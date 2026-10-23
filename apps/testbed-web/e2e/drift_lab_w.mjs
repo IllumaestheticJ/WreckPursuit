@@ -151,6 +151,18 @@ check(Math.abs(gNew.rear_stiffness - 0.45) < 1e-6 && Math.abs(gNew.front_stiffne
   await page.waitForTimeout(1000);
   const carAfter = (await page.evaluate(() => window.__wp.sim.scenario())).entities?.[0]?.car;
   check(carAfter === carBefore, `eye test puts the previous car back (${carBefore} → ${carAfter})`);
+  await page.locator("#eye-start-2").click();
+  await page.waitForTimeout(1500);
+  for (let k = 0; k < 2; k++) {
+    await page.locator("#eye-opt-2").click();
+    await page.waitForTimeout(800);
+    await page.locator("#eye-pick-1").click();
+    await page.waitForTimeout(800);
+  }
+  const code2 = await page.locator("#eye-code").inputValue();
+  check(/^eye2 drift_again=\S+ g_split=\S+$/.test(code2), `eye test round 2 code "${code2}"`);
+  await page.locator("#drift-lab-w button", { hasText: "close" }).click();
+  await page.waitForTimeout(1000);
 }
 // Back to the shipped tyres / balance / ride for the checks below.
 await page.evaluate(() => {

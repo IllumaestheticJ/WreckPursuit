@@ -48,7 +48,7 @@ const RACK_SHIPPED = { speed_sensitivity: 0.75, sens_ref_kmh: 113.0, sens_expone
 const RACK_REF = { speed_sensitivity: 0.75, sens_ref_kmh: 172.0, sens_exponent: 4.0 };
 const RACK_FULL = { speed_sensitivity: 0.0, sens_ref_kmh: 113.0, sens_exponent: 2.0 };
 
-const TESTS: EyeCase[] = [
+const ROUND1: EyeCase[] = [
   {
     id: "rack",
     focus: "Steering at speed (80–150 km/h): highway sweepers, quick lane changes, catching a slide at speed.",
@@ -94,6 +94,39 @@ const TESTS: EyeCase[] = [
   },
 ];
 
+/** Candidate G (held_search, grip-balance handover): tyres, grip balance and a softer ride. */
+const applyG = (h: EyeHost) => {
+  h.setTyres({ spin_b0: 6.48, spin_b2: 1.75, spin_c: 0.9, side_floor: 0.38, rear_relax: 1.41, rear_peak_slip: 1.1 });
+  h.setGrip({ rear_stiffness: 0.533, front_stiffness: 0.666 });
+  h.setRide({ yaw_inertia: 1.35, spring: 1.04, arb: 0.63, roll_inertia: 1.34 });
+};
+/** G's tyres and grip balance with the shipped (owner's firm) springs and bars. */
+const applyGFirm = (h: EyeHost) => {
+  h.setTyres({ spin_b0: 6.48, spin_b2: 1.75, spin_c: 0.9, side_floor: 0.38, rear_relax: 1.41, rear_peak_slip: 1.1 });
+  h.setGrip({ rear_stiffness: 0.533, front_stiffness: 0.666 });
+  h.setRide({ yaw_inertia: 1.35 });
+};
+
+/** Round 2 (owner round-1 result, row physics-4): confirm candidate G, then split it. */
+const ROUND2: EyeCase[] = [
+  {
+    id: "drift_again",
+    focus: "Holding a drift with the countersteer key held and the throttle, and catching it. (The car respawns when you switch.)",
+    restart: true,
+    a: { name: "tyres shipped", apply: () => {} },
+    b: { name: "candidate G", apply: applyG },
+  },
+  {
+    id: "g_split",
+    focus: "Everything: grip cornering, turn-in, weight transfer, and holding / catching drifts. (The car respawns when you switch.)",
+    restart: true,
+    a: { name: "candidate G", apply: applyG },
+    b: { name: "G tyres + shipped firm springs/bars", apply: applyGFirm },
+  },
+];
+
+const ROUNDS: Record<number, EyeCase[]> = { 1: ROUND1, 2: ROUND2 };
+
 const STORE = "wp.tune.eye.v1";
 
 /** Every test runs on this car: the 5-speed RWD reference analog of the owner's clips (owner,
@@ -102,7 +135,7 @@ const TEST_CAR = "parity_rwd_e";
 const TEST_CAR_LABEL = "parity_rwd_e (RWD midsize, the reference-clip car)";
 
 interface EyeState {
-  /** Index of the current test; TESTS.length = finished. */
+  /** Index of the current test; this.tests().length = finished. */
   i: number;
   /** Per test: true = Option 1 is `b`. */
   swap: boolean[];
@@ -112,6 +145,8 @@ interface EyeState {
   driving: 1 | 2 | null;
   /** The car selected before the test (put back afterwards). */
   prevCar?: string;
+  /** Which round ([`ROUNDS`]); 1 when missing (older saves). */
+  round?: number;
 }
 
 /** The blind A/B session shown at the top of the tune panel. */
@@ -121,15 +156,20 @@ export class EyeTest {
   constructor(private readonly host: EyeHost) {
     try {
       const v = JSON.parse(localStorage.getItem(STORE) ?? "null") as EyeState | null;
-      if (v && Array.isArray(v.swap) && v.swap.length === TESTS.length) this.state = v;
+      if (v && Array.isArray(v.swap) && v.swap.length === (ROUNDS[v.round ?? 1] ?? ROUND1).length) this.state = v;
     } catch {
       /* no saved session */
     }
   }
 
+  /** The tests of the current round. */
+  private tests(): EyeCase[] {
+    return ROUNDS[this.state?.round ?? 1] ?? ROUND1;
+  }
+
   /** A test is in progress (the panel hides everything else so nothing gives it away). */
   running(): boolean {
-    return this.state !== null && this.state.i < TESTS.length;
+    return this.state !== null && this.state.i < this.tests().length;
   }
 
   private persist(): void {
@@ -141,10 +181,11 @@ export class EyeTest {
     }
   }
 
-  /** Start a fresh session (new random order). */
-  start(): void {
-    const prevCar = this.host.currentCar();
-    this.state = { i: 0, swap: TESTS.map(() => Math.random() < 0.5), picks: TESTS.map(() => null), driving: null, prevCar };
+  /** Start a fresh session of `round` (new random order). */
+  start(round = 1): void {
+    const prevCar = this.state?.prevCar ?? this.host.currentCar();
+    const tests = ROUNDS[round] ?? ROUND1;
+    this.state = { i: 0, swap: tests.map(() => Math.random() < 0.5), picks: tests.map(() => null), driving: null, prevCar, round };
     this.drive(1);
     // After the settings are saved: the respawn picks them up.
     this.host.setCar(TEST_CAR);
@@ -169,8 +210,8 @@ export class EyeTest {
   /** Apply Option `n` of the current test. */
   drive(n: 1 | 2): void {
     const s = this.state;
-    if (!s || s.i >= TESTS.length) return;
-    const t = TESTS[s.i];
+    if (!s || s.i >= this.tests().length) return;
+    const t = this.tests()[s.i];
     const useB = (n === 1) === s.swap[s.i];
     this.host.resetShipped();
     this.host.setTcs(null);
@@ -184,11 +225,11 @@ export class EyeTest {
   /** Record the verdict for the current test and move on. */
   pick(p: 0 | 1 | 2): void {
     const s = this.state;
-    if (!s || s.i >= TESTS.length) return;
+    if (!s || s.i >= this.tests().length) return;
     s.picks[s.i] = p;
     s.i += 1;
     s.driving = null;
-    if (s.i < TESTS.length) {
+    if (s.i < this.tests().length) {
       this.drive(1);
     } else {
       this.persist();
@@ -205,12 +246,12 @@ export class EyeTest {
     if (p === null) return "skipped";
     if (p === 0) return "same";
     const useB = (p === 1) === s.swap[k];
-    return (useB ? TESTS[k].b : TESTS[k].a).name;
+    return (useB ? this.tests()[k].b : this.tests()[k].a).name;
   }
 
   /** Paste-back code: one `test:winner` per test. */
   resultCode(): string {
-    return `eye1 ${TESTS.map((t, k) => `${t.id}=${this.winner(k).replace(/ /g, "_")}`).join(" ")}`;
+    return `eye${this.state?.round ?? 1} ${this.tests().map((t, k) => `${t.id}=${this.winner(k).replace(/ /g, "_")}`).join(" ")}`;
   }
 
   /** The eye-test section; `rebuild` redraws the whole panel. */
@@ -248,15 +289,18 @@ export class EyeTest {
     const s = this.state;
     if (!s) {
       title.textContent = "Eye test (blind handling A/B)";
-      text(`${TESTS.length} short tests in the RWD test car (${TEST_CAR}; your own car comes back at the end). Each test starts from the shipped handling and changes one hidden thing. Drive Option 1, then Option 2 (switch as often as you like), then say which felt better. The answers are revealed at the end.`);
-      rowOf(btn("start the eye test", () => this.start(), false, "eye-start"));
+      text(`Short blind tests in the RWD test car (${TEST_CAR}; your own car comes back at the end). Each test hides what changes. Drive Option 1, then Option 2 (switch as often as you like), then say which felt better. The answers are revealed at the end.`);
+      rowOf(
+        btn(`start round 1 (${ROUND1.length} tests)`, () => this.start(1), false, "eye-start"),
+        btn(`start round 2 (${ROUND2.length} tests, newest)`, () => this.start(2), false, "eye-start-2"),
+      );
       return box;
     }
-    if (s.i >= TESTS.length) {
+    if (s.i >= this.tests().length) {
       title.textContent = "Eye test: results";
-      for (let k = 0; k < TESTS.length; k++) {
+      for (let k = 0; k < this.tests().length; k++) {
         const p = s.picks[k];
-        const optName = (n: 1 | 2) => (((n === 1) === s.swap[k]) ? TESTS[k].b : TESTS[k].a).name;
+        const optName = (n: 1 | 2) => (((n === 1) === s.swap[k]) ? this.tests()[k].b : this.tests()[k].a).name;
         text(`${k + 1}. Option 1 = ${optName(1)}, Option 2 = ${optName(2)} → you picked ${p === 0 ? "same" : p === null ? "—" : `Option ${p}`} (${this.winner(k)})`);
       }
       text("The shipped handling is back. Paste this code to the physics lead:", "margin-top:6px");
@@ -274,11 +318,11 @@ export class EyeTest {
         void navigator.clipboard?.writeText(code.value).catch(() => document.execCommand("copy"));
         copy.textContent = "copied";
       };
-      rowOf(copy, btn("run it again", () => this.start()), btn("close", () => this.stop()));
+      rowOf(copy, btn("run it again", () => this.start(s.round ?? 1)), btn("close", () => this.stop()));
       return box;
     }
-    const t = TESTS[s.i];
-    title.textContent = `Eye test ${s.i + 1} of ${TESTS.length}`;
+    const t = this.tests()[s.i];
+    title.textContent = `Eye test ${s.i + 1} of ${this.tests().length}`;
     text(`Car: ${this.host.currentCar() === TEST_CAR ? TEST_CAR_LABEL : `${this.host.currentCar()} (not the test car)`}`, "color:#aaa");
     if (this.host.currentCar() !== TEST_CAR) rowOf(btn("back to the test car", () => this.host.setCar(TEST_CAR)));
     text(`Pay attention to: ${t.focus}`);

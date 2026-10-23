@@ -482,6 +482,38 @@ fn main() {
     if std::env::var_os("ONLY_BASE").is_some() {
         return;
     }
+    // CAND=G / G_firm: score one named candidate (G = grip-balance's best inside every guard rail,
+    // the owner's blind pick, row physics-4; G_firm = G's tyres with the owner's springs / bars).
+    if let Ok(name) = std::env::var("CAND") {
+        let g = Params {
+            spin_b0: 6.48,
+            spin_b2: 1.75,
+            spin_c: 0.90,
+            side_floor: 0.38,
+            rear_relax: 1.41,
+            rear_peak_slip: 1.10,
+            rear_stiffness: 0.533,
+            front_stiffness: 0.666,
+            yaw_inertia: 1.35,
+            spring: 1.04,
+            arb: 0.63,
+            roll_inertia: 1.34,
+            ..Params::shipped()
+        };
+        let p = match name.as_str() {
+            "G" => g,
+            "G_firm" => Params {
+                spring: 1.5,
+                arb: 1.5,
+                roll_inertia: Params::shipped().roll_inertia,
+                ..g
+            },
+            other => panic!("unknown CAND {other}"),
+        };
+        let s = score(&p, &drift, &hand);
+        println!("cand {name} {s:?} {p:?}");
+        return;
+    }
     let mut results = Vec::new();
     for i in 0..n {
         let p = Params::sample(&mut u);
