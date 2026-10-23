@@ -62,8 +62,13 @@ pub struct RaceConfig {
     /// Corridor derivation.
     pub corridor: CorridorOptions,
     /// Read traffic signals at junctions (open roads): a lasting green means cross traffic
-    /// is held; careful drivers stop at reds. Off for closed courses.
+    /// is held; careful drivers stop at reds (see [`RaceConfig::stop_at_reds`]). Off for
+    /// closed courses.
     pub signals: bool,
+    /// Careful drivers (`risk` < [`RED_LIGHT_RISK`]) stop for red lights. On for free-roam
+    /// driving; off in races (owner, 2026-10-23: racers of every personality run reds, still
+    /// taking only gaps in the cross traffic).
+    pub stop_at_reds: bool,
     /// The sim applies slipstream ([`crate::draft`]): held-up racers close right up into the
     /// tow on straights and pull out with the run it gives. Leave off unless the sim loop
     /// really applies the drag multipliers (otherwise sitting that close only adds risk).
@@ -86,6 +91,7 @@ impl Default for RaceConfig {
             line: LineParams::default(),
             corridor: CorridorOptions::default(),
             signals: true,
+            stop_at_reds: true,
             draft: false,
             finish_m: None,
         }
@@ -257,6 +263,8 @@ struct SignalAhead {
     state: SignalState,
     /// Seconds until that state ends.
     remaining_s: f32,
+    /// Careful drivers stop for this red ([`RaceConfig::stop_at_reds`]).
+    stop_for_red: bool,
 }
 
 /// Who an obstacle is.
@@ -374,6 +382,13 @@ struct Racer {
     /// beside it I am working towards (reverse with the nose swinging out, creep forward,
     /// repeat), and how long I have been at it, s.
     escape: Option<(Who, f32, f32)>,
+    /// Stuck against something I cannot see (a wall, a shoved K-rail section, debris: no car
+    /// explains it): where (race progress, m), how many times in a row at that spot, and
+    /// which side of the road I was on the first time (true: left of the middle).
+    blind_stuck: Option<(f32, u32, bool)>,
+    /// Detour round an unseen obstacle after [`BLIND_DETOUR_AFTER`] blind stucks at one spot:
+    /// the lateral position to drive at and the race progress where it ends, m.
+    detour: Option<(f32, f32)>,
     /// Stuck and wanting to back out, but something stands right behind me (the car there
     /// backs off for me).
     wants_room: bool,
@@ -382,13 +397,6 @@ struct Racer {
     in_brake_zone: bool,
     brake_err_s: f32,
     line_noise: f32,
-    /// Stuck against something I cannot see (a wall, a shoved K-rail section, debris: no car
-    /// explains it): where (race progress, m), how many times in a row at that spot, and
-    /// which side of the road I was on the first time (true: left of the middle).
-    blind_stuck: Option<(f32, u32, bool)>,
-    /// Detour round an unseen obstacle after [`BLIND_DETOUR_AFTER`] blind stucks at one spot:
-    /// the lateral position to drive at and the race progress where it ends, m.
-    detour: Option<(f32, f32)>,
     effects: HandlingEffects,
     v_cap: f32,
     throttle: f32,
@@ -685,14 +693,6 @@ const ESCAPE_CLEAR_M: f32 = 0.4;
 const ESCAPE_AFTER_S: f32 = 3.0;
 /// Escape from a box-in: given up (back to normal driving) after this long, s.
 const ESCAPE_MAX_S: f32 = 30.0;
-
-/// Lane-splitting: room needed between two cars abreast beyond my own width, m (0.4 m a
-/// side).
-const SPLIT_ROOM_M: f32 = 0.8;
-/// Lane-splitting: back out (while still behind) once the gap shrinks below my width plus
-/// this, m.
-const SPLIT_ABORT_ROOM_M: f32 = 0.5;
-/// Lane-splitting: lateral clearance kept to the two cars while between them, m.
 /// Two stucks with no car to explain them within this much race progress count as the same
 /// spot (a racer wedged on a K-rail pile or a wall reverses and drives into it again), m.
 const BLIND_SAME_SPOT_M: f32 = 8.0;
@@ -702,6 +702,14 @@ const BLIND_SAME_SPOT_M: f32 = 8.0;
 const BLIND_DETOUR_AFTER: u32 = 2;
 /// A detour holds its lateral position this far past the stuck spot, m.
 const BLIND_DETOUR_M: f32 = 14.0;
+
+/// Lane-splitting: room needed between two cars abreast beyond my own width, m (0.4 m a
+/// side).
+const SPLIT_ROOM_M: f32 = 0.8;
+/// Lane-splitting: back out (while still behind) once the gap shrinks below my width plus
+/// this, m.
+const SPLIT_ABORT_ROOM_M: f32 = 0.5;
+/// Lane-splitting: lateral clearance kept to the two cars while between them, m.
 const SPLIT_MARGIN_M: f32 = 0.25;
 /// Lane-splitting: only drivers at least this skilled go between two cars.
 const SPLIT_MIN_SKILL: f32 = 0.75;
@@ -831,6 +839,8 @@ impl Field {
                 pass_blocked_s: 0.0,
                 stuck_s: 0.0,
                 escape: None,
+                blind_stuck: None,
+                detour: None,
                 wants_room: false,
                 stable_s: 0.0,
                 defended: false,
@@ -839,8 +849,6 @@ impl Field {
                 line_noise: 0.0,
                 effects: HandlingEffects::NEUTRAL,
                 v_cap: f32::INFINITY,
-                blind_stuck: None,
-                detour: None,
                 throttle: 0.0,
                 input: VehicleInput::default(),
                 flight: None,
@@ -1179,6 +1187,8 @@ impl Field {
         r.stuck_s = 0.0;
         r.stable_s = 0.0;
         r.escape = None;
+        r.blind_stuck = None;
+        r.detour = None;
         r.wants_room = false;
         r.throttle = 0.0;
         r.ctrl.resync(0.0);
@@ -1187,8 +1197,6 @@ impl Field {
     fn racer_index(&self, e: EntityId) -> Option<usize> {
         self.racers.iter().position(|r| r.entity == e)
     }
-        r.blind_stuck = None;
-        r.detour = None;
 
     fn record_contacts(&mut self, events: &[SimEvent]) {
         for ev in events {
@@ -1804,6 +1812,7 @@ impl Field {
             d_entry: ahead as f32 * CORRIDOR_STEP_M,
             state,
             remaining_s,
+            stop_for_red: self.config.stop_at_reds,
         })
     }
 
@@ -2232,15 +2241,6 @@ fn decide_racer(
                 // Nose to nose, or nosed up to a parked car: back out far enough to steer
                 // round it (a car needs ~5 m of travel to move 1.5 m sideways).
                 r.reverse_s = if head_on || nosed_up { 3.0 } else { 1.6 };
-                // Nosed up to a car standing for good: pick the side with more room beside it
-                // and work towards it over as many reverse / creep cycles as it takes (Lantern
-                // police, seeds 5 and 31: boxed in between captured cars, 0.4 m ahead and
-                // 2.4 m behind, a straight reverse and back to the line went nowhere).
-                if let Some(x) = nosed_to {
-                    r.escape = escape_beside(r, x, hw, &pass_limits);
-                }
-            }
-            // Held at a standstill behind a car standing for good, with no pass that fits (a
                 // Nothing I can see holds me: count the stucks at this spot, and from the
                 // second one back out further and come back on the other side of the road.
                 if !head_on && !nosed_up && !held_by_car {
@@ -2264,6 +2264,15 @@ fn decide_racer(
                         r.detour = Some((n, r.progress + BLIND_DETOUR_M));
                     }
                 }
+                // Nosed up to a car standing for good: pick the side with more room beside it
+                // and work towards it over as many reverse / creep cycles as it takes (Lantern
+                // police, seeds 5 and 31: boxed in between captured cars, 0.4 m ahead and
+                // 2.4 m behind, a straight reverse and back to the line went nowhere).
+                if let Some(x) = nosed_to {
+                    r.escape = escape_beside(r, x, hw, &pass_limits);
+                }
+            }
+            // Held at a standstill behind a car standing for good, with no pass that fits (a
             // pass wants its full margin): squeeze past it with the escape clearance instead
             // (Lantern police seed 31: 3.4 m behind one captured car with another alongside,
             // 12 000 passes refused for room).
@@ -2277,6 +2286,10 @@ fn decide_racer(
                     r.escape = escape_beside(r, x, hw, &pass_limits);
                 }
             }
+            // A detour ends past the stuck spot.
+            if r.detour.is_some_and(|(_, end)| r.progress > end) {
+                r.detour = None;
+            }
             // An escape ends once I am past that car (or it has gone, or it is taking long).
             if let Some((who, n, age)) = r.escape {
                 let past = rel
@@ -2286,10 +2299,6 @@ fn decide_racer(
                 r.escape = (!past && age < ESCAPE_MAX_S).then_some((who, n, age + dt));
             }
             // The car right in front of me is stuck and cannot back out because I stand
-            // A detour ends past the stuck spot.
-            if r.detour.is_some_and(|(_, end)| r.progress > end) {
-                r.detour = None;
-            }
             // behind it: back off for it (otherwise both wait for good).
             let make_room = rel.iter().any(|x| {
                 x.ds > 0.0
@@ -2757,6 +2766,10 @@ fn decide_racer(
                 follow_w = 0.0;
                 r.escape.map_or(r.n, |e| e.1)
             }
+            Tactic::Follow | Tactic::Rejoin if r.detour.is_some() => {
+                follow_w = 0.0;
+                r.detour.map_or(r.n, |d| d.0)
+            }
             Tactic::Follow => match tuck {
                 Some(n) => {
                     follow_w = 0.0;
@@ -2766,10 +2779,6 @@ fn decide_racer(
                     follow_w = 1.0;
                     line_n(r.s) + r.line_noise
                 }
-            Tactic::Follow | Tactic::Rejoin if r.detour.is_some() => {
-                follow_w = 0.0;
-                r.detour.map_or(r.n, |d| d.0)
-            }
             },
             Tactic::Overtake | Tactic::Defend => {
                 follow_w = 0.0;
@@ -3045,8 +3054,16 @@ fn decide_racer(
                     SignalState::Green => g.remaining_s < t_arrive && can_stop,
                     SignalState::Off => false,
                 });
-                // Nobody stops for a red with the police behind them.
-                if red_on_arrival && can_stop && !fleeing && r.profile.risk < RED_LIGHT_RISK {
+                // Nobody stops for a red with the police behind them, and in a race nobody
+                // stops for one at all (owner, 2026-10-23: `RaceConfig::stop_at_reds` off;
+                // the gap acceptance below still keeps them out of cross traffic).
+                let stops = sig.is_some_and(|g| g.stop_for_red);
+                if red_on_arrival
+                    && can_stop
+                    && !fleeing
+                    && stops
+                    && r.profile.risk < RED_LIGHT_RISK
+                {
                     let free = (d_entry - 4.0).max(0.0);
                     let cap = (2.0 * a_brk * 0.8 * free).sqrt();
                     cap_to(&mut v_target, cap, SpeedLimit::Signal);
@@ -4338,6 +4355,7 @@ mod tests {
             d_entry: 30.0,
             state: SignalState::Red,
             remaining_s: 20.0,
+            stop_for_red: true,
         });
         let careful = junction_decision(0.1, red, &[]);
         assert_eq!(careful.limit, SpeedLimit::Signal);
@@ -4345,6 +4363,16 @@ mod tests {
         assert!(careful.v_target * careful.v_target < 2.0 * 12.0 * 26.0);
         let bold = junction_decision(0.6, red, &[]);
         assert_ne!(bold.limit, SpeedLimit::Signal);
+        // In a race (`RaceConfig::stop_at_reds` off) even the careful driver runs it.
+        let racing = junction_decision(
+            0.1,
+            red.map(|g| SignalAhead {
+                stop_for_red: false,
+                ..g
+            }),
+            &[],
+        );
+        assert_ne!(racing.limit, SpeedLimit::Signal);
         // A green that turns red before arrival counts as a red for the careful driver.
         let stale = junction_decision(
             0.1,
@@ -4352,6 +4380,7 @@ mod tests {
                 d_entry: 30.0,
                 state: SignalState::Green,
                 remaining_s: 1.0,
+                stop_for_red: true,
             }),
             &[],
         );
@@ -4372,6 +4401,7 @@ mod tests {
             d_entry: 30.0,
             state: SignalState::Green,
             remaining_s: 30.0,
+            stop_for_red: true,
         });
         let protected = junction_decision(0.4, green, &waiting);
         assert_ne!(protected.limit, SpeedLimit::Obstacle(1_000_007));

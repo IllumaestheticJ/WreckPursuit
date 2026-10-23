@@ -120,6 +120,9 @@ impl AiEntrants {
             seed,
             // The judge owns the rules: a civilian hit is scored there, not by the AI quitting.
             civilian_contact_dq: false,
+            // Racers of every personality run red lights in a race (owner, 2026-10-23); the
+            // junction gap acceptance still keeps them out of cross traffic.
+            stop_at_reds: false,
             corridor: CorridorOptions {
                 opposing: if closed {
                     OpposingLanes::Always
@@ -133,9 +136,6 @@ impl AiEntrants {
                     race.course.corridor_half_width_m + crate::catalog::GATE_CORRIDOR_MARGIN_M
                         - 0.5,
                 ),
-                ..CorridorOptions::default()
-            },
-            ..RaceConfig::default()
                 // A touge pass is sealed by walls and loose K-rails a shoulder's width past
                 // the paved edge: keep the line well clear of them (races audit P2: cars
                 // clipped the outboard K-rails at the hairpins, shoved sections into the road
@@ -145,6 +145,9 @@ impl AiEntrants {
                 } else {
                     CorridorOptions::default().kerb_margin_m
                 },
+                ..CorridorOptions::default()
+            },
+            ..RaceConfig::default()
         };
         let specs: Vec<RacerSpec> = entrants
             .iter()
