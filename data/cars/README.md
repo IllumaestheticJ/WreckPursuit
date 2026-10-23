@@ -80,6 +80,21 @@ inputs, not the outputs. Overview table: `ROSTER.md`; validation: `VALIDATION.md
 | `fulmine_v10` | Fulmine V10 | Exotic | 2010s mid-engine 5.2 NA V10, permanent AWD (30 % front), dual-clutch — top of the market |
 | `sentinel_warden` | Sentinel Warden | PoliceCruiser | late-80s RWD 5.7 V8 body-on-frame police sedan, 4-speed auto, push bar — low-heat old fleet |
 | `sentinel_harrier` | Sentinel Harrier | PoliceInterceptor | 2010s RWD 5.0 V8 muscle-coupe pursuit car, push bar — high-heat (L4–L5) unit |
+| `halberd_40` | Halberd 40 | Exotic | 2020s mid-engine 4.0 TT flat-plane V8, carbon tub, RWD, dual-clutch, active wing, factory track tyres |
+| `ombra_v12` | Ombra V12 | Exotic | 2010s mid-engine 6.5 NA V12 flagship, AWD 25 % front, single-clutch automated manual |
+| `ostwind_6t` | Ostwind 6T | Exotic | 2020s rear-engine 3.8 TT flat-six, AWD 30 % front, 8-speed dual-clutch — toughest supercar (dur. 4) |
+| `kagero_hx` | Kagero HX | Exotic | 2010s mid-engine 3.5 TT V6 hybrid, AWD 35 % front (electric front axle), 9-speed dual-clutch |
+| `morrigan_55` | Morrigan 5.5 | Exotic † | 2010s front-mid 5.5 NA V8 GT endurance racer, sequential transaxle, roll cage, big wing |
+| `nyx_proto` | Nyx Proto | Exotic † | 2010s closed-cockpit sports prototype, 4.2 NA V8, < 1 t, highest downforce in the game |
+| `merlo_20t` | Merlo 2.0T | Exotic † | 2010s FWD 2.0 T touring-car racer, sequential, plated front LSD, roll cage (dur. 4) |
+| `mesquite_pr` | Mesquite PR | Truck | 2010s full-size 6.2 V8 pre-runner pickup, RWD, long-travel (0.33-0.35 m), 35-inch all-terrains |
+| `erg_hamada` | Erg Hamada | Truck | 2020s rally-raid prototype, 5.0 NA V8, fixed 50/50 4WD, tube spaceframe, 37-inch all-terrains |
+
+† Race cars are filed as `Exotic` until a `VehicleClass::Race` exists (requested in
+`docs/integration/cars.md`, wave 3): the Sport purse could not price a slick-shod touring car
+against the Exotic market. Race cars and the two off-roaders are **wave 3** (2026-10-23); they use
+the build knobs `downforce`, lattice `cell_scale` (roll cage / composite tub) and `nose_scale`
+(crash nose) described in `tools/specsheet/README.md`.
 
 `tansy_13`, `drayman_cargo` and `furrow_24` are civilian traffic cars (round 6b): cheap, slow, validated like the rest.
 There is no `Van`/`Civilian` class yet, so the van and pickup use `Truck` (requested in
