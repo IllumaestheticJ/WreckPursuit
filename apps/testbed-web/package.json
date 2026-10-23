@@ -32,6 +32,7 @@
     "e2e:reset": "node e2e/reset.mjs",
     "e2e:touch": "node e2e/touch.mjs",
     "e2e:menu": "node e2e/menu.mjs",
+    "e2e:hud": "node e2e/hud_debug.mjs",
     "profile": "node e2e/frame_profile.mjs",
     "e2e:presets": "node e2e/presets.mjs",
     "e2e:drift-lab-w": "node e2e/drift_lab_w.mjs",
