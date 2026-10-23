@@ -579,9 +579,11 @@ fn level_three_pursuit(seed: u64) -> Harness {
 }
 
 #[test]
-fn level_three_tool_lines_are_spoken_within_a_second_even_over_other_traffic() {
+fn tool_lines_are_spoken_within_a_second_even_over_other_traffic() {
     for (seed, roadblock) in [(31, true), (32, false), (33, true)] {
         let mut h = level_three_pursuit(seed);
+        // Roadblocks from level 3, spikes from level 4 (owner row 156).
+        let heat = if roadblock { 55.0 } else { 75.0 };
         // Wait for some lower-tier line on the air, then decide on the tool (retried while the
         // site planner finds no site ahead yet).
         let cmd = || {
@@ -600,7 +602,7 @@ fn level_three_tool_lines_are_spoken_within_a_second_even_over_other_traffic() {
         let mut over = None;
         let mut t = 0.0;
         while t < 90.0 && over.is_none() {
-            h.run_with(PHYSICS_DT, |p| p.set_heat(RACER, 55.0));
+            h.run_with(PHYSICS_DT, |p| p.set_heat(RACER, heat));
             t += PHYSICS_DT;
             if let Some(tier) = h.police.radio_on_air() {
                 if tier < RadioTier::Actionable && h.police.captain_command(cmd()).is_ok() {
@@ -611,7 +613,7 @@ fn level_three_tool_lines_are_spoken_within_a_second_even_over_other_traffic() {
         let over = over.unwrap_or_else(|| panic!("seed {seed}: no tool placed: {:#?}", h.texts()));
         let t0 = h.police.now().secs();
         let from = h.lines.len();
-        h.run_with(1.5, |p| p.set_heat(RACER, 55.0));
+        h.run_with(1.5, |p| p.set_heat(RACER, heat));
         let what = if roadblock { "roadblock" } else { "spikes" };
         let k = find(&h.lines, from, what)
             .unwrap_or_else(|| panic!("seed {seed}: no {what:?}: {:#?}", h.texts()));

@@ -171,6 +171,11 @@ impl PoliceSystem {
                 if !r.pursued() {
                     return Err(CaptainError::NotPursued);
                 }
+                // The player captain's helicopter unlocks at the AI's level (row 156: level 5).
+                let need = self.cfg.presence.helicopter.min_level;
+                if r.level.number() < need {
+                    return Err(CaptainError::Locked { need_level: need });
+                }
                 self.request_helo(target)
             }
             CaptainCommand::SetPriorityTarget { target } => {
