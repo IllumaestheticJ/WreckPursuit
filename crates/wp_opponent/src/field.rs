@@ -3249,11 +3249,17 @@ fn decide_racer(
         // 0.25 s since candidate G (2026-10-23: yaw inertia × 1.35, the car answers the wheel
         // later; with 0.2 s it ran 0.5 m wide of its line in the Hollins hairpins, into the kerb).
         const STEER_LAG_S: f32 = 0.25;
-        // The stretch is 0.6 s per m/s over 25 since candidate G (was 0.3): with G's slower yaw
-        // answer the steering loop weaved with growing amplitude at 45-50 m/s on Loop 9 (4.7 m
-        // off the commanded line, then a spin; s95 walls 22 -> 52 over 16 seeds).
-        const STRETCH_S: f32 = 0.6;
-        let mut ld = r.ctrl.lookahead(v) + STRETCH_S * (v - 25.0).max(0.0) + v * STEER_LAG_S;
+        // Since candidate G another 0.6 s per m/s over 35 on top: with G's slower yaw answer
+        // the steering loop weaved with growing amplitude at 45-50 m/s on Loop 9 (4.7 m off the
+        // commanded line, then a spin; s95 walls 22 -> 52 over 16 seeds). Below 35 m/s (the
+        // fast downtown streets) the look-ahead is as before: a longer one there cut corners
+        // into Lantern's walls.
+        const STRETCH_S: f32 = 0.3;
+        const HIGH_STRETCH_S: f32 = 0.6;
+        let mut ld = r.ctrl.lookahead(v)
+            + STRETCH_S * (v - 25.0).max(0.0)
+            + HIGH_STRETCH_S * (v - 35.0).max(0.0)
+            + v * STEER_LAG_S;
         // Held up and slowing (a car or a light ahead): aim no further than where I stop.
         // A target around the next corner turns the car in early, across the inside lane —
         // queued at a junction that is the oncoming lane (Lantern Row, round-12 tip: a racer
