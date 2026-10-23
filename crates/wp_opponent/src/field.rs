@@ -382,6 +382,13 @@ struct Racer {
     in_brake_zone: bool,
     brake_err_s: f32,
     line_noise: f32,
+    /// Stuck against something I cannot see (a wall, a shoved K-rail section, debris: no car
+    /// explains it): where (race progress, m), how many times in a row at that spot, and
+    /// which side of the road I was on the first time (true: left of the middle).
+    blind_stuck: Option<(f32, u32, bool)>,
+    /// Detour round an unseen obstacle after [`BLIND_DETOUR_AFTER`] blind stucks at one spot:
+    /// the lateral position to drive at and the race progress where it ends, m.
+    detour: Option<(f32, f32)>,
     effects: HandlingEffects,
     v_cap: f32,
     throttle: f32,
@@ -686,6 +693,15 @@ const SPLIT_ROOM_M: f32 = 0.8;
 /// this, m.
 const SPLIT_ABORT_ROOM_M: f32 = 0.5;
 /// Lane-splitting: lateral clearance kept to the two cars while between them, m.
+/// Two stucks with no car to explain them within this much race progress count as the same
+/// spot (a racer wedged on a K-rail pile or a wall reverses and drives into it again), m.
+const BLIND_SAME_SPOT_M: f32 = 8.0;
+/// After this many blind stucks at one spot, the next attempt detours to the other side of
+/// the road (races audit P2: touge cars reversed 1.6 s and drove back into the same shoved
+/// K-rail sections for the rest of the battle).
+const BLIND_DETOUR_AFTER: u32 = 2;
+/// A detour holds its lateral position this far past the stuck spot, m.
+const BLIND_DETOUR_M: f32 = 14.0;
 const SPLIT_MARGIN_M: f32 = 0.25;
 /// Lane-splitting: only drivers at least this skilled go between two cars.
 const SPLIT_MIN_SKILL: f32 = 0.75;
@@ -823,6 +839,8 @@ impl Field {
                 line_noise: 0.0,
                 effects: HandlingEffects::NEUTRAL,
                 v_cap: f32::INFINITY,
+                blind_stuck: None,
+                detour: None,
                 throttle: 0.0,
                 input: VehicleInput::default(),
                 flight: None,
@@ -1169,6 +1187,8 @@ impl Field {
     fn racer_index(&self, e: EntityId) -> Option<usize> {
         self.racers.iter().position(|r| r.entity == e)
     }
+        r.blind_stuck = None;
+        r.detour = None;
 
     fn record_contacts(&mut self, events: &[SimEvent]) {
         for ev in events {
@@ -2221,6 +2241,29 @@ fn decide_racer(
                 }
             }
             // Held at a standstill behind a car standing for good, with no pass that fits (a
+                // Nothing I can see holds me: count the stucks at this spot, and from the
+                // second one back out further and come back on the other side of the road.
+                if !head_on && !nosed_up && !held_by_car {
+                    let (lo, hi) = (road_lo.min(pass_lo), road_hi.max(pass_hi));
+                    let mid = 0.5 * (lo + hi);
+                    let (cycles, stuck_left) = match r.blind_stuck {
+                        Some((at, k, left)) if (r.progress - at).abs() < BLIND_SAME_SPOT_M => {
+                            (k + 1, left)
+                        }
+                        _ => (1, r.n < mid),
+                    };
+                    r.blind_stuck = Some((r.progress, cycles, stuck_left));
+                    if cycles >= BLIND_DETOUR_AFTER {
+                        r.reverse_s = 3.0;
+                        // Always to the side away from where I first got stuck: on a touge the
+                        // other side of the pile is where the K-rails were shoved out, over
+                        // the edge.
+                        let edge = hw + 0.6;
+                        let n = if stuck_left { hi - edge } else { lo + edge };
+                        let n = n.clamp(lo + edge, (hi - edge).max(lo + edge));
+                        r.detour = Some((n, r.progress + BLIND_DETOUR_M));
+                    }
+                }
             // pass wants its full margin): squeeze past it with the escape clearance instead
             // (Lantern police seed 31: 3.4 m behind one captured car with another alongside,
             // 12 000 passes refused for room).
@@ -2243,6 +2286,10 @@ fn decide_racer(
                 r.escape = (!past && age < ESCAPE_MAX_S).then_some((who, n, age + dt));
             }
             // The car right in front of me is stuck and cannot back out because I stand
+            // A detour ends past the stuck spot.
+            if r.detour.is_some_and(|(_, end)| r.progress > end) {
+                r.detour = None;
+            }
             // behind it: back off for it (otherwise both wait for good).
             let make_room = rel.iter().any(|x| {
                 x.ds > 0.0
@@ -2719,6 +2766,10 @@ fn decide_racer(
                     follow_w = 1.0;
                     line_n(r.s) + r.line_noise
                 }
+            Tactic::Follow | Tactic::Rejoin if r.detour.is_some() => {
+                follow_w = 0.0;
+                r.detour.map_or(r.n, |d| d.0)
+            }
             },
             Tactic::Overtake | Tactic::Defend => {
                 follow_w = 0.0;

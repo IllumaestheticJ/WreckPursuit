@@ -37,6 +37,9 @@ use crate::result::DnfReason;
 /// at the end of its corridor; without run-off it would stop short of the judge's finish gate.
 pub const AI_RUN_OFF_M: f32 = 60.0;
 
+/// Clearance the AI keeps from the paved edge on a touge pass, m (0.3 m on city streets).
+pub const TOUGE_KERB_MARGIN_M: f32 = 0.9;
+
 /// The race route extended [`AI_RUN_OFF_M`] past the finish, so AI cars drive through the
 /// finish gate: the race route itself plus a run-off leg planned from the finish onward (the
 /// whole route is never re-planned, so on a grid the AI cannot take a different, equally short
@@ -133,6 +136,15 @@ impl AiEntrants {
                 ..CorridorOptions::default()
             },
             ..RaceConfig::default()
+                // A touge pass is sealed by walls and loose K-rails a shoulder's width past
+                // the paved edge: keep the line well clear of them (races audit P2: cars
+                // clipped the outboard K-rails at the hairpins, shoved sections into the road
+                // and stayed wedged there).
+                kerb_margin_m: if wp_world::touge::is_touge(&world.network().id) {
+                    TOUGE_KERB_MARGIN_M
+                } else {
+                    CorridorOptions::default().kerb_margin_m
+                },
         };
         let specs: Vec<RacerSpec> = entrants
             .iter()
