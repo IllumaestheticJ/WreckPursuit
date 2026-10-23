@@ -545,7 +545,7 @@ mod tests {
     use wp_contracts::{DamageMode, VehicleInput};
 
     fn chase(city: &str) -> Session {
-        let sc = crate::scenario::city_chase_in(
+        let sc = crate::scenario::night_run_in(
             "debug_sedan",
             DamageMode::Arcade,
             crate::scenario::city_spec(city),
@@ -620,7 +620,7 @@ mod tests {
         let n = d[h::N_UNITS] as usize;
         let t = d[h::N_TOOLS] as usize;
         assert_eq!(n, s.sim().police().units().len());
-        assert!(n > 0, "city chase has police");
+        assert!(n > 0, "night run has police");
         assert_eq!(d.len(), HEADER + n * UNIT_STRIDE + t * TOOL_STRIDE);
         assert_eq!(d[h::N_RACERS], 0.0, "no race");
         assert_eq!(d[h::HAS_PLAYER], 1.0);

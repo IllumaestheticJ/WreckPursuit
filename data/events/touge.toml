@@ -1,15 +1,16 @@
 # Touge battles (wp_race::touge): payouts and rep. Owned by the touge workstream.
 #
-# Who may race, bet and put up pink slips: [gates] (rep needed). A stand-in for the career's
-# rep tiers (wp_economy::progression, lead/career-port); the numbers mirror that branch's
-# career.toml (touge_races = Known 2000, boss_races / touge_betting = Respected 5000,
-# pink_slips = Feared 10000, Respected max_bet 8000, stake <= half the cash on hand).
+# Who may race, bet and put up pink slips is NOT decided here: the rep tiers in
+# data/economy/career.toml (wp_economy::progression) open Feature::TougeRaces (challengers),
+# Feature::BossRaces (bosses), Feature::TougeBetting (side bets, capped by max_bet(Touge)) and
+# Feature::PinkSlips.
 #
-# Side bet: the stake is taken at the start as a cash adjustment on the account's ledger (the
-# same wallet as the street racers' wagers); a win pays `side_bet_payout` x stake back (stake
-# included), a loss or a totaled car pays nothing.
+# Side bet: the stake is taken at the start (Economy::place_bet, venue Touge: the one career
+# wallet, as the street racers' and picker races' bets); a win pays `side_bet_payout` x stake
+# back (stake included, settle_bet), a loss or a totaled car pays nothing.
 # Rep: `win_rep` / `loss_rep` for the result, plus `totaled_rep` when your car went through the
-# wall, plus the pink-slip rep when one was on the line. A boss win also pays `purse` credits.
+# wall, plus the pink-slip rep when one was on the line (award_rep, which pays any tier reward
+# reached). A boss win also pays `purse` credits (award_credits).
 
 totaled_rep = -100
 
@@ -28,11 +29,3 @@ side_bet_payout = 2.5
 [pink_slip]
 win_rep = 400
 loss_rep = -250
-
-[gates]
-challenger_rep = 2000
-boss_rep = 5000
-side_bet_rep = 5000
-pink_slip_rep = 10000
-max_stake = 8000
-max_stake_cash_frac = 0.5

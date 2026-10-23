@@ -1,0 +1,70 @@
+// wp_race picker race "Harlan Flats dirt run" (harlan_dirt_run): Dusk sprint over Harlan Flats' gravel section roads towards Harlan Crossing.
+// Generated from wp_race::catalog by wp_wasm's race_scenario_files_match_the_picker
+// (WP_RACE_WRITE_SCENARIOS=1); the browser's race_start builds the same scenario with
+// the player's car. Entity "player" sits on the last grid slot, the AI field ahead.
+// Run standalone, simcli has no race block or AI driver, so the cars wait on the grid
+// for 10 s; crates/wp_race/tests/race_picker.rs races it to the finish with wp_opponent
+// AI in every seat and checks the expectation ranges.
+(
+    name: "race_harlan_dirt_run",
+    seed: 43,
+    city: preset(
+        name: "ashpeak",
+        seed: 1,
+    ),
+    time_of_day_h: 19.5,
+    time_ratio: 1.0,
+    mode: Arcade,
+    assists: ai,
+    traffic_density: 0.2,
+    police_presence: 1.0,
+    panels: true,
+    entities: [
+        (
+            id: "player",
+            car: "lindwurm_4t",
+            pos: (-4320.645, 1701.2651, 24.13869),
+            yaw: 1.5413162,
+            driver: scripted,
+            inputs: [],
+        ),
+        (
+            id: "ai_dez",
+            car: "rampart_50",
+            pos: (-4332.7544, 1697.746, 24.13869),
+            yaw: 1.5413162,
+            driver: scripted,
+            inputs: [],
+        ),
+        (
+            id: "ai_tito",
+            car: "sperber_32",
+            pos: (-4328.6416, 1701.501, 24.13869),
+            yaw: 1.5413162,
+            driver: scripted,
+            inputs: [],
+        ),
+        (
+            id: "ai_vic",
+            car: "kestrel_ts",
+            pos: (-4324.758, 1697.5101, 24.13869),
+            yaw: 1.5413162,
+            driver: scripted,
+            inputs: [],
+        ),
+    ],
+    duration_s: 10.0,
+    sample_hz: 60.0,
+    hash_every: 240,
+    expect: [
+        total_loss(
+            entity: "player",
+            expected: false,
+        ),
+        total_loss(
+            entity: "ai_dez",
+            expected: false,
+        ),
+    ],
+    expect_pending: [],
+)

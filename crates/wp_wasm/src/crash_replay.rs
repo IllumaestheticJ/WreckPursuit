@@ -33,7 +33,7 @@ use crate::race::RaceRun;
 use crate::session::{world_to_local, EntityExtra};
 
 /// Ticks between snapshots (2 s): a replay fast-forwards at most this far before it shows.
-/// A snapshot of a city chase costs ~6 ms native (4 ms of it Rapier's own sets), so not every
+/// A snapshot of a night run costs ~6 ms native (4 ms of it Rapier's own sets), so not every
 /// second.
 pub const SNAPSHOT_EVERY_TICKS: u64 = 2 * 240;
 

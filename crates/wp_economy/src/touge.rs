@@ -8,15 +8,16 @@
 //! through `Feature::PinkSlips` (the rep tiers), not by `stakes.toml [pink_slip]`, which only
 //! governs player-vs-player slips.
 //!
-//! [`Economy::touge_result`] posts a battle's rep and boss purse. Side bets are plain cash
-//! adjustments ([`Economy::adjust`]), the same path as the street racers' wagers.
+//! A battle's rep, boss purse and side bets go through the career calls
+//! ([`Economy::award_rep`], [`Economy::award_credits`], [`Economy::place_bet`] /
+//! [`Economy::settle_bet`] with `BetVenue::Touge`): the one betting wallet.
 
 use wp_contracts::VehicleClass;
 
 use crate::ledger::{
     transact, CarLocation, CarUid, DamageSnapshot, Delta, EconResult, EventReason, OwnedCar,
 };
-use crate::{Economy, Money, PlayerAccount};
+use crate::{Economy, PlayerAccount};
 
 /// The NPC car a player wins in a pink slip, as it crossed the line.
 #[derive(Debug, Clone, PartialEq)]
@@ -84,41 +85,6 @@ impl Economy {
             Ok(lost)
         })
     }
-
-    /// Post a touge battle's result: `rep` (may be negative; rep never drops below 0) as
-    /// `RaceRep` (placement 1 = won, 2 = lost) and, when `purse` > 0, the boss purse as
-    /// `RacePurse { race }`. All or nothing.
-    pub fn touge_result(
-        &self,
-        acct: &mut PlayerAccount,
-        race: &str,
-        won: bool,
-        rep: i64,
-        purse: Money,
-    ) -> EconResult<()> {
-        let placement = if won { 1 } else { 2 };
-        transact(acct, |tx| {
-            if purse > 0 {
-                tx.credit(
-                    purse,
-                    EventReason::RacePurse {
-                        race: race.to_string(),
-                        placement,
-                    },
-                    None,
-                );
-            }
-            tx.note(
-                EventReason::RaceRep { placement },
-                None,
-                Delta {
-                    rep,
-                    ..Delta::default()
-                },
-            );
-            Ok(())
-        })
-    }
 }
 
 #[cfg(test)]
@@ -164,27 +130,5 @@ mod tests {
         assert_eq!(acct.stats.cars_lost, 1);
         assert!(matches!(events[0].reason, EventReason::PinkSlipLost { .. }));
         assert!(econ.lose_pink_slip_car(&mut acct, uid).is_err());
-    }
-
-    #[test]
-    fn touge_result_posts_rep_and_purse_and_floors_rep_at_zero() {
-        let econ = Economy::embedded();
-        let (mut acct, _) = econ.open_account(PlayerId(7));
-        let cash = acct.cash;
-        let (_, ev) = econ
-            .touge_result(&mut acct, "touge_boss", true, 600, 12_000)
-            .unwrap();
-        assert_eq!(acct.rep, 600);
-        assert_eq!(acct.cash, cash + 12_000);
-        assert_eq!(ev.len(), 2);
-        let (_, ev) = econ
-            .touge_result(&mut acct, "touge", false, -1_000, 0)
-            .unwrap();
-        assert_eq!(acct.rep, 0);
-        assert_eq!(ev.len(), 1);
-        assert!(matches!(
-            ev[0].reason,
-            EventReason::RaceRep { placement: 2 }
-        ));
     }
 }

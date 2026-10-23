@@ -112,7 +112,7 @@ await shot("workshop_parts_off.png");
 // Buy an aftermarket radiator through the catalog, fit it from the inventory strip.
 await button("Catalog").click();
 await page.locator('[data-testid="ws-catalog"] [role="tab"]', { hasText: "Cooling" }).click();
-await page.locator('[data-testid="ws-catrow"][data-grade="cooling_radiator_1"] button').click();
+await page.locator('[data-testid="ws-catrow"][data-grade="cooling_radiator_1"] button', { hasText: "Buy" }).click();
 await page.locator('[data-testid="ws-catalog"] button', { hasText: "Close" }).click();
 s = await screen();
 const bought = s.inventory.find((p) => p.part.grade === "cooling_radiator_1");
@@ -133,6 +133,13 @@ s = await screen();
 check(s.missing.length === 0 && (await slot("front_bumper")).fitted, "bumper back on: the car is ready to drive");
 const mods = await page.evaluate((u) => window.__wp.sim.careerView().cars.find((c) => c.uid === u).mods, uid);
 check(JSON.stringify(mods).includes("cooling_radiator_1"), "the fitted part counts as an installed mod");
+
+// Every fitted part has a place on the car: mesh, cosmetic piece or workshop hardware.
+await page.waitForFunction(() => window.__wp.workshop.hardwareSlots().length > 0, null, { timeout: 15000 });
+const hw = await page.evaluate(() => window.__wp.workshop.hardwareSlots());
+check(hw.includes("battery") && hw.includes("differential"), `the battery and the diff are drawn (${hw.join(", ")})`);
+const undrawn = await page.evaluate(() => window.__wp.workshop.undrawnSlots());
+check(undrawn.length === 0, `every fitted part is drawn somewhere on the car (missing: ${undrawn.join(", ")})`);
 
 // Underside on the lift.
 await button("Underside").click();

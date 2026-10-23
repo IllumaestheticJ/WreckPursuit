@@ -1,0 +1,86 @@
+// wp_race picker race "Ashpeak City block circuit" (ashpeak_metro_circuit): Two laps round the downtown block grid, under the towers at night.
+// Generated from wp_race::catalog by wp_wasm's race_scenario_files_match_the_picker
+// (WP_RACE_WRITE_SCENARIOS=1); the browser's race_start builds the same scenario with
+// the player's car. Entity "player" sits on the last grid slot, the AI field ahead.
+// Run standalone, simcli has no race block or AI driver, so the cars wait on the grid
+// for 10 s; crates/wp_race/tests/race_picker.rs races it to the finish with wp_opponent
+// AI in every seat and checks the expectation ranges.
+(
+    name: "race_ashpeak_metro_circuit",
+    seed: 48,
+    city: preset(
+        name: "ashpeak",
+        seed: 1,
+    ),
+    time_of_day_h: 23.5,
+    time_ratio: 1.0,
+    mode: Arcade,
+    assists: ai,
+    traffic_density: 0.3,
+    police_presence: 1.0,
+    panels: true,
+    entities: [
+        (
+            id: "player",
+            car: "lindwurm_4t",
+            pos: (-1000.75, 4673.0, 32.278416),
+            yaw: 3.1415927,
+            driver: scripted,
+            inputs: [],
+        ),
+        (
+            id: "ai_vic",
+            car: "kestrel_ts",
+            pos: (-995.75, 4653.0, 32.278416),
+            yaw: 3.1415927,
+            driver: scripted,
+            inputs: [],
+        ),
+        (
+            id: "ai_mara",
+            car: "hakone_gt",
+            pos: (-1000.75, 4657.0, 32.278416),
+            yaw: 3.1415927,
+            driver: scripted,
+            inputs: [],
+        ),
+        (
+            id: "ai_dez",
+            car: "rampart_50",
+            pos: (-995.75, 4661.0, 32.278416),
+            yaw: 3.1415927,
+            driver: scripted,
+            inputs: [],
+        ),
+        (
+            id: "ai_juno",
+            car: "shiro_turbo",
+            pos: (-1000.75, 4665.0, 32.278416),
+            yaw: 3.1415927,
+            driver: scripted,
+            inputs: [],
+        ),
+        (
+            id: "ai_tito",
+            car: "sperber_32",
+            pos: (-995.75, 4669.0, 32.278416),
+            yaw: 3.1415927,
+            driver: scripted,
+            inputs: [],
+        ),
+    ],
+    duration_s: 10.0,
+    sample_hz: 60.0,
+    hash_every: 240,
+    expect: [
+        total_loss(
+            entity: "player",
+            expected: false,
+        ),
+        total_loss(
+            entity: "ai_vic",
+            expected: false,
+        ),
+    ],
+    expect_pending: [],
+)

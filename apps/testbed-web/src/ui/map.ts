@@ -3,6 +3,11 @@
 // city and map_dynamic(player) every frame. While the full map is open the testbed sends the
 // player's car neutral input with light braking (input paused; the sim keeps running).
 import { mountMapHud, type MapHud } from "../../../ui-kit/src/live";
+import { chaseRadar, decodeMapDynamic } from "../../../ui-kit/src/map/data";
+import type { MapBlip, Vec2 } from "../../../ui-kit/src/model/types";
+
+/** The chase HUD's radar (ChaseHud, PR #32): the player's pose and the blips around them. */
+export type Radar = { pos: Vec2; headingRad: number; blips: MapBlip[]; hidden?: boolean };
 import { layers } from "../settings";
 import { W } from "../wasm/layout";
 import { sim } from "../wasm/sim";
@@ -15,6 +20,8 @@ export class MapOverlay {
   readonly hud: MapHud;
   private city = "";
   private lastFrame = -Infinity;
+  /** The chase radar from the last map_dynamic() fetch (null: none yet / nothing to show). */
+  private lastRadar: Radar | null = null;
 
   constructor(parent: HTMLElement, onOpenChange?: (open: boolean) => void) {
     // Bottom-right corner (playtest row 67): clear of the developer panel (bottom-left), the race
@@ -25,6 +32,7 @@ export class MapOverlay {
   /** New session: fetch the static map when the city changed. */
   reset(): void {
     this.lastFrame = -Infinity;
+    this.lastRadar = null;
     const id = sim.worldInfo()[W.city] > 0.5 ? sim.cityId() : "";
     if (id === this.city) return;
     this.city = id;
@@ -38,10 +46,24 @@ export class MapOverlay {
     const minimap = layers.on("minimap");
     this.hud.setMinimapVisible(minimap);
     this.hud.setSignals(layers.on("mapSignals"));
-    // Full map open: every frame (pan / zoom); minimap only: throttled; neither: nothing to draw.
-    if (!this.hud.isOpen && (!minimap || mayRest || nowMs - this.lastFrame < MINIMAP_EVERY_MS)) return;
+    // The chase HUD's radar reads the same frame (PR #32).
+    const radar = layers.on("chase");
+    // Full map open: every frame (pan / zoom); minimap / radar only: throttled; none: nothing.
+    if (!this.hud.isOpen && (!(minimap || radar) || mayRest || nowMs - this.lastFrame < MINIMAP_EVERY_MS)) return;
     this.lastFrame = nowMs;
-    this.hud.frame(sim.mapDynamic(player), nowMs);
+    // Decoded once for both (the map HUD takes a decoded frame).
+    const f = decodeMapDynamic(sim.mapDynamic(player));
+    if (this.hud.isOpen || minimap) this.hud.frame(f, nowMs);
+    // The corner minimap already shows all of it: then the chase HUD only keeps its "on you"
+    // note (lead, 2026-10-23).
+    const r = radar ? chaseRadar(f) : null;
+    this.lastRadar = r ? { ...r, hidden: minimap } : null;
+  }
+
+  /** The chase radar (police cars, racers and the helicopter with its follow tether) from the
+   * latest map frame; null when there is nothing around or the chase layer is off. */
+  radar(): Radar | null {
+    return this.lastRadar;
   }
 
   get isOpen(): boolean {

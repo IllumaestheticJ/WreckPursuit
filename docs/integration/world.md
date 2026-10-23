@@ -204,6 +204,9 @@ Suburb }` — exactly `wp_world::network::DistrictKind` (moved to contracts, re-
 - `crates/wp_vehicle/src/lib.rs`: added `Vehicle::set_pose_and_speed(pos, yaw, speed_mps)`
   (Lead: the stub this went into was replaced by 02's real model; the method now lives in `wp_vehicle/src/vehicle.rs`, same signature.)
   (7 lines, `reset` + speed) for LOD promotion — see contract request 1.
+- `crates/wp_sim/src/physics.rs` + `crates/wp_sim/tests/barrier_scrape.rs` (lead-owned; row 164,
+  assigned by the lead): barrier and rail colliders are mitered triangle meshes
+  (`barrier_colliders`, `chain_segments`) instead of per-segment boxes. See "Playtest row 164".
 - `apps/testbed-web`: **photo mode** (owner request, 2026-10-20; branch `claude/fervent-cerf-ft2h9h`,
   not `ws/world`). Testbed-only, no Rust changes. Full notes and the list of touched files are in
   `docs/integration/testbed.md` → "Photo mode" (C to review).
@@ -559,7 +562,7 @@ when convenient.
   1.1 MB → 0.47 MB). `vesper_v2.road.bin` is generated in memory and not committed.
 - **Testbed:** the city chase and the free-drive "city" box use the city selector (default
   Port Vesper v2, "grid 12×12" keeps the old city); `?city=procedural_12x12`, `?chase=1`;
-  wasm `free_drive_city_json`, `city_chase_city_json`, `city_id`; police units drawn on the
+  wasm `free_drive_city_json`, `night_run_city_json`, `city_id`; police units drawn on the
   ground; `__wp.lookAt(from, to)` for docs shots (`e2e/city_v2_shots.mjs` →
   `docs/media/city-v2/`).
 **Checks (this branch)**
@@ -1522,6 +1525,77 @@ the behaviour gate.
 on lead/round12 353744ec and on ws/world (debug and release: 1 go-around, contacts 0). The
 failure opponent-pace saw on 0e84a9f7 predates a779ad57 (the fix and the re-aimed ≥ 1
 threshold are not in that commit), so it is not a regression. The margin is thin (exactly 1).
+
+## Lead (2026-10-23): `world_traffic_soak` on candidate G handling — 1 civilian collision
+**Cause (traffic driving, not G).** Both cars were kinematic civilians; no racer or police unit
+was involved. G only changed the timing.
+- Agent 241 began a 13 s kinematic turn-around with agent 420 queued 2.9 m behind it (bumper
+  gap). The turn-around holds its own lane at `TURN_OWN_HOLD_M` (8 m) behind the turner, but
+  420 was already closer than that.
+- So 420 never saw the hold. It saw the turning car's own entry as its leader and crept up to
+  its 1.8 m standstill gap during the turn.
+- The turn ends with the car lined up with the opposite lane, its nose swung back over the
+  own lane. That end pose cleared 420 by 0.29 m when the turn was planned; after the creep it
+  overlapped 420 by about 0.1 m.
+
+**Fix (`traffic/blocked.rs`).** `turn_own_hold_s`: the hold sits 8 m behind the turner, or
+0.5 m ahead of a follower already closer than that (`TURN_FOLLOWER_HOLD_GAP_M`), so that
+follower stays where it is until the turn ends. Unit test
+`a_follower_queued_close_behind_a_turn_is_held_where_it_is`.
+**Measured on `lead/opponent-pace` (0274348d, G).** `world_traffic_soak`: 0 civilian
+collisions on seeds 5–9. With the fix, 113 of 115 scenarios pass on G. The other two,
+`police_tunnel_escape_founders_cut*`, fail identically without it (same hashes), so they
+are G-side; they are not on physics.md's red list.
+
+## Playtest row 164 — barriers: a glancing scrape slides the car along
+**Cause (physics only; the drawn barrier is already one swept profile).** Median barriers,
+deck guard rails and bare-sidewalk-back rails were one yaw-only box per segment
+(`box_collider`). A car scraping along caught the next box's end corner at a joint: on a
+straight Loop 9 barrier, at 30 m/s and 10°, the contact normal tilted 23°, there was an 8.7 kN·s impulse,
+the car spun at 140°/s and was thrown 5.3 m/s away from the barrier.
+**Fix (`crates/wp_sim/src/physics.rs`: outside D's crates, assigned by the lead).**
+`barrier_colliders`: per barrier line (median barriers) or per chained run of rail segments
+(`chain_segments`: deck rails, bare backs) the colliders are two triangle meshes:
+- side faces plus end caps, mitered at every joint and facing outward, with
+  `TriMeshFlags::FIX_INTERNAL_EDGES`;
+- the top, 2 cm inside and 1 cm below the side faces' top edge.
+
+One closed mesh with the top included let the internal-edge fix tilt the normal up at the
+shared top edge, which rolled a scraping car onto the barrier on a right bend. The plain mesh
+(no edge fix) kept the joint kicks.
+
+Friction 0.3 (was 0.4) and restitution 0 (the chassis' Min rule already made it 0). Sizes are
+unchanged (barrier 0.5 × 0.81 m; rails 0.3 × 0.9 m; feet 0.3 m below the line). The
+`CityColliders::{rails, barriers}` counts are still segments, so there are now far fewer
+colliders (one or two meshes per line instead of a box per segment).
+**Gate.** `crates/wp_sim/tests/barrier_scrape.rs`, Port Vesper. 30 m/s at 10° into the median
+barrier, then held lightly against it (bend feed-forward, aimed 5 cm into the face), checked
+for 2 s after the first contact:
+
+| Stretch | Max gap (m) | Max speed away (m/s) | Scrape yaw (°/s) | End speed (m/s) |
+|---|---|---|---|---|
+| Straight | 0.09 | 0.39 | 10 | 27.5 |
+| Bending away, 16° over 110 m (convex face) | 0.28 | 0.75 | 6 | 29.2 |
+| Bending in, 4° (concave face; Vesper's sharpest right-hand barrier bend) | 0.47 | 0.83 | 24 | 28.3 |
+
+Limits are 1.5 m, 3 m/s and 60°/s; no spin past 15° off the barrier. On the old boxes, the
+straight stretch fails (gap 4.1 m, 5.3 m/s away, 140°/s).
+
+The first 0.25 s (the impact itself) yaws the car 85–98°/s on every collider shape. That is
+the rigid-body minimum for the box chassis' front corner taking a 5.2 m/s closing speed:
+Δω = m_eff·v·arm/I_z ≈ 96°/s for the debug sedan. So that window has its own limit
+(110°/s), and the 60°/s limit applies after it. Softening the impact itself would need a
+chassis or contact change in wp_vehicle (physics is frozen).
+
+**Scenario fix.** `soak/traffic_soak_observer.ron`'s observer was parked at the grid origin.
+Since main's grid viaduct, that point is the viaduct's median barrier, so the car spent the
+run balanced on the old barrier box (contacts at deck + 0.81 m). On the smooth barrier it
+slid off (1.17 m against the 0.5 m limit). It now parks inside a core block ≥ 25 m from every
+road (100, 27.5).
+
+**Goldens [bless].** jam_pursuit_grid, opponent_circuit_8x5, opponent_flee_police and
+world_traffic_soak_observer moved: new barrier/rail colliders (collider set and contact
+order), plus the observer's new spot.
 
 ## Playtest row 159 — "overpass 3D models still completely block the highway underneath"
 **Cause (drawn greybox only).** Every interchange crossroad over Loop 9 (Harbor Boulevard west

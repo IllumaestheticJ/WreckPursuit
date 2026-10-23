@@ -252,8 +252,11 @@ fn requirements_hold_in_the_workshop() {
         parts.fitted("rear_wing").unwrap().grade.as_deref(),
         Some("aero_wing_2")
     );
-    remove(&e, &mut a, car, "front_bumper");
+    // The GT wing needs the splitter: neither the splitter nor the bumper it is bolted to
+    // (which takes it along) can come off while the wing is on.
     let why = refused(e.remove_part(&mut a, car, "front_splitter"));
+    assert!(why.contains("aero_splitter"), "{why}");
+    let why = refused(e.remove_part(&mut a, car, "front_bumper"));
     assert!(why.contains("aero_splitter"), "{why}");
     // Shop removal of the wing frees the splitter.
     e.uninstall_mod(&mut a, car, "aero_wing_2").unwrap();
@@ -267,6 +270,99 @@ fn requirements_hold_in_the_workshop() {
         .is_none());
     remove(&e, &mut a, car, "front_splitter");
     assert!(a.car(car).unwrap().mods.is_empty());
+}
+
+#[test]
+fn mounted_parts_come_off_and_go_on_with_their_host() {
+    let (e, mut a, car) = rich();
+    e.install_mod(&mut a, car, "aero_splitter", MODE).unwrap();
+    e.install_mod(&mut a, car, "aero_diffuser", MODE).unwrap();
+    // The splitter is worked on with the bumper on: it is bolted to it.
+    let w = e.workshop(&a, car, MODE).unwrap();
+    let splitter = w.slots.iter().find(|s| s.id == "front_splitter").unwrap();
+    assert_eq!(splitter.mount.as_deref(), Some("front_bumper"));
+    assert!(
+        splitter.remove_blocker.is_none(),
+        "{:?}",
+        splitter.remove_blocker
+    );
+    let bumper = w.slots.iter().find(|s| s.id == "front_bumper").unwrap();
+    assert_eq!(bumper.takes_along, vec!["front_splitter".to_string()]);
+
+    // Bumper off: the splitter goes with it, inside the loose bumper.
+    let b = remove(&e, &mut a, car, "front_bumper");
+    let c = a.car(car).unwrap();
+    let parts = c.parts.as_ref().unwrap();
+    assert!(parts.fitted("front_bumper").is_none());
+    assert!(
+        parts.fitted("front_splitter").is_none(),
+        "no splitter left floating"
+    );
+    assert!(!c.mods.contains(&"aero_splitter".to_string()));
+    assert!(c.mods.contains(&"aero_diffuser".to_string()));
+    let loose = a.inventory.iter().find(|p| p.uid == b).unwrap();
+    assert_eq!(
+        a.inventory.len(),
+        1,
+        "one loose part: the bumper with its splitter"
+    );
+    assert_eq!(loose.contents.len(), 1);
+    assert_eq!(loose.contents[0].kind, "front_splitter");
+    assert_eq!(loose.contents[0].grade.as_deref(), Some("aero_splitter"));
+    assert!(
+        e.part_sale_price(loose)
+            > e.part_sale_price(&wp_economy::LoosePart {
+                contents: vec![],
+                ..loose.clone()
+            }),
+        "the splitter adds to the bumper's resale"
+    );
+
+    // Bumper back on: the splitter comes back with it.
+    fit(&e, &mut a, car, "front_bumper", b);
+    let c = a.car(car).unwrap();
+    assert_eq!(
+        c.parts
+            .as_ref()
+            .unwrap()
+            .fitted("front_splitter")
+            .unwrap()
+            .grade
+            .as_deref(),
+        Some("aero_splitter")
+    );
+    assert!(c.mods.contains(&"aero_splitter".to_string()));
+    assert!(a.inventory.is_empty());
+
+    // A splitter on its own goes on only onto a fitted bumper.
+    let s = remove(&e, &mut a, car, "front_splitter");
+    let b = remove(&e, &mut a, car, "front_bumper");
+    assert!(a
+        .inventory
+        .iter()
+        .find(|p| p.uid == b)
+        .unwrap()
+        .contents
+        .is_empty());
+    let why = refused(e.fit_part(&mut a, car, "front_splitter", s, MODE));
+    assert!(why.contains("no front bumper"), "{why}");
+    fit(&e, &mut a, car, "front_bumper", b);
+    fit(&e, &mut a, car, "front_splitter", s);
+
+    // The diffuser rides on the rear bumper the same way.
+    let r = remove(&e, &mut a, car, "rear_bumper");
+    assert!(a
+        .car(car)
+        .unwrap()
+        .parts
+        .as_ref()
+        .unwrap()
+        .fitted("diffuser")
+        .is_none());
+    assert_eq!(
+        a.inventory.iter().find(|p| p.uid == r).unwrap().contents[0].kind,
+        "diffuser"
+    );
 }
 
 #[test]
