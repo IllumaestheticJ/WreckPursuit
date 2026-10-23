@@ -74,8 +74,10 @@ Browser e2e on the gate-2 head (+ 773e4021):
   built through `Corridor::try_from_route` (`street::field_on`). Test
   `street_race_starts_and_runs_30_s`. `wp_race::entrants` still calls `Field::from_route` (fixed
   picker routes).
-- **150** no challenge while wanted or chased (`PoliceSystem::is_wanted_or_pursued`): a honk
-  does nothing, an open offer lapses, accept is refused; the hint says "Lose the police first".
+- **150** no challenge during an active pursuit (`street::pursued`: `PursuitStatus::Pursuit`
+  only; relaxed 2026-10-23, wanted with no unit on the player or cooling down / `Searching` is
+  fine): a honk does nothing, an open offer lapses, accept is refused; the hint says "Shake the
+  pursuit".
   Accepting resets both cars side by side at the start, at rest, facing along the route (two
   logged `ResetAt` moves; the racer uses the opposing lane on one-lane streets, else goes behind).
 - **151** waypoints: after B, map clicks add up to 8 waypoints (list with ↑ ↓ ✕, "Move B";

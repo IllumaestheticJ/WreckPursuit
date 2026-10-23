@@ -22,8 +22,10 @@
 //!   stops it and opens an [`Offer`]: the player picks B on the map ([`StreetRacers::preview`]),
 //!   optionally waypoints the route must run through in order (up to [`MAX_WAYPOINTS`], owner
 //!   row 151; gates the player passes within [`GATE_RADIUS_M`] before B counts), and a stake
-//!   inside the level's range (capped by their cash), then accepts. Not while the player is
-//!   wanted or chased (owner row 150): a honk does nothing and an open offer lapses.
+//!   inside the level's range (capped by their cash), then accepts. Not during an active
+//!   pursuit ([`pursued`]; owner row 150, relaxed 2026-10-23): a honk does nothing and an open
+//!   offer lapses. Wanted with no unit on the player, or cooling down (`Searching`, escape timer
+//!   running), is fine.
 //! - **Race.** Accepting pays the stake (a ledger line), resets both cars side by side at the
 //!   start, at rest, facing along the route (logged moves, owner row 150),
 //!   holds both for a 3 s countdown, then the racer drives a full-pace `Field` like a picker
@@ -58,6 +60,7 @@ use wp_opponent::{
     CarCapability, CorridorOptions, DriverProfile, Field, OpposingLanes, RaceConfig, RacerSpec,
     RacerStatus, SimPolice, VehicleObs,
 };
+use wp_police::PursuitStatus;
 use wp_sim::{Sim, VehicleKind};
 use wp_world::{geom, World};
 
@@ -655,10 +658,19 @@ pub struct StreetRacers {
     pending_light: Vec<(EntityId, bool)>,
 }
 
-/// The player is wanted or in a pursuit (search included): no street challenges then (owner
-/// row 150).
-fn pursued(sim: &Sim, player: EntityId) -> bool {
-    sim.police().is_wanted_or_pursued(player)
+/// The player is in an active pursuit: no street challenges then (owner row 150, relaxed
+/// 2026-10-23 to [`blocks_challenges`]: wanted or cooling down is fine).
+pub fn pursued(sim: &Sim, player: EntityId) -> bool {
+    sim.police()
+        .racer(player)
+        .is_some_and(|r| blocks_challenges(r.status))
+}
+
+/// Whether a player in this police status may not challenge street racers: only an active
+/// pursuit (a unit has them in sight) blocks. `Clear`, `Wanted` (no unit on them) and
+/// `Searching` (contact lost, the cooldown / escape timer running) do not.
+pub fn blocks_challenges(status: PursuitStatus) -> bool {
+    status == PursuitStatus::Pursuit
 }
 
 /// For each waypoint, the index of the nearest point of the route centreline (searched in
@@ -1011,8 +1023,8 @@ impl StreetRacers {
         self.in_reach(sim, player)
     }
 
-    /// Nearest roaming racer in honking range with no challenge or race open, police or not
-    /// (the hint says to lose the police first).
+    /// Nearest roaming racer in honking range with no challenge or race open, pursuit or not
+    /// (the hint says to shake the pursuit first).
     pub fn in_reach(&self, sim: &Sim, player: EntityId) -> Option<RosterEntry> {
         if self.offer.is_some() || self.race.is_some() {
             return None;
@@ -1099,7 +1111,7 @@ impl StreetRacers {
     /// Accept the open offer: race through the waypoints `via` (in order) to `finish` for
     /// `stake`. Pays the stake and starts the countdown; returns the moves that put both cars
     /// side by side at the start, at rest, facing along the route (owner row 150; the session
-    /// logs them). Refused while the police are after the player. Nothing changes on an error.
+    /// logs them). Refused during an active pursuit ([`pursued`]). Nothing changes on an error.
     pub fn accept(
         &mut self,
         sim: &Sim,
@@ -1114,7 +1126,7 @@ impl StreetRacers {
         }
         let player = run.player();
         if pursued(sim, player) {
-            return Err("lose the police first".into());
+            return Err("shake the pursuit first (cooling down is fine)".into());
         }
         let l = *level(self.racers[k].level);
         let cash = run.account().cash;
@@ -2166,6 +2178,16 @@ mod tests {
     use super::*;
     use crate::scenario::free_drive;
     use crate::session::Session;
+
+    /// Row 150 (relaxed 2026-10-23): only an active pursuit blocks challenges; wanted with no
+    /// unit on the player and cooling down (contact lost, escape timer running) do not.
+    #[test]
+    fn only_an_active_pursuit_blocks_challenges() {
+        assert!(blocks_challenges(PursuitStatus::Pursuit));
+        assert!(!blocks_challenges(PursuitStatus::Searching));
+        assert!(!blocks_challenges(PursuitStatus::Wanted));
+        assert!(!blocks_challenges(PursuitStatus::Clear));
+    }
 
     #[test]
     fn entity_ids_round_trip_and_other_ids_are_not_racers() {
