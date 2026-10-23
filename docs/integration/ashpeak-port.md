@@ -122,12 +122,20 @@ directly):
 **The Ashpeak greybox is over the cap** (it already was on `ws/ashpeak`: 24.9 MB; its own
 staleness test allows 30 MB). Not raised or hidden here; `tools/preview_build.sh` copies every
 `*.greybox.b64.txt`, so a preview publish would fail on it (its `find -size +15M` prints it).
-Options for the lead (see "Greybox options" for measurements):
+Measured on the tip (per-triangle split of the greybox primitives at Port Vesper's extent,
+`wp_world::ashpeak::plan::VESPER_LO..HI`): **~71 % of the bytes are county geometry** (≈ 17.8
+MB of the 25.0 MB `.glb`, ≈ 23.7 MB as `.b64.txt`); Port Vesper's part is the `vesper_v2`
+greybox again. In the county the biggest item is the drawn ground (`ground_suburb`, ≈ 31 %),
+then sidewalks / lots / kerbs / retaining walls (the metro grid), rock (mountains) and
+buildings. Options for the lead:
 
-1. **Split into tiles**: the county as its own greybox file(s) next to Port Vesper's
-   (`ashpeak` = `vesper_v2` greybox + county tiles), each ≤ 15 MB. Biggest saving: Port Vesper
-   (10 MB of it) is shipped once, not twice.
-2. **Coarser drawn ground** on the county (16 m → 32 m cells; terrain is the bulk).
+1. **Split into tiles** (recommended): `ashpeak` loads the `vesper_v2` greybox plus county
+   tiles. The county alone (~17.8 MB glb / ~23.7 MB b64) still needs **≥ 2 tiles** (e.g. west:
+   farms + mountains, east: metro + freeways) to stay ≤ 15 MB each as b64. Port Vesper is then
+   shipped once, not twice. Needs a small loader change in `scene.ts` (several files per city)
+   and `gen-city` writing per-tile files.
+2. **Coarser drawn ground** on the county (16 m → 32 m cells): ≈ −4 MB glb. Not enough alone
+   (county would still be ~13–14 MB glb, ~18 MB b64); useful with 1.
 3. **Leave Ashpeak out of the preview** (`preview_build.sh` skips files > 15 MB with a note;
    the map stays in dev / native).
 4. Raise the cap: not possible for the artifact host (15 MB per file is the host's limit).
@@ -148,7 +156,27 @@ GATE_TABLE
 
 ## Perf (same container, round 12 `db0035d9` vs port tip)
 
-PERF_TABLE
+Native release, `wp_wasm --example chase_bench hakone_gt 30 [city]` (the same `Session` the
+browser runs), two runs each; browser `apps/testbed-web/e2e/perf_check.mjs` (desktop 1280×720
+gates) and `e2e/frame_profile.mjs` (`CITY=ashpeak`), headless SwiftShader on this 4-core
+container.
+
+| Measurement | round 12 `db0035d9` | port tip | Budget |
+|---|---|---|---|
+| Native city chase, Port Vesper: sim ms / 60 Hz frame (mean · p95) | 3.48–3.59 · 5.3–6.3 | 3.37–3.65 · 4.9–5.6 | — |
+| Same, final state hash | `b987092867952e80` | **`b987092867952e80`** (identical: Port Vesper sim unchanged) | — |
+| Native city chase, Ashpeak map (22 → 20 vehicles, 4643 props) | — | 3.54–3.74 · 5.8–6.5 | — |
+| Desktop chase (Vesper): draw calls · triangles | 425 · 326.6 k | 437 · 329.0 k | < 600 · ≤ 400 k |
+| Desktop rain chase (Vesper): draw calls · triangles | 411 · 308.5 k | 415 · 304.3 k | < 600 · ≤ 400 k |
+| Desktop chase on the Ashpeak map (`frame_profile`, `CITY=ashpeak`) | — | 432 · 336.8 k (city 149 calls, 4679 tiles / 128 drawn) | < 600 · ≤ 400 k |
+| Phone chase 740×360 (informational, row 145): draw calls · triangles | 327 · 352.3 k | 331 · 348.2 k | (300 · 400 k, not a gate) |
+| Browser sim section, chase · rain, ms per rendered frame | 91.5 · 101.6 | 85.1 · 108.9 | (noise ±10) |
+| perf_check RTF / frames > 250 ms / steady alloc | 0.76, 0.68 / 28, 28 / 587, 640 KB | 0.69, 0.64 / 29, 29 / 572, 685 KB | 0.9 / 12 / 200 KB |
+
+RTF, slow frames and steady allocation **fail on round 12 too** on this container (SwiftShader
+raster ~230 ms of the frame; `browser-perf.md` calibration): not from the port. Draw calls
++4…+12 on Vesper are the honk-spot markers near the spawn (ring, disc, pillar, arrow, label
+per spot; frustum-culled). Every desktop gate that is machine-independent passes.
 
 ## Collisions with the parallel ports
 
