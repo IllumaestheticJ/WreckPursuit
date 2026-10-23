@@ -14,12 +14,14 @@ use crate::events::{
     DisableCause, IncidentId, PoliceEvent, PursuitOutcome, ToolId, UnitId, UnitKind,
 };
 use crate::graph::{
-    add, dist, dot, len, lerp2, normalize, scale, sub, xy, District, NodeId, PoiKind, RoadClass,
+    add, dist, dot, len, lerp2, normalize, perp_left, scale, sub, xy, District, NodeId, PoiKind,
+    RoadClass,
 };
 use crate::heat::{PursuitStatus, WantedLevel};
 use crate::time::SimTime;
 use crate::tools::{
-    plan_site, roadblock_barriers, roadblock_unit_spots, Roadblock, SiteRules, SpikeStrip, ToolSite,
+    plan_site, plan_site_where, roadblock_barriers, roadblock_unit_spots, Roadblock, SiteRules,
+    SpikeStrip, ToolSite,
 };
 use crate::unit::{Assignment, DriveCommand, Tactic, Track, Unit, UnitRole, LANE_OFFSET_M};
 use crate::PoliceSystem;
@@ -76,8 +78,14 @@ pub const ACTIVE_STOP_S: f32 = 5.0;
 /// How far beyond the road edge a spike-strip car parks, m.
 pub const SPIKE_CAR_SHOULDER_M: f32 = 2.5;
 
-/// A roadblock or spike-strip car not spawned yet because its spot is in a racer's view
-/// (row 131): it appears once the spot is hidden, while its tool lasts.
+/// A spike strip is lifted once its unit is further than this from where it parked (shoved
+/// away, driven off, reset elsewhere), so a strip never lies on the road without a police car
+/// beside it (PR #54), m.
+pub const SPIKE_UNIT_LEASH_M: f32 = 15.0;
+
+/// A roadblock car not spawned yet because its spot is in a racer's view (row 131): it
+/// appears once the spot is hidden, while its tool lasts. (Spike cars never wait: a strip only
+/// lies on the road with its car beside it, PR #54, so both go down together.)
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PendingToolCar {
     /// Tool it belongs to.
@@ -1744,6 +1752,11 @@ impl PoliceSystem {
         {
             return;
         }
+        // A unit leaving its spike post (wrecked, pulled over, released) takes the strip with
+        // it (PR #54).
+        if let Assignment::SpikeAt { tool, .. } = self.units[i].assignment {
+            self.lift_spikes(tool);
+        }
         // A unit's first patrol is not "resuming" anything: no line (13 units "resuming
         // patrol" at the start held the channel for ≈ 25 s).
         let first_patrol =
@@ -2020,6 +2033,9 @@ impl PoliceSystem {
     }
 
     pub(crate) fn despawn(&mut self, i: usize) {
+        if let Assignment::SpikeAt { tool, .. } = self.units[i].assignment {
+            self.lift_spikes(tool);
+        }
         let id = self.units[i].id;
         self.units.remove(i);
         self.pending.push(PoliceEvent::UnitDespawned { unit: id });
@@ -3655,8 +3671,10 @@ impl PoliceSystem {
     }
 
     /// Scenario / test placement: a spike strip across the road at `pos`, perpendicular to
-    /// `dir`, attributed to `racer`, without a deploying unit and bypassing every dispatch rule
-    /// (see [`PoliceSystem::place_roadblock_at`]). Any racer crossing it is spiked. Emits
+    /// `dir`, attributed to `racer`, bypassing every dispatch rule (see
+    /// [`PoliceSystem::place_roadblock_at`]), the row-131 spawn view check included. Like
+    /// every strip it comes with a spike unit parked on the shoulder beside it (left of `dir`)
+    /// and is lifted when that unit leaves (PR #54). Any racer crossing it is spiked. Emits
     /// `SpikesPlaced`.
     pub fn place_spikes_at(&mut self, racer: EntityId, pos: [f32; 2], dir: [f32; 2]) -> ToolId {
         let sc = &self.cfg.tools.spikes;
@@ -3664,17 +3682,80 @@ impl PoliceSystem {
         let site = Self::scenario_site(pos, dir);
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
-        let strip = SpikeStrip::across(id, racer, site, length, None, self.now.plus(lifetime));
+        let post = add(
+            site.pos,
+            scale(
+                perp_left(site.dir),
+                ROAD_HALF_WIDTH_M + SPIKE_CAR_SHOULDER_M,
+            ),
+        );
+        let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, post, site.dir);
+        self.assign(
+            i,
+            Assignment::SpikeAt {
+                segment: site.segment,
+                tool: id,
+            },
+        );
+        let mut strip = SpikeStrip::across(id, racer, site, length, None, self.now.plus(lifetime));
+        strip.unit = Some(self.units[i].id);
+        strip.post = Some(post);
+        self.lay_spikes(strip);
+        id
+    }
+
+    /// Put `strip` on the road (its unit is beside it) and announce it (`SpikesPlaced`).
+    fn lay_spikes(&mut self, strip: SpikeStrip) {
         self.pending.push(PoliceEvent::SpikesPlaced {
-            tool: id,
-            racer,
+            tool: strip.id,
+            racer: strip.racer,
             a: [strip.a[0], strip.a[1], 0.0],
             b: [strip.b[0], strip.b[1], 0.0],
-            sight_m: 0.0,
+            sight_m: strip.site.sight_m,
         });
         self.spikes.push(strip);
-        self.stats.spikes += 1;
-        id
+    }
+
+    /// Whether strip `s` still has its unit beside it: present, not wrecked, still on this
+    /// strip's post and within [`SPIKE_UNIT_LEASH_M`] of where it parked. Scripted
+    /// race-profile strips without a unit (no race profile stakes one out beside its strip)
+    /// are exempt.
+    fn spike_unit_holds(&self, s: &SpikeStrip) -> bool {
+        let Some(uid) = s.unit else {
+            return s.scripted;
+        };
+        let Some(u) = self.units.iter().find(|u| u.id == uid) else {
+            return false;
+        };
+        !u.wrecked
+            && matches!(u.assignment, Assignment::SpikeAt { tool, .. } if tool == s.id)
+            && dist(u.body.pos, s.post.unwrap_or(s.site.pos)) <= SPIKE_UNIT_LEASH_M
+    }
+
+    /// Remove strip `tool` from the road (no-op if already gone). Its unit is not touched.
+    fn lift_spikes(&mut self, tool: ToolId) {
+        let before = self.spikes.len();
+        self.spikes.retain(|s| s.id != tool);
+        if self.spikes.len() != before {
+            self.pending.push(PoliceEvent::ToolRemoved { tool });
+        }
+    }
+
+    /// The host could not give AI unit `unit` a physical car (vehicle cap, failed spawn). A
+    /// spike unit is then withdrawn and its strip lifted, so no strip lies on the road without
+    /// a visible police car; returns whether that happened. Other units are left as they are.
+    pub fn withdraw_unbodied_spike_unit(&mut self, unit: UnitId) -> bool {
+        let Some(i) = self.unit_index(unit) else {
+            return false;
+        };
+        if !matches!(self.units[i].assignment, Assignment::SpikeAt { .. })
+            || self.units[i].entity.is_some()
+            || self.units[i].player.is_some()
+        {
+            return false;
+        }
+        self.despawn(i);
+        true
     }
 
     /// Place a spike strip ahead of `racer` (optionally on a specific road).
@@ -3709,8 +3790,14 @@ impl PoliceSystem {
             min_sight_m: sc.min_sight_m,
             highway_ok: true,
         };
-        let site =
-            plan_site(&self.graph, p, v, &rules, road.map(|r| r.0)).map_err(CaptainError::Site)?;
+        // PR #54: the strip goes down with its car, so the site needs a shoulder spot the car
+        // can appear on (row 75: clear of parked cars and cones, and of other vehicles).
+        let parkable = |site: &ToolSite| {
+            let span = self.tool_span(site);
+            self.spot_clear(span.at(site.pos, span.outer + SPIKE_CAR_SHOULDER_M))
+        };
+        let site = plan_site_where(&self.graph, p, v, &rules, road.map(|r| r.0), &parkable)
+            .map_err(CaptainError::Site)?;
         let (length, lifetime, cooldown) =
             (sc.length_m, sc.lifetime_s, sc.cooldown_s.get(self.phase));
         let id = ToolId(self.next_tool);
@@ -3718,31 +3805,31 @@ impl PoliceSystem {
         // Row 133: the car parks on the right shoulder of the racer's own carriageway,
         // facing its traffic; on a one-way carriageway (a divided road's half) the strip
         // spans that carriageway, lane edge to median.
+        // PR #54: the car appears with its strip, at once. It does not wait for its spot to
+        // leave the racer's view as roadblock cars do (row 131): a strip may never lie on the
+        // road without its car, and a strip held back until its spot is hidden is never down
+        // in time (police scenarios: spike hits 10 -> 0 and 16 -> 0). Sites are at least
+        // `min_ahead_m` (150 m) ahead.
         let span = self.tool_span(&site);
-        self.tool_cars.push(PendingToolCar {
-            tool: id,
-            pos: span.at(site.pos, span.outer + SPIKE_CAR_SHOULDER_M),
-            heading: span.flow,
-            assignment: Assignment::SpikeAt {
-                segment: site.segment,
-                tool: id,
-            },
-        });
+        let post = span.at(site.pos, span.outer + SPIKE_CAR_SHOULDER_M);
         let expires = now.plus(lifetime);
-        let strip = if span.oneway {
+        let mut strip = if span.oneway {
             let (a, b) = (span.at(site.pos, span.inner), span.at(site.pos, span.outer));
             SpikeStrip::between(id, racer, site, a, b, None, expires)
         } else {
             SpikeStrip::across(id, racer, site, length, None, expires)
         };
-        self.pending.push(PoliceEvent::SpikesPlaced {
-            tool: id,
-            racer,
-            a: [strip.a[0], strip.a[1], 0.0],
-            b: [strip.b[0], strip.b[1], 0.0],
-            sight_m: site.sight_m,
-        });
-        self.spikes.push(strip);
+        let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, post, span.flow);
+        self.assign(
+            i,
+            Assignment::SpikeAt {
+                segment: site.segment,
+                tool: id,
+            },
+        );
+        strip.unit = Some(self.units[i].id);
+        strip.post = Some(post);
+        self.lay_spikes(strip);
         self.captain.spikes_ready = now.plus(cooldown);
         self.stats.spikes += 1;
         self.stats.tool_sight_m.push(site.sight_m);
@@ -3774,23 +3861,18 @@ impl PoliceSystem {
         }
     }
 
-    /// Spawn the roadblock and spike-strip cars whose spots are now out of every racer's
-    /// view, now and along its road ahead (row 131); drop those whose tool has gone.
+    /// Spawn the roadblock cars whose spots are now out of every racer's view, now and along
+    /// its road ahead (row 131); drop those whose roadblock has gone. (Spike cars appear with
+    /// their strip at once: PR #54, see [`Self::place_spikes`].)
     fn maintain_tool_cars(&mut self, world: &dyn WorldQuery) {
         let pending = std::mem::take(&mut self.tool_cars);
         for car in pending {
-            let rb = self.roadblocks.iter().position(|r| r.id == car.tool);
-            let sp = self.spikes.iter().position(|s| s.id == car.tool);
-            if rb.is_none() && sp.is_none() {
+            let Some(k) = self.roadblocks.iter().position(|r| r.id == car.tool) else {
                 continue;
-            }
+            };
             // Row 140: by the time its spot is hidden the racer may have moved on, leaving the
             // spot on the far carriageway of its road now; such a car is not spawned at all.
-            let racer = match (rb, sp) {
-                (Some(k), _) => self.roadblocks[k].racer,
-                (_, Some(k)) => self.spikes[k].racer,
-                _ => continue,
-            };
+            let racer = self.roadblocks[k].racer;
             if self.far_side(&self.racer_corridor(racer), car.pos) {
                 continue;
             }
@@ -3802,12 +3884,7 @@ impl PoliceSystem {
             let uid = self.units[i].id;
             self.assign(i, car.assignment);
             self.record_spawn(world, i);
-            if let Some(k) = rb {
-                self.roadblocks[k].units.push(uid);
-            }
-            if let Some(k) = sp {
-                self.spikes[k].unit = Some(uid);
-            }
+            self.roadblocks[k].units.push(uid);
         }
     }
 
@@ -3901,8 +3978,18 @@ impl PoliceSystem {
             }
             keep
         });
+        // PR #54: a strip whose unit has left its post (wrecked, shoved or driven away,
+        // reassigned, gone) is lifted.
+        let unmanned: Vec<ToolId> = self
+            .spikes
+            .iter()
+            .filter(|s| !self.spike_unit_holds(s))
+            .map(|s| s.id)
+            .collect();
         self.spikes.retain(|s| {
-            let keep = now < s.expires && (s.scripted || racer != Some(s.racer));
+            let keep = now < s.expires
+                && (s.scripted || racer != Some(s.racer))
+                && !unmanned.contains(&s.id);
             if !keep {
                 removed.push((s.id, s.unit.into_iter().collect()));
             }

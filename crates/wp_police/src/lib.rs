@@ -1120,8 +1120,8 @@ impl PoliceSystem {
         self.decks = decks;
     }
 
-    /// Spots `(position, heading)` of tool `tool`'s cars not spawned yet: still in a racer's
-    /// view (row 131); each appears there once hidden.
+    /// Spots `(position, heading)` of roadblock `tool`'s cars not spawned yet: still in a
+    /// racer's view (row 131); each appears there once hidden. Spike cars never wait (PR #54).
     pub fn tool_cars_waiting(&self, tool: ToolId) -> Vec<([f32; 2], [f32; 2])> {
         self.tool_cars
             .iter()

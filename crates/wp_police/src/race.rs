@@ -1376,6 +1376,12 @@ mod tests {
         assert_eq!(plan.spikes.len(), 1);
         let s = &police.spike_strips()[0];
         assert!(s.scripted);
+        // PR #54 port: a scripted strip has no unit (no profile stakes one out beside it) and
+        // is exempt from "a strip only lies while its unit is beside it".
+        assert_eq!(s.unit, None);
+        police.remove_tools_for(None);
+        assert_eq!(police.spike_strips().len(), 1);
+        let s = &police.spike_strips()[0];
         assert!((dist(s.a, s.b) - prof.spikes[0].length_m).abs() < 1e-3);
         // A car in the next lane (3.5 m left of the course line) misses it.
         let sp = prof.spikes[0];
