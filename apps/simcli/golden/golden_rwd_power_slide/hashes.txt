@@ -1,4 +1,4 @@
-# simcli hashes scenario=golden_rwd_power_slide systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=golden_rwd_power_slide systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
 24 7ec024d070eb73ac
 48 fd093e8bef77b9c9
 72 784ecb03b40f9042

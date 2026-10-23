@@ -78,7 +78,7 @@ export class UiOverlay {
       player,
       events: events as unknown as KitSimEvent[],
       police: status ? toReadout(status) : null,
-      damageMode: mode === "Simulation" ? "Simulation" : "Arcade",
+      damageMode: mode === "Simulation" || mode === "Extreme" ? mode : "Arcade",
       timeOfDayS: hours * 3600,
     });
   }

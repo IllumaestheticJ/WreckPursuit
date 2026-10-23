@@ -32,7 +32,7 @@ pub struct SkillProfile {
     pub violation_chance: f32,
     /// Chance of a light / medium / heavy crash per race.
     pub crash_chance: [f32; 3],
-    /// Chance a heavy crash totals the car in Simulation.
+    /// Chance a heavy crash totals the car in Extreme (the pre-v0.4.0 Simulation).
     pub sim_heavy_total_loss: f32,
     /// Chance of drawing police attention on a given night.
     pub wanted_chance_per_night: f32,
@@ -222,10 +222,13 @@ struct Career<'a> {
 }
 
 impl Career<'_> {
+    /// Crash severity multiplier: Simulation keeps the old Arcade 1.0, Extreme the old
+    /// Simulation 2.0, and Arcade racers take 20 % of Simulation's damage (owner, 2026-10-22).
     fn mode_scale(&self) -> f32 {
         match self.cfg.mode {
-            DamageMode::Arcade => 1.0,
-            DamageMode::Simulation => 2.0,
+            DamageMode::Arcade => 0.2,
+            DamageMode::Simulation => 1.0,
+            DamageMode::Extreme => 2.0,
         }
     }
 
@@ -318,7 +321,7 @@ impl Career<'_> {
         let mt = self.econ.mode_table(self.cfg.mode);
         let total_loss = health < mt.total_loss_health
             || (kind == 2
-                && self.cfg.mode == DamageMode::Simulation
+                && self.cfg.mode == DamageMode::Extreme
                 && self.rng.chance(self.cfg.skill.sim_heavy_total_loss));
         let mut handling = car.damage.handling;
         if kind >= 1 {

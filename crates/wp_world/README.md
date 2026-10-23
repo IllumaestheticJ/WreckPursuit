@@ -25,6 +25,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `routes` | Lane-legal race routes, circuits, checkpoints, closures |
 | `props` | Parked cars (rules from `data/city/parking.json`, `ParkingTable`) and cones (static colliders) |
 | `clock` | `WorldClock`, `sun_direction` |
+| `progression` | Career time budget: `TimeProgression` (day free-roam / night racing shifts, activity costs, dusk/dawn transitions, carry-over), drives `WorldClock` via `apply` |
 | `geom` | Deterministic geometry (polylines, OBB, Bézier; re-exports `wp_math::{atan, atan2}`) |
 | `drive` | Shared AI driving: `DriveController` (pure pursuit + PID) and `PathFollower` (`follow_path` along any `DrivePath`) for traffic, police and racers |
 | `leader` | Leader / obstacle query (`find_leader`) + shared IDM (`CarFollowing`) so police and racers follow and stop behind vehicles like traffic does |

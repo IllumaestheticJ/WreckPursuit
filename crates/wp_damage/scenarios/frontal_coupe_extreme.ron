@@ -1,9 +1,9 @@
 // The coupe lattice (different profile, mass and dimensions) must meet the same frontal
 // calibration as the sedan: sections scale with car mass.
 (
-    name: "frontal_coupe_sim",
+    name: "frontal_coupe_extreme",
     car: "debug_coupe",
-    mode: Simulation,
+    mode: Extreme,
     impact: Frontal,
     other_mass_kg: 0.0,
     duration_s: 0.5,

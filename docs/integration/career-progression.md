@@ -75,7 +75,7 @@ rewards they already qualify for at their next update).
   `settle_touge_wager` can keep posting `RaceEntryFee` / `RacePurse`; just call
   `require_unlocked` first and `update_progression` after any rep change.
 - **Time/day-night**: nothing to call; progression does not depend on time.
-- **Pink slips today** (`stakes.toml [pink_slip] modes = ["Simulation"]`, `min_rep = 500`)
+- **Pink slips today** (`stakes.toml [pink_slip] modes = ["Simulation", "Extreme"]`, `min_rep = 500`)
   are owned by the economy settlement; the touge thread decides whether to widen the modes. The
   career gate (`Feature::PinkSlips`) sits on top.
 

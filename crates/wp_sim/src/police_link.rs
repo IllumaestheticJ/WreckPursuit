@@ -493,7 +493,7 @@ mod tests {
 
     fn city_run(fleet: Option<Vec<PoliceModel>>, ticks: u32) -> Sim {
         let player = car("debug_sedan");
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 11,
             mode,

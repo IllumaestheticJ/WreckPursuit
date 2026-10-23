@@ -51,7 +51,7 @@ fn car() -> &'static LoadedCar {
 }
 
 fn sim(net: &RoadNetwork) -> Sim {
-    let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
+    let mode = load_mode_table(data("modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed: 4,
         mode,
@@ -110,7 +110,7 @@ fn hubs(st: &wp_contracts::VehicleState) -> [V3; 4] {
 fn rest_wheels() -> [(f32, f32); 4] {
     static REST: OnceLock<[(f32, f32); 4]> = OnceLock::new();
     *REST.get_or_init(|| {
-        let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = load_mode_table(data("modes/sim.toml")).unwrap();
         let mut s = Sim::new(SimConfig {
             seed: 4,
             mode,
@@ -147,7 +147,7 @@ fn wheel_clearance(st: &wp_contracts::VehicleState, i: usize, hub: V3, surface_z
 fn rest_height() -> f32 {
     static REST: OnceLock<f32> = OnceLock::new();
     *REST.get_or_init(|| {
-        let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = load_mode_table(data("modes/sim.toml")).unwrap();
         let mut s = Sim::new(SimConfig {
             seed: 4,
             mode,

@@ -54,7 +54,7 @@ fn roam(seed: u64, n: usize, traffic: f32, seconds: f32) -> RoamOutcome {
             );
         }
     }
-    let mode = wp_contracts::load_mode_table(common::data("modes/arcade.toml")).unwrap();
+    let mode = wp_contracts::load_mode_table(common::data("modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed,
         mode,

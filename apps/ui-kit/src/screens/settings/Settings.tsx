@@ -349,16 +349,19 @@ function Assists() {
 
 // ------------------------------------------------------------------ damage mode
 
-const MODE_ROWS: { label: string; arcade: string; sim: string }[] = [
-  { label: "Crash energy into the body", arcade: "45 %", sim: "100 %" },
-  { label: "Total loss below health", arcade: "10 %", sim: "25 %" },
-  { label: "Cabin intrusion = total loss", arcade: "0.50 m", sim: "0.25 m" },
-  { label: "Wheels come off", arcade: "half as easily", sim: "at mount failure" },
-  { label: "Component wear", arcade: "× 0.6", sim: "× 1.0" },
-  { label: "Repair bills", arcade: "× 0.5", sim: "× 1.0" },
-  { label: "Fines at capture", arcade: "× 0.6", sim: "× 1.25" },
-  { label: "Car seized at level 4–5", arcade: "never", sim: "30 % chance" },
-  { label: "Totalled car at capture", arcade: "impounded", sim: "destroyed" },
+/** data/modes/{arcade,sim,extreme}.toml and data/economy/consequences.toml. */
+const MODE_ROWS: { label: string; arcade: string; sim: string; extreme: string }[] = [
+  { label: "Damage to racers (you, AI)", arcade: "20 %", sim: "100 %", extreme: "100 %" },
+  { label: "Damage to traffic, police", arcade: "100 %", sim: "100 %", extreme: "100 %" },
+  { label: "Crash energy into the body", arcade: "45 %", sim: "45 %", extreme: "100 %" },
+  { label: "Total loss below health", arcade: "10 %", sim: "10 %", extreme: "25 %" },
+  { label: "Cabin intrusion = total loss", arcade: "0.78 m", sim: "0.78 m", extreme: "0.25 m" },
+  { label: "Wheels come off", arcade: "rarely", sim: "rarely", extreme: "at mount failure" },
+  { label: "Component wear", arcade: "× 0.24", sim: "× 0.24", extreme: "× 1.0" },
+  { label: "Repair bills", arcade: "× 0.5", sim: "× 0.5", extreme: "× 1.0" },
+  { label: "Fines at capture", arcade: "× 0.6", sim: "× 1.25", extreme: "× 1.25" },
+  { label: "Car seized at level 4–5", arcade: "never", sim: "30 % chance", extreme: "30 % chance" },
+  { label: "Totalled car at capture", arcade: "impounded", sim: "destroyed", extreme: "destroyed" },
 ];
 
 function DamageMode() {
@@ -373,10 +376,11 @@ function DamageMode() {
   return (
     <div class="wp-grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)" }}>
       <div class="wp-stack">
-        {card("Arcade", "Arcade", "Punishing but survivable. One hard hit degrades the car; several end it.")}
-        {card("Simulation", "Simulation", "Real-world-ish. One hard hit at speed is a total loss. Bills and fines hurt.")}
+        {card("Arcade", "Arcade", "Forgiving. You and the AI racers take 20 % damage; traffic and police take full damage.")}
+        {card("Simulation", "Simulation", "Punishing but survivable. One hard hit degrades the car; several end it.")}
+        {card("Extreme", "Extreme", "Real-world-ish. One hard hit at speed is a total loss. Bills and fines hurt.")}
         <p class="wp-dim wp-mono" style={{ fontSize: "0.8em" }}>
-          Both modes run the same damage code with different tables (data/modes/*.toml). Changing mode applies from the next session; online lobbies set their own mode.
+          Every mode runs the same damage code with different tables (data/modes/*.toml). Changing mode applies from the next session; online lobbies set their own mode.
         </p>
       </div>
       <Panel title="What changes">
@@ -386,6 +390,7 @@ function DamageMode() {
               <th />
               <th class="num">Arcade</th>
               <th class="num">Simulation</th>
+              <th class="num">Extreme</th>
             </tr>
           </thead>
           <tbody>
@@ -397,6 +402,9 @@ function DamageMode() {
                 </td>
                 <td class="num" data-on={mode === "Simulation"}>
                   {r.sim}
+                </td>
+                <td class="num" data-on={mode === "Extreme"}>
+                  {r.extreme}
                 </td>
               </tr>
             ))}

@@ -19,7 +19,7 @@
     ),
     time_of_day_h: 23.0,
     time_ratio: 1.0,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     traffic_density: 0.3,
     police_presence: 0.0,
