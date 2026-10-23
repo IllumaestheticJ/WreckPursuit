@@ -335,6 +335,13 @@ fn road_lanes_at(map: &CityMap, p: V3) -> Vec<(SegId, f32)> {
         .collect()
 }
 
+/// A [`paths_to_any`] target reached: (travel time s, segments from the start's), or not.
+type Reached = Option<(f32, Vec<SegId>)>;
+
+/// A pick's chosen lane in [`plan_route_via`]: (time there and on, lane position, path there,
+/// paths on from it to the next pick's lanes).
+type Pick = (f32, (SegId, f32), Vec<SegId>, Option<Vec<Reached>>);
+
 /// The quickest legal path (travel time at the limit) from lane position `from` to each of
 /// `targets`: `(time s, segments from `from.0` to the target's)`, `None` for a target the
 /// search did not reach. A target behind `from` on its lane goes round the block. One A*
@@ -342,14 +349,9 @@ fn road_lanes_at(map: &CityMap, p: V3) -> Vec<(SegId, f32)> {
 /// every target is reached or its paths pass [`SEARCH_FACTOR`] × the quickest found plus
 /// [`SEARCH_SLACK_S`] (a lane that far round is no use, and an unreachable one would
 /// otherwise search the whole city).
-#[allow(clippy::type_complexity)]
-fn paths_to_any(
-    map: &CityMap,
-    from: (SegId, f32),
-    targets: &[(SegId, f32)],
-) -> Vec<Option<(f32, Vec<SegId>)>> {
+fn paths_to_any(map: &CityMap, from: (SegId, f32), targets: &[(SegId, f32)]) -> Vec<Reached> {
     const START: u32 = u32::MAX - 1;
-    let mut out: Vec<Option<(f32, Vec<SegId>)>> = vec![None; targets.len()];
+    let mut out: Vec<Reached> = vec![None; targets.len()];
     let start = map.seg(from.0);
     let mut best = f32::INFINITY;
     for (k, t) in targets.iter().enumerate() {
@@ -467,15 +469,13 @@ pub fn plan_route_via(
     let mut segs: Vec<SegId> = Vec::new();
     let mut cur = first;
     // Paths from `cur` to the next layer's lanes, when the look-ahead already found them.
-    let mut reach: Option<Vec<Option<(f32, Vec<SegId>)>>> = None;
+    let mut reach: Option<Vec<Reached>> = None;
     for i in 0..layers.len() {
         let cands = &layers[i];
         let there = reach
             .take()
             .unwrap_or_else(|| paths_to_any(map, cur, cands));
-        // (time, lane, path there, paths on from it)
-        #[allow(clippy::type_complexity)]
-        let mut picked: Option<(f32, (SegId, f32), Vec<SegId>, Option<Vec<_>>)> = None;
+        let mut picked: Option<Pick> = None;
         for (c, r) in cands.iter().zip(there) {
             let Some((t, path)) = r else {
                 continue;
