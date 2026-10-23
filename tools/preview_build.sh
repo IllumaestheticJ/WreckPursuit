@@ -30,6 +30,15 @@ PY
 rm -rf $S/preview && mkdir -p $S/preview && cp -r $W/dist/* $S/preview/
 P=$S/preview; mkdir -p $P/data/city $P/data/panels $P/data/audio $P/scenarios
 cp $R/data/city/*.greybox.b64.txt $P/data/city/ 2>/dev/null || true
+# Split greyboxes over the 15 MB per-file cap into 12 MB parts plus a count manifest
+# (scene.ts fetchGreyboxB64 joins them).
+for f in $P/data/city/*.greybox.b64.txt; do
+  if [ $(stat -c %s "$f") -gt 14000000 ]; then
+    b=${f%.txt}; split -b 12000000 -d -a 1 "$f" "$b.part"
+    n=0; for p in "$b".part[0-9]; do mv "$p" "$p.txt"; n=$((n+1)); done
+    echo $n > "$b.parts.txt"; rm "$f"; echo "split $(basename $f) into $n parts"
+  fi
+done
 cp -r $R/data/panels/meshes $P/data/panels/
 cp -r $R/data/audio/packs $P/data/audio/ && find $P/data/audio -name "*.json" -delete
 (cd $R/apps/simcli/scenarios && find . -name '*.ron' | sed 's#^\./##' | sort) > /tmp/claude-0/pv-ron.txt
