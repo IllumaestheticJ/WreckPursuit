@@ -6,7 +6,7 @@
 //! full lattice damage is kept as `wp_damage::FullDamageSnapshot` JSON in
 //! `CareerProfile::lattices`, so a dented car comes back dented.
 //!
-//! **A run** ([`Career::start_run`]) takes any live scenario (free drive, city chase, a race),
+//! **A run** ([`Career::start_run`]) takes any live scenario (free drive, night run, a race),
 //! puts the career's active car in the first entity slot with the career's damage mode and
 //! carried heat, builds the car from its installed mods (the modified `VehicleDef` /
 //! `LatticeDef` from `Economy::preview`, overlaid on the embedded data under the same car
@@ -1767,7 +1767,7 @@ pub fn career_run_active() -> bool {
     CAREER.with(|c| c.borrow().as_ref().is_some_and(Career::run_active))
 }
 
-/// Start a career run of `scenario_json` (free drive, city chase, a race: any live scenario;
+/// Start a career run of `scenario_json` (free drive, night run, a race: any live scenario;
 /// the first entity becomes the career car). Ends a career run in progress first. Returns the
 /// entity ids like `init`.
 #[wasm_bindgen]

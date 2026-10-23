@@ -41,7 +41,7 @@ keep the career's damage mode (`set_damage_mode` is refused). Lattice blobs are
 
 Testbed (`apps/testbed-web`): `garage` button and a `career` box (on by default) in the
 controls: with it, **free drive** and **city chase** start career runs; the car selector and
-`window.__wp.startFreeDrive(car, …)` / `startCityChase(car, …)` stay sandbox runs. Saved to
+`window.__wp.startFreeDrive(car, …)` / `startNightRun(car, …)` stay sandbox runs. Saved to
 `localStorage["wp.career.v1"]` (try/catch everywhere; an unreadable save is kept under
 `wp.career.v1.unreadable`) after every garage action, every settlement and every 20 s of a run;
 export / import as a file from the garage. The end-of-run panel gets a **Garage** button on

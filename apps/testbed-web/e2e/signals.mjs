@@ -46,7 +46,7 @@ page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 await page.goto(URL);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 30000 });
 await page.evaluate(() => localStorage.removeItem("wp.career.v1"));
-await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+await page.evaluate(() => window.__wp.startNightRun("debug_sedan", "Arcade"));
 await page.waitForFunction(() => window.__wp.sim.worldInfo()[0] > 240, null, { timeout: 60000 });
 await page.evaluate(() => window.__wp.indicators.probe(true));
 

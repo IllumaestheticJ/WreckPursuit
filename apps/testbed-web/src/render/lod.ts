@@ -8,6 +8,7 @@
 //   * the instanced fleet (render/fleet.ts) otherwise: same model, same livery, same pose.
 // So a promotion or demotion swaps the drawer on one frame with no gap, jump or recolour.
 //
+// Ashpeak County Sheriff units (police flag 4) use the county livery models.
 // Models: a draw record's `model` picks the car model it is drawn as — traffic
 // `SessionModels.traffic_models[model]`, police `SessionModels.police_models[model]` (the
 // `car_mix` fleets); -1 / an empty list falls back to the single `traffic` / `police` model.
@@ -25,6 +26,7 @@ import type { VehicleView } from "../vehicle_view";
 import { layers } from "../settings";
 import { BAR, Fleet, IND, POLICE_PAINT, TAIL, TRAFFIC_PALETTE, indicatorPhaseOn, type DrawMode, type FleetModel } from "./fleet";
 import { unitLevels } from "./lights";
+import { COUNTY_PAINT, countySkin } from "./livery";
 
 /** Hysteresis of the view → fleet hand-off (`LodDirector.viewDrawM`): a promoted car goes to
  * the fleet past `viewDrawM + VIEW_LOD_BAND_M` and comes back to its view within `viewDrawM`, m. */
@@ -118,6 +120,8 @@ export class LodDirector {
    * index `list.length` holds the fallback model (record `model` −1). */
   private tModels: (FleetModel | null | undefined)[] = [];
   private pModels: (FleetModel | null | undefined)[] = [];
+  /** `pModels` in the Ashpeak County Sheriff livery. */
+  private cModels: (FleetModel | null | undefined)[] = [];
   /** Lens levels scratch (render/lights.ts unitLevels). */
   private readonly lens = new Float32Array(6);
 
@@ -129,6 +133,7 @@ export class LodDirector {
     this.sessionModels = m;
     this.tModels = [];
     this.pModels = [];
+    this.cModels = [];
   }
 
   /** Fleet model of a traffic draw record's `model` (null: the session has no traffic model). */
@@ -143,14 +148,18 @@ export class LodDirector {
     return m;
   }
 
-  /** Fleet model of a police draw record's `model` (null: the session has no police model). */
-  private policeModel(model: number): FleetModel | null {
+  /**
+   * Fleet model of a police draw record's `model` (null: the session has no police model);
+   * `county`: in the Ashpeak County Sheriff livery.
+   */
+  private policeModel(model: number, county: boolean): FleetModel | null {
     const list = this.sessionModels.police_models ?? [];
     const i = model >= 0 && model < list.length ? Math.round(model) : list.length;
-    let m = this.pModels[i];
+    const cache = county ? this.cModels : this.pModels;
+    let m = cache[i];
     if (m === undefined) {
       const id = recordModel(list, model, this.sessionModels.police);
-      this.pModels[i] = m = id ? this.fleet.model(id, true) : null;
+      cache[i] = m = id ? this.fleet.model(id, true, county) : null;
     }
     return m;
   }
@@ -238,6 +247,7 @@ export class LodDirector {
       this.fleetGen = this.fleet.generation;
       this.tModels = [];
       this.pModels = [];
+      this.cModels = [];
     }
     for (let o = 0; o < traffic.length; o += DRAW_STRIDE) {
       const entity = traffic[o + D.entity];
@@ -270,12 +280,14 @@ export class LodDirector {
       const entity = police[o + D.entity];
       const view = entity > 0 ? views.get(entity) : undefined;
       if (view) claimed.add(entity);
-      const pModel = this.policeModel(police[o + D.model]);
+      // Ashpeak County Sheriff units: county livery model and green proxy paint.
+      const county = countySkin((flags & POLICE_DRAW_FLAG.county) !== 0);
+      const pModel = this.policeModel(police[o + D.model], county);
       const id = police[o + D.id];
       // Mesh light-bar lenses flash from the model's pattern (the box bar of the proxy / older
       // meshes alternates red / blue); livery schemes paint their plain paint parts in the base.
       const lens = pModel?.lensed ? unitLevels(pModel.info.car_id, id, timeS, (flags & POLICE_DRAW_FLAG.chasing) !== 0, this.lens) : null;
-      const paint = pModel?.liveryBase ?? POLICE_PAINT;
+      const paint = pModel?.liveryBase ?? (county ? COUNTY_PAINT : POLICE_PAINT);
       states.push(this.draw(keyOf(this.pKeys, "p", id), entity, view, police, o, pModel, paint, TAIL.off, barOf(flags, timeS, unit), 0, lens));
     }
 

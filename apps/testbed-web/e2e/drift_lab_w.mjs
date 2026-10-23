@@ -432,10 +432,10 @@ await page.getByText("Free drive", { exact: true }).first().waitFor({ timeout: 1
 // City chase: the same physics on every car; the steering aids only on the player's car.
 {
   await page.goto(`http://localhost:${PORT}/?chase=1`);
-  await page.waitForFunction(() => window.__wp?.ready === true && window.__wp.sim.scenario().name === "city_chase", null, { timeout: 90000 }).catch(() => {});
+  await page.waitForFunction(() => window.__wp?.ready === true && window.__wp.sim.scenario().name === "night_run", null, { timeout: 90000 }).catch(() => {});
   await page.waitForTimeout(3000);
   const c = await handling();
-  check(c.name === "city_chase" && c.plain && c.spin && c.firm && c.player, `chase: shipped handling on the player (${JSON.stringify(c)})`);
+  check(c.name === "night_run" && c.plain && c.spin && c.firm && c.player, `chase: shipped handling on the player (${JSON.stringify(c)})`);
   check(c.others === 0 || c.othersPlayer === 0, `chase: ${c.others} police / traffic cars without the player steering aids (${c.othersPlayer})`);
   // A street race: AI racers drive the same physics with their own steering.
   await page.goto(`http://localhost:${PORT}/?race=grid_highway_sprint`);

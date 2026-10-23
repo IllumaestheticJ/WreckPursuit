@@ -165,6 +165,17 @@ traffic, no police). Every pass has a fixed challenger and boss (`ROSTER`).
   wall), and pink slips: the winner takes the loser's car **exactly as it finished**
   (`Economy::take_pink_slip_car` with the NPC's damage snapshot; `lose_pink_slip_car`).
 
+### Honk-to-start spots (`spots`)
+
+`race_spots(world)` puts a meet spot (radius `SPOT_RADIUS_M` = 12 m, ±4 m height window) at the
+pole position of every catalog race that runs on the world's city (`catalog::races_on`; Port
+Vesper's races run on `vesper_v2` and on the combined `ashpeak` map, `RaceCity::hosts`). A race
+whose course does not plan gets no spot. `HonkTrigger::update(horn, pos, speed, spots)` fires once
+per horn press (rising edge) when the car is inside a spot and slower than `HONK_MAX_SPEED_MPS`
+(3 m/s); a held horn never retriggers. The browser session runs it (`wp_wasm::race_spots`).
+Ashpeak County's races (`RaceCity::Ashpeak`) need the district roads; their course test
+(`tests/race_spots.rs`) is `#[ignore]`d until the districts are merged.
+
 ## Tests
 
 ```sh

@@ -410,12 +410,19 @@ pub fn parse_weather(name: &str) -> Result<wp_contracts::WeatherKind, String> {
 }
 
 /// Load a city for the server: `procedural` (the 12×12 procedural city), `vesper_v2` (Port
-/// Vesper v2: curves, elevation, terrain) or a road file.
+/// Vesper v2: curves, elevation, terrain), `ashpeak` (Port Vesper + Ashpeak County) or a road
+/// file.
 pub fn load_city(city: &str, sim_cfg: &SimConfig) -> Result<wp_world::World, String> {
     let wcfg = server_world_config(sim_cfg);
     if city == wp_world::vesper::CITY_ID || city == "vesper" {
         return Ok(wp_world::World::vesper(
             &wp_world::vesper::VesperConfig::default(),
+            wcfg,
+        ));
+    }
+    if city == wp_world::ashpeak::CITY_ID {
+        return Ok(wp_world::World::ashpeak(
+            &wp_world::ashpeak::default_config(),
             wcfg,
         ));
     }

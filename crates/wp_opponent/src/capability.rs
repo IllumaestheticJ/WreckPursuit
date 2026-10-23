@@ -3,7 +3,7 @@
 //! *fraction* of them (see [`crate::DriverParams`]).
 
 use serde::{Deserialize, Serialize};
-use wp_contracts::{HandlingEffects, LoadedCar, GRAVITY_MPS2};
+use wp_contracts::{HandlingEffects, LoadedCar, SurfaceType, GRAVITY_MPS2};
 use wp_vehicle::metrics;
 
 /// Skidpad radius used for the lateral-grip measurement, m (city corners are 10–40 m).
@@ -28,6 +28,56 @@ pub struct CarCapability {
     pub length_m: f32,
     /// Body width, m.
     pub width_m: f32,
+    /// Grip on loose surfaces as a fraction of asphalt grip (the car's worst tyre's
+    /// `surface_multipliers`), see [`CarCapability::surface_grip`].
+    #[serde(default)]
+    pub loose: LooseGrip,
+}
+
+/// A car's grip on unpaved surfaces relative to asphalt (1.0 = as on asphalt).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct LooseGrip {
+    /// On [`SurfaceType::Gravel`].
+    pub gravel: f32,
+    /// On [`SurfaceType::Dirt`].
+    pub dirt: f32,
+    /// On [`SurfaceType::Grass`].
+    pub grass: f32,
+}
+
+impl Default for LooseGrip {
+    /// As on asphalt (no loss): what a car without tyre data assumes.
+    fn default() -> Self {
+        Self {
+            gravel: 1.0,
+            dirt: 1.0,
+            grass: 1.0,
+        }
+    }
+}
+
+impl LooseGrip {
+    /// The worst ratio over the car's tyres (`wp_vehicle::tire::surface_grip` on the surface
+    /// over the same on asphalt), so a car on mixed tyres plans for its weaker axle.
+    pub fn of_car(car: &LoadedCar) -> Self {
+        use wp_vehicle::tire::surface_grip;
+        let ratio = |s: SurfaceType| {
+            car.def
+                .wheels
+                .iter()
+                .filter_map(|w| car.tires.get(&w.tire_id))
+                .map(|t| {
+                    let base = surface_grip(t, SurfaceType::Asphalt).max(1e-3);
+                    (surface_grip(t, s) / base).clamp(0.1, 1.0)
+                })
+                .fold(1.0f32, f32::min)
+        };
+        Self {
+            gravel: ratio(SurfaceType::Gravel),
+            dirt: ratio(SurfaceType::Dirt),
+            grass: ratio(SurfaceType::Grass),
+        }
+    }
 }
 
 impl CarCapability {
@@ -79,6 +129,19 @@ impl CarCapability {
             max_steer_rad: d.wheels[0].max_steer_rad.max(0.1),
             length_m: d.body_size_m[1],
             width_m: d.body_size_m[0],
+            loose: LooseGrip::of_car(car),
+        }
+    }
+
+    /// Fraction of the car's measured (asphalt) grip available on `surface`: exactly 1.0 on
+    /// every paved surface (asphalt, concrete, painted lines, metal), the tyre's ratio on
+    /// gravel, dirt and grass. Scales the speed profile per corridor sample.
+    pub fn surface_grip(&self, surface: SurfaceType) -> f32 {
+        match surface {
+            SurfaceType::Gravel => self.loose.gravel,
+            SurfaceType::Dirt => self.loose.dirt,
+            SurfaceType::Grass => self.loose.grass,
+            _ => 1.0,
         }
     }
 

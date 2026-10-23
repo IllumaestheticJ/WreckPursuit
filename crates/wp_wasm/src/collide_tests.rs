@@ -29,7 +29,7 @@ struct Ram {
 fn ram(chase: bool, street_on: bool, extra: usize, warm_s: u32) -> Ram {
     set_street_racers_enabled(street_on);
     let mut sc = if chase {
-        crate::scenario::city_chase("debug_sedan", DamageMode::Arcade)
+        crate::scenario::night_run("debug_sedan", DamageMode::Arcade)
     } else {
         free_drive("debug_sedan", DamageMode::Arcade, true)
     };

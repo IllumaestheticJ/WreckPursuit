@@ -7,7 +7,7 @@ use wp_contracts::{DamageMode, EntityId, VehicleInput, VehicleSim};
 use crate::crash_replay::{
     CrashMark, BUFFER_TICKS, POST_IMPACT_TICKS, PRE_IMPACT_TICKS, SNAPSHOT_EVERY_TICKS,
 };
-use crate::scenario::{city_chase, from_ron};
+use crate::scenario::{from_ron, night_run};
 use crate::session::Session;
 
 fn scenario_file(rel: &str) -> simcli::Scenario {
@@ -92,9 +92,9 @@ fn buffer_keeps_ten_seconds_of_snapshots() {
 }
 
 #[test]
-fn city_chase_crash_into_parked_car_replays_without_drift() {
+fn night_run_crash_into_parked_car_replays_without_drift() {
     // Traffic, police, props and weather all come back from the snapshot.
-    let mut live = Session::new(city_chase("debug_sedan", DamageMode::Arcade), false).unwrap();
+    let mut live = Session::new(night_run("debug_sedan", DamageMode::Arcade), false).unwrap();
     let p = EntityId(1);
     live.run_ticks(300);
     live.debug_knock_prop(p, None, 14.0).unwrap();
@@ -122,7 +122,7 @@ fn city_chase_crash_into_parked_car_replays_without_drift() {
     let t0 = std::time::Instant::now();
     let _copy = live.sim().clone();
     eprintln!(
-        "city chase: sim clone {:?}, replay build {build:?}",
+        "night run: sim clone {:?}, replay build {build:?}",
         t0.elapsed()
     );
 }

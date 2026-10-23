@@ -35,7 +35,9 @@ Dependencies are wasm32-clean: `simcli` (lib), `wp_world`, `wp_weather`, `wp_rac
 Street races (workstream 15): `race_list`, `race_start`, `race_info`, `race_standings`,
 `race_course`, `race_result_json`; a scenario named `race_<id>` gets a `race::RaceRun` (AI field
 before each tick, judge after it, buy-in/payout on the player's run). See
-`docs/integration/race.md` → Step 2.
+`docs/integration/race.md` → Step 2. Honk-to-start spots: `race_spots()` (JSON) and
+`race_spot_honked()` (`src/race_spots.rs`; the check runs in `Session` after every live tick,
+read-only); `race_start` keeps the current map when the race runs there.
 
 ## Perf
 Real vehicle + damage, headless Chromium (SwiftShader), release wasm: 0.09 / 0.62 / 3.0 ms of
@@ -54,7 +56,7 @@ out of the police racer views (`Sim::set_light_when_far`; Vesper 23:00 racers' s
 `cargo test --release -p wp_wasm --lib street_perf -- --ignored --nocapture --test-threads=1`.
 
 ## Known gaps
-- Instant crash replay (`crash_replay.rs`, `docs/integration/crash-replay.md`): a live session snapshots its `Sim` every 2 s (~6 ms native in a city chase); the last ~1.5 s of a replay accepted early is extrapolated from the last logged inputs.
+- Instant crash replay (`crash_replay.rs`, `docs/integration/crash-replay.md`): a live session snapshots its `Sim` every 2 s (~6 ms native in a night run); the last ~1.5 s of a replay accepted early is extrapolated from the last logged inputs.
 - Sandbox runs (car selector, `startFreeDrive(car)`) keep the end-of-run account in memory only; career runs (`career.rs`) persist it (the testbed saves the career to `localStorage`).
 - Replays of a career run whose car has mods or started damaged do not verify (the replay rebuilds the stock, pristine car).
 - The end-of-run economy (`run.rs`) keeps the account in memory only (lost on reload); the lattice blob in `DamageReport` is empty (the live sim keeps the dents).

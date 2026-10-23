@@ -444,6 +444,8 @@ impl TougeSetup {
             ai: std::slice::from_ref(&self.racer().driver),
             seed: self.seed(),
             prior_meets: 0,
+            // Laid out single file by `plan_course` (NPC ahead).
+            grid: None,
         }
     }
 }

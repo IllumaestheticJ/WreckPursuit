@@ -20,7 +20,7 @@
 import * as THREE from "three";
 import type { CarMeshJson, MaterialJson, PartMaterial } from "./panels";
 import { applyCarEnv, carMidMeshNow, indicatorRight, isIndicatorPart, loadCarMidMesh, rgbColour } from "./panels";
-import { hasPoliceLivery, liveryBaseColour, liveryTexture } from "./livery";
+import { COUNTY_PAINT, hasPoliceLivery, liveryBaseColour, liveryTexture } from "./livery";
 import { LENS_ON } from "./lights";
 import { sim, type CarModelInfo } from "../wasm/sim";
 import { PALETTE, type Hex } from "./palette";
@@ -105,6 +105,8 @@ const indEndsCache = new WeakMap<CarMeshJson, { front: boolean; rear: boolean }>
  */
 export function styledPaint(hex: Hex, police = false): Hex {
   if (!artStyle.lowpoly) return hex;
+  // Ashpeak County Sheriff units keep their green (render/livery.ts ACSO scheme).
+  if (hex === COUNTY_PAINT) return PALETTE.countyPolicePaint;
   if (police || hex === POLICE_PAINT) return PALETTE.policePaint;
   const i = TRAFFIC_PALETTE.indexOf(hex);
   return i < 0 ? hex : PALETTE.trafficPaints[i % PALETTE.trafficPaints.length];
@@ -769,6 +771,8 @@ export class FleetModel {
     private readonly group: THREE.Group,
     private readonly mats: FleetMaterials,
     readonly police: boolean,
+    /** Ashpeak County Sheriff livery (police models only). */
+    readonly county = false,
   ) {
     this.info = sim.carModelInfo(carId);
     this.proxy = new InstancedCar(proxyGeoms(this.info), MAX_PROXY, mats, this.barAt(), !this.police);
@@ -788,10 +792,10 @@ export class FleetModel {
     if (this.full) return;
     const g = fullGeoms(mesh, this.info, this.police, !this.police);
     if (g.liv) {
-      const tex = liveryTexture(mesh);
+      const tex = liveryTexture(mesh, 8, this.county);
       this.livMat = new THREE.MeshStandardMaterial({ map: tex, flatShading: true, metalness: 0.25, roughness: 0.55 });
       applyCarEnv(this.livMat, !artStyle.lowpoly);
-      this.liveryBase = liveryBaseColour(mesh)?.getHex() ?? null;
+      this.liveryBase = liveryBaseColour(mesh, this.county)?.getHex() ?? null;
     }
     this.lensed = g.lensL != null || g.lensR != null;
     this.full = new InstancedCar(g, MAX_FULL, this.mats, this.lensed ? null : this.barAt(), !this.police, this.livMat);
@@ -836,12 +840,15 @@ export class Fleet {
   /** Instance set and index the last `add` wrote (automation read-back; null = not drawn). */
   readonly lastAdded: { car: InstancedCar | null; i: number } = { car: null, i: -1 };
 
-  /** Model for `carId` (built on first use; `police` adds a light bar). */
-  model(carId: string, police = false): FleetModel {
-    const key = police ? `${carId}#police` : carId;
+  /**
+   * Model for `carId` (built on first use; `police` adds a light bar, `county` the Ashpeak
+   * County Sheriff livery on a police model).
+   */
+  model(carId: string, police = false, county = false): FleetModel {
+    const key = police ? `${carId}#${county ? "county" : "police"}` : carId;
     let m = this.models.get(key);
     if (!m) {
-      m = new FleetModel(carId, this.group, this.mats, police);
+      m = new FleetModel(carId, this.group, this.mats, police, police && county);
       this.models.set(key, m);
     }
     return m;

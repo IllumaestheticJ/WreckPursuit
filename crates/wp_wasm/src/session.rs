@@ -31,6 +31,7 @@ use crate::crash_replay::{
 use crate::data::mem_data;
 use crate::garage_visit::{GarageOffer, GarageRepairReport, GarageSite, GARAGE_ENTER_SPEED_MPS};
 use crate::race::RaceRun;
+use crate::race_spots::MeetSpots;
 use crate::roam::RoamRun;
 use crate::run::{ContinueReport, PlayerCar, PlayerRun};
 use crate::scenario::entity;
@@ -131,6 +132,8 @@ pub struct Session {
     career: bool,
     /// A picker race (scenario `race_<id>`, live or replayed; see [`crate::race`]).
     race: Option<RaceRun>,
+    /// Honk-to-start race spots (see [`crate::race_spots`]).
+    meet_spots: MeetSpots,
     /// Free-roam street racers (scenario entities `roam_*`; see [`crate::roam`]). Driven
     /// only live; in playback the log supplies their inputs.
     roam: Option<RoamRun>,
@@ -246,6 +249,7 @@ impl Session {
             street,
             crash,
             race,
+            meet_spots: MeetSpots::default(),
             roam,
             run,
             career: false,
@@ -570,6 +574,50 @@ impl Session {
     pub fn race_report(&self) -> Option<crate::race::RaceReport> {
         let over = self.run.as_ref().is_some_and(PlayerRun::is_over);
         self.race.as_ref().and_then(|r| r.report(over))
+    }
+
+    /// Honk-to-start race spots are live: a live (not replayed, not scripted) city session
+    /// that is not a race or a career run, with the player's run still going.
+    pub fn race_spots_active(&self) -> bool {
+        self.load_city
+            && self.playback.is_none()
+            && !self.scripted
+            && self.race.is_none()
+            && !self.career
+            && !self.run.as_ref().is_some_and(PlayerRun::is_over)
+            && !self.ids.is_empty()
+    }
+
+    /// The race spots of this session's city (empty when [`Session::race_spots_active`] is
+    /// false). Planned on the first call.
+    pub fn race_spots(&mut self) -> &[wp_race::spots::RaceSpot] {
+        if !self.race_spots_active() {
+            return &[];
+        }
+        self.meet_spots.spots(self.sim.world())
+    }
+
+    /// Take the race the player just honked for in a spot (see [`crate::race_spots`]).
+    pub fn take_race_spot_honked(&mut self) -> Option<&'static str> {
+        self.meet_spots.take_honked()
+    }
+
+    /// The honk check after a tick: the player's horn edge, position and speed.
+    fn observe_horn(&mut self) {
+        let Some(&player) = self.ids.first() else {
+            return;
+        };
+        let horn = self.last_input[0].horn;
+        if !self.race_spots_active() {
+            self.meet_spots.track_horn(horn);
+            return;
+        }
+        let Some(v) = self.sim.vehicles().iter().find(|v| v.id == player) else {
+            return;
+        };
+        let st = v.vehicle.state();
+        let speed = (st.lin_vel[0].powi(2) + st.lin_vel[1].powi(2) + st.lin_vel[2].powi(2)).sqrt();
+        self.meet_spots.tick(self.sim.world(), horn, st.pos, speed);
     }
 
     fn script_running(&self) -> bool {
@@ -1477,6 +1525,8 @@ impl Session {
             }
             self.check_garage();
         }
+        // Honk-to-start race spots: reads the stepped state only (no sim writes).
+        self.observe_horn();
         if self.playback.is_none() {
             if let Some(p) = player {
                 self.observe_crash(p, player_before.as_ref(), &drained);
@@ -1857,6 +1907,7 @@ impl Session {
             run: None,
             career: false,
             race: snap.race.clone(),
+            meet_spots: MeetSpots::default(),
             roam: None,
             crash: CrashRecorder::off(),
         };

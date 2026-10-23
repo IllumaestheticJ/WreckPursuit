@@ -580,7 +580,7 @@ if (CITY === "vesper_v2") {
 }
 
 // Late-night city chase: racers roam there too and show on the map.
-await page.evaluate((car) => window.__wp.startCityChase(car, "Arcade"), CAR);
+await page.evaluate((car) => window.__wp.startNightRun(car, "Arcade"), CAR);
 await wait(page, 4000);
 const chase = await status(page);
 check(chase?.roster.length === 13 && chase.roster.every((r) => r.mode !== "OffDuty"), `city chase (23:00): all 13 street racers out (${chase?.roster.length})`);

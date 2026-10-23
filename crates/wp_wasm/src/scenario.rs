@@ -23,11 +23,12 @@ pub fn procedural_city() -> CitySpec {
 }
 
 /// City by id for the testbed's selector: `"vesper_v2"` (Port Vesper v2, the default city),
-/// `"procedural_12x12"` (the old grid), a touge pass (`"touge_*"`); anything else is the flat
-/// world.
+/// `"ashpeak"` (Port Vesper + Ashpeak County), `"procedural_12x12"` (the old grid), a touge
+/// pass (`"touge_*"`); anything else is the flat world.
 pub fn city_spec(city_id: &str) -> CitySpec {
     match city_id {
         wp_world::vesper::CITY_ID => CitySpec::vesper(),
+        wp_world::ashpeak::CITY_ID => CitySpec::ashpeak(),
         "procedural_12x12" => procedural_city(),
         id if wp_world::touge::is_touge(id) => CitySpec::Preset {
             name: id.to_string(),
@@ -86,27 +87,27 @@ pub fn free_drive_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
     }
 }
 
-/// Speed the city-chase player starts at, m/s (~110 km/h: well over the city limits).
-pub const CITY_CHASE_SPEED_MPS: f32 = 30.0;
+/// Speed the night-run player starts at, m/s (~110 km/h: well over the city limits).
+pub const NIGHT_RUN_SPEED_MPS: f32 = 30.0;
 
-/// "City chase" preset: Port Vesper v2 (hills, curves, highway loop) at 23:00 with full
+/// "Night run" preset: Port Vesper v2 (hills, curves, highway loop) at 23:00 with full
 /// police presence and traffic; the live player starts on the race grid (Loop 9) already
-/// speeding ([`CITY_CHASE_SPEED_MPS`]), which the world reports as violations and the police
+/// speeding ([`NIGHT_RUN_SPEED_MPS`]), which the world reports as violations and the police
 /// turn into heat. Same seed every time, so chases are reproducible and replayable.
-pub fn city_chase(car: &str, mode: DamageMode) -> Scenario {
-    city_chase_in(car, mode, CitySpec::vesper())
+pub fn night_run(car: &str, mode: DamageMode) -> Scenario {
+    night_run_in(car, mode, CitySpec::vesper())
 }
 
-/// [`city_chase`] in another city (the testbed keeps the old grid selectable).
-pub fn city_chase_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
+/// [`night_run`] in another city (the testbed keeps the old grid selectable).
+pub fn night_run_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
     let mut sc = free_drive_in(car, mode, city);
-    sc.name = "city_chase".into();
+    sc.name = "night_run".into();
     sc.seed = 23;
     sc.time_of_day_h = 23.0;
     sc.police_presence = Some(1.0);
     // All five police versions (by heat) and seven civilian models (simcli `car_mix`).
     sc.car_mix = true;
-    sc.entities[0].speed_mps = CITY_CHASE_SPEED_MPS;
+    sc.entities[0].speed_mps = NIGHT_RUN_SPEED_MPS;
     sc
 }
 
@@ -166,8 +167,8 @@ mod tests {
     }
 
     #[test]
-    fn city_chase_is_a_valid_v2_scenario() {
-        let sc = city_chase("debug_coupe", DamageMode::Arcade);
+    fn night_run_is_a_valid_v2_scenario() {
+        let sc = night_run("debug_coupe", DamageMode::Arcade);
         sc.validate().unwrap();
         assert_eq!(from_ron(&sc.to_ron()).unwrap(), sc);
         assert!(sc.entities[0].speed_mps > 20.0);

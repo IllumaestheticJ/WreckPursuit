@@ -5,7 +5,7 @@
 // ?bench=24 spawns a 24-car benchmark, ?cam=orbit picks a camera, ?replay=last plays the last
 // stored replay, ?city=vesper_v2 / ?city=procedural_12x12 starts free drive in that city (without
 // it free drive starts on the flat world; the selector defaults to vesper_v2), ?chase=1 starts the
-// city chase (in the ?city= map when given; ?chase=rain the rainy night), ?weather=heavy_rain picks the weather,
+// night run (in the ?city= map when given; ?chase=rain the rainy night), ?weather=heavy_rain picks the weather,
 // ?style=greybox|lowpoly the art style (default low-poly dark, render/style.ts).
 // ?race=<id> starts a street race (&autopilot=1: the AI drives the player's car).
 // ?fx=low|med|high sets the crash effects quality (render/fx; default from ?gfx).
@@ -67,6 +67,7 @@ import { RaceView, type RaceFrame } from "./ui/race";
 import { GarageVisitView } from "./ui/garageVisit";
 import { TougeView, type TougeChoice, type Wager } from "./ui/touge";
 import { RaceMarker, parseCourse } from "./race_marker";
+import { RaceSpotsView } from "./race_spots";
 import { CarStatBars, statLine } from "./ui/carStats";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
@@ -84,7 +85,7 @@ import { StreetUi } from "./ui/street";
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
 /** Cities the selector offers (data/city/<id>.greybox.glb); the first is the default. */
-const CITY_IDS = ["vesper_v2", "procedural_12x12"];
+const CITY_IDS = ["vesper_v2", "ashpeak", "procedural_12x12"];
 const COLOURS = [0xd04a2a, 0x2a7fd0, 0x3fb950, 0xd0a92a, 0x9b59b6, 0x1abc9c];
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -94,7 +95,7 @@ const params = new URLSearchParams(location.search);
 const regions = new Map<number, Uint8Array>();
 const rests = new Map<number, Float32Array>();
 
-/** Default car for free drive and the city chase: the quick AWD hot hatch (analog name; 0–100
+/** Default car for free drive and the night run: the quick AWD hot hatch (analog name; 0–100
  * km/h in ~5.4 s, 80 ms dual-clutch shifts). The debug sedan (8.3 s) read as "slow" in the
  * owner's playtest. */
 const DEFAULT_CAR = "lindwurm_4t";
@@ -436,6 +437,8 @@ async function main(): Promise<void> {
   /** Street race gates (waypoints, then B; row 151) in the world. */
   const streetMarker = new RaceMarker(scene.world);
   let streetCourseKey = "";
+  // Honk-to-start meet spots (race_spots.ts): stop in one and honk to start its race.
+  const raceSpots = new RaceSpotsView(scene.world, overlay);
   const raceView = new RaceView(raceEl, {
     start: (id) => startRace(id),
     freeDrive: () => startFreeDrive(undefined, undefined, true),
@@ -510,8 +513,8 @@ async function main(): Promise<void> {
     (mods) => {
       const sc = sim.scenario();
       const car = sc.entities[0]?.car ?? DEFAULT_CAR;
-      if (sc.name === "city_chase") startCityChase(car, sc.mode, false, mods);
-      else if (sc.name === "city_chase_rainy_night") startCityChase(car, sc.mode, true, mods);
+      if (sc.name === "night_run") startNightRun(car, sc.mode, false, mods);
+      else if (sc.name === "night_run_rainy_night") startNightRun(car, sc.mode, true, mods);
       else startFreeDrive(car, sc.mode, undefined, undefined, mods);
     },
     (open) => {
@@ -619,6 +622,7 @@ async function main(): Promise<void> {
     raceMarker.setCourse(course);
     raceView.reset(id, names, course);
     tougeView.reset();
+    raceSpots.set(sim.raceSpots());
   };
 
   /** Start street race `id` (the picker's "Race" button, `?race=`, "Race again"). */
@@ -782,10 +786,10 @@ async function main(): Promise<void> {
     applyAssistPreset(app.source);
   };
 
-  /** City chase preset: procedural city at 23:00, police + traffic, player already speeding.
+  /** Night run preset: procedural city at 23:00, police + traffic, player already speeding.
    * `rain` = the rainy-night variant (downpour, soaked road; the weather selector can still
    * override it). */
-  const startCityChase = (
+  const startNightRun = (
     car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR,
     mode = ($("mode") as HTMLSelectElement).value,
     rain = false,
@@ -795,7 +799,7 @@ async function main(): Promise<void> {
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    const json = withMods(rain ? sim.cityChaseRainJson(car, mode, citySel.value) : sim.cityChaseCityJson(car, mode, citySel.value), mods);
+    const json = withMods(rain ? sim.nightRunRainJson(car, mode, citySel.value) : sim.nightRunCityJson(car, mode, citySel.value), mods);
     sim.init(0, withWeather(withQuickTune(json)), false);
     rebuildViews();
     applyAssistPreset(app.source);
@@ -819,12 +823,12 @@ async function main(): Promise<void> {
     applyAssistPreset(app.source);
   };
 
-  /** A career run: the city chase or a free drive (city box) with the career car, its saved
+  /** A career run: the night run or a free drive (city box) with the career car, its saved
    * damage and mods. Opens the garage instead when the car cannot go out. */
   const startCareerRun = (kind: RunKind): boolean => {
     const json =
       kind === "chase"
-        ? sim.cityChaseCityJson(DEFAULT_CAR, "Arcade", citySel.value)
+        ? sim.nightRunCityJson(DEFAULT_CAR, "Arcade", citySel.value)
         : ($("city") as HTMLInputElement).checked
           ? sim.freeDriveCityJson(DEFAULT_CAR, "Arcade", citySel.value)
           : sim.freeDriveJson(DEFAULT_CAR, "Arcade", false);
@@ -850,11 +854,11 @@ async function main(): Promise<void> {
   /** "Restart" on the end-of-run panel: the same session again (the account carries over). */
   const restartRun = () => {
     const sc = sim.scenario();
-    if (sim.careerRunActive()) return void startCareerRun(sc.name === "city_chase" ? "chase" : "free");
+    if (sim.careerRunActive()) return void startCareerRun(sc.name === "night_run" ? "chase" : "free");
     const car = sc.entities[0]?.car;
     const mods = sc.entities[0]?.mods ?? [];
-    if (sc.name === "city_chase") startCityChase(car, sc.mode, false, mods);
-    else if (sc.name === "city_chase_rainy_night") startCityChase(car, sc.mode, true, mods);
+    if (sc.name === "night_run") startNightRun(car, sc.mode, false, mods);
+    else if (sc.name === "night_run_rainy_night") startNightRun(car, sc.mode, true, mods);
     else if (sc.name === "free_roam") startFreeRoam(car, sc.mode);
     else if (raceView.raceId) startRace(raceView.raceId, car, sc.mode);
     else startFreeDrive(car, sc.mode, undefined, undefined, mods);
@@ -1083,8 +1087,8 @@ async function main(): Promise<void> {
   $("sc-run").onclick = () => scSel.value && runScenario(scSel.value, Number(($("sc-speed") as HTMLInputElement).value));
   $("sc-free").onclick = () => startFreeDrive();
   // Drift Lab W (the old lab C, with its drift assists, stays reachable via ?drift=c only).
-  $("sc-chase").onclick = () => startCityChase();
-  $("sc-chase-rain").onclick = () => startCityChase(undefined, undefined, true);
+  $("sc-chase").onclick = () => startNightRun();
+  $("sc-chase-rain").onclick = () => startNightRun(undefined, undefined, true);
   // Career cars are modded in the garage (their run carries the career build).
   $("mods-btn").onclick = () => {
     if (!sim.careerRunActive()) modShop.toggle();
@@ -1096,16 +1100,16 @@ async function main(): Promise<void> {
     const name = sim.scenario()?.name;
     if (sim.careerRunActive()) {
       sim.careerEndRun();
-      void startCareerRun(name === "city_chase" ? "chase" : "free");
+      void startCareerRun(name === "night_run" ? "chase" : "free");
     } else if (app.scenarioFile) void runScenario(app.scenarioFile);
-    else if (name === "city_chase") startCityChase();
-    else if (name === "city_chase_rainy_night") startCityChase(undefined, undefined, true);
+    else if (name === "night_run") startNightRun();
+    else if (name === "night_run_rainy_night") startNightRun(undefined, undefined, true);
     else if (name === "free_roam") startFreeRoam();
     else startFreeDrive();
   };
   const careerOn = () => ($("career") as HTMLInputElement).checked;
   $("sc-free").onclick = () => (careerOn() ? startCareerRun("free") : startFreeDrive());
-  $("sc-chase").onclick = () => (careerOn() ? startCareerRun("chase") : startCityChase());
+  $("sc-chase").onclick = () => (careerOn() ? startCareerRun("chase") : startNightRun());
   $("sc-garage").onclick = () => openGarage();
   addEventListener("pagehide", persistCareer);
   $("sc-races").onclick = () => raceView.openPicker();
@@ -1125,9 +1129,9 @@ async function main(): Promise<void> {
     if (sim.careerRunActive()) {
       // A career run restarts in the new city with the career car (the run so far is settled).
       sim.careerEndRun();
-      void startCareerRun(name === "city_chase" ? "chase" : "free");
-    } else if (name === "city_chase") startCityChase();
-    else if (name === "city_chase_rainy_night") startCityChase(undefined, undefined, true);
+      void startCareerRun(name === "night_run" ? "chase" : "free");
+    } else if (name === "night_run") startNightRun();
+    else if (name === "night_run_rainy_night") startNightRun(undefined, undefined, true);
     else if (($("city") as HTMLInputElement).checked) startFreeDrive();
   };
   const cstr = $("cstr") as HTMLInputElement;
@@ -1469,8 +1473,8 @@ async function main(): Promise<void> {
     host: {
       play: (choice: PlayChoice) => {
         // Quick play runs outside the career; the career lives behind Garage.
-        if (choice === "chase") startCityChase();
-        else if (choice === "chaseRain") startCityChase(undefined, undefined, true);
+        if (choice === "chase") startNightRun();
+        else if (choice === "chaseRain") startNightRun(undefined, undefined, true);
         else if (choice === "free") startFreeDrive(undefined, undefined, true);
         else if (choice === "races") raceView.openPicker();
         else if (choice === "touge") tougeView.openPicker();
@@ -1541,7 +1545,7 @@ async function main(): Promise<void> {
     // Old Drift Lab B / C links (the labs are gone, unify 2026-10-21): the test pad.
     startDriftLabW(params.get("car") ?? DRIFT_LAB_W_CAR);
   } else if (params.get("chase")) {
-    startCityChase("debug_sedan", undefined, params.get("chase") === "rain");
+    startNightRun("debug_sedan", undefined, params.get("chase") === "rain");
   } else if (params.get("roam")) {
     startFreeRoam(DEFAULT_CAR, undefined, Number(params.get("roam")) || 0);
   } else {
@@ -1752,6 +1756,24 @@ async function main(): Promise<void> {
       if (r) streetMarker.update(crash.playing ? -1 : r.next_gate, r.next_gate >= r.gates.length, tS);
     }
     if (raceView.raceId && !crash.playing) raceFrame(cur, meta, tS, frameNo % 6 === 0);
+    // Honk-to-start spots: the sim reports a honk in a spot; start that race like the picker.
+    if (!replay && !crash.playing) {
+      const honked = sim.raceSpotHonked();
+      if (honked) {
+        const sc = sim.scenario();
+        startRace(honked, sc.entities[0]?.car ?? DEFAULT_CAR, modeName(), false);
+        prof.end();
+        return void requestAnimationFrame(frame);
+      }
+    }
+    {
+      let pp: [number, number, number] | null = null;
+      let pv = 0;
+      for (let o = 0; o < cur.length; o += STATE_STRIDE)
+        if (cur[o + S.entity] === app.player) [pp, pv] = [[cur[o + S.pos], cur[o + S.pos + 1], cur[o + S.pos + 2]], cur[o + S.speed]];
+      const hk = getBindings().keys.horn[0];
+      raceSpots.update(pp, pv, tS, hk ? keyName(hk) : "horn", replay || crash.playing || !!raceView.raceId);
+    }
     prof.lap("ui");
     scene.update(dt, sim.intents());
     scene.updateHelicopters(policeDraw, tS);
@@ -2019,6 +2041,8 @@ async function main(): Promise<void> {
     layout,
     /** Police radio strip (src/radio_strip.ts): `radioStrip.count`, `radioStrip.recent`. */
     radioStrip,
+    /** Honk-to-start spots view (src/race_spots.ts): `raceSpots.inside`, `raceSpots.group`. */
+    raceSpots,
     ready: true,
     stopRecording,
     loadReplay,
@@ -2028,7 +2052,7 @@ async function main(): Promise<void> {
     startDriftLabW,
     /** The hidden handling tune panel (F10 / ?tune=1). */
     tunePanel: driftLabW,
-    startCityChase,
+    startNightRun,
     startBench,
     weather,
     /** Art style (render/style.ts): `style.id`, `style.baseFogDensity`, `style.lampCount(city)`. */

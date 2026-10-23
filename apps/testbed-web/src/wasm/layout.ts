@@ -114,7 +114,7 @@ export const DRAW_STRIDE = 11;
  */
 export const D = { id: 0, entity: 1, pos: 2, rot: 5, flags: 9, model: 10 } as const;
 /** police_draw() flag bits. */
-export const POLICE_DRAW_FLAG = { helicopter: 1, chasing: 2 } as const;
+export const POLICE_DRAW_FLAG = { helicopter: 1, chasing: 2, county: 4 } as const;
 
 /** Floats per intent arrow in intents(). */
 export const INTENT_STRIDE = 8;
@@ -124,7 +124,8 @@ export const POLICE_UNIT_STRIDE = 8;
 /**
  * Offsets inside one police_units() record. `unitId` is the stable wp_police unit id (hash it
  * for light-bar phase); `model` indexes sim.policeModels() (-1 = none: helicopter or
- * single-model session). Flags: 1 helicopter, 2 pursuing.
+ * single-model session). Flags: 1 helicopter, 2 pursuing, 4 Ashpeak County unit (ACSO livery;
+ * wp_wasm police::Agencies).
  */
 export const PU = { x: 0, y: 1, z: 2, yaw: 3, speed: 4, flags: 5, unitId: 6, model: 7 } as const;
 
