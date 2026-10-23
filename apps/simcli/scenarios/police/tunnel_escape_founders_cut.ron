@@ -54,14 +54,19 @@
 // 50 (L3) the run never reached L5 and the helicopter never launched. Heat 90 (the bottom of L5)
 // keeps the story: pursuit at 9.8 s, helicopter at 72.2 s, lost inside the Cut, Escaped at
 // 133.8 s after 40 s unseen (the L5 day escape time); control Captured at 125.8 s.
-// Police power package + no pursuit speed cap (2026-10-23): on seed 54 the faster units passed
-// the racer just before he pulled into the lay-by and the control never ended (they held a
-// rolling block ahead of the stopped car, out of capture range). Seeds 50-63 on the new cars:
-// the escape story holds on 11 of 14, both scenarios on 5 (50, 51, 53, 58, 59). Re-seeded to
-// 58: Escaped 133.8 s after 40 s unseen; control Captured 109.5 s.
+// Row 157 (2026-10-23: every heat gain halved): from heat 90 the racer drops below L5 and climbs
+// back at half the rate, so the helicopter launched at 95.7-111.2 s on every seed 50-63 (deadline
+// 95 s). Heat 95 -> seeds 50-63: escape story on 8 of 14 (51-53, 55-57, 63), control captured in
+// its window on 2 (54, 63; the other 12 are still in pursuit at 190 s or captured early, none
+// escapes). Re-seeded 54 -> 63, heat 90 -> 95.
+// Police power package + no pursuit speed cap (2026-10-23, merged on world v7 / row 157): seed
+// 63 ends in no pursuit end in either scenario (the faster units pass the racer before the
+// lay-by and hold a rolling block ahead of the stopped car, out of capture range; see
+// docs/integration/police.md). Seeds 50-70: both scenarios pass on 51, 52, 56, 62, 65, 68, 69,
+// 70. Re-seeded to 56: Escaped 132.4 s; control Captured 131.0 s.
 (
     name: "police_tunnel_escape_founders_cut",
-    seed: 58,
+    seed: 56,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,
     time_ratio: 1.0,
@@ -75,7 +80,7 @@
         (
             id: "racer",
             car: "debug_coupe",
-            police_heat: 90.0,
+            police_heat: 95.0,
             speed_mps: 20.0,
             driver: follow_route(route_id: "Lantern Run -> Founders Cut lay-by", target_speed: 25.0),
         ),

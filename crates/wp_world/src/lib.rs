@@ -147,6 +147,7 @@ fn empty_network() -> RoadNetwork {
         terrain: None,
         covered: Vec::new(),
         decor: Vec::new(),
+        features: crate::network::CityFeatures::default(),
     }
 }
 
