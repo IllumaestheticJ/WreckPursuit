@@ -543,8 +543,6 @@ export const sim = {
   restStops: (): { name: string; pos: [number, number, number]; heading_rad: number }[] => JSON.parse(wasm.rest_stops_json()),
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
   debugParkNearPolice: (entity: number, aheadM: number): number => wasm.debug_park_near_police(entity, aheadM),
-  /** Debug / e2e: put `entity` on the ground at (x, y) facing `yaw`, rolling at `speed` m/s. */
-  debugPlace: (entity: number, x: number, y: number, yaw: number, speed: number): void => wasm.debug_place(entity, x, y, yaw, speed),
   /** Aim `entity` at a parked car (`prop` < 0: the nearest) at `speed` m/s; returns the prop index. */
   debugKnockProp: (entity: number, prop: number, speed: number): number => wasm.debug_knock_prop(entity, prop, speed),
 
