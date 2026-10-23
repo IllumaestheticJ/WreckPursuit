@@ -146,7 +146,7 @@ mod tests {
     }
 
     #[test]
-    fn grid_city_has_its_race_spot_at_the_pole() {
+    fn grid_city_has_its_race_spots_at_the_pole() {
         let world = World::procedural(
             &wp_world::procgen::ProcGenConfig::default(),
             wp_world::WorldConfig::default(),
@@ -154,7 +154,7 @@ mod tests {
         let spots = race_spots(&world);
         assert_eq!(
             spots.iter().map(|s| s.race_id).collect::<Vec<_>>(),
-            vec!["grid_highway_sprint"]
+            vec!["grid_highway_sprint", "grid_arterial_sprint"]
         );
         let def = catalog::race("grid_highway_sprint").unwrap();
         let race = catalog::plan_course(&world, &def).unwrap();
