@@ -1,4 +1,4 @@
-# simcli hashes scenario=race_grid_arterial_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=race_grid_arterial_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
 240 bcb9c2aecca64627
 480 932d46a4248e612e
 720 dd38a54d2b8c9c10
