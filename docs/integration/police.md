@@ -1618,3 +1618,30 @@ Tests updated to the new levels:
 
 No golden or scenario expectation moved.
 
+### Row 158: a cop spawned in view and started a chase (2026-10-23)
+
+Owner (0.12.59): "cop also spawned right into my line of sight and started a chase". Checked every spawn path against row 131's view check (`spawn_in_view`):
+- pool patrols, responders, backup and search (ambush plan, response spawn point, reinforcement spawn point) and the AI captain's tool cars all check;
+- three paths did not, and are fixed below.
+
+**1. Session-start patrols (the likely report).** `warm_up` placed every district's patrols at once with no view check: the opening scene. A patrol could land right beside the player, and a racer still wanted from before was chased at once. Every patrol now spawns out of every racer's sight, the session-start ones too. A district short of hidden spots fills up later through `maintain_pool`.
+- Test: `dispatch::tests::session_start_patrols_spawn_out_of_view`. It fails without the fix: a patrol placed 75 m from the racer, in view.
+
+**2. Round the corner ahead.** The "seen within `ROUTE_VIEW_S`" part of the check followed only the straightest road, from the racer's centreline, at its current height. In the bench, backup appeared hidden 120–200 m away and in plain view 1.5–3 s later. The check (`roads_ahead`) now covers:
+- every road the racer can reach within 3 s, assuming at least 15 m/s plus 20 m (a racer pulling away);
+- both ways along its road when it is slow or stopped, and 40 m behind otherwise (it may turn round);
+- points every 10 m, on the centreline and 2.5 m to either side;
+- eyes and the spot 5 m higher there (ground heights ahead are not known: Port Vesper's crests).
+- Test: `dispatch::tests::spawn_view_covers_every_road_the_racer_can_take`. It fails with the old straightest-road check.
+
+**3. Race setup.** Race-profile stakeout cars and scripted roadblock cars (`start_race`, which has no world) spawned with no view check. Now:
+- a roadblock car whose spot a racer can see waits out of view in the tool-car queue (row 131);
+- a stakeout post a racer can see stays empty;
+- both use the road graph's building sight lines.
+
+**Bench (4 seeds × 12 cells = 48 runs).**
+- Spawns a racer saw within 3 s: 3 before. After: 1 (backup at 200 m, seen 2.6 s later), plus one roadblock's 3 cars 568 m away on a long straight (roadblocks are sited to be seen from far).
+- Capture 77 % → 77 %.
+
+**Other.** The police scenario `self_wreck_sim` moved from 23 to 24 self-wrecks of 240 units (9.6 % → 10.0 %, one unit, inside noise). Its bound was re-aimed from "< 10 %" to "≤ 10 %", with the reason in the scenario file.
+

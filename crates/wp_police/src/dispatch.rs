@@ -33,7 +33,20 @@ pub const ROUTE_VIEW_MIN_MPS: f32 = 5.0;
 /// ... this many seconds of its travel ahead, s.
 pub const ROUTE_VIEW_S: f32 = 3.0;
 /// ... sampled this far apart, m.
-pub const ROUTE_VIEW_STEP_M: f32 = 15.0;
+pub const ROUTE_VIEW_STEP_M: f32 = 10.0;
+/// ... from the centreline and this far to either side of it (the lanes), m.
+pub const ROUTE_LANE_M: f32 = 2.5;
+/// Extra eye height at the racer's points along its roads ahead (their ground height is not
+/// known here; a climb ahead must not hide a car it will see), m.
+pub const ROUTE_EYE_SLACK_M: f32 = 5.0;
+/// The road-ahead check assumes at least this speed (a racer pulling away), m/s.
+pub const ROUTE_MIN_MPS: f32 = 15.0;
+/// ... and this much further, m.
+pub const ROUTE_MARGIN_M: f32 = 20.0;
+/// ... and every road this far behind the racer (it may turn round), m.
+pub const ROUTE_BACK_M: f32 = 40.0;
+/// Most road legs [`PoliceSystem::roads_ahead`] walks (a bound on dense junction grids).
+pub const ROADS_AHEAD_MAX_LEGS: usize = 24;
 
 /// Road half width used for tool layout, m.
 pub const ROAD_HALF_WIDTH_M: f32 = 5.0;
@@ -1976,9 +1989,11 @@ impl PoliceSystem {
             }
             // In the right-hand lane, not on the centreline.
             let pos = add(centre, scale([dir[1], -dir[0]], LANE_OFFSET_M));
-            // The session-start patrols are part of the opening scene; every later refill
-            // appears out of every racer's sight (no pop-in).
-            let hidden = !self.warmed_up || !self.spawn_in_view(world, pos);
+            // Every patrol appears out of every racer's sight, the session-start ones too
+            // (row 158: a patrol placed in view at the start, beside a racer still wanted
+            // from before, started a chase at once). A district short of hidden spots fills
+            // up later through `maintain_pool`.
+            let hidden = !self.spawn_in_view(world, pos);
             if hidden && self.spawn_clear(pos) {
                 let i = self.spawn_unit(UnitKind::Car, UnitRole::Pool(d), pos, dir);
                 self.start_patrol(i, dest);
@@ -2334,6 +2349,58 @@ impl PoliceSystem {
         self.in_racer_view_opt(Some(world), p, true)
     }
 
+    /// Points every `step_m` along every road a car at `pos` moving with `vel` can reach within
+    /// `horizon_m`: its own road ahead, then every legal branch at each junction (no
+    /// U-turns), in a fixed order; each with the road's direction there.
+    pub(crate) fn roads_ahead(
+        &self,
+        pos: [f32; 2],
+        vel: [f32; 2],
+        horizon_m: f32,
+        step_m: f32,
+    ) -> Vec<([f32; 2], [f32; 2])> {
+        let mut out = Vec::new();
+        let Some(on) = self.graph.nearest_on_road(pos) else {
+            return out;
+        };
+        let seg = self.graph.segment(on.segment);
+        let (a, b) = (self.graph.node(seg.a).pos, self.graph.node(seg.b).pos);
+        // Toward the end it is driving at.
+        let (to, from) = if dot(sub(b, a), vel) >= 0.0 {
+            (seg.b, seg.a)
+        } else {
+            (seg.a, seg.b)
+        };
+        // (node, arrived from, distance travelled to it, point the leg started at)
+        let mut stack = vec![(to, from, 0.0f32, on.point)];
+        let mut legs = 0;
+        while let Some((n, prev, done, start)) = stack.pop() {
+            legs += 1;
+            if legs > ROADS_AHEAD_MAX_LEGS {
+                break;
+            }
+            let end = self.graph.node(n).pos;
+            let len = dist(start, end);
+            let dir = normalize(sub(end, start));
+            // Sample this leg (from where it starts to node `n`).
+            let mut d = step_m - done % step_m;
+            while d <= len && done + d <= horizon_m {
+                out.push((lerp2(start, end, d / len.max(1e-3)), dir));
+                d += step_m;
+            }
+            let reach = done + len;
+            if reach >= horizon_m {
+                continue;
+            }
+            for &(_, next) in self.graph.outgoing(n) {
+                if next != prev {
+                    stack.push((next, n, reach, end));
+                }
+            }
+        }
+        out
+    }
+
     /// [`Self::in_racer_view`] (`route`: also from the road ahead, see
     /// [`Self::spawn_in_view`]); without a world (captain tool placement) only the road
     /// graph's own sight lines (city blocks) are checked.
@@ -2360,6 +2427,7 @@ impl PoliceSystem {
             let z = r.pos[2];
             let body = [p[0], p[1], z + BODY_UP_M];
             let mut views = vec![[rp[0], rp[1], z + EYE_UP_M]];
+            let mut route_views: Vec<[f32; 3]> = Vec::new();
             let v = [r.vel[0], r.vel[1]];
             if crate::graph::len(v) > 1.0 {
                 let back = scale(normalize(v), CAM_BACK_M);
@@ -2376,16 +2444,48 @@ impl PoliceSystem {
             // not pop in just round the corner ahead of a fast racer): a few points on its
             // predicted path, the look-ahead growing with speed.
             let speed = crate::graph::len(v);
-            if route && speed > ROUTE_VIEW_MIN_MPS {
-                let horizon = speed * ROUTE_VIEW_S;
-                let path = self.graph.predict_path(rp, v, horizon);
-                let pts = Track::new(path.points());
-                let len = pts.length().min(horizon);
-                let mut d = ROUTE_VIEW_STEP_M;
-                while d <= len + 0.5 * ROUTE_VIEW_STEP_M {
-                    let q = pts.point_at(d.min(len));
-                    views.push([q[0], q[1], z + EYE_UP_M]);
-                    d += ROUTE_VIEW_STEP_M;
+            // Every road it could take, not only the straightest (row 158: backup appeared
+            // 150-190 m away, hidden, and in plain view 1.5-2 s later down the side street
+            // the racer turned into).
+            if route {
+                // The road ahead may climb (Port Vesper's hills): its eye points sit higher
+                // than the racer's eye now, so a crest does not hide a car that will be seen.
+                // Far enough for a racer that speeds up (or pulls away from a stop): at least
+                // ROUTE_MIN_MPS for ROUTE_VIEW_S, plus a margin.
+                let horizon = speed.max(ROUTE_MIN_MPS) * ROUTE_VIEW_S + ROUTE_MARGIN_M;
+                // Slow or stopped: it may go either way along its road.
+                let dir = if speed > ROUTE_VIEW_MIN_MPS {
+                    v
+                } else {
+                    self.graph
+                        .nearest_on_road(rp)
+                        .map(|on| {
+                            let sg = self.graph.segment(on.segment);
+                            sub(self.graph.node(sg.b).pos, self.graph.node(sg.a).pos)
+                        })
+                        .unwrap_or([0.0, 1.0])
+                };
+                let back = [-dir[0], -dir[1]];
+                let back_m = if speed > ROUTE_VIEW_MIN_MPS {
+                    ROUTE_BACK_M
+                } else {
+                    horizon
+                };
+                let ahead = self.roads_ahead(rp, dir, horizon, ROUTE_VIEW_STEP_M);
+                // And the roads just behind it: a racer that turns round (the evader bot does)
+                // drives back along them.
+                let behind = self.roads_ahead(rp, back, back_m, ROUTE_VIEW_STEP_M);
+                // Centre and either lane: the racer drives a few metres off the centreline,
+                // and a sightline grazing a building corner differs there (row 158).
+                for (q, d) in ahead.into_iter().chain(behind) {
+                    let side = [d[1] * ROUTE_LANE_M, -d[0] * ROUTE_LANE_M];
+                    for o in [[0.0, 0.0], side, scale(side, -1.0)] {
+                        route_views.push([
+                            q[0] + o[0],
+                            q[1] + o[1],
+                            z + EYE_UP_M + ROUTE_EYE_SLACK_M,
+                        ]);
+                    }
                 }
             }
             // Police only know the racer's velocity, not which way it faces (sliding, turning,
@@ -2394,9 +2494,17 @@ impl PoliceSystem {
                 let c = add(rp, scale(d, CAM_BACK_M));
                 views.push([c[0], c[1], z + CAM_UP_M]);
             }
+            // Along the roads ahead the spot's own ground height is not known either: a car
+            // standing a little higher shows over a crest (row 158, Port Vesper).
+            let body_high = [body[0], body[1], body[2] + ROUTE_EYE_SLACK_M];
             views.iter().any(|eye| {
                 self.graph.line_of_sight([eye[0], eye[1]], p)
                     && world.is_none_or(|w| w.line_of_sight(*eye, body))
+            }) || route_views.iter().any(|eye| {
+                self.graph.line_of_sight([eye[0], eye[1]], p)
+                    && world.is_none_or(|w| {
+                        w.line_of_sight(*eye, body) || w.line_of_sight(*eye, body_high)
+                    })
             })
         })
     }
@@ -4068,5 +4176,134 @@ fn offence_text(kind: &ViolationKind) -> &'static str {
         ViolationKind::WrongWay => "going the wrong way",
         ViolationKind::Collision => "hit a car",
         ViolationKind::Reckless => "driving like a maniac",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::{Occluder, RoadClass, RoadGraph};
+    use crate::scenario::ScenarioWorld;
+    use crate::{PoliceConfig, PoliceSetup};
+    use wp_contracts::{DamageMode, TimeOfDay};
+
+    /// Row 158: a spot hidden from the racer and from every point of its straightest road
+    /// ahead, but in plain view down a side street it can turn into within ROUTE_VIEW_S, is in
+    /// view for spawns (the straightest-road check let backup appear there, seen 1.5-2 s later).
+    #[test]
+    fn spawn_view_covers_every_road_the_racer_can_take() {
+        let mut g = RoadGraph::new();
+        let d = District::Core;
+        let a = g.add_node([0.0, -200.0], d);
+        let j1 = g.add_node([0.0, 0.0], d);
+        let b = g.add_node([0.0, 100.0], d);
+        let j2 = g.add_node([100.0, 0.0], d);
+        let s = g.add_node([100.0, -200.0], d);
+        for (x, y) in [(a, j1), (j1, b), (j1, j2), (j2, s)] {
+            g.add_segment(x, y, 20.0, RoadClass::Local, false);
+        }
+        // The block between the two north-south roads.
+        g.occluders.push(Occluder {
+            min: [8.0, -200.0],
+            max: [92.0, -8.0],
+        });
+        let setup = PoliceSetup {
+            seed: 1,
+            mode: DamageMode::Arcade,
+            internal_driving: true,
+            hazards: false,
+        };
+        let mut p = PoliceSystem::with_city(PoliceConfig::builtin(), g, setup);
+        let world = ScenarioWorld::clock(TimeOfDay::from_hours(12.0), 0.0);
+        let racer = crate::RacerView {
+            entity: EntityId(1),
+            pos: [0.0, -50.0, 0.0],
+            vel: [0.0, 50.0, 0.0],
+        };
+        let mut out = Vec::new();
+        p.step(&world, &[racer], &[], wp_contracts::PHYSICS_DT, &mut out);
+        // 150 m down the far road: hidden now, seen from the junction after a right turn.
+        let spot = [100.0, -150.0];
+        assert!(dist(spot, [0.0, -50.0]) > p.cfg.presence.response.never_closer_m);
+        assert!(
+            !p.in_racer_view(&world, spot),
+            "visible from where it is now"
+        );
+        assert!(
+            p.spawn_in_view(&world, spot),
+            "round the corner it will be in view"
+        );
+        // The straightest road alone (north) never sees it.
+        let north = p
+            .graph
+            .predict_path([0.0, -50.0], [0.0, 50.0], 150.0)
+            .points();
+        assert!(north.iter().all(|q| !p.graph.line_of_sight(*q, spot)));
+    }
+
+    /// Row 158: the session-start patrols appear out of the racer's sight too (one placed in
+    /// view beside a racer still wanted from before started a chase at once).
+    #[test]
+    fn session_start_patrols_spawn_out_of_view() {
+        let mut g = RoadGraph::new();
+        let d = District::Core;
+        // A 5 x 5 grid of 150 m blocks, buildings in every block.
+        let mut ids = Vec::new();
+        for y in 0..5 {
+            for x in 0..5 {
+                ids.push(g.add_node([x as f32 * 150.0, y as f32 * 150.0], d));
+            }
+        }
+        for y in 0..5 {
+            for x in 0..5 {
+                let k = y * 5 + x;
+                if x < 4 {
+                    g.add_segment(ids[k], ids[k + 1], 14.0, RoadClass::Local, false);
+                }
+                if y < 4 {
+                    g.add_segment(ids[k], ids[k + 5], 14.0, RoadClass::Local, false);
+                }
+            }
+        }
+        for y in 0..4 {
+            for x in 0..4 {
+                let (x0, y0) = (x as f32 * 150.0 + 10.0, y as f32 * 150.0 + 10.0);
+                g.occluders.push(Occluder {
+                    min: [x0, y0],
+                    max: [x0 + 130.0, y0 + 130.0],
+                });
+            }
+        }
+        let setup = PoliceSetup {
+            seed: 3,
+            mode: DamageMode::Arcade,
+            internal_driving: true,
+            hazards: false,
+        };
+        let mut p = PoliceSystem::with_city(PoliceConfig::builtin(), g, setup);
+        let world = ScenarioWorld::clock(TimeOfDay::from_hours(12.0), 0.0);
+        // Wanted from before, parked at the centre crossing.
+        p.set_heat(EntityId(1), 40.0);
+        let racer = crate::RacerView {
+            entity: EntityId(1),
+            pos: [300.0, 300.0, 0.0],
+            vel: [0.0; 3],
+        };
+        let mut out = Vec::new();
+        for _ in 0..(2.0 / wp_contracts::PHYSICS_DT) as usize {
+            p.step(&world, &[racer], &[], wp_contracts::PHYSICS_DT, &mut out);
+            if !p.units.is_empty() {
+                break;
+            }
+        }
+        assert!(!p.units.is_empty(), "no patrols at all");
+        for u in &p.units {
+            assert!(
+                !p.in_racer_view(&world, u.body.pos),
+                "unit {:?} placed in view at {:?}",
+                u.id,
+                u.body.pos
+            );
+        }
     }
 }
