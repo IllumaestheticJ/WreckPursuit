@@ -152,3 +152,24 @@ Every variant with yaw inertia × 1.35 costs the AI time and wall hits; no near-
 the guard. Best compromise V4 (held 2.50 s). Owner decision needed: accept an AI retune (out of
 scope here: wp_opponent / wp_race) for G-type handling, or keep searching for a drift gain
 without the yaw inertia.
+
+## 2026-10-23: candidate G is the shipped handling (owner decision)
+Owner (asked with the AI numbers above): **"G + retune the AI"**. Full G (round 2 pick over
+G_firm) is the default for every car on `lead/physics`:
+- `CarTune::shipped` = G tyres (b0 6.48, b2 1.75, c 0.90, side floor 0.38, rear relax × 1.41,
+  rear peak slip × 1.10); `CarTune::pre_g` = the set before.
+- `GripBalance::shipped` = front × 0.666 / rear × 0.533; `GripBalance::pre_g` = 0.6 / 0.45.
+- `RideTune::shipped` (new) = the owner's ride with yaw inertia × 1.35, springs × 1.04, bars
+  × 0.63, roll inertia × 1.34; `lab_scope::ride()` uses it; `RideTune::owner` kept.
+- Bench (held_search base): held 2.59 s (was 2.24), taps 21 / 36, handling fails 0.
+- `wp_opponent` capability table regenerated (`WP_WRITE_CAPS=1`); simcli goldens re-blessed.
+- Tests re-ranged with reasons: diff hashes [bless]; gearbox throttle window 17 → 18 s;
+  heavy_cars_still_push margin 0.5 → 0.2; ride heave lower limit 1.2 → 1.05 Hz; camber launch
+  6.0°; beater 0–100 check at 16.2 s (≈ 16.05 s with G).
+
+### Red until the AI / traffic retune (all green on pre-G)
+- `wp_race` `race_picker::hollins_hill_sprint` (winner captured by police) and
+  `simcli_races::sprint_off_route_excursion_is_not_disqualified` (AI does not finish in 24 s).
+- scenario `world_traffic_soak`: 1 civilian collision (limit 0).
+- AI pace (measured limits, 4 seeds): lantern / hollins at skills 0.75 / 0.95 slower by up to
+  ~8 s, more wall hits at hollins.
