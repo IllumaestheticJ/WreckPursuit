@@ -178,11 +178,14 @@ pub fn scenario_states(sim: &Sim, ids: &[EntityId]) -> Vec<(EntityId, wp_contrac
 
 /// Car model for AI police units in city scenarios.
 pub const POLICE_CAR: &str = "sentinel_cruiser";
-/// Car model for physical (near-player) traffic in city scenarios.
-pub const TRAFFIC_CAR: &str = "debug_sedan";
-/// Car model whose lattice dents parked cars (`Sim::set_parked_car`); the same model as
-/// traffic, so the testbed draws parked cars with the traffic mesh.
-pub const PARKED_CAR: &str = TRAFFIC_CAR;
+/// Car model for physical (near-player) traffic in city scenarios: the roster's supermini
+/// (was the lead's `debug_sedan` test car; cars audit F9).
+pub const TRAFFIC_CAR: &str = "tansy_13";
+/// Car model whose lattice dents parked cars (`Sim::set_parked_car`). The parked collider is a
+/// fixed 1.9 × 4.5 m box (`wp_sim::parked`), which the plain four-door `debug_sedan` body fits
+/// (4.7 × 1.8 m); the testbed draws parked cars with this model
+/// (`wp_wasm::lod::SessionModels::parked`).
+pub const PARKED_CAR: &str = "debug_sedan";
 
 /// `car_mix` police fleet: `(car, min level, max level, measured limits)`. Limits are
 /// `[skidpad g, 100-0 m, 0-100 s, vmax km/h]` from `data/cars/VALIDATION.md` (sim-measured,
@@ -198,14 +201,19 @@ pub const CAR_MIX_POLICE: &[(&str, u8, u8, Option<[f32; 4]>)] = &[
 
 /// `car_mix` physical traffic models, in model-index order (agent `id` drives
 /// `CAR_MIX_TRAFFIC[wp_world::traffic::traffic_model_index(id, len)]`).
+/// Civilian roster only (no debug car); the delivery vans `satchel_20` / `tumbril_20` were
+/// built for traffic (cars audit F9).
 pub const CAR_MIX_TRAFFIC: &[&str] = &[
-    "debug_sedan",
-    "junkyard_beater",
     "tansy_13",
+    "junkyard_beater",
     "furrow_24",
     "hauler_1500",
     "drayman_cargo",
     "vireo_xs",
+    "satchel_20",
+    "tumbril_20",
+    "stoat_16v",
+    "marten_20",
 ];
 
 /// Load the `car_mix` police fleet ([`CAR_MIX_POLICE`]).

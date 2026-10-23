@@ -436,7 +436,14 @@ mod tests {
         let mut single = sc.clone();
         single.car_mix = false;
         let m = session_car_models(&single, true);
-        assert_eq!(m.cars, vec!["debug_sedan", simcli::run::POLICE_CAR]);
+        assert_eq!(
+            m.cars,
+            vec![
+                "debug_sedan",
+                simcli::run::TRAFFIC_CAR,
+                simcli::run::POLICE_CAR
+            ]
+        );
         assert_eq!(m.traffic.as_deref(), Some(simcli::run::TRAFFIC_CAR));
         assert_eq!(m.police.as_deref(), Some(simcli::run::POLICE_CAR));
         assert!(m.police_models.is_empty());
