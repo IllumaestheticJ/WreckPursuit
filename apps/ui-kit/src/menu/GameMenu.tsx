@@ -466,7 +466,7 @@ function Brand(props: { kicker: string }) {
 }
 
 const PLAY: { id: PlayChoice; label: string; hint: string }[] = [
-  { id: "chase", label: "City chase", hint: "Night in Port Vesper. You're speeding; the police will come." },
+  { id: "chase", label: "Night run", hint: "Night in Port Vesper. You're speeding; the police will come." },
   { id: "chaseRain", label: "Rainy night", hint: "Same chase on a soaked road" },
   { id: "races", label: "Street races", hint: "Races against AI drivers" },
   { id: "free", label: "Free drive", hint: "Explore the city with traffic" },

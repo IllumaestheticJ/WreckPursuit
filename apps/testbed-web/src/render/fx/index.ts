@@ -51,7 +51,7 @@ const MAX = FX_PRESETS.high;
 /** `wp_contracts::WORLD_ENTITY` (static world in Contact events). */
 const WORLD = 4294967295;
 
-// Thresholds (calibrated on crash/head_on.ron and the city chase; see the doc).
+// Thresholds (calibrated on crash/head_on.ron and the night run; see the doc).
 /** Sliding speed above which a contact throws sparks, m/s. */
 const SCRAPE_MIN_MPS = 2.5;
 /** Per-tick impulse below which a contact is too light to spark, N·s. */

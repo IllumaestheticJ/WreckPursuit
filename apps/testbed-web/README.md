@@ -36,13 +36,13 @@ npm run typecheck
 | `e2e/gamepad.mjs` | fake-gamepad + rebinding check (`npm run e2e:gamepad`; run by `e2e/run.mjs` too) |
 | `e2e/city_v2_shots.mjs` | Port Vesper v2 screenshots → `docs/media/city-v2/` (`node e2e/city_v2_shots.mjs [dir]`) |
 
-Cities: the "city" box (free drive) and the city chase use the city selector — Port Vesper v2
+Cities: the "city" box (free drive) and the night run use the city selector — Port Vesper v2
 (`vesper_v2`, hills, default) or the flat grid (`procedural_12x12`); URL `?city=procedural_12x12`,
 `?chase=1`. The greybox is `data/city/<sim.cityId()>.greybox.glb` (base64 fallback
 `.greybox.b64.txt` on the published build). Automation: `__wp.lookAt(from, to)` places a fixed
 orbit camera in sim coordinates, `__wp.setClip(near, far)`.
-| `e2e/playtest_chase.mjs` | city chase playtest: screenshots, overlapping HUD panels, layer + camera keys, F1 help (`node e2e/playtest_chase.mjs [outDir] [WxH]`) |
-| `e2e/chase_perf.mjs` | city chase perf (sim / views / render ms, draw calls); `PANELS=0` A/B for panel meshes, `VIEWPORT=WxH` |
+| `e2e/playtest_chase.mjs` | night run playtest: screenshots, overlapping HUD panels, layer + camera keys, F1 help (`node e2e/playtest_chase.mjs [outDir] [WxH]`) |
+| `e2e/chase_perf.mjs` | night run perf (sim / views / render ms, draw calls); `PANELS=0` A/B for panel meshes, `VIEWPORT=WxH` |
 
 Assist presets: the **preset** row (Rookie / Street / Sim, `wp_vehicle::AssistPreset`) sets the
 damage mode and the assists in one click and is remembered per viewer (`wp.assistPreset`). Any
@@ -82,11 +82,11 @@ sensitivity exponent), each pedal through `shapePedal` (dead zone, saturation).
 
 ## Perf (headless Chromium, SwiftShader, real vehicle + damage)
 sim 0.09 / 0.62 / 3.0 ms per 60 Hz frame and render 0.7 / 3.4 / 9.2 ms at 1 / 8 / 24 cars;
-city + ~190 traffic agents 0.27 ms sim. City chase after warm-up: grid 1.5 ms, Port Vesper v2
+city + ~190 traffic agents 0.27 ms sim. Night run after warm-up: grid 1.5 ms, Port Vesper v2
 2.8 ms sim per 60 Hz frame (its 6.8 MB greybox parses in ≈ 2 s under SwiftShader). Re-measure in
 desktop Chrome with a GPU.
 
-Browser frame budget (city chase, low-poly dark): `npm run profile` (`e2e/frame_profile.mjs`)
+Browser frame budget (night run, low-poly dark): `npm run profile` (`e2e/frame_profile.mjs`)
 prints JS ms per frame-loop section, draw calls / triangles / raster ms per render feature
 (`tagFeature` roots in `src/perf.ts`), steady vs one-off allocation and the top allocators;
 `npm run e2e:perf` (`e2e/perf_check.mjs`) checks desktop chase / rain and the phone profile.

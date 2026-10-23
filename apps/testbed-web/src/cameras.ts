@@ -8,7 +8,7 @@
 // Chase follow: the camera sits at a car-relative offset built from a *smoothed heading*, and
 // only that offset is sprung — never the camera's world position. A world-space position spring
 // trails the car by roughly (2/ω)·speed, which is what made the old chase cam drift ~10–16 m
-// back at city-chase speeds. Speed adds at most `pullBack` metres.
+// back at night-run speeds. Speed adds at most `pullBack` metres.
 //
 // All targets are Three.js objects: the vehicle root (sim chassis space: +X right, +Y
 // forward, +Z up) inside the Z-up `world` group. Three world space is +Y up.

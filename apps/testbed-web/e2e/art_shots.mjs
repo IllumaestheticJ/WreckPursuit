@@ -1,6 +1,6 @@
 // Art-style screenshots and perf for docs/media/art/ (machine S, render/style.ts).
 // Usage (after `npm run wasm`): node e2e/art_shots.mjs [outDir]   Env: CHROMIUM, VIEWPORT=WxH.
-// Shots: the city chase in Port Vesper at dawn / day / dusk / night in low-poly dark, the same
+// Shots: the night run in Port Vesper at dawn / day / dusk / night in low-poly dark, the same
 // night in greybox, the rainy night, a police close-up and street-level / aerial views downtown.
 // Perf A/B: e2e/art_perf.mjs. Exits 1 on page errors.
 import { spawn } from "node:child_process";
@@ -39,15 +39,15 @@ page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 await page.goto(`${URL}?style=lowpoly&gfx=${process.env.GFX ?? "high"}`);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 30000 });
 
-/** City chase in Port Vesper at `hour` (the preset is 23:00), optionally rainy. */
+/** Night run in Port Vesper at `hour` (the preset is 23:00), optionally rainy. */
 const chase = async (hour, rain = false) => {
   await page.evaluate(
     ([h, r]) => {
       const w = window.__wp;
       document.getElementById("career").checked = false;
       document.getElementById("city-map").value = "vesper_v2";
-      w.startCityChase("debug_sedan", "Arcade", r);
-      const json = JSON.parse(r ? w.sim.cityChaseRainJson("debug_sedan", "Arcade", "vesper_v2") : w.sim.cityChaseCityJson("debug_sedan", "Arcade", "vesper_v2"));
+      w.startNightRun("debug_sedan", "Arcade", r);
+      const json = JSON.parse(r ? w.sim.nightRunRainJson("debug_sedan", "Arcade", "vesper_v2") : w.sim.nightRunCityJson("debug_sedan", "Arcade", "vesper_v2"));
       w.sim.init(0, JSON.stringify({ ...json, time_of_day_h: h }), false);
     },
     [hour, rain],

@@ -322,13 +322,13 @@ mod tests {
         }
     }
 
-    /// City chase, stepped tick by tick: every traffic draw record moves continuously, through
+    /// Night run, stepped tick by tick: every traffic draw record moves continuously, through
     /// promotions (kinematic → sim vehicle) and demotions, and between traffic steps.
     #[test]
     fn traffic_draw_poses_are_continuous_through_promotions() {
         use crate::session::Session;
         use std::collections::BTreeMap;
-        let sc = crate::scenario::city_chase("lindwurm_4t", wp_contracts::DamageMode::Arcade);
+        let sc = crate::scenario::night_run("lindwurm_4t", wp_contracts::DamageMode::Arcade);
         let mut s = Session::new(sc, false).unwrap();
         let player = s.entities()[0];
         /// Position, previous position, embodied.
@@ -377,16 +377,16 @@ mod tests {
         println!(
             "{swaps} swaps, worst swap error {worst_swap:.3} m, worst step error {worst_step:.3} m"
         );
-        assert!(swaps > 0, "no promotion in 12 s of city chase");
+        assert!(swaps > 0, "no promotion in 12 s of night run");
         assert!(worst_swap < 0.5, "swap jump {worst_swap} m");
     }
 
     #[test]
     fn session_models_list_traffic_and_police_once() {
         use crate::session::Session;
-        // The city chase runs simcli's car_mix: every traffic model and police version, in
+        // The night run runs simcli's car_mix: every traffic model and police version, in
         // model-index order, each once in `cars`.
-        let sc = crate::scenario::city_chase("debug_sedan", wp_contracts::DamageMode::Arcade);
+        let sc = crate::scenario::night_run("debug_sedan", wp_contracts::DamageMode::Arcade);
         let s = Session::new(sc.clone(), false).unwrap();
         let m = session_car_models(&sc, true, s.sim());
         assert_eq!(m.traffic, simcli::run::CAR_MIX_TRAFFIC);
