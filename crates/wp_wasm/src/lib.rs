@@ -11,7 +11,7 @@
 //!
 //! | group | functions |
 //! |---|---|
-//! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `free_drive_city_json(car, mode, city_id)`, `city_chase_city_json(car, mode, city_id)`, `city_id()`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()`, `car_stats_json()`, `car_stats_build_json(car, mods, mode)` |
+//! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `free_drive_city_json(car, mode, city_id)`, `night_run_city_json(car, mode, city_id)`, `city_id()`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()`, `car_stats_json()`, `car_stats_build_json(car, mods, mode)` |
 //! | control | `spawn_vehicle(car_id, pos, yaw)`, `set_input(entity, f32[])`, `set_assist_profile(entity, json)`, `assist_preset(source)`, `set_countersteer(entity, %)` / `countersteer(entity)`, `set_clutch_mode(entity, "auto"|"manual")` / `clutch_mode(entity)`, `engine_stalled(entity)`, `assist_presets()`, `assist_preset_named(name, source)`, `assist_preset_of(entity, source)`, `reset_vehicle(entity)` |
 //! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()`, `traffic_models()`, `police_models()`, `signal_heads()`, `signal_states()`, `road_markings(yellow)` |
 //! | damage | `lattice_nodes`, `lattice_rest`, `lattice_beams`, `lattice_node_regions`, `lattice_strain`, `region_energy`, `skin_binding_indices`, `skin_binding_weights` |
@@ -25,7 +25,7 @@
 //! | props (lead) | `props_static()` once per session, `props_moved()` per frame, `prop_stride()`, `prop_moved_stride()`, `prop_pose(i)`, `debug_knock_prop(entity, prop, speed)` — see [`props`] |
 //! | parked-car damage (lead) | `parked_wrecks()` per frame, `parked_wreck_stride()`, `parked_entity_base()`, `parked_wreck_shattered(entity)`; a wreck's entity works with the `lattice_*` / `vehicle_info` calls — see [`props`] |
 //! | map (16) | `map_static_json()` once per city, `map_dynamic(player)` per frame — see [`map`] |
-//! | weather (lead) | `weather_choices()`, `scenario_with_weather(json, choice)`, `scenario_weather_choice(json)`, `city_chase_rain_json(car, mode, city_id)`, `weather_info()`, `weather_grid_meta()`, `weather_grid()`, `weather_spray()` — see [`weather`] |
+//! | weather (lead) | `weather_choices()`, `scenario_with_weather(json, choice)`, `scenario_weather_choice(json)`, `night_run_rain_json(car, mode, city_id)`, `weather_info()`, `weather_grid_meta()`, `weather_grid()`, `weather_spray()` — see [`weather`] |
 //! | career (G) | `career_new(mode)`, `career_load_json`, `career_save_json`, `career_view_json`, `career_mods_json(uid)`, `career_start_run(scenario_json)`, `career_end_run`, `career_run_active`, `career_buy_car`, `career_floor_car`, `career_sell_car`, `career_set_active`, `career_install_mod`, `career_uninstall_mod`, `career_quote_json`, `career_repair`, `career_release`, `career_insure`, `career_next_night` — see [`career`] |
 //! | drift lab B (lead) | `drift_tuning_json()`, `drift_tuning_defaults_json()`, `drift_tuning_set(json)`, `drift_readout(entity)` — see [`drift_lab`] |
 //! | mods | `mod_catalog_json(car)`, `build_visuals_json(car, mods)`, `entity_visuals_json(entity)` — see [`mod_visuals`]; install with `EntitySpec::mods` in the scenario |
@@ -192,12 +192,12 @@ pub fn free_drive_json(car: &str, mode: &str, city: bool) -> Result<String, JsVa
     Ok(json(&scenario::free_drive(car, mode, city)))
 }
 
-/// "City chase" preset JSON (live): Port Vesper v2 at night, full police presence, traffic,
+/// "Night run" preset JSON (live): Port Vesper v2 at night, full police presence, traffic,
 /// the player already speeding on the race grid.
 #[wasm_bindgen]
-pub fn city_chase_json(car: &str, mode: &str) -> Result<String, JsValue> {
+pub fn night_run_json(car: &str, mode: &str) -> Result<String, JsValue> {
     let mode = data::parse_mode(mode).map_err(err)?;
-    Ok(json(&scenario::city_chase(car, mode)))
+    Ok(json(&scenario::night_run(car, mode)))
 }
 
 /// Free drive in a chosen city: `city_id` = `"vesper_v2"` (Port Vesper v2) or
@@ -240,11 +240,11 @@ pub fn roam_status_json() -> Result<String, JsValue> {
     get(|s| json(&s.roam().map(roam::RoamRun::status)))
 }
 
-/// City chase in a chosen city (`city_id` as in [`free_drive_city_json`]).
+/// Night run in a chosen city (`city_id` as in [`free_drive_city_json`]).
 #[wasm_bindgen]
-pub fn city_chase_city_json(car: &str, mode: &str, city_id: &str) -> Result<String, JsValue> {
+pub fn night_run_city_json(car: &str, mode: &str, city_id: &str) -> Result<String, JsValue> {
     let mode = data::parse_mode(mode).map_err(err)?;
-    Ok(json(&scenario::city_chase_in(
+    Ok(json(&scenario::night_run_in(
         car,
         mode,
         scenario::city_spec(city_id),
@@ -818,11 +818,11 @@ pub fn scenario_weather_choice(scenario_json: &str) -> Result<String, JsValue> {
     Ok(weather::choice_of(&sc).to_string())
 }
 
-/// "Rainy night" city chase JSON: [`city_chase_city_json`] in a held downpour on a soaked road.
+/// "Rainy night" night run JSON: [`night_run_city_json`] in a held downpour on a soaked road.
 #[wasm_bindgen]
-pub fn city_chase_rain_json(car: &str, mode: &str, city_id: &str) -> Result<String, JsValue> {
+pub fn night_run_rain_json(car: &str, mode: &str, city_id: &str) -> Result<String, JsValue> {
     let mode = data::parse_mode(mode).map_err(err)?;
-    Ok(json(&weather::rainy_night(scenario::city_chase_in(
+    Ok(json(&weather::rainy_night(scenario::night_run_in(
         car,
         mode,
         scenario::city_spec(city_id),
@@ -1101,7 +1101,7 @@ pub fn race_result_json() -> Result<String, JsValue> {
 // ----- street racers (src/street.rs) -------------------------------------------------------
 
 /// Add the NPC street racers (8 by day, 13 at night, [`street::ROSTER`]) to live free-drive /
-/// city-chase city sessions started after this call (default on). They are scenario entities (`street_<level>_<name>`, after the
+/// night-run city sessions started after this call (default on). They are scenario entities (`street_<level>_<name>`, after the
 /// player in `entities()`), so recordings and replays carry them.
 #[wasm_bindgen]
 pub fn set_street_racers(on: bool) {
@@ -1735,7 +1735,7 @@ pub fn session_car_models() -> Result<String, JsValue> {
 }
 
 /// Car ids of the physical traffic models as a JSON array, in model-index order (the
-/// `model` of `traffic_agents()`); `[]` when traffic stays kinematic. The city-chase preset
+/// `model` of `traffic_agents()`); `[]` when traffic stays kinematic. The night-run preset
 /// uses simcli's `CAR_MIX_TRAFFIC`. Fetch once per session.
 #[wasm_bindgen]
 pub fn traffic_models() -> Result<String, JsValue> {

@@ -31,7 +31,7 @@ fn dist2(a: [f32; 3], b: [f32; 3]) -> f32 {
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
 }
 
-/// Free drive on the procedural grid at `hour` (12 = noon, 23 = the city chase's night).
+/// Free drive on the procedural grid at `hour` (12 = noon, 23 = the night run's night).
 fn city_session_at(hour: f32) -> Session {
     let mut sc = free_drive("debug_sedan", DamageMode::Arcade, true);
     sc.time_of_day_h = hour;

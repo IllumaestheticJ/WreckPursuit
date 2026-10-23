@@ -25,7 +25,7 @@ const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
 await page.goto(URL);
 await page.waitForFunction(() => window.__wp?.sim, null, { timeout: 120000 });
 const chase = process.argv[2] === "chase";
-await page.evaluate((chase) => (chase ? window.__wp.startCityChase() : window.__wp.startFreeDrive(undefined, undefined, true)), chase);
+await page.evaluate((chase) => (chase ? window.__wp.startNightRun() : window.__wp.startFreeDrive(undefined, undefined, true)), chase);
 await page.keyboard.down("KeyW");
 let worst = 0, physMax = 0;
 for (let k = 0; k < 12; k++) {

@@ -9,7 +9,7 @@ use wp_police::unit::Assignment;
 use simcli::replay::OpKind;
 
 use crate::run::RunOutcome;
-use crate::scenario::{city_chase_in, procedural_city};
+use crate::scenario::{night_run_in, procedural_city};
 use crate::session::Session;
 
 const PLAYER: EntityId = EntityId(1);
@@ -35,7 +35,7 @@ fn state(s: &Session, id: EntityId) -> VehicleState {
 
 /// A stationary racer parked `ahead_m` in front of the first police car, at `heat`.
 fn parked_near_police(ahead_m: f32, heat: f32) -> Session {
-    let mut sc = city_chase_in("debug_sedan", DamageMode::Arcade, procedural_city());
+    let mut sc = night_run_in("debug_sedan", DamageMode::Arcade, procedural_city());
     sc.entities[0].speed_mps = 0.0;
     let mut s = Session::new(sc, false).unwrap();
     for _ in 0..240 * 5 {
@@ -271,7 +271,7 @@ fn restart_keeps_the_account() {
     let prev = s.take_run().unwrap();
     let cash = prev.account().cash;
     let n = prev.ledger().len();
-    let mut sc = city_chase_in("debug_sedan", DamageMode::Arcade, procedural_city());
+    let mut sc = night_run_in("debug_sedan", DamageMode::Arcade, procedural_city());
     sc.entities[0].speed_mps = 0.0;
     let mut next = Session::new(sc, false).unwrap();
     next.adopt_account(prev);
@@ -288,7 +288,7 @@ fn restart_keeps_the_account() {
 
 #[test]
 fn replays_and_scripted_sessions_have_no_economy_run() {
-    let mut sc = city_chase_in("debug_sedan", DamageMode::Arcade, procedural_city());
+    let mut sc = night_run_in("debug_sedan", DamageMode::Arcade, procedural_city());
     sc.duration_s = 1.0;
     assert!(Session::new(sc.clone(), true).unwrap().run().is_none());
     let mut live = Session::new(sc, false).unwrap();
@@ -302,7 +302,7 @@ fn replays_and_scripted_sessions_have_no_economy_run() {
 /// (the browser e2e's flow, natively).
 #[test]
 fn helicopter_tracks_a_racer_driving_off_in_port_vesper() {
-    let mut sc = city_chase_in(
+    let mut sc = night_run_in(
         "debug_sedan",
         DamageMode::Arcade,
         crate::scenario::city_spec("vesper_v2"),
