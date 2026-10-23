@@ -328,6 +328,14 @@ pub struct DriveCommand {
 /// Right-hand lane offset from the road centreline, m.
 pub const LANE_OFFSET_M: f32 = 1.75;
 
+/// A patrol car indicates this far before a junction where its route turns, m (≈ 3 s at a
+/// 13 m/s patrol, like traffic).
+pub const TURN_SIGNAL_BEFORE_M: f32 = 40.0;
+/// ...and keeps indicating until this far past the junction centre, m.
+pub const TURN_SIGNAL_EXIT_M: f32 = 8.0;
+/// Within this of the end of a pass it indicates back in (right), m.
+pub const PASS_RETURN_SIGNAL_M: f32 = 10.0;
+
 impl DriveCommand {
     /// Stand still.
     pub fn stop() -> Self {
@@ -390,6 +398,10 @@ pub struct Unit {
     pub pit_ready: SimTime,
     /// Whether this unit ever pursued (for statistics).
     pub engaged: bool,
+    /// Whether it ever had a job (call, pursuit, intercept, tool): only then does "resuming
+    /// patrol" go out on the radio.
+    #[serde(default)]
+    pub had_job: bool,
     /// Steering geometry of the unit's car.
     pub geometry: SteerGeometry,
     /// `wp_world`'s shared driving controller (pure pursuit + PID), created on first use.
@@ -400,6 +412,25 @@ pub struct Unit {
     /// Stuck detection and recovery (physical units, [`crate::stuck`]).
     #[serde(default)]
     pub unstick: crate::stuck::UnstickState,
+    /// Which branch of `drive_input` produced the last input (debug: bench traces; 0 = the
+    /// plain drive along the track).
+    #[serde(skip)]
+    pub branch: u8,
+    /// The pro driver's planned speed and whether it was reversing out, last tick (debug).
+    #[serde(skip)]
+    pub pro_dbg: (f32, bool),
+    /// The pro driver was turning round last tick (debug: bench turn-round audit).
+    #[serde(skip)]
+    pub turning_round: bool,
+    /// How long this unit has stood still while on an active job (row 86 audit), s.
+    #[serde(skip)]
+    pub active_stop_s: f32,
+    /// Since when the sim has reported this unit on its side or roof (row 75), if it is.
+    #[serde(default)]
+    pub flipped_since: Option<SimTime>,
+    /// Branch and blocker when that stop began (row 86 audit).
+    #[serde(skip)]
+    pub active_stop_why: (u8, u8),
     /// Road route a pursuer is following to the racer (out of its sight), if any.
     #[serde(default)]
     pub chase_route: Option<ChaseRoute>,
@@ -422,6 +453,10 @@ pub struct Unit {
     /// Pro driver of a physical unit, created on first use.
     #[serde(skip)]
     pub pro: Option<crate::pro::ProDriver>,
+    /// Where the unit first appeared (XY, m). Presentation uses it to pick the unit's home
+    /// station (agency livery); the AI never reads it.
+    #[serde(default)]
+    pub spawn_pos: [f32; 2],
 }
 
 /// A pursuer's road route to the racer (see `PoliceSystem::chase_route`).
@@ -473,16 +508,24 @@ impl Unit {
             captain_hold_until: SimTime::ZERO,
             pit_ready: SimTime::ZERO,
             engaged: false,
+            had_job: false,
             geometry: SteerGeometry::default(),
             controller: None,
             avoid: AvoidState::default(),
             unstick: crate::stuck::UnstickState::default(),
+            branch: 0,
+            pro_dbg: (0.0, false),
+            turning_round: false,
+            active_stop_s: 0.0,
+            flipped_since: None,
+            active_stop_why: (0, 0),
             chase_route: None,
             quiet: false,
             vel: [0.0, 0.0],
             feel: crate::pro::UnitFeel::default(),
             limits: None,
             pro: None,
+            spawn_pos: pos,
         }
     }
 
@@ -492,6 +535,35 @@ impl Unit {
         self.controller.get_or_insert_with(|| {
             DriveController::new(DriveGains::TRAFFIC, g.wheelbase_m, g.max_steer_rad, v)
         })
+    }
+
+    /// Turn signal for the renderer: -1 left, 0 off, 1 right (ported from the unmerged
+    /// `claude/happy-knuth-g39ogc`, owner playtest 2026-10-21). Off with lights and siren on
+    /// and for helicopters. Otherwise the unit indicates [`TURN_SIGNAL_BEFORE_M`] before a
+    /// junction where its route turns (until [`TURN_SIGNAL_EXIT_M`] past it), pulling out to
+    /// pass a stopped vehicle (left) and pulling back in at the end of the pass (right).
+    /// Presentation only: nothing in the sim reads it.
+    pub fn turn_signal(&self) -> i8 {
+        if self.kind != UnitKind::Car || self.cmd.siren || !self.cmd.track.is_drivable() {
+            return 0;
+        }
+        if self.avoid.pass_offset_m.is_some() {
+            return if self.avoid.pass_until_s - self.track_s < PASS_RETURN_SIGNAL_M {
+                1
+            } else {
+                -1
+            };
+        }
+        match self.avoid.junction {
+            Some(j)
+                if j.turn_dir != 0
+                    && (-TURN_SIGNAL_EXIT_M..TURN_SIGNAL_BEFORE_M)
+                        .contains(&(j.s - self.track_s)) =>
+            {
+                j.turn_dir
+            }
+            _ => 0,
+        }
     }
 
     /// Available for a new job (not busy with a tool, not out of service).
@@ -671,8 +743,7 @@ pub fn step_ground(
         .expect("controller created above")
         .steer(b.pos, b.heading, [target[0], target[1], 0.0]);
     // Target behind: pure pursuit degenerates (lateral offset → 0), so turn at full lock.
-    let turning_round = dot(b.heading, to) < 0.0;
-    if turning_round {
+    if dot(b.heading, to) < 0.0 {
         steer = if cross(b.heading, to) >= 0.0 {
             -1.0
         } else {
@@ -684,7 +755,9 @@ pub fn step_ground(
     let curvature = sd / cd.max(1e-3) / geom.wheelbase_m.max(0.5);
     let mut a_lat = b.speed * b.speed * curvature;
     let grip = dynm.grip_g * GRAVITY_MPS2 * grip_scale;
-    if a_lat.abs() > grip {
+    // Over the grip: the car understeers and runs wide of its line.
+    let understeer = a_lat.abs() > grip;
+    if understeer {
         a_lat = a_lat.signum() * grip;
     }
     let yaw_rate = if b.speed > 0.5 {
@@ -708,10 +781,11 @@ pub fn step_ground(
     let ds = b.speed * dt;
     b.pos = add(b.pos, scale(b.heading, ds));
 
-    // Ran wide: hit the kerb / building.
-    // Behind the start of the track or turning round toward a target behind (a full-lock
-    // circle is wider than the crash offset) is not running wide.
-    if u.on_track && s > 1.0 && !turning_round && lateral > dynm.crash_offset_m && b.speed > 5.0 {
+    // Ran wide: hit the kerb / building. Only while over the grip: off the line within it is
+    // the track's geometry (main's ramp terminals and viaduct ends, where a 5 m/s unit was
+    // "crashing" over and over at the same corner), not running wide.
+    // Behind the start of the track (turning around) is not running wide.
+    if u.on_track && understeer && s > 1.0 && lateral > dynm.crash_offset_m && b.speed > 5.0 {
         let impact = b.speed * 0.6;
         u.health -= dynm.crash_health_per_kmps2.get(env.mode) * impact * impact / 1000.0;
         rep.crashed = true;
@@ -859,5 +933,48 @@ mod tests {
             assert!(!r.crashed, "crashed at tick {i} pos {:?}", u.body.pos);
         }
         assert!(u.body.pos[0] > 150.0, "{:?}", u.body.pos);
+    }
+
+    #[test]
+    fn turn_signals_before_turns_and_passes_but_not_with_lights() {
+        let mut u = Unit::new(
+            UnitId(1),
+            UnitKind::Car,
+            UnitRole::Reinforcement,
+            [0.0, 0.0],
+            [0.0, 1.0],
+            1.0,
+        );
+        u.set_command(DriveCommand {
+            track: l_track(),
+            speed_mps: 10.0,
+            cornering_g: 0.4,
+            siren: false,
+            lane_offset_m: LANE_OFFSET_M,
+        });
+        u.avoid.junction = Some(crate::avoid::JunctionAhead {
+            s: 200.0,
+            light: None,
+            turn: true,
+            turn_dir: 1,
+        });
+        u.track_s = 100.0;
+        assert_eq!(u.turn_signal(), 0, "too far before the junction");
+        u.track_s = 170.0;
+        assert_eq!(u.turn_signal(), 1);
+        u.track_s = 205.0;
+        assert_eq!(u.turn_signal(), 1, "still in the junction");
+        u.track_s = 215.0;
+        assert_eq!(u.turn_signal(), 0, "through it");
+        // Passing: left while pulling out, right while pulling back in.
+        u.track_s = 50.0;
+        u.avoid.pass_offset_m = Some(-1.75);
+        u.avoid.pass_until_s = 80.0;
+        assert_eq!(u.turn_signal(), -1);
+        u.track_s = 75.0;
+        assert_eq!(u.turn_signal(), 1);
+        // Lights on: no indicators.
+        u.cmd.siren = true;
+        assert_eq!(u.turn_signal(), 0);
     }
 }

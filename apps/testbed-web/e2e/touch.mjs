@@ -9,7 +9,7 @@
 // swipe up the throttle pedal accelerates; steering works and is analogue; release lets go of
 // everything; source → Touch with the touch assists (auto gears, TCS, steer help); edge buttons
 // (camera, map, pause); tilt falls back to buttons when no orientation events arrive and steers
-// when they do; HUD + controls do not overlap at 640×360, 740×360 and 932×430 in the city chase
+// when they do; HUD + controls do not overlap at 640×360, 740×360 and 932×430 in the night run
 // (dev panels hidden); portrait shows the rotate hint; a desktop shows no touch UI.
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -107,7 +107,7 @@ await page.waitForTimeout(2500);
 const v = await speed();
 const st = await page.evaluate(() => ({ source: window.__wp.app.source, a: window.__wp.sim.assists(window.__wp.app.player) }));
 check(v > 1.5, `swipe on the throttle accelerates (${v.toFixed(2)} m/s)`);
-check(st.source === "Touch" && st.a.auto_gears && st.a.tcs && st.a.countersteer_help >= 0.5 && st.a.steer_speed_sensitivity >= 0.9, `source → Touch with auto gears + TCS + steer help (${JSON.stringify({ auto: st.a.auto_gears, tcs: st.a.tcs, cs: st.a.countersteer_help, ss: st.a.steer_speed_sensitivity })})`);
+check(st.source === "Touch" && st.a.auto_gears && st.a.tcs === "Full" && st.a.countersteer_help >= 0.5 && st.a.steer_speed_sensitivity >= 0.9, `source → Touch with auto gears + TCS + steer help (${JSON.stringify({ auto: st.a.auto_gears, tcs: st.a.tcs, cs: st.a.countersteer_help, ss: st.a.steer_speed_sensitivity })})`);
 
 // 3. Steering (second finger while the throttle is held): outer right = full, analogue drag.
 const steer = await rect("#wp-touch .steer");
@@ -153,7 +153,7 @@ await tap('#wp-touch [data-touch="cameraCycle"]');
 const cam1 = await page.evaluate(() => window.__wp.rig.mode);
 check(cam1 !== cam0, `camera button cycles the camera (${cam0} → ${cam1})`);
 await page.evaluate(() => window.__wp.setCamera("chase"));
-await page.evaluate(() => window.__wp.startCityChase(undefined, "Arcade"));
+await page.evaluate(() => window.__wp.startNightRun(undefined, "Arcade"));
 await page.waitForTimeout(1500);
 // Phones draw fewer parked cars (350 m, compacted proxies) but every prop near the camera
 // still has exactly one drawn instance (no invisible collisions).
@@ -224,7 +224,7 @@ const tilt = await page.evaluate(async () => {
 check(tilt.mode === "tilt" && tilt.cls && tilt.right > 0.6 && tilt.left < -0.6 && Math.abs(tilt.level) < 0.05, `tilt steers (right ${tilt.right.toFixed(2)}, left ${tilt.left.toFixed(2)}, level ${tilt.level.toFixed(2)})`);
 
 // 7. Layout: HUD and controls inside the screen and not overlapping, at three phone sizes, in
-// the city chase with the pursuit banner showing.
+// the night run with the pursuit banner showing.
 const layout = () =>
   page.evaluate(() => {
     const banner = document.getElementById("pursuit-banner");

@@ -40,8 +40,14 @@ pub struct EngineLayers {
 }
 
 impl EngineLayers {
-    /// Resolve a pack's layers for an engine with `idle_rpm` and `redline_rpm`.
-    pub fn resolve(pack: &SamplePack, idle_rpm: f32, redline_rpm: f32) -> Self {
+    /// Resolve a pack's layers for `engine` (cylinders / layout: [`RpmAnchor::FiringHz`]) with
+    /// `idle_rpm` and `redline_rpm`.
+    pub fn resolve(
+        pack: &SamplePack,
+        engine: &EngineAudioDef,
+        idle_rpm: f32,
+        redline_rpm: f32,
+    ) -> Self {
         let mut layers: Vec<ResolvedLayer> = pack
             .engine_layers
             .iter()
@@ -53,6 +59,7 @@ impl EngineLayers {
                     RpmAnchor::Idle => idle_rpm,
                     RpmAnchor::Rpm(r) => r,
                     RpmAnchor::RedlineFrac(f) => f * redline_rpm,
+                    RpmAnchor::FiringHz(hz) => engine.rpm_at_firing_hz(hz),
                 }
                 .max(1.0),
                 throttle: l.throttle,
@@ -443,7 +450,7 @@ mod tests {
 
     #[test]
     fn layers_sorted_and_resolved() {
-        let l = EngineLayers::resolve(&pack(), 800.0, 7000.0);
+        let l = EngineLayers::resolve(&pack(), &test_def(false), 800.0, 7000.0);
         let roots: Vec<f32> = l.layers.iter().map(|x| x.root_rpm).collect();
         assert!(roots.windows(2).all(|w| w[0] <= w[1]));
         assert_eq!(l.layers[0].cue, "idle");
@@ -452,7 +459,7 @@ mod tests {
 
     #[test]
     fn weights_are_energy_preserving() {
-        let l = EngineLayers::resolve(&pack(), 800.0, 7000.0);
+        let l = EngineLayers::resolve(&pack(), &test_def(false), 800.0, 7000.0);
         for rpm in [500.0, 800.0, 1500.0, 3000.0, 4500.0, 6500.0, 9000.0] {
             for load in [0.0, 0.3, 1.0] {
                 let e: f32 = l.weights(rpm, load).iter().map(|w| w * w).sum();
@@ -462,8 +469,59 @@ mod tests {
     }
 
     #[test]
+    fn firing_hz_anchor_roots_at_the_cars_firing_frequency() {
+        let mut p = pack();
+        p.engine_layers[3].anchor = RpmAnchor::FiringHz(87.2);
+        // Inline-4: 87.2 Hz = 2,616 rpm; a V8 fires twice as often per rev: 1,308 rpm.
+        let i4 = EngineLayers::resolve(&p, &test_def(false), 800.0, 7000.0);
+        let mid = |l: &EngineLayers| {
+            l.layers
+                .iter()
+                .find(|x| x.cue == "mid_on")
+                .unwrap()
+                .root_rpm
+        };
+        assert!((mid(&i4) - 2616.0).abs() < 0.5, "{}", mid(&i4));
+        let v8 = EngineAudioDef {
+            cylinders: 8,
+            layout: crate::data::EngineLayout::V,
+            ..test_def(false)
+        };
+        let l8 = EngineLayers::resolve(&p, &v8, 800.0, 7000.0);
+        assert!((mid(&l8) - 1308.0).abs() < 0.5, "{}", mid(&l8));
+        // Played at rpm / root, the loop sounds at the car's firing frequency at any rpm.
+        for rpm in [1000.0f32, 2616.0, 5000.0] {
+            let hz = 87.2 * rpm / mid(&l8);
+            assert!((hz / v8.firing_hz(rpm) - 1.0).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn layers_do_not_churn_along_an_rpm_sweep() {
+        // Each layer fades in and out at most once over a monotone sweep (no flicker between
+        // neighbours), on and off throttle and mixed.
+        let l = EngineLayers::resolve(&pack(), &test_def(false), 800.0, 7000.0);
+        for load in [0.0, 0.5, 1.0] {
+            let mut on_runs = vec![0u32; l.layers.len()];
+            let mut was = vec![false; l.layers.len()];
+            let mut rpm = 500.0;
+            while rpm < 9000.0 {
+                for (i, w) in l.weights(rpm, load).iter().enumerate() {
+                    let on = *w > 1e-3;
+                    if on && !was[i] {
+                        on_runs[i] += 1;
+                    }
+                    was[i] = on;
+                }
+                rpm += 5.0;
+            }
+            assert!(on_runs.iter().all(|n| *n <= 1), "load {load}: {on_runs:?}");
+        }
+    }
+
+    #[test]
     fn crossfade_is_mid_between_roots() {
-        let l = EngineLayers::resolve(&pack(), 800.0, 7000.0);
+        let l = EngineLayers::resolve(&pack(), &test_def(false), 800.0, 7000.0);
         // Halfway between low_on (2100) and mid_on (3850): equal weights.
         let w = l.weights(2975.0, 1.0);
         let lo = l.layers.iter().position(|x| x.cue == "low_on").unwrap();
@@ -502,7 +560,7 @@ mod tests {
             blip_load: 0.8,
             blip_ref_rpm: 4000.0,
             lod_two_layer_m: 40.0,
-            second_layer_cull_scale: 1.0e-4,
+            second_layer_cull_scale: 0.25,
             physical_max_others: 6,
             physical_radius_m: 60.0,
         }
@@ -547,7 +605,7 @@ mod tests {
         applied: impl Fn(usize) -> f32,
     ) -> Vec<EngineOutput> {
         let (def, limits) = (test_def(false), test_limits());
-        let layers = EngineLayers::resolve(&pack(), 800.0, 7000.0);
+        let layers = EngineLayers::resolve(&pack(), &test_def(false), 800.0, 7000.0);
         let mut rng = Rng::new(3);
         (0..frames)
             .map(|i| {
@@ -674,7 +732,7 @@ mod tests {
     #[test]
     fn blowoff_on_lift_under_boost() {
         let (mix, def, limits) = (test_mix(), test_def(true), test_limits());
-        let layers = EngineLayers::resolve(&pack(), 800.0, 7000.0);
+        let layers = EngineLayers::resolve(&pack(), &test_def(false), 800.0, 7000.0);
         let mut st = EngineAudioState::default();
         let mut rng = Rng::new(1);
         let dt = 1.0 / 60.0;

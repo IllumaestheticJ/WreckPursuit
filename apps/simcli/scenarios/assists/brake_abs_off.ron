@@ -1,0 +1,18 @@
+// ABS level Off: heavy RWD muscle car at 60 mph (26.8 m/s), brake floored to a stop.
+(
+    name: "assists_brake_abs_off",
+    mode: Simulation,
+    seed: 1,
+    assists: custom((abs: "Off", tcs: "Off", esc: false, steer_speed_sensitivity: 0.75, countersteer_help: 0.6, throttle_filter: 0.7, brake_filter: 0.6, auto_gears: false, auto_clutch: true)),
+    duration_s: 5.0,
+    entities: [
+        (
+            id: "car",
+            car: "rampart_50",
+            speed_mps: 26.82,
+            inputs: [(t_s: 0.0, input: (brake: 1.0))],
+        ),
+    ],
+    // Measured 2026-10-20: 47.9 m, wheels locked (3.4 s above 0.2 slip).
+    expect: [metric(name: "final_speed_mps", min: -0.2, max: 0.2), metric(name: "distance_m", min: 44.0, max: 52.0), metric(name: "wheelspin_s", min: 2.8, max: 5.0)],
+)

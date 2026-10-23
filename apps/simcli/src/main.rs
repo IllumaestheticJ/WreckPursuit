@@ -24,6 +24,10 @@ USAGE:
   simcli --fuzz --minutes 5                                       (alias of `fuzz`)
   simcli bundle [--data DIR]                                      data root as JSON (WASM runner)
   simcli car-stats [--check] [--data DIR]                         measure every car, write stats/cars.json
+  simcli police-bench [--full] [--seeds N] [--duration S] [--threads N] [--label TEXT]
+                [--city vesper,grid] [--phase day,night] [--weather clear,rain]
+                [--level 1,2,3] [--skill casual,good,expert] [--mode arcade|simulation|extreme]
+                [--out FILE.md | --no-write] [--json FILE]       police competency benchmark
 
 LIST is comma-separated from vehicle,damage,world,police,net (or `all`).
 Exit codes: 0 pass, 1 expectation/golden/determinism/fuzz failure, 2 usage or load error.";
@@ -35,7 +39,7 @@ struct Args {
 
 impl Args {
     /// Flags that take a value; everything else starting with `--` is a switch.
-    const VALUED: [&'static str; 13] = [
+    const VALUED: [&'static str; 23] = [
         "--data",
         "--out",
         "--systems",
@@ -49,6 +53,16 @@ impl Args {
         "--max-vehicles",
         "--replay-out",
         "--format",
+        "--seeds",
+        "--duration",
+        "--threads",
+        "--label",
+        "--city",
+        "--phase",
+        "--weather",
+        "--level",
+        "--skill",
+        "--json",
     ];
 
     fn parse(raw: Vec<String>) -> Result<Self, String> {
@@ -135,7 +149,7 @@ fn main() -> ExitCode {
     let cmd = match raw.first().map(String::as_str) {
         Some(
             c @ ("run" | "hashes" | "determinism" | "replay" | "goldens" | "fuzz" | "bundle"
-            | "car-stats" | "help"),
+            | "car-stats" | "police-bench" | "help"),
         ) => {
             let c = c.to_string();
             raw.remove(0);
@@ -157,6 +171,7 @@ fn main() -> ExitCode {
         "fuzz" => cmd_fuzz(&args),
         "bundle" => cmd_bundle(&args),
         "car-stats" => cmd_car_stats(&args),
+        "police-bench" => cmd_police_bench(&args),
         _ => {
             println!("{USAGE}");
             Ok(true)
@@ -496,5 +511,94 @@ fn cmd_car_stats(args: &Args) -> Result<bool, String> {
     std::fs::write(&path, simcli::car_stats::to_json(&fresh))
         .map_err(|e| format!("{}: {e}", path.display()))?;
     println!("wrote {}", path.display());
+    Ok(true)
+}
+
+/// `police-bench`: the police competency benchmark (`simcli::police_bench`). Prints the
+/// summary and per-cell tables; writes the markdown report (default
+/// `docs/integration/police-bench-results.md`) unless `--no-write`.
+fn cmd_police_bench(args: &Args) -> Result<bool, String> {
+    use simcli::police_bench::{self as pb, BenchCell, BenchOptions};
+    let list = |name: &str| -> Option<Vec<String>> {
+        args.get(name)
+            .map(|v| v.split(',').map(|x| x.trim().to_lowercase()).collect())
+    };
+    let keep = |name: &str, value: &str| list(name).is_none_or(|l| l.iter().any(|x| x == value));
+    for (flag, known) in [
+        ("--city", &["vesper", "grid"][..]),
+        ("--phase", &["day", "night"][..]),
+        ("--weather", &["clear", "rain"][..]),
+        ("--level", &["1", "2", "3"][..]),
+        ("--skill", &["casual", "good", "expert"][..]),
+    ] {
+        for v in list(flag).unwrap_or_default() {
+            if !known.contains(&v.as_str()) {
+                return Err(format!(
+                    "{flag}: unknown value {v:?} (known: {})",
+                    known.join(",")
+                ));
+            }
+        }
+    }
+    let full = args.has("--full");
+    let cells: Vec<BenchCell> = BenchCell::matrix()
+        .into_iter()
+        .filter(|c| full || !c.slow())
+        .filter(|c| keep("--city", c.city.name()))
+        .filter(|c| keep("--phase", if c.night { "night" } else { "day" }))
+        .filter(|c| keep("--weather", if c.rain { "rain" } else { "clear" }))
+        .filter(|c| keep("--level", &c.level.to_string()))
+        .filter(|c| keep("--skill", c.skill.name()))
+        .collect();
+    if cells.is_empty() {
+        return Err("no benchmark cells match the filters".into());
+    }
+    let seeds: u64 = args.num("--seeds")?.unwrap_or(8);
+    // Default Simulation: the police bench's published numbers were measured in the old Arcade
+    // table, which is Simulation since contract v0.4.0 (main-sync round 4).
+    let mode = match args.get("--mode").unwrap_or("simulation") {
+        "arcade" => wp_contracts::DamageMode::Arcade,
+        "simulation" => wp_contracts::DamageMode::Simulation,
+        "extreme" => wp_contracts::DamageMode::Extreme,
+        m => return Err(format!("--mode: unknown {m:?} (arcade|simulation|extreme)")),
+    };
+    let opts = BenchOptions {
+        cells,
+        seeds: (1..=seeds.max(1)).collect(),
+        duration_s: args.num("--duration")?.unwrap_or(300.0),
+        mode,
+        threads: args.num("--threads")?.unwrap_or(0),
+        progress: true,
+    };
+    let data = FsData::new(data_root(args));
+    eprintln!(
+        "police-bench: {} cells x {} seeds = {} runs (<= {:.0} s each)",
+        opts.cells.len(),
+        opts.seeds.len(),
+        opts.cells.len() * opts.seeds.len(),
+        opts.duration_s
+    );
+    let started = Instant::now();
+    let runs = pb::run_bench(&data, &opts).map_err(|e| e.to_string())?;
+    let (cells, rollups) = pb::summaries(&runs);
+    println!("{}", pb::table(&rollups));
+    println!("{}", pb::table(&cells));
+    eprintln!(
+        "police-bench: {:.0} s wall",
+        started.elapsed().as_secs_f32()
+    );
+    let label = args.get("--label").unwrap_or("unlabelled run");
+    if !args.has("--no-write") {
+        let out = args.get("--out").map(PathBuf::from).unwrap_or_else(|| {
+            manifest_dir().join("../../docs/integration/police-bench-results.md")
+        });
+        std::fs::write(&out, pb::markdown_report(label, &opts, &runs))
+            .map_err(|e| format!("{}: {e}", out.display()))?;
+        eprintln!("police-bench: wrote {}", out.display());
+    }
+    if let Some(j) = args.get("--json") {
+        let text = serde_json::to_string_pretty(&runs).map_err(|e| e.to_string())?;
+        std::fs::write(j, text).map_err(|e| format!("{j}: {e}"))?;
+    }
     Ok(true)
 }

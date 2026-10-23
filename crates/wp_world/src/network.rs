@@ -22,8 +22,11 @@ pub const ROAD_MAGIC: [u8; 4] = *b"WPRD";
 /// v4 (residential streets, playtest rows 94–95): building kind and roof
 /// ([`Building::kind`], [`Building::roof`], [`Building::roof_rise_m`]) and street / yard
 /// furniture ([`RoadNetwork::decor`]).
-/// v5 (divided highways): `RoadSurface::median_barrier`.
-pub const ROAD_FORMAT_VERSION: u32 = 5;
+/// v5 (main's divided highways, merged on lead/main-sync): `RoadSurface::median_barrier`
+/// (main's own v3).
+/// v6 (Ashpeak County): road material ([`RoadSurface::material`]: gravel and dirt roads),
+/// farm / landmark / construction building kinds and construction, farm and forest decor.
+pub const ROAD_FORMAT_VERSION: u32 = 6;
 
 /// Index into [`RoadNetwork::nodes`].
 pub type NodeId = u32;
@@ -141,6 +144,23 @@ pub struct RoadSurface {
     /// A concrete median barrier runs along the left paved edge (one carriageway of a
     /// divided highway carries it; [`crate::surface::median_barriers`] gives its line).
     pub median_barrier: bool,
+    /// What the road is paved with (`WorldQuery::surface_at` on its lanes).
+    #[serde(default)]
+    pub material: RoadMaterial,
+}
+
+/// Road paving (v6). Highways stay concrete whatever this says.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
+pub enum RoadMaterial {
+    /// Asphalt (every road before v6).
+    #[default]
+    Asphalt,
+    /// Graded gravel (farm roads, forest roads).
+    Gravel,
+    /// Packed dirt (field tracks, trails).
+    Dirt,
 }
 
 impl RoadSurface {
@@ -345,6 +365,9 @@ pub enum PoiKind {
     PoliceStation,
     /// Police helipad.
     Helipad,
+    /// Highway rest stop: a pull-off with a lit parking road (pose = the middle of the
+    /// parking road, facing its travel direction). Not in `wp_contracts`' POI list.
+    RestStop,
 }
 
 /// A point of interest.
@@ -376,6 +399,14 @@ pub enum BuildingKind {
     Garage,
     /// Corner shop in a residential district.
     Shop,
+    /// Farm building: barn, shed, farmhouse outbuilding (pitched roof, timber colours).
+    Farm,
+    /// Grain silo (round-ish footprint, tall).
+    Silo,
+    /// Named landmark (supertall tower, stadium, observatory, dam, ...).
+    Landmark,
+    /// Building under construction (open frame, scaffolding colours).
+    Construction,
 }
 
 /// Roof shape over a building's walls.
@@ -482,6 +513,18 @@ pub enum DecorKind {
     Fence,
     /// Paved driveway from the sidewalk to a garage (drawn only; level with the yard).
     Driveway,
+    /// Conifer in a mountain forest (trunk + narrow crown; the trunk is solid).
+    PineTree,
+    /// Construction tower crane (the mast is solid; size = mast footprint and full height).
+    Crane,
+    /// Concrete jersey barrier (solid box).
+    JerseyBarrier,
+    /// Construction-site hoarding / chain-link fence panel (solid box).
+    SiteFence,
+    /// Round hay bale on a field (solid box).
+    HayBale,
+    /// Roadside billboard on posts (solid box).
+    Billboard,
 }
 
 /// One piece of street / yard furniture: an oriented box standing on the ground.
@@ -521,15 +564,6 @@ pub enum RoadError {
 }
 
 impl RoadNetwork {
-    /// The terrain when it has relief (hills, embankments); `None` for a city without terrain
-    /// or with a flat one (the grid city's, under its viaduct). Sidewalk lots, wedges and
-    /// slope support follow the flat-city rules then.
-    pub fn relief(&self) -> Option<&crate::terrain::Heightfield> {
-        self.terrain
-            .as_ref()
-            .filter(|t| t.z.iter().any(|z| *z != t.z[0]))
-    }
-
     /// Ground height at `p` (terrain, or 0 without one). Roads are not included; see
     /// `CityMap::surface_height`.
     pub fn ground_z(&self, p: [f32; 2]) -> f32 {

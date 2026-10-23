@@ -1,0 +1,27 @@
+// Owner playtest 2026-10-21 "parked cars don't take damage" (lead helper, lead/parked-signals).
+// A debug sedan drives at 50 km/h straight into the tail of a parked car, then brakes.
+// The parked car is a cheap prop until the hit, then dents with the traffic car's lattice
+// (wp_sim parked-car damage, same Simulation mode table as driven cars) and is shoved forward.
+(
+    name: "parked_frontal_50_sim",
+    seed: 2110,
+    mode: Extreme,
+    assists: ai,
+    parked: [(pos: (0.0, 30.0, 0.0), yaw: 0.0)],
+    entities: [
+        (id: "car", car: "debug_sedan", speed_mps: 13.9, driver: cruise(target_mps: 13.9, until_s: 1.9),
+            inputs: [(t_s: 1.9, input: (brake: 1.0)), (t_s: 3.4, input: ())]),
+    ],
+    duration_s: 5.0,
+    hash_every: 60,
+    expect: [
+        // Measured 2026-10-21: parked car structural crush 0.126 m, health 0.871, shoved 5.0 m,
+        // a glass panel broken; the striker 0.141 m / 0.865 (Simulation: one hard hit hurts).
+        world_metric(name: "parked_dented", min: 1.0, max: 1.0),
+        world_metric(name: "parked_crush_max_m", min: 0.05, max: 0.4),
+        world_metric(name: "parked_health_min", min: 0.6, max: 0.97),
+        world_metric(name: "parked_moved_max_m", min: 2.0, max: 9.0),
+        metric(entity: "car", name: "final_health", min: 0.6, max: 0.97),
+        event_count(event: "Contact", entity: "car", min: 1, max: 100000),
+    ],
+)

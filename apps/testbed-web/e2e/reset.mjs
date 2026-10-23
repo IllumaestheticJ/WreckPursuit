@@ -4,7 +4,7 @@
 //
 // Checks: after the barrier crash scenario, R puts the car upright at rest within 15 m of the
 // crash point, repaired (health 100 %), and the R is a replay op that plays back without drift;
-// in the city chase R lands on a lane, keeps the police heat and makes the car a blinking ghost
+// in the night run R lands on a lane, keeps the police heat and makes the car a blinking ghost
 // for 1 s; in a career run R does not
 // repair (repairs are bought in the garage).
 import { spawn } from "node:child_process";
@@ -98,8 +98,8 @@ const pb = await page.evaluate(async () => {
 check(pb.tick >= pb.end_tick && pb.drift_count === 0, `the reset is a replay op: playback to tick ${pb.tick}/${pb.end_tick} with ${pb.drift_count} drift`);
 await page.evaluate(() => window.__wp.sim.replayExit?.());
 
-// 2. City chase: R lands on a lane near the car and keeps the heat.
-await page.evaluate(() => window.__wp.startCityChase());
+// 2. Night run: R lands on a lane near the car and keeps the heat.
+await page.evaluate(() => window.__wp.startNightRun());
 await page.waitForTimeout(1500);
 await page.evaluate(() => window.__wp.sim.debugSetHeat(window.__wp.app.player, 0.6));
 const c0 = await player();
@@ -110,34 +110,47 @@ const { heat0, r, heat1 } = await page.evaluate(() => {
   const heat0 = wp.sim.policeStatus(wp.app.player)?.heat ?? null;
   const r = wp.sim.resetInPlace(wp.app.player);
   const heat1 = wp.sim.policeStatus(wp.app.player)?.heat ?? null;
+  // Sample the player's drawn visibility every frame from the reset on, while the ghost window
+  // lasts: on a slow machine the whole window is a few frames, gone before a later evaluate.
+  const p = wp.app.player;
+  const seen = (window.__ghostSeen = new Set());
+  const sample = () => {
+    if (wp.sim.ghostTicks(p) === 0) return;
+    seen.add(wp.app.views.get(p).root.visible);
+    requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
   return { heat0, r, heat1 };
 });
 await page.waitForTimeout(300);
 const c1 = await player();
 check(
   r.on_lane && dist2d([r.x, r.y], c0.pos) <= 15 && c1.upZ > 0.95,
-  `city chase: reset lands on a lane ${dist2d([r.x, r.y], c0.pos).toFixed(1)} m away, upright`,
+  `night run: reset lands on a lane ${dist2d([r.x, r.y], c0.pos).toFixed(1)} m away, upright`,
 );
-check(heat0 !== null && heat0 > 0 && heat1 === heat0, `city chase: heat unchanged by the reset (${heat0} → ${heat1})`);
+check(heat0 !== null && heat0 > 0 && heat1 === heat0, `night run: heat unchanged by the reset (${heat0} → ${heat1})`);
 // Ghost window: 1 s through traffic (wp_sim GhostHooks; pass-through is proven natively in
 // wp_sim's tests), the car blinks meanwhile, then it is solid again.
 const ghost = await page.evaluate(async () => {
   const wp = window.__wp;
   const p = wp.app.player;
   const at0 = wp.sim.ghostTicks(p);
-  const seen = new Set();
-  for (let i = 0; i < 20; i++) {
+  // Frames sampled since the reset (above) plus a few more while the window lasts.
+  const seen = window.__ghostSeen;
+  for (let i = 0; i < 20 && wp.sim.ghostTicks(p) > 0; i++) {
     await new Promise((r) => requestAnimationFrame(r));
     seen.add(wp.app.views.get(p).root.visible);
   }
   const t0 = performance.now();
   while (wp.sim.ghostTicks(p) > 0 && performance.now() - t0 < 8000) await new Promise((r) => setTimeout(r, 100));
   await new Promise((r) => requestAnimationFrame(r));
-  return { at0, blinked: seen.size === 2, after: wp.sim.ghostTicks(p), visible: wp.app.views.get(p).root.visible };
+  // Blinked = hidden in at least one ghost frame and drawn again afterwards.
+  const visible = wp.app.views.get(p).root.visible;
+  return { at0, blinked: seen.has(false) && visible, after: wp.sim.ghostTicks(p), visible };
 });
 check(
   r.ghost_ticks === 240 && ghost.blinked && ghost.after === 0 && ghost.visible,
-  `city chase: the reset car is a ghost for 1 s and blinks, then solid and drawn again (ghost ${r.ghost_ticks} ticks, blinked ${ghost.blinked}, after ${ghost.after})`,
+  `night run: the reset car is a ghost for 1 s and blinks, then solid and drawn again (ghost ${r.ghost_ticks} ticks, blinked ${ghost.blinked}, after ${ghost.after})`,
 );
 
 // 3. Career run: reset in place, no repair.

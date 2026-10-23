@@ -301,6 +301,17 @@ fn traffic_weather_events_and_captain_on_the_real_sim() {
         replies.get(&bad_unit),
         Some(&Err(CaptainError::UnknownUnit))
     );
+    // The captain's priority line goes through the radio queue (one transmission at a time, see
+    // wp_police::radio; critical lines live 15 s): give it up to 20 s to be spoken. With the
+    // shipped brake bias a racer rams a unit first, and the assault call holds the channel.
+    for _ in 0..200 {
+        if h.peers[2].client.game_events.iter().any(|e| {
+            matches!(e, SimEvent::Police(PoliceEvent::Radio { text, .. }) if text.contains("priority"))
+        }) {
+            break;
+        }
+        h.run_secs(0.1);
+    }
     assert!(h.peers[2].client.game_events.iter().any(|e| matches!(
         e,
         SimEvent::Police(PoliceEvent::Radio { text, .. }) if text.contains("priority")

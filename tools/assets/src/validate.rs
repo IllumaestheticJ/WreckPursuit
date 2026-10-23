@@ -110,6 +110,12 @@ pub fn validate(car: &LoadedCar, mesh: &CarMesh, panels: Option<&PanelSpec>) -> 
                 {
                     errs.push(format!("{tag}: weights must sum to 255"));
                 }
+                if p.rigid
+                    && (p.skin_nodes.iter().any(|&i| i != p.skin_nodes[0])
+                        || p.skin_weights.chunks(4).any(|w| w != [255, 0, 0, 0]))
+                {
+                    errs.push(format!("{tag}: rigid parts bind one node, weight 255"));
+                }
                 if let Some(f) = &p.fold {
                     if f.weights.len() != n * 3 {
                         errs.push(format!("{tag}: fold weights need 3 per vertex"));
@@ -141,12 +147,6 @@ pub fn validate(car: &LoadedCar, mesh: &CarMesh, panels: Option<&PanelSpec>) -> 
                     if !(1.0..=3.0).contains(&f.gain) || !(0.0..=0.4).contains(&f.max_m) {
                         errs.push(format!("{tag}: fold gain / max out of range"));
                     }
-                }
-                if p.rigid
-                    && (p.skin_nodes.iter().any(|&i| i != p.skin_nodes[0])
-                        || p.skin_weights.chunks(4).any(|w| w != [255, 0, 0, 0]))
-                {
-                    errs.push(format!("{tag}: rigid parts bind one node, weight 255"));
                 }
                 for v in 0..n {
                     let q = p.vertex(v);

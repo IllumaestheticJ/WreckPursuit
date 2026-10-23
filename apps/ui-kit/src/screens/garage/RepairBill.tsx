@@ -160,7 +160,7 @@ export function RepairBill() {
                   {r.insurance && (
                     <div class="wp-spread">
                       <span class="wp-dim2">Insurance ({r.insurance})</span>
-                      {bill.claimDenied ? <Badge tone="danger">Denied: damage while wanted</Badge> : <Money value={-bill.insuranceCovers} signed tone />}
+                      {bill.claimDenied ? <Badge tone="danger">Denied: damage before capture</Badge> : <Money value={-bill.insuranceCovers} signed tone />}
                     </div>
                   )}
                 </>

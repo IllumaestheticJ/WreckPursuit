@@ -5,7 +5,8 @@
 // buttons; the finger's position across them is the analogue value, so sliding inwards steers
 // less) or tilt-to-steer; brake and throttle pedals bottom-right (analogue by the finger's
 // height on the pedal: low = light, high = full; slide to modulate); handbrake next to the
-// pedals; map / pause top-right; camera / reset / steering mode above the steering. Portrait shows a
+// pedals; map / pause top-right; camera / reset / horn / steering mode above the steering
+// (the horn also challenges a street racer you are right behind, src/ui/street.ts). Portrait shows a
 // "rotate your phone" hint.
 //
 // Values reach the sim through `input.ts` exactly like the gamepad's (registered with
@@ -157,7 +158,7 @@ html.wp-touch #pursuit-banner span { font-size: 12px; }
 html.wp-touch #audio-panel, html.wp-touch #weather-hud { display: none !important; }
 html.wp-touch .wp-chase-col { font-size: 12px; width: 180px; top: calc(env(safe-area-inset-top, 0px) + 6px); }
 html.wp-touch .wp-chase-col .wp-hud-alerts { width: 200px; }
-html.wp-touch .wp-race-hud { left: auto; right: calc(env(safe-area-inset-right, 0px) + 12px); top: calc(env(safe-area-inset-top, 0px) + 60px); width: min(240px, 36vw); font-size: 11px; }
+html.wp-touch .wp-race-hud, html.wp-touch #street-hud { left: auto; right: calc(env(safe-area-inset-right, 0px) + 12px); top: calc(env(safe-area-inset-top, 0px) + 60px); width: min(240px, 36vw); font-size: 11px; }
 `;
 
 interface Finger {
@@ -182,6 +183,9 @@ export class TouchControls {
   private throttle = 0;
   private brake = 0;
   private hbrake = false;
+  /** Horn held (the 📯 button). */
+  private horn = false;
+  private readonly hornEl: HTMLElement;
   /** Slewed steering sent to the sim. */
   private steer = 0;
   private tiltSteer = 0;
@@ -251,6 +255,30 @@ export class TouchControls {
     };
     edgeBtn("cameraCycle", "🎥", "camera", side);
     edgeBtn("reset", "↺", "reset the car", side);
+    // Horn (held): also challenges a street racer you are right behind.
+    this.hornEl = el("tc", "📯", side);
+    this.hornEl.dataset.touch = "horn";
+    this.hornEl.title = "horn (challenge a street racer)";
+    const hornUp = (e: PointerEvent) => {
+      if (!this.horn) return;
+      e.preventDefault();
+      this.setHorn(false);
+    };
+    this.hornEl.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        this.hornEl.setPointerCapture(e.pointerId);
+      } catch {
+        // synthetic events without an active pointer
+      }
+      this.touchedThisFrame = true;
+      this.setHorn(true);
+    });
+    this.hornEl.addEventListener("pointerup", hornUp);
+    this.hornEl.addEventListener("pointercancel", hornUp);
+    this.hornEl.addEventListener("lostpointercapture", hornUp);
+    this.hornEl.addEventListener("contextmenu", (ev) => ev.preventDefault());
     this.modeEl = el("tc mode", "", side);
     this.modeEl.dataset.touch = "steerMode";
     this.modeEl.title = "steering: buttons or tilt";
@@ -435,8 +463,14 @@ export class TouchControls {
     }
   }
 
+  private setHorn(on: boolean): void {
+    this.horn = on;
+    this.hornEl.classList.toggle("on", on);
+  }
+
   /** Let go of everything (blur, tab hidden, controls hidden). */
   releaseAll(): void {
+    this.setHorn(false);
     for (const id of this.fingers.keys()) {
       for (const e of [this.steerEl, this.throttleEl, this.brakeEl, this.hbrakeEl]) {
         try {
@@ -469,11 +503,11 @@ export class TouchControls {
       clutch: 0,
       gearUp: false,
       gearDown: false,
-      horn: false,
+      horn: this.horn,
       headlights: false,
     };
     const tilting = this.mode === "tilt" && this.driving && this.tiltSteer !== 0;
-    const active = this.touchedThisFrame || this.fingers.size > 0 || tilting;
+    const active = this.touchedThisFrame || this.fingers.size > 0 || tilting || this.horn;
     this.touchedThisFrame = false;
     const edges = this.edges.splice(0);
     return { input, active, edges };

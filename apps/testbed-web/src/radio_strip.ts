@@ -5,11 +5,27 @@
 // up, after the scanner tier's delay), or straight from the police events while the audio is
 // not running (before the first click, scanner tier "None", audio failed). wp_police paces the
 // radio (one transmission at a time), so the strip never needs to queue.
+//
+// Priority tiers (owner playtest row 144): tiers 1–2 are highlighted (bold, an icon: ⚠ for
+// tier 1 warnings, ▲ for tier 2 escalation) and stay on screen longer; tier 3 (impacts,
+// wrecks) gets an urgent red style; tiers 4–5 are dimmed. Tier 0 = unknown (plain).
 
 /** Lines kept on the strip. */
 const MAX_LINES = 3;
 /** A line is fully visible this long, then fades, ms. */
 const SHOW_MS = 7000;
+/** Tiers 1–2 stay this long, ms. */
+const SHOW_IMPORTANT_MS = 12000;
+
+/** Strip icon for a tier ("" = none). */
+export function tierIcon(tier: number): string {
+  return tier === 1 ? "⚠" : tier === 2 ? "▲" : tier === 3 ? "✸" : "";
+}
+
+/** How long a line of `tier` stays fully visible, ms. */
+export function showMs(tier: number): number {
+  return tier === 1 || tier === 2 ? SHOW_IMPORTANT_MS : SHOW_MS;
+}
 /** Fade-out length, ms. */
 const FADE_MS = 1500;
 
@@ -34,6 +50,7 @@ export function callsignColour(callsign: string): string {
 interface Shown {
   el: HTMLElement;
   born: number;
+  show: number;
 }
 
 export class RadioStrip {
@@ -53,12 +70,21 @@ export class RadioStrip {
     parent.appendChild(this.el);
   }
 
-  /** Show a transmission. `unit` = police unit id (null / 0 = dispatch). */
-  push(unit: number | null, text: string, nowMs = performance.now()): void {
+  /** Show a transmission. `unit` = police unit id (null / 0 = dispatch); `tier` = police
+   * priority tier (1 actionable … 5 routine, 0 unknown). */
+  push(unit: number | null, text: string, nowMs = performance.now(), tier = 0): void {
     const { callsign, rest } = splitCallsign(text);
     const line = document.createElement("div");
-    line.className = "radio-line";
+    line.className = `radio-line tier-${tier}`;
     line.dataset.unit = String(unit ?? 0);
+    line.dataset.tier = String(tier);
+    const icon = tierIcon(tier);
+    if (icon) {
+      const i = document.createElement("i");
+      i.className = "radio-icon";
+      i.textContent = icon;
+      line.appendChild(i);
+    }
     const chip = document.createElement("b");
     chip.className = "radio-cs";
     chip.textContent = (callsign || (unit ? `Unit ${unit}` : "Radio")).toUpperCase();
@@ -69,7 +95,7 @@ export class RadioStrip {
     body.textContent = rest;
     line.append(chip, body);
     this.el.appendChild(line);
-    this.shown.push({ el: line, born: nowMs });
+    this.shown.push({ el: line, born: nowMs, show: showMs(tier) });
     while (this.shown.length > MAX_LINES) this.shown.shift()!.el.remove();
     this.count++;
     this.recent.push(text);
@@ -80,9 +106,16 @@ export class RadioStrip {
   frame(nowMs: number): void {
     for (const s of this.shown) {
       const age = nowMs - s.born;
-      s.el.style.opacity = age <= SHOW_MS ? "1" : String(Math.max(0, 1 - (age - SHOW_MS) / FADE_MS));
+      s.el.style.opacity = age <= s.show ? "" : String(Math.max(0, 1 - (age - s.show) / FADE_MS));
     }
-    while (this.shown.length && nowMs - this.shown[0].born > SHOW_MS + FADE_MS) this.shown.shift()!.el.remove();
+    // Oldest first, but a highlighted line outlives plain ones pushed after it.
+    for (let k = this.shown.length - 1; k >= 0; k--) {
+      const s = this.shown[k];
+      if (nowMs - s.born > s.show + FADE_MS) {
+        s.el.remove();
+        this.shown.splice(k, 1);
+      }
+    }
     this.el.classList.toggle("empty", this.shown.length === 0);
   }
 

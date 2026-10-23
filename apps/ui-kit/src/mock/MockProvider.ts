@@ -423,7 +423,13 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
         ...captain.suspects.filter((x) => x.id !== player).map((x) => ({ id: x.id, kind: "racer" as const, pos: x.pos, headingRad: x.headingRad })),
         ...captain.units
           .filter((u) => u.assignment !== "out-of-service")
-          .map((u) => ({ id: u.id, kind: u.kind === "Helicopter" ? ("helicopter" as const) : ("police" as const), pos: u.pos, headingRad: u.headingRad })),
+          .map((u): MapBlip => {
+            if (u.kind !== "Helicopter") return { id: u.id, kind: "police", pos: u.pos, headingRad: u.headingRad };
+            // Labelled with the radio's call sign ("Air 9"), tethered to the racer it tracks (PR #32).
+            const target = u.assignment === "helo-track" ? u.target : null;
+            const tracking = target === player ? (pose?.pos ?? s.hud.pos) : captain.suspects.find((x) => x.id === target)?.pos;
+            return { id: u.id, kind: "helicopter", pos: u.pos, headingRad: u.headingRad, label: `AIR ${u.id}`, tracking };
+          }),
       ];
       const race = raceHud(tick);
       if (race) blips.push({ id: -1, kind: "checkpoint", pos: race.nextCheckpoint });
@@ -624,7 +630,7 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
           outstanding: { lines: remaining, total: remaining.reduce((a, l) => a + l.total, 0) },
           health: remaining.length ? healthAfter(remaining) : 1,
           totalLoss: car.totalLoss && remaining.some((l) => "Region" in l.item && (l.item.Region === "FrameFront" || l.item.Region === "Cabin")),
-          sustainedWhileWanted: remaining.length > 0 && car.sustainedWhileWanted,
+          sustainedBeforeCapture: remaining.length > 0 && car.sustainedBeforeCapture,
         };
         repaired.drivable = !repaired.totalLoss;
         const note = shop.kind === "legit" && wanted(s) && ["L2", "L3", "L4", "L5"].includes(s.hud.heat.level) ? " The shop reported you to the police." : "";
@@ -683,7 +689,7 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
           location: { kind: "Garage" },
           insurance: null,
           outstanding: { lines: [], total: 0 },
-          sustainedWhileWanted: false,
+          sustainedBeforeCapture: false,
           value: 0,
         };
         car.value = carValue(car);

@@ -211,8 +211,8 @@ fn csv_export_has_one_row_per_sample() {
 }
 
 #[test]
-fn city_chase_speeding_player_gets_heat() {
-    let sc = crate::scenario::city_chase("debug_sedan", DamageMode::Arcade);
+fn night_run_speeding_player_gets_heat() {
+    let sc = crate::scenario::night_run("debug_sedan", DamageMode::Arcade);
     let mut s = Session::new(sc, false).unwrap();
     let p = EntityId(1);
     assert!(s.sim().world().agent_count() == 0 || s.has_city());
@@ -330,7 +330,7 @@ fn one_click_assist_presets_set_mode_and_assists_together() {
     }
     // Ticking one box afterwards makes it a custom setup.
     let mut a = s.assists(p).unwrap();
-    a.abs = true;
+    a.abs = wp_contracts::AbsLevel::Full;
     s.set_assists(p, a).unwrap();
     assert_eq!(
         AssistPreset::matching(&s.assists(p).unwrap(), s.mode(), InputSource::Keyboard),
@@ -421,11 +421,11 @@ fn reset_in_place_repairs_near_the_crash_and_replays() {
     }
 }
 
-/// In a city chase, reset in place lands on a lane near the car, heading its way, and keeps
+/// In a night run, reset in place lands on a lane near the car, heading its way, and keeps
 /// the police heat.
 #[test]
 fn reset_in_place_in_the_city_snaps_to_a_lane_and_keeps_heat() {
-    let sc = crate::scenario::city_chase("debug_sedan", DamageMode::Arcade);
+    let sc = crate::scenario::night_run("debug_sedan", DamageMode::Arcade);
     let mut s = Session::new(sc, false).unwrap();
     let p = EntityId(1);
     s.set_input(p, drive(0.6, 0.15)).unwrap();
@@ -447,8 +447,8 @@ fn reset_in_place_in_the_city_snaps_to_a_lane_and_keeps_heat() {
 }
 
 #[test]
-fn city_chase_uses_mixed_police_and_traffic_fleets() {
-    let sc = crate::scenario::city_chase("debug_sedan", DamageMode::Arcade);
+fn night_run_uses_mixed_police_and_traffic_fleets() {
+    let sc = crate::scenario::night_run("debug_sedan", DamageMode::Arcade);
     assert!(sc.car_mix);
     let mut s = Session::new(sc, false).unwrap();
     s.set_input(EntityId(1), drive(0.6, 0.0)).unwrap();
@@ -489,9 +489,12 @@ fn city_chase_uses_mixed_police_and_traffic_fleets() {
         "traffic models in use: {models_seen:?}"
     );
     // Non-sim police units carry their stable id and model in the stream.
-    let units = crate::police::units(s.sim().police(), &|_| 0.0, &|u| {
-        s.sim().police_unit_model(u).map_or(-1.0, |m| m as f32)
-    });
+    let units = crate::police::units(
+        s.sim().police(),
+        &|_| 0.0,
+        &|u| s.sim().police_unit_model(u).map_or(-1.0, |m| m as f32),
+        &crate::police::Agencies::default(),
+    );
     assert_eq!(units.len() % crate::police::UNIT_STRIDE, 0);
     for u in units.chunks(crate::police::UNIT_STRIDE) {
         assert!(u[6] >= 0.0 && u[7] >= -1.0 && u[7] < 5.0, "{u:?}");

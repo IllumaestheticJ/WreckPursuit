@@ -40,14 +40,45 @@ heat = 20.0
 min_level = 2
 nearby_units_m = 60.0
 
-# Blatant speeding right past a unit (owner playtest row 60): a speeding violation this far
-# over the limit within range_m of an in-service unit that can see it is recognised at once
-# (no recognition_time_s wait): wanted >= min_level and a pursuit by that unit. At night a
-# pursuit otherwise needs 40 m for 4 s, which a car passing at 150 km/h never gives.
+# Blatant speeding right past a unit (owner playtest rows 60 / 80): a speeding violation this
+# far over the limit within range_m of an in-service unit that can see it (oncoming, parked or
+# driving the same way) is recognised at once: wanted >= min_level and a pursuit by that unit.
+# Row 80: 20 km/h over within 90 m (was 40 km/h within 60 m; a pass at 20-40 km/h over made the
+# racer wanted with no chase).
 [heat.blatant]
-over_mps = 11.1
-range_m = 60.0
+over_mps = 5.5
+range_m = 90.0
 min_level = 1
+
+# Field of view of a ground unit (row 89): line of sight within the phase's range (below) in a
+# forward cone this wide, and all round this close (mirrors).
+[heat.sight]
+fov_deg = 200.0
+all_round_m = 60.0
+
+# Radar (owner report 2026-10-21, "cops are seeing me but not triggering pursuit"): a unit that
+# can see a racer (sight, line of sight, witness range) clocks it. Over the limit where it drives
+# by more than max(margin_mps, ratio x limit) is a witnessed speeding violation. wp_world only reports speeding against a lane pointing the car's way,
+# every 5 s: on the wrong side of the road, or between two reports, a speeder was seen but never
+# clocked. Same margins as wp_world's detector. Only racers not wanted yet are clocked (a wanted
+# racer a unit sees is recognised and pursued anyway).
+[heat.radar]
+margin_mps = 2.24
+ratio = 0.1
+# Clock only when no speeding counted for this long (wp_world's repeat): the same heat rate as
+# the world's reports, just never missed while a unit watches.
+repeat_s = 5.0
+# Speeding in sight this long before it is clocked (wp_world's hold). The limit is the higher
+# of the lane's and the police road graph's (at a junction the lane can be the cross street).
+hold_s = 1.0
+
+# Recognising an already-wanted car the unit did not see offend (rows 80 / 89):
+# recognition_time_s within near_m, + far_extra_s at the edge of recognition_range_m (linear).
+# Out of sight the timer drains at decay_per_s instead of resetting.
+[heat.recognition]
+near_m = 150.0
+far_extra_s = 2.0
+decay_per_s = 0.5
 
 [heat.violation]
 speeding_base = 2.0
@@ -57,26 +88,32 @@ wrong_way = 4.0
 collision = 8.0
 reckless = 3.0
 
-# A unit with line of sight within this range witnesses a violation. Shorter at night.
+# Owner playtest row 89, "if I can see them, they can see me": a unit with line of sight within
+# this range witnesses a violation (was 70-160 m). Headlights and street lights make a moving
+# car visible far at night too. Fog and rain shorten it further through the weather sight range
+# (wp_weather's line_of_sight cap, the same one the renderer's fog follows).
 [heat.witness_range_m]
-dawn = 120.0
-day = 160.0
-dusk = 120.0
-night = 70.0
+dawn = 320.0
+day = 380.0
+dusk = 320.0
+night = 260.0
 
-# A unit with line of sight within this range recognises a wanted car and starts a pursuit.
+# A unit with line of sight within this range recognises a wanted car and starts a pursuit (the
+# same range: what it can see it can recognise, given time; was 40-250 m).
 [heat.recognition_range_m]
-dawn = 120.0
-day = 250.0
-dusk = 120.0
-night = 40.0
+dawn = 320.0
+day = 380.0
+dusk = 320.0
+night = 260.0
 
-# ...after this many seconds of continuous sight (a glimpse at night is not enough).
+# ...after this many seconds of sight within heat.recognition.near_m (longer further out, see
+# [heat.recognition]). Only for a wanted car the unit did not see offend: a witnessed violation
+# that makes the racer wanted starts the pursuit at once (row 80).
 [heat.recognition_time_s]
-dawn = 2.0
-day = 0.3
-dusk = 2.0
-night = 4.0
+dawn = 0.8
+day = 0.5
+dusk = 0.8
+night = 1.0
 
 # Heat lost per second while unseen and not pursued. Faster at night.
 [heat.decay_per_s]
@@ -109,6 +146,10 @@ unit_radius_m = 15.0
 # pinned_time_s with a unit close is a capture too.
 pinned_radius_m = 4.0
 pinned_time_s = 6.0
+# ... with a unit within this range (wider than unit_radius_m: a racer stuck in a jam, the
+# police held up behind other cars 20 m away, is captured, not waited for forever; Hollins
+# hairpin, lead/opponent-pace).
+pinned_unit_radius_m = 30.0
 
 [safehouse]
 dwell_s = 10.0

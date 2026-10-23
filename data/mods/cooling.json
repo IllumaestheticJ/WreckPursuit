@@ -3,7 +3,7 @@
   "mods": [
     {"id": "cooling_radiator_1", "name": "Aluminium Radiator", "slot": "Cooling", "line": "radiator", "tier": 1, "price": 800, "effects": [{"Tool": {"kind": "ReinforcedCooling", "tier": 1}}, {"Durability": {"target": {"Component": "Radiator"}, "scale": 1.15, "mass_kg": 3.0}}], "tradeoff": "+3 kg."},
     {"id": "cooling_radiator_2", "name": "Race Radiator", "slot": "Cooling", "line": "radiator", "tier": 2, "price": 1800, "effects": [{"Tool": {"kind": "ReinforcedCooling", "tier": 2}}, {"Durability": {"target": {"Component": "Radiator"}, "scale": 1.3, "mass_kg": 5.0}}], "tradeoff": "+5 kg; bigger core sits further forward."},
-    {"id": "cooling_intercooler_1", "name": "Front-mount Intercooler", "slot": "Cooling", "line": "intercooler", "tier": 1, "price": 1500, "effects": [{"Vehicle": {"param": "engine.torque_scale", "op": "Mul", "value": 1.02}}, {"Vehicle": {"param": "body.mass_kg", "op": "Add", "value": 6.0}}], "tradeoff": "+6 kg in the nose; first thing hit in a front crash."},
+    {"id": "cooling_intercooler_1", "name": "Front-mount Intercooler", "slot": "Cooling", "line": "intercooler", "tier": 1, "price": 1500, "effects": [{"Vehicle": {"param": "engine.torque_scale", "op": "Mul", "value": 1.02}}, {"Vehicle": {"param": "body.mass_kg", "op": "Add", "value": 6.0}}], "visuals": [{"part": "Intercooler", "style": "fmic"}], "tradeoff": "+6 kg in the nose; first thing hit in a front crash."},
     {"id": "cooling_oil_cooler", "name": "Oil Cooler", "slot": "Cooling", "line": "oil_cooler", "tier": 1, "price": 700, "effects": [{"Tool": {"kind": "ReinforcedCooling", "tier": 1}}, {"Vehicle": {"param": "body.mass_kg", "op": "Add", "value": 3.0}}], "tradeoff": "+3 kg."}
   ]
 }

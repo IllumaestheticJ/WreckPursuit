@@ -1,6 +1,6 @@
 //! Race purses, buy-ins, clean-race bonus, rep, pink slips and informant tips.
 //!
-//! `winner purse = max(min_purse, base_per_km × km) × class × day phase × mode × purse_scale × wanted`;
+//! `winner purse = max(min_purse, base_per_km × km) × class × day phase × mode × wanted`;
 //! position `n` gets `placement_share[n-1]` of it; a clean race (no contact, no violations
 //! beyond speeding) adds `clean_bonus` on top. Buy-in = `entry_frac × base purse × phase.entry`.
 
@@ -41,18 +41,6 @@ pub struct RaceSetup {
     pub phase: DayPhase,
     /// Damage mode of the instance.
     pub mode: DamageMode,
-    /// Multiplier on the winner purse so the economy pays the stake the lobby advertised
-    /// (`wp_race::bridge::economy_race`, R5: the event stake table is flat per kind, the
-    /// economy prices per km). 1 = the economy's own purse.
-    #[serde(default = "unit_scale")]
-    pub purse_scale: f32,
-    /// Multiplier on the buy-in, for the same reason. 1 = the economy's own buy-in.
-    #[serde(default = "unit_scale")]
-    pub entry_scale: f32,
-}
-
-fn unit_scale() -> f32 {
-    1.0
 }
 
 /// One racer's result (server-validated).
@@ -125,8 +113,6 @@ impl Economy {
             route_length_m,
             phase,
             mode,
-            purse_scale: 1.0,
-            entry_scale: 1.0,
         }
     }
 
@@ -160,8 +146,7 @@ impl Economy {
         money(
             self.base_purse_raw(s)
                 * self.stakes.day_phase[&s.phase].purse
-                * self.stakes.mode_purse[&s.mode]
-                * s.purse_scale,
+                * self.stakes.mode_purse[&s.mode],
         )
     }
 
@@ -172,8 +157,7 @@ impl Economy {
             self.base_purse_raw(s)
                 * rt.entry_frac
                 * self.kind_multipliers(s).1
-                * self.stakes.day_phase[&s.phase].entry
-                * s.entry_scale,
+                * self.stakes.day_phase[&s.phase].entry,
         )
     }
 

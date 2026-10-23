@@ -131,6 +131,18 @@ pub fn load_car(src: &dyn DataSource, car_id: &str) -> Result<LoadedCar, RunErro
     let rel = format!("cars/{car_id}.json");
     let def = wp_contracts::parse_vehicle_def(&rel, &src.read(&rel)?)?;
     check_id(&rel, &def.id)?;
+    let rel = format!("lattices/{}.json", def.lattice_id);
+    let lattice = wp_contracts::parse_lattice_def(&rel, &src.read(&rel)?)?;
+    check_id(&rel, &lattice.id)?;
+    resolve(src, def, lattice)
+}
+
+/// Resolve a definition and its lattice against the tires and materials they reference.
+fn resolve(
+    src: &dyn DataSource,
+    def: wp_contracts::VehicleDef,
+    lattice: wp_contracts::LatticeDef,
+) -> Result<LoadedCar, RunError> {
     let mut tires = BTreeMap::new();
     for wheel in &def.wheels {
         if !tires.contains_key(&wheel.tire_id) {
@@ -140,9 +152,6 @@ pub fn load_car(src: &dyn DataSource, car_id: &str) -> Result<LoadedCar, RunErro
             tires.insert(tire.id.clone(), tire);
         }
     }
-    let rel = format!("lattices/{}.json", def.lattice_id);
-    let lattice = wp_contracts::parse_lattice_def(&rel, &src.read(&rel)?)?;
-    check_id(&rel, &lattice.id)?;
     let mut materials = BTreeMap::new();
     for beam in &lattice.beams {
         if !materials.contains_key(&beam.material_id) {
@@ -158,6 +167,42 @@ pub fn load_car(src: &dyn DataSource, car_id: &str) -> Result<LoadedCar, RunErro
         &[lattice],
         &materials,
     )?)
+}
+
+/// The mod catalog from `mods/<pack>.json` (the packs in `wp_economy::data::MOD_PACKS`).
+pub fn load_mod_catalog(src: &dyn DataSource) -> Result<wp_economy::ModCatalog, RunError> {
+    let mut packs = Vec::new();
+    for stem in wp_economy::data::MOD_PACKS {
+        let rel = format!("mods/{stem}.json");
+        let pack: wp_economy::mods::ModPack = serde_json::from_str(&src.read(&rel)?)
+            .map_err(|e| RunError::Scenario(rel.clone(), e.to_string()))?;
+        packs.push(pack);
+    }
+    wp_economy::ModCatalog::from_packs(packs)
+        .map_err(|e| RunError::Scenario("mods".into(), e.to_string()))
+}
+
+/// Load a car with `mods` installed (`wp_economy::mods::apply_mods`: a legal set for its class;
+/// only mods active in `mode` change the physics). The result is the car the sim drives: tuned
+/// engine, fitted tires, stiffer springs, reinforced lattice. An empty set is [`load_car`].
+pub fn load_modded_car(
+    src: &dyn DataSource,
+    catalog: &wp_economy::ModCatalog,
+    car_id: &str,
+    mods: &[String],
+    mode: DamageMode,
+) -> Result<LoadedCar, RunError> {
+    let base = load_car(src, car_id)?;
+    if mods.is_empty() {
+        return Ok(base);
+    }
+    let what = format!("{car_id} mods");
+    let set = catalog
+        .validate_set(base.def.class, mods)
+        .map_err(|e| RunError::Scenario(what.clone(), e.to_string()))?;
+    let applied = wp_economy::mods::apply_mods(&base.def, &base.lattice, &set, Some(mode))
+        .map_err(|e| RunError::Scenario(what, e.to_string()))?;
+    resolve(src, applied.vehicle, applied.lattice)
 }
 
 /// Load the mode table for a damage mode.
@@ -197,11 +242,26 @@ pub fn load_world(
             };
             Some(wp_world::World::procedural(&pg, cfg))
         }
+        CitySpec::Preset { name, .. } if wp_world::touge::is_touge(name) => {
+            Some(wp_world::World::touge(name, cfg).expect("built-in touge pass generates"))
+        }
         CitySpec::Preset { name, seed } => {
+            if name == wp_world::ashpeak::CITY_ID {
+                let vc = wp_world::vesper::VesperConfig {
+                    seed: *seed,
+                    ..wp_world::ashpeak::default_config()
+                };
+                return Ok(Some(wp_world::World::ashpeak(&vc, cfg)));
+            }
             if name != wp_world::vesper::CITY_ID {
                 return Err(RunError::Scenario(
                     name.clone(),
-                    format!("unknown city preset (known: {})", wp_world::vesper::CITY_ID),
+                    format!(
+                        "unknown city preset (known: {}, {}, {})",
+                        wp_world::vesper::CITY_ID,
+                        wp_world::ashpeak::CITY_ID,
+                        wp_world::touge::TOUGE_IDS.join(", ")
+                    ),
                 ));
             }
             let vc = wp_world::vesper::VesperConfig {
@@ -254,5 +314,32 @@ mod tests {
         let reference = wp_contracts::load_car(root().join("cars/debug_sedan.json")).unwrap();
         assert_eq!(a.def, reference.def);
         assert!(car_ids(&root()).contains(&"debug_coupe".to_string()));
+    }
+
+    #[test]
+    fn modded_car_is_the_applied_build() {
+        let fs = FsData::new(root());
+        let catalog = load_mod_catalog(&fs).unwrap();
+        let stock = load_car(&fs, "kestrel_ts").unwrap();
+        let mods: Vec<String> = ["tires_semi_slick", "tires_wide", "prot_cage_1"]
+            .map(String::from)
+            .to_vec();
+        let car = load_modded_car(&fs, &catalog, "kestrel_ts", &mods, DamageMode::Arcade).unwrap();
+        // The fitted compound is resolved, the tires are wider, the cage adds lattice beams.
+        assert!(car.tires.contains_key("semi_slick"));
+        assert!(car.def.wheels.iter().all(|w| w.tire_id == "semi_slick"));
+        assert!(car.def.wheels[0].width_m > stock.def.wheels[0].width_m);
+        assert!(car.lattice.beams.len() > stock.lattice.beams.len());
+        // Illegal sets are refused with the economy's reason.
+        let err = load_modded_car(
+            &fs,
+            &catalog,
+            "kestrel_ts",
+            &["aero_wing_2".to_string()],
+            DamageMode::Arcade,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("requires"), "{err}");
     }
 }

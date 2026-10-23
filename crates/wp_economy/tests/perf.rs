@@ -59,8 +59,6 @@ fn perf() {
         route_length_m: 9000.0,
         phase: DayPhase::Night,
         mode: DamageMode::Arcade,
-        purse_scale: 1.0,
-        entry_scale: 1.0,
     };
     let res = RaceResult {
         placement: 1,

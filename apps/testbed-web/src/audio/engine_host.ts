@@ -9,6 +9,9 @@ import { EF, EF_COUNT, ENGINE_PROCESSOR, ENGINE_SLOTS, engineWorkletSource } fro
 import type { SynthVoice } from "./synth";
 import type { VoiceParams } from "./types";
 
+/** Per-engine test counters from the worklet (see `EngineDspApi`). */
+export type EngineCounters = Record<string, number> & { popAt?: number[] };
+
 interface Slot {
   /** Entity the slot plays (0 = free). */
   entity: number;
@@ -160,14 +163,17 @@ export class EngineSynthHost {
     this.node.port.postMessage({ t: "frame", data: this.frame.slice() });
   }
 
-  /** The worklet's per-slot counters (events, misfires, pops, cuts, blow-offs); tests. */
-  counters(): Promise<(Record<string, number> | null)[]> {
+  /**
+   * The worklet's per-slot counters (events, misfires, pops, cuts, blow-offs) and pop onsets
+   * (`popAt`, samples since the slot's engine started); tests.
+   */
+  counters(): Promise<(EngineCounters | null)[]> {
     return new Promise((resolve) => {
       const port = this.node.port;
       const done = (e: MessageEvent) => {
         if ((e.data as { t?: string })?.t !== "stats") return;
         port.removeEventListener("message", done);
-        resolve((e.data as { counters: (Record<string, number> | null)[] }).counters);
+        resolve((e.data as { counters: (EngineCounters | null)[] }).counters);
       };
       port.addEventListener("message", done);
       port.start();

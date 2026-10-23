@@ -9,6 +9,10 @@ civilian_hit_threshold_ns = 400.0
 # Gate tolerance = base + per_mps_s × speed. 0.02 s ≈ one sample at 60 Hz with margin.
 gate_tolerance_base_m = 1.0
 gate_tolerance_per_mps_s = 0.02
+# Off-course resets only (leaving the route is never a DQ): the clock runs past the
+# corridor half-width + margin; after the grace time the racer is put back on the course.
+corridor_margin_m = 2.0
+corridor_grace_s = 3.0
 max_plausible_speed_mps = 110.0
 countdown_s = 3.0
 

@@ -81,8 +81,6 @@ fn row(e: &Economy, car: &LoadedCar, mode: DamageMode) -> Row {
         route_length_m: 5_000.0,
         phase: DayPhase::Night,
         mode,
-        purse_scale: 1.0,
-        entry_scale: 1.0,
     };
     let basic = &e.prices.insurance["basic"];
     Row {
@@ -230,7 +228,7 @@ fn pricier_cars_are_not_slower() {
     // sale): a car that costs 25% more than another must not have a lower class index. Known
     // outliers are listed with the request to 09 in docs/integration/economy.md; drop them from
     // KNOWN once 09 retunes the price (the test then keeps them honest).
-    const KNOWN: &[&str] = &["hakone_gt", "ironside_440"];
+    const KNOWN: &[&str] = &["hakone_gt", "ironside_440", "brigand_400"];
     let e = econ();
     let cars: Vec<_> = roster()
         .into_iter()

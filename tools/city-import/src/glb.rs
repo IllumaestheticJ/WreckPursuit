@@ -5,20 +5,21 @@
 //! faces along ribbon edges, ground per district and extruded buildings. Cities with terrain
 //! (Port Vesper v2) also get the terrain mesh (decimated, never above a road), a sea plane,
 //! retaining walls where roads sit above the ground, bridge decks with parapets and
-//! piers, tunnels / covered roads (walls, roof deck, emissive ceiling lights) and a concrete
-//! (Jersey-profile) median barrier between divided carriageways. Painted markings are not in
-//! the greybox: the testbed draws them from `wp_world::markings::marking_mesh` at run time.
-//! World space is +Z up; glTF is +Y up, so positions are written as `(x, z, -y)` (a
+//! piers, and tunnels / covered roads (walls, roof deck, emissive ceiling lights). Highways are paved from their road surfaces (lanes plus
+//! shoulders) with ramp taper connectors through freeway merges and diverges, and a concrete
+//! (Jersey-profile) median barrier between divided carriageways. World space is +Z up; glTF is +Y up, so positions are written as `(x, z, -y)` (a
 //! rotation, so triangle winding is preserved). Units are metres. Primitives with more than
 //! 65 535 vertices are split so every index buffer is 16-bit.
 
 use serde_json::json;
 use wp_world::geom::{self, V2, V3};
 use wp_world::map::CityMap;
-use wp_world::network::{Building, BuildingKind, DecorKind, DistrictKind, LaneKind, RoadNetwork};
+use wp_world::network::{
+    Building, BuildingKind, DecorKind, DistrictKind, LaneKind, RoadMaterial, RoadNetwork,
+};
 use wp_world::residential;
 use wp_world::surface::{
-    is_elevated, lane_bank, median_barriers, node_patches, rail_piece, sidewalk_mesh,
+    inside_other_paving, is_elevated, lane_bank, median_barriers, node_patches, sidewalk_mesh,
     surface_edges, surface_ribbon, TriMesh,
 };
 use wp_world::terrain::Heightfield;
@@ -478,11 +479,132 @@ fn render_terrain(
     }
 }
 
+/// Bridge piers: a block under every deck about every 30 m (`(footprint, bottom, top)`),
+/// 1.6 m deep and 80 % of the deck wide, down to the ground. A pier never stands on a road
+/// under its deck (an interchange crossroad over the highway) or beside one within 1.5 m:
+/// such sites move on to the next centreline point.
+pub fn deck_piers(net: &RoadNetwork) -> Vec<([V2; 4], f32, f32)> {
+    let Some(t) = &net.terrain else {
+        return Vec::new();
+    };
+    let ground_z = |q: V2| t.height_at(q);
+    let mut out = Vec::new();
+    for (si, s) in net.surfaces.iter().enumerate() {
+        let n = s.centre.len();
+        let deck: Vec<bool> = (0..n).map(|k| is_elevated(s, k, &ground_z, 1.5)).collect();
+        let cum = geom::cumulative(&s.centre);
+        let mut next_pier = 0.0;
+        for k in 0..n.saturating_sub(1) {
+            if !(deck[k] && deck[k + 1]) || cum[k] < next_pier {
+                continue;
+            }
+            let c = geom::xy(s.centre[k]);
+            let d = geom::normalize(geom::sub(geom::xy(s.centre[k + 1]), c));
+            let r = geom::right_of(d);
+            let half_w = 0.4 * (s.left_m + s.right_m);
+            let corner =
+                |a: f32, b: f32| geom::add(c, geom::add(geom::scale(d, a), geom::scale(r, b)));
+            let fp = [
+                corner(-0.8, -half_w),
+                corner(-0.8, half_w),
+                corner(0.8, half_w),
+                corner(0.8, -half_w),
+            ];
+            let fp = if signed_area(&fp) < 0.0 {
+                [fp[3], fp[2], fp[1], fp[0]]
+            } else {
+                fp
+            };
+            let mid = |a: V2, b: V2| geom::scale(geom::add(a, b), 0.5);
+            let probes = [
+                fp[0],
+                fp[1],
+                fp[2],
+                fp[3],
+                c,
+                mid(fp[0], fp[1]),
+                mid(fp[2], fp[3]),
+                mid(c, mid(fp[0], fp[1])),
+                mid(c, mid(fp[2], fp[3])),
+            ];
+            let deck_z = s.centre[k][2];
+            if probes.iter().any(|q| on_paving_below(net, si, *q, deck_z)) {
+                continue;
+            }
+            next_pier = cum[k] + 30.0;
+            let base = fp
+                .iter()
+                .map(|q| ground_z(*q))
+                .fold(f32::INFINITY, f32::min)
+                - 0.5;
+            out.push((fp, base, deck_z - 1.2));
+        }
+    }
+    out
+}
+
+/// Depth of a bridge deck's slab below its road surface, m (the slab sides, and how far a
+/// wall on a deck edge may hang).
+const DECK_SLAB_M: f32 = 1.2;
+
+/// Foot height of a wall whose top is at `top`: `foot` (down to the ground), except over the
+/// paving of a road below (an overpass's sidewalk back or edge over the road it crosses),
+/// where it ends at the deck slab's depth, clear of the traffic underneath (owner row 159:
+/// sidewalk-back walls on the interchange crossroads hung down onto Loop 9).
+fn wall_foot(net: &RoadNetwork, top: V3, foot: f32) -> f32 {
+    if top[2] - foot > DECK_SLAB_M && on_paving_below(net, usize::MAX, geom::xy(top), top[2]) {
+        top[2] - DECK_SLAB_M
+    } else {
+        foot
+    }
+}
+
+/// Whether `q` lies on (or within 1.5 m of) the paving of a road other than surface `si`, or
+/// a junction box, more than 1 m below height `z` (where a bridge pier must not stand).
+fn on_paving_below(net: &RoadNetwork, si: usize, q: V2, z: f32) -> bool {
+    const MARGIN_M: f32 = 1.5;
+    let roads = net.surfaces.iter().enumerate().any(|(oi, o)| {
+        if oi == si || o.centre.len() < 2 {
+            return false;
+        }
+        let (a, b) = (
+            geom::xy(o.centre[0]),
+            geom::xy(o.centre[o.centre.len() - 1]),
+        );
+        let w = o.left_m.max(o.right_m) + MARGIN_M;
+        if geom::dist(q, geom::scale(geom::add(a, b), 0.5)) > geom::dist(a, b) * 0.5 + w + 400.0 {
+            return false;
+        }
+        let cum = geom::cumulative(&o.centre);
+        let pr = geom::project(&o.centre, &cum, q);
+        let edge = if pr.lateral < 0.0 {
+            o.left_m
+        } else {
+            o.right_m
+        };
+        let len = cum[cum.len() - 1];
+        pr.s >= -MARGIN_M
+            && pr.s <= len + MARGIN_M
+            && pr.lateral.abs() <= edge + MARGIN_M
+            && geom::point_at(&o.centre, &cum, pr.s.clamp(0.0, len)).0[2] < z - 1.0
+    });
+    roads
+        || net.intersections.iter().any(|ix| {
+            let n = net.nodes[ix.node as usize].pos;
+            ix.radius_m > 0.0
+                && n[2] < z - 1.0
+                && geom::dist(q, geom::xy(n)) <= ix.radius_m + MARGIN_M
+        })
+}
+
 /// Build the greybox primitives for a city.
 pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let net = &map.net;
     let mut asphalt = Prim::new("asphalt", [0.20, 0.20, 0.21, 1.0]);
     let mut concrete = Prim::new("highway_concrete", [0.42, 0.42, 0.40, 1.0]);
+    // Unpaved roads (Ashpeak County farm and forest roads): tan-grey gravel, brown dirt.
+    let mut gravel = Prim::new("gravel_road", [0.56, 0.52, 0.45, 1.0]);
+    let mut dirt = Prim::new("dirt_road", [0.43, 0.32, 0.21, 1.0]);
     let mut parking = Prim::new("parking", [0.26, 0.26, 0.27, 1.0]);
     let mut bus = Prim::new("bus_lane", [0.35, 0.16, 0.14, 1.0]);
     let mut sidewalk = Prim::new("sidewalk", [0.62, 0.61, 0.58, 1.0]);
@@ -493,6 +615,15 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let mut lot_skirt = Prim::new("lot_skirt", [0.50, 0.52, 0.44, 1.0]);
     let mut kerb = Prim::new("kerb", [0.70, 0.69, 0.66, 1.0]);
     let mut buildings = Prim::new("building", [0.75, 0.74, 0.72, 1.0]);
+    // Ashpeak County building kinds: red barns under dark metal roofs, galvanised silos,
+    // glassy landmarks, concrete construction frames with orange safety bands.
+    let mut barn = Prim::new("barn", [0.56, 0.17, 0.13, 1.0]);
+    let mut barn_roof = Prim::new("barn_roof", [0.30, 0.31, 0.32, 1.0]);
+    let mut silo = Prim::new("silo", [0.78, 0.80, 0.82, 1.0]);
+    let mut silo_cap = Prim::new("silo_cap", [0.66, 0.69, 0.72, 1.0]);
+    let mut landmark = Prim::new("landmark", [0.52, 0.64, 0.73, 1.0]);
+    let mut construction = Prim::new("construction", [0.60, 0.59, 0.56, 1.0]);
+    let mut construction_accent = Prim::new("construction_accent", [0.95, 0.46, 0.08, 1.0]);
     // Residential lots (playtest row 95): grass verges, pitched roofs, garages (trees,
     // driveways, hedges and fences are instanced: `build_instanced`).
     let mut verge = Prim::new("verge", [0.42, 0.52, 0.34, 1.0]);
@@ -503,6 +634,7 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let mut rock = Prim::smooth("rock", [0.45, 0.42, 0.37, 1.0]);
     let mut seabed = Prim::smooth("seabed", [0.55, 0.52, 0.40, 1.0]);
     let mut water = Prim::new("water", [0.16, 0.30, 0.45, 1.0]);
+    let mut taper = Prim::new("ramp_taper", [0.42, 0.42, 0.40, 1.0]);
     let mut barrier = Prim::new("median_barrier", [0.66, 0.65, 0.62, 1.0]);
     let mut ground: Vec<Prim> = DistrictKind::ALL
         .iter()
@@ -538,10 +670,11 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     // Pavement: the road surface ribbons, the very triangles `wp_sim` collides with; parking
     // and bus lanes are tinted 1 cm above them.
     for s in &net.surfaces {
-        let prim = if s.highway {
-            &mut concrete
-        } else {
-            &mut asphalt
+        let prim = match s.material {
+            _ if s.highway => &mut concrete,
+            RoadMaterial::Asphalt => &mut asphalt,
+            RoadMaterial::Gravel => &mut gravel,
+            RoadMaterial::Dirt => &mut dirt,
         };
         prim.mesh(&surface_ribbon(s));
     }
@@ -571,12 +704,21 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     kerb.mesh(&walks.kerbs);
     // Pavement between the ribbon ends (junctions, bends, dead ends): the very triangles
     // `wp_sim` collides with.
+    let node_material = node_materials(map);
     for p in node_patches(map) {
-        if p.highway {
-            concrete.mesh(&p.mesh);
-        } else {
-            asphalt.mesh(&p.mesh);
-        }
+        // Freeway merge / diverge (radius-0 junction): the ramp tapers overlap the
+        // carriageway's paving, so they get their own (offset) material.
+        let freeway = net.nodes[p.node as usize]
+            .intersection
+            .is_some_and(|ix| net.intersections[ix as usize].radius_m <= 0.0);
+        let prim = match node_material.get(p.node as usize) {
+            _ if freeway => &mut taper,
+            _ if p.highway => &mut concrete,
+            Some(RoadMaterial::Gravel) => &mut gravel,
+            Some(RoadMaterial::Dirt) => &mut dirt,
+            _ => &mut asphalt,
+        };
+        prim.mesh(&p.mesh);
     }
     // Median barriers.
     let barriers = median_barriers(net);
@@ -586,6 +728,14 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let near_barrier = BarrierIndex::new(&barriers);
     // Hilly cities: retaining walls where a road edge stands above the (render) ground, and
     // bridge decks with parapets and piers.
+    // How far wall feet go below the ground: on hills the drawn (coarse) ground can sit lower
+    // than the physics terrain; a flat terrain (main's grid, which has one only for its
+    // viaduct) is drawn exactly, so the feet stay just under it.
+    let foot_m = if wp_world::surface::has_relief(net) {
+        1.5
+    } else {
+        0.2
+    };
     if let Some(t) = terrain {
         let ground_z = |q: V2| t.height_at(q);
         for (si, s) in net.surfaces.iter().enumerate() {
@@ -611,15 +761,13 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
                         if *d {
                             p[2]
                         } else {
-                            (ground_z(geom::xy(*p)) - 1.5).min(p[2])
+                            wall_foot(net, *p, (ground_z(geom::xy(*p)) - foot_m).min(p[2]))
                         }
                     })
                     .collect();
                 wall.curtain(&top, &bottom, side > 0.0);
             }
-            // Decks: 1.2 m deep slab sides, 0.9 m parapets, piers every ~30 m.
-            let cum = geom::cumulative(&s.centre);
-            let mut next_pier = 0.0;
+            // Decks: 1.2 m deep slab sides, 0.9 m parapets (piers below).
             for k in 0..n - 1 {
                 if !(deck[k] && deck[k + 1]) {
                     continue;
@@ -631,60 +779,43 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
                     if near_barrier.near(geom::xy(seg[0])) && near_barrier.near(geom::xy(seg[1])) {
                         continue;
                     }
-                    let Some((a, b)) = rail_piece(net, si, seg[0], seg[1]) else {
-                        continue;
-                    };
-                    let seg = [a, b];
-                    bridge.curtain(&seg, &[seg[0][2] - 1.2, seg[1][2] - 1.2], side > 0.0);
-                    // A sidewalk side's parapet is the rail at the sidewalk's back edge.
-                    if s.sidewalk[usize::from(side > 0.0)] {
+                    if inside_other_paving(net, si, seg[0]) && inside_other_paving(net, si, seg[1])
+                    {
                         continue;
                     }
+                    bridge.curtain(
+                        &seg,
+                        &[seg[0][2] - DECK_SLAB_M, seg[1][2] - DECK_SLAB_M],
+                        side > 0.0,
+                    );
                     let top = [
                         [seg[0][0], seg[0][1], seg[0][2] + 0.9],
                         [seg[1][0], seg[1][1], seg[1][2] + 0.9],
                     ];
                     bridge.curtain(&top, &[seg[0][2], seg[1][2]], side > 0.0);
                 }
-                if cum[k] >= next_pier {
-                    next_pier = cum[k] + 30.0;
-                    let c = geom::xy(s.centre[k]);
-                    let (d, _) = (geom::normalize(geom::sub(geom::xy(s.centre[k + 1]), c)), 0);
-                    let r = geom::right_of(d);
-                    let half_w = 0.4 * (s.left_m + s.right_m);
-                    let corner = |a: f32, b: f32| {
-                        geom::add(c, geom::add(geom::scale(d, a), geom::scale(r, b)))
-                    };
-                    let fp = [
-                        corner(-0.8, -half_w),
-                        corner(-0.8, half_w),
-                        corner(0.8, half_w),
-                        corner(0.8, -half_w),
-                    ];
-                    let fp = if signed_area(&fp) < 0.0 {
-                        [fp[3], fp[2], fp[1], fp[0]]
-                    } else {
-                        fp
-                    };
-                    let base = fp
-                        .iter()
-                        .map(|q| ground_z(*q))
-                        .fold(f32::INFINITY, f32::min)
-                        - 0.5;
-                    bridge.block(&fp, base, s.centre[k][2] - 1.2);
-                }
             }
         }
     }
+    for (fp, z0, z1) in deck_piers(net) {
+        bridge.block(&fp, z0, z1);
+    }
     // Sidewalk roads: walls from the skirt feet (and the back edges of sidewalks without a
     // lot, e.g. on decks) down past the drawn ground, which is coarser and lower than the
-    // physics terrain the skirts end on.
+    // physics terrain the skirts end on. On flat terrain (main's grid) a skirt foot stands on
+    // the ground, so its curtain would be buried whole: only the bare backs get one there
+    // (render budget: ~10 draw calls and 6k triangles a frame on the grid).
     if let Some(t) = terrain {
         let ground_z = |q: V2| t.height_at(q);
-        for line in chain_segments(walks.skirt_feet.iter().chain(&walks.bare_backs)) {
+        let feet: &[(V3, V3)] = if wp_world::surface::has_relief(net) {
+            &walks.skirt_feet
+        } else {
+            &[]
+        };
+        for line in chain_segments(feet.iter().chain(&walks.bare_backs)) {
             let bottom: Vec<f32> = line
                 .iter()
-                .map(|p| (ground_z(geom::xy(*p)) - 1.5).min(p[2]))
+                .map(|p| wall_foot(net, *p, (ground_z(geom::xy(*p)) - foot_m).min(p[2])))
                 .collect();
             wall.curtain(&line, &bottom, true);
         }
@@ -705,12 +836,17 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
         }
     }
     for b in &net.buildings {
-        let walls = if b.kind == BuildingKind::Garage {
-            &mut garage
-        } else {
-            &mut buildings
+        let (walls, r) = match b.kind {
+            BuildingKind::Garage => (&mut garage, &mut roof),
+            BuildingKind::Farm => (&mut barn, &mut barn_roof),
+            BuildingKind::Silo => (&mut silo, &mut silo_cap),
+            BuildingKind::Landmark => (&mut landmark, &mut roof),
+            BuildingKind::Construction => {
+                safety_bands(&mut construction_accent, b);
+                (&mut construction, &mut roof)
+            }
+            _ => (&mut buildings, &mut roof),
         };
-        let r = &mut roof;
         house(walls, r, b);
     }
     // Tunnels and covered roads (backlog B04): concrete walls, the roof deck, ceiling lights.
@@ -725,6 +861,8 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let mut out = vec![
         asphalt,
         concrete,
+        gravel,
+        dirt,
         parking,
         bus,
         sidewalk,
@@ -736,6 +874,13 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
         buildings,
         roof,
         garage,
+        barn,
+        barn_roof,
+        silo,
+        silo_cap,
+        landmark,
+        construction,
+        construction_accent,
         wall,
         bridge,
         rock,
@@ -744,11 +889,68 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
         tunnel_wall,
         tunnel_roof,
         tunnel_light,
+        taper,
         barrier,
     ];
     out.extend(ground);
     out.retain(|p| !p.indices.is_empty());
     out
+}
+
+/// Paving per node for its junction patch: gravel or dirt when every road meeting there is
+/// unpaved (gravel if they mix), else asphalt.
+fn node_materials(map: &CityMap) -> Vec<RoadMaterial> {
+    let net = &map.net;
+    // None = no road seen yet.
+    let mut per: Vec<Option<RoadMaterial>> = vec![None; net.nodes.len()];
+    for (i, l) in net.lanes.iter().enumerate() {
+        let m = map.lane_material(i as u32);
+        for n in [l.from_node, l.to_node] {
+            let Some(slot) = per.get_mut(n as usize) else {
+                continue;
+            };
+            *slot = Some(match (*slot, m) {
+                (None, m) => m,
+                (Some(RoadMaterial::Asphalt), _) | (_, RoadMaterial::Asphalt) => {
+                    RoadMaterial::Asphalt
+                }
+                (Some(a), b) if a == b => a,
+                _ => RoadMaterial::Gravel,
+            });
+        }
+    }
+    per.into_iter().map(Option::unwrap_or_default).collect()
+}
+
+/// Orange safety-netting bands around a building under construction: 0.4 m tall, 0.15 m
+/// proud of the walls, one per ~4 m storey and one at the top.
+fn safety_bands(p: &mut Prim, b: &Building) {
+    let f = &b.footprint;
+    if f.len() < 3 {
+        return;
+    }
+    let n = f.len() as f32;
+    let c = [
+        f.iter().map(|q| q[0]).sum::<f32>() / n,
+        f.iter().map(|q| q[1]).sum::<f32>() / n,
+    ];
+    let outset: Vec<V2> = f
+        .iter()
+        .map(|q| {
+            let d = geom::sub(*q, c);
+            let len = geom::dist(*q, c).max(0.1);
+            geom::add(*q, geom::scale(d, 0.15 / len))
+        })
+        .collect();
+    let (z0, z1) = (b.base_z_m, b.roof_z());
+    let mut z = z0 + 4.0;
+    let mut bands = 0;
+    while z < z1 - 1.0 && bands < 40 {
+        p.walls(&outset, z - 0.2, z + 0.2);
+        z += 4.0;
+        bands += 1;
+    }
+    p.prism(&outset, z1 - 0.4, z1 + 0.05);
 }
 
 /// Push triangle `a b c` into `p`, wound so its normal points along `out` (flat-shaded).
@@ -938,6 +1140,138 @@ fn unit_tree() -> Vec<Prim> {
     vec![trunk, crown]
 }
 
+/// Axis-aligned box from (x0, y0, z0) to (x1, y1, z1) into `p` (walls and top).
+fn add_box(p: &mut Prim, x: [f32; 2], y: [f32; 2], z: [f32; 2]) {
+    let sq = [[x[0], y[0]], [x[1], y[0]], [x[1], y[1]], [x[0], y[1]]];
+    p.block(&sq, z[0], z[1]);
+}
+
+/// Closed solid: convex `profile` in the x-z plane extruded along +Y from `y0` to `y1`.
+fn extrude_y(p: &mut Prim, profile: &[V2], y0: f32, y1: f32) {
+    let n = profile.len();
+    let c = [
+        profile.iter().map(|q| q[0]).sum::<f32>() / n as f32,
+        profile.iter().map(|q| q[1]).sum::<f32>() / n as f32,
+    ];
+    let v = |q: V2, y: f32| [q[0], y, q[1]];
+    for i in 0..n {
+        let (a, b) = (profile[i], profile[(i + 1) % n]);
+        let out = [(a[0] + b[0]) * 0.5 - c[0], 0.0, (a[1] + b[1]) * 0.5 - c[1]];
+        tri_facing(p, v(a, y0), v(b, y0), v(b, y1), out);
+        tri_facing(p, v(a, y0), v(b, y1), v(a, y1), out);
+        tri_facing(p, v(c, y0), v(a, y0), v(b, y0), [0.0, -1.0, 0.0]);
+        tri_facing(p, v(c, y1), v(a, y1), v(b, y1), [0.0, 1.0, 0.0]);
+    }
+}
+
+/// Cone of radius `r` (`sides`-gon) from a base at `z0` to the apex at `z1`, base closed.
+fn cone(p: &mut Prim, r: f32, z0: f32, z1: f32, sides: usize) {
+    let ring: Vec<V2> = (0..sides)
+        .map(|k| {
+            let (s, c) = wp_math::sin_cos(k as f32 * std::f32::consts::TAU / sides as f32);
+            [c * r, s * r]
+        })
+        .collect();
+    let apex = [0.0, 0.0, z1];
+    for i in 0..sides {
+        let (a, b) = (ring[i], ring[(i + 1) % sides]);
+        let (a3, b3) = ([a[0], a[1], z0], [b[0], b[1], z0]);
+        let m = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
+        tri_facing(p, a3, b3, apex, [m[0], m[1], r * 0.5]);
+        tri_facing(p, [0.0, 0.0, z0], a3, b3, [0.0, 0.0, -1.0]);
+    }
+}
+
+/// Unit pine (1 m crown diameter, 1 m tall): a hexagonal trunk and three stacked cones.
+fn unit_pine() -> Vec<Prim> {
+    let mut trunk = Prim::new("pine_trunk", [0.33, 0.24, 0.18, 1.0]);
+    let mut crown = Prim::new("pine_crown", [0.15, 0.29, 0.20, 1.0]);
+    let r = 0.05;
+    let ring: Vec<V2> = (0..6)
+        .map(|k| {
+            let (s, c) = wp_math::sin_cos(k as f32 * std::f32::consts::TAU / 6.0);
+            [c * r, s * r]
+        })
+        .collect();
+    trunk.walls(&ring, -0.05, 0.3);
+    cone(&mut crown, 0.5, 0.18, 0.66, 7);
+    cone(&mut crown, 0.38, 0.42, 0.85, 7);
+    cone(&mut crown, 0.25, 0.64, 1.0, 7);
+    vec![trunk, crown]
+}
+
+/// Unit tower crane: x, y = the mast footprint (-0.5..0.5), z = full height (0..1). Lattice
+/// mast to 0.9, slewing cab, a jib reaching 14 mast widths along +Y, a counter-jib along -Y
+/// with its concrete counterweight, a hook line hanging from the jib.
+fn unit_crane() -> Vec<Prim> {
+    let mut steel = Prim::new("crane", [0.93, 0.71, 0.13, 1.0]);
+    let mut weight = Prim::new("crane_counterweight", [0.55, 0.55, 0.53, 1.0]);
+    let mut cable = Prim::new("crane_cable", [0.15, 0.15, 0.16, 1.0]);
+    add_box(&mut steel, [-0.5, 0.5], [-0.5, 0.5], [0.0, 0.9]);
+    add_box(&mut steel, [-0.6, 0.6], [-0.6, 0.9], [0.9, 0.935]);
+    add_box(&mut steel, [-0.3, 0.3], [-5.0, 14.0], [0.935, 0.955]);
+    // Apex and its tie line silhouette (a thin rod over the jib root).
+    add_box(&mut steel, [-0.15, 0.15], [-0.15, 0.15], [0.955, 1.0]);
+    add_box(&mut steel, [-0.05, 0.05], [0.15, 6.0], [0.975, 0.985]);
+    add_box(&mut weight, [-0.45, 0.45], [-5.0, -3.2], [0.88, 0.935]);
+    add_box(&mut cable, [-0.03, 0.03], [9.97, 10.03], [0.55, 0.935]);
+    add_box(&mut weight, [-0.15, 0.15], [9.85, 10.15], [0.52, 0.55]);
+    vec![steel, weight, cable]
+}
+
+/// Unit Jersey barrier: the median barrier's profile across x (-0.5..0.5), along y
+/// (-0.5..0.5), 0..1 tall.
+fn unit_jersey() -> Vec<Prim> {
+    let mut p = Prim::new("jersey_barrier", [0.72, 0.71, 0.68, 1.0]);
+    let (w, h) = (BARRIER_PROFILE[0].0 * 2.0, BARRIER_PROFILE[3].1);
+    let right: Vec<V2> = BARRIER_PROFILE
+        .iter()
+        .map(|(x, z)| [x / w, z / h])
+        .collect();
+    let mut prof: Vec<V2> = right.clone();
+    prof.extend(right.iter().rev().map(|q| [-q[0], q[1]]));
+    extrude_y(&mut p, &prof, -0.5, 0.5);
+    vec![p]
+}
+
+/// Unit construction-site hoarding panel: a green-grey panel with posts and a top rail.
+fn unit_site_fence() -> Vec<Prim> {
+    let mut panel = Prim::new("site_fence", [0.38, 0.45, 0.40, 1.0]);
+    let mut posts = Prim::new("site_fence_post", [0.62, 0.63, 0.62, 1.0]);
+    add_box(&mut panel, [-0.35, 0.35], [-0.5, 0.5], [0.05, 0.92]);
+    add_box(&mut posts, [-0.5, 0.5], [-0.5, 0.5], [0.92, 1.0]);
+    for y in [-0.47, 0.47] {
+        add_box(&mut posts, [-0.5, 0.5], [y - 0.03, y + 0.03], [-0.1, 0.92]);
+    }
+    vec![panel, posts]
+}
+
+/// Unit round hay bale lying on its side: an octagonal roll along y, 1 × 1 × 1.
+fn unit_hay_bale() -> Vec<Prim> {
+    let mut p = Prim::new("hay_bale", [0.80, 0.68, 0.36, 1.0]);
+    let prof: Vec<V2> = (0..8)
+        .map(|k| {
+            let (s, c) = wp_math::sin_cos((k as f32 + 0.5) * std::f32::consts::TAU / 8.0);
+            [c * 0.5, 0.5 + s * 0.5]
+        })
+        .collect();
+    extrude_y(&mut p, &prof, -0.5, 0.5);
+    vec![p]
+}
+
+/// Unit roadside billboard: a panel over the top half on two posts, a walkway under it.
+fn unit_billboard() -> Vec<Prim> {
+    let mut frame = Prim::new("billboard", [0.30, 0.32, 0.36, 1.0]);
+    let mut face = Prim::new("billboard_panel", [0.86, 0.82, 0.70, 1.0]);
+    add_box(&mut frame, [-0.5, 0.5], [-0.5, 0.0], [0.48, 1.0]);
+    add_box(&mut face, [-0.47, 0.47], [0.0, 0.25], [0.51, 0.97]);
+    add_box(&mut frame, [-0.5, 0.5], [-0.5, 0.5], [0.45, 0.48]);
+    for x in [-0.3, 0.3] {
+        add_box(&mut frame, [x - 0.03, x + 0.03], [-0.2, 0.1], [0.0, 0.45]);
+    }
+    vec![frame, face]
+}
+
 /// Unit box: x, y in -0.5..0.5, z in 0..1 (walls and top), one material.
 fn unit_box(material: &str, color: [f32; 4]) -> Prim {
     let mut p = Prim::new(material, color);
@@ -965,6 +1299,29 @@ pub fn build_instanced(map: &CityMap) -> Vec<Instanced> {
             parts: unit_tree(),
             instances: trees,
         });
+    }
+    // Ashpeak County decor: shaped unit meshes, each scaled to its decor box (size x, y, z)
+    // and standing on its base point.
+    for (kind, name, parts) in [
+        (DecorKind::PineTree, "pines", unit_pine()),
+        (DecorKind::Crane, "cranes", unit_crane()),
+        (DecorKind::JerseyBarrier, "jersey_barriers", unit_jersey()),
+        (DecorKind::SiteFence, "site_fences", unit_site_fence()),
+        (DecorKind::HayBale, "hay_bales", unit_hay_bale()),
+        (DecorKind::Billboard, "billboards", unit_billboard()),
+    ] {
+        let instances: Vec<(V3, f32, V3)> = decor
+            .iter()
+            .filter(|d| d.kind == kind)
+            .map(|d| (d.pos, d.yaw, [d.size[0], d.size[1], d.size[2]]))
+            .collect();
+        if !instances.is_empty() {
+            out.push(Instanced {
+                name: name.into(),
+                parts,
+                instances,
+            });
+        }
     }
     for (kind, name, color) in [
         (DecorKind::Driveway, "driveway", [0.58, 0.57, 0.54, 1.0]),
@@ -1350,6 +1707,37 @@ mod tests {
     }
 
     #[test]
+    fn no_bridge_pier_stands_on_a_road() {
+        for net in [
+            wp_world::vesper::generate(&wp_world::vesper::VesperConfig::default()),
+            wp_world::procgen::generate(&wp_world::procgen::ProcGenConfig::default()),
+        ] {
+            let piers = deck_piers(&net);
+            assert!(piers.len() > 20, "{} piers", piers.len());
+            for (fp, _, top) in &piers {
+                for q in fp {
+                    // Nothing paved under a pier (beyond its own deck).
+                    let paved = net.surfaces.iter().any(|o| {
+                        let cum = geom::cumulative(&o.centre);
+                        let pr = geom::project(&o.centre, &cum, *q);
+                        let edge = if pr.lateral < 0.0 {
+                            o.left_m
+                        } else {
+                            o.right_m
+                        };
+                        let len = cum[cum.len() - 1];
+                        pr.s >= 0.0
+                            && pr.s <= len
+                            && pr.lateral.abs() <= edge
+                            && geom::point_at(&o.centre, &cum, pr.s).0[2] < top - 1.0
+                    });
+                    assert!(!paved, "pier on a road at {q:?} in {}", net.id);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn glb_header_and_chunks() {
         let mut p = Prim::new("x", [1.0; 4]);
         p.quad(
@@ -1373,5 +1761,149 @@ mod tests {
         assert_eq!(doc["accessors"][0]["max"][1], 0.0);
         assert_eq!(doc["accessors"][0]["min"][2], -1.0);
         assert_eq!(&g[20 + jl + 4..20 + jl + 8], b"BIN\0");
+    }
+
+    /// The small procedural city with every odd road unpaved (gravel / dirt) plus one of
+    /// each Ashpeak County building kind and decor kind.
+    fn county_sample() -> CityMap {
+        use wp_world::network::{Decor, RoofShape};
+        use wp_world::procgen::{generate, ProcGenConfig};
+        let mut net = generate(&ProcGenConfig::small());
+        for s in &mut net.surfaces {
+            if s.road % 2 == 1 && !s.highway {
+                s.material = if s.road % 4 == 1 {
+                    RoadMaterial::Gravel
+                } else {
+                    RoadMaterial::Dirt
+                };
+            }
+        }
+        let sq = |x: f32, y: f32, h: f32| vec![[x, y], [x + h, y], [x + h, y + h], [x, y + h]];
+        for (i, kind) in [
+            BuildingKind::Farm,
+            BuildingKind::Silo,
+            BuildingKind::Landmark,
+            BuildingKind::Construction,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut b = Building::block(sq(-900.0 + 40.0 * i as f32, -900.0, 12.0), 20.0, 0.0);
+            b.kind = kind;
+            if kind == BuildingKind::Farm {
+                b.footprint = vec![
+                    [-900.0, -900.0],
+                    [-888.0, -900.0],
+                    [-888.0, -880.0],
+                    [-900.0, -880.0],
+                ];
+                b.roof = RoofShape::Gable;
+                b.roof_rise_m = 4.0;
+            }
+            net.buildings.push(b);
+        }
+        for (i, kind) in [
+            DecorKind::PineTree,
+            DecorKind::Crane,
+            DecorKind::JerseyBarrier,
+            DecorKind::SiteFence,
+            DecorKind::HayBale,
+            DecorKind::Billboard,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            net.decor.push(Decor {
+                kind,
+                pos: [-900.0 + 20.0 * i as f32, -950.0, 0.0],
+                yaw: 0.3,
+                size: [2.0, 2.0, 6.0],
+            });
+        }
+        CityMap::new(net)
+    }
+
+    #[test]
+    fn unpaved_roads_and_county_buildings_get_their_own_materials() {
+        let map = county_sample();
+        let prims = build_greybox(&map);
+        let tris = |name: &str| {
+            prims
+                .iter()
+                .find(|p| p.material == name)
+                .map_or(0, |p| p.indices.len() / 3)
+        };
+        for name in [
+            "asphalt",
+            "gravel_road",
+            "dirt_road",
+            "barn",
+            "barn_roof",
+            "silo",
+            "landmark",
+            "construction",
+            "construction_accent",
+        ] {
+            assert!(tris(name) > 0, "{name} missing");
+        }
+        // A city without unpaved roads or county buildings has none of these primitives.
+        let plain = build_greybox(&CityMap::new(wp_world::procgen::generate(
+            &wp_world::procgen::ProcGenConfig::small(),
+        )));
+        for name in ["gravel_road", "dirt_road", "barn", "construction_accent"] {
+            assert!(plain.iter().all(|p| p.material != name), "{name}");
+        }
+        // Junctions where only dirt roads meet are dirt, mixed with asphalt are asphalt.
+        let mats = node_materials(&map);
+        assert!(mats.contains(&RoadMaterial::Dirt) || mats.contains(&RoadMaterial::Gravel));
+        assert!(mats.contains(&RoadMaterial::Asphalt));
+    }
+
+    #[test]
+    fn county_decor_is_shaped_and_instanced() {
+        let map = county_sample();
+        let inst = build_instanced(&map);
+        for (name, materials) in [
+            ("pines", &["pine_trunk", "pine_crown"][..]),
+            (
+                "cranes",
+                &["crane", "crane_counterweight", "crane_cable"][..],
+            ),
+            ("jersey_barriers", &["jersey_barrier"][..]),
+            ("site_fences", &["site_fence", "site_fence_post"][..]),
+            ("hay_bales", &["hay_bale"][..]),
+            ("billboards", &["billboard", "billboard_panel"][..]),
+        ] {
+            let m = inst
+                .iter()
+                .find(|i| i.name == name)
+                .unwrap_or_else(|| panic!("{name}"));
+            assert_eq!(m.instances.len(), 1, "{name}");
+            let got: Vec<&str> = m.parts.iter().map(|p| p.material.as_str()).collect();
+            assert_eq!(got, materials, "{name}");
+            for p in &m.parts {
+                assert!(!p.indices.is_empty() && p.indices.len() % 3 == 0, "{name}");
+                // Small unit meshes (instancing keeps the glb small).
+                assert!(p.positions.len() < 400, "{name}: {}", p.positions.len());
+            }
+        }
+        // Pines no longer ride on the broadleaf tree mesh.
+        assert!(inst.iter().all(|i| i.name != "trees"));
+        // The crane's jib reaches well past its mast footprint; everything stands on z >= -0.1.
+        let crane = inst.iter().find(|i| i.name == "cranes").unwrap();
+        let max_y = crane.parts[0]
+            .positions
+            .iter()
+            .map(|p| p[1])
+            .fold(f32::MIN, f32::max);
+        assert!(max_y > 10.0, "{max_y}");
+        for i in &inst {
+            for p in &i.parts {
+                assert!(p.positions.iter().all(|q| q[2] >= -0.11), "{}", i.name);
+            }
+        }
+        // The whole glb still writes.
+        let glb = greybox_glb(&map);
+        assert_eq!(&glb[0..4], b"glTF");
     }
 }

@@ -86,8 +86,8 @@ export const ACTIONS: ActionDef[] = [
 ];
 
 /** Defaults. Look-back keeps V (driving); audio mute moved to F8 so the two no longer share V.
- * The clutch starts unbound on every device: every letter key is already a game or debug-layer
- * key, and on a pad the triggers / shoulders are taken; the player binds it in the panel. */
+ * The clutch is on C (owner request 2026-10-21) and the camera cycle moved from C to F3; on a pad
+ * the clutch starts unbound (triggers / shoulders are taken) and the player binds it in the panel. */
 export function defaultBindings(): Bindings {
   return {
     keys: {
@@ -95,13 +95,13 @@ export function defaultBindings(): Bindings {
       steerRight: ["KeyD", "ArrowRight"],
       throttle: ["KeyW", "ArrowUp"],
       brake: ["KeyS", "ArrowDown"],
-      clutch: [],
+      clutch: ["KeyC"],
       handbrake: ["Space"],
       gearUp: ["ShiftLeft", "ShiftRight"],
       gearDown: ["ControlLeft", "ControlRight"],
       horn: ["KeyQ"],
       lookBack: ["KeyV"],
-      cameraCycle: ["KeyC"],
+      cameraCycle: ["F3"],
       reset: ["KeyR"],
       headlights: ["KeyO"],
       followNext: ["Backquote"],
@@ -171,6 +171,15 @@ export function loadBindings(): Bindings {
     if (Array.isArray(k) && k.every((c) => typeof c === "string")) b.keys[a.id] = k.slice(0, SLOTS);
     const p = saved.pad?.[a.id];
     if (Array.isArray(p) && p.every(isPadControl)) b.pad[a.id] = p.slice(0, SLOTS);
+  }
+  // 2026-10-21: C became the clutch and the camera moved to F3. A save made before that still
+  // holds the old defaults (camera on C, clutch unbound); move those to the new defaults, but keep
+  // any binding the player chose themselves.
+  const sameKeys = (k: unknown, want: string[]) =>
+    Array.isArray(k) && k.length === want.length && k.every((c, i) => c === want[i]);
+  if (sameKeys(saved.keys?.cameraCycle, ["KeyC"]) && sameKeys(saved.keys?.clutch, [])) {
+    b.keys.cameraCycle = ["F3"];
+    b.keys.clutch = ["KeyC"];
   }
   if (typeof saved.padDeadzone === "number" && saved.padDeadzone >= 0 && saved.padDeadzone <= 0.5) b.padDeadzone = saved.padDeadzone;
   if (typeof saved.padCurve === "number" && saved.padCurve >= 1 && saved.padCurve <= 3) b.padCurve = saved.padCurve;
@@ -283,9 +292,12 @@ export function padName(c: PadControl): string {
 
 /** One line per action for the F1 help: `throttle — W / ↑ · RT`. */
 export function bindingsHelp(b: Bindings): string[] {
-  return ACTIONS.map((a) => {
-    const k = b.keys[a.id].map(keyName).join(" / ") || "–";
-    const p = b.pad[a.id].map(padName).join(" / ");
-    return `${a.label} — ${k}${p ? ` · pad ${p}` : ""}`;
-  });
+  return ACTIONS.map((a) => `${a.label} — ${bindingText(b, a.id)}`);
+}
+
+/** One action's bound keys and pad controls as help text ("Q · pad L3"; "–" when unbound). */
+export function bindingText(b: Bindings, id: ActionId): string {
+  const k = b.keys[id].map(keyName).join(" / ") || "–";
+  const p = b.pad[id].map(padName).join(" / ");
+  return `${k}${p ? ` · pad ${p}` : ""}`;
 }

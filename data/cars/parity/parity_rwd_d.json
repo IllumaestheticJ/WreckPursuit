@@ -1,0 +1,230 @@
+{
+  "id": "parity_rwd_d",
+  "display_name": "Parity RWD-D",
+  "class": "Muscle",
+  "analog_of": "reference-parity test car: full-size RWD muscle, 390 kW @ 5800, 807 N·m @ 3800, 1633 kg, 4-speed (owner clip 1 arena car)",
+  "body_size_m": [
+    1.92,
+    4.78,
+    1.38
+  ],
+  "mass_kg": 1633.0,
+  "front_weight_frac": 0.54,
+  "wheelbase_m": 2.72,
+  "track_front_m": 1.58,
+  "track_rear_m": 1.65,
+  "cg_height_m": 0.5,
+  "inertia_kgm2": [
+    605.6,
+    3028.0,
+    3326.2
+  ],
+  "drag_cd_a_m2": 0.779,
+  "lift_front": 0.08,
+  "lift_rear": 0.1,
+  "engine": {
+    "torque_curve_nm": [
+      [
+        1000,
+        540
+      ],
+      [
+        1500,
+        630
+      ],
+      [
+        2000,
+        700
+      ],
+      [
+        2500,
+        755
+      ],
+      [
+        3000,
+        790
+      ],
+      [
+        3800,
+        807
+      ],
+      [
+        4400,
+        790
+      ],
+      [
+        5000,
+        735
+      ],
+      [
+        5400,
+        680
+      ],
+      [
+        5800,
+        642
+      ],
+      [
+        6200,
+        575
+      ],
+      [
+        6500,
+        520
+      ]
+    ],
+    "idle_rpm": 750.0,
+    "redline_rpm": 6200.0,
+    "rev_limit_rpm": 6500.0,
+    "inertia_kgm2": 0.22,
+    "engine_brake_nm": 80.7
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [
+      2.43,
+      1.61,
+      1.23,
+      1.0
+    ],
+    "final_drive": 3.73,
+    "reverse_ratio": 3.53,
+    "diff_front": "Open",
+    "diff_rear": {
+      "Lsd": {
+        "preload_nm": 80.0,
+        "ramp_power": 0.6,
+        "ramp_coast": 0.4
+      }
+    },
+    "clutch_max_nm": 1090.0,
+    "shift_time_s": 0.5
+  },
+  "wheels": [
+    {
+      "position_m": [
+        -0.79,
+        1.36,
+        0.333
+      ],
+      "radius_m": 0.333,
+      "width_m": 0.255,
+      "mass_kg": 26.0,
+      "tire_id": "sport",
+      "steerable": true,
+      "max_steer_rad": 0.662,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.014,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1222
+    },
+    {
+      "position_m": [
+        0.79,
+        1.36,
+        0.333
+      ],
+      "radius_m": 0.333,
+      "width_m": 0.255,
+      "mass_kg": 26.0,
+      "tire_id": "sport",
+      "steerable": true,
+      "max_steer_rad": 0.662,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.014,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1222
+    },
+    {
+      "position_m": [
+        -0.825,
+        -1.36,
+        0.341
+      ],
+      "radius_m": 0.341,
+      "width_m": 0.275,
+      "mass_kg": 28.0,
+      "tire_id": "sport",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0035,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [
+        0.825,
+        -1.36,
+        0.341
+      ],
+      "radius_m": 0.341,
+      "width_m": 0.275,
+      "mass_kg": 28.0,
+      "tire_id": "sport",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0035,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 39500.0,
+      "damper_bump_ns_per_m": 2920.0,
+      "damper_rebound_ns_per_m": 5840.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 11930.0,
+      "bump_stop_n_per_m": 170000.0
+    },
+    {
+      "spring_n_per_m": 39500.0,
+      "damper_bump_ns_per_m": 2920.0,
+      "damper_rebound_ns_per_m": 5840.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 11930.0,
+      "bump_stop_n_per_m": 170000.0
+    },
+    {
+      "spring_n_per_m": 37550.0,
+      "damper_bump_ns_per_m": 2610.0,
+      "damper_rebound_ns_per_m": 5220.0,
+      "travel_m": 0.17,
+      "preload_m": 0.02,
+      "arb_n_per_m": 560.0,
+      "bump_stop_n_per_m": 170000.0
+    },
+    {
+      "spring_n_per_m": 37550.0,
+      "damper_bump_ns_per_m": 2610.0,
+      "damper_rebound_ns_per_m": 5220.0,
+      "travel_m": 0.17,
+      "preload_m": 0.02,
+      "arb_n_per_m": 560.0,
+      "bump_stop_n_per_m": 170000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 3480.0,
+    "max_torque_rear_nm": 1140.0,
+    "bias_front": 0.5,
+    "handbrake_rear_nm": 1880.0
+  },
+  "steering": {
+    "ratio": 15.7,
+    "rack_speed_rad_per_s": 1.4,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [
+    0.0,
+    0.0
+  ],
+  "lattice_id": "rampart_50",
+  "base_price": 0,
+  "durability_class": 3,
+  "fuel_capacity_l": 60.0
+}

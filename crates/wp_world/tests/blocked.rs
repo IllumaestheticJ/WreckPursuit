@@ -280,7 +280,10 @@ fn multi_lane_road_changes_lane_around_a_stopped_car() {
     report("grid 2+2, stopped car in the right lane", &r);
     assert_eq!(r.contacts, 0);
     assert_eq!(r.collisions, 0);
-    assert!(r.stats.go_around_lane_changes >= 2, "{r:?}");
+    // At least one car caught behind it changes lane around it. Was ≥ 2 (3 measured) until
+    // lane changes saw tracked vehicles in the target lane (round 13 lead feedback): cars no
+    // longer change into the lane just behind the stopped car, so fewer end up behind it.
+    assert!(r.stats.go_around_lane_changes >= 1, "{r:?}");
     assert_eq!(
         r.stats.oncoming_passes, 0,
         "no oncoming passes on a multi-lane road"

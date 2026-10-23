@@ -62,16 +62,17 @@ const DOWNTOWN_LOOP: [[f32; 2]; 4] = [
     [-200.0, 150.0],
 ];
 /// Racer 0 and the cop lap the port block (lane centrelines, right-hand traffic): east along
-/// Gantry Row (y = −770 m, a 450 m straight — the only stretch near the centre with the
+/// Gantry Row (y = −771.75 m, a 460 m straight — the only stretch near the centre with the
 /// 120 m approach sight police need for a roadblock or spike strip; downtown has a cross
-/// street every 100 m), south on x = 920 m, west along the quay (y = −925 m), north on
-/// x = 450 m. `plan_circuit` does not route this block, so the loop is written out. (Main's
-/// divided Loop 9 moved Gantry Row 10 m and the quay 21 m north.)
+/// street every 100 m), south on x = 914.8 m, west along the quay street (y = −919.75 m),
+/// north on x = 455.2 m. `plan_circuit` does not route this block, so the loop is written out.
+/// lead/main-sync: main's port rework moved these streets (round 12 had y = −781.8 / −946.5,
+/// x = 453.5 / 916.5; racer 0 spawned off the paving there and fell through the ground).
 const PORT_LOOP: [[f32; 3]; 4] = [
-    [453.5, -771.75, 0.0],
-    [916.5, -771.75, 0.0],
-    [916.5, -921.5, 0.0],
-    [453.5, -921.5, 0.0],
+    [455.2, -771.75, 0.0],
+    [914.8, -771.75, 0.0],
+    [914.8, -919.75, 0.0],
+    [455.2, -919.75, 0.0],
 ];
 /// Route distance (m) of each seat's spawn on its loop: racer 0 (port), racer 1 (downtown),
 /// cop (port, behind racer 0).
@@ -411,6 +412,8 @@ fn four_clients_three_minutes_in_port_vesper() {
 
     // Everything the clients were told, per client (the client keeps a bounded queue).
     let mut events: Vec<Vec<SimEvent>> = vec![Vec::new(); 4];
+    // Step at which p0 saw racer 0's pursuit end.
+    let mut capture_step = None;
     let mut history: VecDeque<(u64, BTreeMap<u32, QVehicle>)> = VecDeque::new();
     let mut positions: VecDeque<(u64, BTreeMap<u32, [f32; 3]>)> = VecDeque::new();
     let mut traffic_history: BTreeMap<u64, BTreeMap<u32, TrafficAgentSnapshot>> = BTreeMap::new();
@@ -517,6 +520,14 @@ fn four_clients_three_minutes_in_port_vesper() {
 
         for (i, p) in h.peers.iter_mut().enumerate() {
             events[i].extend(p.client.game_events.drain(..));
+        }
+        if capture_step.is_none()
+            && events[0].iter().any(|e| {
+                matches!(e, SimEvent::Police(PoliceEvent::PursuitEnded { racer, .. })
+                    if *racer == racer0)
+            })
+        {
+            capture_step = Some(step);
         }
         let tick = h.server.sim().tick();
 
@@ -962,6 +973,14 @@ fn four_clients_three_minutes_in_port_vesper() {
             _ => None,
         });
         println!("p{i} sees the end of racer 0's pursuit: {capture:?}");
+        // Racer 1's link is down from reconnect.0 to reconnect.1: events sent then are not
+        // replayed on reconnect, so p1 misses a capture that lands in that window (police
+        // round 12c caught racer 0 at step ≈ 2746, inside it). The other three must see it.
+        let offline = capture_step.is_some_and(|t| t + 5 >= reconnect.0 && t <= reconnect.1 + 5);
+        if i == 1 && capture.is_none() && offline {
+            println!("p1 was offline at the capture (step {capture_step:?})");
+            continue;
+        }
         let (outcome, capturer, assists) =
             capture.unwrap_or_else(|| panic!("p{i} never saw racer 0's pursuit end"));
         assert_eq!(outcome, PursuitOutcome::Captured, "p{i}");

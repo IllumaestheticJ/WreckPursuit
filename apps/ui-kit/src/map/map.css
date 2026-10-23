@@ -136,3 +136,31 @@
   height: 22px;
   flex: none;
 }
+/* Host panel (top-left over the full map; e.g. the street-race challenge card). */
+.wp-map-host {
+  position: absolute;
+  z-index: 2;
+  left: 1em;
+  top: 3.6em;
+  width: 19em;
+  max-height: calc(100% - 5em);
+  overflow: auto;
+  background: rgba(9, 12, 11, 0.92);
+  pointer-events: auto;
+  cursor: default;
+}
+.wp-map-host[hidden] {
+  display: none;
+}
+.wp-map-full.wp-map-picking > canvas {
+  cursor: crosshair;
+}
+.wp-map-legend-sub {
+  color: var(--ink);
+  margin-top: 0.3em;
+}
+.wp-map-legend-host:not(:empty) {
+  border-bottom: 1px solid var(--edge);
+  padding-bottom: 0.3em;
+  margin-bottom: 0.3em;
+}

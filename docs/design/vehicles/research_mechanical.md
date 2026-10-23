@@ -112,7 +112,7 @@ car differs.
   Drayman: engine partly under the cab floor (cab-forward van "doghouse"), front face at y_fa + 0.25, top z ≈ 1.00.
 - Tris: hero ~1,000. Traffic ~250.
 
-**C. Modern DOHC V8, 5.0 L, 90° V, 4 cams** (`rampart_50`, `sentinel_harrier`)
+**C. Modern DOHC V8, 5.0 L, 90° V, 4 cams** (`rampart_50`, `sentinel_vigil`)
 - Wider than a pushrod V8 because of the 4-valve heads: 0.70 L × 0.78 W × 0.66 H. Crank z = 0.36.
 - Cam covers: 0.60 × 0.20 × 0.10, black crinkle or silver with a lighter rib. Each carries 4 coil-pack boxes
   (0.05 × 0.05 × 0.08) in a line.
@@ -122,7 +122,7 @@ car differs.
 - Exhaust: tubular **4-into-1 headers per side** (four 0.042 Ø primaries, 0.30 long, merging into a 0.064 collector).
   An X- or H-crossover sits under the gearbox. Dual 0.064 pipes run to two rear mufflers in front of the bumper.
   - Rampart: **quad tips**, two each side, trapezoid/rounded-rectangle 0.12 × 0.065 in the diffuser.
-  - Harrier: dual round tips 0.09 Ø, plain steel/black.
+  - Vigil: dual round tips 0.09 Ø, plain steel/black.
 - Placement: longitudinal, front face at y_fa + 0.08, rear face at y_fa − 0.62.
 - Tris: hero ~1,600 (headers are expensive; use 6-sided primaries). LOD ~400.
 
@@ -235,7 +235,7 @@ car differs.
 |---|---|---|---|---|
 | `ironside_440` | A big-block pushrod V8 + round chrome air cleaner | long. front-mid | orange-red or chrome covers | dual round, turned down, rear |
 | `rampart_50` | C DOHC V8, plenum, coil packs | long. front-mid | black crinkle | quad trapezoid in diffuser |
-| `sentinel_harrier` NEW | C DOHC V8 (no cover) | long. front-mid | black | dual round, plain |
+| `sentinel_vigil` NEW | C DOHC V8 (no cover) | long. front-mid | black | dual round, plain |
 | `sentinel_cruiser` | B small-block pushrod V8 (modern) | long. front-mid | black | dual round, turned down |
 | `sentinel_warden` NEW | B small-block pushrod V8 (old, round cleaner) | long. front-mid | dull blue/black | single or dual turned down |
 | `sentinel_bastion` | B small-block pushrod V8 (modern) | long. front-mid, high | black | single, behind right rear wheel |
@@ -354,7 +354,7 @@ Spring/damper rates and travel are already in each JSON. Visible spring compress
 |---|---|---|---|
 | `ironside_440` | SLA + longitudinal torsion bars | **live axle, leaf (5 leaves, 1.45 m), staggered shocks** | big diff pumpkin, rear drums |
 | `rampart_50` | strut (twin lower links) | multilink IRS | big 6-piston caliper, wide carrier |
-| `sentinel_harrier` NEW | strut | multilink IRS | as rampart, black parts |
+| `sentinel_vigil` NEW | strut | multilink IRS | as rampart, black parts |
 | `vireo_xs` | double wishbone (90s FF) | double wishbone | red coil springs (tint) |
 | `lindwurm_4t` | strut | multilink + rear driveshafts 0.04 Ø | AWD shafts visible |
 | `kestrel_ts` | strut | multilink | coilover look on the AWD mod |
@@ -457,7 +457,7 @@ Shape: an arc-swept beveled box hugging the disc edge. Inner radius = disc_r −
 |---|---|---|---|
 | `ironside_440` | 0.279 × 0.025 vented, **single-piston floating** (70 mm) | **drum 0.279** | grey, trailing; rear drum |
 | `rampart_50` | 0.380 × 0.034 vented slotted, **6-piston fixed** (46/40/36) | 0.330 × 0.025 vented, single floating | red/silver, F trailing |
-| `sentinel_harrier` NEW | ~0.355 × 0.032, 4-piston fixed | ~0.330 solid/vented, floating | black |
+| `sentinel_vigil` NEW | ~0.355 × 0.032, 4-piston fixed | ~0.330 solid/vented, floating | black |
 | `vireo_xs` | 0.262 × 0.022 vented, single floating | 0.239 × 0.010 solid, single floating | red, trailing |
 | `lindwurm_4t` | 0.340 × 0.030 vented, single floating (large 60 mm) | 0.310 × 0.022 vented | red, trailing |
 | `kestrel_ts` | 0.300 × 0.026 vented, single floating | 0.280 × 0.010 solid | silver/red, trailing |
@@ -590,13 +590,13 @@ Use `wheels[i].radius_m` (loaded R) and `width_m` (W), plus `rim_in` from §4.4.
 
 ### 4.4 Roster → wheel/tire map
 
-rim/R uses the loaded radius. Fulmine, warden, harrier and the debug cars are proposals (no spec file yet).
+rim/R uses the loaded radius. Fulmine, warden, vigil and the debug cars are proposals (no spec file yet).
 
 | Car | Tire (spec) | rim_in | rim/R | Sidewall h | Style (§4.2) | Finish | Lugs |
 |---|---|---|---|---|---|---|---|
 | `ironside_440` | 235/70R15 vintage_bias | 15 | 0.55 | 0.153 | 10 slotted mag (alt: 9 steelie + dog-dish) | grey + polished lip | 5 × 0.1143 chrome |
 | `rampart_50` | 255/40R19 F, 275/40R19 R | 19 | 0.72 | 0.092/0.100 | 5 split Y, concave | machined/gunmetal | 5 × 0.1143 |
-| `sentinel_harrier` NEW | ~255/45R18 police_pursuit | 18 | ~0.68 | ~0.11 | 6 tuner-style 6-spoke, black | black | 5 × 0.1143 |
+| `sentinel_vigil` NEW | ~255/45R18 police_pursuit | 18 | ~0.68 | ~0.11 | 6 tuner-style 6-spoke, black | black | 5 × 0.1143 |
 | `vireo_xs` | 195/55R15 | 15 | 0.66 | 0.098 | 1 classic 5-spoke (or 3 turbine as variant) | white/silver | 4 × 0.100 |
 | `lindwurm_4t` | 225/40R18 | 18 | 0.74 | 0.080 | 3 turbine/fan | dark silver | 5 × 0.112 |
 | `kestrel_ts` | 225/45R17 | 17 | 0.70 | 0.092 | 6 6-spoke tuner | gold/bronze | 5 × 0.1143 |

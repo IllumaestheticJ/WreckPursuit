@@ -12,10 +12,12 @@
 // Unit numbers vary per car, so they are not in the shared canvas: they go on the mesh's
 // `decal_*` carrier parts with a small per-unit texture (`applyUnitDecals`).
 //
-// Fictional Port Vesper Police Department (PVPD) only; generic words otherwise.
+// Fictional Port Vesper Police Department (PVPD) and Ashpeak County Sheriff's Office (ACSO,
+// the county agency of the combined `ashpeak` map: any police model can wear its `acso`
+// scheme, chosen per unit by wasm's county flag); generic words otherwise.
 import * as THREE from "three";
 import type { CarMeshJson, LiverySide, LiveryAtlas, PanelBody } from "./panels";
-import { DEFAULT_ATLAS, liveryPx } from "./panels";
+import { DEFAULT_ATLAS, liveryFlag, liveryPx } from "./panels";
 
 /** Canvas size of a livery (covers atlas U 0–0.5). */
 const W = 2048;
@@ -55,7 +57,7 @@ interface TextOpts {
   strokeM?: number;
   /** Horizontal scale of the glyphs (condensed 0.8, extended 1.25). */
   cond?: number;
-  /** Italic shear, glyph tops toward the car's front (harrier). */
+  /** Italic shear, glyph tops toward the car's front (vigil). */
   lean?: number;
   /** Letter spacing, em. */
   track?: number;
@@ -241,6 +243,70 @@ class Painter {
   }
 }
 
+/**
+ * ACSO emblem: a six-point sheriff's star with ball tips around a disc holding a snow-capped
+ * peak (drawn with paths, never a seal). `ink` outlines the star and fills the disc.
+ */
+function sheriffStar(p: Painter, side: LiverySide, y: number, z: number, diaM: number, brass: string, ink: string): void {
+  const g = p.g;
+  const c = p.px(side, y, z);
+  const { pa, pb } = p.scale(side, y, z);
+  // Top band: the drawing's up is the car's nose (as the lettering there).
+  const top = side === "top";
+  const r = (diaM / 2) * (top ? pa : pb);
+  g.save();
+  g.translate(c.x, c.y);
+  if (top) g.rotate(Math.PI / 2);
+  if (!top) g.scale(pa / pb, 1); // round on the car
+  else g.scale(pb / pa, 1);
+  const ro = r * 0.84;
+  const ri = r * 0.46;
+  g.beginPath();
+  for (let i = 0; i < 12; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / 6;
+    const rr = i % 2 ? ri : ro;
+    if (i === 0) g.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+    else g.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+  }
+  g.closePath();
+  g.fillStyle = brass;
+  g.fill();
+  g.lineJoin = "round";
+  g.lineWidth = Math.max(1, r * 0.05);
+  g.strokeStyle = ink;
+  g.stroke();
+  for (let i = 0; i < 6; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / 3;
+    g.beginPath();
+    g.arc(Math.cos(a) * ro, Math.sin(a) * ro, r * 0.11, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+  }
+  // Disc with the peak (two summits, snow cap on the tall one).
+  g.beginPath();
+  g.arc(0, 0, r * 0.36, 0, Math.PI * 2);
+  g.fillStyle = ink;
+  g.fill();
+  g.beginPath();
+  g.moveTo(-0.3 * r, 0.17 * r);
+  g.lineTo(-0.1 * r, -0.12 * r);
+  g.lineTo(-0.02 * r, -0.02 * r);
+  g.lineTo(0.09 * r, -0.25 * r);
+  g.lineTo(0.3 * r, 0.17 * r);
+  g.closePath();
+  g.fillStyle = brass;
+  g.fill();
+  g.beginPath();
+  g.moveTo(0.09 * r, -0.25 * r);
+  g.lineTo(0.15 * r, -0.13 * r);
+  g.lineTo(0.09 * r, -0.16 * r);
+  g.lineTo(0.03 * r, -0.13 * r);
+  g.closePath();
+  g.fillStyle = "#F4F1E6";
+  g.fill();
+  g.restore();
+}
+
 /** What a scheme painter can measure on the car. */
 interface CarGeo {
   atlas: LiveryAtlas;
@@ -422,13 +488,112 @@ const pursuit: SchemePainter = (p, c) => {
   p.text("front", "DIAL 911", 0, 0.30, 0.05, { fill: white });
 };
 
+/** ACSO colours: pine green body, bone band and roof, brass pinstripes and star. */
+export const ACSO = { green: "#1D3A2E", bone: "#E6DEC3", brass: "#C8983A" } as const;
+/** Scheme id of the county livery (any police model can wear it). */
+export const COUNTY_SCHEME = "acso";
+/** ACSO base colour as a hex (instanced fleet proxies, mirrors, the greybox box). */
+export const COUNTY_PAINT = 0x1d3a2e;
+
+/**
+ * Ashpeak County Sheriff's Office (`acso`): pine green with a bone band along the doors whose
+ * top edge climbs into a mountain ridge over the rear door, brass pinlines, SHERIFF on the
+ * front door with ASHPEAK COUNTY above it, a brass six-point star on the front fender and the
+ * hood, bone roof for the aerial number. Heights come from the mesh's own doors, so sedans and
+ * SUVs fit.
+ */
+const sheriff: SchemePainter = (p, c) => {
+  const green = ACSO.green;
+  const bone = ACSO.bone;
+  const brass = ACSO.brass;
+  const a = c.atlas;
+  for (const s of ["left", "right", "top", "front", "rear"] as const) p.band(s, green);
+  const [zd0, zd1] = c.zDoor;
+  const h = zd1 - zd0;
+  const lo = zd0 + 0.3 * h;
+  const hi = zd0 + 0.64 * h;
+  // Ridge over the rear door (listed rear → front: y grows toward the nose).
+  const [r0, r1] = c.rd;
+  const w = r1 - r0;
+  const dh = zd1 - 0.03 - hi;
+  const ridge: Pt[] = [
+    [r0 - 0.2, hi],
+    [r0 + 0.12 * w, hi + 0.55 * dh],
+    [r0 + 0.28 * w, hi + 0.3 * dh],
+    [r0 + 0.5 * w, hi + dh],
+    [r0 + 0.68 * w, hi + 0.42 * dh],
+    [r0 + 0.82 * w, hi + 0.7 * dh],
+    [r1 + 0.18, hi],
+  ];
+  const top: Pt[] = [[a.y[0], hi], ...ridge, [a.y[1], hi]];
+  p.sides([[a.y[0], lo], [a.y[1], lo], ...[...top].reverse()], bone);
+  for (const s of ["left", "right"] as const) {
+    p.line(s, top, 0.014, brass);
+    p.line(s, [[a.y[0], lo - 0.02], [a.y[1], lo - 0.02]], 0.014, brass);
+  }
+  // Bone roof (aerial number) and a brass stripe pair over hood and deck.
+  p.rect("top", c.roof.min.y + 0.02, c.roof.max.y - 0.02, -a.x_half, a.x_half, bone);
+  for (const sx of [-1, 1]) {
+    p.rect("top", c.roof.max.y + 0.05, a.y[1], sx * 0.16, sx * 0.2, brass);
+    p.rect("top", a.y[0], c.roof.min.y - 0.05, sx * 0.16, sx * 0.2, brass);
+  }
+  const fdMid = (c.fd[0] + c.fd[1]) / 2;
+  const cap = Math.min(0.15, (hi - lo) * 0.62);
+  p.sideText("SHERIFF", fdMid, lo + (hi - lo - cap) / 2, cap, { fill: green, track: 0.08 });
+  p.sideText("ASHPEAK COUNTY", fdMid, hi + 0.045, Math.min(0.055, dh * 0.45), { fill: bone, track: 0.06 });
+  const starDia = Math.min(0.24, (hi - lo) * 1.05);
+  for (const s of ["left", "right"] as const) sheriffStar(p, s, c.fd[1] + 0.3, (lo + hi) / 2, starDia, brass, green);
+  // Tail: bone band with SHERIFF, the county under it; nose: SHERIFF.
+  p.rect("rear", -a.x_half, a.x_half, lo, hi, bone);
+  p.text("rear", "SHERIFF", 0, lo + (hi - lo) * 0.2, (hi - lo) * 0.55, { fill: green, cond: 0.9, track: 0.08 });
+  p.text("rear", "ASHPEAK COUNTY", 0, lo - 0.08, 0.04, { fill: bone });
+  p.text("front", "SHERIFF", 0, 0.42, 0.06, { fill: bone, track: 0.08 });
+  if (c.hood) {
+    p.text("top", "SHERIFF", (c.hood.min.y + a.y[1]) / 2, 0, 0.13, { fill: bone, cond: 0.85 });
+    sheriffStar(p, "top", c.hood.min.y + 0.2, 0, 0.2, brass, green);
+  }
+  if (c.trunk) p.text("top", "SHERIFF", c.trunk.min.y + 0.55, 0, 0.09, { fill: bone, cond: 0.9 });
+};
+
 const SCHEMES: Record<string, SchemePainter> = {
   pvpd_bw: blackWhite(false),
   pvpd_bw_classic: blackWhite(true),
   pvpd_highway: highway,
   pvpd_suv: suv,
   pvpd_pursuit: pursuit,
+  [COUNTY_SCHEME]: sheriff,
 };
+
+/**
+ * Debug override of the police agency (`?police_skin=county` puts every police car in the
+ * ACSO livery, `?police_skin=city` none); null = follow the unit's county flag.
+ */
+export function policeSkinOverride(): "county" | "city" | null {
+  if (skinOverride === undefined) {
+    try {
+      const v = new URLSearchParams(globalThis.location?.search ?? "").get("police_skin");
+      skinOverride = v === "county" || v === "city" ? v : null;
+    } catch {
+      skinOverride = null;
+    }
+  }
+  return skinOverride;
+}
+/** Parsed once (countySkin runs per police car per frame). */
+let skinOverride: "county" | "city" | null | undefined;
+
+/** Whether a unit wears the county livery: its wasm county flag, unless the URL overrides it. */
+export function countySkin(flag: boolean): boolean {
+  const o = policeSkinOverride();
+  return o === null ? flag : o === "county";
+}
+
+/** The scheme a police mesh wears: its own, or the county scheme (`county`). */
+function schemeOf(mesh: CarMeshJson, county: boolean): string | undefined {
+  const own = mesh.livery?.scheme;
+  if (!own || !(own in SCHEMES)) return undefined;
+  return county ? COUNTY_SCHEME : own;
+}
 
 /** True if the mesh carries a livery scheme this painter knows. */
 export function hasPoliceLivery(mesh: CarMeshJson | null): boolean {
@@ -437,10 +602,13 @@ export function hasPoliceLivery(mesh: CarMeshJson | null): boolean {
 
 const liveryCache = new Map<string, THREE.CanvasTexture>();
 
-/** The shared livery texture of a car model (null if its mesh has no known scheme). */
-export function liveryTexture(mesh: CarMeshJson, anisotropy = 8): THREE.CanvasTexture | null {
-  const scheme = mesh.livery?.scheme;
-  if (!scheme || !(scheme in SCHEMES)) return null;
+/**
+ * The shared livery texture of a car model (null if its mesh has no known scheme); `county`
+ * paints the ACSO scheme on the model instead of its PVPD one.
+ */
+export function liveryTexture(mesh: CarMeshJson, anisotropy = 8, county = false): THREE.CanvasTexture | null {
+  const scheme = schemeOf(mesh, county);
+  if (!scheme) return null;
   const key = `${mesh.id}:${scheme}`;
   const hit = liveryCache.get(key);
   if (hit) return hit;
@@ -461,7 +629,8 @@ export function liveryTexture(mesh: CarMeshJson, anisotropy = 8): THREE.CanvasTe
 }
 
 /** Base (first) colour of a scheme, for paint parts that do not take the livery (mirrors). */
-export function liveryBaseColour(mesh: CarMeshJson): THREE.Color | null {
+export function liveryBaseColour(mesh: CarMeshJson, county = false): THREE.Color | null {
+  if (county && schemeOf(mesh, true)) return new THREE.Color().setHex(COUNTY_PAINT, THREE.SRGBColorSpace);
   const c = mesh.livery?.colors?.[0];
   return c ? new THREE.Color().setRGB(c[0] / 255, c[1] / 255, c[2] / 255, THREE.SRGBColorSpace) : null;
 }
@@ -490,11 +659,16 @@ export function unitNumber(carId: string, id: number): string {
       return `L-L${n(9)}`;
     case "sentinel_bastion":
       return `${precinct}-B${n(9)}`;
-    case "sentinel_harrier":
+    case "sentinel_vigil":
       return `${precinct}-H${n(9)}`;
     default:
       return `${precinct}-${String(n(19)).padStart(2, "0")}`;
   }
+}
+
+/** County unit string: the city's number with the `AC` (Ashpeak County) prefix: `AC-12`, `AC-B3`. */
+export function countyUnitNumber(carId: string, id: number): string {
+  return unitNumber(carId, id).replace(/^[A-Z]+-/, "AC-");
 }
 
 /** Decal text colours per scheme: side, roof, trunk (fill, optional outline). */
@@ -504,6 +678,7 @@ const DECAL_STYLE: Record<string, Record<"side" | "roof" | "trunk", { fill: stri
   pvpd_highway: { side: { fill: "#D9AA3A", stroke: "#000" }, roof: { fill: "#2B241C" }, trunk: { fill: "#2B241C" } },
   pvpd_suv: { side: { fill: "#14223F" }, roof: { fill: "#14223F" }, trunk: { fill: "#14223F" } },
   pvpd_pursuit: { side: { fill: "#0E0F12" }, roof: { fill: "#F4F5F7" }, trunk: { fill: "#0E0F12" } },
+  [COUNTY_SCHEME]: { side: { fill: ACSO.bone, stroke: ACSO.green }, roof: { fill: ACSO.green }, trunk: { fill: ACSO.bone } },
 };
 
 const decalCache = new Map<string, THREE.MeshStandardMaterial>();
@@ -551,6 +726,9 @@ function decalMaterial(text: string, aspect: number, fill: string, stroke: strin
     metalness: 0.1,
     flatShading: true,
     side: THREE.DoubleSide,
+    // Single pass: transparent + DoubleSide is otherwise drawn back then front, flipping `side`
+    // and re-resolving the program twice every frame (perf_check "no shader re-resolve").
+    forceSinglePass: true,
     polygonOffset: true,
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,
@@ -565,11 +743,11 @@ function decalMaterial(text: string, aspect: number, fill: string, stroke: strin
  * strings. Side decals read left → right from outside; roof / trunk read from behind with
  * glyph tops toward the front. Call once the meshes exist (rest pose).
  */
-export function applyUnitDecals(root: THREE.Object3D, mesh: CarMeshJson, unitId: number): void {
-  const scheme = mesh.livery?.scheme ?? "";
+export function applyUnitDecals(root: THREE.Object3D, mesh: CarMeshJson, unitId: number, county = false): void {
+  const scheme = schemeOf(mesh, county) ?? "";
   const style = DECAL_STYLE[scheme];
   if (!style) return;
-  const body = unitNumber(mesh.id, unitId);
+  const body = county ? countyUnitNumber(mesh.id, unitId) : unitNumber(mesh.id, unitId);
   const roofStr = body.replace("-", "");
   const lean = scheme === "pvpd_pursuit" ? 0.17 : 0;
   root.traverse((o) => {
@@ -610,22 +788,15 @@ export function applyUnitDecals(root: THREE.Object3D, mesh: CarMeshJson, unitId:
 }
 
 /**
- * Give a sim police car's panel mesh its scheme: shared livery texture on the livery parts,
+ * Give a sim police car's panel mesh (render/panels.ts PanelBody: its decal carriers are own
+ * meshes named after their part, the other parts batched) its scheme: shared livery texture on the livery parts,
  * the scheme's base colour on plain paint parts (mirrors), per-unit decals from `unitId`.
  * Skipped when the URL forces a livery (`?livery=grid` debug view) or the mesh has no scheme.
  */
-export function setupPoliceLook(panels: PanelBody, mesh: CarMeshJson, unitId: number): void {
-  let flag: string | null = null;
-  try {
-    flag = new URLSearchParams(globalThis.location?.search ?? "").get("livery");
-  } catch {
-    flag = null;
-  }
-  if (flag) return;
-  const tex = liveryTexture(mesh);
+export function setupPoliceLook(panels: PanelBody, mesh: CarMeshJson, unitId: number, county = false): void {
+  if (liveryFlag()) return;
+  const tex = liveryTexture(mesh, 8, county);
   if (!tex) return;
-  panels.setLivery(tex);
-  const base = liveryBaseColour(mesh);
-  if (base) panels.paint.color.copy(base);
-  applyUnitDecals(panels.root, mesh, unitId);
+  panels.setLivery(tex, liveryBaseColour(mesh, county));
+  applyUnitDecals(panels.root, mesh, unitId, county);
 }

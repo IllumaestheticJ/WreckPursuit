@@ -21,19 +21,19 @@ fn main() {
         .to_vec();
     }
     let no_tcs = AssistProfile {
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         esc: false,
         ..AssistProfile::keyboard_default()
     };
     let gp_no_tcs = AssistProfile {
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         ..AssistProfile::gamepad_default()
     };
     // Countersteer slider (countersteer_help) at 0 / 50 / 100 % on the keyboard and gamepad
     // presets, plus the wheel preset (no assists) as the reference.
     let kb = |h: f32, tcs: bool| AssistProfile {
         countersteer_help: h,
-        tcs,
+        tcs: tcs.into(),
         esc: tcs,
         ..AssistProfile::keyboard_default()
     };

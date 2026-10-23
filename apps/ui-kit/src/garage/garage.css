@@ -70,3 +70,270 @@
 .wp-cg .wp-table td {
   vertical-align: top;
 }
+.wp-cg-tune {
+  max-width: 40em;
+}
+.wp-cg-tune-row {
+  display: grid;
+  gap: 0.25em;
+  padding: 0.55em 0;
+  border-bottom: 1px solid var(--edge);
+}
+.wp-cg-tune-ctl {
+  gap: 0.6em;
+  align-items: center;
+}
+.wp-cg-tune-ctl .wp-slider {
+  flex: 1;
+  min-width: 0;
+}
+.wp-cg-tune-ticks {
+  display: flex;
+  justify-content: space-between;
+  /* Line the numbers up under the slider, between the end labels. */
+  padding: 0 3.6em;
+  font-size: 0.8em;
+}
+.wp-cg-tune-ticks .is-on {
+  color: var(--scan);
+  font-weight: 700;
+}
+
+/* Garage workshop overlay (Workshop.tsx): panels at the edges, the middle left to the 3D bay. */
+.wp-ws {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: grid;
+  grid-template-columns: 9.5em minmax(0, 1fr) minmax(16em, 21em);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: "top top top" "tools mid right" "strip strip strip";
+  gap: 0.6em;
+  padding: 0.8em;
+}
+.wp-ws > * {
+  pointer-events: auto;
+}
+.wp-ws-top {
+  grid-area: top;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1em;
+  flex-wrap: wrap;
+  background: color-mix(in oklab, var(--panel) 88%, transparent);
+  border: 1px solid var(--edge);
+  padding: 0.4em 0.8em;
+}
+.wp-ws-top h1 {
+  margin: 0;
+  font-size: 1.15em;
+  display: grid;
+}
+.wp-ws-top h1 small {
+  color: var(--scan);
+  font-size: 0.6em;
+  letter-spacing: 0.16em;
+}
+.wp-ws-tools {
+  grid-area: tools;
+  align-self: start;
+  display: grid;
+  gap: 0.35em;
+  background: color-mix(in oklab, var(--panel) 88%, transparent);
+  border: 1px solid var(--edge);
+  padding: 0.5em;
+}
+.wp-ws-tools .wp-upper {
+  font-size: 0.66em;
+  letter-spacing: 0.14em;
+  margin-top: 0.3em;
+}
+.wp-ws-right {
+  grid-area: right;
+  align-self: start;
+  display: grid;
+  gap: 0.5em;
+  max-height: 100%;
+  overflow: auto;
+}
+.wp-ws-list {
+  grid-area: mid;
+  justify-self: start;
+  align-self: start;
+  width: min(20em, 100%);
+  max-height: 100%;
+  overflow: auto;
+}
+.wp-ws-slot {
+  appearance: none;
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.2em 0.4em;
+  background: none;
+  border: 0;
+  border-left: 2px solid transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wp-ws-slot[aria-selected="true"],
+.wp-ws-slot:hover {
+  border-left-color: var(--scan);
+  background: rgba(61, 255, 143, 0.06);
+}
+.wp-ws-hover {
+  grid-area: mid;
+  justify-self: center;
+  align-self: start;
+  pointer-events: none !important;
+  background: color-mix(in oklab, var(--panel) 85%, transparent);
+  border: 1px solid var(--scan);
+  padding: 0.2em 0.6em;
+}
+.wp-ws-strip {
+  grid-area: strip;
+  display: grid;
+  gap: 0.4em;
+  background: color-mix(in oklab, var(--panel) 88%, transparent);
+  border: 1px solid var(--edge);
+  padding: 0.5em;
+}
+.wp-ws-tiles {
+  display: flex;
+  gap: 0.5em;
+  overflow-x: auto;
+  min-height: 3.6em;
+  align-items: stretch;
+}
+.wp-ws-tile {
+  appearance: none;
+  flex: 0 0 10em;
+  display: grid;
+  gap: 0.2em;
+  padding: 0.4em 0.5em;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--edge);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wp-ws-tile[aria-selected="true"] {
+  border-color: var(--scan);
+}
+.wp-ws-tile-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wp-ws-tile-actions {
+  display: flex;
+  gap: 0.5em;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.wp-ws-modal {
+  position: absolute;
+  inset: 8% 10%;
+  z-index: 2;
+  overflow: auto;
+}
+.wp-ws-catalog {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18em, 1fr));
+  gap: 0.8em;
+  margin-top: 0.6em;
+}
+.wp-ws-catgroup {
+  display: grid;
+  gap: 0.3em;
+  align-content: start;
+}
+.wp-ws-catrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 0.5em;
+  align-items: center;
+}
+.wp-ws-standpanel {
+  grid-area: mid;
+  justify-self: start;
+  align-self: start;
+  width: min(27em, 100%);
+  max-height: 100%;
+  overflow: auto;
+}
+.wp-ws-standrow[aria-selected="true"] {
+  background: rgba(61, 255, 143, 0.08);
+  box-shadow: inset 2px 0 0 var(--scan);
+}
+.wp-ws-stand {
+  display: grid;
+  gap: 0.3em;
+  margin-bottom: 0.8em;
+}
+.wp-ws-standrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5em;
+  align-items: center;
+  padding: 0.15em 0;
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.06));
+}
+@media (max-width: 760px) {
+  .wp-ws {
+    grid-template-columns: 1fr;
+    grid-template-areas: "top" "tools" "right" "strip";
+    overflow: auto;
+  }
+  .wp-ws-list {
+    grid-area: right;
+  }
+  .wp-ws-standpanel {
+    grid-area: right;
+  }
+  .wp-ws-modal {
+    inset: 0;
+  }
+}
+
+/* Part card sections: do it yourself / mechanic. */
+.wp-ws-section {
+  border-top: 1px solid var(--edge);
+  padding-top: 0.4em;
+  margin-top: 0.2em;
+  font-size: 0.8em;
+}
+.wp-ws-mech {
+  display: flex;
+  gap: 0.4em;
+  flex-wrap: wrap;
+}
+.wp-ws-oldparts {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.wp-ws-notice {
+  margin: 0 0 0.5em;
+  padding: 0.4em 0.6em;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-left: 3px solid currentColor;
+}
+.wp-ws-sort {
+  display: inline-flex;
+  gap: 0.4em;
+  align-items: center;
+  font-size: 0.8em;
+}
+.wp-ws-sort select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  padding: 0.1em 0.3em;
+  pointer-events: auto;
+}

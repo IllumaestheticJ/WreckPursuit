@@ -18,6 +18,10 @@ wp_world.workspace = true
 wp_weather.workspace = true
 # Menu stat bars (car_stats).
 wp_vehicle.workspace = true
+# Entity `mods` (the mod catalog and apply_mods; wasm-clean, no native feature).
+wp_economy.workspace = true
+# Evader bot (police-bench).
+wp_opponent.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ron.workspace = true

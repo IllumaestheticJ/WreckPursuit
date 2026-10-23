@@ -25,6 +25,7 @@ pub mod fuzz;
 pub mod golden;
 pub mod net;
 pub mod output;
+pub mod police_bench;
 pub mod replay;
 pub mod run;
 pub mod scenario;

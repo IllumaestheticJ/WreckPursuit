@@ -151,8 +151,6 @@ fn run_op(
                     route_length_m: 8000.0,
                     phase: DayPhase::Night,
                     mode,
-                    purse_scale: 1.0,
-                    entry_scale: 1.0,
                 };
                 let fee = e.entry_fee(&setup);
                 let r = e.enter_race(a, &setup, car);
@@ -403,6 +401,8 @@ proptest! {
             location: wp_economy::CarLocation::Garage,
             insurance: None,
             purchase_price: Some(base_price as i64),
+            tune: Default::default(),
+            parts: None,
         };
         let table = e.price_table_for(&car);
         let all: Vec<(RepairItem, f32)> = ALL_REGIONS.iter().map(|r| (RepairItem::Region(*r), 1.0))

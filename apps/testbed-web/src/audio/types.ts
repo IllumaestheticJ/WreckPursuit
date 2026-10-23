@@ -30,6 +30,8 @@ export interface VoiceParams {
   freq_hz: number;
   load: number;
   phase: number;
+  /** Cue-specific blend 0..1 (tire squeal: 0 = cornering slide, 1 = braking lock-up); absent = 0. */
+  timbre?: number;
   lowpass_hz: number;
   doppler: number;
   pos: [number, number, number];
@@ -59,6 +61,8 @@ export type AudioCommand =
         unit: number;
         text: string;
         priority: RadioPriority;
+        /** Police priority tier (row 144): 1 actionable … 5 routine, 0 unknown. */
+        tier?: number;
         duration_s: number;
         voice_pitch: number;
       };
@@ -134,8 +138,26 @@ export interface SamplePack {
   cues: Record<string, CueDef>;
 }
 
+/**
+ * Master stage gain staging (`audio_config.json` → `master`, wp_audio `MasterMix`): fixed
+ * per-bus headroom trims, the master compressor (a peak catcher; its automatic make-up gain is
+ * compensated, see `compressorMakeupGain`), a final trim and the safety soft clip.
+ */
+export interface MasterMix {
+  /** Fixed gain of each bus where it enters the master stage, dB (after the user slider). */
+  bus_gain_db: Partial<Record<Bus, number>>;
+  /** DynamicsCompressorNode settings. */
+  compressor: { threshold_db: number; knee_db: number; ratio: number; attack_s: number; release_s: number };
+  /** Gain after the compressor (its make-up gain already divided out), dB. */
+  trim_db: number;
+  /** Soft clip: linear below this level (full scale = 1). */
+  clip_knee: number;
+  /** Soft clip: output level the tanh knee approaches (never exceeded). */
+  clip_ceiling: number;
+}
+
 export interface AudioLibrary {
-  config: { max_voices: number; bus_max_voices: Partial<Record<Bus, number>> };
+  config: { max_voices: number; bus_max_voices: Partial<Record<Bus, number>>; master?: MasterMix };
   packs: Record<string, SamplePack>;
 }
 

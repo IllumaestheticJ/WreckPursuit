@@ -6,6 +6,9 @@
 - **Contract version built against:** 0.3.0
 
 Design write-up, tuning levers and measured numbers: `crates/wp_economy/README.md`.
+Career progression (rep tiers, unlocks, betting wallet): `docs/integration/career-progression.md`.
+
+- **Mod visuals:** `wp_economy::visuals` (what a build looks like, `ModDef::visuals`) — see `docs/integration/mod-visuals.md`.
 
 ## Exposes
 
@@ -39,7 +42,7 @@ keep the career's damage mode (`set_damage_mode` is refused). Lattice blobs are
 
 Testbed (`apps/testbed-web`): `garage` button and a `career` box (on by default) in the
 controls: with it, **free drive** and **city chase** start career runs; the car selector and
-`window.__wp.startFreeDrive(car, …)` / `startCityChase(car, …)` stay sandbox runs. Saved to
+`window.__wp.startFreeDrive(car, …)` / `startNightRun(car, …)` stay sandbox runs. Saved to
 `localStorage["wp.career.v1"]` (try/catch everywhere; an unreadable save is kept under
 `wp.career.v1.unreadable`) after every garage action, every settlement and every 20 s of a run;
 export / import as a file from the garage. The end-of-run panel gets a **Garage** button on
@@ -110,7 +113,7 @@ capture), `CarImpounded/CarSeized/CarDestroyed` (despawn / do not spawn that car
 | Call | Notes |
 |---|---|
 | `price_table(class, car_value)` / `price_table_for(&OwnedCar)` | contract `PriceTable` to pass to `DamageSim::repair_estimate` |
-| `record_damage(&mut acct, &DamageReport)` | end of session: health, total_loss, handling, estimate, lattice blob, `wanted_during_session`, `towed` (towing is a penalty) |
+| `record_damage(&mut acct, &DamageReport)` | end of session: health, total_loss, handling, estimate, lattice blob, `wanted_during_session` (informational; insurance only cares about captures), `towed` (towing is a penalty) |
 | `quote_repair(&acct, car, &RepairOption, &ShopContext, mode) -> RepairQuote` | `RepairAll`, `RepairSelected(items)`, `DriveDamaged`, `Scrap`; district + crooked/legit labour; insurance. `ShopContext.district: DistrictId` (round 8); `district_from_key(&str)` parses names and the old keys (`default` → Residential, `Docks` → Port, `Hills` → Suburb) |
 | `repair(...) -> RepairOrder` | the damage system must apply the order to the stored lattice and send a fresh `DamageReport` (`towed: false`) |
 | `repair::reference_estimate(&PriceTable, scale, &[(RepairItem, severity)])` | formula stand-in for `wp_damage` |
@@ -558,11 +561,3 @@ none of my round 12b commits): the same tests fail there — `simcli goldens_mat
 diverge: city, golden chase/escape, panels, police sideswipe, race picks, weather),
 `wp_race race_picker::grid_highway_sprint`, `wp_sim sidewalk::vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`,
 and both `wp_wasm` race tests. They are not caused by the economy changes.
-
-## RaceSetup stake scales (2026-10-23, from the race follow-up)
-
-`RaceSetup::{purse_scale, entry_scale}` (serde default 1.0) multiply the winner purse and the
-buy-in. `wp_race::bridge::economy_race` sets them so races from the picker charge and pay the
-stake the lobby advertised (the stake table is flat per kind; the economy prices per km, so a
-short sprint paid 0.27× the advertised purse). Career / street meets leave them at 1.0.
-Details: `docs/integration/race.md`, "R5 follow-up".

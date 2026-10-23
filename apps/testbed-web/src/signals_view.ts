@@ -126,7 +126,6 @@ export class SignalView {
       const [x, y, z, yaw] = [heads[o + SH.x], heads[o + SH.y], heads[o + SH.z], heads[o + SH.yaw]];
       this.headXY[h * 2] = x;
       this.headXY[h * 2 + 1] = y;
-      const left = heads[o + SH.left];
       const right = heads[o + SH.right];
       const radius = heads[o + SH.radius];
       const cz = heads[o + SH.centreZ];

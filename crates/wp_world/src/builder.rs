@@ -155,12 +155,15 @@ pub struct RoadSpec {
     /// Explicit `turn:lanes` for b → a, left to right (empty = defaults).
     pub turn_lanes_bwd: Vec<TurnSet>,
     /// Extra paving (shoulder) beyond the lanes on the left of a → b, m. Paving only: lanes
-    /// and markings are unchanged.
+    /// and markings are unchanged. When either side is set, both replace the class shoulder
+    /// ([`shoulder_width`], round 12's 3 m highway shoulder) instead of adding to it.
     pub shoulder_left_m: f32,
     /// Extra paving (shoulder) beyond the lanes on the right of a → b, m.
     pub shoulder_right_m: f32,
     /// A median barrier runs along the left paved edge (see [`RoadSurface::median_barrier`]).
     pub median_barrier: bool,
+    /// Paving ([`RoadSurface::material`]).
+    pub material: RoadMaterial,
 }
 
 impl RoadSpec {
@@ -183,6 +186,7 @@ impl RoadSpec {
             shoulder_left_m: 0.0,
             shoulder_right_m: 0.0,
             median_barrier: false,
+            material: RoadMaterial::Asphalt,
         }
     }
 }
@@ -511,18 +515,21 @@ pub fn half_width_of(
     }
 }
 
-/// Whether a road sets its own shoulders ([`RoadSpec::shoulder_left_m`] /
-/// [`RoadSpec::shoulder_right_m`], e.g. divided-highway carriageways and ramps); those replace
-/// the class's generic [`shoulder_width`] in its paved width.
-fn own_shoulders(r: &RoadSpec) -> bool {
-    r.shoulder_left_m > 0.0 || r.shoulder_right_m > 0.0
+/// Half width of the side of the road a lane group occupies (max of both sides), m.
+fn half_width(r: &RoadSpec, opt: &BuildOptions) -> f32 {
+    let base = half_width_of(r.class, r.lanes_fwd, r.lanes_bwd, r.parking, opt);
+    match explicit_shoulders(r) {
+        Some((sl, sr)) => base - shoulder_width(r.class, opt) + sl.max(sr),
+        None => base,
+    }
 }
 
-/// Half width of the side of the road a lane group occupies (max of both sides), m. Used for
-/// junction setbacks, so it keeps the class's shoulder even where a road paves its own
-/// (main's spine ends then keep their 30 m junctions, roomy enough for three-lane turns).
-fn half_width(r: &RoadSpec, opt: &BuildOptions) -> f32 {
-    half_width_of(r.class, r.lanes_fwd, r.lanes_bwd, r.parking, opt)
+/// A road's own shoulders (left, right of a → b), when it sets them (main's divided
+/// carriageways and ramps: [`RoadSpec::shoulder_left_m`]); they replace the class shoulder
+/// ([`shoulder_width`]) instead of adding to it.
+fn explicit_shoulders(r: &RoadSpec) -> Option<(f32, f32)> {
+    (r.shoulder_left_m > 0.0 || r.shoulder_right_m > 0.0)
+        .then_some((r.shoulder_left_m, r.shoulder_right_m))
 }
 
 /// Build the lane graph.
@@ -675,31 +682,31 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
         let w = lane_width(r.class, opt);
         let one_way = r.lanes_bwd == 0;
         let park = if r.parking { opt.parking_width_m } else { 0.0 };
-        let shoulder = if own_shoulders(r) {
-            0.0
-        } else {
-            shoulder_width(r.class, opt)
-        };
+        let shoulder = shoulder_width(r.class, opt);
+        let (sl, sr) = explicit_shoulders(r).unwrap_or((shoulder, shoulder));
         // Centreline to each direction's inner lane edge.
         let inner = median_width(r.class, r.lanes_fwd, r.lanes_bwd, opt) * 0.5;
         let (left_m, right_m) = if one_way {
-            let h = r.lanes_fwd as f32 * w * 0.5 + park + shoulder;
-            (h, h)
+            let h = r.lanes_fwd as f32 * w * 0.5 + park;
+            (h + sl, h + sr)
         } else {
             (
-                inner + r.lanes_bwd as f32 * w + park + shoulder,
-                inner + r.lanes_fwd as f32 * w + park + shoulder,
+                inner + r.lanes_bwd as f32 * w + park + sl,
+                inner + r.lanes_fwd as f32 * w + park + sr,
             )
         };
+        // Unpaved roads (gravel, dirt) have soft verges, no kerb and sidewalk.
+        let kerbed = r.class != RoadClass::Highway && r.material == RoadMaterial::Asphalt;
         surfaces.push(RoadSurface {
             road: ri as u32,
             centre: paved,
             bank: paved_bank,
-            left_m: left_m + r.shoulder_left_m,
-            right_m: right_m + r.shoulder_right_m,
+            left_m,
+            right_m,
             highway: r.class == RoadClass::Highway,
-            sidewalk: [r.class != RoadClass::Highway, r.class != RoadClass::Highway],
+            sidewalk: [kerbed, kerbed],
             median_barrier: r.median_barrier,
+            material: r.material,
         });
         let base_kind = match r.class {
             RoadClass::Highway => LaneKind::Highway,

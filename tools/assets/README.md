@@ -8,14 +8,14 @@ and checks them. See `data/panels/README.md` for the file formats and
 ```sh
 cargo run -p car-assets --bin gen-panels            # data/panels/<car>.json (first pass from the lattice)
 cargo run -p car-assets --bin gen-panels -- --check # exit 1 if a spec differs from the derived one
-cargo run -p car-assets --bin gen-car-mesh          # data/panels/meshes/<car>.json (+ bind-skin)
+cargo run -p car-assets --bin gen-car-mesh          # data/panels/meshes/<car>.json (+ bind-skin) and meshes/mid/<car>.json
 cargo run -p car-assets --bin gen-car-mesh -- --check  # exit 1 if a mesh is stale
 cargo run -p car-assets --bin bind-skin -- data/panels/meshes/<car>.json [data/lattices/<id>.json]
 cargo run -p car-assets --bin validate-car-asset [car ...]
 cargo run --release -p car-assets --bin panels-bench # perf, 24 cars
 cargo run --release -p car-assets --example panel_probe -- apps/simcli/scenarios/panels/side_swipe_door.ron
 cargo run -p car-assets --example profile_dump -- [--ring <y>] <car>  # styled anchors, regions, a cross-section
-cargo test -p car-assets                             # every car valid + meshes up to date
+cargo test -p car-assets                             # every car valid + meshes up to date + turn-signal contract
 cargo run --release -p car-assets --example crumple_matrix -- Arcade [frame ticks]  # hood/fender/bumper crumple, 30/50/70 km/h
 node tools/assets/panels_shots.mjs                   # browser checks + screenshots (docs/media/panels)
 node tools/assets/crumple_shots.mjs after            # hood crumple shots at 8 m / 30 m
@@ -64,8 +64,12 @@ built in another worktree with a shared `CARGO_TARGET_DIR` writes into *that* wo
   greenhouse / top / bed) into a body region: bumpers, hood, fenders, doors (door windows ride with
   their door), quarter glass, sills, roof, windshield, rear glass (or cab-back wall), trunk or
   deck, quarters, pillars, open bed floor (`bed_floor`, FrameRear). Plus head / tail lights on the
-  nose / tail faces (proud of the surface; skinned to the bumper, hood / trunk, fender / quarter
-  and frame nodes of their end, so they crush with it), door mirrors, hood scoop / vents, a minimal interior, the underbody, style
+  nose / tail faces (`LIGHT_PROUD_M` proud of the surface; region `FrameFront` / `FrameRear`,
+  bound to their end of the car so they crush with it), each with its turn signal cut out of
+  the same lens (`indicator_front_*` / `indicator_rear_*`, optional `indicator_side_*` fender or
+  mirror repeaters; contract and per-family layouts in `data/panels/README.md` "Turn signals";
+  helpers `Kit::{front_cluster, rear_cluster, top_lamp_split, fender_repeaters,
+  mirror_repeaters}`, traffic `reshape_indicators`), door mirrors, hood scoop / vents, a minimal interior, the underbody, style
   details, mechanical parts (`mechanical/`: engine bay, suspension, exhaust, frame) and per-wheel
   tire / rim (`wheels/`) / brake disc / caliper / upright parts, all from the resolved
   `mechanical::car_spec` (per-id table + style overrides). The underbody plate stays at floor
@@ -80,42 +84,104 @@ built in another worktree with a shared `CARGO_TARGET_DIR` writes into *that* wo
 
 ### Triangle budgets (`Tier::tri_budget`, checked by `validate-car-asset`)
 Hero (performance + police, and classes Sport / Muscle / Exotic / Police*): 8k–20k. Traffic
-(traffic module; classes Beater / Compact / Truck): 4k–10k. Current output (2026-10-21, wave-2
-styles + mechanical parts + lead polish; traffic styles still pending):
+(traffic module; classes Beater / Compact / Truck): 4k–10k. Current output (2026-10-21, mesh
+format 4 after the round-12 × detailed-car-models merge and the integrated turn signals, which
+cost at most +1.6 % per car — `every_car_has_turn_signals_integrated_into_its_lamps` caps them at
++2 % of the counts before; the fold bindings add no triangles):
 
 | car | tris | car | tris | car | tris |
 |---|---|---|---|---|---|
-| debug_coupe | 16617 | ironside_440 | 18699 | sentinel_bastion | 17191 |
-| debug_sedan | 8106 | junkyard_beater | 7480 | sentinel_cruiser | 16963 |
-| drayman_cargo | 8594 | kestrel_ts | 17548 | sentinel_harrier | 17715 |
-| fulmine_v10 | 18738 | lindwurm_4t | 16246 | sentinel_warden | 17770 |
-| furrow_24 | 8144 | lucciola_350 | 17242 | sentinel_wolfhound | 17137 |
-| hakone_gt | 17829 | rampart_50 | 18826 | shiro_turbo | 17918 |
-| hauler_1500 | 9403 | sperber_32 | 17772 | tansy_13 | 6926 |
-| | | | | vireo_xs | 15731 |
+| arashi_t4 | 17180 | ironside_440 | 18699 | sentinel_vigil | 17955 |
+| brigand_400 | 19772 | junkyard_beater | 7968 | sentinel_warden | 18010 |
+| bulwark_400 | 19186 | kestrel_ts | 17812 | sentinel_wolfhound | 17377 |
+| debug_coupe | 16801 | lindwurm_4t | 16430 | shiro_turbo | 17982 |
+| debug_sedan | 8454 | lucciola_350 | 17306 | sperber_32 | 18036 |
+| drayman_cargo | 9467 | marten_20 | 15916 | stoat_16v | 15730 |
+| fulmine_v10 | 18802 | rampart_50 | 18866 | talus_20t | 17326 |
+| furrow_24 | 8498 | satchel_20 | 8362 | tansy_13 | 7220 |
+| hakone_gt | 17773 | sentinel_bastion | 17431 | tumbril_20 | 8535 |
+| hauler_1500 | 9813 | sentinel_cruiser | 17203 | vireo_xs | 15851 |
 
-Headroom: hero cars sit at 15.7k–18.8k of 20k, `hauler_1500` at 9.4k of 10k (drop its tire lugs
+Headroom: hero cars sit at 15.7k–19.8k of 20k (`brigand_400` 19.8k with 22 wheel segments),
+`hauler_1500` at 9.8k of 10k (drop its tire lugs
 or wheel segments first if traffic details push it over; see `wave2_mechanical.md`).
+
+### Mid LOD (`Lod::Mid`, `data/panels/meshes/mid/<car>.json`)
+`gen-car-mesh` writes a second, unskinned mesh per car for the browser's instanced far cars
+(fleet near tier, nearest parked cars): `mesh::generate_mid` = `generate_lod(.., Lod::Mid)`, the
+same style at `MID_LOFT_STEPS` (0.20 m / 0.12 m), `MID_WHEEL_SEGMENTS` (12) wheels,
+`MID_PATCH_STEP_M` (16 cm) surface patches and traffic-tier mechanical detail, filtered by
+`keep_in_mid` (exterior panels, glass, lights, mirrors, light bars, tires, rims, exhaust tips,
+details ≥ `MID_MIN_DETAIL_M` = 0.2 m); details, rims, lamps, light bars and mirrors are then
+decimated by vertex clustering (`cluster_part`, `MID_CLUSTER_M` = 3.5 cm grid, vertices snap
+to cell centres so touching parts stay closed; atlas seams kept apart by a UV bucket). Atlas,
+livery hint, tints and atlas UVs equal the full mesh's. Budget `MID_TRI_BUDGET` 2k–6.5k; checked
+by `every_car_has_an_up_to_date_mid_lod` (also: up to date, a subset of the full mesh's parts
+with the same kinds / materials, every panel / glass / light / tire kept). Format: see
+`data/panels/README.md` "Mid LOD". Current output:
+
+| car | mid (full) tris | car | mid (full) tris | car | mid (full) tris |
+|---|---|---|---|---|---|
+| arashi_t4 | 4938 (17180) | ironside_440 | 5349 (18699) | sentinel_vigil | 4919 (17955) |
+| brigand_400 | 6008 (19772) | junkyard_beater | 4433 (7968) | sentinel_warden | 5460 (18010) |
+| bulwark_400 | 5502 (19186) | kestrel_ts | 5017 (17812) | sentinel_wolfhound | 5086 (17377) |
+| debug_coupe | 4765 (16801) | lindwurm_4t | 4728 (16430) | shiro_turbo | 5014 (17982) |
+| debug_sedan | 4562 (8454) | lucciola_350 | 4752 (17306) | sperber_32 | 4904 (18036) |
+| drayman_cargo | 5041 (9467) | marten_20 | 4072 (15916) | stoat_16v | 3978 (15730) |
+| fulmine_v10 | 5588 (18802) | rampart_50 | 5280 (18866) | talus_20t | 5213 (17326) |
+| furrow_24 | 4514 (8498) | satchel_20 | 4693 (8362) | tansy_13 | 4092 (7220) |
+| hakone_gt | 4790 (17773) | sentinel_bastion | 5309 (17431) | tumbril_20 | 4604 (8535) |
+| hauler_1500 | 5309 (9813) | sentinel_cruiser | 4824 (17203) | vireo_xs | 3967 (15851) |
+
+Mid LODs: 3967–6008 triangles (full meshes 7220–19772); files 130–190 KB each (full meshes
+0.5–1.4 MB). The four `parity_*` cars' mid files are copies of their template car's
+(`tools/parity/build_parity_cars.py`; after a regeneration refresh the copies with its
+`copy_panels(spec)` for each `CARS` entry, or rerun the script).
+
+### Mesh format 4
+`MESH_FORMAT = 4` = `claude/detailed-car-models`' format 2 (part kinds / materials, `rigid`,
+`tints`, `livery`, `atlas`, `wheel_camber_deg`, livery atlas UVs) + `lead/round12`'s format 3
+(`MeshPart::fold` crumple binding on hood / trunk / front fenders / rear quarters, head / tail
+lamps in `FrameFront` / `FrameRear` bound to their end of the car). Field names are those of the
+two sides; `data/panels/README.md` documents every field. Validation and tests accept format 4
+only.
+
+### Styles of the round-12 roster cars
+Variants of an existing family (same body kit, so the same lamp shapes / tail pattern as the
+family car; their own body knobs, paint, wheels and mechanical spec):
+
+| car | archetype (`analog_of`) | style |
+|---|---|---|
+| `stoat_16v` | early-90s FF 3-door hot hatch | `hatch::stoat` (vireo family) |
+| `marten_20` | early-90s FF hot hatch | `hatch::marten` (vireo family) |
+| `arashi_t4` | mid-90s AWD rally saloon | `tuner::arashi` (kestrel family, AWD spec) |
+| `talus_20t` | late-90s AWD rally saloon | `tuner::talus` (kestrel family, AWD spec) |
+| `bulwark_400` | early-70s US four-door muscle sedan | `muscle::bulwark` (ironside family) |
+| `brigand_400` | mid-70s US four-door sedan | `muscle::brigand` (ironside family, dog-dish wheels) |
+| `satchel_20` / `tumbril_20` | 2000s FWD high-roof panel van | `traffic::euro_panel_van` (drayman van kit, I4 / strut / torsion beam) |
 
 ## bind-skin (`src/skin.rs`)
 4 nearest nodes of the part's own region, weights ∝ 1/(d² + 1e-4), quantised to 1/255 summing
 to 255. Region-aware: a hood vertex never follows a fender node. Regions with fewer than four
 nodes (glass, 2-door side strips) borrow from their fallback regions (roof/cabin, quarter).
-Light lenses bind to the 4 nearest nodes of their end of the car (bumper, hood/trunk, same-side
-fender/quarter, frame), so they crush and move with the bumper and hood. Hood and trunk lids, the
-front fenders and the rear quarters also get a crumple binding (`bind_fold`, mesh format 3): fixed-row → leading-row
-node chords, front-structure lead nodes per chord, a visual gain and per-vertex crease, lift and
-follow weights (see `data/panels/README.md`). `skin::deform` / `skin::deform_detail` and
+Head / tail lamps (light parts in `FrameFront` / `FrameRear`, `skin::is_end_lamp`) bind to the 4
+nearest nodes of their end of the car (bumper, hood/trunk, same-side fender/quarter, frame), so
+they crush and move with the bumper and hood; other lamps (fog lamps, DRLs, light bars, markers)
+bind like any part of their region. Hood and trunk lids, the front fenders and the rear quarters
+also get a crumple binding (`bind_fold`, the `fold` field): fixed-row → leading-row node chords,
+front-structure lead nodes per chord, a visual gain and per-vertex crease, lift and follow
+weights (see `data/panels/README.md`). `skin::deform` / `skin::deform_detail` and
 `crumple::render_part` are the Rust reference of the browser skinning (tests use them).
 Rigid parts (`rigid: true`) bind every vertex to the candidate node nearest the part centroid
-(weight 255). Writes into the mesh file (not `LatticeDef::skin_binding`, which would bloat the lattices; the
-contract field stays available for hand-made meshes).
+(weight 255). Writes into the mesh file (not `LatticeDef::skin_binding`, which would bloat the
+lattices; the contract field stays available for hand-made meshes).
 
 ## validate-car-asset (`src/validate.rs`)
-ids and lattice match, format, per-tier triangle budget, rigid parts bound to one node (255),
-wheel-space kinds (`tire rim brake_disc caliper upright`) unskinned with a wheel index, unique lower_snake_case names, index ranges,
-every skinned vertex bound to allowed nodes with weights summing to 255, fold chords inside their
-region with 3 weights per vertex, four wheels with tire and
+ids and lattice match, format (4 only), per-tier triangle budget, rigid parts bound to one node
+(255), wheel-space kinds (`tire rim brake_disc caliper upright`) unskinned with a wheel index,
+unique lower_snake_case names, index ranges, every skinned vertex bound to allowed nodes with
+weights summing to 255, fold chords inside their region with lead nodes outside it and 3 weights
+per vertex, four wheels with tire and
 rim, every exterior region with lattice nodes has a part, every panel in the spec has a painted
 part, glass parts use glass, mesh size within the declared `body_size_m` (pivot/scale check).
 
@@ -139,6 +205,9 @@ The worst case (every node moving every frame, e.g. a car being crushed) scales 
 vertex count. `panels_shots.mjs` reports 0.14 ms per car per frame during its crash scenarios.
 
 ## Known gaps
+- The eight round-12 roster cars reuse their family's body kit, so each shares the family car's
+  lamp shapes and tail-lamp pattern (the "every car has a distinct tail pattern" rule does not
+  hold for them yet).
 - Shapes are parametric (`BodyStyle`), but the lattice still fixes the panel zones; very different
   cabins (mid-engine) use the visual `cabin_shift_m`, so on lucciola / fulmine the windshield sits
   over lattice hood nodes and the hood lid is short of its hinge line. Hand-made meshes in the

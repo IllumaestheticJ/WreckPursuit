@@ -14,6 +14,8 @@
 //!   laps and standings.
 //! - [`draft`]: slipstream model (drag multiplier per vehicle from wake geometry) for the sim
 //!   loop to apply.
+//! - [`evader`]: scripted escapee for the police benchmark (`simcli police-bench`): flees
+//!   police it can see on the road graph, three skills.
 //! - [`roam`]: free-roam street racers that chain legs around their haunt (highway, touge,
 //!   dirt, downtown, rural) on open roads, each leg driven by a one-car [`Field`].
 //! - [`pursuit`]: police awareness ([`PoliceQuery`]; [`EventHeat`] tracks wanted levels and
@@ -32,17 +34,21 @@ pub mod capability;
 pub mod capability_table;
 pub mod corridor;
 pub mod draft;
+pub mod evader;
 pub mod field;
 pub mod line;
 pub mod profile;
 pub mod pursuit;
 pub mod roam;
 
-pub use capability::CarCapability;
+pub use capability::{CarCapability, LooseGrip};
 pub use corridor::{
     Corridor, CorridorOptions, CorridorPos, CorridorSample, OpposingLanes, CORRIDOR_STEP_M,
 };
 pub use draft::{drag_scales, DraftBody, DraftParams};
+pub use evader::{
+    Evader, EvaderDebug, EvaderMode, EvaderParams, EvaderSkill, EvaderStats, PoliceCar,
+};
 pub use field::{
     Debug, Field, GridLayout, OpponentEvent, RaceConfig, RacerSpec, RacerStatus, SpeedLimit,
     Standing, Tactic, VehicleObs, AI_CONTACT_IMPULSE_NS, RED_LIGHT_RISK, YIELD_AFTER_S,

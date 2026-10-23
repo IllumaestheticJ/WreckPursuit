@@ -152,3 +152,253 @@ once under build load and passed on two re-runs.
   `World::vesper` uses `generate_with_report` (same network). Presentation only, not hashed.
 - `wp_audio`: one test (`radio_pacing_matches_the_scanner_speaking_rate`).
 - `apps/ui-kit`: `GameSettings.radioVoice` + the menu toggle + a unit test.
+
+---
+
+# Row 144: radio priority tiers (`docs/briefs/police-radio-priority.md`)
+
+- **Branch:** `claude/project-thread-75jdte`, from `origin/lead/round12` (2bac2382).
+- **Crates and folders touched:**
+  - `crates/wp_police`: `radio.rs`, `chatter.rs`, `dispatch.rs`, `pursuit.rs`, `captain.rs`, `lib.rs`; new example `radio_bench`; new scenario `radio_race_pack.ron`.
+  - `data/police/radio.toml`.
+  - `crates/wp_audio`: scanner, director and types.
+  - `crates/wp_wasm`: `audio.rs`.
+  - `apps/testbed-web` and `apps/ui-kit`.
+- **Contract version built against:** 0.3.0, unchanged. See request R144-1 below.
+- The tier column of the row 79 table above is superseded by the table below. The old names still parse from saved logs: `Critical` is read as `Escalation` and `Tactical` as `Investigation`.
+
+## Tiers
+
+`RadioTier` is ordered so that a higher tier wins. `RadioTier::number()` gives the brief's numbering, 1 to 5.
+
+| Tier | Lines | Pacing |
+|---|---|---|
+| 1 Actionable | Roadblocks and spikes, announced when planned, with distance and direction ("Dispatch, racer #7: roadblock 650 metres ahead, southbound on X; spikes 300 metres ahead"). Air unit launching, eyes on, lost and reacquired. A unit moving to intercept *ahead* of the racer, at L2 and up, with distance. | No gap. It waits only for the transmission on air, not the silence after it. Cuts any lower tier, including emergency break-ins. A tool warning cuts other tier 1 traffic. Tools planned in the same step for the same racer are spoken as one line. |
+| 2 Escalation | 10-80, level up (with the department taking over and the rams now authorised), level down, pursuit end, witness lines, captain priority. | No gap. Cuts tiers 3 to 5. |
+| 3 Impact | Contacts picked by severity, wrecks (two stacked lines), unit down, spikes hit, PIT attempt and verdict, assault on an officer (a break-in), a pursued racer hitting a civilian. | `impact_gap_s` 0.4 s, `impact_min_gap_s` 0.8 s after the line. Short life (`impact_stale_s` 4 s). Heavier impacts live longer: 6 s, and 8 s for a wreck. |
+| 4 Investigation | Call announcements, "units responding" (once per racer at L0 to L1, before any pursuit), lost visual, eyes on again, searching, tunnel, box-in, bumper, helicopter "still on", nobody to send. | The global gap per level, as in row 79. |
+| 5 Routine | Patrol chatter, out of service, backup requests. | `routine_gap_s` [10, 14, 20, 30, 45] s by level, with a gap that grows as heat rises. `routine_quiet_s` 6 s after any important line. Dropped first: a routine line is removed as soon as anything higher is waiting. |
+
+**Removed deploy lines.** The removed lines are:
+
+- "copy, sending unit n of m";
+- "Unit 9 in pursuit of …";
+- "moving to intercept" behind the racer, or at L1;
+- "setting up a roadblock / deploying spikes on …" after the fact;
+- the helicopter's track assignment.
+
+`radio_deploy_suppressed()` counts them for the bench. At L0 to L1 the only deploy-style line is one "Dispatch: units responding, racer #N …" summary.
+
+**Takeover lines** come from `takeover` in `radio.toml`, indexed by level:
+
+- 3: "Highway Patrol is taking over the pursuit."
+- 4: "Heavy units authorised."
+- 5: "Tactical units authorised, all units, stop him by any means."
+
+The rams sentence ("Hard rams and rolling blocks authorised.") is read from `pursuit.chase.hard_ram_level` and `rear_ram_level`, so the radio never promises rams the AI will not use.
+
+## Impact severity
+
+`chatter::impact_severity` measures collision energy as ½ · impulse · closing speed, or uses a nominal 1500 kg car when the contact has no impulse.
+
+| Severity | When | Line |
+|---|---|---|
+| Tap | Below `hit_j` (6 kJ) | No line |
+| Hit | Up to `heavy_j` (30 kJ) | "I'm hit! I'm hit!" |
+| Heavy | Above 30 kJ, or health ≤ 0.45 | "He rammed me, I've lost my front end!" |
+| Wreck | Only a unit the damage model wrecked | "Officer down" and "I'm done!" |
+
+Energy alone stops at Heavy. The full-physics race showed why: a 110 kJ hit gave "officer down", and that unit then made an arrest.
+
+**Rules for picking the line:**
+
+- Each role (victim, rammer, self-crash) has its own pool.
+- "Officer down" exists only in the Wreck pool.
+- Every tier 3 line is shouted, ending in "!".
+- A wreck stacks a second line from the nearest unit on the same racer, or from dispatch.
+  - Both lines use `WRECK_PRIO` (5, above every other impact line).
+  - The reaction lives 12 s, so it follows its victim line even when tier 1 calls cut in between.
+- A unit with no racer to chase does not narrate its own scrapes.
+
+## Browser
+
+- **Scanner (`wp_audio`):** `RadioLine.tier` and `RadioSay.tier`, both with serde defaults.
+  - The tier maps to a priority: 1 Urgent, 2 Pursuit, 3 Dispatch, 4 Routine, 5 Chatter.
+  - Tier 1 lines skip the scanner tier delay.
+  - With `set_important_only`, tiers 4 and 5 are not voiced.
+  - The bridge gets the tier per police event from `PoliceSystem::radio_tier_of`, through `wp_wasm`'s `frame_commands`.
+- **Owner decisions:**
+  - "Tier 1 skips the delay, but make sure the map notifications and the scanner work at the same time." The roadblock and spike markers come from `map_dynamic`, which reads `roadblocks()` and `spike_strips()` every frame. The tool exists in the frame its decision is made, which is the frame its tier 1 line is spoken, so the marker and the voice appear together.
+  - "Drivers all male, dispatch female." `pickVoice` picks voices by name: a female system voice for dispatch, and a male one per unit, hashed by unit. Pitch: dispatch 1.15, units low.
+- **Sound:**
+  - Tier 1 plays a two-tone cue (1250 then 1650 Hz, 0.11 s each) into the radio EQ, and the voice starts after it.
+  - Tier 3 is spoken faster (rate +0.25) and higher (+0.12), with a louder squelch and static.
+- **Strip:**
+  - Each line gets a `tier-N` class and a `data-tier` attribute.
+  - Tier 1 shows ⚠, bold and amber. Tier 2 shows ▲, bold. Tier 3 shows ✸, in red.
+  - Tiers 1 and 2 stay on screen 12 s. Tiers 4 and 5 are dimmed.
+- **Setting:** game menu → Audio → "Radio: All / Important only".
+  - Stored as `GameSettings.radioFilter`, default "all".
+  - Important only drops tiers 4 and 5 from both the voice and the strip.
+
+## How to test (row 144)
+
+| What | Command |
+|---|---|
+| Tier 1 cuts routine; routine dropped when busy; tier ordering; wreck stack; old logs parse | `cargo test -p wp_police --lib radio` |
+| No deploy lines at L0 to L1 except one summary; L3 tool line within 1 s over other traffic; severity picking; takeovers | `cargo test -p wp_police --test radio_chatter` |
+| Tier 1 skips the scanner delay; important-only; tier to priority | `cargo test -p wp_audio` |
+| Bench and transcripts | `cargo run --release -p wp_police --example radio_bench -- crates/wp_police/scenarios/radio_city_chase.ron [--log 4] [--text-tiers]` |
+| Browser: tier on strip and scanner lines; filter switch; default All | `npm run e2e:radio` |
+
+## Bench (before = `lead/round12` with text-classified tiers, after = this branch)
+
+How the bench counts:
+
+- Lines per minute by the highest wanted level of any racer at the time.
+- "Deploy" means unit deployment chatter: en route, responding, in pursuit of, moving to intercept, sending unit, setting up a roadblock, and similar. Call announcements and the "units responding" summary are not counted as deploy lines.
+- Delay is the time from a `RoadblockPlaced` or `SpikesPlaced` decision to the first line about it, by the racer's level at the decision. A decision with no matching line within 20 s counts as never spoken.
+
+**`radio_city_chase.ron`** (4 × 5 min night chase):
+
+| lines/min | L0 before | L0 after | L1 before | L1 after | L2 before | L2 after | L3+ before | L3+ after |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 0 | 0 | 0 | 0 | 0 | 11.4 | 2.9 | 3.5 |
+| T2 | 0 | 0 | 13.5 | 13.5 | 3.8 | 0 | 0.4 | 0.3 |
+| T3 | 0 | 0 | 0 | 0 | 0 | 0 | 1.7 | 2.3 |
+| T4 | 4.8 | 4.8 | 0 | 0 | 0 | 0 | 1.0 | 1.4 |
+| T5 | 0 | 0 | 0 | 0 | 0 | 0 | 1.1 | 0 |
+| all | 4.8 | 4.8 | 13.5 | 13.5 | 3.8 | 11.4 | 7.1 | 7.5 |
+
+Minutes at each level: 0.8 / 0.3 / 0.3 / 18.6. Deploy lines per minute (L0 / L1 / L2+): before 0 / 0 / 2.2, after 0 / 0 / 0.2.
+
+| Deploy decision → spoken | before: n, median, max | after: n, median, max |
+|---|---|---|
+| L2 | 2, 8.8 s, 8.8 s | 3, 0 s, 0 s |
+| L3 | 1, 7.4 s, 7.4 s | 4, 3.6 s, 3.8 s |
+| L5 | 6, 8.1 s, 13.0 s | 23, 0 s, 0 s |
+| Never spoken | 21 | 0 |
+
+**`radio_race_pack.ron`** (new: four racers at 2.8× the limit across the city, 3 × 4 min). Deploy lines per minute at L2+: 1.6 before, 0.7 after.
+
+| Deploy decision → spoken | before | after |
+|---|---|---|
+| L2 | none | 2, 2.5 s, 2.5 s |
+| L3 | 1, 13.6 s | 4, 0 s median, 4.7 s max |
+| L5 | 2, 10.6 s | 20, 0 s median, 1.9 s max |
+| Never spoken | 23 | 0 |
+
+The L3 cases over 1 s are a second tool decided while the first tool's warning is still on air. The second waits for that transmission, and a tool line does not cut another tool line.
+
+**Race with police, full physics** (`city_sprint_police.ron` through `wp_race`'s `race_police` harness, extended to 150 s):
+
+- The race only reaches L1 to L2: 1.2 min at L0, 1.3 min at L1, under 0.1 min at L2. So it has no tool decisions.
+- Lines per minute at L1: 7.9 before and 8.7 after.
+  - T5 (the "in pursuit of" line) goes from 0.8 to 0.
+  - T3 goes from 0 to 1.6 (two contact impacts).
+- Deploy lines at L1: 0.8 per minute before, 0 after.
+- See transcript 5.
+
+**Perf:**
+
+- Chatter does no more work per step than in row 79. Tool lines are built only in steps that decide a tool, and impacts only from the step's contacts.
+- The director's flush is linear in the held lines, which is fewer than 10 in practice.
+- None of this shows up in `police_bench` noise.
+
+## Transcripts
+
+See [police-radio-row144-transcripts.md](police-radio-row144-transcripts.md). It has five excerpts:
+
+- a roadblock and spike sequence;
+- a department takeover;
+- heavy units and a wreck pair;
+- a wreck between tier 1 calls;
+- the full-physics race, before and after.
+
+## Gate (row 144)
+
+- `cargo fmt` and `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test -p wp_police -p wp_audio`: all pass.
+- `cargo build --target wasm32-unknown-unknown -p wp_wasm` and wasm-pack: OK.
+- testbed `tsc`: clean.
+- ui-kit vitest:
+  - 110 of 111 pass. `data.test.ts` "stock builds are the measured table" fails (247.9 > 248).
+  - It fails the same way on `lead/round12` without this branch.
+- `npm run e2e:radio`: passes, including the new tier and filter checks.
+- `npm run e2e:siren`: passes.
+- Goldens: none move. `simcli goldens` gives the same results and the same hashes on `lead/round12` and on this branch: 112 ok, and 3 already red on the base (`jam_pursuit_grid`, `police_tunnel_escape_founders_cut`, `police_tunnel_escape_founders_cut_control`). Nothing was re-blessed. The radio is presentation and is not hashed.
+
+## Known gaps (row 144)
+
+- **Tool warnings back to back.** A second tool warning waits behind a first one still on air, up to about 4.7 s. Making tool lines cut each other would chop the first warning mid-sentence.
+- **No real-physics contacts in the police harness.** Its impact lines come from `UnitDisabled`, spikes and PIT. The severity picking from real contacts is exercised by the unit tests and the full-physics race only.
+- **Wrecks can still go stale under a flood.** At L5 with four racers, wrecks happen faster than one channel can speak them. Wreck pairs win over other impact lines, but the rest still go stale.
+- **Wanted level column.** The 10-80 can still go stale (15 s) behind a run of tier 1 lines. The bench's "level" column is the highest of all racers, so the race pack shows L5 while one racer is at L3.
+- **Old wording for the tier 4 summary.** Before the first pursuit, "Dispatch: caller reports … Unit 2 responding" still names the unit sent. It is the call announcement (tier 4), not a deploy line. Only the extra "copy, sending" lines were removed.
+
+## Contract change requests
+
+**R144-1: carry the tier on `PoliceEvent::Radio`.**
+
+- **Proposal:** add `tier: u8` (1 actionable … 5 routine, 0 = unknown) to `PoliceEvent::Radio`, with `#[serde(default)]`.
+- **Why it is needed:**
+  - Today the tier lives only in `wp_police`'s `RadioLine` log.
+  - The single-player browser looks it up with `PoliceSystem::radio_tier_of(unit, text)`.
+  - A networked client only receives the event, so it cannot know the tier. Its strip styling, tone cue, delay skip and important-only filter would fall back to tier 0, which is unstyled and filtered like tier 4.
+- **What changes if accepted:**
+  - `flush_radio` fills in the field.
+  - `wp_wasm` and `wp_net` read it, and `radio_tier_of` goes away.
+  - The `wp_audio` director takes it straight from the event.
+- **Cost:** one field. Not hashed (the radio is presentation).
+
+## Voice upgrade (listed, not built)
+
+What it would take to replace browser text-to-speech with recorded or generated lines:
+
+1. **Voice cast.**
+   - 6 to 8 distinct male officer voices, hashed by unit as `pickVoice` does today.
+   - 1 to 2 female dispatchers.
+   - 1 to 2 air crew voices with rotor noise baked in.
+   - Each needs calm and shouted takes.
+2. **Line packs instead of free text.**
+   - Today's lines are templates, with a call sign, place, distance, racer number and heading.
+   - Recorded audio needs these split into phrase slots, for example "Unit" + "twelve" + ", roadblock" + "six hundred fifty" + "metres ahead" + "southbound" + "on" + street name.
+   - That means:
+     - a phrase table in `data/police/voice/*.toml`;
+     - a stitcher in `wp_audio` that emits a phrase list instead of text;
+     - recorded numbers (0 to 99, hundreds, thousands);
+     - recorded street and district names (Port Vesper has about 120).
+   - For the procedural grid, districts only.
+   - Generated TTS can render the packs offline, per voice and per take.
+3. **Shouted tier 3 variants.**
+   - Separate takes for each impact pool line ("I'm hit!", "officer down", "I'm done!") per officer voice.
+   - Breathing and engine-strain layers.
+   - About 40 lines × 8 voices.
+4. **Radio processing chain in Web Audio.** Recorded audio can go through `mixer.radioIn`, which browser speech cannot. The chain:
+   - 300 to 3400 Hz band-pass;
+   - soft clip and saturation;
+   - a 4 to 8 kHz noise bed;
+   - a squelch tail;
+   - per-tier gain (tier 3 hot, tier 5 low).
+
+   This is the chain the row 79 notes could not apply to speech.
+5. **Streaming and memory.**
+   - About 2,000 to 3,000 phrase clips at 16 kHz mono Opus, about 15 to 25 MB.
+   - Lazy-load by district.
+   - Keep the tone and squelch procedural.
+6. **Timing.**
+   - Clip lengths replace the `words / 2.6 + 0.7` estimate.
+   - The director must take a measured duration per line. This is a small API change in `wp_police::radio`, which today estimates duration from the text.
+7. **Fallbacks.** Missing phrases fall back to TTS for that slot, or to strip text only.
+
+## Changes outside my crates (row 144)
+
+- `wp_audio`:
+  - `RadioLine.tier` and `RadioSay.tier`, with serde defaults;
+  - `priority_for_tier` and `important_only` in the scanner;
+  - `set_police_radio_tiers` and `set_radio_important_only` in the director;
+  - tests;
+  - `tier: 0` added in `examples/mix_trace.rs`.
+- `wp_wasm` (`audio.rs`): tiers passed to the director, `audio_set_radio_important_only`, `police_radio_tier`.
+- `apps/testbed-web`: scanner voices, tones and tier speech; strip styling; the important-only filter; `e2e/radio.mjs` checks.
+- `apps/ui-kit`: `GameSettings.radioFilter`, the menu row, a test.
