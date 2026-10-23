@@ -21,7 +21,21 @@ claim those two. So the PR's own diff (`06d2b260..9565482e`, 96 files) was appli
 | `6408ed48` | Greyboxes and the grid road file regenerated on the tip; `pick_harlan_dirt_run.ron`, `pick_waterfront_drag.ron` rewritten (`WP_RACE_WRITE_SCENARIOS=1`) |
 | `f23212ed` | testbed: duplicate `debugPlace` binding dropped (tsc) |
 | `b5281e40` | `[bless]` the 8 Ashpeak race goldens |
-| (this doc) | docs, perf |
+| `10f7cdfa` | Merge round 12's new tip `5080fa80` (main #41 / #45 / #48, touge port #49, overpass fix, police row 156): 9 conflicts, below |
+| `a04af158` | Ashpeak greybox regenerated on the merged tip (round 12's overpass fix); Vesper and grid identical to `5080fa80` |
+| (this doc) | docs, perf, gate |
+
+### Merge of round 12 `5080fa80` (`10f7cdfa`)
+
+Round 12 moved while the port ran (main merged in: #41 free roam, #45 career time, #48 damage
+modes / contract 0.4.x; the touge port of PR #49; overpass walls row 159; police row 156).
+Conflicts, both sides kept: `wp_race` `RaceCity` has `Ashpeak` and `Touge(id)` (`hosts()` of a
+pass is a one-element slice of a static copy of `TOUGE_IDS`; the touge `RaceDef` gets
+`grid: None`, it sets its own single-file grid); `wp_wasm` session: meet spots + the one horn
+edge next to main's free roam (renumbered step 1f; roamers do not read the horn); simcli city
+presets, `gen-city` help, scenario docs, `wp_race` README, wasm lib docs, testbed `main.ts` /
+`sim.ts`. Round 12's `027525c8` (street challenge only from right behind the racer) keeps the
+honk priority as designed; the priority test now parks the player right behind the racer.
 
 ## Round 12 kept (all of it)
 
@@ -150,9 +164,26 @@ buildings. Options for the lead:
   expectations (`simcli run`), and `race_picker` (release) races every Ashpeak race to the flag
   on round 12 physics with the new police profiles (15 / 15 pass).
 
-## Gate (`9c1d26b8`…`f23212ed`, env `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`)
+## Gate (env `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`)
 
-GATE_TABLE
+Final, on the merged tip (`a04af158`):
+
+| Step | Exit | Notes |
+|---|---|---|
+| `cargo fmt --all -- --check` | 0 | |
+| `cargo clippy --workspace --all-targets -- -D warnings` | 0 | |
+| `cargo test --workspace --no-fail-fast` | 0 | 1602 passed, 0 failed, 42 ignored |
+| `cargo build --target wasm32-unknown-unknown -p wp_wasm` | 0 | |
+| `cd apps/testbed-web && npm run wasm && npx tsc --noEmit -p .` | 0, 0 | |
+| `e2e/street.mjs` | 0 | 105 PASS |
+| `e2e/traffic_bodies.mjs` | 0 | PASS (orphan bodies 0) |
+| `e2e/race_spots.mjs` (PR's e2e), `vesper_v2` · `CITY=ashpeak` | 0 · 0 | 16 · 16 PASS; prompt shows buy-in / purse |
+| `wp_race --test race_picker` (release; on `b5281e40`) | 0 | 15 / 15, every Ashpeak race to the flag |
+| `simcli goldens` (release) | 1 | 4 red, **identical on round 12 `5080fa80` itself** (same hashes): `jam_pursuit_grid` (tick 14400), `jam_pursuit_vesper` (tick 12000), `police_tunnel_escape_founders_cut` + `_control` (expectation `police_event_before(kind:12, 95 s)` never; round 12's own notes already list the Founders Cut pair as red). Not from the port, not blessed: for round 12 / E (police row 156 landed in `5080fa80`). All 8 Ashpeak goldens and every other round-12 golden match. |
+| `e2e/perf_check.mjs` | 1 | RTF / slow frames / steady alloc fail on round 12 too on this container (machine-bound); every machine-independent gate passes (see Perf) |
+
+Tooling installed in the container for this: `wasm-pack` (cargo install), testbed `npm ci`;
+`just` is not installed (justfile commands run directly).
 
 ## Perf (same container, round 12 `db0035d9` vs port tip)
 
