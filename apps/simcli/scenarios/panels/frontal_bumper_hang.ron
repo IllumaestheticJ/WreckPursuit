@@ -3,7 +3,7 @@
 (
     name: "panels_frontal_bumper_hang",
     seed: 2102,
-    mode: Simulation,
+    mode: Extreme,
     assists: ai,
     panels: true,
     barriers: [(pos: (-1.6, 30.0, 0.75), size: (2.4, 1.0, 1.5))],

@@ -3,7 +3,7 @@
 (
     name: "golden_rwd_power_slide",
     seed: 102,
-    mode: Arcade,
+    mode: Simulation,
     assists: off,
     entities: [
         (

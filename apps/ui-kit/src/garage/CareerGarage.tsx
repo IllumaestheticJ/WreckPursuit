@@ -550,8 +550,8 @@ function NewCareer(props: { api: CareerApi; run: (f: () => CareerView) => void; 
   return (
     <Panel title="New career" tag="replaces the current one">
       <p>
-        Arcade: one hard hit degrades, several end the car; repairs at half price. Simulation: one hard hit at speed is a total loss, and a
-        total-loss bust means the car is gone.
+        Arcade: your car and AI racers take 20 % damage; repairs at half price. Simulation: one hard hit degrades, several end the car;
+        repairs at half price. Extreme: one hard hit at speed is a total loss, and a total-loss bust means the car is gone.
       </p>
       <div class="wp-row" style={{ gap: "0.5em" }}>
         <Button size="sm" pressed={mode === "Arcade"} onClick={() => setMode("Arcade")}>
@@ -559,6 +559,9 @@ function NewCareer(props: { api: CareerApi; run: (f: () => CareerView) => void; 
         </Button>
         <Button size="sm" pressed={mode === "Simulation"} onClick={() => setMode("Simulation")}>
           Simulation
+        </Button>
+        <Button size="sm" pressed={mode === "Extreme"} onClick={() => setMode("Extreme")}>
+          Extreme
         </Button>
         <Button variant="danger" onClick={() => (props.run(() => props.api.newCareer(mode)), props.onDone())}>
           Start over in {mode}

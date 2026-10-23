@@ -12,6 +12,23 @@ use wp_contracts::{ContactImpulse, ModeTable};
 use crate::model::DamageModel;
 use crate::vec3::{self, V3};
 
+/// Scale a racer car's contacts by `mode.racer_damage_scale` (normal and friction impulse) before
+/// they reach [`DamageModel`]: Arcade's 0.25 leaves the player's racer and AI racers about 20 %
+/// of the damage, while traffic and police (whose contacts are not scaled) take it all.
+/// The closing speed is kept, so the light-hit threshold still sees the real hit. No-op at 1.0.
+pub fn scale_racer_contacts(contacts: &mut [ContactImpulse], mode: &ModeTable) {
+    let s = mode.racer_damage_scale;
+    if s == 1.0 {
+        return;
+    }
+    for c in contacts {
+        c.impulse_ns *= s;
+        for t in &mut c.tangent_impulse_local_ns {
+            *t *= s;
+        }
+    }
+}
+
 /// Face profile of an impactor at normalised lateral distance `q = lateral / radius`: flat
 /// (`1`) over the inner half, smoothstep falloff to the rim, never below 0.05. A flat core
 /// makes a wall or another car's nose push a whole area evenly; the rounded rim avoids a

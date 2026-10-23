@@ -2,7 +2,7 @@
 // acts as throttle in reverse; reverse gear tops out around 60 km/h at the limiter).
 (
     name: "vehicle_sedan_reverse",
-    mode: Arcade,
+    mode: Simulation,
     seed: 4,
     duration_s: 4.0,
     entities: [

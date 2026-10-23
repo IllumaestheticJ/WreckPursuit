@@ -18,7 +18,7 @@ fn main() {
     let root = repo_root();
     let car = load_car(&root, "debug_sedan").unwrap();
     let spec = PanelSpec::load(&panel_path(&root, "debug_sedan")).unwrap();
-    let mode = wp_contracts::load_mode_table(root.join("data/modes/sim.toml")).unwrap();
+    let mode = wp_contracts::load_mode_table(root.join("data/modes/extreme.toml")).unwrap();
     let mut lo = [f32::MAX; 3];
     let mut hi = [f32::MIN; 3];
     for n in &car.lattice.nodes {

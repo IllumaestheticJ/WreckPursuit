@@ -1,4 +1,4 @@
-# simcli hashes scenario=race_lantern_checkpoint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=race_lantern_checkpoint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
 240 acc138c00871694f
 480 5a0878edf8cf934a
 720 1be2b504adc7a94f

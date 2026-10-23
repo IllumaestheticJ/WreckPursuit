@@ -1,4 +1,4 @@
-# simcli hashes scenario=weather_wet_brake_100_0 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=weather_wet_brake_100_0 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
 240 ba3852b487cc02cc
 480 6737d8505f889dac
 720 0727e6d740d790b1

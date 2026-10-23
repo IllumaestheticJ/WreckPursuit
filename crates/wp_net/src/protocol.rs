@@ -131,6 +131,7 @@ fn mode_to_u8(m: DamageMode) -> u8 {
     match m {
         DamageMode::Arcade => 0,
         DamageMode::Simulation => 1,
+        DamageMode::Extreme => 2,
     }
 }
 
@@ -138,6 +139,7 @@ fn mode_from_u8(v: u8) -> Result<DamageMode, NetError> {
     Ok(match v {
         0 => DamageMode::Arcade,
         1 => DamageMode::Simulation,
+        2 => DamageMode::Extreme,
         _ => return Err(NetError::Decode(format!("damage mode {v}"))),
     })
 }
