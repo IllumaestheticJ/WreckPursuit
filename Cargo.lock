@@ -536,6 +536,7 @@ name = "city-import"
 version = "0.1.0"
 dependencies = [
  "osmpbf",
+ "rapier3d",
  "serde_json",
  "wp_math",
  "wp_sim",
