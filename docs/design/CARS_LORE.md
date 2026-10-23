@@ -338,6 +338,98 @@ the long doors and low sills are weak in side hits, and the cooling pack goes on
 - **Scene role (police):** top-heat interceptor (levels 4–5).
 - **Typical ground:** Loop 9, the Westline Viaduct, Route 40.
 
+### Halberd 40 — `halberd_40` · Exotic · RWD (mid-engine) · 125 000
+A 2020s mid-engine supercar from a small British house: a twin-turbo flat-plane V8 in a carbon
+tub, rear drive, a dual-clutch and an active rear wing. Lighter than the Fulmine by almost 200 kg
+and with far more torque, it is the hardest-accelerating rear-driver in Port Vesper — and rear
+drive is the catch: on its track tyres it lights them up in third on a damp Loop. Calm flat-out,
+nervous on a roundabout. The tub shrugs off street-speed hits, but everything bolted to it is
+sacrificial: the front crash box and radiators fold early, a rear hit kills drive, carbon panels
+crack and shed, and the dihedral doors pop open in side hits.
+- **Scene role:** Feared-tier rear-drive weapon; highway outruns.
+- **Best routes:** R01, R12.
+
+### Ombra V12 — `ombra_v12` · Exotic · AWD (25 % front, mid-engine) · 124 000
+A 2010s Benvenuti flagship with a screaming V12, scissor doors and a body wider than a delivery
+van — the loudest thing at any meet. Its automated manual thumps every shift and costs a few tenths
+against the dual-clutch cars, but the AWD launch and the twelve's top end keep it on terms with
+anything on a long road. It hates tight gaps. Rear hits kill drive, the short nose holds the front
+diff and both radiators, the scissor doors tear off in side hits and the wide carbon bodywork
+shatters on any contact at ruinous prices.
+- **Scene role:** theatre and top speed; pink-slip trophy.
+- **Best routes:** R01, R12, R06.
+
+### Ostwind 6T — `ostwind_6t` · Exotic · AWD (30 % front, rear-engine) · 110 000
+The everyday missile: a 2020s rear-engined twin-turbo flat-six with a rear-biased AWD coupling.
+All its weight sits over the rear wheels, so it launches like nothing else and darts through
+traffic on its short wheelbase, but lift mid-corner and the tail swings like a pendulum. It is
+the toughest of the supercars: a steel-and-aluminium unibody with a front luggage bay gives real
+crumple length, so nose hits are cheap — but the engine hangs behind the rear axle, right where a
+rear-ender lands, and one firm rear hit stops it dead.
+- **Scene role:** the supercar you can drive every night.
+- **Best routes:** R02, R13, R11.
+
+### Kagero HX — `kagero_hx` · Exotic · AWD (electric front axle, mid-engine) · 100 000
+A 2010s Tsurugi mid-engine hybrid: twin-turbo V6 behind the cabin, electric motors on the front
+axle, nine speeds. Heaviest and least powerful of the supercars on paper, but the electric torque
+hits from walking pace and the front motors pull it out of corners, so it is the easiest supercar
+to drive fast and the best in the rain on Old Harbor cobbles. It runs out of breath against the V8
+and V12 on the Loop. The battery in the tunnel is guarded by the sills, the V6 and gearbox ride
+the rear subframe (rear hits kill drive) and the front motors share the nose with the radiators.
+- **Scene role:** wet-night and checkpoint supercar.
+- **Best routes:** R14, R02, R11.
+
+### Morrigan 5.5 — `morrigan_55` · Exotic · RWD (front-mid, race car) · 120 000
+A 2010s GT endurance racer with an air-restricted pushrod V8, a door-sized wing and a sequential
+box — a real race car loose in the city. Once it is up to speed nothing on the street corners or
+brakes with it; below 80 km/h the aero does nothing, the stiff suspension skips over manhole
+covers and the tall first gear hates junction starts. The welded cage makes the cabin tougher than
+any road supercar's, but the carbon and fibreglass outside it shatters on contact and the low floor
+pays for every kerb.
+- **Scene role:** circuit and Loop specialist; hopeless at a red light.
+- **Best routes:** R01, R13, R09.
+
+### Nyx Proto — `nyx_proto` · Exotic · RWD (mid-engine prototype) · 125 000
+A 2010s closed-cockpit sports prototype under a tonne, with downforce that would hold it to a
+ceiling at 250 km/h: the fastest thing on four wheels in Port Vesper and the least suited to its
+streets. On a smooth wide road it stops and turns where nothing can follow; in town it grounds on
+every crest, needs three points for a U-turn and sees little out of its cockpit. The carbon
+survival cell shrugs off almost any hit and almost nothing else does: the nose cone crushes, the
+floor and wings shatter, and a rear hit can break the car in two.
+- **Scene role:** Loop 9 time-trial legend; a liability anywhere else.
+- **Best routes:** R01, R12.
+
+### Merlo 2.0T — `merlo_20t` · Exotic · FWD (touring-car racer) · 100 000
+A 2010s touring-car racer built to bang doors: front drive, turbo four, sequential box, a plated
+front diff and a stiff rear that steps out on cue when you lift. Slow on the straights next to the
+supercars, but it brakes later than any road car and shrugs off the contact that ends their night.
+The welded cage, seam-welded shell and steel bumper beam make it the toughest race car in the city;
+splitter, wing and bumpers break off on the first touch and are cheap, but the transverse engine
+sits right behind the radiator, so hard frontals still end it.
+- **Scene role:** contact racing; the cheapest race-built car.
+- **Best routes:** R13, R09, R10.
+
+### Mesquite PR — `mesquite_pr` · Truck · RWD (pre-runner) · 48 000
+A 2010s full-size pre-runner pickup with a 6.2 L V8, a foot of suspension travel and a locker:
+built to fly across the desert at 150 km/h, it treats Port Vesper as a set of jumps. Kerbs, medians
+and staircases that break other cars barely register, and it takes short cuts through dirt lots and
+parks the supercars cannot follow. On tarmac it rolls like a ship and takes a long time to stop. The
+boxed frame and tube bumpers bulldoze traffic; the long-travel front end sticks out past the body,
+so offset hits fold a front corner, and the bed and fender flares crumple cheaply.
+- **Scene role:** short-cut king; Cannonball and Delivery runs.
+- **Best routes:** R11, R15, R05.
+
+### Erg Hamada — `erg_hamada` · Exotic · AWD (50/50 rally-raid prototype) · 110 000
+A 2020s desert rally-raid prototype that survived a fortnight of dunes and wants more: an
+air-restricted V8, permanent four-wheel drive with plated diffs and 35 cm of travel. Absurdly fast
+across rough ground and over anything Port Vesper calls a jump; on smooth tarmac it is wide, tall,
+draggy and capped well below supercar speeds, and the locked drivetrain scrubs in tight turns. The
+chromoly spaceframe is the strongest cell in the city under composite panels that shatter and fall
+off; the long-travel corners hang outside the body and break in offset hits. It keeps driving with
+half its bodywork gone.
+- **Scene role:** rough-ground outlaw; the Iron Bridge Delivery record holder.
+- **Best routes:** R15, R11, R05.
+
 ### Debug cars — excluded from the fiction
 `debug_sedan` and `debug_coupe` are integration-lead test fixtures, not part of the world. In the
 fiction they don't exist. If they ever appear in a player-facing build, call them "test mule"
@@ -350,10 +442,10 @@ too-similar name, rename it here first.
 
 | House | Origin | Cars | Identity |
 |---|---|---|---|
-| **Tsurugi Motor Co.** | Japan | Vireo XS, Kestrel TS, Shiro Turbo, Hakone GT, Arashi T4, Talus 2.0T | Engineering-led, high-revving fours and sixes; the scene's backbone. |
+| **Tsurugi Motor Co.** | Japan | Vireo XS, Kestrel TS, Shiro Turbo, Hakone GT, Arashi T4, Talus 2.0T, Kagero HX | Engineering-led, high-revving fours and sixes; the scene's backbone. |
 | **Ostrander Motor Works** | USA (Midwest) | Rampart 5.0, Ironside 440, Bulwark 400, Brigand 400 | V8s since forever; heritage plus horsepower. |
 | **Falkenrath Fahrzeugbau** | Germany | Sperber 32, Lindwurm 4T | Precise, expensive to fix, beloved by the clean-racing crowd. |
-| **Benvenuti** | Italy | Lucciola 350, Fulmine V10 | Small-volume exotics; parts arrive slowly. |
+| **Benvenuti** | Italy | Lucciola 350, Fulmine V10, Ombra V12 | Small-volume exotics; parts arrive slowly. |
 | **Ridgeback Truck Co.** | USA | Hauler 1500 | Work trucks for the port and the farms beyond Route 40. |
 | **Sentinel Fleet Systems** | USA | Sentinel Cruiser, Wolfhound, Bastion, Warden, Vigil | Fleet upfitter building police packages; the push bar is their signature. |
 

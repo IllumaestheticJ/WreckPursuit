@@ -7,7 +7,7 @@
 # Checks: Arcade frontal 56 degrades (health <= 0.9) and ends in 2-6 hits; Simulation frontal
 # 56 ends in 1. Side impacts are reported, not checked. No data is changed.
 # Generated variant list: one per car x mode x impact (class in the name). Round 8 added H's
-# drayman_cargo, furrow_24 and tansy_13; the cars audit (2026-10-23) the eleven later cars.
+# drayman_cargo, furrow_24 and tansy_13; the cars audit (2026-10-23) the eleven later cars and wave 3.
 description: Hits to total loss and single-hit total-loss speed, every car, Arcade vs Simulation, frontal and side
 probe:
   kind: survival
@@ -73,6 +73,16 @@ variants:
     expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
   - name: drayman_cargo (Truck) sim side
     probe: {car: drayman_cargo, mode: Simulation, impact: Side}
+  - name: erg_hamada (Exotic) arc frontal
+    probe: {car: erg_hamada, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: erg_hamada (Exotic) arc side
+    probe: {car: erg_hamada, mode: Arcade, impact: Side}
+  - name: erg_hamada (Exotic) sim frontal
+    probe: {car: erg_hamada, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: erg_hamada (Exotic) sim side
+    probe: {car: erg_hamada, mode: Simulation, impact: Side}
   - name: fulmine_v10 (Exotic) arc frontal
     probe: {car: fulmine_v10, mode: Arcade, impact: Frontal}
     expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
@@ -103,6 +113,16 @@ variants:
     expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
   - name: hakone_gt (Sport) sim side
     probe: {car: hakone_gt, mode: Simulation, impact: Side}
+  - name: halberd_40 (Exotic) arc frontal
+    probe: {car: halberd_40, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: halberd_40 (Exotic) arc side
+    probe: {car: halberd_40, mode: Arcade, impact: Side}
+  - name: halberd_40 (Exotic) sim frontal
+    probe: {car: halberd_40, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: halberd_40 (Exotic) sim side
+    probe: {car: halberd_40, mode: Simulation, impact: Side}
   - name: hauler_1500 (Truck) arc frontal
     probe: {car: hauler_1500, mode: Arcade, impact: Frontal}
     expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
@@ -133,6 +153,16 @@ variants:
     expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
   - name: junkyard_beater (Beater) sim side
     probe: {car: junkyard_beater, mode: Simulation, impact: Side}
+  - name: kagero_hx (Exotic) arc frontal
+    probe: {car: kagero_hx, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: kagero_hx (Exotic) arc side
+    probe: {car: kagero_hx, mode: Arcade, impact: Side}
+  - name: kagero_hx (Exotic) sim frontal
+    probe: {car: kagero_hx, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: kagero_hx (Exotic) sim side
+    probe: {car: kagero_hx, mode: Simulation, impact: Side}
   - name: kestrel_ts (Sport) arc frontal
     probe: {car: kestrel_ts, mode: Arcade, impact: Frontal}
     expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
@@ -173,6 +203,66 @@ variants:
     expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
   - name: marten_20 (Compact) sim side
     probe: {car: marten_20, mode: Simulation, impact: Side}
+  - name: merlo_20t (Exotic) arc frontal
+    probe: {car: merlo_20t, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: merlo_20t (Exotic) arc side
+    probe: {car: merlo_20t, mode: Arcade, impact: Side}
+  - name: merlo_20t (Exotic) sim frontal
+    probe: {car: merlo_20t, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: merlo_20t (Exotic) sim side
+    probe: {car: merlo_20t, mode: Simulation, impact: Side}
+  - name: mesquite_pr (Truck) arc frontal
+    probe: {car: mesquite_pr, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: mesquite_pr (Truck) arc side
+    probe: {car: mesquite_pr, mode: Arcade, impact: Side}
+  - name: mesquite_pr (Truck) sim frontal
+    probe: {car: mesquite_pr, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: mesquite_pr (Truck) sim side
+    probe: {car: mesquite_pr, mode: Simulation, impact: Side}
+  - name: morrigan_55 (Exotic) arc frontal
+    probe: {car: morrigan_55, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: morrigan_55 (Exotic) arc side
+    probe: {car: morrigan_55, mode: Arcade, impact: Side}
+  - name: morrigan_55 (Exotic) sim frontal
+    probe: {car: morrigan_55, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: morrigan_55 (Exotic) sim side
+    probe: {car: morrigan_55, mode: Simulation, impact: Side}
+  - name: nyx_proto (Exotic) arc frontal
+    probe: {car: nyx_proto, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: nyx_proto (Exotic) arc side
+    probe: {car: nyx_proto, mode: Arcade, impact: Side}
+  - name: nyx_proto (Exotic) sim frontal
+    probe: {car: nyx_proto, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: nyx_proto (Exotic) sim side
+    probe: {car: nyx_proto, mode: Simulation, impact: Side}
+  - name: ombra_v12 (Exotic) arc frontal
+    probe: {car: ombra_v12, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: ombra_v12 (Exotic) arc side
+    probe: {car: ombra_v12, mode: Arcade, impact: Side}
+  - name: ombra_v12 (Exotic) sim frontal
+    probe: {car: ombra_v12, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: ombra_v12 (Exotic) sim side
+    probe: {car: ombra_v12, mode: Simulation, impact: Side}
+  - name: ostwind_6t (Exotic) arc frontal
+    probe: {car: ostwind_6t, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: ostwind_6t (Exotic) arc side
+    probe: {car: ostwind_6t, mode: Arcade, impact: Side}
+  - name: ostwind_6t (Exotic) sim frontal
+    probe: {car: ostwind_6t, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: ostwind_6t (Exotic) sim side
+    probe: {car: ostwind_6t, mode: Simulation, impact: Side}
   - name: rampart_50 (Muscle) arc frontal
     probe: {car: rampart_50, mode: Arcade, impact: Frontal}
     expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
