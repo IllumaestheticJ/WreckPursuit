@@ -6,8 +6,8 @@
     duration_s: 30.0,
     racers: [],
     expect: [
-        (metric: "patrols_core", min: 6, max: 6),
-        (metric: "patrols_suburb", min: 2, max: 2),
-        (metric: "patrols_industrial", min: 2, max: 2),
+        (metric: "patrols_core", min: 2, max: 2),
+        (metric: "patrols_suburb", min: 1, max: 1),
+        (metric: "patrols_industrial", min: 0, max: 0),
     ],
 )

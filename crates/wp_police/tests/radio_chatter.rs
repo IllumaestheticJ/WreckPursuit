@@ -42,6 +42,25 @@ impl WorldQuery for BlindWorld {
     }
 }
 
+/// The pre-2026-10-23 patrol counts (Core 2/8/6/3, Suburb 1/3/2/1, Industrial 1/2/2/1 by
+/// dawn/day/dusk/night). Tests of radio / backup mechanics that need several units close to
+/// the racer use these, so they don't depend on how sparse the shipped patrol table is.
+fn dense_patrols(mut cfg: PoliceConfig) -> PoliceConfig {
+    use wp_police::config::{DistrictTable, PhaseTable};
+    let t = |dawn, day, dusk, night| PhaseTable {
+        dawn,
+        day,
+        dusk,
+        night,
+    };
+    cfg.presence.patrols = DistrictTable {
+        core: t(2, 8, 6, 3),
+        suburb: t(1, 3, 2, 1),
+        industrial: t(1, 2, 2, 1),
+    };
+    cfg
+}
+
 fn city() -> &'static (RoadGraph, Arc<wp_world::CityMap>) {
     static CITY: OnceLock<(RoadGraph, Arc<wp_world::CityMap>)> = OnceLock::new();
     CITY.get_or_init(|| {
@@ -86,7 +105,7 @@ impl Harness {
             .max()
             .unwrap_or(0);
         let mut police = PoliceSystem::with_city(
-            PoliceConfig::builtin(),
+            dense_patrols(PoliceConfig::builtin()),
             graph,
             PoliceSetup {
                 seed,

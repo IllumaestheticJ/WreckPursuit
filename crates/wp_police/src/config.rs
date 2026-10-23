@@ -126,6 +126,9 @@ pub struct HeatConfig {
     pub level_thresholds: [f32; 5],
     /// Fraction of a violation's heat that counts when no unit or camera saw it ("reports").
     pub unseen_factor: f32,
+    /// A violation nobody saw only becomes a call (a unit sent to look) once the racer's heat
+    /// is at least this, so a little unseen speeding is not investigated.
+    pub call_min_heat: f32,
     /// Same violation kind from the same racer is counted at most once per this many seconds.
     pub repeat_cooldown_s: f32,
     /// Heat per violation kind.
@@ -1010,6 +1013,9 @@ impl PoliceConfig {
         if !(0.0..=1.0).contains(&self.heat.heat.unseen_factor) {
             return bad("heat.unseen_factor must be in 0..=1");
         }
+        if self.heat.heat.call_min_heat < 0.0 {
+            return bad("heat.call_min_heat must be >= 0");
+        }
         if self.pursuit.think_hz <= 0.0 {
             return bad("pursuit.think_hz must be > 0");
         }
@@ -1057,8 +1063,8 @@ mod tests {
     #[test]
     fn builtin_tables_parse_and_validate() {
         let c = PoliceConfig::builtin();
-        assert_eq!(c.presence.patrols.core.day, 8);
-        assert_eq!(c.presence.patrols.suburb.night, 1);
+        assert_eq!(c.presence.patrols.core.day, 3);
+        assert_eq!(c.presence.patrols.suburb.night, 0);
         // The data dir on disk matches the compiled-in copy.
         let disk =
             PoliceConfig::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/police")).unwrap();
