@@ -328,6 +328,8 @@ impl Session {
                     .pois
                     .iter()
                     .find(|p| p.kind == wp_world::network::PoiKind::RaceStartGrid);
+                // Only a player left at the origin (free_drive_in's default): a scenario that
+                // sets a spawn keeps it (a career drive out of a garage starts at the shop).
                 if let (Some(p), Some(e)) = (grid, sc.entities.first_mut()) {
                     if e.pos == [0.0; 3] {
                         e.pos = p.pos;
@@ -337,8 +339,6 @@ impl Session {
                 // Street racers join the scenario as entities before the sim is built, so a
                 // recording carries them and playback spawns them the same way.
                 if STREET_ENABLED.with(|c| c.get()) && crate::street::scenario_wants_racers(&sc) {
-                // Only a player left at the origin (free_drive_in's default): a scenario that
-                // sets a spawn keeps it (a career drive out of a garage starts at the shop).
                     let at = sc
                         .entities
                         .first()
