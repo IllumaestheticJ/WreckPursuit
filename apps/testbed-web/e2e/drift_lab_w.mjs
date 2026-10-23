@@ -52,11 +52,11 @@ check(!sc.traffic_cars && !sc.police_cars, "no traffic, no police");
 const plain = await page.evaluate(() => window.__wp.sim.plainSteer());
 check(plain && Math.abs(plain.t_full_s - 0.28) < 1e-6 && Math.abs(plain.t_return_s - 0.33) < 1e-6, `plain steering on ${JSON.stringify(plain)}`);
 const ride = await page.evaluate(() => window.__wp.sim.rideTune());
-check(ride && Math.abs(ride.arb - 1.5) < 1e-6 && Math.abs(ride.spring - 1.5) < 1e-6 && Math.abs(ride.damper_rebound - 2.1) < 1e-6, `ride default = the owner's (medium weight, springs / bars × 1.5) ${JSON.stringify(ride)}`);
+check(ride && Math.abs(ride.arb - 0.63) < 1e-6 && Math.abs(ride.spring - 1.04) < 1e-6 && Math.abs(ride.yaw_inertia - 1.35) < 1e-6 && Math.abs(ride.damper_rebound - 2.1) < 1e-6, `ride default = shipped candidate G (owner dampers, springs × 1.04, bars × 0.63, yaw inertia × 1.35) ${JSON.stringify(ride)}`);
 {
   const g0 = await page.evaluate(() => window.__wp.sim.gripBalance());
-  // Rows 141 / 142: the owner's step-14 tyres without the steering parts (no smart lock, no held-key cut).
-  check(g0 && g0.lock_mode === "plain" && Math.abs(g0.rear_stiffness - 0.45) < 1e-6 && Math.abs(g0.front_stiffness - 0.6) < 1e-6 && g0.slide_lock === 1, `grip balance default = the owner's step 14 tyres, no steering parts ${JSON.stringify(g0)}`);
+  // Rows 141 / 142: candidate G's balance (front × 0.666 / rear × 0.533, 2026-10-23) without the steering parts (no smart lock, no held-key cut).
+  check(g0 && g0.lock_mode === "plain" && Math.abs(g0.rear_stiffness - 0.533) < 1e-6 && Math.abs(g0.front_stiffness - 0.666) < 1e-6 && g0.slide_lock === 1, `grip balance default = candidate G, no steering parts ${JSON.stringify(g0)}`);
 }
 check(plain.counter_margin_deg === 0, `no countersteer limit by default, row 142 (${plain.counter_margin_deg})`);
 const a = await page.evaluate(() => window.__wp.sim.assists(window.__wp.app?.player ?? window.__wp.sim.entities()[0]));
@@ -107,9 +107,9 @@ await page.locator("#drift-w-balance-ab").click();
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "plain", `A/B → before (plain lock, tyre data): ${JSON.stringify(await page.evaluate(() => window.__wp.sim.gripBalance()))}`);
 check((await abText()) === "balance: before", `A/B button reads "${await abText()}" (balance: before)`);
 await page.locator("#drift-w-balance-ab").click();
-check(Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance()?.rear_stiffness)) - 0.45) < 1e-6, "A/B → new again (the step-14 rear tyres)");
+check(Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance()?.rear_stiffness)) - 0.533) < 1e-6, "A/B → shipped again (candidate G rear tyres)");
 const gNew = await page.evaluate(() => window.__wp.sim.gripBalance());
-check(Math.abs(gNew.rear_stiffness - 0.45) < 1e-6 && Math.abs(gNew.front_stiffness - 0.6) < 1e-6 && gNew.tyres_rwd_only === true && gNew.probe_tilt_fix === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `shipped balance: the owner's step 14, rear downforce, probe fix ${JSON.stringify(gNew)}`);
+check(Math.abs(gNew.rear_stiffness - 0.533) < 1e-6 && Math.abs(gNew.front_stiffness - 0.666) < 1e-6 && gNew.tyres_rwd_only === true && gNew.probe_tilt_fix === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `shipped balance: the owner's step 14, rear downforce, probe fix ${JSON.stringify(gNew)}`);
 // Player rack A/B presets (physics lead, 2026-10-22; row 147): steering only.
 {
   const before = await page.evaluate(() => ({ car: window.__wp.sim.carTune(), grip: window.__wp.sim.gripBalance(), ride: window.__wp.sim.rideTune() }));
@@ -184,7 +184,7 @@ await page.locator("#drift-w-balance-grip").click();
 for (const [id, k] of [["drift-w-rear-50", 0.5], ["drift-w-rear-55", 0.55]]) {
   await page.locator(`#${id}`).click();
   const g = await page.evaluate(() => window.__wp.sim.gripBalance());
-  check(Math.abs(g.rear_stiffness - k) < 1e-6 && Math.abs(g.front_stiffness - 0.6) < 1e-6 && (await abText()) === `balance: rear ×${k.toFixed(2)}`, `rear ×${k} preset: "${await abText()}"`);
+  check(Math.abs(g.rear_stiffness - k) < 1e-6 && Math.abs(g.front_stiffness - 0.666) < 1e-6 && (await abText()) === `balance: rear ×${k.toFixed(2)}`, `rear ×${k} preset: "${await abText()}"`);
 }
 await page.locator("#drift-lab-w").getByRole("button", { name: "step 2", exact: true }).click();
 check((await abText()) === "balance: step 2", `step 2 preset: "${await abText()}"`);
@@ -253,7 +253,7 @@ await page.locator("#drift-lab-w-new").click();
 await page.waitForTimeout(1500);
 {
   const n = await page.evaluate(() => [window.__wp.sim.plainSteer().counter_margin_deg, window.__wp.sim.rideTune().spring]);
-  check(n[0] === 0 && Math.abs(n[1] - 1.5) < 1e-6 && (await sim()).name === "drift_lab_w", `"new" → the shipped steering (no limit since row 142), firm ride (${n})`);
+  check(n[0] === 0 && Math.abs(n[1] - 1.04) < 1e-6 && (await sim()).name === "drift_lab_w", `"new" → the shipped steering (no limit since row 142), shipped ride, candidate G (${n})`);
 }
 // Step 11 catch A/B (owner: catch over-rotations): default new, "before" turns the directional
 // limit / extra lock / fast rack off.
@@ -412,7 +412,7 @@ const handling = () =>
       plain: s.plainSteer() !== null,
       spin: s.carTune()?.spin_model === true,
       grip: s.gripBalance()?.lock_mode,
-      firm: Math.abs((s.rideTune()?.spring ?? 0) - 1.5) < 1e-6,
+      firm: Math.abs((s.rideTune()?.spring ?? 0) - 1.04) < 1e-6,
       player: s.playerInput(p),
       others: others.length,
       othersPlayer: others.filter((e) => s.playerInput(e)).length,
@@ -462,7 +462,7 @@ check((await sim()).name !== "drift_lab_w", "?tune=1 keeps the session (no separ
   });
   await page.evaluate(() => document.getElementById("drift-lab-w-reset-all").click());
   const reset = await page.evaluate(() => ({ ride: window.__wp.sim.rideTune(), saved: Object.keys(localStorage).filter((k) => k.startsWith("wp.tune.")) }));
-  check(Math.abs(reset.ride.spring - 1.5) < 1e-6 && reset.saved.length === 0, `reset all → shipped ride, no saved tune keys (${JSON.stringify(reset)})`);
+  check(Math.abs(reset.ride.spring - 1.04) < 1e-6 && reset.saved.length === 0, `reset all → shipped ride, no saved tune keys (${JSON.stringify(reset)})`);
   // "Copy tune JSON": everything in effect.
   const tj = JSON.parse(await page.evaluate(() => window.__wp.tunePanel.tuneJson()));
   check(tj.legacy === false && tj.steer && tj.ride && tj.tyres && tj.grip && tj.assists, `tune JSON has steering / ride / tyres / grip / assists (${Object.keys(tj).join(",")})`);

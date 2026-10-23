@@ -48,6 +48,29 @@ const RACK_SHIPPED = { speed_sensitivity: 0.75, sens_ref_kmh: 113.0, sens_expone
 const RACK_REF = { speed_sensitivity: 0.75, sens_ref_kmh: 172.0, sens_exponent: 4.0 };
 const RACK_FULL = { speed_sensitivity: 0.0, sens_ref_kmh: 113.0, sens_exponent: 2.0 };
 
+/** The handling before candidate G (shipped until 2026-10-23): b0 7.5 spin tyres, step-14
+ * grip balance, the owner's firm ride. */
+const applyPreG = (h: EyeHost) => {
+  h.setTyres({ spin_b0: 7.5, spin_b2: 1.627, spin_c: 0.85, side_floor: 0.4, rear_relax: 1.0, rear_peak_slip: 1.0 });
+  h.setGrip({ rear_stiffness: 0.45, front_stiffness: 0.6 });
+  h.setRide({}, "owner");
+};
+
+/** Candidate G (held_search, grip-balance handover): tyres, grip balance and a softer ride.
+ * The shipped handling since 2026-10-23, so applying it explicitly changes nothing then. */
+const applyG = (h: EyeHost) => {
+  h.setTyres({ spin_b0: 6.48, spin_b2: 1.75, spin_c: 0.9, side_floor: 0.38, rear_relax: 1.41, rear_peak_slip: 1.1 });
+  h.setGrip({ rear_stiffness: 0.533, front_stiffness: 0.666 });
+  h.setRide({ yaw_inertia: 1.35, spring: 1.04, arb: 0.63, roll_inertia: 1.34 });
+};
+/** G's tyres and grip balance with the owner's firm springs and bars (pre-G ride) and G's
+ * yaw inertia. */
+const applyGFirm = (h: EyeHost) => {
+  h.setTyres({ spin_b0: 6.48, spin_b2: 1.75, spin_c: 0.9, side_floor: 0.38, rear_relax: 1.41, rear_peak_slip: 1.1 });
+  h.setGrip({ rear_stiffness: 0.533, front_stiffness: 0.666 });
+  h.setRide({ yaw_inertia: 1.35 }, "owner");
+};
+
 const ROUND1: EyeCase[] = [
   {
     id: "rack",
@@ -74,16 +97,9 @@ const ROUND1: EyeCase[] = [
     id: "drift",
     focus: "Holding a drift with the countersteer key held and the throttle, and catching it. (The car respawns when you switch.)",
     restart: true,
-    a: { name: "tyres shipped", apply: () => {} },
-    b: {
-      // held_search: best lock-preserving set inside every guard rail (grip-balance handover).
-      name: "tyres+weight candidate G",
-      apply: (h) => {
-        h.setTyres({ spin_b0: 6.48, spin_b2: 1.75, spin_c: 0.9, side_floor: 0.38, rear_relax: 1.41, rear_peak_slip: 1.1 });
-        h.setGrip({ rear_stiffness: 0.533, front_stiffness: 0.666 });
-        h.setRide({ yaw_inertia: 1.35, spring: 1.04, arb: 0.63, roll_inertia: 1.34 });
-      },
-    },
+    a: { name: "tyres shipped", apply: applyPreG },
+    // held_search: best lock-preserving set inside every guard rail (grip-balance handover).
+    b: { name: "tyres+weight candidate G", apply: applyG },
   },
   {
     id: "tcs",
@@ -94,26 +110,13 @@ const ROUND1: EyeCase[] = [
   },
 ];
 
-/** Candidate G (held_search, grip-balance handover): tyres, grip balance and a softer ride. */
-const applyG = (h: EyeHost) => {
-  h.setTyres({ spin_b0: 6.48, spin_b2: 1.75, spin_c: 0.9, side_floor: 0.38, rear_relax: 1.41, rear_peak_slip: 1.1 });
-  h.setGrip({ rear_stiffness: 0.533, front_stiffness: 0.666 });
-  h.setRide({ yaw_inertia: 1.35, spring: 1.04, arb: 0.63, roll_inertia: 1.34 });
-};
-/** G's tyres and grip balance with the shipped (owner's firm) springs and bars. */
-const applyGFirm = (h: EyeHost) => {
-  h.setTyres({ spin_b0: 6.48, spin_b2: 1.75, spin_c: 0.9, side_floor: 0.38, rear_relax: 1.41, rear_peak_slip: 1.1 });
-  h.setGrip({ rear_stiffness: 0.533, front_stiffness: 0.666 });
-  h.setRide({ yaw_inertia: 1.35 });
-};
-
 /** Round 2 (owner round-1 result, row physics-4): confirm candidate G, then split it. */
 const ROUND2: EyeCase[] = [
   {
     id: "drift_again",
     focus: "Holding a drift with the countersteer key held and the throttle, and catching it. (The car respawns when you switch.)",
     restart: true,
-    a: { name: "tyres shipped", apply: () => {} },
+    a: { name: "tyres shipped", apply: applyPreG },
     b: { name: "candidate G", apply: applyG },
   },
   {
