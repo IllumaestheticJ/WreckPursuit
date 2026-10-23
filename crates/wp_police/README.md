@@ -164,7 +164,7 @@ A unit whose steering target is more than ~107° off its nose (the racer went pa
 round: a forward U-turn at full lock from above 3 m/s (handbrake pulled for 0.6 s when fast,
 held near 6 m/s) or a reverse swing from a standstill (brake held engages reverse, lock that
 swings the nose toward the target), until it faces within 60°; 3 s cooldown. Shadowing units far
-behind the racer close at the phase's pursuit cap and brake (4 m/s²) to arrive at their gap.
+behind the racer close at their car's top speed and brake (4 m/s²) to arrive at their gap.
 Tested with real cars in `crates/wp_sim/tests/police_passby.rs`.
 
 ### Un-sticking (`stuck.rs`, physical units)
@@ -190,7 +190,8 @@ call: spawned or not, start and road distance, stuck events, outcome (`Arrived`,
   corner it would cut into a building (row 66).
 - **Chase driving** (`[chase]` in `pursuit.toml`, row 63): corners planned at `cornering_g`
   (0.82 g), braking at `brake_mps2` (8.5), closing at up to the racer's speed × (1 +
-  `speed_margin`) and `pursuit_cap_mps[phase]` × `cap_scale[level]`; through junctions at
+  `speed_margin`), capped only by the unit car's top speed (no pursuit speed cap since
+  2026-10-23, every damage mode); through junctions at
   `chase_junction_mps`, reds at `chase_red_mps`, a 0.6 s look for cross traffic, passes after
   0.5 s; interceptors at up to 2.2 × the limit.
 - **Risk budget**: collisions and near misses cost budget (a deliberate PIT/ram/box contact only

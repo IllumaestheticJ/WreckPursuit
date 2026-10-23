@@ -845,7 +845,9 @@ fn assault_counts_once_per_episode_and_not_for_police_contact_tactics() {
     };
     h.run(PHYSICS_DT, &[ram]);
     assert_eq!(h.police.stats().assaults, 2, "a second unit rammed");
-    assert!(h.police.racer(RACER).unwrap().heat >= heat + 19.0);
+    // The assault's heat from data/police/heat.toml (10 since row 157), less rounding.
+    let assault = PoliceConfig::builtin().heat.heat.assault.heat;
+    assert!(h.police.racer(RACER).unwrap().heat >= heat + assault - 1.0);
 }
 
 /// Reckless driving nobody saw, as `wp_world` reports it: a speeding violation at the racer.

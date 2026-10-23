@@ -69,5 +69,8 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.59 | preview | Police never spawn on parked cars / cones (3 m clearance); a unit on its side or roof for 1.5 s is reset upright out of view (row 75); golden headers stamped contract 0.3.1 |
 | 0.12.60 | preview | Career garage insurance text follows the rule (row 155) |
 | 0.12.61 | preview | Garage repair of a car with a torn-off panel no longer errors (row 163); garage stages 4–5: engine internals, DIY engine rebuild, 3D engine stand (PR #43) |
-| 0.12.62 | preview | (next) |
+| 0.12.62 | preview | Ashpeak County (PR #50) with 8 races and honk-to-start spots; career + city betting (PRs #46/#47), touge on the career, street wins give rep; mitered barriers (row 164); spike strips never bring a police car into view (PR #54); Air-1 radio + radar (PR #32); audio dropout fix (PR #53); police tools L3/L4/L5 (row 156) |
+| 0.12.63 | main + public demo | Round 12 merged into main (PR #59); main is the single integration branch. City chase is now "Night run" (PR #51); no police spawn in a wanted racer's view (row 158). Public demo refreshed from main with the game's own start menu |
+| 0.12.64 | main + public demo | World v7 (PR #38 port: river, canal, bridges, landmarks, hideouts); Loop 9 outer barriers (row 160); flat ramp merges (row 162); heat gains halved, ~40 s of chase per level (row 157). PR #62 |
+| 0.12.65 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |

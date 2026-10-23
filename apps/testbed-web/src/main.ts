@@ -63,7 +63,7 @@ import { WorkshopMode } from "./workshop/mode";
 import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
 import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
-import { RaceView, type RaceFrame } from "./ui/race";
+import { RaceView, racesForMap, type RaceFrame } from "./ui/race";
 import { GarageVisitView } from "./ui/garageVisit";
 import { TougeView, type TougeChoice, type Wager } from "./ui/touge";
 import { RaceMarker, parseCourse } from "./race_marker";
@@ -86,6 +86,12 @@ import { StreetUi } from "./ui/street";
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
 /** Cities the selector offers (data/city/<id>.greybox.glb); the first is the default. */
 const CITY_IDS = ["vesper_v2", "ashpeak", "procedural_12x12"];
+/** Maps the game menu's main screen offers (the first is the default; owner 2026-10-23). The
+ * Ashpeak greybox is ~34 MB, so its entry says so. */
+const MENU_MAPS = [
+  { id: "vesper_v2", label: "Port Vesper" },
+  { id: "ashpeak", label: "Port Vesper + Ashpeak County", note: "Large download (~34 MB): the first load takes a while" },
+];
 const COLOURS = [0xd04a2a, 0x2a7fd0, 0x3fb950, 0xd0a92a, 0x9b59b6, 0x1abc9c];
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -453,7 +459,8 @@ async function main(): Promise<void> {
       }
     },
     freeDrive: () => startFreeDrive(undefined, undefined, true),
-    list: () => sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value),
+    // The picker lists the races of the chosen map (main menu "Map", or the panel's city box).
+    list: () => racesForMap(sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value), citySel.value),
     betStatus: () => {
       try {
         return sim.raceBetStatus();
@@ -685,7 +692,8 @@ async function main(): Promise<void> {
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    sim.raceStart(id, car, mode, autopilot, quickTune(car));
+    // On the chosen map when the race runs there (a Port Vesper race on Ashpeak stays there).
+    sim.raceStart(id, car, mode, autopilot, quickTune(car), citySel.value);
     rebuildViews();
     applyAssistPreset(app.source);
     rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
@@ -1512,8 +1520,12 @@ async function main(): Promise<void> {
     developerDefault: devDefault,
     countersteer: true,
     cameras: CAMERAS.filter((c) => c.mode !== "orbit").map((c) => ({ id: c.mode, label: c.label })),
+    maps: MENU_MAPS,
     host: {
-      play: (choice: PlayChoice) => {
+      play: (choice: PlayChoice, map: string) => {
+        // The main screen's map: night run, rainy night, street races and free drive start on it
+        // (the developer panel's city box follows).
+        if (map && CITY_IDS.includes(map) && choice !== "touge" && choice !== "garage") citySel.value = map;
         // Quick play runs outside the career; the career lives behind Garage.
         if (choice === "chase") startNightRun();
         else if (choice === "chaseRain") startNightRun(undefined, undefined, true);

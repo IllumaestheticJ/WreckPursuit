@@ -54,11 +54,14 @@
 // 50 (L3) the run never reached L5 and the helicopter never launched. Heat 90 (the bottom of L5)
 // keeps the story: pursuit at 9.8 s, helicopter at 72.2 s, lost inside the Cut, Escaped at
 // 133.8 s after 40 s unseen (the L5 day escape time); control Captured at 125.8 s.
-// 2026-10-23 (D, deck floors lift in place: river and canal bridges up to 0.35 m higher, a few
-// buildings moved): seed 54 diverged and the control lost its capture (the lead unit braked
-// 40 m behind the parked racer, then turned across the Cut at walking pace and never closed).
-// Seeds 50-63: the escape story holds on 12 of 14, the control capture on seed 60 only (the
-// geometry in the Cut is unchanged). Re-seeded to 60: Escaped 132.5 s; control Captured 107.8 s.
+// Row 157 (2026-10-23: every heat gain halved): from heat 90 the racer drops below L5 and climbs
+// back at half the rate, so the helicopter launched at 95.7-111.2 s on every seed 50-63 (deadline
+// 95 s). Heat 95 -> seeds 50-63: escape story on 8 of 14 (51-53, 55-57, 63), control captured in
+// its window on 2 (54, 63; the other 12 are still in pursuit at 190 s or captured early, none
+// escapes). Re-seeded 54 -> 63, heat 90 -> 95.
+// PR #60 port (2026-10-23: no AI pursuit cap, stronger police cars, rolling-block deadlock fix):
+// seed 63 was Captured at 141.8 s. Seeds 50-70 at heat 95: escape story on 16 of 21, control
+// on 20, both on 15 (50-52, 56-62, 64-66, 68-70). Re-seeded 63 -> 60, the middle of 56-62.
 (
     name: "police_tunnel_escape_founders_cut",
     seed: 60,
@@ -75,7 +78,7 @@
         (
             id: "racer",
             car: "debug_coupe",
-            police_heat: 90.0,
+            police_heat: 95.0,
             speed_mps: 20.0,
             driver: follow_route(route_id: "Lantern Run -> Founders Cut lay-by", target_speed: 25.0),
         ),

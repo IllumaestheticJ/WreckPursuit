@@ -84,7 +84,6 @@ fn risk_budget_and_caps_keep_cops_alive() {
     cfg.pursuit.risk.budget = 1.0e9;
     cfg.pursuit.pursuit_cornering_g = 0.92;
     cfg.pursuit.target_speed_margin = 0.6;
-    cfg.pursuit.pursuit_cap_mps.day = 60.0;
     let reckless = run_scenario_with(&sc, &cfg);
     let m = |s: &PoliceRunSummary, k: &str| s.metric(k).unwrap();
     // The prompt's bar: about 10 % at most of engaged units total-loss themselves without

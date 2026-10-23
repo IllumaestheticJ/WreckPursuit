@@ -163,6 +163,10 @@ pub struct EngineAudioState {
     pub rpm_rate: f32,
     /// `prev_rpm` holds a real sample (false before the first frame).
     pub primed: bool,
+    /// Gear seen last frame, when the caller reports one.
+    pub last_gear: Option<i8>,
+    /// Time left on the upshift cue started by a gear change under throttle, s.
+    pub upshift_left_s: f32,
 }
 
 /// What the engine model reads for one vehicle this frame.
@@ -174,6 +178,10 @@ pub struct EngineInput {
     pub pedal: f32,
     /// Throttle reaching the engine 0..=1 (after TCS and the gearbox's shift cut); drives load.
     pub applied: f32,
+    /// Current gear (`VehicleState::gear`), if the caller has it. An upshift under throttle
+    /// starts a short shift cue even when the rpm falls too slowly for the rpm-rate cue (a
+    /// converter automatic with no torque cut). `None`: rpm-rate cues only.
+    pub gear: Option<i8>,
 }
 
 /// What the engine model wants to play this frame (gains before spatialisation).
@@ -261,6 +269,15 @@ pub fn update_engine(
     }
     st.prev_rpm = rpm;
     st.primed = true;
+    // Gear-change cue: an upshift under throttle holds the dip for `upshift_cue_s`.
+    if let (Some(g), Some(last)) = (input.gear, st.last_gear) {
+        if g > last && last >= 1 && pedal > 0.5 {
+            st.upshift_left_s = mix.upshift_cue_s;
+        }
+    }
+    st.last_gear = input.gear.or(st.last_gear);
+    let upshift = if st.upshift_left_s > 0.0 { 1.0 } else { 0.0 };
+    st.upshift_left_s = (st.upshift_left_s - dt).max(0.0);
     // A rev-match's rpm jump is the ratio step times the rpm, so a low-rpm downshift rises
     // slower in rpm/s for the same shift: the rising (blip) side is judged as if at
     // `blip_ref_rpm` (never weaker than the plain rate, at most 2.5× stronger).
@@ -275,7 +292,12 @@ pub fn update_engine(
             .max(mix.shift_rate_onset_rpm_s + 1.0),
         rate,
     );
-    let (target, shift) = if st.rpm_rate < 0.0 {
+    let (target, shift) = if st.rpm_rate < 0.0 || upshift > 0.0 {
+        let cue = if st.rpm_rate < 0.0 {
+            cue.max(upshift)
+        } else {
+            upshift
+        };
         let dip = cue * applied;
         (applied * (1.0 - mix.shift_dip_depth * cue), -dip)
     } else {
@@ -534,6 +556,7 @@ mod tests {
             rpm,
             pedal: throttle,
             applied: throttle,
+            gear: None,
         }
     }
 
@@ -559,6 +582,7 @@ mod tests {
             shift_dip_depth: 0.6,
             blip_load: 0.8,
             blip_ref_rpm: 4000.0,
+            upshift_cue_s: 0.15,
             lod_two_layer_m: 40.0,
             second_layer_cull_scale: 0.25,
             physical_max_others: 6,
@@ -619,12 +643,60 @@ mod tests {
                         rpm: rpm(i),
                         pedal: 1.0,
                         applied: applied(i),
+                        gear: None,
                     },
                     1.0 / 60.0,
                     &mut rng,
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn upshift_with_a_slow_rpm_fall_still_dips_when_the_gear_is_known() {
+        // A converter shift without a torque cut, flat out: rpm 6000 -> 5000 over 0.6 s
+        // (1,667 rpm/s, under the rpm-rate cue's onset), gear 3 -> 4 at frame 60.
+        let (def, limits) = (test_def(false), test_limits());
+        let layers = EngineLayers::resolve(&pack(), &test_def(false), 800.0, 7000.0);
+        let run = |with_gear: bool| {
+            let mut st = EngineAudioState::default();
+            let mut rng = Rng::new(3);
+            (0..120)
+                .map(|i| {
+                    let rpm = if i < 60 {
+                        6000.0
+                    } else {
+                        6000.0 - (i.min(96) - 60) as f32 * 1000.0 / 36.0
+                    };
+                    let gear = if i < 60 { 3 } else { 4 };
+                    update_engine(
+                        &mut st,
+                        &test_mix(),
+                        &def,
+                        limits,
+                        &layers,
+                        EngineInput {
+                            rpm,
+                            pedal: 1.0,
+                            applied: 1.0,
+                            gear: with_gear.then_some(gear),
+                        },
+                        1.0 / 60.0,
+                        &mut rng,
+                    )
+                    .load
+                })
+                .collect::<Vec<f32>>()
+        };
+        let (plain, cued) = (run(false), run(true));
+        let low = |v: &[f32]| v[60..80].iter().copied().fold(1.0, f32::min);
+        assert!(
+            low(&plain) > 0.95,
+            "no rpm-rate cue at this rate: {}",
+            low(&plain)
+        );
+        assert!(low(&cued) < 0.8, "gear-change cue dips to {}", low(&cued));
+        assert!(cued[119] > 0.95, "re-rises to {}", cued[119]);
     }
 
     #[test]

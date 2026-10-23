@@ -345,12 +345,13 @@ fn roster_diff_hashes_are_pinned() {
     // handling (the owner's spin-model tyres, ride and step-14 balance; `wp_vehicle::lab_scope`)
     // and the auto box holds its gear while sliding: tyre / suspension / gearbox changes, not
     // a differential change.
+    // Re-recorded [bless] 2026-10-23: police power package (wolfhound engine).
     let pinned: [(&str, u64); 6] = [
         ("shiro_turbo", 0x96762dfa9a0ef27a),
         ("hakone_gt", 0x039ad3a1e0da61e0),
         ("sperber_32", 0x6e9a9325742bbb98),
         ("lindwurm_4t", 0xd4407407a6e845d4),
-        ("sentinel_wolfhound", 0xdba3700cd0465e18),
+        ("sentinel_wolfhound", 0x0c96519f042d6e13),
         ("junkyard_beater", 0x23f0ef1f2a408b23),
     ];
     let mut got = Vec::new();

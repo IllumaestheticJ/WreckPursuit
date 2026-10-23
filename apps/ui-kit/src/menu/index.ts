@@ -17,6 +17,7 @@ export {
   type SpeedUnits,
   type Volumes,
 } from "./settings";
+export { MAP_KEY, loadMenuMap, saveMenuMap, type MenuMap } from "./maps";
 export { keyAction, PadNav, stepIndex, type NavAction } from "./nav";
 export { BAR_CHANNELS, paintInputBars, type BarChannel } from "./bars";
 export {
