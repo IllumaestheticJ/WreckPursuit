@@ -8,7 +8,7 @@ use wp_contracts::AssistProfile;
 use wp_contracts::LoadedCar;
 use wp_vehicle::brake_dive::{brake_dive, clearance_on_front_bump_stops, owner_default_assists};
 
-const ROSTER: [&str; 17] = [
+const ROSTER: [&str; 28] = [
     "vireo_xs",
     "kestrel_ts",
     "shiro_turbo",
@@ -26,6 +26,17 @@ const ROSTER: [&str; 17] = [
     "tansy_13",
     "drayman_cargo",
     "furrow_24",
+    "stoat_16v",
+    "bulwark_400",
+    "arashi_t4",
+    "satchel_20",
+    "marten_20",
+    "brigand_400",
+    "talus_20t",
+    "tumbril_20",
+    "fulmine_v10",
+    "sentinel_warden",
+    "sentinel_vigil",
 ];
 
 fn load(id: &str) -> LoadedCar {

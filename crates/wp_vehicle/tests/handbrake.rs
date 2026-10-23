@@ -339,3 +339,27 @@ fn the_clip_2_hairpin_pivots_with_the_aid_and_is_caught() {
         );
     }
 }
+
+#[test]
+fn every_car_can_lock_its_rears_with_the_handbrake() {
+    // Rows 56 / 72 rule (docs/integration/cars.md): handbrake torque per rear wheel ≥ 1.5 ×
+    // the static rear lock torque (rear corner load × rolling radius), so a pulled handbrake
+    // locks the rears on every car. Eleven later cars were at 0.4–1.1 × until regenerated.
+    let dir = format!("{}/../../data/cars", env!("CARGO_MANIFEST_DIR"));
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_none_or(|x| x != "json") {
+            continue;
+        }
+        let d = wp_contracts::load_car(&p).unwrap().def;
+        let lock = d.mass_kg * (1.0 - d.front_weight_frac) / 2.0 * 9.81 * d.wheels[2].radius_m;
+        // 1 % slack for the 10 N·m rounding of the generated files.
+        assert!(
+            d.brakes.handbrake_rear_nm >= 1.5 * lock * 0.99,
+            "{}: handbrake {} N·m < 1.5 × lock {:.0} N·m",
+            d.id,
+            d.brakes.handbrake_rear_nm,
+            lock
+        );
+    }
+}

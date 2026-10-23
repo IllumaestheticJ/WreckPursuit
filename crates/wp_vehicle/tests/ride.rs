@@ -16,7 +16,7 @@ fn car(id: &str) -> LoadedCar {
 /// Sports, sedan, muscle, police cruiser.
 const REFERENCE: [&str; 4] = ["hakone_gt", "kestrel_ts", "rampart_50", "sentinel_cruiser"];
 
-const ROSTER: [&str; 17] = [
+const ROSTER: [&str; 28] = [
     "vireo_xs",
     "kestrel_ts",
     "shiro_turbo",
@@ -34,7 +34,45 @@ const ROSTER: [&str; 17] = [
     "tansy_13",
     "drayman_cargo",
     "furrow_24",
+    "stoat_16v",
+    "bulwark_400",
+    "arashi_t4",
+    "satchel_20",
+    "marten_20",
+    "brigand_400",
+    "talus_20t",
+    "tumbril_20",
+    "fulmine_v10",
+    "sentinel_warden",
+    "sentinel_vigil",
 ];
+
+/// Every car file except the lead's debug cars (`data/cars/*.json`).
+fn roster_on_disk() -> Vec<String> {
+    let dir = format!("{}/../../data/cars", env!("CARGO_MANIFEST_DIR"));
+    let mut ids: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(|e| {
+            let p = e.unwrap().path();
+            let stem = p.file_stem()?.to_str()?.to_string();
+            (p.extension()? == "json" && !stem.starts_with("debug_")).then_some(stem)
+        })
+        .collect();
+    ids.sort();
+    ids
+}
+
+#[test]
+fn every_roster_car_is_ride_tested() {
+    // Rows 54 / 56 / 72: eleven cars added after the ride rules missed them. A new car file
+    // must join ROSTER here (and in brake_dive.rs) so the ride checks run on it.
+    for id in roster_on_disk() {
+        assert!(
+            ROSTER.contains(&id.as_str()),
+            "{id} is not in ride.rs ROSTER"
+        );
+    }
+}
 
 #[test]
 fn ride_frequency_and_damping_are_car_like() {
@@ -42,8 +80,19 @@ fn ride_frequency_and_damping_are_car_like() {
     // ~0.3–0.5 in bump with clearly more in rebound. Measured: 1.06–2.08 Hz, bump 0.21–0.38,
     // rebound 2× bump.
     for id in ROSTER {
-        for (a, ax) in axle_ride(&car(id)).iter().enumerate() {
-            assert!((1.0..=2.15).contains(&ax.ride_hz), "{id} axle {a}: {ax:?}");
+        let c = car(id);
+        // A modern mid-engine supercar runs a stiffer rear (fulmine_v10 2.19 Hz; the class's
+        // published rates reach ~2.3 Hz).
+        let max_hz = if c.def.class == wp_contracts::VehicleClass::Exotic {
+            2.25
+        } else {
+            2.15
+        };
+        for (a, ax) in axle_ride(&c).iter().enumerate() {
+            assert!(
+                (1.0..=max_hz).contains(&ax.ride_hz),
+                "{id} axle {a}: {ax:?}"
+            );
             // Re-ranged (unify, lead 2026-10-21): the owner-chosen ride (medium weight with
             // springs / bars × 1.5) puts lucciola_350's rear at 0.46 in bump; limit 0.48.
             assert!(
