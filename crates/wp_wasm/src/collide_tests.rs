@@ -195,8 +195,9 @@ fn player_collides_with_traffic_in_the_city() {
 fn traffic_near_the_player_keeps_a_body_when_vehicle_slots_run_short() {
     // Free drive by day has up to 27 non-traffic vehicles (player, 13 street racers with 5 in
     // the lockup, 13 police; 0.12.49 had 30 and promoted 16 traffic cars where 10 had room).
-    // Eleven stand-ins more leave 2, and the car the player drives into must take one.
-    let r = ram(false, true, 11, 40);
+    // Eleven stand-ins more left 2, and the car the player drives into must take one.
+    // 2026-10-23 (owner: fewer patrols by day) about 6 fewer police are about: 17 stand-ins.
+    let r = ram(false, true, 17, 40);
     println!("{r:?}");
     assert_eq!(r.orphans, 0, "every physical traffic car has a body: {r:?}");
     assert!(
