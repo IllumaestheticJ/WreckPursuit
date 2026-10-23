@@ -4,7 +4,7 @@
 
 | Class | Archetype | Durability | Base price |
 |---|---|---|---|
-| Sport | 2010s German AWD hot hatch, 2.0 L turbocharged I4, on-demand clutch-pack AWD, dual-clutch gearbox | 3 / 5 | 32,000 |
+| Sport | 2010s German AWD hot hatch, 2.0 L turbocharged I4, on-demand clutch-pack AWD, dual-clutch gearbox | 3 / 5 | 34,000 |
 
 ## Design note
 

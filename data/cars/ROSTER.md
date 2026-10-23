@@ -11,7 +11,7 @@
 | Rampart 5.0 | `rampart_50` | Muscle | RWD | 1753 | 319 | 182 | 5.6 | 276 | 0.96 | 603 | 3 | 42,000 | sport |
 | Ironside 440 | `ironside_440` | Muscle | RWD | 1695 | 216 | 127 | 7.7 | 220 | 0.71 | 450 | 4 | 38,000 | vintage_bias |
 | Sperber 32 | `sperber_32` | Sport | RWD | 1602 | 248 | 155 | 5.8 | 279 | 0.99 | 602 | 3 | 36,000 | sport |
-| Lindwurm 4T | `lindwurm_4t` | Sport | AWD on-demand (≤ 50 % rear) | 1554 | 220 | 141 | 5.5 | 259 | 0.97 | 608 | 3 | 32,000 | sport |
+| Lindwurm 4T | `lindwurm_4t` | Sport | AWD on-demand (≤ 50 % rear) | 1554 | 220 | 141 | 5.5 | 259 | 0.97 | 608 | 3 | 34,000 | sport |
 | Lucciola 350 | `lucciola_350` | Exotic | RWD | 1344 | 278 | 207 | 4.6 | 297 | 1.02 | 692 | 1 | 120,000 | sport |
 | Hauler 1500 | `hauler_1500` | Truck | RWD | 2438 | 265 | 109 | 8.0 | 221 | 0.71 | 440 | 5 | 32,000 | all_terrain |
 | Sentinel Cruiser | `sentinel_cruiser` | PoliceCruiser | RWD | 2048 | 276 | 135 | 6.2 | 267 | 0.91 | 559 | 5 | 30,000 | police_pursuit |

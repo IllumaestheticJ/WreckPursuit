@@ -525,7 +525,7 @@ CARS = [
             bar=P_MODERN, handbrake_frac=0.8,
         ),
         steer=dict(ratio=13.6, turn_circle_m=10.9, ackermann=0.6, rack_speed=1.7),
-        price=32000,
+        price=34000,
         durability=3,
         note=("Point-and-squirt in any weather. Instant dual-clutch shifts and AWD launches make "
               "it brutally quick to 100 km/h for its power, and it is the most forgiving fast "
