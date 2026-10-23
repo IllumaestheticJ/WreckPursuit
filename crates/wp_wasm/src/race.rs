@@ -604,7 +604,9 @@ impl RaceRun {
     /// Attach race `def` to a freshly built session (before the first tick): `ids` are the
     /// scenario entities in scenario order (player first, then `def.ai`), `cars` by car id.
     /// Marks the AI cars `VehicleKind::AiRacer`, starts the countdown and charges the buy-in
-    /// on `run`'s account (when there is one).
+    /// on `run`'s account (when there is one). `wager` is a touge battle's wager (ignored by
+    /// other races).
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         def: &RaceDef,
         autopilot: bool,
@@ -613,6 +615,7 @@ impl RaceRun {
         cars: &BTreeMap<String, LoadedCar>,
         sc: &Scenario,
         run: Option<&mut PlayerRun>,
+        wager: wp_race::touge::Wager,
     ) -> Result<Self, String> {
         if ids.len() != def.entrants() || sc.entities.len() != ids.len() {
             return Err(format!(
@@ -693,6 +696,7 @@ impl RaceRun {
                     .ok_or("touge opponent car not loaded")?;
                 Some(crate::touge::TougeRun::new(
                     t,
+                    wager,
                     sim,
                     ids[0],
                     ids[1],

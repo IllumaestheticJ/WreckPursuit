@@ -197,3 +197,30 @@ fn locked_wager_is_refused_and_the_battle_still_runs() {
     assert!(r.wager_error.is_some());
     assert_eq!(s.run().unwrap().account().cash, cash0);
 }
+
+/// A wager prepared in the menu belongs to the next live session only: a replay never takes
+/// it, and a live session that is not that battle clears it (bughunt F6).
+#[test]
+fn a_stale_wager_never_reaches_a_replay_or_a_later_battle() {
+    let free = crate::scenario::free_drive("debug_sedan", DamageMode::Arcade, false);
+    let mut rec = Session::new(free.clone(), false).unwrap();
+    rec.record_start();
+    rec.run_ticks(10);
+    let replay = rec.record_stop().unwrap();
+
+    set_next_wager(Wager::PinkSlip);
+    let _playback = Session::from_replay(replay).unwrap();
+    assert_eq!(
+        crate::touge::take_next_wager(),
+        Wager::PinkSlip,
+        "a replay leaves the wager"
+    );
+
+    set_next_wager(Wager::SideBet { stake: 500 });
+    let _live = Session::new(free, false).unwrap();
+    assert_eq!(
+        crate::touge::take_next_wager(),
+        Wager::None,
+        "the next live session took it"
+    );
+}

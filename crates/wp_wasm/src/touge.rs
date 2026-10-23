@@ -49,7 +49,10 @@ pub fn set_next_wager(w: Wager) {
     NEXT_WAGER.with(|n| *n.borrow_mut() = w);
 }
 
-fn take_next_wager() -> Wager {
+/// Take the wager set with [`set_next_wager`] (it is then cleared). `Session::build` takes it
+/// for every live session it builds, so a wager prepared for a battle that never started does
+/// not attach to a later one, and a replay never takes it.
+pub(crate) fn take_next_wager() -> Wager {
     NEXT_WAGER.with(|n| std::mem::replace(&mut *n.borrow_mut(), Wager::None))
 }
 
@@ -143,10 +146,11 @@ pub struct TougeRun {
 }
 
 impl TougeRun {
-    /// Battle `setup` between `player` and `npc` on the session's pass, taking the wager set
-    /// with [`set_next_wager`] (none in replays: they have no economy).
+    /// Battle `setup` between `player` and `npc` on the session's pass with `wager` (the one
+    /// set with [`set_next_wager`] for a live session; none in replays: they have no economy).
     pub fn new(
         setup: TougeSetup,
+        wager: Wager,
         sim: &Sim,
         player: EntityId,
         npc: EntityId,
@@ -161,7 +165,7 @@ impl TougeRun {
             npc,
             npc_class,
             npc_base_price,
-            wager: take_next_wager(),
+            wager,
             placed: false,
             ticket: None,
             place_error: None,

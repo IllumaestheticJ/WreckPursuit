@@ -220,6 +220,13 @@ impl Session {
         } else {
             None
         };
+        // The touge wager the menu prepared: taken (and cleared) by every live session, so a
+        // stale one never attaches to a later battle; a replay never takes it.
+        let wager = if playback.is_none() {
+            crate::touge::take_next_wager()
+        } else {
+            wp_race::touge::Wager::None
+        };
         // A picker race: judged next to the sim, live and in playback (not scripted menu runs).
         let race = match crate::race::race_for_scenario(&sc.name) {
             Some((def, autopilot)) if !scripted => Some(RaceRun::new(
@@ -230,6 +237,7 @@ impl Session {
                 &cars,
                 &sc,
                 run.as_mut(),
+                wager,
             )?),
             _ => None,
         };
