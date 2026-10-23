@@ -213,6 +213,47 @@ and each mod is drawn once:
 - Gaps: the workshop picker can't select parts that `fitBuild` drew (they carry no workshop slot).
   The mods the old renderer draws keep its look, not this branch's pieces.
 
+## City garages and map icons (garage audit, 2026-10-23)
+Owner: "make sure all garages / map icons are usable and functional". Audit findings and plan:
+playtest team report `garage.md` (scratchpad). What changed:
+- **Shops sit on a street lane.** `wp_wasm::garage_visit::sites` puts each `Garage` POI's shop
+  on the nearest street-level, non-highway, non-parking lane (`street_pose`, within 60 m; Port
+  Vesper / Ashpeak shops already were, so they do not move). The grid city's block POIs were 18 m
+  off the road (outside the 15 m ring) or under the viaduct. `GarageSite::contains` takes a 3D
+  point and has a ±4 m height window (`GARAGE_HEIGHT_WINDOW_M`): a deck above or a tunnel below
+  is not in the shop.
+- **Career runs have the shops.** `Session::garages()` lists them in career runs too (empty only
+  in picker races and sessions without an economy, which includes a session whose career run
+  ended). A visit in a career run has `GarageOffer::career = true`, no in-place repair
+  (`garage_repair` refuses), and the panel offers **Enter garage**. That ends the run at the
+  shop and opens `CareerGarageView.show(message, shop)`. Repairs there are priced at that shop's
+  district and kind (no free district / legit-crooked picker). Closing the garage after it
+  ended a run starts a new career drive: from the shop after a visit, else the same kind of run
+  (it used to unpause a session with no run left).
+- **Visit panel** (`ui/garageVisit.tsx`): Enter / pad A = Repair or Enter garage, Esc /
+  Backspace / pad B = Leave (the car is held while it is open). It sits centred under the
+  pursuit banner, clear of the speed block. A note says quick play uses a demo account. A
+  "<shop> · stop inside to visit" hint shows while the car is in a ring.
+- **3D marker** (`scene.ts`): a floating name sign over the ring and beam.
+- **Map** (`ui/map.ts` `sessionPois`, ui-kit map):
+  - Garages come from `garages()`, with their shop kind (legit blue, crooked amber, as in 3D).
+  - Race meets come from `race_spots()` (`RaceSpot`, orange chequer). The city's
+    `RaceStartGrid` POIs are no longer drawn: 8 of 15 on Port Vesper were scenario route ends
+    with no race, and two meets had no icon.
+  - POIs draw above host markers (street racers). Shops and meets are 9 px with names at every
+    zoom.
+  - The legend has rows for legit / crooked garages, race meets, safehouses (what they do),
+    police helipads and rest stops.
+- **Grid POIs** (`wp_world::procgen`, pending): police stations and safehouses should sit on
+  their nearest lane (they are inside buildings or 13-18 m off the road, outside their 15 m
+  radius). Garages and the helipad keep their block point. The change, a `push_block_poi` hunk,
+  waits for the in-flight procgen ramp work, because `data/city/procedural_12x12.road.{json,bin}`
+  must be regenerated (`just city`) with both. The map's shops already use the street-lane spot.
+- Tests: `garage_visit` every city (incl. Ashpeak) has its shops on a street lane, height window;
+  `run_tests::every_garage_can_be_driven_into` (grid + Port Vesper, driving, no teleport), the
+  existing visit tests drive in too; `career_tests::a_career_run_stops_at_a_shop_for_the_career_garage`;
+  `e2e/garages.mjs` (`npm run e2e:garages`, `CITY=`, `DIST=` for a `vite build` + preview).
+
 ## Needs
 - Nothing open. Stage 3 reads anchors straight from `data/panels/meshes/*.json`.
 
