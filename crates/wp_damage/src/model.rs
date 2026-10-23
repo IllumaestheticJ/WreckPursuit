@@ -645,6 +645,17 @@ impl DamageModel {
         self.health
     }
 
+    /// Seconds until a failed radiator has fully overheated the engine (`overheating` reaches
+    /// 1), `Some(0.0)` once it has, `None` while no radiator has failed. For the HUD
+    /// ("Radiator holed — ~40 s to overheat"); display only.
+    pub fn seconds_to_overheat(&self) -> Option<f32> {
+        self.components
+            .iter()
+            .filter(|c| c.kind == Component::Radiator && c.failed)
+            .map(|c| (self.tuning.overheat_ramp_s - (self.time_s - c.failed_at_s)).max(0.0))
+            .reduce(f32::min)
+    }
+
     /// Whether the vehicle has been declared a total loss.
     pub fn is_total_loss(&self) -> bool {
         self.total_loss

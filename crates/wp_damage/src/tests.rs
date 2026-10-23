@@ -10,7 +10,7 @@ use wp_contracts::{
 
 use crate::barrier::{run_barrier, ImpactKind};
 use crate::debris::DetachedKind;
-use crate::{default_price_table, DamageModel};
+use crate::{default_price_table, DamageModel, DamageTuning};
 
 fn data(path: &str) -> String {
     format!("{}/../../data/{path}", env!("CARGO_MANIFEST_DIR"))
@@ -358,9 +358,25 @@ fn radiator_failure_overheats_over_time() {
     );
     assert!(m.component_failed(Component::Radiator));
     let before = m.handling_effects().overheating;
+    let left_before = m.seconds_to_overheat().expect("radiator failed");
     run(&mut m, &extreme_mode(), 10.0);
     let after = m.handling_effects().overheating;
     assert!(after > before && after <= 1.0, "{before} -> {after}");
+    // F1 HUD countdown: ten seconds less to go, and consistent with `overheating`.
+    let left = m.seconds_to_overheat().unwrap();
+    assert!(
+        (left_before - left - 10.0).abs() < 0.05,
+        "{left_before} -> {left}"
+    );
+    let ramp = DamageTuning::default().overheat_ramp_s;
+    assert!(
+        (left - ramp * (1.0 - after)).abs() < 0.05,
+        "{left} vs {after}"
+    );
+    run(&mut m, &extreme_mode(), ramp);
+    assert_eq!(m.seconds_to_overheat(), Some(0.0));
+    let fresh = DamageModel::new(&car.lattice, &car.materials);
+    assert_eq!(fresh.seconds_to_overheat(), None);
 }
 
 #[test]

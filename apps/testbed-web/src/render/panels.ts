@@ -1831,6 +1831,24 @@ export class PanelBody {
       .map((p) => ({ name: p.def.name, broken: p.broken, material: p.mesh.material as THREE.Material, visible: !p.hidden && p.mesh.visible }));
   }
 
+  /**
+   * Head lamps still lit, 0..1 (F1 "damage you can read"): the share of head-lamp sides
+   * (left / right lenses) with at least one unbroken lens still on the car (a torn-off lens is
+   * dead). 1 when the mesh has no head lamp lenses (not loaded, or a proxy body), so an
+   * undamaged car never goes dark.
+   */
+  headlampsWorking(): number {
+    let sides = 0;
+    let lit = 0;
+    for (const key of ["headlight", "headlight@r"]) {
+      const lenses = this.parts.filter((p) => p.def.kind === "light" && p.key === key);
+      if (lenses.length === 0) continue;
+      sides++;
+      if (lenses.some((p) => !p.broken && !p.hidden)) lit++;
+    }
+    return sides === 0 ? 1 : lit / sides;
+  }
+
   private hideRegion(region: number): void {
     for (const p of this.parts) {
       if (p.region === region) this.hidePart(p);

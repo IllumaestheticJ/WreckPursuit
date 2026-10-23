@@ -111,6 +111,13 @@ class CarFx {
   steamAcc = 0;
   readonly tyreAcc = new Float32Array(4);
   readonly tracks = new Float32Array(4 * TRACK);
+  /** F1 readable damage (damage_fx()): overheating 0..1 and fuel leak rate (tank share / s). */
+  overheat = 0;
+  leak = 0;
+  /** Fuel leak trail (one skid-style track under the tank). */
+  readonly leakTrack = new Float32Array(TRACK);
+  /** Rim-spark emission carry per wheel (fractional sparks). */
+  readonly rimAcc = new Float32Array(4);
   /** Head / tail lights already burst (once per car end). */
   headBroken = false;
   tailBroken = false;
@@ -127,6 +134,16 @@ const tmpSite = new THREE.Vector3();
 const fallbackPlane: Plane = { ga: 0, gb: 0, gc: 0 };
 // Reusable emitter arguments (no allocation per emit; see pool.ts on boxing).
 const skidArgs = new SkidArgs();
+/** Fuel leak trail input (F1): the midpoint of the rear contact patches. */
+const leakArgs = new SkidArgs();
+/** damage_fx() floats per car (crates/wp_wasm/src/damage_fx.rs DAMAGE_FX_STRIDE). */
+const DFX_STRIDE = 11;
+/** Leak trail half width, m, and the leak rate (tank share / s) drawn as a heavy trail (a
+ * failed tank leaks 0.01 / s, a damaged one 0.001 / s: wp_damage DamageTuning). */
+const LEAK_HALF_W = 0.035;
+const LEAK_HEAVY = 0.005;
+/** Below this speed a wheel on its rim throws no sparks, m/s. */
+const RIM_SPARK_MIN_MPS = 3;
 const tyrePuff = new PuffArgs().look(0.82, 0.82, 0.84, 0.25, 1.25, 1.8, 0.26, 0.35);
 const enginePuff = new PuffArgs();
 const steamPuff = new PuffArgs().look(0.95, 0.96, 0.97, 0.14, 0.75, 1.0, 0.45, 1.8);
@@ -342,12 +359,13 @@ function engineSmoke(c: CarFx, rate: number, dt: number, ep: PuffArgs): number {
 
 /** Radiator steam: number of puffs this frame (velocity left in `sp`). */
 function radiatorSteam(c: CarFx, rate: number, dt: number, sp: PuffArgs): number {
-  if (!(c.radiator < RADIATOR_STEAM_HEALTH)) {
+  if (!(c.radiator < RADIATOR_STEAM_HEALTH) && !(c.overheat > 0)) {
     c.steamAcc = 0;
     return 0;
   }
-  const sev = Math.min((RADIATOR_STEAM_HEALTH - c.radiator) / RADIATOR_STEAM_HEALTH, 1);
-  c.steamAcc += (2 + 10 * sev) * rate * dt;
+  const sev = Math.min(Math.max((RADIATOR_STEAM_HEALTH - c.radiator) / RADIATOR_STEAM_HEALTH, 0), 1);
+  // F1: a holed radiator vents more and more as the engine overheats (overheating 0..1).
+  c.steamAcc += (2 + 10 * sev + 18 * c.overheat) * rate * dt;
   let n = 0;
   while (c.steamAcc >= 1) {
     c.steamAcc -= 1;
@@ -431,6 +449,9 @@ export class CrashFx {
   private level: FxLevel;
   private preset: FxPreset;
   private readonly cars = new Map<number, CarFx>();
+  /** Last damage_fx() / tire_rim_contact() (setDamage), vehicle_states order. */
+  private dfx: ArrayLike<number> = [];
+  private rim: ArrayLike<number> = [];
   private readonly lastHit = new Map<number, number>();
   private readonly rng = new FxRng(0x5eed);
   private time = 0;
@@ -515,6 +536,15 @@ export class CrashFx {
    * states and the views' interpolated poses, then the drained events (contacts, glass,
    * damage), then the particle step. `dt` = 0 while paused. `night` 0..1 (world_info).
    */
+  /**
+   * F1 readable damage for the next frame: `dfx` = damage_fx() (DAMAGE_FX_STRIDE floats per car,
+   * vehicle_states order), `rim` = tire_rim_contact() (4 per car). Empty arrays turn them off.
+   */
+  setDamage(dfx: ArrayLike<number>, rim: ArrayLike<number>): void {
+    this.dfx = dfx;
+    this.rim = rim;
+  }
+
   frame(events: Record<string, Record<string, unknown>>[], cur: Float32Array, views: Map<number, VehicleView>, dt: number, night: number): void {
     this.frameNo++;
     this.time += dt;
@@ -528,6 +558,35 @@ export class CrashFx {
     this.skids.update(this.time);
     // Forget vehicles that left the session (traffic despawns) now and then.
     if (this.frameNo % 300 === 0) for (const [id, c] of this.cars) if (this.frameNo - c.frame > 300) this.cars.delete(id);
+  }
+
+  /** Sparks from a wheel running on its rim (flat tyre, F1), at the contact patch in
+   * `skidArgs`, thrown backward along the road; more the faster the wheel rolls. */
+  private rimSparks(c: CarFx, i: number, dt: number): void {
+    const speed = Math.sqrt(c.vx * c.vx + c.vy * c.vy + c.vz * c.vz);
+    if (speed < RIM_SPARK_MIN_MPS) {
+      c.rimAcc[i] = 0;
+      return;
+    }
+    c.rimAcc[i] += this.preset.rate * Math.min(speed * 2.5, 90) * dt;
+    const count = Math.floor(c.rimAcc[i]);
+    if (count <= 0) return;
+    c.rimAcc[i] -= count;
+    const sa = sparkArgs;
+    sa.x = skidArgs.cx;
+    sa.y = skidArgs.cy;
+    sa.z = skidArgs.cz + 0.02;
+    sa.dx = -c.vx / speed;
+    sa.dy = -c.vy / speed;
+    sa.dz = -c.vz / speed;
+    sa.speed = Math.min(speed * 0.6, 14);
+    sa.spread = 0.3;
+    sa.nx = 0;
+    sa.ny = 0;
+    sa.nz = 1;
+    sa.lifeScale = 0.8;
+    sa.plane = c.planeOk ? c.plane : fallbackPlane;
+    this.sparks.emit(this.rng, count, sa);
   }
 
   private car(id: number): CarFx {
@@ -555,14 +614,44 @@ export class CrashFx {
       if (!kernelsWarmed) warmVehicleKernels(view, this.cars);
       const c = this.car(id);
       c.frame = this.frameNo;
+      const car = o / STATE_STRIDE;
+      const d = car * DFX_STRIDE;
+      c.overheat = this.dfx[d] ?? 0;
+      c.leak = this.dfx[d + 1] ?? 0;
+      let rearN = 0;
+      leakArgs.cx = leakArgs.cy = leakArgs.cz = 0;
       carFrame(cur, o, view.root.quaternion, view.root.position, view.panels.paint.color, c, K);
 
       // Wheels: contact patches → ground plane, skid marks, tyre smoke.
       for (let i = 0; i < 4 && i < info.wheels.length; i++) {
         const puffs = wheelFx(cur, o + S.wheelBase + i * S.wheelStride, packWheel(info.wheels[i]), c, i, K, skidArgs, tyrePuff, this.time, p.tyreSmoke, dt);
-        if (puffs < 0) continue;
+        if (puffs < 0) {
+          if (i >= 2) rearN = -9;
+          continue;
+        }
+        if (i >= 2) {
+          rearN++;
+          leakArgs.cx += skidArgs.cx * 0.5;
+          leakArgs.cy += skidArgs.cy * 0.5;
+          leakArgs.cz += skidArgs.cz * 0.5;
+          leakArgs.sx = skidArgs.sx;
+          leakArgs.sy = skidArgs.sy;
+          leakArgs.sz = skidArgs.sz;
+        }
+        const rim = this.rim[car * 4 + i] ?? 0;
+        if (rim > 0.5) this.rimSparks(c, i, dt);
+        else c.rimAcc[i] = 0;
         this.skids.track(c.tracks, i * TRACK, skidArgs);
         for (let k = 0; k < puffs; k++) this.smoke.puff(rng, tyrePuff);
+      }
+      // F1: a leaking tank leaves a thin dark trail between the rear wheels.
+      if (c.leak > 0 && rearN === 2) {
+        leakArgs.halfW = LEAK_HALF_W;
+        leakArgs.strength = c.leak >= LEAK_HEAVY ? 0.65 : 0.35;
+        leakArgs.time = this.time;
+        this.skids.track(c.leakTrack, 0, leakArgs);
+      } else {
+        c.leakTrack[0] = 0;
       }
       carPlane(c, K);
 

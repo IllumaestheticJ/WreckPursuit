@@ -87,6 +87,13 @@ const LAMP_STYLES: Record<string, { lens?: number; glow?: number; tail?: number 
   halo: {},
 };
 
+/** damage_fx() layout (crates/wp_wasm/src/damage_fx.rs): offsets within one car's floats. */
+export const DFX = { stride: 11, overheating: 0, fuelLeak: 1, toe: 2, camber: 6, overheatS: 10 } as const;
+/** Drawn bend = this × the damage toe / camber (display only; see setDamageFx). */
+const BEND_VISUAL = 4;
+/** Largest drawn bend, rad (~7°). */
+const BEND_MAX_RAD = 0.12;
+
 interface WheelView {
   pivot: THREE.Group; // positioned at the hub, rotated by steer
   /** Child of pivot: the mesh's visual camber for the non-spinning wheel parts (calipers). */
@@ -132,6 +139,9 @@ export class VehicleView {
   private skinTried = false;
   private readonly rest: Float32Array;
   private readonly wheels: WheelView[] = [];
+  /** Visual-only extra toe / camber per wheel from damage (setDamageFx), rad. */
+  private readonly bendToe = [0, 0, 0, 0];
+  private readonly bendCamber = [0, 0, 0, 0];
   /** Lattice wireframe and stress points: built the first time those layers are on. */
   private latticeView: LatticeView | null = null;
   private readonly cg: THREE.Mesh;
@@ -513,7 +523,9 @@ export class VehicleView {
       w.pivot.visible = !detached;
       const compression = cur[wb + SW.compression];
       w.pivot.position.z = wheelCentreZ(wi, compression);
-      w.pivot.rotation.z = cur[wb + SW.steer];
+      // The sim's steer already holds the damage toe; `bend` exaggerates it so it reads (F1).
+      w.pivot.rotation.z = cur[wb + SW.steer] + this.bendToe[i];
+      w.pivot.rotation.y = this.bendCamber[i];
       w.angle += cur[wb + SW.omega] * dt;
       w.spin.rotation.x = w.angle;
       if (slip) heat(Math.abs(cur[wb + SW.slipAngle]) / SLIP_RED, w.material.color);
@@ -646,6 +658,24 @@ export class VehicleView {
     });
   }
 
+  /**
+   * Bent corners from damage_fx() (F1): extra visual toe / camber per wheel, display only, so a
+   * damaged corner reads at a glance. The physics' own toe (in the wheel's steer angle) is about
+   * 1° after a hard hit, too small to see; the drawn bend is BEND_VISUAL × the damage toe /
+   * camber, capped at BEND_MAX_RAD. `fx` = damage_fx(), `base` = this car's first float.
+   */
+  setDamageFx(fx: ArrayLike<number>, base: number): void {
+    for (let i = 0; i < 4; i++) {
+      const toe = fx[base + DFX.toe + i] ?? 0;
+      const camber = fx[base + DFX.camber + i] ?? 0;
+      const left = (this.info.wheels[i]?.position_m[0] ?? 0) < 0;
+      const clamp = (v: number) => Math.max(-BEND_MAX_RAD, Math.min(BEND_MAX_RAD, v * BEND_VISUAL));
+      // Toe out on the left wheel turns it left (+Z); negative camber tips the top inboard.
+      this.bendToe[i] = clamp(left ? -toe : toe) - (left ? -toe : toe);
+      this.bendCamber[i] = clamp(left ? -camber : camber);
+    }
+  }
+
   /** Lights from `vehicle_meta()` flags; `timeS` drives the siren flash pattern. */
   setMeta(flags: number, timeS: number): void {
     if (this.styleVersion !== artStyle.version) this.applyStyle();
@@ -682,9 +712,11 @@ export class VehicleView {
     this.tailMat.emissiveIntensity = lowpoly ? PALETTE.brakeGlow : 1;
     this.reverseMat.emissive.setHex(this.reversing ? REVERSE_GLOW : 0x000000);
     this.reverseMat.emissiveIntensity = lowpoly ? PALETTE.headlightGlow : 1;
-    const pool = lowpoly && headlights && artStyle.night > 0.2;
+    // F1: broken head lamps take their share of the beam with them (one-eyed car at night).
+    const lamps = headlights && lowpoly && artStyle.night > 0.2 ? this.panels.headlampsWorking() : 0;
+    const pool = lamps > 0;
     this.headPool.visible = pool;
-    if (pool) (this.headPool.material as THREE.ShaderMaterial).uniforms.uStrength.value = 0.35 * Math.min(1, (artStyle.night - 0.2) * 2.5);
+    if (pool) (this.headPool.material as THREE.ShaderMaterial).uniforms.uStrength.value = 0.35 * lamps * Math.min(1, (artStyle.night - 0.2) * 2.5);
     // Underglow (tuners that have it) only with the headlights on (night / dusk).
     this.panels.setUnderglow(headlights);
     this.look?.setLights(headlights);
