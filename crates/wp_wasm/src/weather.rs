@@ -69,7 +69,7 @@ pub fn choice_of(sc: &Scenario) -> &'static str {
     "custom"
 }
 
-/// The "rainy night" city chase: the chase preset (23:00) in a steady downpour on a soaked
+/// The "rainy night" night run: the chase preset (23:00) in a steady downpour on a soaked
 /// road. Same seed as the dry chase, so the two are comparable run for run.
 pub fn rainy_night(mut sc: Scenario) -> Scenario {
     sc.name = format!("{}_rainy_night", sc.name);
@@ -230,8 +230,8 @@ mod tests {
     }
 
     #[test]
-    fn rainy_night_is_a_soaked_city_chase() {
-        let sc = rainy_night(crate::scenario::city_chase(
+    fn rainy_night_is_a_soaked_night_run() {
+        let sc = rainy_night(crate::scenario::night_run(
             "debug_coupe",
             DamageMode::Arcade,
         ));

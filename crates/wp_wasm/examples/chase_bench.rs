@@ -1,4 +1,4 @@
-//! Native cost of the browser city chase (the same `Session` the wasm build runs, including
+//! Native cost of the browser night run (the same `Session` the wasm build runs, including
 //! the per-tick replay hash).
 //!
 //! `cargo run --release -p wp_wasm --example chase_bench -- [car] [seconds] [city]`
@@ -12,7 +12,7 @@
 use std::time::Instant;
 
 use wp_contracts::{DamageMode, EntityId, VehicleInput};
-use wp_wasm::scenario::{city_chase_in, city_spec};
+use wp_wasm::scenario::{city_spec, night_run_in};
 use wp_wasm::session::Session;
 
 fn main() {
@@ -21,7 +21,7 @@ fn main() {
     let seconds: f32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(30.0);
     let city = args.get(3).map(String::as_str).unwrap_or("vesper_v2");
     let mut s = Session::new(
-        city_chase_in(car, DamageMode::Arcade, city_spec(city)),
+        night_run_in(car, DamageMode::Arcade, city_spec(city)),
         false,
     )
     .expect("session");
@@ -55,7 +55,7 @@ fn main() {
     let p95 = sorted[(sorted.len() as f64 * 0.95) as usize];
     let max = sorted[sorted.len() - 1];
     println!(
-        "city chase ({city}, {car}, {seconds} s): sim {mean:.3} ms/frame mean, p95 {p95:.3}, max {max:.3}; \
+        "night run ({city}, {car}, {seconds} s): sim {mean:.3} ms/frame mean, p95 {p95:.3}, max {max:.3}; \
          up to {max_vehicles} vehicles, {max_props}/{} props awake; state hash {hash_ms:.3} ms \
          per tick ({acc:x})",
         s.sim().prop_count()

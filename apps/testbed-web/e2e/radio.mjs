@@ -1,7 +1,7 @@
 // End-to-end check of the police radio (owner playtest row 79) in headless Chromium.
 // Usage: node e2e/radio.mjs  (needs the wasm package built first, like e2e/run.mjs).
 //
-// Checks: in the city chase, police transmissions reach the radio strip with a coloured call
+// Checks: in the night run, police transmissions reach the radio strip with a coloured call
 // sign chip — straight from the police events while the scanner hears nothing (tier "None"),
 // and through the audio scanner (RadioSay) once it does, where the line is also spoken with
 // speechSynthesis when the browser has it; the strip never shows more than 3 lines; the game
@@ -55,10 +55,10 @@ page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 await page.goto(URL);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 60000 });
 
-// 1. City chase, wanted, scanner off: the strip shows police events directly.
+// 1. Night run, wanted, scanner off: the strip shows police events directly.
 await page.evaluate(() => {
   window.__wpAudio.setTier("None");
-  window.__wp.startCityChase("debug_sedan", "Arcade");
+  window.__wp.startNightRun("debug_sedan", "Arcade");
 });
 await page.evaluate(() => window.__wp.sim.debugSetHeat(window.__wp.app.player, 30));
 await page.keyboard.down("KeyW");

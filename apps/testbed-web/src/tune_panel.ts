@@ -1,6 +1,6 @@
 // Free car tune outside the career (G10): the developer panel's "car tune" row (four 1..5
 // sliders for the car in the car selector, for A/B work) and the hook that puts the stored
-// tune on the player entity of a quick run (free drive, city chase, race). Career runs use the
+// tune on the player entity of a quick run (free drive, night run, race). Career runs use the
 // tune saved with the career car instead (wp_wasm `career_start_run`).
 //
 // Tunes are stored per viewer and per car id (ui-kit `garage/tune.ts`, localStorage).

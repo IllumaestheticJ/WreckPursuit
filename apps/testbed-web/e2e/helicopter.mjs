@@ -56,7 +56,7 @@ await ready();
 // 23:00) it is drawn as an airframe with a spotlight on the car. The real launch takes 120 s at
 // night, so the e2e puts one up with the debug hook once the pursuit is on.
 {
-  await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+  await page.evaluate(() => window.__wp.startNightRun("debug_sedan", "Arcade"));
   const parked = await page
     .waitForFunction(
       () => {
