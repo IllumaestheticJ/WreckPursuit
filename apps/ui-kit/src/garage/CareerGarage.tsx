@@ -7,7 +7,7 @@
  * mods), Car lots (dealerships, used lots, junkyards: list today's stock or visit the lot; the
  * economy-floor beater), Impound (release or let the
  * auction countdown run), Ledger. The head has cash / debt / rep / bounty / carried heat and
- * starts the next run (free drive or city chase) with the active car.
+ * starts the next run (free drive or night run) with the active car.
  */
 import { render, type ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -710,7 +710,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
       </header>
       <div class="wp-row wp-cg-start" style={{ gap: "0.5em", flexWrap: "wrap", marginBottom: "0.8em" }}>
         <Button variant="primary" disabled={!view.can_start} onClick={() => api.startRun("chase")}>
-          City chase
+          Night run
         </Button>
         <Button disabled={!view.can_start} onClick={() => api.startRun("free")}>
           Free drive

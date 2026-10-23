@@ -45,7 +45,7 @@ Weather (`weather.rs`): +0.1 ms of sim per frame in heavy rain on the flat world
 1 car, 62 500-cell grid); `weather_info` 0.005 ms, `weather_grid` 0.8 ms (called at 1 Hz).
 
 ## Known gaps
-- Instant crash replay (`crash_replay.rs`, `docs/integration/crash-replay.md`): a live session snapshots its `Sim` every 2 s (~6 ms native in a city chase); the last ~1.5 s of a replay accepted early is extrapolated from the last logged inputs.
+- Instant crash replay (`crash_replay.rs`, `docs/integration/crash-replay.md`): a live session snapshots its `Sim` every 2 s (~6 ms native in a night run); the last ~1.5 s of a replay accepted early is extrapolated from the last logged inputs.
 - Sandbox runs (car selector, `startFreeDrive(car)`) keep the end-of-run account in memory only; career runs (`career.rs`) persist it (the testbed saves the career to `localStorage`).
 - Replays of a career run whose car has mods or started damaged do not verify (the replay rebuilds the stock, pristine car).
 - Region energy / strain are proxies until contract request TB-2 lands; `intents()` is empty (TB-5).

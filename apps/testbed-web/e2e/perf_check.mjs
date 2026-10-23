@@ -1,5 +1,5 @@
 // Browser perf regression check (docs/integration/browser-perf.md): runs e2e/frame_profile.mjs on
-// the city chase and the rainy-night chase (1280×720) and on the phone profile (740×360 touch,
+// the night run and the rainy-night chase (1280×720) and on the phone profile (740×360 touch,
 // chase), all at the default "auto" graphics quality (= the software-GL / touch profiles under
 // headless SwiftShader), and fails on the targets below. Every run also prints per-feature cost
 // lines (frame-loop sections, draw calls, triangles and raster ms per render feature, steady vs

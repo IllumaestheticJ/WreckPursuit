@@ -214,10 +214,10 @@ export const sim = {
   init: (seed: number, scenarioJson: string, scripted: boolean): number[] =>
     Array.from(wasm.init(seed, scenarioJson, scripted)),
   freeDriveJson: (car: string, mode: string, city: boolean): string => wasm.free_drive_json(car, mode, city),
-  cityChaseJson: (car: string, mode: string): string => wasm.city_chase_json(car, mode),
-  /** Free drive / city chase in a city by id ("vesper_v2" | "procedural_12x12"). */
+  nightRunJson: (car: string, mode: string): string => wasm.night_run_json(car, mode),
+  /** Free drive / night run in a city by id ("vesper_v2" | "procedural_12x12"). */
   freeDriveCityJson: (car: string, mode: string, cityId: string): string => wasm.free_drive_city_json(car, mode, cityId),
-  cityChaseCityJson: (car: string, mode: string, cityId: string): string => wasm.city_chase_city_json(car, mode, cityId),
+  nightRunCityJson: (car: string, mode: string, cityId: string): string => wasm.night_run_city_json(car, mode, cityId),
   /** Free roam: free drive plus `roamers` AI street racers (0 = default 10). */
   freeRoamCityJson: (car: string, mode: string, cityId: string, roamers = 0): string =>
     wasm.free_roam_city_json(car, mode, cityId, roamers),
@@ -232,8 +232,8 @@ export const sim = {
   scenarioWithWeather: (json: string, choice: string): string => wasm.scenario_with_weather(json, choice),
   /** The selector choice matching a scenario's weather ("none", a choice id or "custom"). */
   scenarioWeatherChoice: (json: string): string => wasm.scenario_weather_choice(json),
-  /** "Rainy night" city chase JSON (downpour, soaked road). */
-  cityChaseRainJson: (car: string, mode: string, cityId: string): string => wasm.city_chase_rain_json(car, mode, cityId),
+  /** "Rainy night" night run JSON (downpour, soaked road). */
+  nightRunRainJson: (car: string, mode: string, cityId: string): string => wasm.night_run_rain_json(car, mode, cityId),
   /** Per-frame weather state (render/weather.ts WX offsets). */
   weatherInfo: (): Float32Array => wasm.weather_info(),
   /** Wetness grid placement [origin_x, origin_y, cell_m, nx, ny] (empty without weather). */
