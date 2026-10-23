@@ -868,7 +868,7 @@ pub fn table(id: &str) -> Option<CarSpec> {
                 Mount::Mid,
                 Susp::Coilover,
                 Susp::Coilover,
-                exhaust(Tips::HighCentre, 0.055, 0.04, false),
+                exhaust(Tips::Centre, 0.06, 0.045, false),
             )
         },
         "merlo_20t" => CarSpec {
