@@ -1,6 +1,6 @@
 // Under the hood and inside the car: coolers, intakes, turbos and blowers, engine dress-up,
 // roll cages, seats, shifters, nitrous, fuel cell, window net; and the looks that are material
-// changes (paint finish, vinyl, carbon panels, tint, glazing, interior colour).
+// changes (paint finish, vinyl, tint, glazing, interior colour).
 import * as THREE from "three";
 import type { Builder, LookCtx } from "./context";
 import { bentTube, box, cylX, cylY, lampMat, meshTexture, tube } from "./kit";
@@ -326,7 +326,6 @@ const fuelRail: Builder = (c) => {
 /** Material looks: recorded in the tweaks and applied by look.ts after every style change. */
 const paint: Builder = (c, p) => void (c.tweaks.finish = p.finish);
 const vinyl: Builder = (c, p) => void (c.tweaks.vinyl = p.design);
-const carbon: Builder = (c, p) => void c.tweaks.carbon.add(p.panel ?? "hood");
 const tint: Builder = (c, p) => void (c.tweaks.tint = p.style === "limo" ? "limo" : "dark");
 const glass: Builder = (c, p) => void (c.tweaks.glass = p.style === "poly" ? "poly" : "shatterproof");
 
@@ -352,7 +351,6 @@ export const CABIN_BUILDERS: Record<string, Builder> = {
   fuel_rail: fuelRail,
   paint,
   vinyl,
-  carbon,
   tint,
   glass,
 };

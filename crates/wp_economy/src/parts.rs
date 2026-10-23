@@ -29,6 +29,10 @@
 //!   car, in removal order, or on the **engine stand** ([`Economy::strip_part`],
 //!   [`Economy::build_part`]) while the assembly is loose. Stock children belong to an engine
 //!   family (the stock engine's car model, or the swap engine's mod id) and fit only it.
+//! - **Mounted parts.** A slot with a `mount` holds a part bolted onto the part in that slot
+//!   (a splitter on the front bumper, a wing on the trunk lid). It can be worked on while its
+//!   host is on, needs the host on to be fitted, and comes off with the host (in the loose
+//!   host's [`LoosePart::contents`]) and goes back on with it: nothing is left floating.
 //! - **Wear.** Assembly members (the block and its children) carry wear 0..=1 instead of reading
 //!   their condition from a repair line. When a damage report raises the assembly's repair-line
 //!   severity by `d`, each member's wear rises by `d × damage_share`. A shop repair of that line
@@ -129,6 +133,10 @@ pub struct SlotDef {
     /// Assembly slot this part lives inside (engine internals: `engine`).
     #[serde(default)]
     pub parent: Option<String>,
+    /// Slot of the part this one bolts onto (`front_splitter` on `front_bumper`): it comes off
+    /// and goes back on with that part (see the module docs).
+    #[serde(default)]
+    pub mount: Option<String>,
     /// Share of the assembly's damage this part takes as wear (see the module docs).
     #[serde(default)]
     pub damage_share: f32,
@@ -168,6 +176,27 @@ impl SlotDef {
 #[serde(deny_unknown_fields)]
 struct PartsFile {
     slot: Vec<SlotDef>,
+    #[serde(default)]
+    mechanic: MechanicRates,
+}
+
+/// What the garage mechanic charges (`[mechanic]` in `parts.toml`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MechanicRates {
+    /// Once per job.
+    pub call_out: u32,
+    /// Per part taken off and put back (the part itself and everything in its way).
+    pub per_part: u32,
+}
+
+impl Default for MechanicRates {
+    fn default() -> Self {
+        Self {
+            call_out: 60,
+            per_part: 30,
+        }
+    }
 }
 
 /// All slots, in file order (`data/economy/parts.toml`).
@@ -175,6 +204,8 @@ struct PartsFile {
 pub struct PartsTable {
     /// Slots in display order.
     pub slots: Vec<SlotDef>,
+    /// Mechanic labour rates.
+    pub mechanic: MechanicRates,
 }
 
 impl PartsTable {
@@ -184,7 +215,10 @@ impl PartsTable {
             name: "economy/parts.toml".into(),
             source,
         })?;
-        Ok(Self { slots: f.slot })
+        Ok(Self {
+            slots: f.slot,
+            mechanic: f.mechanic,
+        })
     }
 
     /// Slot by id.
@@ -214,6 +248,19 @@ impl PartsTable {
     /// True when other slots live inside `id` (the engine).
     pub fn is_assembly(&self, id: &str) -> bool {
         self.children(id).next().is_some()
+    }
+
+    /// Slots bolted onto the part in `host`, in table order.
+    pub fn mounted<'a>(&'a self, host: &'a str) -> impl Iterator<Item = &'a SlotDef> + 'a {
+        self.slots
+            .iter()
+            .filter(move |s| s.mount.as_deref() == Some(host))
+    }
+
+    /// Slots whose parts leave the car with the part in `id`: an assembly's internals and the
+    /// parts mounted on it.
+    pub fn carried<'a>(&'a self, id: &'a str) -> impl Iterator<Item = &'a SlotDef> + 'a {
+        self.children(id).chain(self.mounted(id))
     }
 
     /// The assembly `slot` belongs to: its parent, itself if it is an assembly, else `None`.
@@ -292,6 +339,28 @@ impl PartsTable {
                 return Err(invalid(
                     w,
                     "the assembly cannot be blocked by its own parts (they come out with it)",
+                ));
+            }
+        }
+        for s in &self.slots {
+            let Some(m) = &s.mount else { continue };
+            let w = format!("economy/parts.toml slot {}", s.id);
+            let Some(host) = self.slot(m) else {
+                return Err(invalid(w, format!("mount {m:?} is not a slot")));
+            };
+            if host.parent.is_some() || host.mount.is_some() || host.set.is_some() {
+                return Err(invalid(w, "the mount must be a plain top-level slot"));
+            }
+            if s.parent.is_some() || s.set.is_some() || s.repair.is_some() {
+                return Err(invalid(
+                    w,
+                    "a mounted part has no parent, set or repair item",
+                ));
+            }
+            if host.blocked_by.contains(&s.id) || s.blocked_by.contains(&host.id) {
+                return Err(invalid(
+                    w,
+                    "a mounted part and its host do not block each other (they move together)",
                 ));
             }
         }
@@ -452,6 +521,13 @@ pub struct SlotView {
     pub kind: String,
     /// Assembly slot it lives inside (engine internals), if any.
     pub parent: Option<String>,
+    /// Slot of the part it bolts onto (comes off and goes on with it), if any.
+    #[serde(default)]
+    pub mount: Option<String>,
+    /// Fitted slots whose parts come off with this one (mounted parts; an assembly's internals
+    /// are listed on the stand instead).
+    #[serde(default)]
+    pub takes_along: Vec<String>,
     /// Fitted part (`None` = empty).
     pub fitted: Option<PartView>,
     /// The car cannot leave while the slot is empty.
@@ -460,6 +536,11 @@ pub struct SlotView {
     pub blocked_by: Vec<String>,
     /// Why the fitted part cannot come off now (`None` = it can).
     pub remove_blocker: Option<String>,
+    /// Fitted parts that have to come off first, all the way down (what "take off what's in
+    /// the way" removes), in removal order.
+    pub in_the_way: Vec<String>,
+    /// What the mechanic charges to install one part here now.
+    pub mechanic_fee: Money,
 }
 
 /// A part as the workshop shows it (fitted or loose).
@@ -537,6 +618,35 @@ pub struct CatalogEntry {
     pub count: u32,
     /// `None` = can be bought for this car, else why not.
     pub reason: Option<String>,
+    /// What the mechanic charges to fit what one purchase brings (every slot of a set).
+    pub install_fee: Money,
+}
+
+/// Where the part the mechanic fits comes from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PartSource {
+    /// A part already in the inventory.
+    Inventory(u32),
+    /// Bought now: a mod id, or `None` for the stock part. An aftermarket set (wheels) is
+    /// bought and fitted on every slot of the set.
+    Buy(Option<String>),
+}
+
+/// Result of [`Economy::mechanic_install`].
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct MechanicJob {
+    /// Labour charged.
+    pub fee: Money,
+    /// Price of the new parts bought for the job.
+    pub bought: Money,
+    /// What the old parts sold for (0 when kept or there were none).
+    pub sold: Money,
+    /// Inventory uids of the old parts kept.
+    pub kept: Vec<u32>,
+    /// Parts taken off and put back.
+    pub touched: u32,
+    /// Repair items the damage system must restore on the stored lattice (new parts).
+    pub restore: Vec<RepairItem>,
 }
 
 /// The whole workshop screen for one car.
@@ -854,15 +964,25 @@ impl Economy {
         if parts.fitted(&slot.id).is_some() {
             return Some("the slot is not empty".into());
         }
-        if let Some(parent) = &slot.parent {
-            if parts.fitted(parent).is_none() {
-                let name = self.parts.slot(parent).map_or(parent.as_str(), |s| &s.name);
+        if let Some(holder) = slot.parent.as_ref().or(slot.mount.as_ref()) {
+            if parts.fitted(holder).is_none() {
+                let name = self.parts.slot(holder).map_or(holder.as_str(), |s| &s.name);
                 return Some(format!("no {} fitted", name.to_lowercase()));
             }
         }
         let blockers = self.blockers(parts, slot);
         if !blockers.is_empty() {
             return Some(self.blocker_reason(&blockers));
+        }
+        // What comes with the part goes back where it was: those slots must be free.
+        let taken: Vec<String> = p
+            .contents
+            .iter()
+            .filter(|q| parts.fitted(&q.kind).is_some())
+            .map(|q| q.kind.clone())
+            .collect();
+        if !taken.is_empty() {
+            return Some(self.blocker_reason(&taken));
         }
         if let Some(why) = self.underneath_reason(slot, |id| parts.fitted(id).is_some()) {
             return Some(why);
@@ -950,16 +1070,26 @@ impl Economy {
                         Err(e) => Some(e.to_string()),
                     },
                 };
+                let in_the_way = self.in_the_way(&parts, s);
                 SlotView {
                     id: s.id.clone(),
                     name: s.name.clone(),
                     group: s.group,
                     kind: s.kind().to_string(),
                     parent: s.parent.clone(),
+                    mount: s.mount.clone(),
+                    takes_along: self
+                        .parts
+                        .mounted(&s.id)
+                        .filter(|k| parts.fitted(&k.id).is_some())
+                        .map(|k| k.id.clone())
+                        .collect(),
                     fitted,
                     required: s.required,
                     blocked_by,
                     remove_blocker,
+                    mechanic_fee: self.mechanic_fee(in_the_way.len()),
+                    in_the_way,
                 }
             })
             .collect();
@@ -1076,10 +1206,14 @@ impl Economy {
                     group: s.group,
                     kind: s.kind().to_string(),
                     parent: s.parent.clone(),
+                    mount: None,
+                    takes_along: Vec::new(),
                     fitted,
                     required: s.required,
+                    in_the_way: blocked_by.clone(),
                     blocked_by,
                     remove_blocker,
+                    mechanic_fee: 0,
                 }
             })
             .collect();
@@ -1165,7 +1299,7 @@ impl Economy {
         }
         let mut next = parts.clone();
         next.slots.insert(slot.id.clone(), None);
-        for k in self.parts.children(&slot.id) {
+        for k in self.parts.carried(&slot.id) {
             next.slots.insert(k.id.clone(), None);
         }
         let next_mods = self.derive_mods(&car.mods, &next);
@@ -1191,30 +1325,36 @@ impl Economy {
             Some(parent) => self.family(c, &parts, parent),
             None => c.def_id.clone(),
         };
-        // An assembly takes its fitted parts with it.
+        // An assembly takes its fitted internals with it (stock ones of its engine family, worn
+        // as they were); a host takes the parts mounted on it (stock ones of the car's model).
         let family = fitted.grade.clone().unwrap_or_else(|| c.def_id.clone());
-        let inner: Vec<(String, FittedPart, Money)> = self
+        let inner: Vec<(String, FittedPart, Money, String, f32)> = self
             .parts
-            .children(slot)
+            .carried(slot)
             .filter_map(|k| {
                 let f = parts.fitted(&k.id)?.clone();
                 let v = self.new_part_value(c, k, f.grade.as_deref());
-                Some((k.id.clone(), f, v))
+                let (model, condition) = if k.parent.is_some() {
+                    (family.clone(), 1.0 - f.wear)
+                } else {
+                    (c.def_id.clone(), self.slot_condition(c, k))
+                };
+                Some((k.id.clone(), f, v, model, condition))
             })
             .collect();
         transact(acct, |tx| {
             let uid = tx.acct.next_part_uid.max(1);
             tx.acct.next_part_uid = uid + 1;
             let mut contents = Vec::new();
-            for (kind, f, value) in &inner {
+            for (kind, f, value, model, condition) in &inner {
                 let cuid = tx.acct.next_part_uid;
                 tx.acct.next_part_uid += 1;
                 contents.push(LoosePart {
                     uid: cuid,
                     kind: kind.clone(),
-                    model: f.grade.is_none().then(|| family.clone()),
+                    model: f.grade.is_none().then(|| model.clone()),
                     grade: f.grade.clone(),
-                    condition: 1.0 - f.wear,
+                    condition: *condition,
                     damage: Vec::new(),
                     value: *value,
                     contents: Vec::new(),
@@ -1286,7 +1426,9 @@ impl Economy {
         next.slots.insert(slot.to_string(), Some(fitted));
         for q in &p.contents {
             let mut f = FittedPart::grade(q.grade.clone());
-            f.wear = wear(q);
+            if member {
+                f.wear = wear(q);
+            }
             next.slots.insert(q.kind.clone(), Some(f));
         }
         let next_mods = self.derive_mods(&c.mods, &next);
@@ -1335,6 +1477,145 @@ impl Economy {
                 Some(w) => w <= m.wear_limit(),
                 None => !m.required,
             })
+    }
+
+    /// Fitted parts that must come off before `slot` can be worked on, all the way down, in
+    /// removal order (the bumper before the radiator guard before the radiator).
+    pub fn in_the_way(&self, parts: &CarParts, slot: &SlotDef) -> Vec<String> {
+        fn walk(e: &Economy, parts: &CarParts, slot: &SlotDef, out: &mut Vec<String>) {
+            for b in &slot.blocked_by {
+                if parts.fitted(b).is_none() || out.contains(b) {
+                    continue;
+                }
+                if let Some(bs) = e.parts.slot(b) {
+                    walk(e, parts, bs, out);
+                }
+                if !out.contains(b) {
+                    out.push(b.clone());
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(self, parts, slot, &mut out);
+        out
+    }
+
+    /// Mechanic's labour for one part with `in_the_way` parts to take off and put back.
+    pub fn mechanic_fee(&self, in_the_way: usize) -> Money {
+        let r = self.parts.mechanic;
+        (r.call_out + r.per_part * (in_the_way as u32 + 1)) as Money
+    }
+
+    /// Do it yourself: take off everything in the way of `slot` (not `slot` itself) into the
+    /// inventory, in removal order. Returns the removed parts' uids. No cash changes.
+    pub fn clear_way(
+        &self,
+        acct: &mut PlayerAccount,
+        car: CarUid,
+        slot: &str,
+    ) -> EconResult<Vec<u32>> {
+        let c = self.workshop_car(acct, car)?;
+        let s = self.try_slot(slot)?;
+        let way = self.in_the_way(&self.car_parts(c), s);
+        let mut a = acct.clone();
+        let mut events = Vec::new();
+        let mut uids = Vec::new();
+        for b in &way {
+            let (uid, ev) = self.remove_part(&mut a, car, b)?;
+            events.extend(ev);
+            uids.push(uid);
+        }
+        *acct = a;
+        Ok((uids, events))
+    }
+
+    /// Pay the mechanic to fit a part in `slot` of `car`: take off what is in the way, swap
+    /// the part, put everything back. The new part comes from the inventory or is bought now
+    /// (an aftermarket set is bought and fitted on every slot of the set). The old parts are
+    /// sold to the dealer (`sell_old`) or kept in the inventory. All or nothing: the job is
+    /// refused if the cash does not cover parts and labour.
+    pub fn mechanic_install(
+        &self,
+        acct: &mut PlayerAccount,
+        car: CarUid,
+        slot: &str,
+        source: &PartSource,
+        sell_old: bool,
+        mode: DamageMode,
+    ) -> EconResult<MechanicJob> {
+        self.workshop_car(acct, car)?;
+        let s = self.try_slot(slot)?;
+        let mut a = acct.clone();
+        let mut events = Vec::new();
+        let mut job = MechanicJob::default();
+        let cash_before = a.cash;
+        // The new parts and the slots they go in.
+        let (news, targets): (Vec<u32>, Vec<String>) = match source {
+            PartSource::Inventory(uid) => (vec![*uid], vec![slot.to_string()]),
+            PartSource::Buy(grade) => {
+                let (uids, ev) = self.buy_part(&mut a, car, s.kind(), grade.as_deref(), mode)?;
+                events.extend(ev);
+                let targets = if uids.len() > 1 {
+                    self.parts
+                        .slots_of_kind(s.kind())
+                        .map(|x| x.id.clone())
+                        .collect()
+                } else {
+                    vec![slot.to_string()]
+                };
+                (uids, targets)
+            }
+        };
+        job.bought = cash_before - a.cash;
+        let mut olds = Vec::new();
+        for (t, new) in targets.iter().zip(&news) {
+            let ts = self.try_slot(t)?;
+            let way = self.in_the_way(&self.car_parts(a.try_car(car)?), ts);
+            let mut off = Vec::new();
+            for b in &way {
+                let (uid, ev) = self.remove_part(&mut a, car, b)?;
+                events.extend(ev);
+                off.push((b.clone(), uid));
+            }
+            if self.car_parts(a.try_car(car)?).fitted(t).is_some() {
+                let (uid, ev) = self.remove_part(&mut a, car, t)?;
+                events.extend(ev);
+                olds.push(uid);
+            }
+            let (fit, ev) = self.fit_part(&mut a, car, t, *new, mode)?;
+            events.extend(ev);
+            job.restore.extend(fit.restore);
+            for (b, uid) in off.iter().rev() {
+                let (fit, ev) = self.fit_part(&mut a, car, b, *uid, mode)?;
+                events.extend(ev);
+                job.restore.extend(fit.restore);
+            }
+            job.touched += way.len() as u32 + 1;
+        }
+        let r = self.parts.mechanic;
+        job.fee = (r.call_out + r.per_part * job.touched) as Money;
+        let ((), ev) = transact(&mut a, |tx| {
+            tx.spend(
+                job.fee,
+                EventReason::RepairPaid {
+                    lines: job.touched,
+                    labour_multiplier: 1.0,
+                },
+                Some(car),
+            )
+        })?;
+        events.extend(ev);
+        for uid in olds {
+            if sell_old {
+                let (price, ev) = self.sell_part(&mut a, uid)?;
+                events.extend(ev);
+                job.sold += price;
+            } else {
+                job.kept.push(uid);
+            }
+        }
+        *acct = a;
+        Ok((job, events))
     }
 
     /// Engine stand: take the part in `slot` out of loose assembly `assembly` into the
@@ -1441,6 +1722,7 @@ impl Economy {
         mode: DamageMode,
     ) -> Result<Vec<CatalogEntry>, EconomyError> {
         let c = acct.try_car(car)?;
+        let parts = self.car_parts(c);
         let mut out = Vec::new();
         let mut seen = BTreeSet::new();
         for s in &self.parts.slots {
@@ -1451,6 +1733,16 @@ impl Economy {
             let slot_name = match &s.set {
                 Some(set) => set.replace('_', " "),
                 None => s.name.clone(),
+            };
+            let one_fee = self.mechanic_fee(self.in_the_way(&parts, s).len());
+            let set_fee = {
+                let r = self.parts.mechanic;
+                let n: usize = self
+                    .parts
+                    .slots_of_kind(s.kind())
+                    .map(|x| self.in_the_way(&parts, x).len() + 1)
+                    .sum();
+                (r.call_out + r.per_part * n as u32) as Money
             };
             if !s.optional {
                 out.push(CatalogEntry {
@@ -1463,6 +1755,7 @@ impl Economy {
                     price: self.new_part_value(c, s, None),
                     count: 1,
                     reason: None,
+                    install_fee: one_fee,
                 });
             }
             let mut grades: Vec<_> = self
@@ -1489,6 +1782,7 @@ impl Economy {
                     price: m.price as Money,
                     count,
                     reason,
+                    install_fee: if count > 1 { set_fee } else { one_fee },
                 });
             }
         }
