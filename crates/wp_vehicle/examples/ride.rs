@@ -13,7 +13,7 @@ use wp_vehicle::ride::{
 };
 
 const REFERENCE: [&str; 4] = ["hakone_gt", "kestrel_ts", "rampart_50", "sentinel_cruiser"];
-const ROSTER: [&str; 28] = [
+const ROSTER: [&str; 37] = [
     "vireo_xs",
     "kestrel_ts",
     "shiro_turbo",
@@ -42,6 +42,15 @@ const ROSTER: [&str; 28] = [
     "fulmine_v10",
     "sentinel_warden",
     "sentinel_vigil",
+    "halberd_40",
+    "ombra_v12",
+    "ostwind_6t",
+    "kagero_hx",
+    "morrigan_55",
+    "nyx_proto",
+    "merlo_20t",
+    "mesquite_pr",
+    "erg_hamada",
 ];
 
 fn load(id: &str) -> LoadedCar {

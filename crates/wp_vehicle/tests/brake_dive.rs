@@ -18,7 +18,7 @@ fn car(id: &str) -> LoadedCar {
     wp_contracts::load_car(p).unwrap()
 }
 
-const ROSTER: [&str; 28] = [
+const ROSTER: [&str; 37] = [
     "vireo_xs",
     "kestrel_ts",
     "shiro_turbo",
@@ -47,7 +47,19 @@ const ROSTER: [&str; 28] = [
     "fulmine_v10",
     "sentinel_warden",
     "sentinel_vigil",
+    "halberd_40",
+    "ombra_v12",
+    "ostwind_6t",
+    "kagero_hx",
+    "morrigan_55",
+    "nyx_proto",
+    "merlo_20t",
+    "mesquite_pr",
+    "erg_hamada",
 ];
+
+/// Dedicated race cars (wave 3): stiff, low, short-travel by design (see ride.rs).
+const RACE_CARS: [&str; 3] = ["morrigan_55", "nyx_proto", "merlo_20t"];
 
 #[test]
 fn hard_stops_dive_like_a_road_car_and_never_touch_the_road() {
@@ -67,7 +79,10 @@ fn hard_stops_dive_like_a_road_car_and_never_touch_the_road() {
         };
         // A stiff-sprung modern supercar still dives, just less (fulmine_v10 0.74° peak at
         // 1.07 g on its 2+ Hz ride; road tests of the archetype show well under 1°).
-        let min_dive = if c.def.class == wp_contracts::VehicleClass::Exotic {
+        // Race cars (wave 3) barely pitch on their 2.3-3 Hz springs (nyx_proto 0.29°).
+        let min_dive = if RACE_CARS.contains(&id) {
+            0.25
+        } else if c.def.class == wp_contracts::VehicleClass::Exotic {
             0.7
         } else {
             0.8
@@ -108,8 +123,11 @@ fn the_bump_stops_hold_the_nose_off_the_road() {
     // bump stops), rear at rest: the body ahead of the front axle is still above the road.
     // Measured 1.2 cm (lucciola_350, low exotic) … 11 cm (hauler_1500); lindwurm_4t was 1.0
     // cm before its front travel was shortened by 1.5 cm.
+    // Race cars run 6-7 cm ride heights: their front travel is shortened so the body still
+    // stays off the road (≥ 0.5 cm, nyx_proto 0.9 cm).
     for id in ROSTER {
         let c = clearance_on_front_bump_stops(&car(id));
-        assert!(c > 0.01, "{id}: {c:.3} m");
+        let min = if RACE_CARS.contains(&id) { 0.005 } else { 0.01 };
+        assert!(c > min, "{id}: {c:.3} m");
     }
 }
