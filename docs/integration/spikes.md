@@ -84,6 +84,25 @@ seeds.
   `place_spikes_at`, unchanged).
 - Earlier (PR #54 port): `golden_spike_strip` re-blessed when its strip got its unit (tick 24).
 
+## Follow-ups tried (row 165)
+- **Re-plan** (cancel the drive-in and pick a new site when the racer leaves the predicted road
+  before the strip is down): not kept. In the random-walk scenarios no strip went down at all
+  any more (the racer keeps leaving the road, runs thrash and are given up), hits stayed 0, and
+  the road-keeping measure was unchanged (10 / 12).
+- `police_scenario tool_placement` / `radio_city_chase`: the reason for ~0 spike hits is written
+  in the scenario files; no spike-hit expectation there.
+
+## Gate (row 165, d589145c + bless 03b2b2b1)
+- fmt, clippy `-D warnings`, simcli goldens (only `jam_pursuit_grid` moved; blessed), wasm32
+  build, `npm run wasm` + tsc, e2e `police_tools` and `helicopter`: pass.
+- `cargo test --workspace`: one failure, `wp_opponent` `tests/race.rs`
+  `live_police_chase_ends_in_escape_or_capture_without_stuck_cars` ("busted EntityId(1) still
+  moving 6.0 m/s"; passes on `main`). Spikes now reach this chase (4 drive-in strips); after
+  its capture at ~82 s racer 1's AI keeps "rolling on at 6 m/s until at the kerb and clear of
+  any junction" (`wp_opponent::field`, pull-over) and never meets that condition before the run
+  ends, likely with spike-flattened tyres. No police car pushes it. Opponent-workstream code;
+  not changed here.
+
 ## Known gaps
 - A drive-in spike car can be seen driving to its post (it never appears in view).
 - A run whose racer leaves the predicted road keeps going until too late; re-planning is not
