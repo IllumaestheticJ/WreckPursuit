@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { chromiumPath } from "./chromium.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const PORT = 5208;
@@ -20,7 +21,7 @@ process.on("exit", () => {
   } catch {}
 });
 for (let i = 0; i < 100; i++) { try { if ((await fetch(URL)).ok) break; } catch {} await new Promise((r) => setTimeout(r, 200)); }
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM, args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
+const browser = await chromium.launch({ executablePath: chromiumPath(), args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
 const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
 await page.goto(URL);
 await page.waitForFunction(() => window.__wp?.sim, null, { timeout: 120000 });
