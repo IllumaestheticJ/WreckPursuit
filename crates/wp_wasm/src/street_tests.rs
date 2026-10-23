@@ -412,6 +412,7 @@ fn challenge_race_result(hour: f32) {
     challenge(&mut s, 1);
     let fin = finish_for(&s);
     let before = cash(&s);
+    let rep_before = s.run().unwrap().account().rep;
     let stake = street::level(ROSTER[1].0).bet_min;
     s.street_accept(fin, &[], stake).unwrap();
     s.run_ticks(street::COUNTDOWN_TICKS + 240);
@@ -424,6 +425,10 @@ fn challenge_race_result(hour: f32) {
     assert!(r.won, "{r:?}");
     assert_eq!(r.net, stake);
     assert_eq!(cash(&s), before + stake, "stake back plus theirs");
+    // The win climbs the career's rep ladder by the level's win_rep (a loss costs none).
+    let win_rep = street::level(ROSTER[1].0).win_rep;
+    assert_eq!(r.rep, win_rep);
+    assert_eq!(s.run().unwrap().account().rep, rep_before + win_rep);
     let ledger = s.run().unwrap().ledger();
     assert!(ledger
         .iter()

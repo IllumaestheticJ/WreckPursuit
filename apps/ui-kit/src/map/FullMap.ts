@@ -8,7 +8,7 @@
 import type { MapFrame, MapStatic, MapZone } from "./data";
 import { isWanted, racersToDraw } from "./data";
 import { districtLabels, type DistrictLabel } from "./districts";
-import { drawPoi, drawPlayer, drawRacer, drawRoads, drawSearch, drawSight, drawTool, drawUnit, makeCanvas, readPalette, ROAD_MIN_PX, type MapPalette } from "./draw";
+import { drawHeliTether, drawPoi, drawPlayer, drawRacer, drawRoads, drawSearch, drawSight, drawTool, drawUnit, heliFollows, makeCanvas, readPalette, ROAD_MIN_PX, type MapPalette } from "./draw";
 import { drawFlag, drawMarker, drawRoute, type MapExtras } from "./extras";
 import { clampCentre, fitBounds, fullMatrix, glyphRotation, pan, worldToFull, zoomAt, type FullView } from "./projection";
 
@@ -213,6 +213,14 @@ export class FullMapRenderer {
     if (ex?.route && ex.route.length > 1) drawRoute(ctx, ex.route.map(([x, y]) => worldToFull(v, x, y)), 3.5 * dpr);
     let units = 0;
     const us = 7 * dpr;
+    // Who the helicopter is following (PR #32): tether + pulsing ring, under the glyphs.
+    for (const u of f.units) {
+      const at = heliFollows(u, f.player);
+      if (!at) continue;
+      const [hx, hy] = worldToFull(v, u.x, u.y);
+      const [tx, ty] = worldToFull(v, at[0], at[1]);
+      drawHeliTether(ctx, hx, hy, tx, ty, 8 * dpr, nowMs, pal);
+    }
     for (const u of f.units) {
       if (u.wrecked && u.state === "out") continue;
       const [sx, sy] = worldToFull(v, u.x, u.y);

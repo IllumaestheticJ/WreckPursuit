@@ -186,6 +186,17 @@ let (job, _) = econ.mechanic_install(&mut acct, car, "radiator", &PartSource::Bu
 - A new career starts with 4 500: a worn beater (1 800) leaves room for three busted L1 nights
   in it (≈ 740 each); `tests/browser_career.rs` keeps that true.
 
+### Career progression (`progression`, `data/economy/career.toml`)
+Credits are cash; rep is `PlayerAccount::rep`. On top sits a tier ladder decided by *current*
+rep: Unknown (0) → Street (500) → Known (2 000) → Respected (5 000) → Feared (10 000) → Legend
+(20 000). Tiers gate features (city betting at Street, touge at Known, touge betting and boss
+races at Respected, pink slips at Feared) and dealer classes (Sport / Muscle at Known, Exotic at
+Feared). The first time a tier is reached its bonus is paid once (`career.peak_tier`); a capture
+can drop you a tier and close what it opened. Bets are capped per tier and at 50 % of cash, and
+refused in debt. The scripted mid-skill racer makes ~250 rep a night: Street after ~2 nights,
+Known ~8, Respected ~20, Feared ~40 (`tests/progression.rs::tier_pacing`). API and ledger notes:
+`docs/integration/career-progression.md`.
+
 ### Payouts
 `winner purse = max(min, per_km × km) × class × day phase × mode × wanted`; places 1–4 get
 100/50/25/10 %; clean race (no contact, no violations beyond speeding) +25 %. Buy-in =
@@ -410,3 +421,7 @@ Browser numbers not measured yet (expect ~2× native).
   validated by typed loaders with `deny_unknown_fields` and completeness checks.
 - CI runs without `--features native`, so the SQLite tests only run locally until CI adds that
   line (requested).
+- Career ledger entries (tier bonuses, bets, extra rep) are `Adjustment`s with `career:` /
+  `bet:` notes until the contract has typed reasons (`career-progression.md`, request #1). Tier
+  rewards are paid when the caller runs `update_progression` (the browser career does it at the
+  end of every run and night; the server path does not call it yet).

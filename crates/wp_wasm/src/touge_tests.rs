@@ -1,7 +1,8 @@
 //! Native tests of touge battles inside a live session (`crate::touge`).
 
 use wp_contracts::{DamageMode, DamageSim, EntityId, VehicleSim};
-use wp_race::touge::{BattleResult, BreachKind, Gate, TougeSetup, TougeTable, Wager};
+use wp_economy::Feature;
+use wp_race::touge::{BattleResult, BreachKind, TougeSetup, Wager};
 use wp_world::geom;
 
 use crate::session::Session;
@@ -15,9 +16,13 @@ fn setup(map: &str, dir: &str, opponent: &str) -> TougeSetup {
     TougeSetup::from_keys(map, dir, "night", "rain", opponent).unwrap()
 }
 
-/// Rep that opens `g` in the shipped touge gates (`data/events/touge.toml [gates]`).
-fn rep_for(g: Gate) -> i64 {
-    TougeTable::embedded().gates.rep_for(g)
+/// Rep that opens `f` in the shipped career tiers (`data/economy/career.toml`).
+fn rep_for(f: Feature) -> i64 {
+    crate::garage::with_economy(|e| {
+        e.progression
+            .tier_def(e.progression.feature_tier(f))
+            .min_rep
+    })
 }
 
 fn battle(setup: &TougeSetup, autopilot: bool, wager: Wager, rep: Option<i64>) -> Session {
@@ -142,7 +147,12 @@ fn fixed_walls_hold() {
 #[test]
 fn pink_slip_won_brings_the_wrecked_npc_car_home() {
     let st = setup("touge_ashfall_grade", "up", "boss");
-    let mut s = battle(&st, false, Wager::PinkSlip, Some(rep_for(Gate::PinkSlip)));
+    let mut s = battle(
+        &st,
+        false,
+        Wager::PinkSlip,
+        Some(rep_for(Feature::PinkSlips)),
+    );
     let garage0 = s.run().unwrap().account().garage.len();
     s.run_ticks(240 * 4);
     launch_at_krails(&mut s, NPC, 30.0);
@@ -178,7 +188,7 @@ fn locked_wager_is_refused_and_the_battle_still_runs() {
         &st,
         false,
         Wager::SideBet { stake: 500 },
-        Some(rep_for(Gate::Challenger)),
+        Some(rep_for(Feature::TougeRaces)),
     );
     let cash0 = s.run().unwrap().account().cash;
     s.run_ticks(10);

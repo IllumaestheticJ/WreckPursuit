@@ -1,0 +1,160 @@
+# The city's street-racing regulars (wp_race::roster). Every named AI racer in the race picker
+# and in scheduled night meets comes from this list, so the same faces keep showing up with
+# the same car, temperament and track record.
+#
+# id          stable key (save files, bets, scenario entity `ai_<first name>` in the picker)
+# name        display name; nickname is shown in quotes in menus
+# car         data/cars id (analog names only)
+# home        the part of town they haunt (flavour + scheduled-meet affinity)
+# specialty   course type they are best on: hill, highway, downtown, mixed
+# tier        lowest licence tier at which they turn up at scheduled meets
+#             (rookie, street, pro, elite, legend); picker races list their field explicitly
+# rating      starting form rating (Elo-like, 1000 = mid-pack). Moves with every race result.
+# profile     wp_opponent::DriverProfile, every field 0..=1
+#
+# The first five are the picker's original field; wp_race's tests check that
+# catalog::AiDriverDef and this file agree on name, car and profile.
+
+[[racer]]
+id = "mara"
+name = "Mara Lindqvist"
+nickname = "Veteran"
+car = "hakone_gt"
+home = "Hollins Heights"
+specialty = "hill"
+tier = "street"
+rating = 1180
+style = "veteran: quick, patient, rarely errs"
+profile = { skill = 0.8, aggression = 0.5, consistency = 0.8, risk = 0.4, awareness = 0.8 }
+
+[[racer]]
+id = "vic"
+name = "Vic Marlowe"
+nickname = "Redline"
+car = "kestrel_ts"
+home = "Harbor"
+specialty = "highway"
+tier = "rookie"
+rating = 1120
+style = "aggressive: dives for gaps, leans on you"
+profile = { skill = 0.75, aggression = 0.85, consistency = 0.55, risk = 0.7, awareness = 0.6 }
+
+[[racer]]
+id = "juno"
+name = "Juno Park"
+nickname = "Glass"
+car = "shiro_turbo"
+home = "Lantern Row"
+specialty = "downtown"
+tier = "rookie"
+rating = 1090
+style = "clean: smooth lines, backs off from cops"
+profile = { skill = 0.7, aggression = 0.3, consistency = 0.9, risk = 0.25, awareness = 0.9 }
+
+[[racer]]
+id = "dez"
+name = "Dez Okafor"
+nickname = "Sirens"
+car = "rampart_50"
+home = "Larkspur"
+specialty = "highway"
+tier = "rookie"
+rating = 960
+style = "hothead: fast, sloppy, runs from sirens"
+profile = { skill = 0.55, aggression = 0.7, consistency = 0.45, risk = 0.85, awareness = 0.55 }
+
+[[racer]]
+id = "tito"
+name = "Tito Ruiz"
+nickname = "Kid"
+car = "sperber_32"
+home = "Larkspur"
+specialty = "mixed"
+tier = "rookie"
+rating = 880
+style = "rookie: brakes early, gives way"
+profile = { skill = 0.45, aggression = 0.35, consistency = 0.6, risk = 0.3, awareness = 0.6 }
+
+[[racer]]
+id = "sol"
+name = "Sol Abernathy"
+nickname = "Big Sol"
+car = "ironside_440"
+home = "Harbor"
+specialty = "highway"
+tier = "rookie"
+rating = 990
+style = "bully: owns the straights, parks it in the bends"
+profile = { skill = 0.6, aggression = 0.75, consistency = 0.6, risk = 0.6, awareness = 0.5 }
+
+[[racer]]
+id = "rafi"
+name = "Rafi Haddad"
+nickname = "Pocket"
+car = "vireo_xs"
+home = "Lantern Row"
+specialty = "downtown"
+tier = "rookie"
+rating = 940
+style = "giant-killer: tiny car, threads traffic, never lifts"
+profile = { skill = 0.6, aggression = 0.4, consistency = 0.75, risk = 0.35, awareness = 0.8 }
+
+[[racer]]
+id = "bex"
+name = "Bex Thornton"
+nickname = "Coinflip"
+car = "tansy_13"
+home = "Mercer"
+specialty = "mixed"
+tier = "rookie"
+rating = 820
+style = "wildcard: brave, messy, either wins or bins it"
+profile = { skill = 0.4, aggression = 0.6, consistency = 0.4, risk = 0.7, awareness = 0.45 }
+
+[[racer]]
+id = "lupe"
+name = "Lupe Varga"
+nickname = "Scrap"
+car = "junkyard_beater"
+home = "Gantry Docks"
+specialty = "downtown"
+tier = "street"
+rating = 860
+style = "dirty: nothing to lose, will put you in the wall"
+profile = { skill = 0.5, aggression = 0.95, consistency = 0.5, risk = 0.8, awareness = 0.4 }
+
+[[racer]]
+id = "augusto"
+name = "Augusto Ferro"
+nickname = "The Count"
+car = "fulmine_v10"
+home = "Bluff"
+specialty = "highway"
+tier = "pro"
+rating = 1100
+style = "money: the fastest car in town, not the fastest driver"
+profile = { skill = 0.62, aggression = 0.55, consistency = 0.65, risk = 0.5, awareness = 0.65 }
+
+[[racer]]
+id = "kaito"
+name = "Kaito Sena"
+nickname = "Switchback"
+car = "lindwurm_4t"
+home = "Ridge Road"
+specialty = "hill"
+tier = "pro"
+rating = 1200
+style = "hill specialist: late on the brakes, never wide"
+profile = { skill = 0.78, aggression = 0.4, consistency = 0.85, risk = 0.55, awareness = 0.75 }
+
+[[racer]]
+id = "nina"
+name = "Nina Castellanos"
+nickname = "Static"
+car = "lucciola_350"
+home = "Founders"
+specialty = "mixed"
+tier = "elite"
+rating = 1300
+style = "the one to beat: cold, precise, untouchable on a good night"
+profile = { skill = 0.88, aggression = 0.45, consistency = 0.85, risk = 0.45, awareness = 0.85 }

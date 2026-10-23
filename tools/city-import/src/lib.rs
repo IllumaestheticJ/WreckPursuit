@@ -114,6 +114,43 @@ mod tests {
     }
 
     #[test]
+    fn shipped_ashpeak_greybox_is_current() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/city");
+        let net = wp_world::ashpeak::generate(&wp_world::ashpeak::default_config());
+        let map = CityMap::new(net);
+        let prims = glb::build_greybox(&map);
+        let names: Vec<&str> = prims.iter().map(|p| p.material.as_str()).collect();
+        for m in [
+            "asphalt",
+            "gravel_road",
+            "dirt_road",
+            "landmark",
+            "barn",
+            "silo",
+        ] {
+            assert!(names.contains(&m), "ashpeak greybox has no {m}");
+        }
+        let fresh = glb::greybox_glb(&map);
+        let shipped =
+            std::fs::read(dir.join("ashpeak.greybox.glb")).expect("run `just city-ashpeak`");
+        assert!(
+            fresh == shipped,
+            "ashpeak.greybox.glb is stale: run `just city-ashpeak`"
+        );
+        let b64 = std::fs::read_to_string(dir.join("ashpeak.greybox.b64.txt")).unwrap();
+        assert!(
+            b64 == base64(&shipped),
+            "ashpeak.greybox.b64.txt does not match the .glb"
+        );
+        // About four times Port Vesper's area on a 16 m drawn ground (24.9 MB at first).
+        assert!(
+            shipped.len() < 30_000_000,
+            "ashpeak greybox grew to {} bytes",
+            shipped.len()
+        );
+    }
+
+    #[test]
     fn base64_matches_rfc4648() {
         assert_eq!(super::base64(b""), "");
         assert_eq!(super::base64(b"f"), "Zg==");

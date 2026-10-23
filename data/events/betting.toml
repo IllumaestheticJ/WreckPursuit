@@ -1,0 +1,33 @@
+# Street-race betting book (wp_race::betting). Odds come from the racers' form ratings
+# (data/events/racers.toml + the save's RosterState): Plackett-Luce win / podium chances and
+# head-to-head Elo chances, shortened by the house margin, rounded down to `odds_step`, clamped
+# to [min_odds, max_odds]. Who may bet and how much (rep tier, cash, debt) is the career
+# economy's call (wp_economy: max_bet / place_bet / settle_bet), not this file's.
+
+[book]
+# House margin per market: offered odds = 1 / (p * (1 + margin)).
+win_margin = 0.15
+podium_margin = 0.12
+h2h_margin = 0.06
+# Decimal odds bounds and step (2.35 = stake back x 2.35).
+min_odds = 1.05
+max_odds = 30.0
+odds_step = 0.05
+# Smallest stake the book takes, credits.
+min_stake = 100
+# Tickets one bettor may hold on one race.
+max_tickets = 3
+# Fields of this size or smaller get no podium market (everyone would be on it).
+podium_min_field = 4
+
+[rating]
+# Elo K per race, spread over the field's pairings.
+k = 32
+# Bonus on a course matching the racer's specialty (hill, highway, downtown).
+specialty_bonus = 60
+# Ratings never fall below this.
+floor = 400
+# Player's car vs the field: rating points per class-index point of difference from the
+# field's median car (wp_economy::Economy::class_index), capped at +-car_cap.
+car_weight = 0.6
+car_cap = 200

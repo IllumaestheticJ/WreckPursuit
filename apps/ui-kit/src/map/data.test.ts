@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeMapDynamic, DYN, EMPTY_FRAME, isWanted, RACER_FLAG, racersToDraw, UNIT_FLAG, unitBlinks } from "./data";
+import { chaseRadar, decodeMapDynamic, DYN, EMPTY_FRAME, isWanted, RACER_FLAG, racersToDraw, UNIT_FLAG, unitBlinks } from "./data";
 
 /** Build a map_dynamic() array the way wp_wasm does. */
 function dyn(header: Record<number, number>, units: number[][], tools: number[][], racers: number[][] = []): Float32Array {
@@ -107,5 +107,38 @@ describe("decodeMapDynamic", () => {
   it("a wrecked unit with lights does not blink", () => {
     const f = decodeMapDynamic(dyn({}, [[1, 0, 0, 0, 0, 3 | UNIT_FLAG.LIGHTS | UNIT_FLAG.WRECKED, 0, 0]], []));
     expect(unitBlinks(f.units[0])).toBe(false);
+  });
+});
+
+describe("chaseRadar (PR #32)", () => {
+  it("names the helicopter by call sign and tethers it to the player it is on", () => {
+    const f = decodeMapDynamic(
+      dyn(
+        { 3: 2, 15: 100, 16: 200, 17: 0.5, 19: 1 },
+        [
+          [9, 60, 170, 1.0, 40, 7 | UNIT_FLAG.HELI | UNIT_FLAG.ON_PLAYER | UNIT_FLAG.HAS_TARGET, 95, 205],
+          [12, 0, 0, 0, 0, 7 | UNIT_FLAG.HELI | UNIT_FLAG.HAS_TARGET, 11, 22],
+          [4, 120, 230, 0.2, 25, 3 | UNIT_FLAG.LIGHTS | UNIT_FLAG.ON_PLAYER, 0, 0],
+          [5, 0, 0, 0, 0, 8 | UNIT_FLAG.WRECKED, 0, 0],
+        ],
+        [],
+      ),
+    );
+    const r = chaseRadar(f)!;
+    expect(r.pos).toEqual([100, 200]);
+    expect(r.headingRad).toBeCloseTo(-0.5);
+    const air = r.blips.find((b) => b.id === 9)!;
+    expect(air).toMatchObject({ kind: "helicopter", label: "AIR 9", tracking: [100, 200] });
+    // Tracking someone else: tethered to its tracked spot.
+    expect(r.blips.find((b) => b.id === 12)).toMatchObject({ kind: "helicopter", tracking: [11, 22] });
+    expect(r.blips.find((b) => b.id === 4)?.kind).toBe("police");
+    expect(r.blips.find((b) => b.id === 4)?.tracking).toBeUndefined();
+    // Out of service / wrecked units are not on the radar.
+    expect(r.blips.some((b) => b.id === 5)).toBe(false);
+  });
+
+  it("is null without a player or with nothing around", () => {
+    expect(chaseRadar(decodeMapDynamic(dyn({ 3: 2 }, [[9, 0, 0, 0, 0, 7 | UNIT_FLAG.HELI, 0, 0]], [])))).toBeNull();
+    expect(chaseRadar(decodeMapDynamic(dyn({ 19: 1 }, [], [])))).toBeNull();
   });
 });

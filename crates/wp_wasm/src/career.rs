@@ -40,9 +40,9 @@ use wp_contracts::{
 };
 use wp_damage::{DamageModel, FullDamageSnapshot};
 use wp_economy::{
-    CarLocation, CarSpec, CarUid, CareerProfile, Condition, DamageReport, Economy, EconomyError,
-    EconomyEvent, EventReason, ImpoundStatus, Money, OwnedCar, RepairOption, RepairQuote, RunEnd,
-    ShopContext, ShopKind,
+    CarLocation, CarSpec, CarUid, CareerProfile, CareerProgress, Condition, DamageReport, Economy,
+    EconomyError, EconomyEvent, EventReason, ImpoundStatus, Money, OwnedCar, ProgressUpdate,
+    RepTier, RepairOption, RepairQuote, RunEnd, ShopContext, ShopKind,
 };
 
 use crate::data::mem_data;
@@ -205,6 +205,10 @@ pub struct DealerCar {
     pub price_worn: Money,
     /// Stock performance.
     pub stats: StatsView,
+    /// Rep tier at which the dealer sells this class (career progression).
+    pub unlock_tier: RepTier,
+    /// True while the player's tier is below `unlock_tier` (refreshed by every view).
+    pub locked: bool,
 }
 
 /// An insurance tier on offer.
@@ -272,6 +276,8 @@ pub struct CareerView {
     pub districts: Vec<DistrictView>,
     /// Career counters.
     pub stats: wp_economy::CareerStats,
+    /// Rep tier, next tier, unlocked features and classes, bet limits.
+    pub progress: CareerProgress,
     /// Police history.
     pub captures: u32,
     /// Escapes.
@@ -369,6 +375,8 @@ pub struct RunClose {
     pub cash: Money,
     /// Ledger lines of the run and the night.
     pub ledger: Vec<LedgerLine>,
+    /// Tier changes from the run (promotion, rewards paid, features opened or closed).
+    pub progress: ProgressUpdate,
 }
 
 // ----- the career ------------------------------------------------------------------------------
@@ -517,9 +525,16 @@ impl Career {
         let mut rng = wp_math::Rng::new(
             CAREER_SEED_SALT ^ ABANDONED_SEED_SALT ^ ((p.account.day as u64) << 32),
         );
-        let settled = econ
-            .settle_abandoned_run(&mut p, &mut rng)
-            .map(|_| RunClose {
+        let settled = econ.settle_abandoned_run(&mut p, &mut rng).map(|_| {
+            // The bust can cost a tier; progression only credits, so it never refuses.
+            let progress = match econ.update_progression(&mut p.account) {
+                Ok((up, ev)) => {
+                    p.ledger.extend(ev);
+                    up
+                }
+                Err(_) => ProgressUpdate::default(),
+            };
+            RunClose {
                 end: RunEnd::Captured,
                 carried_heat: p.carry.heat,
                 cash: p.account.cash,
@@ -529,7 +544,9 @@ impl Career {
                     .filter(|e| e.seq >= first_seq)
                     .map(LedgerLine::of)
                     .collect(),
-            });
+                progress,
+            }
+        });
         let mut career = Self::from_profile(econ, p);
         career.abandoned = settled;
         Ok(career)
@@ -724,6 +741,9 @@ impl Career {
                 let Ok(stats) = self.stats_for(&id, &[]) else {
                     continue;
                 };
+                let Some(unlock_tier) = self.econ.progression.class_tier(d.class) else {
+                    continue;
+                };
                 list.push(DealerCar {
                     def_id: id.clone(),
                     name: d.display_name.clone(),
@@ -733,6 +753,8 @@ impl Career {
                     price_used: self.econ.market_price(&spec, Condition::Used),
                     price_worn: self.econ.market_price(&spec, Condition::Worn),
                     stats,
+                    unlock_tier,
+                    locked: false,
                 });
             }
             list.sort_by(|a, b| (a.price_worn, &a.def_id).cmp(&(b.price_worn, &b.def_id)));
@@ -863,7 +885,16 @@ impl Career {
             can_start: self.start_blocker().is_none(),
             start_blocker: self.start_blocker(),
             cars: a.garage.iter().map(|c| self.car_view(c)).collect(),
-            dealer: self.dealer.clone().unwrap_or_default(),
+            dealer: self
+                .dealer
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|mut d| {
+                    d.locked = !self.econ.class_unlocked(a, d.class);
+                    d
+                })
+                .collect(),
             floor_car: (!a.has_usable_car())
                 .then(|| (floor.def_id.clone(), floor.price.min(a.cash.max(0)))),
             insurance: self
@@ -892,6 +923,7 @@ impl Career {
                 })
                 .collect(),
             stats: p.stats.clone(),
+            progress: self.econ.career_progress(a),
             captures: a.heat_history.captures,
             escapes: a.heat_history.escapes,
             ledger: p
@@ -1031,6 +1063,9 @@ impl Career {
             .find(|d| d.def_id == def_id)
             .cloned()
             .ok_or_else(|| format!("the dealer does not sell {def_id:?}"))?;
+        self.econ
+            .require_class(&self.profile.account, d.class)
+            .map_err(e2s)?;
         let spec = CarSpec {
             def_id: d.def_id,
             class: d.class,
@@ -1395,7 +1430,21 @@ impl Career {
         self.guard()?;
         let heat = self.profile.carry.heat;
         self.profile.carry.heat = self.econ.carry_heat(heat, RunEnd::Free);
-        Ok(self.econ.next_night(&mut self.profile))
+        let mut ev = self.econ.next_night(&mut self.profile);
+        ev.extend(self.update_progression().1);
+        Ok(ev)
+    }
+
+    /// Pay first-time tier rewards and record tier changes after rep moved.
+    fn update_progression(&mut self) -> (ProgressUpdate, Vec<EconomyEvent>) {
+        match self.econ.update_progression(&mut self.profile.account) {
+            Ok((up, ev)) => {
+                let ev = self.post(ev);
+                (up, ev)
+            }
+            // Progression never refuses (it only credits); keep the run closing if it ever did.
+            Err(_) => (ProgressUpdate::default(), Vec::new()),
+        }
     }
 
     // ----- runs ------------------------------------------------------------------------------
@@ -1554,6 +1603,7 @@ impl Career {
         }
         self.econ
             .close_run(&mut self.profile, end, heat, bounty_cash, driven_ticks);
+        let (progress, _) = self.update_progression();
         let ledger = self
             .profile
             .ledger
@@ -1566,6 +1616,7 @@ impl Career {
             carried_heat: self.profile.carry.heat,
             cash: self.profile.account.cash,
             ledger,
+            progress,
         })
     }
 

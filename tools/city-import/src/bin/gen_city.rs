@@ -43,6 +43,7 @@ fn main() {
             "-h" | "--help" => {
                 println!("gen-city --grid 12x12 --seed 1 [--spacing 110] [--out data/city]");
                 println!("gen-city --preset vesper_v2 [--seed 1] [--out data/city] [--json]");
+                println!("gen-city --preset ashpeak [--seed 1] [--out data/city] [--json]");
                 println!("gen-city --preset touge|<touge id> [--out data/city] [--json]");
                 return;
             }
@@ -77,7 +78,15 @@ fn main() {
             seed: cfg.seed,
             ..Default::default()
         }),
-        Some(other) => panic!("unknown preset {other} (known: {})", vesper::CITY_ID),
+        Some(wp_world::ashpeak::CITY_ID) => wp_world::ashpeak::generate(&VesperConfig {
+            seed: cfg.seed,
+            ..wp_world::ashpeak::default_config()
+        }),
+        Some(other) => panic!(
+            "unknown preset {other} (known: {}, {})",
+            vesper::CITY_ID,
+            wp_world::ashpeak::CITY_ID
+        ),
     };
     let json = json || preset.is_none();
     city_import::write_city_files(&net, &out, json).expect("write city files");

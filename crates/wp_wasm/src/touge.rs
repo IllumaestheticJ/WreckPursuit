@@ -262,7 +262,7 @@ impl TougeRun {
         };
         if !self.placed {
             self.placed = true;
-            match run.touge_place(&TougeTable::embedded(), self.battle.setup, self.wager) {
+            match run.touge_place(self.battle.setup, self.wager) {
                 Ok((ticket, lines)) => {
                     self.ticket = Some(ticket);
                     self.ledger.extend(lines);
@@ -437,7 +437,9 @@ pub fn touge_cards() -> Vec<TougeCard> {
         .collect()
 }
 
-/// The wager menu for `setup` on `acct`.
+/// The wager menu for `setup` on `acct` (the career rep tiers decide what is open).
 pub fn menu(acct: &PlayerAccount, setup: &TougeSetup) -> WagerMenu {
-    touge::wager_menu(acct, &TougeTable::embedded(), setup)
+    crate::garage::with_economy(|econ| {
+        touge::wager_menu(econ, acct, &TougeTable::embedded(), setup)
+    })
 }
