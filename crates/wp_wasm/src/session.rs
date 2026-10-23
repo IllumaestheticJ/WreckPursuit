@@ -683,7 +683,7 @@ impl Session {
         let Some(&player) = self.ids.first() else {
             return;
         };
-        if self.sim.police().is_wanted_or_pursued(player)
+        if crate::street::pursued(&self.sim, player)
             || self.street.as_ref().is_some_and(|s| s.busy())
         {
             return;

@@ -497,21 +497,33 @@ async function race(label, pad) {
   await frames(page, 3);
   check(!(await page.evaluate(() => document.getElementById("street-ui").classList.contains("hidden"))), `${label}: street UI back after the replay`);
   if (!pad) {
-    // Last: wanted, a honk challenges nobody and the hint says to lose the police (row 150).
+    // Last (row 150, relaxed 2026-10-23): only an active pursuit blocks challenges. Wanted with
+    // no unit on the player, or cooling down (contact lost), a honk still challenges. Whether a
+    // unit has the player in sight here is up to the police, so each honk is checked against the
+    // status it met: pursued → no offer and the hint says to shake the pursuit; not → an offer.
     await page.evaluate(() => window.__wp.sim.debugSetHeat(window.__wp.app.player, 40));
-    await page.keyboard.down(hornKey);
-    let blocked = null;
-    for (let i = 0; i < 12; i++) {
+    let blockedOk = false;
+    let openedOk = false;
+    let wrong = "";
+    for (let i = 0; i < 12 && !openedOk; i++) {
       await placeBehind(page, st.roster[1].entity);
-      await wait(page, 250);
-      blocked = (await status(page))?.blocked ?? blocked;
+      const before = await status(page);
+      await page.keyboard.down(hornKey);
+      await wait(page, 150);
+      await page.keyboard.up(hornKey);
+      await wait(page, 100);
+      const after = await status(page);
+      const hint = await page.evaluate(() => document.querySelector("#street-hint")?.textContent ?? "");
+      if (before.pursued && after.pursued) {
+        if (after.offer) wrong = `offer opened during a pursuit (${after.offer.name})`;
+        else if (after.blocked && /Shake the pursuit/.test(hint)) blockedOk = true;
+      } else if (!before.pursued && !after.pursued && after.offer) {
+        openedOk = true;
+      }
     }
-    await page.keyboard.up(hornKey);
-    const ws = await status(page);
-    const hint = await page.evaluate(() => document.querySelector("#street-hint")?.textContent ?? "");
-    check(ws.pursued && !ws.offer && !!blocked, `${label}: wanted, a honk opens no challenge (blocked: ${blocked?.name})`);
-    check(/Lose the police/.test(hint), `${label}: hint says to lose the police first ("${hint.trim()}")`);
-    // (The pursuit outlives the heat; the session ends here.)
+    check(!wrong, `${label}: no challenge during an active pursuit ${wrong}`);
+    check(blockedOk || openedOk, `${label}: wanted / cooling down a honk challenges, pursued it is blocked with a hint (blocked ${blockedOk}, opened ${openedOk})`);
+    // (The session ends here.)
   }
 }
 
