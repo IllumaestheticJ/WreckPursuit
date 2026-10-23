@@ -1242,4 +1242,13 @@ does not "rejoin" back to the corridor. Test:
 **Tried and dropped.** Giving a finisher a run-off round a corner (no short one exists; a 2.2 km
 detour broke the race). Letting a finisher go round anything standing (worse).
 
-**Measured** (Hollins, 16 seeds): see the table below the gate run.
+**Measured** (Hollins, 16 seeds per skill, against f46ea8be):
+
+| skill | finishers before → after | mean time before → after (s) | walls | most rejoins by one car |
+|---|---|---|---|---|
+| 0.50 | 61/64 → 64/64 | 66.9 → 64.7 | 0 → 2 | 18 → ≤ 3 |
+| 0.95 | 59/64 → 64/64 | 63.4 → 61.2 | 19 → 16 | 17 → 4 |
+
+The times are shorter because the course is 60 m shorter. City sprint, Grid highway, Lantern and
+Loop 9 over seeds 1–8 are identical. Goldens: all 115 unchanged (the race scenario file only holds
+the grid), so there is nothing to bless. Gate clean.
