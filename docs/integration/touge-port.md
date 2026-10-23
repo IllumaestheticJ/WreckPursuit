@@ -1,5 +1,10 @@
 # Touge port (PR #49) onto `lead/round12`
 
+> **Update (`lead/career-port`, round 2):** touge now runs on the career system: the stand-in
+> `[gates]` and `TougeGates` are gone, and stakes / payouts / rep go through `require_unlocked`,
+> `max_bet` / `place_bet` / `settle_bet` (venue Touge), `award_credits` and `award_rep`. See
+> `docs/integration/career-port.md` "Round 2". The notes below describe the stand-in.
+
 - **Workstream:** helper for the integration lead: port PR #49 "Touge: four sealed mountain
   passes, boss/challenger battles, side bets and pink slips" (`claude/project-thread-rgdat5`)
 - **Branch:** `lead/touge-port` (from `lead/round12` at `db0035d9`)

@@ -536,7 +536,7 @@ export class StreetUi {
       this.resultSeq = res.seq;
       this.resultUntil = now + 7000;
       this.resultEl.innerHTML =
-        `<b style="color:${res.won ? "#2ecc40" : "#ff4136"}">${res.won ? "YOU WON" : "YOU LOST"} ${res.won ? "+" : ""}${money(res.net)}</b>` +
+        `<b style="color:${res.won ? "#2ecc40" : "#ff4136"}">${res.won ? "YOU WON" : "YOU LOST"} ${res.won ? "+" : ""}${money(res.net)}${res.rep ? ` · +${res.rep} rep` : ""}</b>` +
         `<span>vs ${esc(res.name)} (Lv ${res.level} ${esc(res.level_name)}) · ${esc(res.reason)}` +
         `${res.margin_m > 1 ? ` · by ${km(res.margin_m)}` : ""} · cash ${money(res.cash_after)}</span>`;
     }
