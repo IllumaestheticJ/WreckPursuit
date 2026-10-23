@@ -1216,3 +1216,30 @@ so there is nothing to bless.
 **Open, not this change.** On Hollins s95 seed 3, shiro_turbo has 17 rejoins and lindwurm_4t
 has 15, and neither finishes. This was already so before; they stay inside the corridor, so no
 reset fires. It is a follow-up.
+
+## Hollins rejoin loops: no run-off past the finish (2026-10-23, lead)
+
+**Cause.** Hollins was the only picker race with no AI run-off. Its route ended at the Knob
+Observatory Lot, 8 m before the end of a dead-end lane. `run_off_route` found nothing straight on,
+and nothing round a corner within 200 m. wp_opponent parks a finisher in the last 25 m of its
+corridor, so the winner stopped on the finish line itself, in the lot entrance where parked cars
+with hazard lights stand.
+
+The cars behind stopped 0.5–2 m short of the line, looped through rejoin and reverse cycles
+(14–17 each) and were DNF on the finish window. This hit s95 seeds 3 and 12, and s50 seed 12.
+
+**Fix 1: the layout (lead-approved, PLAYTEST_LOG "lead 2026-10-23").** The judged Hollins finish is
+now 60 m short of the lot (`CourseSpec::PoiRoute { finish_back_m: 60 }`; the course is 941 m, was
+1001 m). The road into the lot is the AI run-off (86 m), as every other race has. The race scenario
+file is unchanged (same grid). `length_hint_m` is 941. The Hollins pace RONs are re-locked by the
+rule (times about 3–4 s shorter, best_ratio unchanged).
+
+**Fix 2: safety net (wp_opponent, 610f5b0d).** A finisher whose corridor ends at the finish line
+(no run-off) rolls on 15 m past the end at up to 5 m/s, towards the kerb, before pulling over. It
+does not "rejoin" back to the corridor. Test:
+`a_finisher_rolls_on_past_a_corridor_that_ends_at_the_line_before_parking`.
+
+**Tried and dropped.** Giving a finisher a run-off round a corner (no short one exists; a 2.2 km
+detour broke the race). Letting a finisher go round anything standing (worse).
+
+**Measured** (Hollins, 16 seeds): see the table below the gate run.
