@@ -358,10 +358,10 @@ impl RaceJudge {
         }
         let before = self.tracks.len();
         self.tracks.retain(|t| t.entry.racer != racer);
-        // Re-slot everyone so the grid stays packed.
-        let grid = self.course.grid(self.grid_layout(), self.tracks.len());
-        for (t, s) in self.tracks.iter_mut().zip(grid) {
-            t.slot = s;
+        // Re-slot everyone so the grid stays packed, in the same full-capacity layout `enter`
+        // uses (a later entrant must not land on a re-packed slot).
+        for i in 0..self.tracks.len() {
+            self.tracks[i].slot = self.slot_for(i);
         }
         before != self.tracks.len()
     }

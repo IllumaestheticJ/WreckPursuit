@@ -355,7 +355,8 @@ impl LiveRace {
 
     /// Race clock, s (negative during the countdown).
     pub fn elapsed_s(&self, tick: u64) -> f32 {
-        (tick as f32 - self.judge.green_tick() as f32) * PHYSICS_DT
+        // Subtract in integers: tick counts past 2^24 (19 h) are not exact in f32.
+        (tick as i64 - self.judge.green_tick() as i64) as f32 * PHYSICS_DT
     }
 
     /// Feed one stepped tick: `samples` for the racers, the tick's sim `events`, and the
