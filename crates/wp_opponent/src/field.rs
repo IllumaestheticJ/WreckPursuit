@@ -286,8 +286,8 @@ struct Obstacle {
     facing: f32,
     /// A racer stuck nose-in that cannot back out because something stands right behind it.
     wants_room: bool,
-    /// A police unit (only known while some racer is wanted). Wanted racers shove and ram
-    /// these instead of keeping clear.
+    /// A police unit (from `PoliceQuery::police_positions`). Wanted racers shove and ram
+    /// these; the others keep the careful margins (a touch is assaulting an officer).
     police: bool,
 }
 
@@ -538,6 +538,9 @@ fn approach(x: f32, target: f32, max_step: f32) -> f32 {
 /// Side clearance kept to a car alongside (racer, player, police), m: careful drivers
 /// (aggression 0) .. hard chargers (aggression 1), who lean on the other car.
 const SIDE_GAP_M: (f32, f32) = (0.5, 0.2);
+/// Side clearance kept to a police car alongside by a racer that is not wanted, m: a touch
+/// is assaulting an officer and starts a pursuit.
+const COP_SIDE_GAP_M: f32 = 0.6;
 /// Extra lateral room given to a car that is sliding / running wide / reversing, m.
 const UNSTABLE_EXTRA_M: f32 = 0.8;
 const MIN_GAP_M: f32 = 2.5;
@@ -903,13 +906,9 @@ impl Field {
             let dt = self.config.decision_ticks.max(1) as f32 * PHYSICS_DT;
             self.observe(world, vehicles, police, dt);
             self.update_still(world, vehicles, dt);
-            // Police unit positions, only while someone is wanted (only wanted racers treat
-            // police differently).
-            let police_at = if self.racers.iter().any(|r| r.wanted) {
-                police.police_positions()
-            } else {
-                Vec::new()
-            };
+            // Police unit positions: wanted racers shove and ram units, the others keep the
+            // careful margins around them (a touch is assaulting an officer).
+            let police_at = police.police_positions();
             let snapshot = self.perceive_all(world, vehicles, &police_at);
             let civs = self.civilians_near(world);
             for k in 0..self.racers.len() {
@@ -2210,7 +2209,9 @@ fn decide_racer(
                 }
                 continue;
             }
-            let base_gap = if bold && !matches!(x.o.who, Who::Racer(_)) {
+            let base_gap = if x.o.police {
+                COP_SIDE_GAP_M
+            } else if bold && !matches!(x.o.who, Who::Racer(_)) {
                 0.1
             } else if is_civ(&x.o) {
                 civ_margin + 0.2
@@ -2505,8 +2506,12 @@ fn decide_racer(
             let civ = is_civ(o);
             let closing = (v - o.v_s).max(0.5);
             // Arriving fast next to a car: want more lateral room the faster I close.
-            let margin =
-                margin_for(o) + (0.08 * (closing - 2.0)).clamp(0.0, if civ { 0.3 } else { 0.4 });
+            let margin = margin_for(o)
+                + if o.police {
+                    (0.15 * (closing - 2.0)).clamp(0.0, 1.0)
+                } else {
+                    (0.08 * (closing - 2.0)).clamp(0.0, if civ { 0.3 } else { 0.4 })
+                };
             if !overlaps(band, o, margin, x.gap / closing) {
                 continue;
             }
@@ -2722,6 +2727,8 @@ fn decide_racer(
 fn pass_margin(o: &Obstacle, p: &DriverParams) -> f32 {
     if parked_non_racer(o) {
         0.1
+    } else if o.police {
+        0.3
     } else if !matches!(o.who, Who::Racer(_)) {
         0.15
     } else {

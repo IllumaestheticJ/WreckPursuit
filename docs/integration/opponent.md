@@ -371,8 +371,10 @@ Changes:
 - **Bold**: held up by traffic for `overtake_patience_s` + 1.5 s with no clean pass → 0.1 m to
   any non-racer (lateral margin and side gap): it squeezes past and accepts a rub. It still
   plans round traffic and never aims at it.
-- **Police**: units are recognised from `PoliceQuery::police_positions()` (fetched only while
-  some racer is wanted). A wanted or fleeing racer gives police cars no room: zero lateral
+- **Police**: units are recognised from `PoliceQuery::police_positions()`. A racer that is not
+  wanted keeps the old careful room around them (0.6 m side gap, 0.3 m pass margin, closing
+  margin up to 1 m): a touch is assaulting an officer and starts a pursuit (with the tighter
+  traffic margins a racer sideswiped a patrol on Hollins and fled). A wanted or fleeing racer gives police cars no room: zero lateral
   margin, no side constraint, aggression ≥ 0.4 leans into a unit alongside (0.3 m overlap),
   and a unit in its path is rammed at `RAM_CLOSING_MPS` (4–10 m/s with aggression) above the
   unit's speed instead of stopped behind. Only drivers with risk < `POLICE_YIELD_RISK` (0.35)
@@ -386,3 +388,17 @@ at lights and blocked the queue), and a quicker crawler rule (2 s / 80 %, noise)
 Measured: `sweep_open_roads_progress` (now `WP_SWEEP_SEEDS=24`, 4 racers, 25 % traffic,
 90 s): total progress 86.8 → 90.2 km, longest wait 36 → 39 s, zero DQs, zero racer contacts
 ≥ 400 N·s in all 24 seeds before and after.
+
+Other checks:
+- Pace lock-in: every scenario in range except Lantern, now much faster (s95 107–163 →
+  73–78 s, s50 87–93 → 74–77 s: racers no longer sit behind civilians turning across the
+  lane); both Lantern files re-locked with the usual rule. Loop 9, Hollins, grid, city in range.
+- `race_picker` Hollins, `WP_RACE_SEED` 1–5: 17 of 20 finish (15 of 20 before).
+- `wp_wasm` `race_crash_replays_with_the_judge_and_no_crash_on_the_grid`: the player now
+  rear-ends a racer that tucked in ahead, not always the parked one; the test accepts any AI
+  racer as the other car.
+- **Report to G (economy) / K (race glue)**: `short_sprint_with_ai_runs_to_results_and_pays_
+  through_the_economy` fails: the AI-driven player seat now wins the grid sprint (P2 before,
+  so the winner branch never ran), and the winner's purse is 1,377 against an advertised
+  5,031 (`wp_race::bridge::economy_race` vs `Economy::race_setup`, ratio 0.27, band
+  0.75–1.34). A stake mismatch the old result hid; not changed here.
