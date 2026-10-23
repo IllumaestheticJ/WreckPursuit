@@ -49,10 +49,9 @@ nearby_units_m = 60.0
 # driving the same way) is recognised at once: wanted >= min_level and a pursuit by that unit.
 # Row 80: 20 km/h over within 90 m (was 40 km/h within 60 m; a pass at 20-40 km/h over made the
 # racer wanted with no chase).
-# Owner 2026-10-23 (far less sensitive): 30 km/h over within 70 m.
 [heat.blatant]
-over_mps = 8.3
-range_m = 70.0
+over_mps = 5.5
+range_m = 90.0
 min_level = 1
 
 # Field of view of a ground unit (row 89): line of sight within the phase's range (below) in a

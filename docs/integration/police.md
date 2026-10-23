@@ -1675,7 +1675,7 @@ The city total per phase must stay ≥ 1: `PoliceSystem::unit_cap` reads a zero 
 - `heat.unseen_factor` 0.2 → 0.1: an offence nobody saw adds half the heat it did.
 - New `heat.call_min_heat = 1.5` (`HeatConfig::call_min_heat`, checked in `PoliceSystem::on_violation`): an unseen offence only becomes a call (a unit sent to look) once the racer's heat reaches 1.5. Unseen heat decays all the time, so that takes a cluster of offences (a crash plus a red light), not a bit of unseen speeding. Before, every unseen offence was a call.
 - Radar (`heat.radar`): over by max(4.5 m/s, 25 %) held 2 s, was max(2.24 m/s, 10 %) held 1 s. This is no longer wp_world's own speeding margin.
-- Blatant speeding (`heat.blatant`): 30 km/h over within 70 m, was 20 km/h within 90 m (row 80).
+- Blatant speeding (`heat.blatant`) is unchanged: row 80's 20 km/h over within 90 m is an owner rule (`wp_sim/tests/police_passby.rs`).
 
 **Tests and scenarios re-aimed.**
 - `patrol_presence_*` take the new counts. `tests/system.rs::phase_change_adjusts_presence`: Core 3 → 2.
