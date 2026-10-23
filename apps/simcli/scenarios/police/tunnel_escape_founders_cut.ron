@@ -59,9 +59,12 @@
 // 95 s). Heat 95 -> seeds 50-63: escape story on 8 of 14 (51-53, 55-57, 63), control captured in
 // its window on 2 (54, 63; the other 12 are still in pursuit at 190 s or captured early, none
 // escapes). Re-seeded 54 -> 63, heat 90 -> 95.
+// PR #60 port (2026-10-23: no AI pursuit cap, stronger police cars, rolling-block deadlock fix):
+// seed 63 was Captured at 141.8 s. Seeds 50-70 at heat 95: escape story on 16 of 21, control
+// on 20, both on 15 (50-52, 56-62, 64-66, 68-70). Re-seeded 63 -> 60, the middle of 56-62.
 (
     name: "police_tunnel_escape_founders_cut",
-    seed: 63,
+    seed: 60,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,
     time_ratio: 1.0,

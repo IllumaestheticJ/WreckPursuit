@@ -1739,3 +1739,19 @@ damage modes — the owner rule keeps Arcade and Simulation identical outside ca
   shift; the new one makes it flat out at ≈ 5900 rpm, where the converter shift (no torque
   cut in `wp_vehicle`) drops rpm at only ≈ 3000 rpm/s and layer energy is at its ceiling.
   Lowering `shift_rate_onset_rpm_s` to 1200 only reaches 0.9 dB.
+
+### PR #60 ported onto ws/police (2026-10-23)
+
+PR #60 (`claude/epic-dijkstra-6gc3lv`: no AI pursuit cap + police power package) is merged onto ws/police after row 157 and lead/round12 81fa22c0. The lead closes the PR as merged by this port.
+
+Bench, police-bench --seeds 8, 96 runs per arm, before → after:
+- Stock evader (debug_coupe): capture 72 → 72 %, escape 16 → 21 %, capture time 56 → 47 s, crash/min 1.34 → 1.55.
+- Evader = hakone_gt: capture 73 → 79 %, escape 16 → 9 %, crash/min 1.39 → 1.23, police–civilian hits 57 → 36.
+
+**Outside my crates (minimal, for the audio test the PR left red):**
+- `wp_audio` gets a gear-change upshift cue. `EngineInput.gear` is `Option<i8>`; the director passes `Some(VehicleState::gear)`.
+- An upshift under throttle holds the existing upshift note at full depth for `EngineMix.upshift_cue_s`. That field is serde default 0.15 s, so `audio_config.json` is unchanged.
+- It's for converter automatics without a torque cut, whose rpm falls slower than the rpm-rate cue's onset. No `wp_vehicle` change (physics frozen).
+- New unit test: `engine::tests::upshift_with_a_slow_rpm_fall_still_dips_when_the_gear_is_known`.
+- On the merged tree the PR's failing case (cruiser 4→5 at 30.3 s, 0.4 dB) no longer happens: the cruiser makes no 4→5 shift in the trace. Its weakest dip is 3→4: 1.55 dB without the cue (floor 1.2 dB), 2.26 dB with it.
+- **Push-through fix (wp_police, found by the port):** a push (row 61) that started on traffic now ends as soon as the car in front is a racer or another unit. The stronger cruiser, back on Patrol after a capture, kept shoving the held player car (wp_wasm `capture_bills_holds_the_car_and_repair_continue_restores_it`: 2.45 m/s, want < 1).
