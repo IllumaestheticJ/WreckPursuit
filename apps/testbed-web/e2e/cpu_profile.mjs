@@ -4,10 +4,11 @@
 // docs/PLAYTEST_LOG.md row 3.
 import { spawn } from "node:child_process";
 import { chromium } from "playwright-core";
+import { chromiumPath } from "./chromium.mjs";
 const server = spawn("npx", ["vite", "--port", "5196", "--strictPort"], { cwd: process.cwd(), stdio: "pipe" });
 process.on("exit", () => server.kill("SIGTERM"));
 for (;;) { try { if ((await fetch("http://localhost:5196/")).ok) break; } catch {} await new Promise((r) => setTimeout(r, 200)); }
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", args: ["--use-angle=swiftshader","--enable-unsafe-swiftshader"] });
+const browser = await chromium.launch({ executablePath: chromiumPath(), args: ["--use-angle=swiftshader","--enable-unsafe-swiftshader"] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 await page.goto("http://localhost:5196/");
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 60000 });

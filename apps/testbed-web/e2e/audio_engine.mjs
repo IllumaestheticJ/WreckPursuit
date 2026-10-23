@@ -31,6 +31,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { chromium } from "playwright-core";
+import { chromiumPath } from "./chromium.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -266,7 +267,7 @@ const bundle = await build({
 
 await waitForServer();
 const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM ?? "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+  executablePath: chromiumPath(),
   args: [
     "--autoplay-policy=no-user-gesture-required",
     "--use-gl=angle",

@@ -17,6 +17,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { chromiumPath } from "./chromium.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.PORT ?? 5207);
@@ -45,7 +46,7 @@ const check = (ok, msg) => {
 };
 
 const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM ?? "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+  executablePath: chromiumPath(),
   args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
 });
 // Full resolution + high effects for readable screenshots (the perf check covers the default

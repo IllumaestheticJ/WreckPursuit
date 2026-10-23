@@ -64,7 +64,7 @@ a `world` group rotated −90° about X.
 Requires Node 22+, `wasm-pack` (`cargo install wasm-pack`) and the `wasm32-unknown-unknown`
 target (installed by `rust-toolchain.toml`). `src/wasm/pkg/` is generated and gitignored.
 The e2e script uses `playwright-core` with the Chromium at `$CHROMIUM` (default: the
-preinstalled `/opt/pw-browsers/chromium-1194`).
+newest Playwright Chromium under `/opt/pw-browsers`, see `e2e/chromium.mjs`).
 
 ## Input shaping (Settings → Controls)
 
