@@ -28,24 +28,24 @@
     },
     "brigand_400": {
       "display_name": "Brigand 400",
-      "zero_to_100_s": 9.67,
-      "top_speed_kmh": 194.1,
+      "zero_to_100_s": 9.66,
+      "top_speed_kmh": 193.7,
       "cornering_g": 0.618,
       "bars": {
-        "acceleration": 0.506,
-        "top_speed": 0.318,
-        "cornering": 0.136
+        "acceleration": 0.507,
+        "top_speed": 0.316,
+        "cornering": 0.135
       }
     },
     "bulwark_400": {
       "display_name": "Bulwark 400",
-      "zero_to_100_s": 7.81,
-      "top_speed_kmh": 201.2,
-      "cornering_g": 0.732,
+      "zero_to_100_s": 7.87,
+      "top_speed_kmh": 201.1,
+      "cornering_g": 0.731,
       "bars": {
-        "acceleration": 0.655,
-        "top_speed": 0.36,
-        "cornering": 0.365
+        "acceleration": 0.651,
+        "top_speed": 0.359,
+        "cornering": 0.362
       }
     },
     "debug_coupe": {
@@ -83,11 +83,11 @@
     },
     "fulmine_v10": {
       "display_name": "Fulmine V10",
-      "zero_to_100_s": 3.57,
+      "zero_to_100_s": 3.63,
       "top_speed_kmh": 333.6,
       "cornering_g": 0.981,
       "bars": {
-        "acceleration": 0.995,
+        "acceleration": 0.99,
         "top_speed": 1.0,
         "cornering": 0.861
       }
@@ -182,7 +182,7 @@
     },
     "marten_20": {
       "display_name": "Marten 2.0",
-      "zero_to_100_s": 8.63,
+      "zero_to_100_s": 8.62,
       "top_speed_kmh": 201.8,
       "cornering_g": 0.873,
       "bars": {
@@ -252,7 +252,7 @@
       "top_speed_kmh": 197.5,
       "cornering_g": 0.82,
       "bars": {
-        "acceleration": 0.581,
+        "acceleration": 0.582,
         "top_speed": 0.338,
         "cornering": 0.54
       }
@@ -292,11 +292,11 @@
     },
     "stoat_16v": {
       "display_name": "Stoat 16V",
-      "zero_to_100_s": 8.97,
+      "zero_to_100_s": 9.04,
       "top_speed_kmh": 199.6,
       "cornering_g": 0.865,
       "bars": {
-        "acceleration": 0.562,
+        "acceleration": 0.557,
         "top_speed": 0.351,
         "cornering": 0.629
       }
@@ -325,7 +325,7 @@
     },
     "tumbril_20": {
       "display_name": "Tumbril 2.0",
-      "zero_to_100_s": 17.42,
+      "zero_to_100_s": 17.5,
       "top_speed_kmh": 140.4,
       "cornering_g": 0.718,
       "bars": {
