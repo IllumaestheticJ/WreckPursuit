@@ -4,7 +4,7 @@
 (
     name: "race_drag_coupe_vs_sedan",
     seed: 15,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     systems: "vehicle,damage",
     entities: [

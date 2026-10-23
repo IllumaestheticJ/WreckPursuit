@@ -417,6 +417,13 @@ export class GameMenu {
 }
 
 /** Mount the game menu into `parent` (a positioned element). Closed until `openMain` / `openPause`. */
+
+/** One-line hint per damage mode (Settings has the full table). */
+const DAMAGE_HINT: Record<"Arcade" | "Simulation" | "Extreme", string> = {
+  Arcade: "Forgiving: racers take 20 % damage; traffic and police take full damage",
+  Simulation: "Punishing but survivable",
+  Extreme: "One hard hit at speed is a total loss",
+};
 export function mountGameMenu(parent: HTMLElement, opts: GameMenuOptions): GameMenu {
   return new GameMenu(parent, opts);
 }
@@ -715,7 +722,7 @@ function SettingsScreen(props: {
           setTestInput={props.setTestInput}
         />
         <h3>Gameplay</h3>
-        <Row label="Damage" hint={s.damageMode === "Simulation" ? "One hard hit at speed is a total loss" : "Punishing but survivable"}>
+        <Row label="Damage" hint={DAMAGE_HINT[s.damageMode]}>
           <Cycle
             id="gm-mode"
             label="Damage mode"
@@ -723,6 +730,7 @@ function SettingsScreen(props: {
             options={[
               { id: "Arcade", label: "Arcade" },
               { id: "Simulation", label: "Simulation" },
+              { id: "Extreme", label: "Extreme" },
             ]}
             onChange={(damageMode) => change({ ...s, damageMode })}
           />

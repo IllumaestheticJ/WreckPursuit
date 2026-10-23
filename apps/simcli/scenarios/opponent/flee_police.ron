@@ -13,7 +13,7 @@
     slow: true,
     seed: 4,
     city: procedural(seed: 1, blocks_x: 8, blocks_y: 8, block_m: 110.0),
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     traffic_density: 0.25,
     police_presence: 1.0,

@@ -9,7 +9,7 @@
 (
     name: "vehicle_kerb_strike_60_angled",
     seed: 54,
-    mode: Arcade,
+    mode: Simulation,
     barriers: [(pos: (-10.261, 28.191, 0.05), size: (40.0, 60.0, 0.1), yaw: 0.3491)],
     entities: [
         (id: "hakone_gt", car: "hakone_gt", pos: (-9.0, -40.0, 0.0), speed_mps: 16.67, assists: wheel, driver: cruise(target_mps: 16.67)),

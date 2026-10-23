@@ -133,7 +133,7 @@ export interface Barrier {
 export interface Scenario {
   name: string;
   seed: number;
-  mode: "Arcade" | "Simulation";
+  mode: "Arcade" | "Simulation" | "Extreme";
   duration_s: number;
   barriers?: Barrier[];
   entities: { id: string; car: string; pos: number[]; yaw: number; mods?: string[] }[];
@@ -253,6 +253,11 @@ export const sim = {
   /** Free drive / city chase in a city by id ("vesper_v2" | "procedural_12x12"). */
   freeDriveCityJson: (car: string, mode: string, cityId: string): string => wasm.free_drive_city_json(car, mode, cityId),
   cityChaseCityJson: (car: string, mode: string, cityId: string): string => wasm.city_chase_city_json(car, mode, cityId),
+  /** Free roam: free drive plus `roamers` AI street racers (0 = default 10). */
+  freeRoamCityJson: (car: string, mode: string, cityId: string, roamers = 0): string =>
+    wasm.free_roam_city_json(car, mode, cityId, roamers),
+  /** Free-roam status (`null` outside free roam). */
+  roamStatus: (): unknown => JSON.parse(wasm.roam_status_json()),
   /** Id of the session's city ("" on the flat world): data/city/<id>.greybox.glb. */
   cityId: (): string => wasm.city_id(),
   scenarioFromRon: (text: string): string => wasm.scenario_from_ron(text),
@@ -378,7 +383,7 @@ export const sim = {
   assistPresetNamed: (
     name: string,
     source: "Keyboard" | "Gamepad" | "Wheel",
-  ): { mode: "Arcade" | "Simulation"; assists: AssistProfile } => JSON.parse(wasm.assist_preset_named(name, source)),
+  ): { mode: "Arcade" | "Simulation" | "Extreme"; assists: AssistProfile } => JSON.parse(wasm.assist_preset_named(name, source)),
   /** The preset a vehicle's assists + the session's damage mode match ("" = customised). */
   assistPresetOf: (entity: number, source: "Keyboard" | "Gamepad" | "Wheel"): string =>
     wasm.assist_preset_of(entity, source),

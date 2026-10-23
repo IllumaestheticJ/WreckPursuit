@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "ModeTable",
-  "description": "Scalars that turn the single damage code path into Arcade or Simulation behaviour.",
+  "description": "Scalars that turn the single damage code path into Arcade, Simulation or Extreme behaviour.",
   "type": "object",
   "properties": {
     "beam_break_scale": {
@@ -46,6 +46,12 @@
       "type": "number",
       "format": "float"
     },
+    "racer_damage_scale": {
+      "description": "Multiplier on the contact impulses that reach the damage model of *racer* cars (the\nplayer's racer and AI racers). Traffic and police (AI or player-driven) always take\n1.0. Arcade uses 0.25, which leaves racers about 20 % of the damage (the lattice takes\nthe first part of a hit elastically); omitted = 1.0.",
+      "type": "number",
+      "format": "float",
+      "default": 1.0
+    },
     "repair_cost_scale": {
       "description": "Multiplier on repair bills.",
       "type": "number",
@@ -79,17 +85,22 @@
   ],
   "$defs": {
     "DamageMode": {
-      "description": "Damage mode. Both modes run the same code path with different [`crate::ModeTable`]s.",
+      "description": "Damage mode. Every mode runs the same code path with a different [`crate::ModeTable`].",
       "oneOf": [
         {
-          "description": "Punishing but survivable; one hard hit degrades, several end the car.",
+          "description": "Forgiving: the Simulation table with racer cars (player and AI racers) taking about 20 %\nof the damage (`ModeTable::racer_damage_scale`); traffic and police take full damage.",
           "type": "string",
           "const": "Arcade"
         },
         {
-          "description": "Real-world-ish; one hard hit at speed is a total loss.",
+          "description": "Punishing but survivable; one hard hit degrades, several end the car.",
           "type": "string",
           "const": "Simulation"
+        },
+        {
+          "description": "Real-world-ish; one hard hit at speed is a total loss (the pre-0.4 Simulation table).",
+          "type": "string",
+          "const": "Extreme"
         }
       ]
     }

@@ -9,7 +9,7 @@
     seed: 107,
     city: procedural(seed: 7, blocks_x: 8, blocks_y: 8, block_m: 120.0),
     time_of_day_h: 23.0,
-    mode: Arcade,
+    mode: Simulation,
     assists: keyboard,
     police_presence: 1.0,
     traffic_density: 0.3,

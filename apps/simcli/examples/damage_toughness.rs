@@ -37,8 +37,8 @@
 //! first impaired.
 //!
 //! ```sh
-//! cargo run --release -p simcli --example damage_toughness -- [arcade|sim] [car …]
-//! cargo run --release -p simcli --example damage_toughness -- chase [arcade|sim] [car …]
+//! cargo run --release -p simcli --example damage_toughness -- [arcade|sim|extreme] [car …]
+//! cargo run --release -p simcli --example damage_toughness -- chase [arcade|sim|extreme] [car …]
 //! ```
 //! Defaults: Arcade, `hakone_gt debug_sedan junkyard_beater sentinel_cruiser`. `WP_KINDS=a,b`
 //! and `WP_SPEEDS=30,50` limit a table run, `WP_NO_PANELS=1` turns R's panels off,
@@ -194,8 +194,8 @@ fn half_w(car: &LoadedCar) -> f32 {
 
 fn disengage(mode: DamageMode) -> f32 {
     match mode {
-        DamageMode::Arcade => 0.15,
-        DamageMode::Simulation => 0.4,
+        DamageMode::Arcade | DamageMode::Simulation => 0.15,
+        DamageMode::Extreme => 0.4,
     }
 }
 
@@ -576,6 +576,10 @@ fn main() {
         Some("sim") => {
             args.remove(0);
             DamageMode::Simulation
+        }
+        Some("extreme") => {
+            args.remove(0);
+            DamageMode::Extreme
         }
         Some("arcade") => {
             args.remove(0);

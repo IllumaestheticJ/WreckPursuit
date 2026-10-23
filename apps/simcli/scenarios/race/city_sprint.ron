@@ -13,7 +13,7 @@
     name: "race_city_sprint",
     seed: 15,
     city: procedural(seed: 1, blocks_x: 7, blocks_y: 7, block_m: 110.0),
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     traffic_density: 0.0,
     police_cars: false,

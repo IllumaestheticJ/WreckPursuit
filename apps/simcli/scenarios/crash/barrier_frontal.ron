@@ -3,7 +3,7 @@
 (
     name: "crash_barrier_frontal",
     seed: 11,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     barriers: [(pos: (0.0, 45.0, 0.75), size: (8.0, 1.0, 1.5))],
     entities: [
