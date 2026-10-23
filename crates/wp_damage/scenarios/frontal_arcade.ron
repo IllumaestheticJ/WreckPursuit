@@ -1,5 +1,6 @@
-// Full-width rigid barrier, Arcade: same code, arcade.toml scalars. One hard hit degrades,
-// it takes several to end the car.
+// Full-width rigid barrier, Arcade (contract v0.4.0): the Simulation table with the car taking
+// racer_damage_scale (0.25) of the impulse, about a fifth of Simulation's damage. Even 80 km/h
+// leaves the car healthy and every component working (frontal_sim.ron: 56 km/h health ~0.90).
 (
     name: "frontal_arcade",
     car: "debug_sedan",
@@ -10,15 +11,15 @@
     seed: 1,
     monotone: ["crush_m", "plastic_energy_kj", "damage"],
     runs: [
-        (speed_kmh: 15.0, expect: [(metric: "crush_m", min: 0.0, max: 0.05), (metric: "health", min: 0.95, max: 1.0)],
+        (speed_kmh: 15.0, expect: [(metric: "crush_m", min: 0.0, max: 0.02), (metric: "health", min: 0.995, max: 1.0)],
             intact: [Radiator, Engine], total_loss: Some(false)),
-        (speed_kmh: 25.0, expect: [(metric: "crush_m", min: 0.0, max: 0.15)],
+        (speed_kmh: 25.0, expect: [(metric: "crush_m", min: 0.0, max: 0.03), (metric: "health", min: 0.99, max: 1.0)],
             intact: [Radiator, Engine], total_loss: Some(false)),
-        (speed_kmh: 40.0, expect: [(metric: "crush_m", min: 0.08, max: 0.3)],
-            intact: [Radiator, Engine], cracked: [FrontBumper], total_loss: Some(false)),
-        (speed_kmh: 56.0, expect: [(metric: "crush_m", min: 0.2, max: 0.45), (metric: "health", min: 0.55, max: 0.93)],
-            intact: [Engine], total_loss: Some(false)),
-        (speed_kmh: 80.0, expect: [(metric: "crush_m", min: 0.3, max: 0.75), (metric: "health", min: 0.5, max: 0.85)],
-            intact: [Engine], total_loss: Some(false)),
+        (speed_kmh: 40.0, expect: [(metric: "crush_m", min: 0.0, max: 0.05), (metric: "health", min: 0.99, max: 1.0)],
+            intact: [Radiator, Engine], total_loss: Some(false)),
+        (speed_kmh: 56.0, expect: [(metric: "crush_m", min: 0.0, max: 0.15), (metric: "health", min: 0.95, max: 1.0)],
+            intact: [Radiator, Engine], total_loss: Some(false)),
+        (speed_kmh: 80.0, expect: [(metric: "crush_m", min: 0.05, max: 0.3), (metric: "health", min: 0.9, max: 0.99)],
+            intact: [Radiator, Engine, SteeringRack], total_loss: Some(false)),
     ],
 )

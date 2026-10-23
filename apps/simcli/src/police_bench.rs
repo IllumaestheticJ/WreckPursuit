@@ -372,7 +372,7 @@ impl Default for BenchOptions {
                 .collect(),
             seeds: (1..=8).collect(),
             duration_s: 300.0,
-            mode: DamageMode::Arcade,
+            mode: DamageMode::Simulation,
             threads: 0,
             progress: false,
         }

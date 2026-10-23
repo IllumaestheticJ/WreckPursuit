@@ -1,3 +1,5 @@
+// Contract v0.4.0: the pre-v0.4.0 Simulation table is now Extreme, so this scenario keeps its
+// name and runs `mode: Extreme` (same behaviour and hashes as before).
 // Golden "feel" case: the golden_tbone crash in Simulation (wp_damage, machine B). A coupe at
 // 50 km/h (13.9 m/s) along +X hits the driver side of a sedan crossing along +Y at 8 m/s.
 // Pins the mode pair with golden_tbone (Arcade, victim crush 0.165 m): Simulation puts ~2x the
@@ -8,7 +10,7 @@
 (
     name: "golden_tbone_sim",
     seed: 104,
-    mode: Simulation,
+    mode: Extreme,
     assists: ai,
     entities: [
         (id: "victim", car: "debug_sedan", pos: (0.0, -16.0, 0.0), speed_mps: 8.0, driver: cruise(target_mps: 8.0)),

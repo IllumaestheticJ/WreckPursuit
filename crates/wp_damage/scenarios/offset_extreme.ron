@@ -1,0 +1,20 @@
+// 40 % overlap (left) rigid barrier, Extreme (the pre-v0.4.0 Simulation table): energy concentrates on one rail, so crush
+// is deeper than full-width and the struck-side corner fails first.
+(
+    name: "offset_extreme",
+    car: "debug_sedan",
+    mode: Extreme,
+    impact: Offset,
+    other_mass_kg: 0.0,
+    duration_s: 0.5,
+    seed: 1,
+    monotone: ["crush_m", "plastic_energy_kj", "damage"],
+    runs: [
+        (speed_kmh: 15.0, expect: [(metric: "crush_m", min: 0.02, max: 0.2)], intact: [Radiator, Engine], total_loss: Some(false)),
+        (speed_kmh: 25.0, expect: [(metric: "crush_m", min: 0.12, max: 0.4)], intact: [Engine], total_loss: Some(false)),
+        (speed_kmh: 40.0, expect: [(metric: "crush_m", min: 0.3, max: 0.75)], intact: [Engine], total_loss: Some(false)),
+        (speed_kmh: 56.0, expect: [(metric: "crush_m", min: 0.6, max: 1.3)], failed: [SuspensionFL], total_loss: Some(true)),
+        (speed_kmh: 80.0, expect: [(metric: "crush_m", min: 1.0, max: 2.4)], failed: [Engine, SuspensionFL, WheelFL], total_loss: Some(true),
+            order: [Cracked(FrontBumper), Failed(Engine)]),
+    ],
+)

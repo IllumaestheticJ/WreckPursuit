@@ -8,7 +8,7 @@ import type { MeshPartJson } from "../render/panels";
 const CORNERS = ["fl", "fr", "rl", "rr"] as const;
 
 /** Body region → slot for panel / glass / detail parts. */
-const REGION_SLOT: Record<string, string> = {
+export const REGION_SLOT: Record<string, string> = {
   FrontBumper: "front_bumper",
   RearBumper: "rear_bumper",
   Hood: "hood",
@@ -73,4 +73,49 @@ export function slotOfPart(def: MeshPartJson, centreX: number): string | null {
   }
   if (n.startsWith("skirt")) return "side_skirts";
   return null;
+}
+
+/** Slots of the bolt-on body panels: they can come off and carry what is fixed to them. */
+export const PANEL_SLOTS: ReadonlySet<string> = new Set([
+  "front_bumper", "rear_bumper", "hood", "trunk_lid",
+  "fender_fl", "fender_fr", "door_fl", "door_fr", "door_rl", "door_rr",
+]);
+
+/**
+ * Optional slots some models carry a stock-styled part for (a factory wing, splitter or scoop).
+ * While the slot is empty that part is the panel's own styling: it stays drawn with its panel
+ * instead of vanishing as an "empty slot".
+ */
+const STYLED_OPTIONAL = new Set(["front_splitter", "rear_wing", "hood_vent", "roof_rack", "side_skirts", "push_bar"]);
+
+/**
+ * Every slot that must hold a part for mesh part `def` to be drawn in the workshop: its own slot,
+ * the bolt-on panel of its region, and the panel it is bolted to (`host`, mounts.ts). Empty for
+ * welded parts, which are always drawn.
+ */
+export function slotsNeeded(def: MeshPartJson, centreX: number, host: string | undefined, fitted: ReadonlySet<string>): string[] {
+  const out: string[] = [];
+  const own = pickSlot(def, centreX, fitted);
+  if (own) out.push(own);
+  // A part skinned to a bolt-on panel's region rides on that panel (a grille in the hood).
+  const panel = regionPanel(def);
+  if (panel && !out.includes(panel)) out.push(panel);
+  if (host && !out.includes(host)) out.push(host);
+  return out;
+}
+
+/** The bolt-on panel slot of `def`'s body region, or null. */
+function regionPanel(def: MeshPartJson): string | null {
+  const s = def.wheel == null && def.region ? REGION_SLOT[def.region] : undefined;
+  return s && PANEL_SLOTS.has(s) ? s : null;
+}
+
+/**
+ * The slot clicking mesh part `def` works on: its own slot, or for a stock-styled part of an
+ * empty optional slot (a factory wing) the panel it is part of.
+ */
+export function pickSlot(def: MeshPartJson, centreX: number, fitted: ReadonlySet<string>): string | null {
+  const own = slotOfPart(def, centreX);
+  if (own && STYLED_OPTIONAL.has(own) && !fitted.has(own)) return regionPanel(def);
+  return own;
 }

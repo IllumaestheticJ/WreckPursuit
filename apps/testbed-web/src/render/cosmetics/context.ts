@@ -12,8 +12,6 @@ export interface Tweaks {
   finish?: string;
   /** Vinyl design id (vinyls.ts). */
   vinyl?: string;
-  /** Panels painted as bare carbon weave. */
-  carbon: Set<"hood" | "trunk">;
   /** Window tint. */
   tint?: "dark" | "limo";
   /** Glazing: polycarbonate rear windows or laminated shatter-proof glass. */

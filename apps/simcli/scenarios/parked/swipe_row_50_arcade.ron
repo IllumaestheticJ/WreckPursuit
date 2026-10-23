@@ -5,7 +5,7 @@
 (
     name: "parked_swipe_row_50_arcade",
     seed: 2111,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     parked: [
         (pos: (0.0, 20.0, 0.0)),

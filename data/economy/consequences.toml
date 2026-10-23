@@ -72,6 +72,12 @@ seizure_min_level = "L4"
 total_loss_destroys_car = true    # a total loss at capture means the car is gone
 fine_scale = 1.25
 
+[mode.Extreme]                    # contract v0.4.0: same consequences as Simulation
+seizure_chance = 0.3
+seizure_min_level = "L4"
+total_loss_destroys_car = true
+fine_scale = 1.25
+
 [cop_xp]
 clean_minute = 2
 civilian_collision = -40

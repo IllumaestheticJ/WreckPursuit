@@ -177,9 +177,9 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
         })
         .unwrap_err();
     assert!(matches!(err, CaptainError::Locked { .. }), "{err:?}");
-    // Raise heat: spikes unlock, a second request hits the cooldown.
-    h.police.set_heat(RACER, 45.0);
-    assert!(h.police.wanted_level(RACER) >= WantedLevel::L2);
+    // Raise heat: spikes unlock (level 4, owner row 156), a second request hits the cooldown.
+    h.police.set_heat(RACER, 75.0);
+    assert!(h.police.wanted_level(RACER) >= WantedLevel::L4);
     // A valid site (straight approach ≥ 120 m) comes up as the racer drives on.
     let mut r = Err(CaptainError::Budget);
     for _ in 0..40 {
@@ -411,13 +411,15 @@ fn player_units_get_suggestions_and_external_units_pull_over() {
 }
 
 /// Lead round 8: Arcade health levels off around 0.2–0.3 under repeated hits, so an Arcade
-/// unit at 0.3 stays in service while a Simulation unit at the same health pulls over.
+/// unit at 0.3 stays in service while an Extreme (pre-v0.4.0 Simulation) unit pulls over.
+/// Police take full damage in every mode, so Simulation matches Arcade.
 #[test]
 fn disengage_health_depends_on_damage_mode() {
     for (mode, health, out) in [
         (DamageMode::Arcade, 0.3, false),
         (DamageMode::Arcade, 0.1, true),
-        (DamageMode::Simulation, 0.3, true),
+        (DamageMode::Simulation, 0.3, false),
+        (DamageMode::Extreme, 0.3, true),
     ] {
         let mut h = Harness::with_mode(12.0, 7, mode);
         h.run(0.5, &[]);

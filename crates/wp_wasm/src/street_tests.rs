@@ -75,7 +75,7 @@ fn park_behind(s: &mut Session, k: usize) -> EntityId {
     racer
 }
 
-/// Honk next to racer `k`: the offer opens for it.
+/// Honk right behind racer `k`: the offer opens for it.
 fn challenge(s: &mut Session, k: usize) -> EntityId {
     let racer = park_behind(s, k);
     s.set_input(PLAYER, horn(true)).unwrap();
@@ -274,6 +274,49 @@ fn street_racers_only_in_live_free_drive_and_can_be_turned_off() {
     );
 }
 
+/// A honk only challenges a racer the player is right behind: alongside, in front or facing
+/// the other way does nothing (owner request 2026-10-23).
+#[test]
+fn honk_challenges_only_from_right_behind() {
+    let mut s = city_session();
+    s.run_ticks(240 * 2);
+    let racer = s.street().unwrap().entities()[2];
+    let st = state(&s, racer);
+    let yaw = yaw_of(st.rot);
+    let (sn, cs) = wp_math::sin_cos(yaw);
+    // Racer forward = (-sin, cos); right = (cos, sin).
+    for (what, along, side, turn) in [
+        ("alongside", 0.0, 5.0, 0.0),
+        ("in front", 12.0, 0.0, 0.0),
+        (
+            "behind, facing the other way",
+            -9.0,
+            0.0,
+            std::f32::consts::PI,
+        ),
+        ("too far behind", -40.0, 0.0, 0.0),
+    ] {
+        let xy = [
+            st.pos[0] - sn * along + cs * side,
+            st.pos[1] + cs * along + sn * side,
+        ];
+        s.place_logged(PLAYER, xy, yaw + turn, st.pos[2]).unwrap();
+        assert!(
+            s.street().unwrap().challengeable(s.sim(), PLAYER).is_none(),
+            "no hint: {what}"
+        );
+        s.set_input(PLAYER, horn(true)).unwrap();
+        s.run_ticks(2);
+        s.set_input(PLAYER, horn(false)).unwrap();
+        s.run_ticks(2);
+        assert!(
+            s.street().unwrap().offer(s.sim(), s.run()).is_none(),
+            "a honk opens no challenge: {what}"
+        );
+    }
+    challenge(&mut s, 2);
+}
+
 #[test]
 fn honk_opens_a_challenge_and_bad_bets_are_refused() {
     let mut s = city_session();
@@ -369,6 +412,7 @@ fn challenge_race_result(hour: f32) {
     challenge(&mut s, 1);
     let fin = finish_for(&s);
     let before = cash(&s);
+    let rep_before = s.run().unwrap().account().rep;
     let stake = street::level(ROSTER[1].0).bet_min;
     s.street_accept(fin, &[], stake).unwrap();
     s.run_ticks(street::COUNTDOWN_TICKS + 240);
@@ -381,6 +425,10 @@ fn challenge_race_result(hour: f32) {
     assert!(r.won, "{r:?}");
     assert_eq!(r.net, stake);
     assert_eq!(cash(&s), before + stake, "stake back plus theirs");
+    // The win climbs the career's rep ladder by the level's win_rep (a loss costs none).
+    let win_rep = street::level(ROSTER[1].0).win_rep;
+    assert_eq!(r.rep, win_rep);
+    assert_eq!(s.run().unwrap().account().rep, rep_before + win_rep);
     let ledger = s.run().unwrap().ledger();
     assert!(ledger
         .iter()
@@ -1163,4 +1211,33 @@ fn far_racers_drive_light_and_the_race_opponent_never_does() {
         }
     }
     assert!(!light, "the race opponent never drives light");
+}
+
+/// main's career time progression (PR #45, `wp_world::progression`) composes with the street
+/// racers: every moment of a night shift's budget is `DayPhase::Night`, which is what turns the
+/// night-shift street racers on ([`street::is_night`]), and every moment of a day shift is
+/// `DayPhase::Day`. The 18→20 / 04→08 transitions are the only stretches outside the windows.
+#[test]
+fn career_time_shifts_line_up_with_the_street_racers_day_and_night() {
+    use wp_contracts::DayPhase;
+    use wp_world::{Shift as CareerShift, TimeProgression, TimeRules};
+    for (shift, want) in [
+        (CareerShift::Day, DayPhase::Day),
+        (CareerShift::Night, DayPhase::Night),
+    ] {
+        let mut t = TimeProgression::starting_at(TimeRules::default(), 1, shift);
+        let mut events = Vec::new();
+        let mut samples = 0;
+        while t.shift() == shift && !t.is_transitioning() {
+            assert_eq!(
+                t.time_of_day().phase(),
+                want,
+                "{shift:?} at {:.2} h",
+                t.time_of_day().hours()
+            );
+            t.step(1.0, &mut events);
+            samples += 1;
+        }
+        assert!(samples > 100, "{shift:?}: {samples} samples");
+    }
 }

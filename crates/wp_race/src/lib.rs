@@ -20,8 +20,12 @@
 //! | [`entrants`] | AI entrants: `wp_opponent` racers driven in a judged race |
 //! | [`police`] | race signals → `wp_police` input events (hot meets call in a patrol) |
 //! | [`cargo`] | Delivery cargo applied to the car's mass, CG and inertia |
-//! | [`catalog`] | the browser's race picker: courses on Port Vesper and the grid city, named AI drivers |
+//! | [`catalog`] | the browser's race picker: courses on Port Vesper, Ashpeak County and the grid city, named AI drivers |
+//! | [`spots`] | honk-to-start meet spots at each race's start, horn edge trigger |
 //! | [`live`] | a picker race run next to a live `wp_sim` loop: judge, AI, meet heat, standings with gaps |
+//! | [`roster`] | the city's named regulars (`data/events/racers.toml`), their records and form ratings, meet fields, off-screen results |
+//! | [`betting`] | odds from form ratings, win / podium / head-to-head tickets, settlement (`data/events/betting.toml`) |
+//! | [`touge`] | touge battles on the sealed mountain passes: boss/challenger roster, wall breaches, side bets, pink slips (`data/events/touge.toml`) |
 //! | [`bridge`] | `wp_world` city race planning + race-route activation, POIs/zones; `wp_economy` payout inputs |
 //!
 //! `wp_net` owns the lobby transport; this crate owns the rules. Everything here is
@@ -30,6 +34,7 @@
 
 #![warn(missing_docs)]
 
+pub mod betting;
 pub mod bridge;
 pub mod cargo;
 pub mod catalog;
@@ -44,11 +49,14 @@ pub mod live;
 pub mod police;
 pub mod progression;
 pub mod result;
+pub mod roster;
 pub mod rules;
 pub mod schedule;
 pub mod signals;
+pub mod spots;
 pub mod stakes;
 pub mod territory;
+pub mod touge;
 pub mod trace;
 mod trail;
 

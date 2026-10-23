@@ -61,6 +61,11 @@ await page.waitForSelector('[data-testid="race-picker"]', { timeout: 10000 });
 const cards = await page.$$eval("[data-race]", (els) => els.map((e) => e.getAttribute("data-race")));
 check(cards.length >= 4, `race picker lists ${cards.length} races (${cards.join(", ")})`);
 for (const id of ["hollins_sprint", "loop9_circuit", "lantern_checkpoint", "grid_highway_sprint"]) check(cards.includes(id), `picker offers ${id}`);
+for (const id of ["harbor_dash", "tunnel_run", "hollins_descent", "offramp_sprint", "grid_arterial_sprint"]) check(cards.includes(id), `picker offers ${id}`);
+// Betting: every card prices the player (odds on yourself); a fresh account below Street rep
+// sees them with the lock reason, an unlocked one gets the bet slip.
+const betRows = await page.$$eval('[data-testid="bet-locked"], [data-testid="bet-slip"]', (els) => els.map((e) => e.textContent ?? ""));
+check(betRows.length === cards.length && betRows.every((t) => /\d\.\d\d/.test(t)), `every race card shows odds on the player (${betRows[0] ?? "none"})`);
 await shot("race_picker.png");
 
 // 2. Pick the grid highway sprint from the menu: a race session with countdown and HUD.

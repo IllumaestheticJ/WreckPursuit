@@ -202,7 +202,7 @@ fn body_slip(st: &wp_contracts::VehicleState) -> f32 {
 }
 
 fn new_sim(world: World) -> Sim {
-    let mode = wp_contracts::load_mode_table(common::data("modes/arcade.toml")).unwrap();
+    let mode = wp_contracts::load_mode_table(common::data("modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed: 7,
         mode,

@@ -1,4 +1,4 @@
-# simcli hashes scenario=opponent_reverse_grid_2laps systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
+# simcli hashes scenario=opponent_reverse_grid_2laps systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
 2400 45948f68d9120139
 4800 40efc6e117c62085
 7200 e47332d1ce3d1a9f

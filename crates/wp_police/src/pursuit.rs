@@ -2016,7 +2016,7 @@ mod tests {
     }
 
     #[test]
-    fn helicopter_joins_at_level_3_keeps_visual_and_loses_it_under_an_overpass() {
+    fn helicopter_joins_at_level_5_keeps_visual_and_loses_it_under_an_overpass() {
         // Both grade separations: the overpass and the underpass (in a cutting).
         for crossing in 0..2 {
             helicopter_over_crossing(crossing);
@@ -2049,15 +2049,15 @@ mod tests {
             }
         };
         run(&mut p, open, 0.5);
-        // Wanted level 2 with a pursuit on: no helicopter.
-        p.set_heat(racer, 30.0);
-        assert_eq!(p.wanted_level(racer), WantedLevel::L2);
+        // Wanted level 4 with a pursuit on: no helicopter (it joins at level 5, owner row 156).
+        p.set_heat(racer, 75.0);
+        assert_eq!(p.wanted_level(racer), WantedLevel::L4);
         p.start_pursuit(racer, UnitId(999));
         run(&mut p, open, 3.0);
         assert!(p.helicopters().is_empty());
-        // Level 3: the AI captain calls it in; it flies over and has visual.
-        p.set_heat(racer, 60.0);
-        assert_eq!(p.wanted_level(racer), WantedLevel::L3);
+        // Level 5: the AI captain calls it in; it flies over and has visual.
+        p.set_heat(racer, 95.0);
+        assert_eq!(p.wanted_level(racer), WantedLevel::L5);
         run(&mut p, open, 6.0);
         let h = p.helicopters();
         assert_eq!(h.len(), 1, "{:?}", p.stats());
@@ -2070,7 +2070,7 @@ mod tests {
         let said = |p: &PoliceSystem, what: &str| p.radio_log().any(|l| l.text.contains(what));
         let log = |p: &PoliceSystem| p.radio_log().map(|l| l.text.clone()).collect::<Vec<_>>();
         // The radio speaks one line at a time, so the helicopter's lines may wait for the
-        // channel (the level-3 call is still on the air); critical lines are never dropped.
+        // channel (the level-5 call is still on the air); critical lines are never dropped.
         // `go(p, at, secs, what)`: `secs` at `at`, then on until `what` is said (<= 20 s).
         let mut go = |p: &mut PoliceSystem, at: [f32; 3], secs: f32, what: &str| {
             run(p, at, secs);

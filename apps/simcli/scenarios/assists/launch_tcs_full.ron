@@ -2,7 +2,7 @@
 // manual box, no steering. Owner's keyboard assists otherwise (ABS Full, ESC off).
 (
     name: "assists_launch_tcs_full",
-    mode: Arcade,
+    mode: Simulation,
     seed: 1,
     assists: custom((abs: "Full", tcs: "Full", esc: false, steer_speed_sensitivity: 0.75, countersteer_help: 0.6, throttle_filter: 0.7, brake_filter: 0.6, auto_gears: false, auto_clutch: true)),
     duration_s: 4.0,

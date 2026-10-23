@@ -1150,6 +1150,12 @@ mod tests {
             "loop9_circuit",
             "hollins_sprint",
             "grid_highway_sprint",
+            // PR #47's city races (lead/career-port).
+            "harbor_dash",
+            "tunnel_run",
+            "hollins_descent",
+            "offramp_sprint",
+            "grid_arterial_sprint",
         ] {
             assert!(p.get(id).is_some(), "{id} has no police profile");
         }

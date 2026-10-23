@@ -18,13 +18,15 @@
 //!   lanes, no lane-splitting) and a *cruise capability* (top speed and grip capped well below
 //!   the car's) so it keeps to traffic pace and the speed limit, with a stop-line guard for red
 //!   and catchable amber lights. At the end of a route it plans the next one.
-//! - **Challenge.** Honking (horn rising edge) within [`CHALLENGE_RADIUS_M`] of a roaming racer
-//!   stops it and opens an [`Offer`]: the player picks B on the map ([`StreetRacers::preview`]),
+//! - **Challenge.** Honking (horn rising edge) while right behind a roaming racer (same lane and
+//!   heading, at most [`CHALLENGE_BEHIND_M`] back: [`tailing`]) stops it and opens an [`Offer`]: the player picks B on the map ([`StreetRacers::preview`]),
 //!   optionally waypoints the route must run through in order (up to [`MAX_WAYPOINTS`], owner
 //!   row 151; gates the player passes within [`GATE_RADIUS_M`] before B counts), and a stake
 //!   inside the level's range (capped by their cash), then accepts. Not while the player is
 //!   wanted or chased (owner row 150): a honk does nothing and an open offer lapses.
-//! - **Race.** Accepting pays the stake (a ledger line), resets both cars side by side at the
+//! - **Race.** Accepting pays the stake (a betting ticket on the one career wallet:
+//!   `wp_economy` `place_bet`, venue `Street`, open from the start and capped only by cash and
+//!   the level's range; ledger note `bet:stake:street:…`), resets both cars side by side at the
 //!   start, at rest, facing along the route (logged moves, owner row 150),
 //!   holds both for a 3 s countdown, then the racer drives a full-pace `Field` like a picker
 //!   race's AI ([`wp_race::entrants`]): its level's [`DriverProfile`], the car's real
@@ -33,7 +35,8 @@
 //!   police until it finishes, is wrecked or is actually captured). First within
 //!   [`FINISH_RADIUS_M`] of B wins, by any path (shortcuts are fair); a wreck or a capture
 //!   decides it early; at the time limit the one further along the route wins. A win pays back
-//!   twice the stake (even money).
+//!   twice the stake (even money, `settle_bet`, `bet:payout:street:…`) and the level's
+//!   `win_rep` (`award_rep`, so street wins climb the career's rep tiers).
 //! - **Police.** Street racers are `VehicleKind::AiRacer` for the whole session (the kind is
 //!   not a replay op, so it cannot change mid-session): the police treat them as racers, as
 //!   they treat a picker race's AI. Roaming ones keep to the law, so they draw no heat; a
@@ -53,6 +56,7 @@ use serde::Serialize;
 use simcli::scenario::{AssistSpec, CitySpec, EntitySpec};
 use simcli::Scenario;
 use wp_contracts::{DamageSim, EntityId, LoadedCar, SimEvent, VehicleInput, VehicleSim};
+use wp_economy::{BetTicket, BetVenue};
 use wp_math::Rng;
 use wp_opponent::{
     CarCapability, CorridorOptions, DriverProfile, Field, OpposingLanes, RaceConfig, RacerSpec,
@@ -88,8 +92,16 @@ pub(crate) mod perf {
     }
 }
 
-/// Horn within this distance of a roaming racer challenges it, m.
-pub const CHALLENGE_RADIUS_M: f32 = 30.0;
+/// Horn while right behind a roaming racer challenges it: the player's car centre at most this
+/// far behind the racer's, along the racer's heading (about two car lengths of gap), m (owner
+/// request 2026-10-23: challenges only from right behind the racer).
+pub const CHALLENGE_BEHIND_M: f32 = 15.0;
+/// See [`CHALLENGE_BEHIND_M`]: and at most this far to either side of the racer's centre line
+/// (the same lane), m.
+pub const CHALLENGE_SIDE_M: f32 = 2.5;
+/// See [`CHALLENGE_BEHIND_M`]: and facing the racer's way, the cosine of the most the two
+/// headings may differ (45°).
+pub const CHALLENGE_HEADING_COS: f32 = std::f32::consts::FRAC_1_SQRT_2;
 /// An open offer lapses when the player drives this far from the racer, m.
 pub const OFFER_LEAVE_M: f32 = 70.0;
 /// Reaching this close to B finishes the race, m.
@@ -194,6 +206,9 @@ pub struct Level {
     pub bet_min: i64,
     /// Largest bet the racer takes, $.
     pub bet_max: i64,
+    /// Rep for beating a racer of this level (`wp_economy` `award_rep`: the career tier
+    /// ladder sees street wins; a picker-race win is ~100-200). A loss costs no rep.
+    pub win_rep: i64,
 }
 
 /// The four levels, in order (owner, 2026-10-22: the slowest level, Rookie, was dropped; the
@@ -211,6 +226,7 @@ pub const LEVELS: [Level; 4] = [
         cruise_mps: 12.0,
         bet_min: 250,
         bet_max: 1_200,
+        win_rep: 40,
     },
     Level {
         level: 3,
@@ -224,6 +240,7 @@ pub const LEVELS: [Level; 4] = [
         cruise_mps: 12.5,
         bet_min: 500,
         bet_max: 2_500,
+        win_rep: 70,
     },
     Level {
         level: 4,
@@ -237,6 +254,7 @@ pub const LEVELS: [Level; 4] = [
         cruise_mps: 13.0,
         bet_min: 1_000,
         bet_max: 5_000,
+        win_rep: 110,
     },
     Level {
         level: 5,
@@ -250,6 +268,7 @@ pub const LEVELS: [Level; 4] = [
         cruise_mps: 13.3,
         bet_min: 2_000,
         bet_max: 10_000,
+        win_rep: 160,
     },
 ];
 
@@ -456,6 +475,8 @@ pub struct StreetStep {
     /// Light-model permission changes (`Sim::set_light_when_far`, logged as
     /// `OpKind::LightWhenFar`): off for a racer racing the player, on again after.
     pub light: Vec<(EntityId, bool)>,
+    /// This tick's honk opened a challenge (the session's race spots then ignore it).
+    pub challenged: bool,
 }
 
 /// One NPC street racer.
@@ -602,6 +623,8 @@ pub struct RaceResult {
     pub stake: i64,
     /// Cash change from the race (+stake on a win, -stake on a loss), $.
     pub net: i64,
+    /// Rep earned (the level's `win_rep` on a win, 0 on a loss).
+    pub rep: i64,
     /// Cash after, $.
     pub cash_after: i64,
     /// Race time of the winner (or of the race when decided early), s.
@@ -626,6 +649,8 @@ struct Race {
     course: Vec<f32>,
     length_m: f32,
     stake: i64,
+    /// The stake's betting ticket (career economy, venue Street).
+    ticket: BetTicket,
     go_tick: u64,
     limit_tick: u64,
     /// Player's progress along the route, m.
@@ -640,7 +665,6 @@ pub struct StreetRacers {
     race: Option<Race>,
     result: Option<RaceResult>,
     seq: u32,
-    horn_was: bool,
     /// Tick the open offer was made.
     offer_tick: u64,
     /// Last tick's sim events (contacts and police events for the fields).
@@ -743,6 +767,29 @@ fn xy_of(sim: &Sim, id: EntityId) -> Option<[f32; 2]> {
         .map(|v| geom::xy(v.vehicle.state().pos))
 }
 
+/// A vehicle's ground position and unit forward direction.
+fn pose_of(sim: &Sim, id: EntityId) -> Option<([f32; 2], [f32; 2])> {
+    sim.vehicles().iter().find(|v| v.id == id).map(|v| {
+        let st = v.vehicle.state();
+        (geom::xy(st.pos), wp_world::drive::forward_of(st.rot))
+    })
+}
+
+/// How far the `player` pose is behind the `racer` pose along the racer's heading, m, when the
+/// player is right behind it (a challenge may open): at most [`CHALLENGE_BEHIND_M`] back, within
+/// [`CHALLENGE_SIDE_M`] of its centre line and facing its way (within 45°,
+/// [`CHALLENGE_HEADING_COS`]). `None` beside, ahead of, too far behind or facing another way.
+fn tailing(player: ([f32; 2], [f32; 2]), racer: ([f32; 2], [f32; 2])) -> Option<f32> {
+    let (p, pf) = player;
+    let (q, qf) = racer;
+    let rel = geom::sub(p, q);
+    let behind = -geom::dot(rel, qf);
+    let side = geom::cross(qf, rel).abs();
+    let facing = geom::dot(pf, qf) >= CHALLENGE_HEADING_COS;
+    (behind > 0.0 && behind <= CHALLENGE_BEHIND_M && side <= CHALLENGE_SIDE_M && facing)
+        .then_some(behind)
+}
+
 fn dist(a: [f32; 2], b: [f32; 2]) -> f32 {
     geom::dist(a, b)
 }
@@ -830,7 +877,6 @@ impl StreetRacers {
             race: None,
             result: None,
             seq: 0,
-            horn_was: false,
             offer_tick: 0,
             events: Vec::new(),
             cars: BTreeMap::new(),
@@ -1011,8 +1057,8 @@ impl StreetRacers {
         self.in_reach(sim, player)
     }
 
-    /// Nearest roaming racer in honking range with no challenge or race open, police or not
-    /// (the hint says to lose the police first).
+    /// Nearest roaming racer the player is right behind ([`tailing`]) with no challenge or
+    /// race open, police or not (the hint says to lose the police first).
     pub fn in_reach(&self, sim: &Sim, player: EntityId) -> Option<RosterEntry> {
         if self.offer.is_some() || self.race.is_some() {
             return None;
@@ -1022,14 +1068,13 @@ impl StreetRacers {
     }
 
     fn nearest_roaming(&self, sim: &Sim, player: EntityId) -> Option<usize> {
-        let p = xy_of(sim, player)?;
+        let p = pose_of(sim, player)?;
         let tick = sim.tick();
         self.racers
             .iter()
             .enumerate()
             .filter(|(_, r)| r.mode == RacerMode::Roam && tick >= r.cooldown_until)
-            .filter_map(|(k, r)| xy_of(sim, r.entity).map(|q| (k, dist(p, q))))
-            .filter(|(_, d)| *d <= CHALLENGE_RADIUS_M)
+            .filter_map(|(k, r)| pose_of(sim, r.entity).and_then(|q| Some((k, tailing(p, q)?))))
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(k, _)| k)
     }
@@ -1212,9 +1257,12 @@ impl StreetRacers {
             }
             None => (pos, yaw),
         };
-        run.wager(
-            -stake,
-            &format!("street race stake vs {} ({})", self.racers[k].name, l.name),
+        // The one betting wallet (career economy, venue Street): open from the start, the
+        // level's range was checked above and cash covers it.
+        let ticket = run.place_bet(
+            BetVenue::Street,
+            stake,
+            &format!("vs {} ({})", self.racers[k].name, l.name),
         )?;
         let tick = sim.tick();
         let go_tick = tick + COUNTDOWN_TICKS;
@@ -1238,6 +1286,7 @@ impl StreetRacers {
             course: course_packed(&route.polyline, via),
             length_m: route.length_m,
             stake,
+            ticket,
             go_tick,
             limit_tick,
             player_s: 0.0,
@@ -1293,30 +1342,36 @@ impl StreetRacers {
         }
     }
 
+    /// A challenge is open or a street race is running (no other challenge then: the
+    /// session's race spots ignore the horn too).
+    pub fn busy(&self) -> bool {
+        self.offer.is_some() || self.race.is_some()
+    }
+
     /// Before the sim step: horn challenges, offers lapsing, roam routes, and every racer's
-    /// input and move for this tick. Reads the sim only; the session logs and applies the
-    /// result.
+    /// input and move for this tick. `honk` is the horn's rising edge this tick (the session
+    /// owns the one horn edge every challenge reads). Reads the sim only; the session logs
+    /// and applies the result.
     pub fn before_step(
         &mut self,
         sim: &Sim,
         player: EntityId,
-        horn: bool,
+        honk: bool,
         run_over: bool,
     ) -> StreetStep {
         #[cfg(test)]
         let t0 = std::time::Instant::now();
         let tick = sim.tick();
         let mut out = StreetStep::default();
-        let edge = horn && !self.horn_was;
-        self.horn_was = horn;
         let chased = pursued(sim, player);
-        if edge && !run_over && !chased && self.offer.is_none() && self.race.is_none() {
+        if honk && !run_over && !chased && self.offer.is_none() && self.race.is_none() {
             if let Some(k) = self.nearest_roaming(sim, player) {
                 let r = &mut self.racers[k];
                 r.mode = RacerMode::Waiting;
                 r.field = None;
                 self.offer = Some(k);
                 self.offer_tick = tick;
+                out.challenged = true;
             }
         }
         if let Some(k) = self.offer {
@@ -1695,6 +1750,7 @@ impl StreetRacers {
             return;
         };
         let stake = race.stake;
+        let ticket = race.ticket.clone();
         let margin_m = if won {
             race.length_m - racer_s
         } else {
@@ -1706,13 +1762,13 @@ impl StreetRacers {
         let r = &mut self.racers[k];
         self.pending_light.push((r.entity, true));
         let l = level(r.level);
+        let mut rep = 0;
         if won {
             r.losses += 1;
             // Even money: the stake back plus the racer's.
-            let _ = run.wager(
-                2 * stake,
-                &format!("street race won vs {} ({})", r.name, l.name),
-            );
+            run.settle_bet(&ticket, 2 * stake);
+            rep = l.win_rep;
+            run.award_rep(rep, &format!("street:vs {} ({})", r.name, l.name));
         } else {
             r.wins += 1;
         }
@@ -1731,6 +1787,7 @@ impl StreetRacers {
             colour: l.colour,
             stake,
             net: if won { stake } else { -stake },
+            rep,
             cash_after: run.account().cash,
             time_s: elapsed,
             margin_m,
@@ -2166,6 +2223,34 @@ mod tests {
     use super::*;
     use crate::scenario::free_drive;
     use crate::session::Session;
+
+    /// Only right behind a racer (same lane, same way, close) counts as tailing it.
+    #[test]
+    fn tailing_only_right_behind_the_racer() {
+        // Racer at the origin heading +Y.
+        let racer = ([0.0, 0.0], [0.0, 1.0]);
+        let ahead = [0.0, 1.0];
+        assert_eq!(tailing(([0.0, -9.0], ahead), racer), Some(9.0));
+        assert!(
+            tailing(([1.5, -6.0], ahead), racer).is_some(),
+            "a little off centre"
+        );
+        assert!(
+            tailing(([0.0, -20.0], ahead), racer).is_none(),
+            "too far back"
+        );
+        assert!(tailing(([0.0, 9.0], ahead), racer).is_none(), "in front");
+        assert!(tailing(([3.5, 0.0], ahead), racer).is_none(), "alongside");
+        assert!(tailing(([3.5, -6.0], ahead), racer).is_none(), "next lane");
+        assert!(
+            tailing(([0.0, -9.0], [0.0, -1.0]), racer).is_none(),
+            "facing the other way"
+        );
+        assert!(
+            tailing(([0.0, -9.0], [1.0, 0.0]), racer).is_none(),
+            "across the road"
+        );
+    }
 
     #[test]
     fn entity_ids_round_trip_and_other_ids_are_not_racers() {

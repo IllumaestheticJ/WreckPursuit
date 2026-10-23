@@ -79,7 +79,7 @@ export interface GameSettings {
    * impacts and wrecks). Default "all". */
   radioFilter: RadioFilter;
   assists: AssistSettings;
-  damageMode: "Arcade" | "Simulation";
+  damageMode: "Arcade" | "Simulation" | "Extreme";
   units: SpeedUnits;
   /** Default camera angle (host id); "" = the host's default. */
   camera: CameraId;
@@ -162,7 +162,7 @@ export function normalizeSettings(raw: unknown, base: GameSettings): GameSetting
       steerHelp: bool(a.steerHelp, base.assists.steerHelp),
       countersteer: migrateCountersteer(r, a, base.assists.countersteer),
     },
-    damageMode: oneOf(r.damageMode, ["Arcade", "Simulation"] as const, base.damageMode),
+    damageMode: oneOf(r.damageMode, ["Arcade", "Simulation", "Extreme"] as const, base.damageMode),
     units: oneOf(r.units, ["kmh", "mph"] as const, base.units),
     camera: typeof r.camera === "string" && r.camera.length < 32 ? r.camera : base.camera,
     developer: bool(r.developer, base.developer),

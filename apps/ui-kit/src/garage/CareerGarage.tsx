@@ -5,8 +5,10 @@
  *
  * Tabs: Cars (condition, value, repair per item at a district shop, insurance, sell, mods,
  * the free four-slider tune),
- * Dealer (roster cars by class band, the economy-floor beater), Impound (release or let the
- * auction countdown run), Ledger. The head has cash / debt / rep / bounty / carried heat and
+ * Dealer (roster cars by class band, the economy-floor beater; classes above the player's rep
+ * tier are locked), Impound (release or let the auction countdown run), Career (rep tier,
+ * progress to the next, what each tier unlocks), Ledger. The head has cash / debt / rep /
+ * bounty / carried heat and
  * starts the next run (free drive or city chase) with the active car.
  */
 import { render, type ComponentChildren } from "preact";
@@ -17,6 +19,7 @@ import type {
   CareerApi,
   CarTune,
   CareerView,
+  CareerFeature,
   CarView,
   Condition,
   DamageMode,
@@ -31,7 +34,7 @@ import { pickTextFile } from "./store";
 import { isStockTune, normalizeTune, STOCK_TUNE, TUNE_SLIDERS, TUNE_STEPS, tuneSummary } from "./tune";
 import "./garage.css";
 
-type Tab = "cars" | "dealer" | "pound" | "ledger";
+type Tab = "cars" | "dealer" | "pound" | "career" | "ledger";
 
 const itemKey = (i: RepairItem) => JSON.stringify(i);
 const fmt = {
@@ -531,6 +534,7 @@ function DealerTab(props: { view: CareerView; api: CareerApi; run: (f: () => Car
             <th class="num">New</th>
             <th class="num">Used</th>
             <th class="num">Worn</th>
+            <th />
           </tr>
         </thead>
         <tbody>
@@ -548,12 +552,18 @@ function DealerTab(props: { view: CareerView; api: CareerApi; run: (f: () => Car
                 const price = c === "New" ? d.price_new : c === "Used" ? d.price_used : d.price_worn;
                 return (
                   <td class="num" key={c}>
-                    <Button size="sm" disabled={price > view.cash} onClick={() => buy(d.def_id, c)} title={`buy ${c.toLowerCase()}`}>
+                    <Button
+                      size="sm"
+                      disabled={d.locked || price > view.cash}
+                      onClick={() => buy(d.def_id, c)}
+                      title={d.locked ? `needs ${d.unlock_tier} rep tier` : `buy ${c.toLowerCase()}`}
+                    >
                       <Money value={price} />
                     </Button>
                   </td>
                 );
               })}
+              <td>{d.locked && <Badge tone="dim">needs {d.unlock_tier}</Badge>}</td>
             </tr>
           ))}
         </tbody>
@@ -599,6 +609,81 @@ function PoundTab(props: { view: CareerView; api: CareerApi; run: (f: () => Care
   );
 }
 
+/** Ledger line label; career / betting entries are `Adjustment`s with a `career:` / `bet:` note. */
+function reasonLabel(l: CareerView["ledger"][number]): string {
+  const note = (l.detail as { Adjustment?: { note?: string } } | null)?.Adjustment?.note;
+  if (note) {
+    const [scope, kind, raw] = note.split(":");
+    const rest = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : "";
+    if (scope === "career" && kind === "tier_reward") return `Tier bonus · ${rest}`;
+    if (scope === "career" && kind === "tier") return `Tier · ${rest}`;
+    if (scope === "career" && kind === "rep") return "Reputation";
+    if (scope === "career" && kind === "credits") return "Career bonus";
+    if (scope === "bet") return kind === "stake" ? "Bet placed" : "Bet won";
+  }
+  return REASON[l.reason] ?? words(l.reason);
+}
+
+/** Career feature → label. */
+const FEATURE: Record<CareerFeature, string> = {
+  city_races: "City street races",
+  city_betting: "Betting on city races",
+  touge_races: "Touge races",
+  touge_betting: "Touge betting",
+  boss_races: "Boss races",
+  pink_slips: "Pink slips",
+  street_betting: "Street racer challenges",
+};
+
+function CareerTab({ view }: { view: CareerView }) {
+  const p = view.progress;
+  return (
+    <Panel title="Reputation" tag={p.tier_name}>
+      <div class="wp-cg-hero">
+        <Stat label="Tier" value={p.tier_name} tone="ok" />
+        <Stat label="Rep" value={p.rep.toLocaleString("en-US")} />
+        <Stat label="Max bet · city" value={<Money value={p.max_bet_city} />} />
+        <Stat label="Max bet · touge" value={<Money value={p.max_bet_touge} />} />
+      </div>
+      {p.next ? (
+        <div data-testid="career-next">
+          <Meter value={p.tier_fraction} label="Progress to next tier" />
+          <p class="wp-dim">
+            {p.next.rep_needed.toLocaleString("en-US")} rep to <b>{p.next.name}</b>
+            {p.next.reward > 0 && (
+              <>
+                {" "}
+                (bonus <Money value={p.next.reward} />)
+              </>
+            )}
+          </p>
+        </div>
+      ) : (
+        <p class="wp-ok">Top of the ladder.</p>
+      )}
+      <table class="wp-table" data-testid="career-unlocks">
+        <tbody>
+          {p.features.map((f) => (
+            <tr key={f.feature}>
+              <td>{FEATURE[f.feature] ?? words(f.feature)}</td>
+              <td class="num">{f.unlocked ? <Badge tone="ok">open</Badge> : <Badge tone="dim">{`${f.needs} · ${f.needed_rep.toLocaleString("en-US")} rep`}</Badge>}</td>
+            </tr>
+          ))}
+          {p.classes.map((c) => (
+            <tr key={c.class}>
+              <td>{words(c.class)} cars at the dealer</td>
+              <td class="num">{c.unlocked ? <Badge tone="ok">open</Badge> : <Badge tone="dim">{c.needs}</Badge>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p class="wp-dim" style={{ fontSize: "0.8em" }}>
+        Tiers follow your current rep: getting busted can drop you a tier and close what it opened. Each tier's bonus is paid once.
+      </p>
+    </Panel>
+  );
+}
+
 function LedgerTab({ view }: { view: CareerView }) {
   const lines = [...view.ledger].reverse().filter((l) => l.cash_delta !== 0 || l.bounty_delta !== 0 || l.rep_delta !== 0);
   return (
@@ -615,7 +700,7 @@ function LedgerTab({ view }: { view: CareerView }) {
           {lines.map((l) => (
             <tr key={l.seq}>
               <td class="wp-dim wp-mono">N{l.day}</td>
-              <td>{REASON[l.reason] ?? words(l.reason)}</td>
+              <td>{reasonLabel(l)}</td>
               <td class="num">{l.cash_delta !== 0 ? <Money value={l.cash_delta} signed tone /> : l.bounty_delta !== 0 ? `bounty ${l.bounty_delta > 0 ? "+" : ""}${l.bounty_delta}` : `rep ${l.rep_delta > 0 ? "+" : ""}${l.rep_delta}`}</td>
               <td class="num wp-dim">
                 <Money value={l.cash_after} />
@@ -633,8 +718,8 @@ function NewCareer(props: { api: CareerApi; run: (f: () => CareerView) => void; 
   return (
     <Panel title="New career" tag="replaces the current one">
       <p>
-        Arcade: one hard hit degrades, several end the car; repairs at half price. Simulation: one hard hit at speed is a total loss, and a
-        total-loss bust means the car is gone.
+        Arcade: your car and AI racers take 20 % damage; repairs at half price. Simulation: one hard hit degrades, several end the car;
+        repairs at half price. Extreme: one hard hit at speed is a total loss, and a total-loss bust means the car is gone.
       </p>
       <div class="wp-row" style={{ gap: "0.5em" }}>
         <Button size="sm" pressed={mode === "Arcade"} onClick={() => setMode("Arcade")}>
@@ -642,6 +727,9 @@ function NewCareer(props: { api: CareerApi; run: (f: () => CareerView) => void; 
         </Button>
         <Button size="sm" pressed={mode === "Simulation"} onClick={() => setMode("Simulation")}>
           Simulation
+        </Button>
+        <Button size="sm" pressed={mode === "Extreme"} onClick={() => setMode("Extreme")}>
+          Extreme
         </Button>
         <Button variant="danger" onClick={() => (props.run(() => props.api.newCareer(mode)), props.onDone())}>
           Start over in {mode}
@@ -701,6 +789,9 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
           <span>
             REP <span class="wp-ok">{view.rep.toLocaleString("en-US")}</span>
           </span>
+          <Badge tone="info" title="Rep tier">
+            {view.progress.tier_name}
+          </Badge>
           <span>BOUNTY {view.bounty.toLocaleString("en-US")}</span>
           {view.carried_level !== "None" && <Badge tone="warn">wanted {view.carried_level}</Badge>}
           <Button size="sm" onClick={api.close} hotkey="Esc">
@@ -738,6 +829,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
           { id: "cars", label: `Cars (${view.cars.length})` },
           { id: "dealer", label: "Dealer" },
           { id: "pound", label: pound ? `Impound (${pound})` : "Impound" },
+          { id: "career", label: "Career" },
           { id: "ledger", label: "Ledger" },
         ]}
         value={tab}
@@ -747,6 +839,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
         {tab === "cars" && <CarsTab view={view} api={api} run={run} />}
         {tab === "dealer" && <DealerTab view={view} api={api} run={run} />}
         {tab === "pound" && <PoundTab view={view} api={api} run={run} />}
+        {tab === "career" && <CareerTab view={view} />}
         {tab === "ledger" && <LedgerTab view={view} />}
       </div>
     </div>

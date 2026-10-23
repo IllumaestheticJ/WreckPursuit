@@ -1,6 +1,6 @@
 //! Prompt 08 scenario: 20 simulated nights of a mid-skill racer (scripted outcomes) end
-//! solvent in Arcade and marginal in Simulation. Results over 64 seeds are recorded in the
-//! README ("Tuning results"); run with `--nocapture` to print them.
+//! solvent in Arcade and marginal in Extreme (the pre-v0.4.0 Simulation). Results over 64
+//! seeds are recorded in the README ("Tuning results"); run with `--nocapture` to print them.
 
 use wp_contracts::DamageMode;
 use wp_economy::career::{simulate_career, CareerConfig, CareerReport};
@@ -57,12 +57,13 @@ fn print(mode: DamageMode, s: &Summary, r: &[CareerReport]) {
 }
 
 #[test]
-fn twenty_nights_solvent_in_arcade_marginal_in_simulation() {
+fn twenty_nights_solvent_in_arcade_marginal_in_extreme() {
+    // Contract v0.4.0: Extreme is the pre-v0.4.0 Simulation, the "marginal" mode.
     let e = Economy::embedded();
     let (arc, arc_r) = run(&e, DamageMode::Arcade);
-    let (sim, sim_r) = run(&e, DamageMode::Simulation);
+    let (sim, sim_r) = run(&e, DamageMode::Extreme);
     print(DamageMode::Arcade, &arc, &arc_r);
-    print(DamageMode::Simulation, &sim, &sim_r);
+    print(DamageMode::Extreme, &sim, &sim_r);
     let start = arc.start as f32;
     assert_eq!(arc.start, sim.start);
 
@@ -83,25 +84,29 @@ fn twenty_nights_solvent_in_arcade_marginal_in_simulation() {
         arc.pct(10)
     );
 
-    // Simulation: marginal. The typical racer roughly breaks even; a real fraction go backwards.
+    // Extreme: marginal. The typical racer roughly breaks even; a real fraction go backwards.
     let med = sim.pct(50) as f32;
     assert!(
         (0.7 * start..=1.3 * start).contains(&med),
-        "Simulation median {med}"
+        "Extreme median {med}"
     );
     let mean = sim.mean() as f32;
     assert!(
         (0.7 * start..=1.3 * start).contains(&mean),
-        "Simulation mean {mean}"
+        "Extreme mean {mean}"
     );
-    assert!(sim.pct(25) < sim.start, "Simulation p25 should be a loss");
+    assert!(sim.pct(25) < sim.start, "Extreme p25 should be a loss");
     assert!(sim.pct(50) as f32 <= 0.6 * arc.pct(50) as f32);
 }
 
 #[test]
 fn careers_are_deterministic() {
     let e = Economy::embedded();
-    for mode in [DamageMode::Arcade, DamageMode::Simulation] {
+    for mode in [
+        DamageMode::Arcade,
+        DamageMode::Simulation,
+        DamageMode::Extreme,
+    ] {
         let a = simulate_career(&e, &CareerConfig::mid_skill(mode, 11));
         let b = simulate_career(&e, &CareerConfig::mid_skill(mode, 11));
         assert_eq!(a, b);
@@ -109,7 +114,7 @@ fn careers_are_deterministic() {
 }
 
 /// The same 20-night career on each street-racing roster car (prices from `data/cars`).
-/// Arcade must stay solvent on every car; Simulation is reported only (it is meant to be
+/// Arcade must stay solvent on every car; Extreme is reported only (it is meant to be
 /// marginal, and expensive cars are meant to be riskier).
 #[test]
 fn twenty_nights_on_roster_cars() {
@@ -130,7 +135,7 @@ fn twenty_nights_on_roster_cars() {
         let car = wp_contracts::load_car(root.join(format!("{id}.json"))).unwrap();
         let spec = wp_economy::CarSpec::from(&car.def);
         let mut line = format!("{id:14}");
-        for mode in [DamageMode::Arcade, DamageMode::Simulation] {
+        for mode in [DamageMode::Arcade, DamageMode::Extreme] {
             let mut reports: Vec<CareerReport> = (1..=32)
                 .map(|s| {
                     let mut cfg = CareerConfig::mid_skill(mode, s);
