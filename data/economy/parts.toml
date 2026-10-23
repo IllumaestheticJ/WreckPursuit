@@ -16,6 +16,14 @@
 #               damage price table prices the others)
 #   optional    no stock part: the slot is empty on a stock car and only takes aftermarket
 #               parts (a turbo, a wing)
+#   parent      the assembly slot this part lives inside (engine internals: parent = "engine").
+#               It leaves with the assembly and can be worked on in the car or on the stand.
+#               Stock internals belong to an engine family (the stock engine's car model, or the
+#               swap engine's mod id) and fit only that family.
+#   damage_share  how much of the assembly's damage this part takes as wear (wear rises by
+#               damage_share x the rise in the assembly's repair-line severity)
+#   torque_loss fraction of engine torque lost when the part is fully worn
+#   wear_limit  most wear the part can have for the assembly to count as rebuilt (default 0.05)
 #
 # Mod lines that are not in any slot (paint, vinyls, tyre width, brake pads, gadgets...) stay plain
 # upgrades bought through the mod tree.
@@ -242,22 +250,182 @@ blocked_by = ["intake"]
 stock_price = 300
 
 [[slot]]
-id = "engine_internals"
-name = "Engine internals"
-group = "Engine"
-lines = ["internals"]
-required = true
-blocked_by = ["intake", "exhaust", "turbo"]
-stock_price = 1400
-
-[[slot]]
 id = "engine"
-name = "Engine"
+name = "Engine block"
 group = "Engine"
 repair = { Component = "Engine" }
 lines = ["swap"]
 required = true
-blocked_by = ["radiator", "intake", "exhaust", "turbo", "fuel_system", "engine_internals", "gearbox"]
+blocked_by = ["radiator", "intake", "exhaust", "turbo", "fuel_system", "gearbox"]
+damage_share = 0.4
+torque_loss = 0.3
+wear_limit = 0.5
+
+# Engine internals: parts inside the engine (parent = "engine"). They come out with the engine
+# and can be stripped on the engine stand, or one by one while it is in the car.
+
+[[slot]]
+id = "intake_manifold"
+name = "Intake manifold"
+group = "Engine"
+parent = "engine"
+lines = ["intake_manifold"]
+required = true
+blocked_by = ["intake"]
+stock_price = 240
+damage_share = 0.3
+torque_loss = 0.1
+
+[[slot]]
+id = "throttle_body"
+name = "Throttle body"
+group = "Engine"
+parent = "engine"
+lines = ["throttle_body"]
+required = true
+blocked_by = ["intake"]
+stock_price = 160
+damage_share = 0.3
+torque_loss = 0.1
+
+[[slot]]
+id = "exhaust_manifold"
+name = "Exhaust manifold"
+group = "Engine"
+parent = "engine"
+lines = ["headers"]
+required = true
+blocked_by = ["exhaust", "turbo"]
+stock_price = 260
+damage_share = 0.5
+torque_loss = 0.1
+
+[[slot]]
+id = "valve_cover"
+name = "Valve cover"
+group = "Engine"
+parent = "engine"
+required = true
+blocked_by = ["intake_manifold"]
+stock_price = 90
+damage_share = 0.4
+
+[[slot]]
+id = "timing"
+name = "Timing belt and gears"
+group = "Engine"
+parent = "engine"
+lines = ["timing"]
+required = true
+stock_price = 180
+damage_share = 0.9
+torque_loss = 0.25
+
+[[slot]]
+id = "camshafts"
+name = "Camshafts"
+group = "Engine"
+parent = "engine"
+lines = ["camshaft"]
+required = true
+blocked_by = ["valve_cover", "timing"]
+stock_price = 450
+damage_share = 0.5
+torque_loss = 0.15
+
+[[slot]]
+id = "valvetrain"
+name = "Valves and springs"
+group = "Engine"
+parent = "engine"
+lines = ["valvetrain"]
+required = true
+blocked_by = ["camshafts"]
+stock_price = 380
+damage_share = 1.0
+torque_loss = 0.25
+
+[[slot]]
+id = "cylinder_head"
+name = "Cylinder head"
+group = "Engine"
+parent = "engine"
+lines = ["head"]
+required = true
+blocked_by = ["intake_manifold", "throttle_body", "exhaust_manifold", "camshafts", "valvetrain"]
+stock_price = 900
+damage_share = 0.6
+torque_loss = 0.2
+
+[[slot]]
+id = "head_gasket"
+name = "Head gasket"
+group = "Engine"
+parent = "engine"
+lines = ["head_gasket"]
+required = true
+blocked_by = ["cylinder_head"]
+stock_price = 120
+damage_share = 1.2
+torque_loss = 0.3
+
+[[slot]]
+id = "oil_pan"
+name = "Oil pan"
+group = "Engine"
+parent = "engine"
+required = true
+stock_price = 140
+damage_share = 1.3
+torque_loss = 0.05
+
+[[slot]]
+id = "oil_pump"
+name = "Oil pump"
+group = "Engine"
+parent = "engine"
+lines = ["oil_pump"]
+required = true
+blocked_by = ["oil_pan"]
+stock_price = 260
+damage_share = 0.8
+torque_loss = 0.1
+
+[[slot]]
+id = "pistons"
+name = "Pistons and rings"
+group = "Engine"
+parent = "engine"
+lines = ["internals"]
+required = true
+blocked_by = ["head_gasket"]
+stock_price = 800
+damage_share = 0.9
+torque_loss = 0.35
+
+[[slot]]
+id = "con_rods"
+name = "Connecting rods"
+group = "Engine"
+parent = "engine"
+lines = ["rods"]
+required = true
+blocked_by = ["oil_pan", "pistons"]
+stock_price = 700
+damage_share = 0.7
+torque_loss = 0.2
+
+[[slot]]
+id = "crankshaft"
+name = "Crankshaft"
+group = "Engine"
+parent = "engine"
+lines = ["crank"]
+required = true
+blocked_by = ["con_rods", "oil_pump", "timing", "flywheel"]
+stock_price = 1100
+damage_share = 0.5
+torque_loss = 0.2
 
 [[slot]]
 id = "ecu"
@@ -288,6 +456,7 @@ blocked_by = ["driveshaft"]
 id = "clutch"
 name = "Clutch"
 group = "Drivetrain"
+parent = "engine"
 lines = ["clutch"]
 required = true
 blocked_by = ["gearbox"]
@@ -297,6 +466,7 @@ stock_price = 320
 id = "flywheel"
 name = "Flywheel"
 group = "Drivetrain"
+parent = "engine"
 lines = ["flywheel"]
 required = true
 blocked_by = ["clutch"]
