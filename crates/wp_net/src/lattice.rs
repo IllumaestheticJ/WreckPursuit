@@ -391,7 +391,7 @@ mod tests {
         use wp_contracts::DamageSim as D;
         let dir = crate::testkit::repo_data_dir();
         let car = wp_contracts::load_car(dir.join("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(dir.join("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(dir.join("modes/sim.toml")).unwrap();
         let mut full = wp_damage::DamageModel::new(&car.lattice, &car.materials);
         let mut filtered = wp_damage::DamageModel::new(&car.lattice, &car.materials);
         let tuning = full.tuning().clone();

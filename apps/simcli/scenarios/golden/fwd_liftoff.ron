@@ -3,7 +3,7 @@
 (
     name: "golden_fwd_liftoff",
     seed: 101,
-    mode: Arcade,
+    mode: Simulation,
     // No aids, but an automatic gearbox so the cruise run-up can reach 25 m/s.
     assists: custom((abs: false, tcs: false, esc: false, steer_speed_sensitivity: 0.0,
         countersteer_help: 0.0, throttle_filter: 0.0, brake_filter: 0.0, auto_gears: true,

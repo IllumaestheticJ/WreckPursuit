@@ -1,4 +1,4 @@
-# simcli hashes scenario=jam_pursuit_grid systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
+# simcli hashes scenario=jam_pursuit_grid systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
 2400 ed32494f32fbb48e
 4800 37058ea536749d18
 7200 77780d2c7335d09c

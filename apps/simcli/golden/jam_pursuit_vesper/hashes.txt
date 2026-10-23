@@ -1,4 +1,4 @@
-# simcli hashes scenario=jam_pursuit_vesper systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
+# simcli hashes scenario=jam_pursuit_vesper systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
 2400 1470f4491a1997d1
 4800 bf2f3c76f00491ac
 7200 888bbdbe2d5eb633

@@ -1,12 +1,12 @@
-//! Damage mode tables (`ModeTable`, `data/modes/{arcade,sim}.toml`). Both modes use the same
-//! damage code; only these numbers differ.
+//! Damage mode tables (`ModeTable`, `data/modes/{arcade,sim,extreme}.toml`). Every mode uses
+//! the same damage code; only these numbers differ.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::DamageMode;
 
-/// Scalars that turn the single damage code path into Arcade or Simulation behaviour.
+/// Scalars that turn the single damage code path into Arcade, Simulation or Extreme behaviour.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ModeTable {
@@ -35,4 +35,14 @@ pub struct ModeTable {
     pub engine_kill_on_total_loss: bool,
     /// If true global health is derived from structural intrusion (in addition to components).
     pub global_health_from_intrusion: bool,
+    /// Multiplier on the contact impulses that reach the damage model of *racer* cars (the
+    /// player's racer and AI racers). Traffic and police (AI or player-driven) always take
+    /// 1.0. Arcade uses 0.25, which leaves racers about 20 % of the damage (the lattice takes
+    /// the first part of a hit elastically); omitted = 1.0.
+    #[serde(default = "one")]
+    pub racer_damage_scale: f32,
+}
+
+fn one() -> f32 {
+    1.0
 }

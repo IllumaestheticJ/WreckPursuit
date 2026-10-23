@@ -5,7 +5,7 @@
 (
     name: "golden_frontal_56kmh",
     seed: 103,
-    mode: Simulation,
+    mode: Extreme,
     assists: ai,
     entities: [
         (id: "car", car: "debug_sedan", speed_mps: 15.56, driver: cruise(target_mps: 15.56, until_s: 1.0)),

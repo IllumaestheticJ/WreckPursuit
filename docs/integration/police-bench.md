@@ -64,8 +64,9 @@ Not in the browser yet (see Known gaps).
   - `--full` (all 72 cells), `--seeds N` (default 8), `--duration S` (default 300),
     `--threads N` (default: all cores);
   - filters `--city vesper,grid`, `--phase day,night`, `--weather clear,rain`, `--level 1,2,3`,
-    `--skill casual,good,expert`; `--mode arcade|simulation` (default Arcade; police AI is the
-    same in both, only damage differs);
+    `--skill casual,good,expert`; `--mode arcade|simulation|extreme` (default Simulation, which
+    is the table the baselines were measured in: the old Arcade, renamed by contract v0.4.0;
+    police AI is the same in every mode, only damage differs);
   - `--label TEXT` (report title), `--out FILE.md` (default
     `docs/integration/police-bench-results.md`) or `--no-write`, `--json FILE` (every run's
     `RunMetrics`).
@@ -172,8 +173,9 @@ the first pursuit end, or after `--duration` (`TimeoutInPursuit` / `NeverEngaged
   civilians stopped for sirens) are where most stops happen; a player could do better there.
 - **The start is cold** (wanted, unseen, central). Response time is therefore measured from
   "already wanted somewhere in the core" and not from a specific offence.
-- **One car each way** (evader `debug_coupe`, police `sentinel_cruiser`), Arcade damage by
-  default. `--mode simulation` exists but was not baselined.
+- **One car each way** (evader `debug_coupe`, police `sentinel_cruiser`), Simulation damage by
+  default (the old Arcade table, contract v0.4.0). `--mode extreme` (the old Simulation) and the
+  new `--mode arcade` exist but were not baselined.
 - **`stuck/min` counts unstick records**, not stuck episodes; compare it only with itself.
 - **Pre-existing failure, not from this branch:** on `lead/round12`,
   `apps/simcli/scenarios/police/tunnel_escape_founders_cut.ron` fails (`Captured at 136.4 s`

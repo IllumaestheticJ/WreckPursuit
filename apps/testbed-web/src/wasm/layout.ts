@@ -75,6 +75,8 @@ export const INPUT_FLAG = {
 
 /** world_info() offsets. */
 export const W = { tick: 0, hours: 1, night: 2, mode: 3, replay: 4, recording: 5, city: 6, scripted: 7 } as const;
+/** world_info()[W.mode] value (0 / 1 / 2) to the damage mode name. */
+export const MODE_NAMES = ["Arcade", "Simulation", "Extreme"] as const;
 
 /** Floats per head in signal_heads() (crates/wp_wasm/src/signals.rs). */
 export const SIGNAL_HEAD_STRIDE = 10;
@@ -180,7 +182,7 @@ export const PROP_STRIDE = 11;
 /** Offsets inside one props_static() record: kind, box-centre pos xyz, rot quaternion xyzw, half extents xyz. */
 export const P = { kind: 0, pos: 1, rot: 4, half: 8 } as const;
 /** props_static() kind codes. */
-export const PROP_KIND = { parkedCar: 0, cone: 1 } as const;
+export const PROP_KIND = { parkedCar: 0, cone: 1, krail: 2 } as const;
 /** Floats per record in props_moved(): [prop index, x, y, z, qx, qy, qz, qw]. */
 export const PROP_MOVED_STRIDE = 8;
 /** Floats per record in parked_wrecks() (crates/wp_wasm/src/props.rs). */

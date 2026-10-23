@@ -11,7 +11,7 @@
     city: file("city/procedural_12x12.road.json"),
     time_of_day_h: 12.0,
     time_ratio: 1.0,
-    mode: Arcade,
+    mode: Simulation,
     police_presence: 1.0,
     // As in the game, a capture ends the run: the racer starts again from the route start at
     // its starting heat (otherwise it stands in the road and the scene never clears).

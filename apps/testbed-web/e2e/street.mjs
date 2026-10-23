@@ -5,7 +5,7 @@
 // the roster has 13 racers in 4 levels (colours from street_status().levels), 8 out by day and 13
 // at night (row 152; the rest in the lockup, off the map), drawn as level-coloured markers on the UI kit's
 // minimap and full city map (with a legend group) and wearing their level colour on their car;
-// honking (the rebindable horn: Q / pad L3) next to a racer opens the map as the finish picker;
+// honking (the rebindable horn: Q / pad L3) right behind a racer opens the map as the finish picker;
 // picking B on the map (mouse click / pad crosshair + A) previews a raceable route; the bet
 // slider / pad LB-RB sets the stake; by day extra waypoints are added, re-ordered and removed on the
 // map (row 151: numbered flags, the route through them, gates in the world); a wanted player cannot

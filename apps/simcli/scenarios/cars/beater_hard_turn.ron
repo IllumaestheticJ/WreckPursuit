@@ -3,7 +3,7 @@
 // give, it does not tip (no wheel-off-ground stretch longer than a hop) and keeps moving.
 (
     name: "cars_beater_hard_turn",
-    mode: Arcade,
+    mode: Simulation,
     seed: 3,
     duration_s: 10.0,
     entities: [
