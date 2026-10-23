@@ -374,6 +374,9 @@ struct Racer {
     /// beside it I am working towards (reverse with the nose swinging out, creep forward,
     /// repeat), and how long I have been at it, s.
     escape: Option<(Who, f32, f32)>,
+    /// Finished where the corridor ends at the line, and rolled clear past its end: parked for
+    /// good (never drives on along the corridor again).
+    line_cleared: bool,
     /// Stuck and wanting to back out, but something stands right behind me (the car there
     /// backs off for me).
     wants_room: bool,
@@ -824,6 +827,7 @@ impl Field {
                 pass_blocked_s: 0.0,
                 stuck_s: 0.0,
                 escape: None,
+                line_cleared: false,
                 wants_room: false,
                 stable_s: 0.0,
                 defended: false,
@@ -1936,9 +1940,17 @@ fn decide_racer(
         // short of it until the finish window closed (s95 seed 3, 15-17 rejoins each).
         let no_run_off =
             !corridor.closed && finish_m.is_none_or(|f| f >= corridor.length_m - NO_RUN_OFF_M);
-        let clearing_line = matches!(r.status, RacerStatus::Finished { .. })
-            && no_run_off
-            && r.s_rel < corridor.length_m + FINISH_CLEAR_M;
+        // How far past the end of the corridor I am, straight along its last direction (not the
+        // corridor position: past a dead end at the top of a switchback climb that snaps back
+        // onto a lower hairpin, and a finisher drove back down into the field — Hollins).
+        let end_xy = geom::xy(corridor.point(corridor.length_m, 0.0));
+        let end_t = corridor.samples[corridor.samples.len() - 1].tangent;
+        let beyond = geom::dot(geom::sub(r.pos, end_xy), end_t);
+        let finished_dead_end = matches!(r.status, RacerStatus::Finished { .. }) && no_run_off;
+        if finished_dead_end && beyond >= FINISH_CLEAR_M {
+            r.line_cleared = true;
+        }
+        let clearing_line = finished_dead_end && !r.line_cleared;
         r.wide_on = match wide {
             Some((wl, wp)) if !fleeing && !finished_or_dq && r.flight.is_none() => {
                 let a_brk = wp.a_brake.max(3.0);
@@ -2169,9 +2181,10 @@ fn decide_racer(
                 !on_grid && (r.n < road_lo.min(pass_lo) - 1.0 || r.n > road_hi.max(pass_hi) + 1.0);
             // Finished and past the open end of the corridor (clearing the finish line): that
             // is meant to be off it, not a reason to drive back to it.
-            let past_end = matches!(r.status, RacerStatus::Finished { .. })
-                && !corridor.closed
-                && r.s_rel > corridor.length_m - 1.0;
+            let past_end = finished_dead_end
+                || (matches!(r.status, RacerStatus::Finished { .. })
+                    && !corridor.closed
+                    && r.s_rel > corridor.length_m - 1.0);
             if r.tactic != Tactic::Reverse
                 && r.tactic != Tactic::Rejoin
                 && !past_end
@@ -2877,6 +2890,8 @@ fn decide_racer(
         // once past its end where it ends at the finish line (`clearing_line`).
         if clearing_line {
             cap_to(&mut v_target, FINISH_CLEAR_MPS, SpeedLimit::Mode);
+        } else if finished_dead_end {
+            r.tactic = Tactic::Park;
         } else if matches!(r.status, RacerStatus::Finished { .. })
             && !corridor.closed
             && r.s > corridor.length_m - 25.0
@@ -3302,14 +3317,14 @@ fn decide_racer(
         let mut target = corridor.point(s_t, n_t);
         // Clearing the finish line past the end of the corridor: straight on along its last
         // direction.
-        if clearing_line && r.s_rel + ld > corridor.length_m {
+        if clearing_line && beyond + ld > 0.0 {
             // Towards the kerb on my side as I roll on, round whatever stands at the end of
             // the road straight ahead (the Knob lot: a broken-down car in the entrance).
             let (_, kerb) = limits(corridor.length_m);
             let end = corridor.point(corridor.length_m, kerb);
             let t = corridor.samples[corridor.samples.len() - 1].tangent;
             // From where I am past the end (`s` stops at the end; `s_rel` runs on).
-            let past = r.s_rel + ld - corridor.length_m;
+            let past = (beyond + ld).max(0.0);
             target = [end[0] + t[0] * past, end[1] + t[1] * past, end[2]];
         }
         let pos_lag = geom::add(r.pos, geom::scale(r.vel, STEER_LAG_S));
