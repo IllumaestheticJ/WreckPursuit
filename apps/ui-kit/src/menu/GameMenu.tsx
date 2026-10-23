@@ -17,7 +17,7 @@
 import type { ComponentChildren } from "preact";
 import { Fragment, render } from "preact";
 import { keyAction, PadNav, stepIndex, type NavAction } from "./nav";
-import { ASSIST_LEVELS, DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type AssistLevel, type GameSettings, type RadioFilter, type SettingsStorage, type Volumes } from "./settings";
+import { ASSIST_LEVELS, DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type AssistLevel, type GameSettings, type HudPreset, type RadioFilter, type SettingsStorage, type Volumes } from "./settings";
 import { CONTROL_DEVICES, CONTROL_RANGES, defaultDeviceControls, type ControlDevice, type DeviceControls, type InputProbe } from "./controls";
 import { paintInputBars } from "./bars";
 import "../ui/theme.css";
@@ -26,13 +26,41 @@ import "./menu.css";
 /** What the main menu can start. */
 export type PlayChoice = "chase" | "chaseRain" | "races" | "touge" | "free" | "garage";
 
-/** Which screen is showing ("closed" = none). */
-export type MenuScreen = "closed" | "main" | "pause" | "settings";
+/** Which screen is showing ("closed" = none; "roam" = free roam: city + mode). */
+export type MenuScreen = "closed" | "main" | "pause" | "settings" | "roam";
+
+/** Options of a main-menu start. */
+export interface PlayOptions {
+  /** City id for free drive / night runs (from `GameMenuHost.cities`). */
+  city?: string;
+}
+
+/** A city free roam can start in (title → Free roam). */
+export interface CityChoice {
+  /** Host id (e.g. "vesper_v2"). */
+  id: string;
+  label: string;
+  /** One line about it. */
+  hint: string;
+}
+
+/** The title's "Continue career" line. */
+export interface CareerSummary {
+  /** e.g. "Continue career" / "New career". */
+  label: string;
+  /** e.g. "Night 3 · $12,400 · Kestrel TS". */
+  detail: string;
+}
 
 /** What the host does for the menu. */
 export interface GameMenuHost {
-  /** Main menu choice: start that session (the menu has already closed). */
-  play(choice: PlayChoice): void;
+  /** Main menu choice: start that session (the menu has already closed). Free roam passes the
+   * chosen city. */
+  play(choice: PlayChoice, opts?: PlayOptions): void;
+  /** Cities for Title → Free roam (none: the roam screen only picks the mode). */
+  cities?(): CityChoice[];
+  /** The title's career line (Continue career / New career); default "Garage". */
+  career?(): CareerSummary | null;
   /** Pause → Restart: the same session again (the menu has already closed). */
   restart(): void;
   /** Pause → Garage (career). The menu has already closed. */
@@ -166,7 +194,12 @@ export class GameMenu {
 
   /** Title screen. */
   openMain(): void {
-    this.show("main", "gm-play-chase");
+    this.show("main", "gm-play-garage");
+  }
+
+  /** Title → Free roam: pick the city and the mode. */
+  openRoam(): void {
+    this.show("roam", null);
   }
 
   /** Pause menu (pauses the host via onOpenChange). */
@@ -342,6 +375,7 @@ export class GameMenu {
 
   private back(): void {
     if (this.screen === "settings") this.show(this.settingsFrom, "gm-settings");
+    else if (this.screen === "roam") this.show("main", "gm-play-free");
     else if (this.screen === "pause") this.close();
   }
 
@@ -389,9 +423,25 @@ export class GameMenu {
       body = (
         <MainScreen
           hints={h.keyHints ? h.keyHints() : DEFAULT_KEY_HINTS}
+          career={h.career ? h.career() : null}
+          developer={this.settings.developer}
           play={(c) => this.act(() => h.play(c))}
+          roam={() => this.openRoam()}
           settings={() => this.openSettings("main")}
           controls={() => this.controls()}
+          toggleDeveloper={() => this.change({ ...this.settings, developer: !this.settings.developer })}
+        />
+      );
+    } else if (this.screen === "roam") {
+      const cities = h.cities ? h.cities() : [];
+      const city = cities.find((c) => c.id === this.settings.city)?.id ?? cities[0]?.id;
+      body = (
+        <RoamScreen
+          cities={cities}
+          city={city}
+          pick={(id) => this.change({ ...this.settings, city: id })}
+          play={(c) => this.act(() => h.play(c, city ? { city } : {}))}
+          back={() => this.back()}
         />
       );
     } else if (this.screen === "pause") {
@@ -445,6 +495,13 @@ export class GameMenu {
 
 /** Mount the game menu into `parent` (a positioned element). Closed until `openMain` / `openPause`. */
 
+/** One-line hint per HUD preset. */
+const HUD_HINT: Record<HudPreset, string> = {
+  full: "Speed, minimap, police, race and radio",
+  minimal: "Speed and prompts only",
+  off: "Prompts only (for recording)",
+};
+
 /** One-line hint per damage mode (Settings has the full table). */
 const DAMAGE_HINT: Record<"Arcade" | "Simulation" | "Extreme", string> = {
   Arcade: "Forgiving: racers take 20 % damage; traffic and police take full damage",
@@ -492,28 +549,85 @@ function Brand(props: { kicker: string }) {
   );
 }
 
-const PLAY: { id: PlayChoice; label: string; hint: string }[] = [
-  { id: "chase", label: "Night run", hint: "Night in Port Vesper. You're speeding; the police will come." },
-  { id: "chaseRain", label: "Rainy night", hint: "Same chase on a soaked road" },
-  { id: "races", label: "Street races", hint: "Races against AI drivers" },
-  { id: "touge", label: "Touge battles", hint: "One-on-one down sealed mountain passes. Bets and pink slips with rep" },
+/** Title → Free roam modes. */
+const ROAM: { id: PlayChoice; label: string; hint: string }[] = [
   { id: "free", label: "Free drive", hint: "Explore the city with traffic" },
-  { id: "garage", label: "Garage", hint: "Your career: cars, repairs, mods" },
+  { id: "chase", label: "Night run", hint: "Night, and you're speeding: the police will come" },
+  { id: "chaseRain", label: "Rainy night", hint: "The same chase on a soaked road" },
 ];
 
-function MainScreen(props: { hints: KeyHint[]; play: (c: PlayChoice) => void; settings: () => void; controls: () => void }) {
+/** The title's front door: career, free roam, races, touge, settings, controls, developer. */
+function MainScreen(props: {
+  hints: KeyHint[];
+  career: CareerSummary | null;
+  developer: boolean;
+  play: (c: PlayChoice) => void;
+  roam: () => void;
+  settings: () => void;
+  controls: () => void;
+  toggleDeveloper: () => void;
+}) {
   return (
     <div class="wp-gm-card wp-gm-main" role="dialog" aria-label="Main menu">
       <Brand kicker="// PORT VESPER · NIGHT SHIFT" />
       <p class="wp-gm-tag">Street racing, soft-body crashes and police chases in a living city.</p>
       <nav class="wp-gm-list" aria-label="Main menu">
-        {PLAY.map((p, i) => (
-          <Item key={p.id} id={`gm-play-${p.id}`} label={p.label} hint={p.hint} primary={i === 0} onClick={() => props.play(p.id)} />
-        ))}
-        <Item id="gm-settings" label="Settings" hint="Graphics · audio · assists · units" onClick={props.settings} />
+        <Item
+          id="gm-play-garage"
+          label={props.career?.label ?? "Garage"}
+          hint={props.career?.detail ?? "Your career: cars, repairs, mods"}
+          primary
+          onClick={() => props.play("garage")}
+        />
+        <Item id="gm-play-free" label="Free roam" hint="Pick a city: free drive, night run or rainy night" onClick={props.roam} />
+        <Item id="gm-play-races" label="Street races" hint="Races against AI drivers" onClick={() => props.play("races")} />
+        <Item id="gm-play-touge" label="Touge battles" hint="One-on-one down sealed mountain passes. Bets and pink slips with rep" onClick={() => props.play("touge")} />
+        <Item id="gm-settings" label="Settings" hint="Graphics · audio · assists · HUD · units" onClick={props.settings} />
         <Item id="gm-controls" label="Controls" hint="Keyboard and gamepad bindings" onClick={props.controls} />
+        <Item
+          id="gm-developer"
+          label={`Developer tools: ${props.developer ? "on" : "off"}`}
+          hint="Scenarios, telemetry, debug layers (also the ` key)"
+          onClick={props.toggleDeveloper}
+        />
       </nav>
       <Keys hints={props.hints} />
+    </div>
+  );
+}
+
+/** Title → Free roam: the city (one line each) and the mode. */
+function RoamScreen(props: { cities: CityChoice[]; city: string | undefined; pick: (id: string) => void; play: (c: PlayChoice) => void; back: () => void }) {
+  return (
+    <div class="wp-gm-card wp-gm-main" role="dialog" aria-label="Free roam">
+      <Brand kicker="// FREE ROAM" />
+      {props.cities.length > 0 && (
+        <nav class="wp-gm-list" aria-label="City" data-testid="gm-cities">
+          {props.cities.map((c) => (
+            <button
+              type="button"
+              key={c.id}
+              id={`gm-city-${c.id}`}
+              data-nav
+              aria-pressed={c.id === props.city}
+              class={`wp-gm-item wp-gm-city${c.id === props.city ? " is-primary" : ""}`}
+              onClick={() => props.pick(c.id)}
+            >
+              <span class="wp-gm-item-label">
+                {c.id === props.city ? "● " : "○ "}
+                {c.label}
+              </span>
+              <small>{c.hint}</small>
+            </button>
+          ))}
+        </nav>
+      )}
+      <nav class="wp-gm-list" aria-label="Mode">
+        {ROAM.map((r) => (
+          <Item key={r.id} id={`gm-roam-${r.id}`} label={r.label} hint={r.hint} onClick={() => props.play(r.id)} />
+        ))}
+        <Item id="gm-roam-back" label="Back" onClick={props.back} />
+      </nav>
     </div>
   );
 }
@@ -761,6 +875,19 @@ function SettingsScreen(props: {
               { id: "Extreme", label: "Extreme" },
             ]}
             onChange={(damageMode) => change({ ...s, damageMode })}
+          />
+        </Row>
+        <Row label="HUD" hint={HUD_HINT[s.hudPreset]}>
+          <Cycle
+            id="gm-hud"
+            label="HUD"
+            value={s.hudPreset}
+            options={[
+              { id: "full", label: "Full" },
+              { id: "minimal", label: "Minimal" },
+              { id: "off", label: "Off" },
+            ]}
+            onChange={(hudPreset) => change({ ...s, hudPreset })}
           />
         </Row>
         <Row label="Speed units">

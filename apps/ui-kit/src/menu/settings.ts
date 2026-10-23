@@ -85,9 +85,16 @@ export interface GameSettings {
   camera: CameraId;
   /** Show the testbed's developer panels (scenario menu, telemetry, feeds). */
   developer: boolean;
+  /** City for free roam / night runs (host id; "" = the host's default). */
+  city: string;
+  /** How much in-game HUD: everything, speed + prompts, or prompts only (recording). */
+  hudPreset: HudPreset;
   /** Input shaping per device (dead zones, saturation, sensitivity; see `controls.ts`). */
   controls: Record<ControlDevice, DeviceControls>;
 }
+
+/** HUD presets (Settings → HUD): "full", "minimal" (speed + prompts), "off" (prompts only). */
+export type HudPreset = "full" | "minimal" | "off";
 
 /** Which police radio lines are played (row 144). */
 export type RadioFilter = "all" | "important";
@@ -109,6 +116,8 @@ export function defaultGameSettings(developer = true): GameSettings {
     units: "kmh",
     camera: "",
     developer,
+    city: "",
+    hudPreset: "full",
     controls: defaultControls(),
   };
 }
@@ -166,6 +175,8 @@ export function normalizeSettings(raw: unknown, base: GameSettings): GameSetting
     units: oneOf(r.units, ["kmh", "mph"] as const, base.units),
     camera: typeof r.camera === "string" && r.camera.length < 32 ? r.camera : base.camera,
     developer: bool(r.developer, base.developer),
+    city: typeof r.city === "string" && r.city.length < 40 ? r.city : base.city,
+    hudPreset: oneOf(r.hudPreset, ["full", "minimal", "off"] as const, base.hudPreset),
     controls: normalizeControls(r.controls, base.controls),
   };
 }
