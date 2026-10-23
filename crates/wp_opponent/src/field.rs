@@ -665,9 +665,11 @@ const NO_RUN_OFF_M: f32 = 5.0;
 /// (was 0.25): its softer, slower-answering car runs a little wider of its line, and on the
 /// narrow Hollins lanes (±1.45 m) that was the kerb (walls 2 → 124 at s50, 16 seeds).
 const EDGE_MARGIN_M: f32 = 0.5;
-/// A car pulling over (yielding, out of the race) stops after this long rolling towards the
-/// kerb, wherever it is, s.
+/// A car pulling over (yielding, out of the race) that has not reached the kerb after this
+/// long stops short of it, as soon as it is clear of junctions and tight bends, s.
 const PULL_OVER_MAX_S: f32 = 8.0;
+/// A car pulling over stops after this long, wherever it is (it always comes to a stop), s.
+const PULL_OVER_HARD_MAX_S: f32 = 30.0;
 /// Room kept to the kerb when pulled over (parked, yielding, out of the race), m.
 const PARK_EDGE_MARGIN_M: f32 = 0.25;
 /// Room kept to the edge of the lanes while passing, m (the pre-G racing margin).
@@ -2896,11 +2898,10 @@ fn decide_racer(
         // once past its end where it ends at the finish line (`clearing_line`).
         if clearing_line {
             cap_to(&mut v_target, FINISH_CLEAR_MPS, SpeedLimit::Mode);
-        } else if finished_dead_end {
-            r.tactic = Tactic::Park;
-        } else if matches!(r.status, RacerStatus::Finished { .. })
-            && !corridor.closed
-            && r.s > corridor.length_m - 25.0
+        } else if finished_dead_end
+            || (matches!(r.status, RacerStatus::Finished { .. })
+                && !corridor.closed
+                && r.s > corridor.length_m - 25.0)
         {
             r.tactic = Tactic::Park;
         }
@@ -2927,17 +2928,20 @@ fn decide_racer(
                     && (-5..=10).any(|j| {
                         line.curvature[corridor.wrap(i0 + j)].abs() > 1.0 / PARK_MIN_RADIUS_M
                     });
-                (r.n - kerb_hi).abs() > 0.5 || near_junction || in_bend
+                let off_kerb = (r.n - kerb_hi).abs() > 0.5;
+                // Whatever stops it reaching the kerb (flat tyres from a spike strip, heavy
+                // damage), after `PULL_OVER_MAX_S` it stops short of the kerb, once clear of
+                // junctions and bends (row 165: a busted racer on four deflated tyres rolled
+                // on at 6 m/s for the rest of the chase); after `PULL_OVER_HARD_MAX_S` it
+                // stops wherever it is.
+                (off_kerb && r.pull_over_s < PULL_OVER_MAX_S) || near_junction || in_bend
             };
-        // Whatever stops it reaching the kerb (flat tyres from a spike strip, heavy damage), a
-        // car pulling over stops after `PULL_OVER_MAX_S` (row 165: a busted racer on four
-        // deflated tyres rolled on at 6 m/s for the rest of the chase).
         if pulling_over {
             r.pull_over_s += dt;
         } else if !matches!(r.tactic, Tactic::Park | Tactic::Yield) {
             r.pull_over_s = 0.0;
         }
-        let pulling_over = pulling_over && r.pull_over_s < PULL_OVER_MAX_S;
+        let pulling_over = pulling_over && r.pull_over_s < PULL_OVER_HARD_MAX_S;
         match r.tactic {
             // Rejoin at a crawl when pointing the wrong way, briskly when merely beside the
             // corridor and pointing along it.
