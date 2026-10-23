@@ -163,7 +163,17 @@ turns the unit around; 8 s after the first event, despawn once out of every race
 call it had goes out again; a patrol is refilled out of sight). `set_unstick_recovery(false)`
 keeps detection and logging only, for measurements. `stats().responses` logs every trip to a
 call: spawned or not, start and road distance, stuck events, outcome (`Arrived`, `FellBehind`,
-`Stuck(cause)`, `Wrecked`, `CallEnded`).
+`Stuck(cause)`, `NoProgress`, `Wrecked`, `CallEnded`).
+
+### Getting nowhere (`progress.rs`, every AI ground unit)
+Catches units that move but never get anywhere (lost, circling, outrun by the racer). Each
+unit's job has a goal: the racer it pursues or was called about, the crash it was sent to, its
+intercept point or patrol destination. Getting 25 m closer than its best since the job (or the
+patrol leg) began, or being within 40 m of the goal, is progress; an idle unit must drive 40 m
+from where it last did. 30 s without progress → despawn once out of every racer's sight and
+≥ `despawn_min_m` away (call redispatched, patrol refilled out of sight; counted in
+`stats().no_progress_despawns`). Player, tool (roadblock / spike), helicopter and out-of-service
+units are exempt. `set_unstick_recovery(false)` switches the despawn off too.
 
 ### Pursuit (`pursuit.rs`, `unit.rs`)
 - Pursuers within `CLOSE_LOS_M` (70 m) of the racer **with line of sight** drive the racer's

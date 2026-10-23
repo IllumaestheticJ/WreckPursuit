@@ -1045,3 +1045,25 @@ once passed.
   racer's line (one joined while still turning in from its side road).
 - Test: `tests/system.rs::nearby_patrols_sent_as_backup_also_wait_ahead` (default pool; two
   patrol units set up ahead and join facing the racer's way, heading · travel 0.96 / 1.00).
+
+## AI units that get nowhere despawn out of sight (owner request, 2026-10-23)
+
+Owner: AI police that are not making meaningful progress and not in view of any racer should
+despawn.
+
+- New `progress.rs`: `ProgressWatch` per unit (`Unit::progress`), updated at think rate by
+  `dispatch::maintain_progress` (right after `maintain_stuck`). Goal per assignment: `Pursue` →
+  racer, `Respond` → reported racer / crash, `Intercept` → point (ambush wait point included),
+  `Patrol` → destination node. Progress = 25 m closer than the best since the job / patrol leg
+  began, or within 40 m of the goal; `Idle` (no goal) = 40 m driven. 30 s without progress →
+  despawn when `may_vanish` (out of every racer's sight, ≥ `despawn_min_m`); in sight it keeps
+  going and is re-checked every think step.
+- The call is handed back (`ResponseOutcome::NoProgress`) and dispatched again; pool patrols are
+  refilled by `maintain_pool`. `PoliceStats::no_progress_despawns` counts them.
+- Exempt: player units, `UnitRole::Tool`, helicopters, wrecked / out-of-service units, parked
+  roadblock / spike assignments. Applies to headless and physical units alike, both damage modes.
+  `set_unstick_recovery(false)` disables the despawn (measurements).
+- Constants in `progress.rs` (`NO_PROGRESS_S`, `GAIN_M`, `ARRIVED_M`, `MOVE_M`), like `stuck.rs`.
+- Tests: `progress::tests::*` (closing in vs. holding distance, arrival / new job / new patrol leg
+  reset, idle shuffling vs. driving).
+- Outside my crate: none.

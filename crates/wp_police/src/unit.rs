@@ -400,6 +400,9 @@ pub struct Unit {
     /// Stuck detection and recovery (physical units, [`crate::stuck`]).
     #[serde(default)]
     pub unstick: crate::stuck::UnstickState,
+    /// Watch for a unit getting nowhere ([`crate::progress`]).
+    #[serde(default)]
+    pub progress: crate::progress::ProgressWatch,
     /// Road route a pursuer is following to the racer (out of its sight), if any.
     #[serde(default)]
     pub chase_route: Option<ChaseRoute>,
@@ -481,6 +484,7 @@ impl Unit {
             controller: None,
             avoid: AvoidState::default(),
             unstick: crate::stuck::UnstickState::default(),
+            progress: crate::progress::ProgressWatch::default(),
             chase_route: None,
             quiet: false,
             vel: [0.0, 0.0],

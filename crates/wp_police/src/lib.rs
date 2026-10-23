@@ -39,6 +39,7 @@ pub mod events;
 pub mod graph;
 pub mod heat;
 pub mod pro;
+pub mod progress;
 pub mod pursuit;
 pub mod radio;
 pub mod scenario;
@@ -190,6 +191,9 @@ pub enum ResponseOutcome {
     FellBehind,
     /// Stuck for good and despawned out of sight; the call went to another unit.
     Stuck(stuck::StuckCause),
+    /// Got no closer for [`progress::NO_PROGRESS_S`] and despawned out of sight; the call
+    /// went to another unit.
+    NoProgress,
     /// Wrecked or out of service on the way.
     Wrecked,
     /// The call ended first (a pursuit started, or it went stale).
@@ -303,6 +307,10 @@ pub struct PoliceStats {
     /// call was handed back (siren off) and they despawn out of sight.
     #[serde(default)]
     pub turn_loops: u32,
+    /// AI units that made no meaningful progress for [`progress::NO_PROGRESS_S`] and despawned
+    /// out of every racer's sight ([`progress`]).
+    #[serde(default)]
+    pub no_progress_despawns: u32,
     /// Ground units spawned after the session start (pool refills, responders,
     /// reinforcements, tool units).
     pub spawns: Vec<SpawnRecord>,
@@ -494,7 +502,8 @@ impl PoliceSystem {
     }
 
     /// Switch stuck recovery (reverse, re-route, respawn) on (default) or off. Off, stuck units
-    /// are still detected and logged in `stats().stuck`: for before/after measurements.
+    /// are still detected and logged in `stats().stuck`, and units getting nowhere
+    /// ([`progress`]) are not despawned: for before/after measurements.
     pub fn set_unstick_recovery(&mut self, on: bool) {
         self.unstick_recovery = on;
     }
