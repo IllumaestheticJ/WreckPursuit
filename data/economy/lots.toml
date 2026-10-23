@@ -1,0 +1,174 @@
+# Car lots: dealerships, used car lots and junkyards (wp_economy::lots). Owned by workstream 08.
+#
+# Every lot restocks each in-game day from a seeded roll of (lot id, day): `slots` parking
+# spaces, each filled with chance `fill_chance` by a roster model the lot carries (class in
+# `classes`, base price in [`min_base_price`, `max_base_price`]). Dealerships show each model at
+# most once, so on a given day some models are simply not on the floor.
+#
+#   Dealership  brand new: full health, new tyres, priced at the New market price × price_scale.
+#   UsedLot     running cars with wear (body dents, tired parts, worn tyres) in the lot's
+#               condition band; priced from the Used market price, lower for rougher cars.
+#   Junkyard    barely running or dead (engine, gearbox, driveshaft or battery), missing panels,
+#               bald or flat tyres. What is wrong under the bonnet is hidden until you buy it.
+#               Sometimes a rare variant (a model with factory / previous-owner mods) turns up.
+#
+# Repairs fix everything the lot car came with except the tyres: tyres are replaced
+# separately (`[tires]`), Repair All never touches them.
+
+[tires]
+# Price of one replacement tyre (fitted), by class.
+price_per_tire = { Beater = 70, Compact = 95, Sport = 190, Muscle = 170, Exotic = 480, Truck = 150, PoliceCruiser = 140, PoliceInterceptor = 200, PoliceSuv = 170 }
+# Grip of a fully bald tyre relative to a new one (tread 0 → this, tread 1 → 1.0, linear).
+bald_grip = 0.72
+# Tread below this is reported as "bald" in the garage.
+bald_below = 0.15
+# Tread lost per hour of driving (0.06 → about 16 hours of driving from new to bald).
+wear_per_hour = 0.06
+
+[[lots]]
+id = "budget_motors"
+name = "Budget Motors"
+kind = "Dealership"
+tier = 1
+district = "Suburb"
+classes = ["Beater", "Compact", "Truck"]
+min_base_price = 0
+max_base_price = 22000
+slots = 5
+fill_chance = 0.75
+price_scale = 1.0
+
+[[lots]]
+id = "harbourline_auto"
+name = "Harbourline Auto"
+kind = "Dealership"
+tier = 2
+district = "Commercial"
+classes = ["Compact", "Sport", "Muscle", "Truck"]
+min_base_price = 20000
+max_base_price = 45000
+slots = 6
+fill_chance = 0.7
+price_scale = 1.03
+
+[[lots]]
+id = "meridian_prestige"
+name = "Meridian Prestige"
+kind = "Dealership"
+tier = 3
+district = "Core"
+classes = ["Sport", "Muscle", "Exotic"]
+min_base_price = 34000
+max_base_price = 1000000
+slots = 4
+fill_chance = 0.6
+price_scale = 1.08
+
+[[lots]]
+id = "lucky_lou_used"
+name = "Lucky Lou's Used Cars"
+kind = "UsedLot"
+tier = 1
+district = "Industrial"
+classes = ["Beater", "Compact", "Sport", "Muscle", "Truck"]
+min_base_price = 0
+max_base_price = 40000
+slots = 8
+fill_chance = 0.7
+price_scale = 0.95
+condition = [0.5, 0.8]
+tread = [0.15, 0.6]
+
+[[lots]]
+id = "certified_preowned"
+name = "Northgate Certified Pre-Owned"
+kind = "UsedLot"
+tier = 2
+district = "Residential"
+classes = ["Compact", "Sport", "Muscle", "Exotic", "Truck"]
+min_base_price = 7000
+max_base_price = 1000000
+slots = 6
+fill_chance = 0.65
+price_scale = 1.0
+condition = [0.8, 0.96]
+tread = [0.5, 0.9]
+
+[[lots]]
+id = "dockside_salvage"
+name = "Dockside Salvage"
+kind = "Junkyard"
+tier = 1
+district = "Port"
+classes = ["Beater", "Compact", "Sport", "Muscle", "Exotic", "Truck"]
+min_base_price = 0
+max_base_price = 1000000
+slots = 10
+fill_chance = 0.6
+price_scale = 1.0
+condition = [0.15, 0.55]
+tread = [0.0, 0.35]
+price_frac = [0.12, 0.28]
+non_running_chance = 0.5
+missing_part_chance = 0.35
+flat_tire_chance = 0.3
+rare_chance = 0.08
+
+[[lots]]
+id = "ridgeback_scrap"
+name = "Ridgeback Scrap & Pull"
+kind = "Junkyard"
+tier = 2
+district = "Industrial"
+classes = ["Beater", "Compact", "Sport", "Muscle", "Truck"]
+min_base_price = 0
+max_base_price = 60000
+slots = 8
+fill_chance = 0.55
+price_scale = 1.0
+condition = [0.25, 0.65]
+tread = [0.05, 0.45]
+price_frac = [0.16, 0.34]
+non_running_chance = 0.35
+missing_part_chance = 0.25
+flat_tire_chance = 0.2
+rare_chance = 0.05
+
+# Rare variants: only ever found in junkyards (a rare roll picks one whose car is in the roster
+# and whose class the yard takes). Their mods are installed as found, and the yard prices them
+# like the plain model: the find is the point.
+[[rare_variants]]
+id = "ironside_440_six_pack"
+def_id = "ironside_440"
+name = "Ironside 440 \"Six Pack\""
+mods = ["engine_intake_2", "engine_exhaust_2", "drivetrain_lsd_1"]
+
+[[rare_variants]]
+id = "shiro_turbo_time_attack"
+def_id = "shiro_turbo"
+name = "Shiro Turbo Time Attack"
+mods = ["susp_coilovers_2", "tires_semi_slick", "weight_strip_1"]
+
+[[rare_variants]]
+id = "kestrel_ts_rally"
+def_id = "kestrel_ts"
+name = "Kestrel TS Rally Homologation"
+mods = ["susp_springs_1", "drivetrain_lsd_1", "prot_skid_plate"]
+
+[[rare_variants]]
+id = "rampart_50_police_auction"
+def_id = "rampart_50"
+name = "Rampart 5.0 Ex-Pursuit"
+mods = ["prot_push_bar", "susp_arb_front", "engine_ecu_1"]
+
+[[rare_variants]]
+id = "fulmine_v10_flood_car"
+def_id = "fulmine_v10"
+name = "Fulmine V10 (flood title)"
+mods = []
+
+[[rare_variants]]
+id = "tansy_13_barn_find"
+def_id = "tansy_13"
+name = "Tansy 1.3 Barn Find"
+mods = ["engine_intake_1", "engine_exhaust_1"]

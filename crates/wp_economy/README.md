@@ -76,11 +76,12 @@ the fee and returns the car with exactly the damage it went in with, to be repai
 | `session` | `EconomySession`: the end-of-run glue for `wp_sim` (sim events + damage reports → `RunResult`) |
 | `payouts` | purses, buy-ins, clean bonus, rep, bounty while wanted, debt rules, pink slips, informants |
 | `mods` | `ModDef`/`ModEffect`, catalog validation, install/uninstall rules, `apply_mods` → modified `VehicleDef` + `LatticeDef` |
+| `lots` | dealerships / used lots / junkyards: `LotTables`, daily `lot_stock`, `Listing` + `ListingWear`, `buy_listing`, tyres (`replace_tires`, `tire_effects`, `wear_tires`) |
 | `garage` | accounts, buy/sell, floor car, install/uninstall, `preview`, valuation, insurance |
 | `estimate` | performance estimator (0–100, top speed, grip, braking) and the class index |
 | `career` | scripted multi-night career used for tuning (the 20-night scenario) |
 
-Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json` (16 packs,
+Data: `data/economy/{prices,stakes,consequences,market,lots}.toml`, `data/mods/*.json` (16 packs,
 106 mods). The damage mode tables in `data/modes/` are read (not owned) for `repair_cost_scale`.
 
 ## Economy design
@@ -154,6 +155,38 @@ Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json
   reports a wanted car raises the carried heat to that level's threshold (browser career).
 - A new career starts with 4 500: a worn beater (1 800) leaves room for three busted L1 nights
   in it (≈ 740 each); `tests/browser_career.rs` keeps that true.
+
+### Car lots (`lots`, `data/economy/lots.toml`)
+Where cars come from in the career: **dealerships** (tiers 1–3: budget, mainstream, prestige),
+**used car lots** (a bargain lot and a certified one) and **junkyards** (two yards).
+- `Economy::lot_stock(lot, day, roster)` is a pure function of (lot id, day, roster): a
+  `wp_math::Rng` seeded from the lot id and the day fills `slots` spaces with chance
+  `fill_chance` each, from the roster models whose class and base price the lot carries.
+  Every lot restocks daily and never shows every model every day; dealerships show each model
+  at most once. Each slot forks its own RNG, so one space's roll never shifts another's.
+- Dealership cars are new (`market_price(New) × price_scale`, health 1, new tyres).
+- Used cars roll a condition in the lot's band and get wear to match (`ListingWear`): dents on
+  up to seven panels, tired components (never below 0.35: they run), worn tyres. Price =
+  `market_price(Used) × price_scale × (0.55 + 0.5 × condition)`.
+- Junkyard cars roll a lower band, can go below 0.35 on any component, lose bolt-on panels
+  (`missing_part_chance` each), do not run with `non_running_chance` (failed engine), get bald
+  or flat tyres, and are priced at `price_frac` of the base price (×0.75 if dead). Their
+  mechanical state is `hidden` until bought. With `rare_chance` a space holds a **rare
+  variant** (`[[rare_variants]]`: a roster model with mods installed as found).
+- `buy_listing` pays the asking price (`CarPurchased`) and adds the car with the listing's mods
+  and tyres; `purchase_price` = the asking price, so resale never beats what was paid. The
+  damage system turns the wear into lattice damage (browser: `DamageModel::apply_preowned_wear`),
+  after which repairs work as for crash damage.
+
+### Tyres
+`OwnedCar::tires` (`TireState`: tread 0..1 and flat, per wheel; old saves load with new tyres).
+**A repair never fixes tyres** — `RepairAll` and `RepairSelected` only cover estimate lines,
+and tyres are not on the estimate. `replace_tires(car, wheels)` fits new ones at
+`[tires] price_per_tire` by class (not mode-scaled: tyres are not damage); it is posted as an
+`Adjustment` ("tires replaced: N") until the contract has a reason for it (request #8).
+`tire_effects` gives the sim a grip multiplier per wheel (`bald_grip` at 0 tread → 1.0 new) and
+a deflation (1 = flat); `wear_tires` takes `wear_per_hour × hours driven` off and keeps
+spike-strip flats.
 
 ### Payouts
 `winner purse = max(min, per_km × km) × class × day phase × mode × wanted`; places 1–4 get

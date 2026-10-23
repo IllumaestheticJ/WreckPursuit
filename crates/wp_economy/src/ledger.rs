@@ -135,6 +135,41 @@ pub struct OwnedCar {
     /// older than profile version 2, which are valued as the cheapest dealer price of the model.
     #[serde(default)]
     pub purchase_price: Option<Money>,
+    /// Tyres (FL, FR, RL, RR). Worn by driving and replaced on their own
+    /// ([`crate::Economy::replace_tires`]): a repair never fixes tyres. Saves without it load
+    /// with new tyres.
+    #[serde(default)]
+    pub tires: TireState,
+}
+
+/// Condition of a car's four tyres (FL, FR, RL, RR).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TireState {
+    /// Tread left 0 (bald) ..= 1 (new).
+    pub tread: [f32; 4],
+    /// Flat (spike strips, junkyard).
+    pub flat: [bool; 4],
+}
+
+impl Default for TireState {
+    /// Four new tyres.
+    fn default() -> Self {
+        Self {
+            tread: [1.0; 4],
+            flat: [false; 4],
+        }
+    }
+}
+
+impl TireState {
+    /// Tyres that need replacing: flat, or tread below `bald_below`.
+    pub fn worn_out(&self, bald_below: f32) -> [bool; 4] {
+        let mut out = [false; 4];
+        for (w, o) in out.iter_mut().enumerate() {
+            *o = self.flat[w] || self.tread[w] < bald_below;
+        }
+        out
+    }
 }
 
 impl OwnedCar {

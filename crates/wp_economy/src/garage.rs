@@ -441,5 +441,6 @@ fn new_car(spec: &CarSpec, condition: Condition, paid: Money) -> OwnedCar {
         location: CarLocation::Garage,
         insurance: None,
         purchase_price: Some(paid),
+        tires: Default::default(),
     }
 }
