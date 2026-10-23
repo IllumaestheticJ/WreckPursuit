@@ -67,6 +67,9 @@ fn sample_leg(a: [f32; 2], b: [f32; 2], out: &mut Corridor) {
     }
 }
 
+/// Row 86 audit: an active unit standing still longer than this is logged, s.
+pub const ACTIVE_STOP_S: f32 = 5.0;
+
 /// How far beyond the road edge a spike-strip car parks, m.
 pub const SPIKE_CAR_SHOULDER_M: f32 = 2.5;
 
@@ -1631,6 +1634,7 @@ impl PoliceSystem {
         self.expire_tools();
         self.maintain_tool_cars(world);
         self.plan_units(world, tdt);
+        self.audit_active_stops(tdt);
         self.refresh_junctions(world);
         self.refresh_walls();
         self.cleanup_units(world);
@@ -3779,6 +3783,65 @@ impl PoliceSystem {
             if let Some(k) = sp {
                 self.spikes[k].unit = Some(uid);
             }
+        }
+    }
+
+    /// Row 86 audit: time active ground units stand still with no reason to, and log each
+    /// stop longer than [`ACTIVE_STOP_S`] when it ends. Statistics only.
+    fn audit_active_stops(&mut self, tdt: f32) {
+        for i in 0..self.units.len() {
+            let u = &self.units[i];
+            let active = u.kind == UnitKind::Car
+                && !u.wrecked
+                && u.player.is_none()
+                && matches!(
+                    u.assignment,
+                    Assignment::Pursue { .. }
+                        | Assignment::Intercept { ambush: false, .. }
+                        | Assignment::Respond { .. }
+                );
+            let excused = self.booking(u.id)
+                || matches!(u.tactic, Tactic::RollingBlock)
+                || u.assignment
+                    .target()
+                    .and_then(|t| self.racers.get(&t))
+                    .is_some_and(|r| {
+                        // The racer stopped close by: an arrest scene, not a jam.
+                        len([r.vel[0], r.vel[1]]) < 3.0 && dist(xy(r.pos), u.body.pos) < 40.0
+                    });
+            let still = active && !excused && u.body.speed.abs() < 1.0;
+            if still {
+                if self.units[i].active_stop_s == 0.0 {
+                    let u = &self.units[i];
+                    let by = match u.avoid.blocked_by {
+                        None => 0,
+                        Some(crate::avoid::BlockedBy::Vehicle(e))
+                            if Some(e) == u.assignment.target() =>
+                        {
+                            4
+                        }
+                        Some(crate::avoid::BlockedBy::Vehicle(_)) => 1,
+                        Some(crate::avoid::BlockedBy::Unit(_)) => 2,
+                        Some(crate::avoid::BlockedBy::Traffic) => 3,
+                    };
+                    self.units[i].active_stop_why = (u.branch, by);
+                }
+                self.units[i].active_stop_s += tdt;
+                continue;
+            }
+            let stood = self.units[i].active_stop_s;
+            if stood > ACTIVE_STOP_S {
+                let u = &self.units[i];
+                self.stats.active_stops.push(crate::ActiveStop {
+                    unit: u.id,
+                    at: self.now.plus(-stood),
+                    stood_s: stood,
+                    pos: u.body.pos,
+                    branch: u.active_stop_why.0,
+                    blocked_by: u.active_stop_why.1,
+                });
+            }
+            self.units[i].active_stop_s = 0.0;
         }
     }
 

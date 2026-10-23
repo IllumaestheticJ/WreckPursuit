@@ -112,6 +112,8 @@ or commercial districts picked by the seed, at 15 m/s. Nothing else is set up.
 | `far-cw/min` | pursuit cars (responders, backup, roadblock and spike cars) that appeared on the far carriageway of the pursued racer's divided road: within 30 m of its road ahead or behind, on a one-way road running the other way (row 140), per minute of run | rate |
 | `re-acquire` | search episodes (pursuit → searching) that ended with the evader seen again, the rest ended in its escape (row 84) | share |
 | `search units` | police cars within 300 m of the last known position, 1 Hz while searching (row 84) | mean |
+| `stops>5s/min` | active units (pursuing, intercepting, responding) standing still more than 5 s with no reason to (not arresting or booking, not blocking a junction, the racer not stopped beside them), per pursuit minute (row 86) | rate |
+| `stop s` | how long each of those stood | median |
 | `turns/min` | turn-rounds by units after the evader (the pro driver facing more than ~73 deg away from its line, a reverse swing or U-turn, or backing out), per pursuit minute | rate |
 | `turn s` | how long each of those turn-rounds took, start to driving on | median |
 | `capture` | pursuit ended `Captured` / `CapturedTotalLoss` | share of runs |
