@@ -5,6 +5,35 @@
 changed, why, and which workstreams must update. Only the integration lead edits the contract.
 Every session reads this file at start.
 
+## v0.4.0 — applied 2026-10-22 (branch `claude/project-thread-fsdnoo`, owner request)
+
+Owner request (project thread "Arcade, simulation and extreme damage", 2026-10-22): "Make arcade
+damage 20% of what it is now, set current arcade damage to simulation damage, and set
+simulation damage to a new mode called extreme … for arcade damage, set it to 20% for the
+player and AI drivers only. Traffic and police vehicles still receive full damage." Applied by
+the thread session on the owner's direct request rather than by the lead, so it is flagged here.
+
+**Breaking:**
+| Change | Who | What to do |
+|---|---|---|
+| New `DamageMode::Extreme` (appended; wire u8 2 in `wp_net` and simcli replays, `"extreme"` in meta's DB) | everyone matching on `DamageMode` | add the arm. Extreme = the old Simulation; done in this branch for every workspace crate, the testbed and ui-kit. |
+| Data: `data/modes/sim.toml` → `extreme.toml` (mode `Extreme`), `arcade.toml` → `sim.toml` (mode `Simulation`), new `arcade.toml` | 03, G, E, 10 | load `extreme.toml` for Extreme. Behaviour of old Arcade = new Simulation, old Simulation = new Extreme, bit for bit. |
+| `wp_police::ModeValue` gains `extreme` (`data/police/pursuit.toml`) | E | police take full damage in every mode: arcade = simulation (old Arcade), extreme = old Simulation. |
+| `wp_economy` tables need an `Extreme` row (`consequences.mode`, `stakes.mode_purse`); `DataSources::extreme_mode` | G | Extreme copies Simulation's consequences; purse ×1.2 like the old Simulation (keeps tests/career.rs balance); pink slips allowed in Simulation and Extreme. |
+
+**Additive:**
+- `ModeTable::racer_damage_scale: f32` (`#[serde(default)]` = 1.0, must be > 0): multiplier on
+  the contact impulses reaching the damage model of racer cars. `wp_sim` applies it to
+  `VehicleKind::{Player, AiRacer}` before the contact filter (so replicated contacts are the
+  scaled ones); `Police` (AI or player seat) and `Traffic` take 1.0. Arcade = 0.25 (≈ 20 % of the damage, measured), others 1.0.
+- `wp_damage::{forgiving_rules, scale_racer_contacts}`. The `arcade_*` `DamageTuning` rules now
+  apply to Arcade and Simulation (not Extreme).
+
+Goldens: every simcli scenario switched `Arcade` → `Simulation` and `Simulation` → `Extreme`
+(scenario names unchanged), so their hashes are unchanged; only the `contract=` header moves.
+Barrier scenarios renamed `*_arcade` → `*_sim`, `*_sim` → `*_extreme`. Schemas regenerated
+(`mode_table`).
+
 ## v0.3.0 — applied 2026-10-19 (branch `lead/contract-v0.3.0`)
 
 - Amendment (lead round 8): `LocalConditions::visibility_m` + `CLEAR_VISIBILITY_M` (machine K; fog/rain sight for police LOS).

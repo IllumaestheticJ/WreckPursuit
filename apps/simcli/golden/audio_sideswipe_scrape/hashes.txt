@@ -1,4 +1,4 @@
-# simcli hashes scenario=audio_sideswipe_scrape systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=audio_sideswipe_scrape systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
 24 2b88077113939ebb
 48 ad360673521b46e1
 72 a7d3c7836421568e

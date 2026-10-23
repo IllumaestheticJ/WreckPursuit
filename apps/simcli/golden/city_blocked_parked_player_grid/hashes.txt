@@ -1,4 +1,4 @@
-# simcli hashes scenario=city_blocked_parked_player_grid systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=city_blocked_parked_player_grid systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
 240 0adc2625847209b5
 480 6213df6fb507d0b8
 720 0c5696497132b08a

@@ -12,7 +12,7 @@
 // panels off by default; ?dev=0 / ?dev=1 forces the developer panels for this page.
 // ?drift=1 opens the drift lab (live slide-assist tuning, F8 hides the panel).
 import { loadWasm, sim, type AssistProfile, type CarStatsTable, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
-import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
+import { META_STRIDE, MODE_NAMES, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
 import {
   actionHeld,
@@ -534,7 +534,7 @@ async function main(): Promise<void> {
   };
 
   const isReplay = () => sim.worldInfo()[W.replay] > 0.5;
-  const modeName = () => (sim.worldInfo()[W.mode] > 0.5 ? "Simulation" : "Arcade");
+  const modeName = () => MODE_NAMES[Math.round(sim.worldInfo()[W.mode])] ?? "Arcade";
 
   const startFreeDrive = (
     car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR,
@@ -1362,7 +1362,7 @@ async function main(): Promise<void> {
     prof.lap("fx");
     // The game UI is hidden during a crash replay (and must not count its events twice).
     if (!crash.playing) {
-      ui.frame(wi[W.tick], app.player, events, wi[W.hours], wi[W.mode] > 0.5 ? "Simulation" : "Arcade");
+      ui.frame(wi[W.tick], app.player, events, wi[W.hours], MODE_NAMES[Math.round(wi[W.mode])] ?? "Arcade");
       if (!audio.hearsRadio()) {
         for (const ev of events as unknown as { Police?: { Radio?: { unit: number | null; text: string } } }[]) {
           const r = ev.Police?.Radio;
@@ -1493,7 +1493,7 @@ async function main(): Promise<void> {
           : app.input,
         source: replay ? "replay" : app.source,
         assists: replay ? null : sim.assists(app.player),
-        mode: wi[W.mode] > 0.5 ? "Simulation" : "Arcade",
+        mode: MODE_NAMES[Math.round(wi[W.mode])] ?? "Arcade",
         rack: focusView ? sim.ffb(app.focus)[0] : 0,
         fps,
         simMs,

@@ -169,12 +169,12 @@ export type RaceCommand =
  */
 export type RaceEventId = number;
 /**
- * Damage mode. Both modes run the same code path with different [`crate::ModeTable`]s.
+ * Damage mode. Every mode runs the same code path with a different [`crate::ModeTable`].
  *
  * This interface was referenced by `WpContractsBundle`'s JSON-Schema
  * via the `definition` "DamageMode".
  */
-export type DamageMode = "Arcade" | "Simulation";
+export type DamageMode = "Arcade" | "Simulation" | "Extreme";
 /**
  * Coarse phase of the day; police and traffic tables are keyed by this.
  *
@@ -2054,7 +2054,7 @@ export interface MaterialDef {
   young_mpa: number;
 }
 /**
- * Scalars that turn the single damage code path into Arcade or Simulation behaviour.
+ * Scalars that turn the single damage code path into Arcade, Simulation or Extreme behaviour.
  *
  * This interface was referenced by `WpContractsBundle`'s JSON-Schema
  * via the `definition` "ModeTable".
@@ -2093,6 +2093,13 @@ export interface ModeTable {
    * Multiplier on plastic flow (how much permanent set a given over-yield strain produces).
    */
   plasticity_scale: number;
+  /**
+   * Multiplier on the contact impulses that reach the damage model of *racer* cars (the
+   * player's racer and AI racers). Traffic and police (AI or player-driven) always take
+   * 1.0. Arcade uses 0.25, which leaves racers about 20 % of the damage (the lattice takes
+   * the first part of a hit elastically); omitted = 1.0.
+   */
+  racer_damage_scale?: number;
   /**
    * Multiplier on repair bills.
    */

@@ -17,7 +17,7 @@
     city: procedural(seed: 1, blocks_x: 12, blocks_y: 12, block_m: 110.0),
     time_of_day_h: 23.0,
     time_ratio: 1.0,
-    mode: Arcade,
+    mode: Simulation,
     parked_cars: false,
     traffic_density: 0.0,
     assists: keyboard,

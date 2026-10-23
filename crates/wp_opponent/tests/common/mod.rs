@@ -238,7 +238,7 @@ pub fn run(
     let max_len = caps.iter().fold(0.0f32, |m, c| m.max(c.length_m));
     let max_w = caps.iter().fold(0.0f32, |m, c| m.max(c.width_m));
     let slots = field.grid_slots(specs.len(), max_len, max_w, setup.grid);
-    let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+    let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed: setup.seed,
         mode,

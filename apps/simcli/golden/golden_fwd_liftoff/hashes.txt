@@ -1,4 +1,4 @@
-# simcli hashes scenario=golden_fwd_liftoff systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=golden_fwd_liftoff systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
 24 72e6d38317cb8a6a
 48 8f68217d880c6450
 72 300f0bced58f5ec0

@@ -35,7 +35,7 @@ fn vesper() -> &'static RoadNetwork {
 /// City at `hour` with police cars and no traffic or parked cars (nothing else to hit),
 /// run until a police car is driving its patrol.
 fn city_with_patrol(city: City, hour: f32) -> (Sim, EntityId) {
-    let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
+    let mode = load_mode_table(data("modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed: 24,
         mode,

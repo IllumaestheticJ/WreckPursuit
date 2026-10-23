@@ -7,7 +7,7 @@
 (
     name: "golden_spike_strip",
     seed: 105,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     police_orders: [(t_s: 0.0, order: spikes_at(target: "racer", pos: (0.0, 50.0), dir: (0.0, 1.0)))],
     entities: [

@@ -1,7 +1,7 @@
 // Types of the browser career (machine G): the JSON of wp_wasm's `career_*` exports
 // (crates/wp_wasm/src/career.rs). Keep in sync with the Rust structs named in each comment.
 
-export type DamageMode = "Arcade" | "Simulation";
+export type DamageMode = "Arcade" | "Simulation" | "Extreme";
 export type WantedLevel = "None" | "L1" | "L2" | "L3" | "L4" | "L5";
 export type Condition = "New" | "Used" | "Worn";
 export type ShopKind = "Legit" | "Crooked";

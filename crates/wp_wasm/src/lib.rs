@@ -808,7 +808,7 @@ pub fn vehicle_meta() -> Result<Vec<f32>, JsValue> {
     })
 }
 
-/// `[tick, time_of_day_h, night_factor, mode (0 Arcade / 1 Simulation), replay (0/1),
+/// `[tick, time_of_day_h, night_factor, mode (0 Arcade / 1 Simulation / 2 Extreme), replay (0/1),
 /// recording (0/1), city (0/1), scripted (0/1)]`.
 #[wasm_bindgen]
 pub fn world_info() -> Result<Vec<f32>, JsValue> {
@@ -819,7 +819,11 @@ pub fn world_info() -> Result<Vec<f32>, JsValue> {
             s.tick() as f32,
             t.hours(),
             t.night_factor(),
-            b(s.mode() == DamageMode::Simulation),
+            match s.mode() {
+                DamageMode::Arcade => 0.0,
+                DamageMode::Simulation => 1.0,
+                DamageMode::Extreme => 2.0,
+            },
             b(s.playback().is_some()),
             b(s.recording()),
             b(s.has_city()),
@@ -1003,6 +1007,7 @@ pub fn run_repair_continue() -> Result<String, JsValue> {
 fn parse_mode(mode: &str) -> Result<DamageMode, String> {
     match mode {
         "Simulation" => Ok(DamageMode::Simulation),
+        "Extreme" => Ok(DamageMode::Extreme),
         "Arcade" | "" => Ok(DamageMode::Arcade),
         other => Err(format!("unknown damage mode {other:?}")),
     }

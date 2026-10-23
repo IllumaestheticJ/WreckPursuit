@@ -1,4 +1,4 @@
-# simcli hashes scenario=opponent_pace_city_sprint_s95 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=opponent_pace_city_sprint_s95 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
 240 6913743964ff6dc2
 480 1ba741871c9b918c
 720 2185d5641f01d7e4

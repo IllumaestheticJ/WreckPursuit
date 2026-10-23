@@ -56,7 +56,7 @@ export interface GameSettings {
    * and the radio strip's text only. The volume is the Police radio slider. */
   radioVoice: boolean;
   assists: AssistSettings;
-  damageMode: "Arcade" | "Simulation";
+  damageMode: "Arcade" | "Simulation" | "Extreme";
   units: SpeedUnits;
   /** Default camera angle (host id); "" = the host's default. */
   camera: CameraId;
@@ -116,7 +116,7 @@ export function normalizeSettings(raw: unknown, base: GameSettings): GameSetting
       steerHelp: bool(a.steerHelp, base.assists.steerHelp),
       countersteer: clamp01(a.countersteer, base.assists.countersteer),
     },
-    damageMode: oneOf(r.damageMode, ["Arcade", "Simulation"] as const, base.damageMode),
+    damageMode: oneOf(r.damageMode, ["Arcade", "Simulation", "Extreme"] as const, base.damageMode),
     units: oneOf(r.units, ["kmh", "mph"] as const, base.units),
     camera: typeof r.camera === "string" && r.camera.length < 32 ? r.camera : base.camera,
     developer: bool(r.developer, base.developer),

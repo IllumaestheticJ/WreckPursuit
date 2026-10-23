@@ -93,7 +93,10 @@ pub fn queue(
             "player police are disabled",
         ));
     }
-    if prefs.mode == DamageMode::Simulation && !flag_bool(conn, "simulation_mode_enabled", true)? {
+    // The flag predates Extreme (the old Simulation table) and gates both non-Arcade modes.
+    if matches!(prefs.mode, DamageMode::Simulation | DamageMode::Extreme)
+        && !flag_bool(conn, "simulation_mode_enabled", true)?
+    {
         return Err(ApiError::forbidden(
             "feature_disabled",
             "Simulation mode is disabled",

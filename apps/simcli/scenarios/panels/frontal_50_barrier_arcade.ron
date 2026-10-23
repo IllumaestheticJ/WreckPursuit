@@ -1,3 +1,5 @@
+// Contract v0.4.0: the pre-v0.4.0 Arcade table is now Simulation, so this scenario keeps its
+// name and runs `mode: Simulation` (same behaviour and hashes as before).
 // Panels (workstream R, lead feedback round 12b "the hood doesn't crumple enough"): a sedan
 // hits a full-width rigid barrier at 50 km/h in Arcade. Browser: the hood buckles along two
 // fold lines, tents at the centre and its leading edge follows the crushed front
@@ -5,7 +7,7 @@
 (
     name: "panels_frontal_50_barrier_arcade",
     seed: 2150,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     panels: true,
     barriers: [(pos: (0.0, 8.0, 0.75), size: (6.0, 1.0, 1.5))],

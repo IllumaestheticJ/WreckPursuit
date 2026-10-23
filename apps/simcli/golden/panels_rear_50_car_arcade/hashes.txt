@@ -1,4 +1,4 @@
-# simcli hashes scenario=panels_rear_50_car_arcade systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=panels_rear_50_car_arcade systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
 24 a14df49208d0095f
 48 efb2b57b4a89c991
 72 ad964814795fecfb

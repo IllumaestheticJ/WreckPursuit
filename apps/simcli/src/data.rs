@@ -165,6 +165,7 @@ pub fn load_mode(src: &dyn DataSource, mode: DamageMode) -> Result<ModeTable, Ru
     let rel = match mode {
         DamageMode::Arcade => "modes/arcade.toml",
         DamageMode::Simulation => "modes/sim.toml",
+        DamageMode::Extreme => "modes/extreme.toml",
     };
     Ok(wp_contracts::parse_mode_table(rel, &src.read(rel)?)?)
 }

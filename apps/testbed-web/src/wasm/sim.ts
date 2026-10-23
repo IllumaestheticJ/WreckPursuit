@@ -112,7 +112,7 @@ export interface Barrier {
 export interface Scenario {
   name: string;
   seed: number;
-  mode: "Arcade" | "Simulation";
+  mode: "Arcade" | "Simulation" | "Extreme";
   duration_s: number;
   barriers?: Barrier[];
   entities: { id: string; car: string; pos: number[]; yaw: number }[];
@@ -272,7 +272,7 @@ export const sim = {
   assistPresetNamed: (
     name: string,
     source: "Keyboard" | "Gamepad" | "Wheel",
-  ): { mode: "Arcade" | "Simulation"; assists: AssistProfile } => JSON.parse(wasm.assist_preset_named(name, source)),
+  ): { mode: "Arcade" | "Simulation" | "Extreme"; assists: AssistProfile } => JSON.parse(wasm.assist_preset_named(name, source)),
   /** The preset a vehicle's assists + the session's damage mode match ("" = customised). */
   assistPresetOf: (entity: number, source: "Keyboard" | "Gamepad" | "Wheel"): string =>
     wasm.assist_preset_of(entity, source),
