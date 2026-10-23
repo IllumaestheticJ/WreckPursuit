@@ -1,4 +1,4 @@
-// Browser frame profile of the city chase (browser perf pass, docs/integration/browser-perf.md).
+// Browser frame profile of the night run (browser perf pass, docs/integration/browser-perf.md).
 // Usage: node e2e/frame_profile.mjs [chase|rain] [seconds]   (needs `npm run wasm`; own Vite)
 // Env: VIEWPORT=WxH (default 1280x720), CITY=<id> (default the app's default, vesper_v2),
 // QUERY=<url params> (e.g. gfx=high), EVAL=<js> run before measuring, STACKS=<fn> allocation paths,
@@ -59,7 +59,7 @@ page.on("pageerror", (e) => errors.push(String(e)));
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 await page.goto(URL);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 90000 });
-await page.evaluate((rain) => window.__wp.startCityChase(undefined, "Arcade", rain), which === "rain");
+await page.evaluate((rain) => window.__wp.startNightRun(undefined, "Arcade", rain), which === "rain");
 // The key press also starts the AudioContext (recorded packs load in the warm-up).
 await page.keyboard.down("KeyW");
 await page.waitForTimeout(5000);

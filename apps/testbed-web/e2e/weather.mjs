@@ -5,7 +5,7 @@
 // Checks: the weather selector restarts the session with the chosen weather (it lands in the
 // scenario, so replays carry it); heavy rain shows rain streaks, wet roads (grid texture
 // uploaded), spray behind the moving car and the HUD's weather / road line; fog sets the scene
-// fog from the visibility; wipers sweep in the cockpit camera; the rainy-night city chase
+// fog from the visibility; wipers sweep in the cockpit camera; the rainy-night night run
 // starts at night in a downpour; a recording made in the rain verifies headlessly in simcli;
 // and rain rendering stays cheap (frame-time delta measured with the rain on vs off).
 import { spawn, spawnSync } from "node:child_process";
@@ -205,14 +205,14 @@ await shot("rain_city_day.png");
 await page.evaluate(() => {
   window.__wp.setWeather("auto");
   document.getElementById("city").checked = false;
-  window.__wp.startCityChase("lindwurm_4t", "Arcade", true);
+  window.__wp.startNightRun("lindwurm_4t", "Arcade", true);
 });
-await page.waitForFunction(() => window.__wp.sim.scenario().name === "city_chase_rainy_night", null, { timeout: 120000 });
+await page.waitForFunction(() => window.__wp.sim.scenario().name === "night_run_rainy_night", null, { timeout: 120000 });
 await page.waitForTimeout(5000);
 st = await state();
 check(
   st.weather?.kind === "HeavyRain" && st.hour >= 23 && st.rain,
-  `rainy-night city chase: ${st.hour.toFixed(2)} h, ${st.info[3].toFixed(1)} mm/h, HUD "${st.hud}"`,
+  `rainy-night night run: ${st.hour.toFixed(2)} h, ${st.info[3].toFixed(1)} mm/h, HUD "${st.hud}"`,
 );
 await page.evaluate(() => window.__wp.setCamera("chase"));
 await page.waitForTimeout(800);

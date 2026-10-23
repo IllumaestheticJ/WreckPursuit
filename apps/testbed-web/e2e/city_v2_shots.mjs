@@ -2,7 +2,7 @@
 // Usage (after `npm run wasm`): node e2e/city_v2_shots.mjs [outDir]
 // Env: CHROMIUM=/path/to/chrome. Shots: overview, Hollins Drive switchbacks, the Route 40 West
 // overpass and Route 40 North underpass, a banked Loop sweeper, Bluff Road, downtown at street
-// level, and the city chase from the chase camera.
+// level, and the night run from the chase camera.
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -68,17 +68,17 @@ for (const [name, from, to] of views) {
   console.log("wrote", name);
 }
 
-// City chase: night, police, traffic, from the chase camera.
+// Night run: night, police, traffic, from the chase camera.
 await page.evaluate(() => {
   window.__wp.setClip(0.1, 3000);
   document.getElementById("city").checked = false;
-  window.__wp.startCityChase("debug_sedan", "Arcade");
+  window.__wp.startNightRun("debug_sedan", "Arcade");
 });
 await page.keyboard.down("KeyW");
 await page.waitForTimeout(4000);
 await page.keyboard.up("KeyW");
-await page.screenshot({ path: join(out, "city_chase.png") });
-console.log("wrote city_chase.png");
+await page.screenshot({ path: join(out, "night_run.png") });
+console.log("wrote night_run.png");
 
 await browser.close();
 server.kill("SIGTERM");

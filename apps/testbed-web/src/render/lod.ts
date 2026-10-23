@@ -7,7 +7,7 @@
 //   * its VehicleView (full per-panel mesh), once the sim spawned it and its mesh is ready;
 //   * the instanced fleet (render/fleet.ts) otherwise: same model, same livery, same pose.
 // So a promotion or demotion swaps the drawer on one frame with no gap, jump or recolour.
-// Multi-model sessions (city chase: 7 traffic, 5 police models): each record's `model` picks
+// Multi-model sessions (night run: 7 traffic, 5 police models): each record's `model` picks
 // its car model from `sim.sessionCarModels()` (the fleet instances per model); a promoted car's
 // view shows the same model (its vehicle_info().car_id).
 //

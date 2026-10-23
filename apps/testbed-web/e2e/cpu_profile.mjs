@@ -1,4 +1,4 @@
-// CPU profile of the city chase in headless Chromium (Chrome DevTools Profiler): prints the
+// CPU profile of the night run in headless Chromium (Chrome DevTools Profiler): prints the
 // top functions by inclusive and self time over 8 s. Usage: node e2e/cpu_profile.mjs
 // (needs `npm run wasm`; starts its own Vite). Used to find the browser hot spots in
 // docs/PLAYTEST_LOG.md row 3.
@@ -11,7 +11,7 @@ const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromi
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 await page.goto("http://localhost:5196/");
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 60000 });
-await page.evaluate(() => window.__wp.startCityChase(undefined, "Arcade"));
+await page.evaluate(() => window.__wp.startNightRun(undefined, "Arcade"));
 await page.keyboard.down("KeyW");
 await page.waitForTimeout(4000);
 const cdp = await page.context().newCDPSession(page);

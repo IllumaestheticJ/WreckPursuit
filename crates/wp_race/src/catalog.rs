@@ -692,7 +692,7 @@ mod tests {
                 r.id
             );
         }
-        assert!(race_for_scenario("city_chase").is_none());
+        assert!(race_for_scenario("night_run").is_none());
     }
 
     #[test]
