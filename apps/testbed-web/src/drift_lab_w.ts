@@ -296,6 +296,8 @@ export class DriftLabWPanel {
         }
       },
       restartCar: () => this.restart(this.car),
+      currentCar: () => this.car,
+      setCar: (id) => this.restart(id),
     });
   }
 

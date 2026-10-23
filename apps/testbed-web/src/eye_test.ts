@@ -21,6 +21,10 @@ export interface EyeHost {
   setTcs(level: "Off" | "Half" | "Full" | null): void;
   /** Respawn the car (needed after inertia / ride changes). */
   restartCar(): void;
+  /** The car being driven now. */
+  currentCar(): string;
+  /** Switch to car `id` (respawns it). */
+  setCar(id: string): void;
 }
 
 /** One option of a test: its real name (revealed at the end) and how to apply it. */
@@ -92,6 +96,11 @@ const TESTS: EyeCase[] = [
 
 const STORE = "wp.tune.eye.v1";
 
+/** Every test runs on this car: the 5-speed RWD reference analog of the owner's clips (owner,
+ * 2026-10-23: the test ran on whatever car was selected, a 4 t truck). */
+const TEST_CAR = "parity_rwd_e";
+const TEST_CAR_LABEL = "parity_rwd_e (RWD midsize, the reference-clip car)";
+
 interface EyeState {
   /** Index of the current test; TESTS.length = finished. */
   i: number;
@@ -101,6 +110,8 @@ interface EyeState {
   picks: (0 | 1 | 2 | null)[];
   /** The option being driven (1 / 2), or null before the first click. */
   driving: 1 | 2 | null;
+  /** The car selected before the test (put back afterwards). */
+  prevCar?: string;
 }
 
 /** The blind A/B session shown at the top of the tune panel. */
@@ -132,17 +143,27 @@ export class EyeTest {
 
   /** Start a fresh session (new random order). */
   start(): void {
-    this.state = { i: 0, swap: TESTS.map(() => Math.random() < 0.5), picks: TESTS.map(() => null), driving: null };
+    const prevCar = this.host.currentCar();
+    this.state = { i: 0, swap: TESTS.map(() => Math.random() < 0.5), picks: TESTS.map(() => null), driving: null, prevCar };
     this.drive(1);
+    // After the settings are saved: the respawn picks them up.
+    this.host.setCar(TEST_CAR);
   }
 
   /** Stop and put the shipped handling back. */
   stop(): void {
+    const prev = this.state?.prevCar;
     this.state = null;
     this.persist();
     this.host.resetShipped();
     this.host.setTcs(null);
-    this.host.restartCar();
+    this.backToCar(prev);
+  }
+
+  /** Respawn in the viewer's own car again (or the current one if unknown). */
+  private backToCar(prev: string | undefined): void {
+    if (prev && prev !== this.host.currentCar()) this.host.setCar(prev);
+    else this.host.restartCar();
   }
 
   /** Apply Option `n` of the current test. */
@@ -173,7 +194,7 @@ export class EyeTest {
       this.persist();
       this.host.resetShipped();
       this.host.setTcs(null);
-      this.host.restartCar();
+      this.backToCar(s.prevCar);
     }
   }
 
@@ -227,7 +248,7 @@ export class EyeTest {
     const s = this.state;
     if (!s) {
       title.textContent = "Eye test (blind handling A/B)";
-      text(`${TESTS.length} short tests. Each one starts from the shipped handling and changes one hidden thing. Drive Option 1, then Option 2 (switch as often as you like), then say which felt better. The answers are revealed at the end.`);
+      text(`${TESTS.length} short tests in the RWD test car (${TEST_CAR}; your own car comes back at the end). Each test starts from the shipped handling and changes one hidden thing. Drive Option 1, then Option 2 (switch as often as you like), then say which felt better. The answers are revealed at the end.`);
       rowOf(btn("start the eye test", () => this.start(), false, "eye-start"));
       return box;
     }
@@ -258,11 +279,15 @@ export class EyeTest {
     }
     const t = TESTS[s.i];
     title.textContent = `Eye test ${s.i + 1} of ${TESTS.length}`;
+    text(`Car: ${this.host.currentCar() === TEST_CAR ? TEST_CAR_LABEL : `${this.host.currentCar()} (not the test car)`}`, "color:#aaa");
+    if (this.host.currentCar() !== TEST_CAR) rowOf(btn("back to the test car", () => this.host.setCar(TEST_CAR)));
     text(`Pay attention to: ${t.focus}`);
+    text("Click an option, then just keep driving. Switch back and forth as often as you like.", "color:#aaa");
     rowOf(
-      btn("drive Option 1", () => this.drive(1), s.driving === 1, "eye-opt-1"),
-      btn("drive Option 2", () => this.drive(2), s.driving === 2, "eye-opt-2"),
+      btn("switch to Option 1", () => this.drive(1), s.driving === 1, "eye-opt-1"),
+      btn("switch to Option 2", () => this.drive(2), s.driving === 2, "eye-opt-2"),
     );
+    text(`Now driving: Option ${s.driving ?? 1}`, "font-weight:600");
     text("Which felt better?", "margin-top:6px");
     rowOf(
       btn("Option 1", () => this.pick(1), false, "eye-pick-1"),

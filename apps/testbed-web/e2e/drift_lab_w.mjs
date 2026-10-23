@@ -129,7 +129,10 @@ check(Math.abs(gNew.rear_stiffness - 0.45) < 1e-6 && Math.abs(gNew.front_stiffne
 // Eye test (blind A/B, owner 2026-10-22): hides the rest of the panel, five picks, a result code,
 // the shipped handling back afterwards.
 {
+  const carBefore = (await page.evaluate(() => window.__wp.sim.scenario())).entities?.[0]?.car;
   await page.locator("#eye-start").click();
+  await page.waitForFunction(() => window.__wp?.sim.scenario().entities?.[0]?.car === "parity_rwd_e", null, { timeout: 30000 });
+  check(true, "eye test switches to the RWD test car (parity_rwd_e)");
   await page.waitForTimeout(300);
   check((await page.locator("#drift-lab-w button", { hasText: "rack · reference" }).count()) === 0, "eye test hides the other settings");
   for (let k = 0; k < 5; k++) {
@@ -145,6 +148,9 @@ check(Math.abs(gNew.rear_stiffness - 0.45) < 1e-6 && Math.abs(gNew.front_stiffne
   await page.locator("#drift-lab-w button", { hasText: "close" }).click();
   await page.waitForTimeout(300);
   check((await page.locator("#eye-start").count()) === 1, "eye test closes back to the panel");
+  await page.waitForTimeout(1000);
+  const carAfter = (await page.evaluate(() => window.__wp.sim.scenario())).entities?.[0]?.car;
+  check(carAfter === carBefore, `eye test puts the previous car back (${carBefore} → ${carAfter})`);
 }
 // Back to the shipped tyres / balance / ride for the checks below.
 await page.evaluate(() => {
