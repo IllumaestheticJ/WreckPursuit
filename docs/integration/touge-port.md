@@ -118,9 +118,18 @@ goldens were never merged in).
   greybox / road files). All additive; resolve by keeping both. Ashpeak adds a mountain region;
   touge passes stay separate sealed worlds.
 
-## Gate
+## Gate (env CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0)
 
-See the report sent to the lead (hash, commands, results).
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: 1499 passed, 0 failed (185 test binaries).
+- `cargo build --target wasm32-unknown-unknown -p wp_wasm`: ok.
+- `cd apps/testbed-web && npm run wasm && npx tsc --noEmit -p .`: ok.
+- `simcli goldens`: 115 / 115 unchanged; nothing blessed (no golden conflicts either).
+- `e2e/touge.mjs` (new; the PR shipped no e2e): 15 / 15.
+- `e2e/street.mjs`: all pass. The first run failed the two touch checks (horn challenge did not
+  open within its retry loop, so the map tap had no picker); plain round12 passed them, and a
+  re-run on this branch passed them too: a timing flake, not reproduced.
 
 ## Open questions
 
