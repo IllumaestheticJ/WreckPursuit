@@ -184,3 +184,82 @@ fn vesper_ramp_merges_are_flush_and_clear() {
         &bad[..bad.len().min(12)]
     );
 }
+
+/// Row 162 for through traffic (opponent-pace: an AI car at Loop 9 race speed hit "world
+/// geometry" mid-carriageway at the Hollins rest off-ramp gore): over every freeway taper (the
+/// connector strips where a ramp leaves or joins a carriageway, merges and diverges alike)
+/// the physics ground has no step between neighbouring samples 0.25 m apart anywhere on the
+/// paving (0.3 m inside its edges): a level strip across a banked carriageway stood up to ~11
+/// cm proud of it.
+#[test]
+fn vesper_carriageways_are_level_over_every_ramp_taper() {
+    use wp_world::map::SegKind;
+    let map = CityMap::new(wp_world::vesper::generate(
+        &wp_world::vesper::VesperConfig::default(),
+    ));
+    let net = &map.net;
+    let mut phys = wp_sim::PhysicsWorld::new();
+    phys.set_city_ground(&map);
+    let lanes_of = |road: u32| net.lanes.iter().filter(|l| l.road == road).count();
+    let mut tapers = 0;
+    let (mut samples, mut worst) = (0usize, 0.0f32);
+    let mut bad = Vec::new();
+    for (ci, c) in map.segs.iter().enumerate() {
+        let SegKind::Connector { from, to, .. } = c.kind else {
+            continue;
+        };
+        let (rf, rt) = (net.lanes[from as usize].road, net.lanes[to as usize].road);
+        let highway = |r: u32| net.surfaces.iter().any(|s| s.road == r && s.highway);
+        if !highway(rf) || !highway(rt) || lanes_of(rf) == lanes_of(rt) {
+            continue;
+        }
+        tapers += 1;
+        let mut s = 0.0;
+        while s <= c.length {
+            let (p, d) = c.point_at(s);
+            let r = geom::right_of(d);
+            s += 2.0;
+            for k in -40..=40 {
+                let q = geom::add(geom::xy(p), geom::scale(r, k as f32 * 0.25));
+                let paved = |x: V2, z: f32| {
+                    wp_world::surface::inside_other_paving(net, usize::MAX, [x[0], x[1], z])
+                };
+                let Some(g) = phys.drivable_ground_z(q, p[2] + 1.5, 3.0) else {
+                    continue;
+                };
+                if !paved(q, g) {
+                    continue;
+                }
+                for n in [
+                    geom::add(q, geom::scale(d, 0.25)),
+                    geom::add(q, geom::scale(r, 0.25)),
+                ] {
+                    let Some(h) = phys.drivable_ground_z(n, p[2] + 1.5, 3.0) else {
+                        continue;
+                    };
+                    if !paved(n, h) {
+                        continue;
+                    }
+                    samples += 1;
+                    // Grades and banks change height by at most ~2 cm over 0.25 m.
+                    let step = (h - g).abs();
+                    worst = worst.max(step);
+                    if step >= 0.035 {
+                        bad.push(format!("taper {ci}: step {step:.3} m at {q:?}"));
+                    }
+                }
+            }
+        }
+    }
+    println!(
+        "{tapers} tapers, {samples} sample pairs: worst {worst:.3} m, {} steps",
+        bad.len()
+    );
+    assert!(tapers >= 20, "{tapers} tapers");
+    assert!(
+        bad.is_empty(),
+        "{} steps, first: {:?}",
+        bad.len(),
+        &bad[..bad.len().min(12)]
+    );
+}

@@ -2753,6 +2753,7 @@ fn profile_ramp(
         kmax,
     );
     z[..same].copy_from_slice(&desired[..same]);
+    let hold_s = cum[k_flush.min(n - 1)].max(par_end);
     // Resample to 6 m for the road spec.
     let res = resample(&path, 6.0);
     let rc = cum2(&res);
@@ -2775,19 +2776,38 @@ fn profile_ramp(
         .map(|k| (k * v2 / 9.81 * 0.55).clamp(-RAMP.bank_max, RAMP.bank_max))
         .collect();
     let curve = smooth_series(&raw, (30.0 / spacing) as usize);
-    // Ramp travel runs gore → terminal for an off-ramp; the ring's bank is right of
-    // counter-clockwise travel, so it flips for travel against the ring.
-    let travel = if rp.off { rp.dir } else { -rp.dir };
+    // Beside the carriageway the ramp's cross slope (right of its path, gore → terminal) is
+    // the carriageway plane's: the plane's gradient (grade along the ring, bank across it)
+    // taken across the ramp's own direction. (The ring's bank alone missed the grade's share
+    // where a diverging ramp runs ~12° off a 5.6 % carriageway: 2-5 cm at its edge.)
     let bank: Vec<f32> = res
         .iter()
         .zip(&rc)
         .zip(&curve)
-        .map(|((p, s), c)| {
+        .enumerate()
+        .map(|(i, ((p, s), c))| {
             let rs = ring.project(*p);
-            let (_, _, _, b_ring) = ring.at(rs);
-            let w = smoothstep(par_end + 40.0, par_end, *s);
+            let (_, d, _, b_ring) = ring.at(rs);
+            let grade = 0.5 * (ring.at(rs + 1.0).2 - ring.at(rs - 1.0).2);
+            let gradient = geom::add(
+                geom::scale(d, grade),
+                geom::scale(geom::right_of(d), b_ring),
+            );
+            let t = geom::normalize(geom::sub(
+                res[(i + 1).min(res.len() - 1)],
+                res[i.saturating_sub(1)],
+            ));
+            let b_plane = geom::dot(gradient, geom::right_of(t));
+            // The carriageway's bank as long as the paving overlaps it (row 162: blending to
+            // the curve's own bank there stood the ramp's edge 9 cm proud in the right lane),
+            // then over 40 m to the curve's.
+            let w = smoothstep(hold_s + 40.0, hold_s, *s);
             let fade = smoothstep(0.0, 60.0, len - s - flat_term);
-            (w * travel * b_ring + (1.0 - w) * c * fade).clamp(-RAMP.bank_max, RAMP.bank_max)
+            // Not clamped to the ramp's own limit: beside the carriageway it takes the
+            // carriageway's bank exactly (Loop 9 banks up to 6.4 %, the ramp style 5 %: the
+            // clamp left a 6 cm ridge at the off-ramp's inner edge in the right lane, where an
+            // AI car at race speed crashed). The curve's part is clamped already.
+            w * b_plane + (1.0 - w) * c * fade
         })
         .collect();
     (pts, bank)
@@ -5207,7 +5227,20 @@ mod tests {
                     g,
                     rep.road_grades[r]
                 );
-                assert!(s.bank[k].abs() <= 0.0601);
+                // A ramp beside the carriageway lies in its plane (row 162): its cross slope is
+                // the plane's across the ramp's own direction, bank·cos θ + grade·sin θ, up to
+                // 7.6 % where it runs ~12° off a 5.6 % carriageway.
+                let bank_max = if s.highway && !s.median_barrier {
+                    0.0801
+                } else {
+                    0.0601
+                };
+                assert!(
+                    s.bank[k].abs() <= bank_max,
+                    "{} bank {}",
+                    rep.road_names[r],
+                    s.bank[k]
+                );
                 if k > 0 {
                     let ds0 = (cum[k] - cum[k - 1]).max(0.5);
                     let g0 = (s.centre[k][2] - s.centre[k - 1][2]) / ds0;

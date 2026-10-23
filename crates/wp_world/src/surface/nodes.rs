@@ -253,11 +253,32 @@ fn freeway_tapers(map: &CityMap, node: u32) -> TriMesh {
                 let bank = slope(sa) + (slope(sb) - slope(sa)) * f;
                 l[k][2] = s.pts[k][2] - bank * half;
                 r[k][2] = s.pts[k][2] + bank * half;
+                // Over a ribbon it joins, a vertex takes that ribbon's height (the strip's own
+                // heights come from the lane curve: up to 2.5 cm proud of the paving there).
+                for v in [&mut l[k], &mut r[k]] {
+                    let q = geom::xy(*v);
+                    let on: Vec<f32> = [sa, sb]
+                        .into_iter()
+                        .flatten()
+                        .filter(|x| over_paving(x, q))
+                        .map(|x| super::height_under(x, q).1)
+                        .collect();
+                    if !on.is_empty() {
+                        v[2] = on.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                    }
+                }
             }
             m.strip(&l, &r);
         }
     }
     m
+}
+
+/// Whether `q` lies on surface `x`'s paving (between its ends and paved edges).
+fn over_paving(x: &crate::network::RoadSurface, q: V2) -> bool {
+    let cum = geom::cumulative(&x.centre);
+    let pr = geom::project(&x.centre, &cum, q);
+    pr.s >= 0.0 && pr.s <= cum[cum.len() - 1] && pr.lateral >= -x.left_m && pr.lateral <= x.right_m
 }
 
 /// Counter-clockwise angle of `p` around `c`, in [0, 2π).

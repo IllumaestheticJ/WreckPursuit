@@ -1526,6 +1526,103 @@ on lead/round12 353744ec and on ws/world (debug and release: 1 go-around, contac
 failure opponent-pace saw on 0e84a9f7 predates a779ad57 (the fix and the re-aimed ≥ 1
 threshold are not in that commit), so it is not a regression. The margin is thin (exactly 1).
 
+## PR #38 port (lead, 2026-10-23): river, canal, bridges, landmarks, hideouts; rows 160 and 162
+Ported from `claude/beautiful-einstein-b1noth` onto round12 1da95294 (with Ashpeak): a1c11a27,
+6b753b84, 166ee01b, 122def2d and 5b49526a. 823f87a8 was skipped (already on round12), and
+a729a629 (its scenario re-bless) was replaced by blessing here.
+
+**Road format v7** (round12 was at v6 after Ashpeak; PR #38's own v4): `RoadNetwork::features`
+(`CityFeatures`: waterways, bridges, structures, landmarks, hideouts), `#[serde(default)]`.
+
+**Ported:**
+- The Vesper River and Calder Canal, cut into the natural ground. Ashpeak's region hook wraps
+  `Natural::vesper_z`.
+- Every water crossing is a bridge deck: 13 decks, 11 named bridges. The Iron Bridge is a
+  steel truss with a `Metal` deck.
+- 8 landmarks plus the Iron Bridge and Hollins Tunnel; 5 canopy hideouts plus the tunnel.
+  Their lots are reserved before buildings, which also keep out of the water.
+- Structure colliders (convex hulls) and line-of-sight occlusion.
+- `CityMap::water_surface_at` / `on_steel_deck` / `in_tunnel`.
+- The terrain competes in `ground_height` when it is much closer to the reference.
+- Greybox: river water, canopies, landmarks, steel.
+
+**Not ported: PR #38's Hollins Tunnel bore** (TUNNEL_* hold, terrain holes, lining
+structures). Round12 already has the Hollins Tunnel as a covered span at the same place. The
+features list that span as a landmark and hideout instead, and `in_tunnel` = inside any
+covered span. The two tunnel screenshots were dropped.
+
+**Changes to the PR on round12's map:**
+- **Water crossings are profile floors, not holds.** PR #38 held every crossing at the lower
+  bank. Under the grade cap that pulled the Hollins Knob summit junction from 109.8 m to
+  83.6 m, cutting Ridge Road and the Hollins Descent 26 m into the knob; it showed up as
+  drawn-terrain p99 1.04 m. `profile(…, floors, …)`: the deck clears banks and water and
+  stands higher where the road's line passes higher (Ridge Road Bridge: a high gorge bridge).
+- **Parked cars:** `PARK_MAX_TWIST_M` 0.06 → 0.05 (wp_sim). A driveway on the new layout
+  with 5.5 cm of twist left a wheel 3.1 cm in the lot. Vesper keeps 1850 of 1861 cars.
+- **Barrier meshes are not drivable ground** (`BARRIER_USER_DATA`, a row-164 follow-up).
+  `drivable_ground_z` took every triangle mesh as ground.
+- **Tests:**
+  - The drawn-terrain p99 limit is 0.85 m (0.78 with the steep river and canal banks; 0.70
+    before).
+  - The Port Vesper blocked-street test tries the nearest few 1+1 lanes for one that traffic
+    queues on.
+- **Scenarios:**
+  - city_hill_road_ascent: path ≥ 800 m (851 m: the grid moved across the gorge bridge).
+  - city_blocked_parked_player_vesper: seed 5 (no civilian reached the car on seed 7).
+
+**Row 160: highway outer edge barriers** (5b49526a, adapted). `surface::edge_barriers(map)`
+puts concrete barriers on carriageway outer edges and both ramp edges. They are open:
+- where other paving meets the edge (ramp tapers, gores, rest-stop ramps);
+- over node-patch paving (freeway-merge taper connectors);
+- within a junction's paved radius + 2 m (ramp terminals);
+- 40 m either side of each of those openings (row 162);
+- on decks and in covered spans (the barrier stops at the Hollins Tunnel portals).
+
+Physics uses the smooth row-164 meshes. Tests:
+- Vesper `highway_edges_…`: never on paving or in a covered span, every ramp end clear
+  across its width, ≥ 55 % of edges walled (61 % measured).
+- wp_sim `the_edge_barrier_keeps_a_car_off_the_verge`.
+
+**Row 162: ramp merges flush and clear.**
+- `profile_ramp`: a ramp lies in the carriageway's plane while its paving overlaps the
+  carriageway's. It used to leave the plane at the end of the parallel lane: the Hollins rest
+  exit ramp stood 0.64 m under the carriageway's paved edge along the taper, a wall a car
+  driving the ramp at 25 m/s hit.
+- Freeway taper strips are banked like the road surfaces they join. Level strips left 4–5 cm
+  steps at their edges and a ridge over the carriageway. Where a strip lies over a ribbon it
+  joins, its vertices take that ribbon's height (the lane curve's own heights stood 2.5 cm
+  proud).
+- Ramp banks beside the carriageway: the carriageway plane's gradient taken across the
+  ramp's own direction (bank·cos θ + grade·sin θ, up to 7.6 %), not clamped to the ramp
+  style's 5 %. Found with opponent-pace's report: an AI car at Loop 9 race speed was wrecked
+  by "world geometry" mid-carriageway at the Hollins rest off-ramp diverge (seed 15, s95).
+  The ramp's inner edge stood 6–9 cm proud in the right lane there.
+- New gate, city-import `vesper_carriageways_are_level_over_every_ramp_taper`: through
+  traffic over all 28 merge and diverge tapers, every 0.25 m pair on the paving under 3.5 cm
+  (worst 2.2 cm, grade and bank included; it was 7.9 cm on taper 1200, the Hollins rest
+  diverge).
+- Gates:
+  - city-import `ramp_merges` (14 merges, 32.6 k samples on the car's track): pavement, drawn
+    = physics (0.000 m), worst step 0.6 cm beyond the lane profile (was 5.5 cm), nothing
+    standing in the path.
+  - wp_sim `ramp_merges_are_driven_at_speed_without_contact`: every merge at 25 m/s from
+    100 m up the ramp to 120 m along, no static contact.
+  - Scenario `city_ramp_merge_hollins_rest_exit`: player seat, keyboard assists, at the ramp
+    limit.
+
+**Greyboxes:**
+
+| Greybox | glb (MB) | b64 (MB) | Note |
+|---|---|---|---|
+| vesper_v2 | 10.44 | 13.92 | under the 15 MB preview cap; size check raised to 11 MB |
+| procedural_12x12 | 3.02 | 4.02 | |
+| ashpeak | 25.86 | 34.48 | split for the preview by `tools/preview_build.sh` (b0269195) |
+
+**Changes outside my crates:** `crates/wp_sim/src/physics.rs` (structure colliders, edge
+barriers, `BARRIER_USER_DATA`), `crates/wp_sim/src/parked.rs` (`PARK_MAX_TWIST_M`), wp_sim
+tests; `tools/city-import` (greybox features, size check, `ramp_merges` test); simcli
+scenarios and goldens; `data/city` road files and greyboxes.
+
 ## Lead (2026-10-23): `world_traffic_soak` on candidate G handling — 1 civilian collision
 **Cause (traffic driving, not G).** Both cars were kinematic civilians; no racer or police unit
 was involved. G only changed the timing.

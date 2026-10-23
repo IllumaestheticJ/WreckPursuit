@@ -280,16 +280,29 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   Hollins Heights. **Calder Canal**: a level 20 m cut west from the river through Canal Flats
   (between its two rows; the grid moved west of the river) to a 60 m turning basin, 3 m deep
   with steep quay banks.
-- **Bridges:** every road that crosses a channel is held at deck height across it (water +
-  banks, anchors like a grade separation; deck just over the lower bank and ≥ 3 m over the
-  water, 4.5 m for Loop 9, 2.2 m over the canal), left uncarved and gets deck rails and piers
-  like any deck. Eleven named bridges: Vesper Viaduct and Mouth Viaduct (Loop 9 north and
+- **Bridges:** every road that crosses a channel stays at or above deck height across it
+  (water + banks: a profile *floor*, `Draft::floors`; deck just over the lower bank and ≥ 3 m
+  over the water, 4.5 m for Loop 9, 2.2 m over the canal), left uncarved, and gets deck rails
+  and piers like any deck. A floor, not a hold (PR #38 held it): a road whose line passes
+  higher keeps it, so Ridge Road crosses the gorge on a high bridge and the Hollins Knob
+  junction stays at 109.8 m (a hold pulled it to 83.6 m under the grade cap). Eleven named
+  bridges: Vesper Viaduct and Mouth Viaduct (Loop 9 north and
   south), Ridge Road Bridge, Hollins Gorge Bridge, Lantern Bridge, Larkspur Avenue Bridge, the
   **Iron Bridge** (Canal Street, 1+1, steel truss over a steel-grate deck: `surface_at` reads
   `Metal`), Harbor Boulevard Bridge, and the Basin, Mill and Lock bridges over the canal. Loop
   9 is never cut into pieces over the river or in the tunnel.
 - **Hollins Tunnel:** the covered span below (`covered`); `features` lists it as a landmark
   and a hideout. `CityMap::in_tunnel(p)` = inside any covered span.
+- **Highway edge barriers** (row 160, `surface::edge_barriers`): the median's concrete
+  barrier along every carriageway's outer edge and both ramp edges, inner face on the paved
+  edge; open 40 m before and after any other paving meeting the edge (ramp tapers, gores, the
+  rest-stop ramps, junctions, freeway-merge taper patches), on decks and in covered spans.
+  Physics: the smooth row-164 barrier meshes; greybox: plain walls.
+- **Ramp merges** (row 162, `surface::ramp_merges`): a ramp lies in the carriageway's plane as
+  long as its paving overlaps the carriageway's (`profile_ramp`), and the freeway taper strips
+  are banked like (and lie on) the roads they join, and a ramp's bank beside the carriageway
+  is the carriageway plane's across the ramp, so every merge and diverge is flush (≤ 0.6 cm
+  steps on the merge line, drawn = physics) and clear.
 - **Landmarks** (`features.landmarks`; lots found by an outward search for dry, level ground
   clear of roads, reserved before buildings are placed): Lantern Tower (230 m, downtown),
   Vesper Point Lighthouse (south-east shore), Hollins Observatory (the knob), Calder Mill
@@ -319,11 +332,12 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   `CityMap::covered_los = false` / `World::set_covered_los(false)` switches only the
   sightline effect off (A/B controls). `World::covered_at(p)` names the span at a point.
 
-1012 lanes, 159 junctions (31 signalised, 22 freeway merges / diverges), 3218 buildings,
-14 grade separations (Route 40 West / North and five crossroads, each over or under both
-carriageways), 22 ramps, ≈ 10 km of median barrier, 2 covered roads, STATS_TODO, terrain
-681 × 611 vertices (−3 … 111 m); generation ≈ 0.12 s release (0.4 s debug), `CityMap::new`
-≈ 10 ms. `cargo run --release -p wp_world --example vesper_stats` prints grades, crest/sag g
+1180 lanes, 188 junctions (31 signalised), 3576 buildings, 14 grade separations (Route 40
+West / North and five crossroads, each over or under both carriageways), 22 interchange ramps
+and 6 rest-stop ramps, ≈ 10 km of median barrier and ≈ 29 km of highway edge barrier (61 % of
+the highway edges), 2 covered roads, 13 bridge decks over water (11 named bridges), 143
+structures, 10 landmarks, 6 hideouts, terrain 681 × 611 vertices (−3 … 111 m); generation
+≈ 0.29 s release, `CityMap::new` ≈ 10 ms. `cargo run --release -p wp_world --example vesper_stats` prints grades, crest/sag g
 at the limit and banks per road.
 
 ### Sidewalks, kerbs and junction discs (`surface`, playtest #20)
