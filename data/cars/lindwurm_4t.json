@@ -157,7 +157,7 @@
   },
   "aero_downforce_coeffs": [0.0, 0.0],
   "lattice_id": "lindwurm_4t",
-  "base_price": 34000,
+  "base_price": 32000,
   "durability_class": 3,
   "fuel_capacity_l": 55.0
 }

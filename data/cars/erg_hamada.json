@@ -1,0 +1,173 @@
+{
+  "id": "erg_hamada",
+  "display_name": "Erg Hamada",
+  "class": "Truck",
+  "analog_of": "2020s desert rally-raid prototype, 5.0 L naturally aspirated V8 (air-restricted), permanent 4WD, 6-speed sequential, tubular spaceframe with composite body, 37-inch tires, twin dampers per corner",
+  "body_size_m": [2.3, 4.6, 1.95],
+  "mass_kg": 2113.2,
+  "front_weight_frac": 0.52,
+  "wheelbase_m": 3.0,
+  "track_front_m": 2.1,
+  "track_rear_m": 2.1,
+  "cg_height_m": 0.7,
+  "inertia_kgm2": [1410.0, 3740.0, 3960.0],
+  "drag_cd_a_m2": 2.023,
+  "lift_front": 0.15,
+  "lift_rear": 0.15,
+  "engine": {
+    "torque_curve_nm": [
+      [1000, 400],
+      [1500, 450],
+      [2000, 490],
+      [2500, 520],
+      [3000, 545],
+      [3500, 560],
+      [4000, 560],
+      [4500, 555],
+      [5000, 540],
+      [5500, 520],
+      [6000, 490],
+      [6300, 465],
+      [6500, 440]
+    ],
+    "idle_rpm": 900.0,
+    "redline_rpm": 6300.0,
+    "rev_limit_rpm": 6500.0,
+    "inertia_kgm2": 0.18,
+    "engine_brake_nm": 67.0
+  },
+  "drivetrain": {
+    "layout": {
+      "Awd": {
+        "front_split": 0.5
+      }
+    },
+    "gear_ratios": [3.31, 2.31, 1.73, 1.38, 1.13, 0.95],
+    "final_drive": 4.3,
+    "reverse_ratio": 3.0,
+    "diff_front": {
+      "Lsd": {
+        "preload_nm": 100.0,
+        "ramp_power": 0.5,
+        "ramp_coast": 0.4
+      }
+    },
+    "diff_rear": {
+      "Lsd": {
+        "preload_nm": 100.0,
+        "ramp_power": 0.5,
+        "ramp_coast": 0.4
+      }
+    },
+    "clutch_max_nm": 900.0,
+    "shift_time_s": 0.15
+  },
+  "wheels": [
+    {
+      "position_m": [-1.05, 1.5, 0.457],
+      "radius_m": 0.457,
+      "width_m": 0.325,
+      "mass_kg": 70.0,
+      "tire_id": "all_terrain",
+      "steerable": true,
+      "max_steer_rad": 0.585,
+      "ackermann_frac": 0.6,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.1047
+    },
+    {
+      "position_m": [1.05, 1.5, 0.457],
+      "radius_m": 0.457,
+      "width_m": 0.325,
+      "mass_kg": 70.0,
+      "tire_id": "all_terrain",
+      "steerable": true,
+      "max_steer_rad": 0.585,
+      "ackermann_frac": 0.6,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.1047
+    },
+    {
+      "position_m": [-1.05, -1.5, 0.457],
+      "radius_m": 0.457,
+      "width_m": 0.325,
+      "mass_kg": 70.0,
+      "tire_id": "all_terrain",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [1.05, -1.5, 0.457],
+      "radius_m": 0.457,
+      "width_m": 0.325,
+      "mass_kg": 70.0,
+      "tire_id": "all_terrain",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 22900.0,
+      "damper_bump_ns_per_m": 3180.0,
+      "damper_rebound_ns_per_m": 6370.0,
+      "travel_m": 0.35,
+      "preload_m": 0.03,
+      "arb_n_per_m": 5400.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 22900.0,
+      "damper_bump_ns_per_m": 3180.0,
+      "damper_rebound_ns_per_m": 6370.0,
+      "travel_m": 0.35,
+      "preload_m": 0.03,
+      "arb_n_per_m": 5400.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 24900.0,
+      "damper_bump_ns_per_m": 3170.0,
+      "damper_rebound_ns_per_m": 6340.0,
+      "travel_m": 0.35,
+      "preload_m": 0.03,
+      "arb_n_per_m": 3100.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 24900.0,
+      "damper_bump_ns_per_m": 3170.0,
+      "damper_rebound_ns_per_m": 6340.0,
+      "travel_m": 0.35,
+      "preload_m": 0.03,
+      "arb_n_per_m": 3100.0,
+      "bump_stop_n_per_m": 150000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 5100.0,
+    "max_torque_rear_nm": 3030.0,
+    "bias_front": 0.645,
+    "handbrake_rear_nm": 3410.0
+  },
+  "steering": {
+    "ratio": 14.0,
+    "rack_speed_rad_per_s": 1.8,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "erg_hamada",
+  "base_price": 32000,
+  "durability_class": 5,
+  "fuel_capacity_l": 300.0
+}
