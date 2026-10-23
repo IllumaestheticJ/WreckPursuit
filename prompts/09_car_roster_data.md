@@ -14,8 +14,8 @@ Racers:
 5. 2010s American muscle, 5.0 L V8, ~1700 kg → **"Bronco-less" → "Marauder 5.0"** (Muscle, RWD)
 6. 70s American muscle, big-block, ~1650 kg, live axle → **"Ironside 440"** (Muscle, RWD) — durable, heavy, scary brakes
 7. 2000s German FR sedan, 3.2 L I6, ~1550 kg → **"Falke M"** (Sport, RWD)
-8. 2010s German AWD hatch, 2.0 T, ~1500 kg → **"Lindwurm R"** (Sport, AWD Haldex-style on-demand)
-9. 90s Italian mid-engine exotic analogue, 3.5 L, ~1300 kg → **"Scirocco-less" → "Strega 350"** (Exotic, RWD, MR — needs `inertia`/CG done right)
+8. 2010s German AWD hatch, 2.0 T, ~1500 kg → **"Lindwurm R"** (Sport, AWD clutch-pack on-demand)
+9. 90s Italian mid-engine exotic analogue, 3.5 L, ~1300 kg → **"Strega 350"** (renamed away from a real nameplate) (Exotic, RWD, MR — needs `inertia`/CG done right)
 10. Full-size pickup, 5.3 L V8, ~2400 kg → **"Hauler 1500"** (Truck, RWD/4WD) — the battering ram, durability over speed
 Police:
 11. Full-size RWD sedan cruiser (3.7 L V6, ~1900 kg) → **"Sentinel Cruiser"**

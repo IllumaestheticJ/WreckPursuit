@@ -619,11 +619,11 @@ fn crews_and_territory() {
             "/v1/crews",
             Some(&CreateCrewRequest {
                 name: "Night Shift".into(),
-                tag: "nsx".into(),
+                tag: "nsh".into(),
             }),
         )
         .unwrap();
-    assert_eq!(crew.tag, "NSX");
+    assert_eq!(crew.tag, "NSH");
     let err = g
         .call_empty(
             "POST",

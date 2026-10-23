@@ -648,7 +648,7 @@ Ordered by impact per triangle. Triangle figures are a rough share of the 8–20
   [BusinessLive](https://www.businesslive.co.za/bd/life/motoring/2022-05-09-seven-all-time-hot-hatch-styling-greats/),
   [TimesLive](https://www.timeslive.co.za/motoring/features/2022-05-12-seven-of-the-best-looking-hot-hatches-to-ever-hit-the-streets/),
   [eBay Motors blog](https://ebay.com/motors/blog/whats-the-formula-for-making-a-hot-hatchback),
-  [Auto123](https://www.auto123.com/en/news/amp/chevrolet-aveo-rs-show-car-at-naias/21471/),
+  Auto123 (2000s subcompact hot-hatch show-car report; maker name withheld, CLAUDE.md rule 9),
   [GarageDreams](https://garagedreams.net/car-facts/what-is-a-hot-hatchback-a-quick-guide-for-car-enthusiasts).
 - Tuner customisation grammar (wide body, wings, skirts, roof scoops, neon, vinyl):
   [Team-BHP NFS U2 thread](https://www.team-bhp.com/forum/shifting-gears/1297-nfs-underground-2-a.html),
