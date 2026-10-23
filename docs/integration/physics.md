@@ -83,3 +83,16 @@ Base tyres, RACK=ref unless named; held s / taps of 36:
   slide closes below the lock angle a held full lock points the fronts past the travel and helps
   pull the nose through (grip-balance's trace). Next: trace the swap (front vs rear force at the
   moment it closes) before choosing a tyre-side change.
+
+## Blind eye test, owner result 1 (2026-10-23, row physics-4)
+`eye1 rack=rack_shipped rack2=rack_reference ride=same drift=tyres+weight_candidate_G tcs=TCS_Off`
+- Rack: blind, the owner ranks **shipped (most lock cut) > reference > full lock**. So less lock
+  at speed *feels* better, which runs against reading row 147 as "full lock at every speed".
+  Keep the shipped rack; the reference / full-lock presets stay lab A/B only.
+- Ride: no preference (shipped ride kept).
+- **Candidate G preferred** (held_search best inside every guard rail, grip-balance handover):
+  tyres spin_b0 6.48 / b2 1.75 / c 0.90, side_floor 0.38, rear_relax 1.41, rear_peak_slip 1.10;
+  grip rear 0.533 / front 0.666; ride yaw_inertia 1.35, spring 1.04, arb 0.63, roll_inertia 1.34.
+  Bench: held 2.59 s (2.24), taps 21 / 36 (20), handling fails 0. Next: AI pace sweep, tests,
+  owner confirmation, then default.
+- TCS: Off preferred over Half (a player setting; no physics change).
