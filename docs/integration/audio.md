@@ -641,3 +641,41 @@ docs, and the kinematic-traffic bridge which reads `&Session` only): simcli `gol
 `wp_wasm` `crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid` and
 `tests::simcli_golden_replays_play_back_in_the_browser_core` (golden_tbone drift) — neither
 `wp_wasm` test touches audio. These look like round-13 vehicle changes waiting for a `[bless]`.
+
+## Owner report (2026-10-23) — "sound is cutting in/out": whole mix drops out in busy scenes
+
+Symptom: everything drops out at once, cleanly, when many cars / police are around. That is
+the Web Audio render thread missing its deadline (underrun), not the director: a 90 s
+free-drive city run (`free_drive`, police arriving, modelled engines) fed to the director
+showed no global Stop/Play storms for the focus car, and the dropouts hit every bus at once.
+
+Cause: the per-voice strip in `voices.ts` updated the panner position, the listener and the
+air-absorption low-pass with `setTargetAtTime` every frame. A `PannerNode` whose position or
+the listener's has automation pending is rendered per sample (azimuth / elevation / gains
+recomputed every sample), and a `BiquadFilterNode` with an automated frequency recomputes its
+coefficients every sample. `setTargetAtTime` never finishes, so every spatial voice stayed on
+that path permanently.
+
+Fix (`ws/audio-dropouts`):
+- Listener and panner positions are plain `.value` writes (applied per 128-sample block).
+- The strip low-pass is a plain value for per-frame distance changes; a jump of more than half
+  an octave (camera cut, cabin muffling) glides over 20 ms and then returns to the cheap path.
+- Gain and pitch keep their glides (cheap per sample, audible when stepped).
+- `AudioContext` latency hint `"balanced"` instead of `"interactive"`: a bigger output buffer
+  rides out a heavy frame instead of dropping out.
+
+Measured by rendering the city run's command stream through the real `VoicePool` +
+`EngineSynthHost` + `SirenRack` in an `OfflineAudioContext` (recorded packs, headless
+Chromium 141, this container's CPU; render time / audio time):
+
+| window | before | after |
+|---|---|---|
+| 0–30 s (light traffic) | 0.58× | 0.33× |
+| 30–46 s (police arrive, 7 modelled engines, ~45 voices) | 1.00× | 0.61× |
+| 60–90 s | 0.95× | 0.59× |
+
+A busy frame needed a whole core of audio-thread time before; it now has ~40 % headroom.
+Click count of the same render unchanged (302 → 298, dominated by real impacts).
+`e2e/audio_impacts.mjs --no-live` gives the same result before and after (the two
+glass-tail / scrape-sparks failures are pre-existing on `main`). The live e2e suites need the
+wasm build and were not run here.

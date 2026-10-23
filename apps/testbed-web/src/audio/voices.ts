@@ -2,6 +2,15 @@
 // that executes wp_audio's Play / Set / Stop commands. One panner per voice (sources sit on
 // their entity); distance attenuation and Doppler are already folded into the parameters by
 // the Rust director, so panners only pan (rolloff 0).
+//
+// Audio-thread cost (playtest: the whole mix cut in and out in busy scenes): a PannerNode
+// whose position, or the listener's, has automation pending renders per sample (azimuth,
+// elevation and gains recomputed every sample), and so does a BiquadFilter whose frequency is
+// automated (new coefficients every sample). `setTargetAtTime` never finishes, so one call per
+// frame kept every voice on that path for good. Positions and the air-absorption low-pass are
+// therefore plain `.value` writes (applied per 128-sample block); only gain and pitch, which
+// are cheap per sample and audible when stepped, keep their short glides. A busy city chase
+// renders ~40 % cheaper (offline: 1.00× → 0.61× real time on the test container).
 
 import type { EngineSynthHost } from "./engine_host";
 import { engineInstrument, makeSynth, type EngineMix, type EngineSynth, type SynthVoice } from "./synth";
@@ -357,19 +366,31 @@ export class VoicePool {
     return st;
   }
 
-  private setPanner(p: PannerNode, pos: [number, number, number], t: number, smooth: boolean): void {
+  /** Move a panner (per-block value, no automation: see the file comment). */
+  private setPanner(p: PannerNode, pos: [number, number, number]): void {
     if (p.positionX) {
-      if (smooth) {
-        p.positionX.setTargetAtTime(pos[0], t, 0.02);
-        p.positionY.setTargetAtTime(pos[1], t, 0.02);
-        p.positionZ.setTargetAtTime(pos[2], t, 0.02);
-      } else {
-        p.positionX.setValueAtTime(pos[0], t);
-        p.positionY.setValueAtTime(pos[1], t);
-        p.positionZ.setValueAtTime(pos[2], t);
-      }
+      p.positionX.value = pos[0];
+      p.positionY.value = pos[1];
+      p.positionZ.value = pos[2];
     } else {
       p.setPosition(pos[0], pos[1], pos[2]);
+    }
+  }
+
+  /**
+   * Set the air-absorption low-pass. Small (per-frame distance) changes are a plain value;
+   * a big jump (camera cut, cabin muffling switching on) glides over ~one frame and then the
+   * filter is back on the cheap per-block path.
+   */
+  private setLowpass(lp: BiquadFilterNode, hz: number, t: number): void {
+    const f = lp.frequency;
+    const cur = f.value;
+    f.cancelScheduledValues(t);
+    if (cur > 0 && Math.abs(Math.log2(hz / cur)) > 0.5) {
+      f.setValueAtTime(cur, t);
+      f.linearRampToValueAtTime(hz, t + 0.02);
+    } else {
+      f.value = hz;
     }
   }
 
@@ -405,8 +426,8 @@ export class VoicePool {
     if (panner) panner.panningModel = this.router?.panning(played) ?? "equalpower";
     gain.gain.setValueAtTime(looped ? 0 : params.gain, t);
     if (looped) gain.gain.setTargetAtTime(params.gain, t, 0.02);
-    lp.frequency.setValueAtTime(Math.min(params.lowpass_hz || 18000, 18000), t);
-    if (panner) this.setPanner(panner, params.pos, t, false);
+    lp.frequency.value = Math.min(params.lowpass_hz || 18000, 18000);
+    if (panner) this.setPanner(panner, params.pos);
     (panner ?? lp).connect(dest);
 
     let src: AudioBufferSourceNode | null = null;
@@ -465,11 +486,11 @@ export class VoicePool {
       l.gain = params.gain;
     }
     if (changed(params.lowpass_hz, l.lowpass_hz)) {
-      v.lp.frequency.setTargetAtTime(Math.min(params.lowpass_hz || 18000, 18000), t, 0.05);
+      this.setLowpass(v.lp, Math.min(params.lowpass_hz || 18000, 18000), t);
       l.lowpass_hz = params.lowpass_hz;
     }
     if (v.panner && moved(params.pos, l.pos)) {
-      this.setPanner(v.panner, params.pos, t, true);
+      this.setPanner(v.panner, params.pos);
       l.pos = params.pos;
     }
     const pitchMoved = changed(params.pitch, l.pitch);
@@ -523,7 +544,7 @@ export class VoicePool {
       panner.panningModel = "equalpower";
       panner.distanceModel = "linear";
       panner.rolloffFactor = 0;
-      this.setPanner(panner, params.pos, t, false);
+      this.setPanner(panner, params.pos);
       syn.output.connect(gain).connect(lp).connect(panner).connect(this.mixer.input("Engine"));
       g = {
         synth: syn,
@@ -643,7 +664,6 @@ export class VoicePool {
       this.stripsReused++;
       s.gain.gain.cancelScheduledValues(t);
       s.lp.frequency.cancelScheduledValues(t);
-      if (s.panner?.positionX) for (const p of [s.panner.positionX, s.panner.positionY, s.panner.positionZ]) p.cancelScheduledValues(t);
       return s;
     }
     const gain = this.ctx.createGain();
@@ -718,20 +738,22 @@ export class VoicePool {
 
 }
 
-/** Point the Web Audio listener at the camera (sim world space). */
-export function setListener(ctx: AudioContext, pos: number[], fwd: number[], up: number[]): void {
+/**
+ * Point the Web Audio listener at the camera (sim world space). Plain values, no automation:
+ * automated listener params put every panner on the per-sample path (see the file comment).
+ */
+export function setListener(ctx: BaseAudioContext, pos: number[], fwd: number[], up: number[]): void {
   const l = ctx.listener;
-  const t = ctx.currentTime;
   if (l.positionX) {
-    l.positionX.setTargetAtTime(pos[0], t, 0.01);
-    l.positionY.setTargetAtTime(pos[1], t, 0.01);
-    l.positionZ.setTargetAtTime(pos[2], t, 0.01);
-    l.forwardX.setTargetAtTime(fwd[0], t, 0.01);
-    l.forwardY.setTargetAtTime(fwd[1], t, 0.01);
-    l.forwardZ.setTargetAtTime(fwd[2], t, 0.01);
-    l.upX.setTargetAtTime(up[0], t, 0.01);
-    l.upY.setTargetAtTime(up[1], t, 0.01);
-    l.upZ.setTargetAtTime(up[2], t, 0.01);
+    l.positionX.value = pos[0];
+    l.positionY.value = pos[1];
+    l.positionZ.value = pos[2];
+    l.forwardX.value = fwd[0];
+    l.forwardY.value = fwd[1];
+    l.forwardZ.value = fwd[2];
+    l.upX.value = up[0];
+    l.upY.value = up[1];
+    l.upZ.value = up[2];
   } else {
     l.setPosition(pos[0], pos[1], pos[2]);
     l.setOrientation(fwd[0], fwd[1], fwd[2], up[0], up[1], up[2]);
