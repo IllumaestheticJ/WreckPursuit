@@ -1683,7 +1683,7 @@ async function main(): Promise<void> {
     prof.lap("fx");
     // The game UI is hidden during a crash replay (and must not count its events twice).
     if (!crash.playing) {
-      ui.frame(wi[W.tick], app.player, events, wi[W.hours], wi[W.mode] > 0.5 ? "Simulation" : "Arcade");
+      ui.frame(wi[W.tick], app.player, events, wi[W.hours], wi[W.mode] > 0.5 ? "Simulation" : "Arcade", map.radar());
       if (!audio.hearsRadio()) {
         for (const ev of events as unknown as { Police?: { Radio?: { unit: number | null; text: string } } }[]) {
           const r = ev.Police?.Radio;
@@ -1733,7 +1733,10 @@ async function main(): Promise<void> {
     prof.lap("ui");
     scene.update(dt, sim.intents());
     scene.updateHelicopters(policeDraw, tS);
-    scene.updateHelicopterBeams(sim.policeHelicopters(), wi[W.night]);
+    const helis = sim.policeHelicopters();
+    scene.updateHelicopterBeams(helis, wi[W.night]);
+    // The rotor in the world (PR #32): same rows, no extra wasm call.
+    audio.setHelicopters(helis);
     scene.updatePoliceTools(sim.policeTools(), tS);
     const wx = sim.weatherInfo();
     scene.setTimeOfDay(wi[W.night], wx[0] > 0.5 ? wx[7] : 1);

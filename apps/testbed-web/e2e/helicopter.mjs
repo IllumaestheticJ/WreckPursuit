@@ -130,6 +130,42 @@ await ready();
     `helicopter: launched ${launched}, ${heli.n} tracking with visual ${heli.visual}, ${heli.alt.toFixed(0)} m above the car, spotlight ${heli.aimOff.toFixed(1)} m off it, ${heli.lit} lit`,
   );
 }
+
+// Air unit UI (PR #32 port): the helicopter tracking the player is drawn as a helicopter with
+// its call sign ("AIR <id>", the radio's "Air <id>") and a tether on the chase radar and the
+// corner minimap, the chase HUD says it is on you, and its pilot lines are flagged for the AIR
+// badge. Same chase as above (debug-launched helicopter with visual on the player).
+{
+  const air = await page
+    .waitForFunction(
+      () => {
+        const wp = window.__wp;
+        const radar = document.querySelector("#ui-chase .wp-chase-radar");
+        const labels = Array.from(radar?.querySelectorAll("text") ?? []).map((t) => t.textContent ?? "");
+        const out = {
+          radar: !!radar,
+          label: labels.find((t) => /^AIR \d+$/.test(t)) ?? null,
+          tether: !!radar?.querySelector(".wp-minimap-track line"),
+          note: radar?.querySelector(".wp-chase-radar-note")?.textContent ?? null,
+          minimapTethers: wp.map.hud.stats().minimap.tethers ?? 0,
+          pilot: wp.ui.model.get().scanner.find((e) => e.air)?.text ?? null,
+          car: wp.ui.model.get().scanner.some((e) => e.air && !/^Air \d+/.test(e.text)),
+        };
+        return out.radar && out.label && out.tether && out.note && out.minimapTethers > 0 && out.pilot ? out : false;
+      },
+      null,
+      { timeout: 60000, polling: 250 },
+    )
+    .then((h) => h.jsonValue())
+    .catch(() => null);
+  await shot("helicopter_air_unit_hud.png");
+  check(
+    !!air && /on you/i.test(air.note ?? "") && !air.car,
+    air
+      ? `air unit: radar icon "${air.label}", tether ${air.tether}, note "${air.note}", minimap tethers ${air.minimapTethers}, pilot line flagged "${air.pilot}"`
+      : "air unit: no radar icon / tether / on-you note / pilot line within 60 s",
+  );
+}
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();
 stopServer();

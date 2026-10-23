@@ -16,6 +16,7 @@ import type { SimEvent as KitSimEvent } from "../../../ui-kit/src/generated/cont
 import { bannerFor, toReadout, type Banner, type PoliceStatus } from "../police";
 import { layers } from "../settings";
 import { sim, type SimEvent } from "../wasm/sim";
+import type { Radar } from "./map";
 
 export class UiOverlay {
   readonly model: LiveModel;
@@ -59,7 +60,7 @@ export class UiOverlay {
   }
 
   /** Feed one frame (call after draining events). */
-  frame(tick: number, player: number, events: SimEvent[], hours: number, mode: string): void {
+  frame(tick: number, player: number, events: SimEvent[], hours: number, mode: string, radar: Radar | null = null): void {
     const chase = layers.on("chase");
     this.chaseEl.classList.toggle("hidden", !chase);
     const status = sim.policeStatus(player);
@@ -80,6 +81,8 @@ export class UiOverlay {
       police: status ? toReadout(status) : null,
       damageMode: mode === "Simulation" ? "Simulation" : "Arcade",
       timeOfDayS: hours * 3600,
+      // The chase radar only matters once police are around (police cars and the helicopter).
+      radar: status ? radar : null,
     });
   }
 

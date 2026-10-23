@@ -92,6 +92,19 @@ describe("synthetic pursuit (wp_police event shapes)", () => {
     expect(p.units.find((u) => u.unit === 6)?.kind).toBe("Helicopter");
   });
 
+  it("flags the helicopter pilot's lines (Air <n>) for the AIR badge (PR #32)", () => {
+    const ctx = ctxFor(run, 1);
+    const lines = [
+      { tick: 11, t_s: 0.2, event: { Police: { Radio: { unit: 9, text: "Air 9: eyes on racer #1 northbound in Core. Spotlight on." } } } },
+      { tick: 12, t_s: 0.3, event: { Police: { Radio: { unit: 4, text: "Unit 4 in pursuit of racer #1." } } } },
+      { tick: 13, t_s: 0.4, event: { Police: { Radio: { unit: null, text: "Dispatch: air unit launching on racer #1, ETA 40 seconds." } } } },
+    ] as Run["events"];
+    const p = lines.reduce((acc, l) => applyEvent(acc, l, ctx), emptyPlayback());
+    expect(p.scanner.find((e) => e.text.startsWith("Air 9:"))?.air).toBe(true);
+    expect(p.scanner.find((e) => e.text.startsWith("Unit 4"))?.air).toBeUndefined();
+    expect(p.scanner.find((e) => e.text.startsWith("Dispatch"))?.air).toBeUndefined();
+  });
+
   it("puts violations on the map at their contract position", () => {
     const p = foldAll(run, 1, 16 * 240);
     const red = p.incidents.find((i) => i.kind === "RedLight");
