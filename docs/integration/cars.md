@@ -88,6 +88,13 @@ not settable, `mud_flaps` is all-four only. `Tips::HighCentre` draws four touchi
 bumper light bar and exo-bumper pods are detail parts in lamp materials (the four-lens test
 counts light parts per end), so they may not switch on with the head/tail lamps.
 
+After the round-12 merge: every kit emits turn signals as lamp-cluster segments (playtest row
+136 contract) — Mesquite and Erg as segments of their own lamps, Ombra in its lamp housing,
+the rest via the new shared `Kit::signals_beside_lamps` (amber lens beside each head / tail
+lamp, under the outboard end of full-width light bars, inboard on the nose top for set-back
+lamps). Mid LODs (round 12) generated for all nine; `mesquite_pr` sits at 6 498 of the 6 500
+mid budget (5-sided tubes, simpler spare wheel and bypass reservoirs).
+
 ### New requests (wave 3)
 
 | # | To | Request |

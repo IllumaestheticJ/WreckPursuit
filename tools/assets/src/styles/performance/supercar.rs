@@ -22,7 +22,8 @@ use crate::mesh::MaterialSlot as M;
 use crate::style::{ArchShape, BodyStyle, CapKind, CarStyle, DetailCtx, RimKind, Silhouette};
 
 use super::kit::{
-    dkey, headlight_key, lkey, sided, taillight_key, top_band, Kit, Stand, Wing, SIDES,
+    dkey, headlight_key, indicator_front_key, lkey, sided, taillight_key, top_band, Kit, Stand,
+    Wing, SIDES,
 };
 use super::{kit_detail, rgb, wheels};
 
@@ -478,6 +479,9 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     k.mirrors(0.16, 0.10, Some(M::Carbon));
     k.wipers();
+
+    // Turn signals as segments beside the lamps (playtest row 136).
+    k.signals_beside_lamps(0.06, M::EmissiveAmber);
 }
 
 // ======================================================================================= Ombra
@@ -566,6 +570,17 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             y0 + 0.03,
             y0 + 0.09,
             top_band(sx * (xi + 0.24), sx * (xi + 0.34)),
+            0.004,
+            0.010,
+            (1, 1),
+        );
+        // Amber turn-signal segment of the same lens, outboard of the lamp.
+        let ik = indicator_front_key(sx);
+        k.patch(
+            &ik,
+            y0 + 0.03,
+            y0 + 0.09,
+            top_band(sx * (xi + 0.35), sx * (xi + 0.41)),
             0.004,
             0.010,
             (1, 1),
@@ -887,6 +902,9 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     k.mirrors(0.18, 0.09, Some(M::Trim));
     k.wipers();
+
+    // Turn signals as segments beside the lamps (playtest row 136).
+    k.signals_beside_lamps(0.06, M::EmissiveAmber);
 }
 
 // ===================================================================================== Ostwind
@@ -1238,6 +1256,9 @@ fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.door_handles(M::Paint);
     k.fuel_filler(1.0, 0.10, M::Paint);
     k.wipers();
+
+    // Turn signals as segments beside the lamps (playtest row 136).
+    k.signals_beside_lamps(0.06, M::EmissiveAmber);
 }
 
 // ====================================================================================== Kagero
@@ -1594,4 +1615,7 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     k.mirrors(0.16, 0.10, Some(M::Trim));
     k.wipers();
+
+    // Turn signals as segments beside the lamps (playtest row 136).
+    k.signals_beside_lamps(0.06, M::EmissiveAmber);
 }

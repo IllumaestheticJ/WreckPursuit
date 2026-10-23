@@ -19,16 +19,20 @@ use crate::style::{
     ArchShape, BodyStyle, CapKind, CarStyle, DetailCtx, HoodScoop, RimKind, Silhouette,
 };
 
-use super::kit::{dkey, headlight_key, lkey, sided, taillight_key, top_band, Kit, SIDES};
+use super::kit::{
+    dkey, headlight_key, indicator_front_key, indicator_rear_key, lkey, sided, taillight_key,
+    top_band, Kit, SIDES,
+};
 use super::{kit_detail, rgb, wheels};
 
 /// Radius of the kit's tube work (bumpers, rack, frames), m.
 const TUBE_R: f32 = 0.028;
 
-/// Straight tube from `a` to `c` (6 sides, open ends: the ends always meet another tube or a
-/// panel, so caps would be hidden triangles).
+/// Straight tube from `a` to `c` (5 sides — the pickup's mid LOD has to stay under its 6.5k
+/// budget; open ends: the ends always meet another tube or a panel, so caps would be hidden
+/// triangles).
 fn tube(k: &mut Kit, key: &PartKey, a: [f32; 3], c: [f32; 3], r: f32) {
-    k.b.cylinder(key, a, c, r, r, 6, false);
+    k.b.cylinder(key, a, c, r, r, 5, false);
 }
 
 /// Flat colour stripe on the top surface (y0..y1 × x0..x1) with an explicit grid `steps`
@@ -49,15 +53,10 @@ fn spare_wheel(
     hw: f32,
 ) {
     let r_in = 0.62 * r;
-    let prof = [
-        [r_in, -hw],
-        [r - 0.035, -hw],
-        [r, -hw + 0.05],
-        [r, hw - 0.05],
-        [r - 0.035, hw],
-        [r_in, hw],
-    ];
-    k.b.lathe(tire, c, axis, &prof, 14);
+    // Square-shouldered profile, 10 segments (10 / 6 on the rim and hub): the spares sit
+    // inside racks and bays, and the pickup's mid LOD has to stay under its 6.5k budget.
+    let prof = [[r_in, -hw], [r, -hw + 0.03], [r, hw - 0.03], [r_in, hw]];
+    k.b.lathe(tire, c, axis, &prof, 10);
     let at = |d: f32| [c[0] + axis[0] * d, c[1] + axis[1] * d, c[2] + axis[2] * d];
     // Rim face fills the tyre's hole; the hub stands proud of it.
     k.b.cylinder(
@@ -66,7 +65,7 @@ fn spare_wheel(
         at(hw - 0.025),
         r_in + 0.005,
         r_in + 0.005,
-        12,
+        10,
         true,
     );
     k.b.cylinder(
@@ -75,7 +74,7 @@ fn spare_wheel(
         at(hw + 0.02),
         0.16 * r,
         0.12 * r,
-        8,
+        6,
         true,
     );
 }
@@ -189,16 +188,19 @@ fn mesquite_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.010,
             0.0,
         );
+        // Square lamp with its amber turn signal as the inboard segment of the same lens.
         let hk = headlight_key(sx);
         k.front_box(
             &hk,
-            sx * 0.57,
+            sx * 0.64,
             sx * (wn - 0.06),
             lz0 + 0.03,
             lz1,
             0.020,
             0.0,
         );
+        let ik = indicator_front_key(sx);
+        k.front_box(&ik, sx * 0.57, sx * 0.63, lz0 + 0.03, lz1, 0.020, 0.0);
         let kd = sided(
             &lkey("drl_l", BodyRegion::FrontLeftFender, M::Headlight),
             sx,
@@ -506,14 +508,14 @@ fn mesquite_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         for (i, dy) in [0.16f32, -0.02, -0.20].into_iter().enumerate() {
             let r = if i == 1 { 0.045 } else { 0.032 };
             let zt = rail + 0.18 - 0.04 * i as f32;
-            k.b.cylinder(&kb, [x, ar.0 + dy, z0], [x, ar.0 + dy, zt], r, r, 8, false);
+            k.b.cylinder(&kb, [x, ar.0 + dy, z0], [x, ar.0 + dy, zt], r, r, 6, false);
             k.b.cylinder(
                 &kc,
                 [x, ar.0 + dy, zt],
                 [x, ar.0 + dy, zt + 0.03],
                 r + 0.006,
                 r + 0.006,
-                6,
+                5,
                 true,
             );
         }
@@ -628,14 +630,7 @@ fn mesquite_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         for i in 0..3 {
             let z = t0 + 0.02 + h * i as f32;
             let key = if i == 2 {
-                sided(
-                    &lkey(
-                        "indicator_rear_l",
-                        BodyRegion::RearLeftQuarter,
-                        M::EmissiveAmber,
-                    ),
-                    sx,
-                )
+                indicator_rear_key(sx, M::EmissiveAmber)
             } else {
                 tk.clone()
             };
@@ -715,6 +710,9 @@ fn mesquite_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.mirrors(0.16, 0.13, Some(M::Trim));
     k.door_handles(M::Trim);
     k.wipers();
+
+    // Turn signals as segments beside the lamps (playtest row 136).
+    k.signals_beside_lamps(0.06, M::EmissiveAmber);
 }
 
 /// Rally-raid prototype: tube-frame buggy body, short nose, roof scoop, spare wheels in the tail.
@@ -798,8 +796,8 @@ fn erg_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.0,
         );
         let ka = sided(
-            &lkey(
-                "indicator_front_l",
+            &dkey(
+                "front_marker_l",
                 BodyRegion::FrontLeftFender,
                 M::EmissiveAmber,
             ),
@@ -1075,9 +1073,11 @@ fn erg_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [sx * (xo - 0.12), yl + 0.02, lz0],
             [sx * xo, yl - 0.025, lz1],
         );
-        for (a, c) in [(0.015, 0.045), (0.065, 0.095)] {
+        // Outer strip red, inner strip the amber turn signal.
+        let ik = indicator_rear_key(sx, M::EmissiveAmber);
+        for (a, c, key) in [(0.015, 0.045, &tk), (0.065, 0.095, &ik)] {
             k.bx(
-                &tk,
+                key,
                 [sx * (xo - c), yl - 0.02, lz0 + 0.02],
                 [sx * (xo - a), yl - 0.04, lz1 - 0.02],
             );
@@ -1095,4 +1095,7 @@ fn erg_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     k.mirrors(0.14, 0.12, Some(M::Accent));
     k.wipers();
+
+    // Turn signals as segments beside the lamps (playtest row 136).
+    k.signals_beside_lamps(0.06, M::EmissiveAmber);
 }

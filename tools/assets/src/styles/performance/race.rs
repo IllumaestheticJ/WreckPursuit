@@ -382,6 +382,9 @@ fn morrigan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.diffuser(M::Carbon, 0.80, 0.18, 7, 0.16);
     rain_light(&mut k, tz0 + 0.20, 0.08, 0.08, 0.05);
     tow_straps(&mut k, -0.34, nz0 + 0.10, 0.40, tz0 + 0.24);
+
+    // Turn signals as segments beside the lamps (playtest row 136).
+    k.signals_beside_lamps(0.06, M::EmissiveAmber);
 }
 
 // ---------------------------------------------------------------------- nyx_proto
@@ -746,6 +749,9 @@ fn nyx_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.diffuser(M::Carbon, 0.74, 0.24, 8, 0.24);
     rain_light(&mut k, tz0 + 0.06, 0.035, 0.16, 0.27);
     tow_straps(&mut k, 0.30, nz0 + 0.08, -0.48, mz0 + 0.03);
+
+    // Turn signals as segments beside the lamps (playtest row 136).
+    k.signals_beside_lamps(0.06, M::EmissiveAmber);
 }
 
 // ---------------------------------------------------------------------- merlo_20t
@@ -1054,4 +1060,7 @@ fn merlo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.diffuser(M::Carbon, 0.62, 0.16, 5, 0.12);
     rain_light(&mut k, tz0 + 0.21, 0.16, 0.035, 0.05);
     tow_straps(&mut k, 0.38, nz0 + 0.12, -0.42, tz0 + 0.26);
+
+    // Turn signals as segments beside the lamps (playtest row 136).
+    k.signals_beside_lamps(0.06, M::EmissiveAmber);
 }

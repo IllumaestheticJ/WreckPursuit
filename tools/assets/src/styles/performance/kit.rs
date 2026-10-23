@@ -654,6 +654,100 @@ impl<'a> Kit<'a> {
         self.front_box(&ik, sx * sig[0], sx * sig[1], sig[2], sig[3], proud, bevel);
     }
 
+    /// Bounding box (lo, hi) of part `name` as built so far, or `None` if it is empty.
+    fn part_box(&self, name: &str) -> Option<([f32; 3], [f32; 3])> {
+        let (pos, _, _) = self.b.geometry(name)?;
+        let mut lo = [f32::MAX; 3];
+        let mut hi = [f32::MIN; 3];
+        for q in pos {
+            for k in 0..3 {
+                lo[k] = lo[k].min(q[k]);
+                hi[k] = hi[k].max(q[k]);
+            }
+        }
+        (!pos.is_empty()).then_some((lo, hi))
+    }
+
+    /// Turn signals for kits whose own lamp shapes do not carve one (call after the kit has
+    /// built its head and tail lamps): an amber lens `w` wide on the nose / tail face, flush
+    /// against the outboard end of each lamp's box (a strip under its outboard end when the lamp
+    /// already reaches the corner), over the lamp's height clamped to the face. Signals the kit already built are
+    /// left alone. Rear segments use `rear_mat`
+    /// (`EmissiveAmber`, or `Taillight` for red-on-red).
+    pub fn signals_beside_lamps(&mut self, w: f32, rear_mat: MaterialSlot) {
+        for sx in SIDES {
+            for front in [true, false] {
+                let lamp = if front {
+                    headlight_key(sx)
+                } else {
+                    taillight_key(sx)
+                };
+                let sig = if front {
+                    indicator_front_key(sx)
+                } else {
+                    indicator_rear_key(sx, rear_mat)
+                };
+                // The kit built this one itself (a segment of its own lamp shape).
+                if self.part_box(&sig.name).is_some() {
+                    continue;
+                }
+                let Some((lo, hi)) = self.part_box(&lamp.name) else {
+                    continue;
+                };
+                let outer = lo[0].abs().max(hi[0].abs());
+                let (half, (fz0, fz1)) = if front {
+                    (self.wn(), self.nose_z())
+                } else {
+                    (self.wt(), self.tail_z())
+                };
+                // Lamps on the nose top (set back, or above the nose face): an amber strip on
+                // the top surface right inboard of the lamp, over its length (never in front
+                // of it, where it would shadow the lens).
+                if front && (hi[1] < self.yn - 0.04 || lo[2] > fz1 - 0.02) {
+                    let inner = lo[0].abs().min(hi[0].abs());
+                    self.patch(
+                        &sig,
+                        lo[1],
+                        hi[1].min(self.yn - 0.005),
+                        top_band(
+                            sx * (inner - INDICATOR_SEAM_M - w),
+                            sx * (inner - INDICATOR_SEAM_M),
+                        ),
+                        0.003,
+                        0.012,
+                        (2, 1),
+                    );
+                    continue;
+                }
+                // Lamps on the nose top sit above the face: use the face's top strip instead.
+                let z1 = hi[2].min(fz1 - 0.01);
+                let z0 = lo[2].max(fz0 + 0.02).min(z1 - 0.03);
+                let (x0, x1, z0, z1) = if outer + INDICATOR_SEAM_M + w <= half - 0.01 {
+                    (
+                        outer + INDICATOR_SEAM_M,
+                        outer + INDICATOR_SEAM_M + w,
+                        z0,
+                        z1,
+                    )
+                } else {
+                    // Lamp runs to the corner (light bars): a strip under its outboard end.
+                    let zt = lo[2] - INDICATOR_SEAM_M;
+                    (
+                        outer.min(half - 0.01) - 2.0 * w,
+                        outer.min(half - 0.01),
+                        zt - 0.035,
+                        zt,
+                    )
+                };
+                if front {
+                    self.front_box(&sig, sx * x0, sx * x1, z0, z1, 0.012, 0.004);
+                } else {
+                    self.rear_box(&sig, sx * x0, sx * x1, z0, z1, 0.012, 0.004);
+                }
+            }
+        }
+    }
+
     /// Tail-face lamp lens (as [`Kit::rear_box`]) with the rear turn signal cut out of it:
     /// the tail lamp and a segment `seg` of the same lens in `mat` (`EmissiveAmber`, or
     /// `Taillight` for red-on-red).
