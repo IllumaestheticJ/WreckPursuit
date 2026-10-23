@@ -21,9 +21,12 @@
 // 50 (L3) the run never reached L5 and the helicopter never launched. Heat 90 (the bottom of L5)
 // keeps the story: pursuit at 9.8 s, helicopter at 72.2 s, lost inside the Cut, Escaped at
 // 133.8 s after 40 s unseen (the L5 day escape time); control Captured at 125.8 s.
+// Owner 2026-10-23 (Core day patrols 8 -> 3, investigations less sensitive): seed 54 never
+// escaped. Seeds 50-63: escape story on 8 of 14, both scenarios on 3 (56, 62, 63). Re-seeded to
+// 56: pursuit at 10.7 s, helicopter at 76.9 s, Escaped at 132.4 s; control Captured at 132.5 s.
 (
     name: "police_tunnel_escape_founders_cut_control",
-    seed: 54,
+    seed: 56,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,
     time_ratio: 1.0,

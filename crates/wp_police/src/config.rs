@@ -896,7 +896,31 @@ fn parse_one<T: for<'de> Deserialize<'de>>(name: &str, text: &str) -> Result<T, 
     toml::from_str(text).map_err(|e| ConfigError::Parse(name.to_string(), e))
 }
 
+/// The patrol counts shipped before the owner's 2026-10-23 cut (Core 2/8/6/3, Suburb 1/3/2/1,
+/// Industrial 1/2/2/1 by dawn/day/dusk/night). For tests and scenarios that check how units
+/// behave with several close to the racer, not how many patrol the city.
+pub fn dense_patrols() -> DistrictTable<PhaseTable<u32>> {
+    let t = |dawn, day, dusk, night| PhaseTable {
+        dawn,
+        day,
+        dusk,
+        night,
+    };
+    DistrictTable {
+        core: t(2, 8, 6, 3),
+        suburb: t(1, 3, 2, 1),
+        industrial: t(1, 2, 2, 1),
+    }
+}
+
 impl PoliceConfig {
+    /// The built-in tables with [`dense_patrols`] in place of the shipped patrol counts.
+    pub fn builtin_dense_patrols() -> Self {
+        let mut cfg = Self::builtin();
+        cfg.presence.patrols = dense_patrols();
+        cfg
+    }
+
     /// Parse from the four TOML texts (heat, presence, pursuit, tools), with the built-in
     /// `radio.toml`.
     pub fn parse(

@@ -8,6 +8,8 @@
 // violation is seen before the contact, so nothing else could start the pursuit by 8.0 s. Half a
 // metre further right the unit dodges and there is no contact. Re-aim with
 // `examples/probe_police.rs` if police spawning changes.
+// 2026-10-23: aimed at one particular patrol unit, so it keeps the patrol counts from before the
+// owner's cut (`dense_patrols`); it checks the assault rule, not how many cops patrol.
 (
     name: "police_sideswipe_patrol_day",
     seed: 24,
@@ -17,6 +19,7 @@
     mode: Simulation,
     parked_cars: false,
     traffic_density: 0.0,
+    dense_patrols: true,
     assists: keyboard,
     entities: [
         (

@@ -58,6 +58,11 @@ pub struct Scenario {
     /// counts (1 = default, 0 = no patrols); `None` = 1. Needs a city.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub police_presence: Option<f32>,
+    /// Start from `wp_police::config::dense_patrols` (the patrol counts before the owner's
+    /// 2026-10-23 cut) instead of `presence.toml`'s, before `police_presence` scales them: for
+    /// scenarios aimed at one particular patrol unit. Default off. Needs a city.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub dense_patrols: bool,
     /// Mixed fleets (default off, so existing goldens are unchanged): AI police use the
     /// heat-keyed five-model fleet ([`crate::run::CAR_MIX_POLICE`], `Sim::set_police_cars`)
     /// and physical traffic the civilian models of [`crate::run::CAR_MIX_TRAFFIC`]

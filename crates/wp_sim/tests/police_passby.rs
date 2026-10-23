@@ -42,7 +42,6 @@ fn city_with_patrol(city: City, hour: f32) -> (Sim, EntityId) {
 /// [`city_with_patrol`] with another sim seed (other patrols, other streets).
 fn city_with_patrol_seeded(city: City, hour: f32, seed: u64) -> (Sim, EntityId) {
     let mode = load_mode_table(data("modes/sim.toml")).unwrap();
-    let damage_mode = mode.mode;
     let mut sim = Sim::new(SimConfig {
         seed,
         mode,
@@ -64,29 +63,7 @@ fn city_with_patrol_seeded(city: City, hour: f32, seed: u64) -> (Sim, EntityId) 
     });
     // The pre-2026-10-23 patrol counts: this checks how a cop reacts to a pass, not how many
     // cops there are, and the shipped table is now too sparse to find one on a straight.
-    let mut police_cfg = wp_police::PoliceConfig::builtin();
-    let t = |dawn, day, dusk, night| wp_police::config::PhaseTable {
-        dawn,
-        day,
-        dusk,
-        night,
-    };
-    police_cfg.presence.patrols = wp_police::config::DistrictTable {
-        core: t(2, 8, 6, 3),
-        suburb: t(1, 3, 2, 1),
-        industrial: t(1, 2, 2, 1),
-    };
-    let setup = wp_police::PoliceSetup {
-        seed: seed ^ 0x0090_11CE, // wp_sim's police seed salt, as `Sim::set_world` uses
-        mode: damage_mode,
-        internal_driving: true,
-        hazards: false,
-    };
-    sim.set_police(wp_police::PoliceSystem::for_world(
-        police_cfg,
-        sim.world(),
-        setup,
-    ));
+    sim.set_police_config(wp_police::PoliceConfig::builtin_dense_patrols());
     let graph = wp_police::RoadGraph::from_city(sim.world().map());
     for _ in 0..240 * 60 {
         sim.step_fixed();

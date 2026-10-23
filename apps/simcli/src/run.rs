@@ -249,10 +249,15 @@ pub fn world_config(sc: &Scenario) -> wp_world::WorldConfig {
     }
 }
 
-/// The `wp_police` tables a scenario implies: the built-in tables with every patrol count
-/// scaled by `police_presence` (rounded to whole units).
+/// The `wp_police` tables a scenario implies: the built-in tables (with
+/// `wp_police::config::dense_patrols` if `dense_patrols`) with every patrol count scaled by
+/// `police_presence` (rounded to whole units).
 pub fn police_config(sc: &Scenario) -> wp_police::PoliceConfig {
-    let mut cfg = wp_police::PoliceConfig::builtin();
+    let mut cfg = if sc.dense_patrols {
+        wp_police::PoliceConfig::builtin_dense_patrols()
+    } else {
+        wp_police::PoliceConfig::builtin()
+    };
     if let Some(p) = sc.police_presence {
         let scale = |n: &mut u32| *n = (*n as f32 * p).round() as u32;
         let t = &mut cfg.presence.patrols;

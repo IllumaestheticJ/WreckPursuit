@@ -1,12 +1,12 @@
 // Golden "feel" case: city chase. 23:00 in the 12×12 procedural city with physical traffic and
 // police cars (wp_police on the city graph, units driven as real vehicles since lead run 5).
-// A known speeder (starting heat 15 = wanted level L1, e.g. from an earlier report) does
-// 16.5 m/s (59 km/h; the street's limit is 40 km/h) north up the outer lane of the x = 275
-// street, behind the patrol that starts near (277, 131) heading north. At night a pursuit
-// needs a unit to keep the racer within 40 m for 4 s, so the racer has to catch that patrol.
-// The pursuit must start within 20 s. Re-aimed for the divided highway viaduct (the network
-// change moved the patrol spawns): every start from y = -35 to y = 10 on this lane pursues
-// within 20 s (searched with simcli in 15-30 m steps); y = -10 is the middle of that band.
+// A known speeder (starting heat 25 = wanted level L1, e.g. from an earlier report) does
+// 16.5 m/s (59 km/h; the street's limit is 40 km/h) east along y = 273.2, behind the night's
+// only patrol (owner 2026-10-23: one patrol city-wide at night), which starts near (-145, 273)
+// heading east. The racer has to catch it before its heat decays below L1. The pursuit must
+// start within 20 s. Re-aimed 2026-10-23 (was a start on the x = 275 street behind a patrol
+// that no longer exists, heat 15): starts from x = -270 to x = -210 pursue within 20 s with
+// heat 25 (none with 15: the heat decays below L1 first); x = -240 is the middle of that band.
 // If police spawning changes, re-aim with `examples/probe_police.rs`.
 (
     name: "golden_city_chase",
@@ -23,9 +23,10 @@
         (
             id: "racer",
             car: "debug_coupe",
-            pos: (279.75, -10.0, 0.0),
+            pos: (-240.0, 273.2, 0.0),
+            yaw: -1.5708,
             speed_mps: 16.5,
-            police_heat: 15.0,
+            police_heat: 25.0,
             driver: cruise(target_mps: 16.5),
             inputs: [(t_s: 0.0, input: (headlights: true))],
         ),
