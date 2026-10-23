@@ -365,6 +365,7 @@ impl Sim {
             self.police_car.clone()
         };
         if multi || single.is_some() {
+            let unbodied: Vec<UnitId> = wanted.iter().map(|w| w.0).collect();
             for (unit, pos, heading, speed) in wanted {
                 let (car, model_limits) = if multi {
                     let m = self.police_unit_models.get(&unit).copied().unwrap_or(0);
@@ -402,6 +403,18 @@ impl Sim {
                 self.police.bind_unit_entity(unit, id, geom);
                 if let Some(limits) = model_limits.or(self.police_car_limits) {
                     self.police.set_unit_limits(unit, limits);
+                }
+            }
+            // PR #54: a spike unit that got no car (vehicle cap, failed spawn) would leave an
+            // unattended strip on the road: withdraw it, strip and all.
+            for unit in unbodied {
+                let bodied = self
+                    .police
+                    .units()
+                    .iter()
+                    .any(|u| u.id == unit && u.entity.is_some());
+                if !bodied {
+                    self.police.withdraw_unbodied_spike_unit(unit);
                 }
             }
         }
@@ -513,7 +526,7 @@ mod tests {
 
     fn city_run(fleet: Option<Vec<PoliceModel>>, ticks: u32) -> Sim {
         let player = car("debug_sedan");
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 11,
             mode,

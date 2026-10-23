@@ -3,7 +3,7 @@
 // with one upshift. Guards launch pace; wheelspin is measured by examples/parity.rs.
 (
     name: "parity_rampart_launch_tcs_off",
-    mode: Arcade,
+    mode: Simulation,
     seed: 1,
     assists: custom((abs: true, tcs: false, esc: false, steer_speed_sensitivity: 0.75, countersteer_help: 0.6, throttle_filter: 0.7, brake_filter: 0.6, auto_gears: false, auto_clutch: true)),
     duration_s: 6.0,

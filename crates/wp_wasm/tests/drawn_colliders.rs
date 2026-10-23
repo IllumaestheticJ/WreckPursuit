@@ -1,7 +1,7 @@
 //! Every collider the player can hit hard is drawn (lead helper, playtest row 50 "hitting
 //! invisible objects").
 //!
-//! Drives a city chase and a free drive in Port Vesper v2 headless (a seeded wander at full
+//! Drives a night run and a free drive in Port Vesper v2 headless (a seeded wander at full
 //! throttle that hits kerbs, walls, buildings and traffic, plus a parked car knocked every
 //! few seconds), collects every hard static-world contact (`SimEvent::Contact` with the world,
 //! over 2,000 N·s in one tick), finds the collider it hit (the nearest of the sim's static city
@@ -541,8 +541,8 @@ fn every_hard_static_contact_is_near_something_drawn() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/city");
     let drawn = Drawn::load(&dir.join("vesper_v2.greybox.glb"));
     let chase = sweep(
-        "city chase",
-        scenario::city_chase("lindwurm_4t", DamageMode::Arcade),
+        "night run",
+        scenario::night_run("lindwurm_4t", DamageMode::Arcade),
         120.0,
         8.0,
         &drawn,
@@ -554,7 +554,7 @@ fn every_hard_static_contact_is_near_something_drawn() {
         8.0,
         &drawn,
     );
-    for (name, t) in [("city chase", &chase), ("free drive", &free)] {
+    for (name, t) in [("night run", &chase), ("free drive", &free)] {
         assert!(
             t.hard >= 10,
             "{name}: only {} hard contacts sampled",
@@ -606,7 +606,7 @@ fn every_building_and_rail_collider_is_drawn() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/city");
     let drawn = Drawn::load(&dir.join("vesper_v2.greybox.glb"));
     let s = Session::new(
-        scenario::city_chase("debug_sedan", DamageMode::Arcade),
+        scenario::night_run("debug_sedan", DamageMode::Arcade),
         false,
     )
     .unwrap();
@@ -644,11 +644,11 @@ fn every_building_and_rail_collider_is_drawn() {
 #[test]
 fn the_reported_crash_site_is_drawn() {
     // Playtest row 50: a 66,800 N·s static contact at ~150 km/h around (-367.8, 172.1) in the
-    // city chase. Whatever collider is there is drawn within 1 m.
+    // night run. Whatever collider is there is drawn within 1 m.
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/city");
     let drawn = Drawn::load(&dir.join("vesper_v2.greybox.glb"));
     let s = Session::new(
-        scenario::city_chase("lindwurm_4t", DamageMode::Arcade),
+        scenario::night_run("lindwurm_4t", DamageMode::Arcade),
         false,
     )
     .unwrap();

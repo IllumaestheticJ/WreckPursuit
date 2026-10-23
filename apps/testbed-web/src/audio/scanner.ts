@@ -17,7 +17,14 @@
 // sells the effect. Its volume follows master × Police bus. Without speechSynthesis (or with
 // the "Police radio voice" setting off) a line is squelch + static + the radio strip's text.
 // Recorded line packs (future) will be AudioBuffers routed through the same EQ.
+//
+// Helicopter pilot lines ("Air 9: …", PR #32) get the pilot treatment instead of the static
+// bed (heli.ts): rotor-chopped cockpit noise through a harder radio EQ, a mic-key chirp (not on
+// tier 1 lines, which already get the alert), a lower, quicker voice, and HELI_LOUDNESS on all
+// of it. Their tier comes from wp_police like any line (eyes on / lost visual / reacquired are
+// tier 1, position reports tier 4, so "Important only" drops those).
 
+import { HELI_LOUDNESS, isAirLine, type HeliAudio } from "./heli";
 import type { VoicePool } from "./voices";
 import type { RadioPriority } from "./types";
 
@@ -69,7 +76,7 @@ function hash(n: number): number {
 }
 
 export class ScannerPlayer {
-  private current: { line: number; stopStatic: () => void } | null = null;
+  private current: { line: number; stopStatic: () => void; air: boolean } | null = null;
   /** Last lines for the debug panel, newest first. */
   readonly log: RadioLog[] = [];
   /** Speak with TTS (off = squelch + static only): the "Police radio voice" setting. */
@@ -86,7 +93,13 @@ export class ScannerPlayer {
   /** Recorded radio pack when shipped (the pool swaps in its procedural fallback on request). */
   private readonly pack: string;
 
-  constructor(private pool: VoicePool) {
+  /** Helicopter pilot lines spoken (e2e). */
+  airLines = 0;
+
+  constructor(
+    private pool: VoicePool,
+    private heli: HeliAudio | null = null,
+  ) {
     this.pack = pool.has("radio_rec", "radio/static") ? "radio_rec" : "radio_proc";
   }
 
@@ -102,15 +115,19 @@ export class ScannerPlayer {
 
   say(line: number, unit: number, text: string, priority: RadioPriority, pitch: number, tier = 0): void {
     this.end(this.current?.line ?? -1, true);
-    this.pool.playLocal(this.pack, "radio/squelch_on", tier === 3 ? 0.9 : 0.6);
+    const air = !!this.heli && isAirLine(text);
+    const loud = air ? HELI_LOUDNESS : 1;
+    if (air) this.airLines++;
+    this.pool.playLocal(this.pack, "radio/squelch_on", (tier === 3 ? 0.9 : 0.6) * loud);
     // Tier 3: a louder, harsher static bed (the chaos comes across); tier 1: a two-tone alert.
-    const stopStatic = this.pool.playLocal(this.pack, "radio/static", tier === 3 ? 0.32 : 0.12);
+    // The pilot: the rotor-chopped cockpit bed instead of the static.
+    const stopStatic = air && this.heli ? this.heli.keyUp(tier !== 1) : this.pool.playLocal(this.pack, "radio/static", tier === 3 ? 0.32 : 0.12);
     let lead_s = 0;
     if (tier === 1) {
       lead_s = this.pool.playRadioTone([1250, 1650], 0.11, 0.18);
       this.tones++;
     }
-    this.current = { line, stopStatic };
+    this.current = { line, stopStatic, air };
     this.log.unshift({ line, unit, text, priority, tier, interrupted: false });
     this.log.length = Math.min(this.log.length, 8);
     this.onSay?.(unit, text, tier);
@@ -119,12 +136,12 @@ export class ScannerPlayer {
         const u = new SpeechSynthesisUtterance(text);
         const voice = this.voiceFor(unit);
         if (voice) u.voice = voice;
-        u.pitch = speechPitch(unit, pitch, tier);
+        u.pitch = speechPitch(unit, pitch, tier) * (air ? 0.85 : 1);
         // Each unit talks at its own pace; urgent / pursuit traffic a bit faster, shouted
-        // impact traffic faster still.
+        // impact traffic faster still; the pilot clipped and quick over the rotor.
         const base = 1.05 + (hash(unit * 7 + 3) % 5) * 0.04;
-        u.rate = tier === 3 ? base + 0.25 : priority === "Urgent" || priority === "Pursuit" ? base + 0.12 : base;
-        u.volume = Math.min(1, this.volume * (tier === 3 ? 1 : 0.9));
+        u.rate = air ? base + 0.2 : tier === 3 ? base + 0.25 : priority === "Urgent" || priority === "Pursuit" ? base + 0.12 : base;
+        u.volume = Math.min(1, this.volume * (tier === 3 ? 1 : 0.9) * loud);
         this.speechAttempts++;
         if (lead_s > 0) setTimeout(() => speechSynthesis.speak(u), lead_s * 1000);
         else speechSynthesis.speak(u);
@@ -137,7 +154,7 @@ export class ScannerPlayer {
   end(line: number, interrupted: boolean): void {
     if (!this.current || this.current.line !== line) return;
     this.current.stopStatic();
-    this.pool.playLocal(this.pack, "radio/squelch_off", 0.5);
+    this.pool.playLocal(this.pack, "radio/squelch_off", 0.5 * (this.current.air ? HELI_LOUDNESS : 1));
     if (interrupted && ScannerPlayer.speechSupported()) speechSynthesis.cancel();
     const entry = this.log.find((l) => l.line === line);
     if (entry) entry.interrupted = interrupted;

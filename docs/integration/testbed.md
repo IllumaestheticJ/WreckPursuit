@@ -58,7 +58,7 @@ Car data (`data/{cars,lattices,tires,materials,modes}`) is embedded at build tim
 |---|---|---|---|
 | `init` | `seed: u32`, `scenario_json`, `scripted: bool` | `Uint32Array` entity ids | Fresh live session from a v2 scenario as JSON. `seed` 0 = scenario's. `scripted` = drive entities by their scenario drivers until `duration_s`, then entity 1 is live. |
 | `free_drive_json` | `car`, `mode`, `city: bool` | scenario JSON | Free-drive scenario (city = procedural 12×12 with traffic). |
-| `city_chase_json` | `car`, `mode` | scenario JSON | "City chase" preset (live): procedural city at 23:00, `police_presence: 1.0`, traffic, player starts on the race grid at 30 m/s (`EntitySpec::speed_mps`). Seed 23. |
+| `night_run_json` | `car`, `mode` | scenario JSON | "Night run" preset (live): procedural city at 23:00, `police_presence: 1.0`, traffic, player starts on the race grid at 30 m/s (`EntitySpec::speed_mps`). Seed 23. |
 | `scenario_from_ron` | `text` | scenario JSON | simcli format v2 (`apps/simcli/SCENARIOS.md`). |
 | `scenario_with_speed` | `json`, `target_mps` | scenario JSON | Overrides every `cruise` driver's target (the speed box). |
 | `step` | `dt_seconds: f32` | `f32` alpha | Runs the whole 240 Hz ticks covered (max 60/call); leftover interpolation alpha between `vehicle_states_prev()` and `vehicle_states()`. Replays scale `dt` by the playback speed. |
@@ -262,7 +262,7 @@ traffic; signals: the junction nearest the player framed at 12:00 and 22:00
 23:00, a `TrafficViolation` was counted (`__wp.app.eventCounts`) and exactly one heat panel is mounted. `BENCH=1` adds perf, `SHOTS=dir` screenshots.
 
 ### City chase
-**city chase** (button, `__wp.startCityChase()`): the procedural 12×12 city at 23:00 with
+**night run** (button, `__wp.startNightRun()`): the procedural 12×12 city at 23:00 with
 traffic and full police presence; the player starts on the race grid already doing ~110 km/h,
 so speeding violations (event feed) start the heat. Police cars (`VehicleKind::Police` sim
 vehicles, or instanced from `police_draw()` for internally driven units) are white with a
@@ -280,7 +280,7 @@ closes on the next session, one the user opened (F) stays.
 **weather** selector (`scenario` = the scenario's own weather, off, clear, overcast, rain, heavy
 rain, fog, dynamic) restarts the running session with that weather written into its scenario
 (`scenario_with_weather`), so replays and `simcli replay` carry it; **rainy night** = the city
-chase in a downpour on a soaked road (`city_chase_rain_json`; `?chase=rain`, `?weather=<id>`).
+chase in a downpour on a soaked road (`night_run_rain_json`; `?chase=rain`, `?weather=<id>`).
 `src/render/weather.ts`: instanced rain streaks animated in the vertex shader (one draw, ≤ 5000
 lines), wet road materials (`asphalt`, `highway_concrete`, `parking`, `sidewalk`, `kerb`, `bridge`
 and the flat ground: darker, glossier, sky-dome reflections, puddle sheen) driven by the 8 m
@@ -289,7 +289,7 @@ water grid (`weather_grid()`, RG8 texture refreshed at 1 Hz), spray points behin
 bumper / cockpit cameras, and a HUD line (`#weather-hud`) with regime, rain rate, visibility,
 temperature, road state and an aquaplaning warning (player car's `Telemetry::aquaplane`).
 Exports (`crates/wp_wasm/src/weather.rs`): `weather_choices`, `scenario_with_weather`,
-`scenario_weather_choice`, `city_chase_rain_json`, `weather_info` (18 floats, `WX` in
+`scenario_weather_choice`, `night_run_rain_json`, `weather_info` (18 floats, `WX` in
 `render/weather.ts`), `weather_grid_meta`, `weather_grid`, `weather_spray`. Check:
 `npm run e2e:weather` (also run by `npm run e2e`); screenshots in `docs/media/weather/`.
 
@@ -1125,7 +1125,8 @@ met), bet on it; several driver levels, the map icon colour shows the level.
   point 300–1 200 m away, with a *cruise capability* (top speed 11.5–13.3 m/s, under the speeding threshold of a 25 mph street, plus a stop-line guard for red and catchable amber lights, 0.4 g, 0.45 g braking)
   and a calm, low-risk profile, so it keeps traffic pace, follows cars, stops at reds and plans a
   new route at the end. At most one route is planned per tick.
-- **Challenge**: a horn rising edge (the rebindable `horn` action: Q / pad L3 / the touch 📯) within 30 m of a roaming racer stops it and opens
+- **Challenge**: a horn rising edge (the rebindable `horn` action: Q / pad L3 / the touch 📯) right behind a roaming racer (at most 15 m back, within 2.5 m of
+  its centre line, facing its way within 45°: `street::tailing`, owner request 2026-10-23) stops it and opens
   an `Offer`. It lapses when the player drives 70 m away, after 2 min, or when the run ends.
 - **Race**: `street_accept(x, y, stake)` checks the stake (level range, cash) and the route
   (250 m – 6 km, `World::plan_route` from the player's pose), posts the stake as a ledger line

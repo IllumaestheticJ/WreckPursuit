@@ -5,7 +5,7 @@
 // the roster has 13 racers in 4 levels (colours from street_status().levels), 8 out by day and 13
 // at night (row 152; the rest in the lockup, off the map), drawn as level-coloured markers on the UI kit's
 // minimap and full city map (with a legend group) and wearing their level colour on their car;
-// honking (the rebindable horn: Q / pad L3) next to a racer opens the map as the finish picker;
+// honking (the rebindable horn: Q / pad L3) right behind a racer opens the map as the finish picker;
 // picking B on the map (mouse click / pad crosshair + A) previews a raceable route; the bet
 // slider / pad LB-RB sets the stake; by day extra waypoints are added, re-ordered and removed on the
 // map (row 151: numbered flags, the route through them, gates in the world); a wanted player cannot
@@ -14,7 +14,7 @@
 // race panel up and the route on the minimap; the street UI hides in photo mode, under the
 // game menu and during a crash replay; reaching B wins even money and shows the result. Roaming
 // racers are fleet-drawn past ~40 m and get their hero view near the camera; the opponent keeps
-// its view while racing. (Draw calls / triangles: e2e/perf_check.mjs, city chase incl. racers.) Then the late-night city chase
+// its view while racing. (Draw calls / triangles: e2e/perf_check.mjs, night run incl. racers.) Then the late-night night run
 // has its racers, and on touch (?touch=1) the 📯 button challenges and the picker takes taps.
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -579,16 +579,16 @@ if (CITY === "vesper_v2") {
   }
 }
 
-// Late-night city chase: racers roam there too and show on the map.
-await page.evaluate((car) => window.__wp.startCityChase(car, "Arcade"), CAR);
+// Late-night night run: racers roam there too and show on the map.
+await page.evaluate((car) => window.__wp.startNightRun(car, "Arcade"), CAR);
 await wait(page, 4000);
 const chase = await status(page);
-check(chase?.roster.length === 13 && chase.roster.every((r) => r.mode !== "OffDuty"), `city chase (23:00): all 13 street racers out (${chase?.roster.length})`);
-check(chase?.roster.filter((r) => r.shift === "Loop").length === 4, "city chase: 4 of them lap Loop 9");
+check(chase?.roster.length === 13 && chase.roster.every((r) => r.mode !== "OffDuty"), `night run (23:00): all 13 street racers out (${chase?.roster.length})`);
+check(chase?.roster.filter((r) => r.shift === "Loop").length === 4, "night run: 4 of them lap Loop 9");
 await page.waitForFunction(() => window.__wp.map.hud.stats().minimap.markers > 0, null, { timeout: 30000 }).catch(() => {});
-check((await mapStats(page)).minimap.markers === 13, "city chase: racer markers on the minimap");
+check((await mapStats(page)).minimap.markers === 13, "night run: racer markers on the minimap");
 const cl = await lodOf(page);
-check(cl.farOnView === 0, `city chase: far racers fleet-drawn (${cl.views} hero views, ${JSON.stringify(cl.modes)})`);
+check(cl.farOnView === 0, `night run: far racers fleet-drawn (${cl.views} hero views, ${JSON.stringify(cl.modes)})`);
 await page.keyboard.press("KeyM");
 await frames(page, 3);
 await shot(page, "street_chase_citymap.png");

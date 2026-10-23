@@ -204,6 +204,9 @@ Suburb }` — exactly `wp_world::network::DistrictKind` (moved to contracts, re-
 - `crates/wp_vehicle/src/lib.rs`: added `Vehicle::set_pose_and_speed(pos, yaw, speed_mps)`
   (Lead: the stub this went into was replaced by 02's real model; the method now lives in `wp_vehicle/src/vehicle.rs`, same signature.)
   (7 lines, `reset` + speed) for LOD promotion — see contract request 1.
+- `crates/wp_sim/src/physics.rs` + `crates/wp_sim/tests/barrier_scrape.rs` (lead-owned; row 164,
+  assigned by the lead): barrier and rail colliders are mitered triangle meshes
+  (`barrier_colliders`, `chain_segments`) instead of per-segment boxes. See "Playtest row 164".
 - `apps/testbed-web`: **photo mode** (owner request, 2026-10-20; branch `claude/fervent-cerf-ft2h9h`,
   not `ws/world`). Testbed-only, no Rust changes. Full notes and the list of touched files are in
   `docs/integration/testbed.md` → "Photo mode" (C to review).
@@ -559,7 +562,7 @@ when convenient.
   1.1 MB → 0.47 MB). `vesper_v2.road.bin` is generated in memory and not committed.
 - **Testbed:** the city chase and the free-drive "city" box use the city selector (default
   Port Vesper v2, "grid 12×12" keeps the old city); `?city=procedural_12x12`, `?chase=1`;
-  wasm `free_drive_city_json`, `city_chase_city_json`, `city_id`; police units drawn on the
+  wasm `free_drive_city_json`, `night_run_city_json`, `city_id`; police units drawn on the
   ground; `__wp.lookAt(from, to)` for docs shots (`e2e/city_v2_shots.mjs` →
   `docs/media/city-v2/`).
 **Checks (this branch)**

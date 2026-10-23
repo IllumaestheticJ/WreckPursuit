@@ -1,3 +1,5 @@
+// Contract v0.4.0: the pre-v0.4.0 Arcade table is now Simulation, so this scenario keeps its
+// name and runs `mode: Simulation` (same behaviour and hashes as before).
 // Golden "feel" case: the classic 56 km/h (15.56 m/s) full frontal into a rigid wall (static
 // box) in Arcade mode — the counterpart of `barrier_56kmh` (Simulation, total loss). Arcade is
 // "punishing but survivable" (CLAUDE.md): the same hit crushes and degrades the car, damages
@@ -5,7 +7,7 @@
 (
     name: "golden_barrier_56kmh_arcade",
     seed: 108,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     barriers: [(pos: (0.0, 20.0, 0.75), size: (8.0, 1.0, 1.5))],
     entities: [

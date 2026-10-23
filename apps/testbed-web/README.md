@@ -37,19 +37,20 @@ npm run typecheck
 | `e2e/crash_fx.mjs` | crash effects check + `FX_SHOTS=dir` screenshots (run by `e2e/run.mjs` too) |
 | `e2e/controls_settings.mjs` | `npm run e2e:controls`: per-device input shaping — keyboard defaults, AssistProfile speed sensitivity per device (keyboard 0.75 / gamepad 0.70 / wheel 0), persistence, test bars + test mode, saturation / dead zone effect, panel ↔ menu, preset highlight |
 | `e2e/presets.mjs` | `npm run e2e:presets`: Rookie / Street / Sim buttons set damage mode + assists in one click, a hand-ticked box shows "custom", the preset survives a reload |
+| `e2e/race_spots.mjs` | `npm run e2e:race-spots`: honk-to-start race spots (`src/race_spots.ts`): spots listed and drawn, prompts, honk while stopped starts the race on the same map (`CITY=ashpeak` for the combined map) |
 | `e2e/gamepad.mjs` | fake-gamepad + rebinding check (`npm run e2e:gamepad`; run by `e2e/run.mjs` too) |
 | `e2e/mods_shots.mjs` | modified-car screenshots (stock / street / widebody / protection builds; `node e2e/mods_shots.mjs [dir]`, `ONLY=street`, `CAR=…`) |
 | `e2e/signals.mjs` | `npm run e2e:signals`: traffic turn signals — a car whose draw record signals right / left blinks that side's corner lamps (lit and unlit frames, read back from the fleet instance or VehicleView), never the other side; hazards light both; the player's cosmetic stalk (`-` / `=`) |
 | `e2e/city_v2_shots.mjs` | Port Vesper v2 screenshots → `docs/media/city-v2/` (`node e2e/city_v2_shots.mjs [dir]`) |
 
-Cities: the "city" box (free drive) and the city chase use the city selector — Port Vesper v2
+Cities: the "city" box (free drive) and the night run use the city selector — Port Vesper v2
 (`vesper_v2`, hills, default) or the flat grid (`procedural_12x12`); URL `?city=vesper_v2` or
 `?city=procedural_12x12` opens free drive in that city (ticks the box), `?chase=1` the chase.
 The greybox is `data/city/<sim.cityId()>.greybox.glb` (base64 fallback `.greybox.b64.txt` on the
 published build; a failed load is retried on the next session in that city). Automation: `__wp.lookAt(from, to)` places a fixed
 orbit camera in sim coordinates, `__wp.setClip(near, far)`.
-| `e2e/playtest_chase.mjs` | city chase playtest: screenshots, overlapping HUD panels, layer + camera keys, F1 help (`node e2e/playtest_chase.mjs [outDir] [WxH]`) |
-| `e2e/chase_perf.mjs` | city chase perf (sim / views / render ms, draw calls); `PANELS=0` A/B for panel meshes, `VIEWPORT=WxH` |
+| `e2e/playtest_chase.mjs` | night run playtest: screenshots, overlapping HUD panels, layer + camera keys, F1 help (`node e2e/playtest_chase.mjs [outDir] [WxH]`) |
+| `e2e/chase_perf.mjs` | night run perf (sim / views / render ms, draw calls); `PANELS=0` A/B for panel meshes, `VIEWPORT=WxH` |
 
 Assist presets: the **preset** row (Rookie / Street / Sim, `wp_vehicle::AssistPreset`) sets the
 damage mode and the assists in one click and is remembered per viewer (`wp.assistPreset`). Any
@@ -89,11 +90,11 @@ sensitivity exponent), each pedal through `shapePedal` (dead zone, saturation).
 
 ## Perf (headless Chromium, SwiftShader, real vehicle + damage)
 sim 0.09 / 0.62 / 3.0 ms per 60 Hz frame and render 0.7 / 3.4 / 9.2 ms at 1 / 8 / 24 cars;
-city + ~190 traffic agents 0.27 ms sim. City chase after warm-up: grid 1.5 ms, Port Vesper v2
+city + ~190 traffic agents 0.27 ms sim. Night run after warm-up: grid 1.5 ms, Port Vesper v2
 2.8 ms sim per 60 Hz frame (its 6.8 MB greybox parses in ≈ 2 s under SwiftShader). Re-measure in
 desktop Chrome with a GPU.
 
-Browser frame budget (city chase, low-poly dark): `npm run profile` (`e2e/frame_profile.mjs`)
+Browser frame budget (night run, low-poly dark): `npm run profile` (`e2e/frame_profile.mjs`)
 prints JS ms per frame-loop section, draw calls / triangles / raster ms per render feature
 (`tagFeature` roots in `src/perf.ts`), steady vs one-off allocation and the top allocators;
 `npm run e2e:perf` (`e2e/perf_check.mjs`) gates the desktop chase / rain budgets and prints the

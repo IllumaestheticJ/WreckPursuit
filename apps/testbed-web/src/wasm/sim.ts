@@ -91,6 +91,9 @@ export interface VehicleInfo {
   /** wp_police unit id of a sim police vehicle (null / absent for every other vehicle and
    * older wasm builds): the same id as `police_units()` `unit_id`, stable across promotion. */
   police_unit?: number | null;
+  /** The police vehicle belongs to the Ashpeak County Sheriff's Office (ACSO livery); absent on
+   * older wasm builds. */
+  police_county?: boolean;
   /** wp_world agent id of promoted traffic (null / absent otherwise and on older builds): the
    * same id as `traffic_agents()` `agent_id`, so the car keeps its instanced twin's paint. */
   traffic_agent?: number | null;
@@ -133,7 +136,7 @@ export interface Barrier {
 export interface Scenario {
   name: string;
   seed: number;
-  mode: "Arcade" | "Simulation";
+  mode: "Arcade" | "Simulation" | "Extreme";
   duration_s: number;
   barriers?: Barrier[];
   entities: { id: string; car: string; pos: number[]; yaw: number; mods?: string[] }[];
@@ -249,10 +252,15 @@ export const sim = {
   init: (seed: number, scenarioJson: string, scripted: boolean): number[] =>
     Array.from(wasm.init(seed, scenarioJson, scripted)),
   freeDriveJson: (car: string, mode: string, city: boolean): string => wasm.free_drive_json(car, mode, city),
-  cityChaseJson: (car: string, mode: string): string => wasm.city_chase_json(car, mode),
-  /** Free drive / city chase in a city by id ("vesper_v2" | "procedural_12x12"). */
+  nightRunJson: (car: string, mode: string): string => wasm.night_run_json(car, mode),
+  /** Free drive / night run in a city by id ("vesper_v2" | "procedural_12x12"). */
   freeDriveCityJson: (car: string, mode: string, cityId: string): string => wasm.free_drive_city_json(car, mode, cityId),
-  cityChaseCityJson: (car: string, mode: string, cityId: string): string => wasm.city_chase_city_json(car, mode, cityId),
+  nightRunCityJson: (car: string, mode: string, cityId: string): string => wasm.night_run_city_json(car, mode, cityId),
+  /** Free roam: free drive plus `roamers` AI street racers (0 = default 10). */
+  freeRoamCityJson: (car: string, mode: string, cityId: string, roamers = 0): string =>
+    wasm.free_roam_city_json(car, mode, cityId, roamers),
+  /** Free-roam status (`null` outside free roam). */
+  roamStatus: (): unknown => JSON.parse(wasm.roam_status_json()),
   /** Id of the session's city ("" on the flat world): data/city/<id>.greybox.glb. */
   cityId: (): string => wasm.city_id(),
   scenarioFromRon: (text: string): string => wasm.scenario_from_ron(text),
@@ -262,8 +270,8 @@ export const sim = {
   scenarioWithWeather: (json: string, choice: string): string => wasm.scenario_with_weather(json, choice),
   /** The selector choice matching a scenario's weather ("none", a choice id or "custom"). */
   scenarioWeatherChoice: (json: string): string => wasm.scenario_weather_choice(json),
-  /** "Rainy night" city chase JSON (downpour, soaked road). */
-  cityChaseRainJson: (car: string, mode: string, cityId: string): string => wasm.city_chase_rain_json(car, mode, cityId),
+  /** "Rainy night" night run JSON (downpour, soaked road). */
+  nightRunRainJson: (car: string, mode: string, cityId: string): string => wasm.night_run_rain_json(car, mode, cityId),
   /** Per-frame weather state (render/weather.ts WX offsets). */
   weatherInfo: (): Float32Array => wasm.weather_info(),
   /** Wetness grid placement [origin_x, origin_y, cell_m, nx, ny] (empty without weather). */
@@ -378,7 +386,7 @@ export const sim = {
   assistPresetNamed: (
     name: string,
     source: "Keyboard" | "Gamepad" | "Wheel",
-  ): { mode: "Arcade" | "Simulation"; assists: AssistProfile } => JSON.parse(wasm.assist_preset_named(name, source)),
+  ): { mode: "Arcade" | "Simulation" | "Extreme"; assists: AssistProfile } => JSON.parse(wasm.assist_preset_named(name, source)),
   /** The preset a vehicle's assists + the session's damage mode match ("" = customised). */
   assistPresetOf: (entity: number, source: "Keyboard" | "Gamepad" | "Wheel"): string =>
     wasm.assist_preset_of(entity, source),
@@ -512,12 +520,26 @@ export const sim = {
   /** Start a picker race (new session; the account carries over). Returns entity ids, player first. */
   raceStart: (id: string, car: string, mode: string, autopilot: boolean, tune?: CarTune): number[] =>
     Array.from(wasm.race_start_tuned(id, car, mode, autopilot, tune ? JSON.stringify(tune) : "")),
+  /** Honk-to-start meet spots on the session's map (`race_spots.ts`); `[]` during a race / replay / career. */
+  raceSpots: (): RaceSpot[] => JSON.parse(wasm.race_spots()),
+  /** The race the player just honked for in its spot (taken), or "". */
+  raceSpotHonked: (): string => wasm.race_spot_honked(),
   /** `[phase, countdown_s, elapsed_s, laps, gates, player, racers, closed, length_m, autopilot, kind, player_done]`; empty without a race. */
   raceInfo: (): Float32Array => wasm.race_info(),
   /** Standings, position order, RACE_STRIDE floats each (see layout.ts RS). */
   raceStandings: (): Float32Array => wasm.race_standings(),
   /** Gates + route of the race (race_marker.ts parseCourse). */
   raceCourse: (): Float32Array => wasm.race_course(),
+  /** Bet on yourself during the countdown (`odds[].label` from the picker). Throws if refused. */
+  raceBet: (label: string, stake: number): BetCard => JSON.parse(wasm.race_bet(label, stake)),
+  /** Picker-race betting (venue City) on the current account: max stake and why it is locked (null = open). */
+  raceBetStatus: (): { max: number; lock: string | null } => JSON.parse(wasm.race_bet_status()),
+  /** The city's regulars with their records, strongest first. */
+  rosterList: (): RegularCard[] => JSON.parse(wasm.roster_json()),
+  /** The regulars' records as text (local save). */
+  rosterSave: (): string => wasm.roster_state(),
+  /** Restore the regulars' records from `rosterSave()` output. Throws if unreadable. */
+  rosterLoad: (text: string): void => wasm.roster_state_load(text),
   /** Results once the player is done (`wp_wasm::race::RaceReport`), else null. */
   raceResult: (): RaceReport | null => JSON.parse(wasm.race_result_json()),
   /** The city's repair shops (`wp_wasm::garage_visit::GarageSite`); fetch once per session. */
@@ -528,6 +550,22 @@ export const sim = {
   garageRepair: (): GarageRepairReport => JSON.parse(wasm.garage_repair()),
   /** "Leave" the open visit without repairing. */
   garageLeave: (): void => wasm.garage_leave(),
+  /** Touge passes with their challenger and boss (`wp_wasm::touge::TougeCard[]`). */
+  tougeList: (): TougeCard[] => JSON.parse(wasm.touge_list_json()),
+  /** Rep-gated wager menu for one battle, on the account the battle will use (`career`: the
+   * loaded career's, else the session's). Throws on unknown keys. */
+  tougeMenu: (c: TougeChoice, career: boolean): WagerMenu =>
+    JSON.parse(wasm.touge_menu_json(c.map, c.direction, c.daylight, c.surface, c.opponent, career)),
+  /** Touge battle scenario JSON (for `careerStartRun`); remembers `wager` for the next session. */
+  tougeScenarioJson: (c: TougeChoice, car: string, mode: string, wager: Wager, autopilot: boolean): string =>
+    wasm.touge_scenario_json(c.map, c.direction, c.daylight, c.surface, c.opponent, car, mode, JSON.stringify(wager), autopilot),
+  /** Start a touge battle as a plain session. Returns entity ids, player first. */
+  tougeStart: (c: TougeChoice, car: string, mode: string, wager: Wager, autopilot: boolean): number[] =>
+    Array.from(wasm.touge_start(c.map, c.direction, c.daylight, c.surface, c.opponent, car, mode, JSON.stringify(wager), autopilot)),
+  /** Battle panel (`wp_wasm::touge::TougeReport`), null outside a touge battle. */
+  tougeResult: (): TougeReport | null => JSON.parse(wasm.touge_result_json()),
+  /** Testbed only: set the plain session's rep (throws during a career or without an account). */
+  tougeDebugSetRep: (rep: number): void => wasm.touge_debug_set_rep(rep),
   /** Debug / e2e: set a racer's police heat (not recorded in replays). */
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
   /** Debug / e2e: park street racer `entity` idle at Loop 9 rest stop `name` (logged move). */
@@ -603,9 +641,13 @@ export const sim = {
   careerStripPart: (uid: number, assembly: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_strip_part(uid, assembly, slot)),
   careerBuildPart: (uid: number, assembly: number, slot: string, part: number): WorkshopScreen =>
     JSON.parse(wasm.career_build_part(uid, assembly, slot, part)),
+  careerClearWay: (uid: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_clear_way(uid, slot)),
+  /** Pay the mechanic: inventory part `part` (0 = buy `grade` now, null = stock). */
+  careerMechanicInstall: (uid: number, slot: string, part: number, grade: string | null, sellOld: boolean): MechanicResult =>
+    JSON.parse(wasm.career_mechanic_install(uid, slot, part, grade ?? "", sellOld)),
 };
 
-import type { CarTune, CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";
+import type { CarTune, CareerView, MechanicResult, ModTreeView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";
 
 /** A street-racer level (`wp_wasm::street::Level`). */
 export interface StreetLevel {
@@ -615,6 +657,8 @@ export interface StreetLevel {
   cars: string[];
   bet_min: number;
   bet_max: number;
+  /** Rep for beating a racer of this level. */
+  win_rep: number;
 }
 
 /** One street racer (`wp_wasm::street::RosterEntry`). */
@@ -679,6 +723,8 @@ export interface StreetResult {
   colour: string;
   stake: number;
   net: number;
+  /** Rep earned (the level's win_rep on a win, 0 on a loss). */
+  rep: number;
   cash_after: number;
   time_s: number;
   margin_m: number;
@@ -711,7 +757,9 @@ export interface StreetPreview {
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";
-import type { RaceCard, RaceReport } from "../ui/race";
+import type { BetCard, RaceCard, RaceReport, RegularCard } from "../ui/race";
+import type { RaceSpot } from "../race_spots";
+import type { TougeCard, TougeChoice, TougeReport, Wager, WagerMenu } from "../ui/touge";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
 import type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";

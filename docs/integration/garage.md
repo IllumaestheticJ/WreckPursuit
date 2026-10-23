@@ -106,6 +106,33 @@ removed part carries them).
   opens it at that row; hovering a row lights the part up. `e2e/engine.mjs` clicks the valve
   cover in 3D and checks that stripped parts disappear from the model.
 
+### Easier workshop: mechanic, simpler removal order, sorting
+Owner feedback (2026-10-23): installs were confusing (tyre off before the wheel), wanted a paid
+mechanic with the old part sold or kept, and sortable part lists.
+- `parts.toml` removal order keeps only real dependencies: a wheel comes off with its tyre on;
+  brakes and suspension only need the wheel off (suspension no longer waits for the brake); the
+  push bar no longer waits for the splitter. New `[mechanic]` table: `call_out` (60) per job,
+  `per_part` (30) per part handled.
+- `Economy::in_the_way(parts, slot)`: every fitted slot that must come off first, nested ones
+  too, in removal order. `SlotView.in_the_way`, `SlotView.mechanic_fee`,
+  `CatalogEntry.install_fee` (the whole set's fee for a set).
+- `Economy::clear_way(acct, car, slot)`: DIY, free, takes off everything in the way.
+- `Economy::mechanic_install(acct, car, slot, &PartSource, sell_old, mode) -> MechanicJob`:
+  the new part comes from the inventory or is bought now (an aftermarket set goes on every slot
+  of the set); what is in the way comes off and goes back on; labour is charged as
+  `EventReason::RepairPaid`; the old parts are sold or kept. All or nothing.
+- wasm: `career_clear_way(uid, slot)`, `career_mechanic_install(uid, slot, part, grade,
+  sell_old)` (`part` 0 = buy `grade`, `""` = stock) → `{job, workshop}`. New parts restore their
+  lattice area like `fit_part`.
+- ui-kit: the part card splits into "Do it yourself" (take off what's in the way, remove, fit)
+  and "Mechanic" (install an inventory part, new stock part, catalog / upgrades) with an
+  "Old part: keep / sell" choice; catalog rows get "Fit for me"; the part list (group / name /
+  worst first), inventory (newest / name / condition / value / fits) and catalog (tier / price /
+  name) sort. Choices persist in `localStorage` (`wp.workshop.*`). `Button` gained an optional
+  `testid` prop. `e2e/mechanic.mjs` covers it.
+- Later (stage 6): the mechanic's labour should also cost game time through
+  `wp_world::progression` (`Activity::ModInstall { labour_hours }`).
+
 ### Testbed (`apps/testbed-web`, `apps/ui-kit`)
 - `src/workshop/room.ts`: the garage bay, built in code (concrete floor, block walls, roller door,
   two-post lift, bench, tool chest, tyre rack, shelving, lights). The car never moves: raising the
@@ -141,6 +168,31 @@ removed part carries them).
   painted in car metres into the livery atlas). Bolt-ons ride with their region's lattice and
   vanish when the region detaches; pieces are clickable in the workshop (`slotAt`).
 - `e2e/cosmetics.mjs`: every visible mod on four models, four themed builds, lamps, vinyl gallery.
+
+### Mounted parts, hardware and replacement panels (stage 6)
+- `parts.toml` slots take `mount = "<slot>"`: a top-level part bolted to another one (front
+  splitter → front bumper, hood vent → hood, rear wing → trunk lid, diffuser → rear bumper).
+  Removing the host takes the mounted parts along in the loose part's `contents` (sold and
+  refitted with it); a mounted part cannot go on while its host is off ("no front bumper
+  fitted"). `PartsTable::mounted`, `carried`; `SlotView.mount` and `takes_along` (the part card
+  says "on the front bumper" and "comes off with it: ...").
+- `src/workshop/mounts.ts`: every lamp / trim / mirror mesh part gets a host panel from the mesh
+  geometry (nearest touching bolt-on panel, unless the welded shell is as close), so the tail
+  lamps set into a rear bumper leave with it. `slotmap.slotsNeeded` = own slot, region panel,
+  host; a part is drawn only while all are fitted.
+- `src/workshop/hardware.ts`: slots no mesh part or look piece draws (battery, ECU, intake, fuel
+  pump, gearbox, shafts, diff, transfer case, tank, steering rack, shifter, bumper beams,
+  radiator on mid-engined cars, cab back glass on pickups) are built in the workshop from the
+  car's layout (engine place, driven axles), tier-coloured when aftermarket, clickable and
+  highlighted like mesh parts. The belly pan is hidden on the lift so the underside shows.
+  `workshop.undrawnSlots()` (automation) lists fitted slots drawn by nothing; `e2e/workshop.mjs`
+  checks it is empty. A "Rear" camera preset joins the views.
+- `render/cosmetics/shell.ts`: aftermarket bumpers (front aggressive / widebody, rear sport /
+  widebody), the front lip and carbon hood / trunk are new panels made from the car's own stock
+  panel mesh (reshaped; intakes with honeycomb; lip blade; canards; clear-coat twill weave) and
+  hide the stock cover. The old livery-painted carbon and black-box lip / valance are gone.
+- `e2e/workshop_mounts_shots.mjs`: review shots per car (`CARS`, `INSTALL`, `REMOVE`, `CAMS`,
+  `VIEWS`), printing the hardware and any undrawn slots.
 
 ## Port onto lead/round12 (two cosmetic renderers)
 round12 already draws mods on cars: `wp_economy::visuals` (`PartKind`, mod `visuals` lists) →
@@ -202,5 +254,6 @@ Workshop operations run on a button press, not per frame.
 - Internals wear only from crash damage, not from over-revving or mileage yet.
 - Gearbox internals are not modelled (the gearbox is one part).
 - AI and remote cars show no look yet; only the player's career car does.
-- The workshop part picker only knows parts the car meshes draw; slots with no mesh (gearbox,
-  ECU, fuel pump and similar) are reached through the Part list.
+- Workshop hardware (battery, diff, tank...) is drawn in the workshop only, not while driving.
+- Replacement bumpers hide the stock grille and indicators; the new cover draws its own intakes
+  and LED strips.

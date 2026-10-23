@@ -1,4 +1,4 @@
-# simcli hashes scenario=opponent_pace_loop9_circuit_s50 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
+# simcli hashes scenario=opponent_pace_loop9_circuit_s50 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
 240 38992afeb4eeb28d
 480 2e9c3c21d2ac5556
 720 febd27ee09977454

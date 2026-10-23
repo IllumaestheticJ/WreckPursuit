@@ -26,5 +26,11 @@ Format spec: `crates/wp_world/README.md`. Coordinates: metres, +X east, +Y north
   "vesper_v2", seed: 1)`, so `vesper_v2.road.bin` (2.3 MB, mostly terrain) is written locally
   but not committed. A test fails if the greybox is stale.
 
+- `ashpeak.greybox.{glb,b64.txt}` — Port Vesper + Ashpeak County (the new region north and west
+  of Port Vesper: freeways, mountains and the Crowfoot Pass touge, Ashpeak City, Harlan Flats
+  farmland; `wp_world::ashpeak`), regenerate with `just city-ashpeak`. Generated in memory like
+  Port Vesper (`World::ashpeak`, scenario `city: preset(name: "ashpeak", seed: 1)`); a test
+  fails if the greybox is stale.
+
 Imported OSM cities carry an ODbL attribution in the file; see
 `tools/city-import/README.md` before committing or shipping one.

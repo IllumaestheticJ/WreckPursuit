@@ -802,3 +802,137 @@ fn lantern_checkpoint_draws_the_police() {
         r.results.len()
     );
 }
+
+// ---- Ashpeak County (the combined `ashpeak` map) ------------------------------------------
+//
+// Raced with police presence 0: these check that the AI field can drive each course to the
+// flag (touge hairpins, gravel, the downtown grid, the freeways); the police side of street
+// races is covered on Port Vesper above.
+
+/// Race `id` without police and [`check`] it (results printed for tuning).
+fn ashpeak_race(id: &str, max_s: u64, winner_s: std::ops::Range<f32>, min_finish: usize) {
+    let r = run_race_with(id, max_s, Some(0.0));
+    eprintln!(
+        "{id}: route {:.0} m, results {:?}",
+        r.route_m,
+        r.results
+            .iter()
+            .map(|x| (x.position, x.status, x.elapsed_s(), x.gates_passed))
+            .collect::<Vec<_>>()
+    );
+    check(&r, winner_s, min_finish);
+    assert_eq!(r.pursuits, 0);
+}
+
+#[test]
+fn crowfoot_ascent_touge() {
+    // 3.5 km up the hairpins, single-file grid: winner ~165 s, all four finish.
+    ashpeak_race("crowfoot_ascent", 400, 120.0..230.0, 3);
+}
+
+#[test]
+fn crowfoot_descent_touge() {
+    // 2.9 km down the north side: winner ~100 s, three of four finish.
+    ashpeak_race("crowfoot_descent", 400, 70.0..150.0, 3);
+}
+
+#[test]
+fn harlan_dirt_run() {
+    // 4 km of gravel section roads: winner ~266 s.
+    ashpeak_race("harlan_dirt_run", 500, 190.0..380.0, 3);
+}
+
+#[test]
+fn ashpeak_downtown_checkpoint() {
+    // 1.25 km through the signalised downtown grid: winner ~42 s, all four finish.
+    ashpeak_race("ashpeak_downtown_checkpoint", 300, 30.0..90.0, 3);
+}
+
+#[test]
+fn route7_tunnel_sprint() {
+    // 3.5 km of freeway through the Talon Tunnel: winner ~64 s, all five finish.
+    ashpeak_race("route7_tunnel_sprint", 400, 45.0..100.0, 4);
+}
+
+#[test]
+fn grizzly_grade_sprint() {
+    // 2.2 km over the Grizzly saddle: winner ~58 s, all four finish.
+    ashpeak_race("grizzly_grade_sprint", 300, 40.0..90.0, 3);
+}
+
+#[test]
+fn waterfront_drag() {
+    // 400 m standing start: winner ~15.7 s.
+    ashpeak_race("waterfront_drag", 90, 10.0..25.0, 2);
+}
+
+#[test]
+fn ashpeak_metro_circuit() {
+    // Two 4.2 km laps of the downtown grid at night: winner ~326 s, three of six finish.
+    ashpeak_race("ashpeak_metro_circuit", 900, 240.0..480.0, 3);
+}
+
+#[test]
+fn harbor_dash() {
+    let r = run_race("harbor_dash", 150);
+    // 737 m down Harbor Boulevard onto the Loop 9 on-ramp.
+    check(&r, 15.0..70.0, 3);
+}
+
+#[test]
+fn tunnel_run() {
+    let r = run_race("tunnel_run", 200);
+    // 1.3 km of Loop 9 through the Hollins Tunnel.
+    check(&r, 25.0..110.0, 4);
+}
+
+#[test]
+fn hollins_descent() {
+    let r = run_race("hollins_descent", 240);
+    // 1.35 km down the Hollins hairpins into Mercer.
+    check(&r, 40.0..150.0, 3);
+}
+
+#[test]
+fn offramp_sprint() {
+    let r = run_race("offramp_sprint", 240);
+    let id = r.def.id;
+    // 1.6 km off Loop 9 and through the town's signals at dusk. The red lights draw the
+    // patrols, and races with police can end in captures (owner decision), so like
+    // `loop9_circuit` the police decide how many finish: the race is judged to the end, the
+    // winner takes the flag, and every racer's race ends at the flag, by the police, behind
+    // the finish window or in at most one racing incident.
+    assert!(r.finished_tick.is_some(), "{id}: never finished");
+    assert_eq!(r.results.len(), r.def.entrants());
+    let winner = r.results.iter().find(|x| x.position == 1).unwrap();
+    assert_eq!(winner.status, RacerStatus::Finished, "{id}: {winner:?}");
+    let t = winner.elapsed_s().unwrap();
+    assert!((50.0..170.0).contains(&t), "{id}: winner took {t:.1} s");
+    let dqs = r
+        .results
+        .iter()
+        .filter(|x| matches!(x.status, RacerStatus::Dq(_)))
+        .count();
+    assert!(dqs <= 1, "{id}: {dqs} disqualified");
+    for x in &r.results {
+        assert!(
+            matches!(
+                x.status,
+                RacerStatus::Finished
+                    | RacerStatus::Dq(_)
+                    | RacerStatus::Dnf(wp_race::DnfReason::Captured)
+                    | RacerStatus::Dnf(wp_race::DnfReason::Fled)
+                    | RacerStatus::Dnf(wp_race::DnfReason::FinishWindow)
+            ),
+            "{id}: {x:?}"
+        );
+        assert!(x.gates_passed >= 1, "{id}: {x:?} never left the grid");
+    }
+}
+
+#[test]
+fn grid_arterial_sprint() {
+    let r = run_race("grid_arterial_sprint", 200);
+    // 1.0 km across the grid city's blocks.
+    check(&r, 25.0..130.0, 3);
+}

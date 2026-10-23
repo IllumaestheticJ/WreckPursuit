@@ -1,4 +1,4 @@
-# simcli hashes scenario=crash_head_on systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
+# simcli hashes scenario=crash_head_on systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
 60 3470a52e1fd014c8
 120 98ce73ba21ac54c8
 180 f28f123d32654b56

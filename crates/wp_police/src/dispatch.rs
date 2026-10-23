@@ -14,12 +14,14 @@ use crate::events::{
     DisableCause, IncidentId, PoliceEvent, PursuitOutcome, ToolId, UnitId, UnitKind,
 };
 use crate::graph::{
-    add, dist, dot, len, lerp2, normalize, scale, sub, xy, District, NodeId, PoiKind, RoadClass,
+    add, dist, dot, len, lerp2, normalize, perp_left, scale, sub, xy, District, NodeId, PoiKind,
+    RoadClass,
 };
 use crate::heat::{PursuitStatus, WantedLevel};
 use crate::time::SimTime;
 use crate::tools::{
-    plan_site, roadblock_barriers, roadblock_unit_spots, Roadblock, SiteRules, SpikeStrip, ToolSite,
+    plan_site, plan_site_where, roadblock_barriers, roadblock_unit_spots, Roadblock, SiteRules,
+    SpikeStrip, ToolSite,
 };
 use crate::unit::{Assignment, DriveCommand, Tactic, Track, Unit, UnitRole, LANE_OFFSET_M};
 use crate::PoliceSystem;
@@ -33,7 +35,20 @@ pub const ROUTE_VIEW_MIN_MPS: f32 = 5.0;
 /// ... this many seconds of its travel ahead, s.
 pub const ROUTE_VIEW_S: f32 = 3.0;
 /// ... sampled this far apart, m.
-pub const ROUTE_VIEW_STEP_M: f32 = 15.0;
+pub const ROUTE_VIEW_STEP_M: f32 = 10.0;
+/// ... from the centreline and this far to either side of it (the lanes), m.
+pub const ROUTE_LANE_M: f32 = 2.5;
+/// Extra eye height at the racer's points along its roads ahead (their ground height is not
+/// known here; a climb ahead must not hide a car it will see), m.
+pub const ROUTE_EYE_SLACK_M: f32 = 5.0;
+/// The road-ahead check assumes at least this speed (a racer pulling away), m/s.
+pub const ROUTE_MIN_MPS: f32 = 15.0;
+/// ... and this much further, m.
+pub const ROUTE_MARGIN_M: f32 = 20.0;
+/// ... and every road this far behind the racer (it may turn round), m.
+pub const ROUTE_BACK_M: f32 = 40.0;
+/// Most road legs [`PoliceSystem::roads_ahead`] walks (a bound on dense junction grids).
+pub const ROADS_AHEAD_MAX_LEGS: usize = 24;
 
 /// Road half width used for tool layout, m.
 pub const ROAD_HALF_WIDTH_M: f32 = 5.0;
@@ -76,8 +91,19 @@ pub const ACTIVE_STOP_S: f32 = 5.0;
 /// How far beyond the road edge a spike-strip car parks, m.
 pub const SPIKE_CAR_SHOULDER_M: f32 = 2.5;
 
-/// A roadblock or spike-strip car not spawned yet because its spot is in a racer's view
-/// (row 131): it appears once the spot is hidden, while its tool lasts.
+/// A spike strip is lifted once its unit is further than this from where it parked (shoved
+/// away, driven off, reset elsewhere), so a strip never lies on the road without a police car
+/// beside it (PR #54), m.
+pub const SPIKE_UNIT_LEASH_M: f32 = 15.0;
+
+/// An unmanned spike strip (its car's spot was in a racer's view, row 131 / 158) is lifted
+/// once its racer is this far past it along the road, m.
+pub const SPIKE_PASSED_M: f32 = 25.0;
+
+/// A roadblock or spike-strip car not spawned yet. A roadblock car waits while its spot is in a
+/// racer's view (row 131) and appears once the spot is hidden, while its tool lasts. A spike
+/// car is decided on the next think: spot hidden, it appears beside its strip; in view, it is
+/// dropped and the strip stays unmanned (PR #54 port, lead 2026-10-23).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PendingToolCar {
     /// Tool it belongs to.
@@ -1744,6 +1770,11 @@ impl PoliceSystem {
         {
             return;
         }
+        // A unit leaving its spike post (wrecked, pulled over, released) takes the strip with
+        // it (PR #54).
+        if let Assignment::SpikeAt { tool, .. } = self.units[i].assignment {
+            self.lift_spikes(tool);
+        }
         // A unit's first patrol is not "resuming" anything: no line (13 units "resuming
         // patrol" at the start held the channel for ≈ 25 s).
         let first_patrol =
@@ -1976,9 +2007,16 @@ impl PoliceSystem {
             }
             // In the right-hand lane, not on the centreline.
             let pos = add(centre, scale([dir[1], -dir[0]], LANE_OFFSET_M));
-            // The session-start patrols are part of the opening scene; every later refill
-            // appears out of every racer's sight (no pop-in).
-            let hidden = !self.warmed_up || !self.spawn_in_view(world, pos);
+            // Every patrol appears out of every racer's sight. At session start only wanted
+            // racers count (row 158: a patrol placed in view at the start, beside a racer
+            // still wanted from before, started a chase at once); one already on screen at
+            // the first frame around a clean racer did not pop in. A district short of hidden
+            // spots fills up later through `maintain_pool`.
+            let hidden = if self.warmed_up {
+                !self.spawn_in_view(world, pos)
+            } else {
+                !self.opening_spawn_in_view(world, pos)
+            };
             if hidden && self.spawn_clear(pos) {
                 let i = self.spawn_unit(UnitKind::Car, UnitRole::Pool(d), pos, dir);
                 self.start_patrol(i, dest);
@@ -2020,6 +2058,9 @@ impl PoliceSystem {
     }
 
     pub(crate) fn despawn(&mut self, i: usize) {
+        if let Assignment::SpikeAt { tool, .. } = self.units[i].assignment {
+            self.lift_spikes(tool);
+        }
         let id = self.units[i].id;
         self.units.remove(i);
         self.pending.push(PoliceEvent::UnitDespawned { unit: id });
@@ -2334,6 +2375,58 @@ impl PoliceSystem {
         self.in_racer_view_opt(Some(world), p, true)
     }
 
+    /// Points every `step_m` along every road a car at `pos` moving with `vel` can reach within
+    /// `horizon_m`: its own road ahead, then every legal branch at each junction (no
+    /// U-turns), in a fixed order; each with the road's direction there.
+    pub(crate) fn roads_ahead(
+        &self,
+        pos: [f32; 2],
+        vel: [f32; 2],
+        horizon_m: f32,
+        step_m: f32,
+    ) -> Vec<([f32; 2], [f32; 2])> {
+        let mut out = Vec::new();
+        let Some(on) = self.graph.nearest_on_road(pos) else {
+            return out;
+        };
+        let seg = self.graph.segment(on.segment);
+        let (a, b) = (self.graph.node(seg.a).pos, self.graph.node(seg.b).pos);
+        // Toward the end it is driving at.
+        let (to, from) = if dot(sub(b, a), vel) >= 0.0 {
+            (seg.b, seg.a)
+        } else {
+            (seg.a, seg.b)
+        };
+        // (node, arrived from, distance travelled to it, point the leg started at)
+        let mut stack = vec![(to, from, 0.0f32, on.point)];
+        let mut legs = 0;
+        while let Some((n, prev, done, start)) = stack.pop() {
+            legs += 1;
+            if legs > ROADS_AHEAD_MAX_LEGS {
+                break;
+            }
+            let end = self.graph.node(n).pos;
+            let len = dist(start, end);
+            let dir = normalize(sub(end, start));
+            // Sample this leg (from where it starts to node `n`).
+            let mut d = step_m - done % step_m;
+            while d <= len && done + d <= horizon_m {
+                out.push((lerp2(start, end, d / len.max(1e-3)), dir));
+                d += step_m;
+            }
+            let reach = done + len;
+            if reach >= horizon_m {
+                continue;
+            }
+            for &(_, next) in self.graph.outgoing(n) {
+                if next != prev {
+                    stack.push((next, n, reach, end));
+                }
+            }
+        }
+        out
+    }
+
     /// [`Self::in_racer_view`] (`route`: also from the road ahead, see
     /// [`Self::spawn_in_view`]); without a world (captain tool placement) only the road
     /// graph's own sight lines (city blocks) are checked.
@@ -2342,6 +2435,25 @@ impl PoliceSystem {
         world: Option<&dyn WorldQuery>,
         p: [f32; 2],
         route: bool,
+    ) -> bool {
+        self.in_view_of(world, p, route, false)
+    }
+
+    /// Whether the session-start patrol spot `p` is in view of a racer who is already wanted
+    /// (heat above zero). A patrol on screen from the first frame did not pop in; only one that
+    /// would chase at once breaks the rule (row 158). Patrols around a clean racer are the
+    /// living city: they chase only an offence they see.
+    pub(crate) fn opening_spawn_in_view(&self, world: &dyn WorldQuery, p: [f32; 2]) -> bool {
+        self.in_view_of(Some(world), p, true, true)
+    }
+
+    /// `in_racer_view_opt`, optionally counting only racers with heat above zero.
+    fn in_view_of(
+        &self,
+        world: Option<&dyn WorldQuery>,
+        p: [f32; 2],
+        route: bool,
+        wanted_only: bool,
     ) -> bool {
         /// Driver's eye and chase camera above the racer's chassis, camera distance behind
         /// it, and the height of the car body looked at, m.
@@ -2353,6 +2465,9 @@ impl PoliceSystem {
         const LOOK_AHEAD_S: f32 = 1.0;
         let near = self.cfg.presence.response.never_closer_m;
         self.racers.values().any(|r| {
+            if wanted_only && r.heat <= 0.0 {
+                return false;
+            }
             let rp = xy(r.pos);
             if dist(rp, p) < near {
                 return true;
@@ -2360,6 +2475,7 @@ impl PoliceSystem {
             let z = r.pos[2];
             let body = [p[0], p[1], z + BODY_UP_M];
             let mut views = vec![[rp[0], rp[1], z + EYE_UP_M]];
+            let mut route_views: Vec<[f32; 3]> = Vec::new();
             let v = [r.vel[0], r.vel[1]];
             if crate::graph::len(v) > 1.0 {
                 let back = scale(normalize(v), CAM_BACK_M);
@@ -2376,16 +2492,48 @@ impl PoliceSystem {
             // not pop in just round the corner ahead of a fast racer): a few points on its
             // predicted path, the look-ahead growing with speed.
             let speed = crate::graph::len(v);
-            if route && speed > ROUTE_VIEW_MIN_MPS {
-                let horizon = speed * ROUTE_VIEW_S;
-                let path = self.graph.predict_path(rp, v, horizon);
-                let pts = Track::new(path.points());
-                let len = pts.length().min(horizon);
-                let mut d = ROUTE_VIEW_STEP_M;
-                while d <= len + 0.5 * ROUTE_VIEW_STEP_M {
-                    let q = pts.point_at(d.min(len));
-                    views.push([q[0], q[1], z + EYE_UP_M]);
-                    d += ROUTE_VIEW_STEP_M;
+            // Every road it could take, not only the straightest (row 158: backup appeared
+            // 150-190 m away, hidden, and in plain view 1.5-2 s later down the side street
+            // the racer turned into).
+            if route {
+                // The road ahead may climb (Port Vesper's hills): its eye points sit higher
+                // than the racer's eye now, so a crest does not hide a car that will be seen.
+                // Far enough for a racer that speeds up (or pulls away from a stop): at least
+                // ROUTE_MIN_MPS for ROUTE_VIEW_S, plus a margin.
+                let horizon = speed.max(ROUTE_MIN_MPS) * ROUTE_VIEW_S + ROUTE_MARGIN_M;
+                // Slow or stopped: it may go either way along its road.
+                let dir = if speed > ROUTE_VIEW_MIN_MPS {
+                    v
+                } else {
+                    self.graph
+                        .nearest_on_road(rp)
+                        .map(|on| {
+                            let sg = self.graph.segment(on.segment);
+                            sub(self.graph.node(sg.b).pos, self.graph.node(sg.a).pos)
+                        })
+                        .unwrap_or([0.0, 1.0])
+                };
+                let back = [-dir[0], -dir[1]];
+                let back_m = if speed > ROUTE_VIEW_MIN_MPS {
+                    ROUTE_BACK_M
+                } else {
+                    horizon
+                };
+                let ahead = self.roads_ahead(rp, dir, horizon, ROUTE_VIEW_STEP_M);
+                // And the roads just behind it: a racer that turns round (the evader bot does)
+                // drives back along them.
+                let behind = self.roads_ahead(rp, back, back_m, ROUTE_VIEW_STEP_M);
+                // Centre and either lane: the racer drives a few metres off the centreline,
+                // and a sightline grazing a building corner differs there (row 158).
+                for (q, d) in ahead.into_iter().chain(behind) {
+                    let side = [d[1] * ROUTE_LANE_M, -d[0] * ROUTE_LANE_M];
+                    for o in [[0.0, 0.0], side, scale(side, -1.0)] {
+                        route_views.push([
+                            q[0] + o[0],
+                            q[1] + o[1],
+                            z + EYE_UP_M + ROUTE_EYE_SLACK_M,
+                        ]);
+                    }
                 }
             }
             // Police only know the racer's velocity, not which way it faces (sliding, turning,
@@ -2394,9 +2542,17 @@ impl PoliceSystem {
                 let c = add(rp, scale(d, CAM_BACK_M));
                 views.push([c[0], c[1], z + CAM_UP_M]);
             }
+            // Along the roads ahead the spot's own ground height is not known either: a car
+            // standing a little higher shows over a crest (row 158, Port Vesper).
+            let body_high = [body[0], body[1], body[2] + ROUTE_EYE_SLACK_M];
             views.iter().any(|eye| {
                 self.graph.line_of_sight([eye[0], eye[1]], p)
                     && world.is_none_or(|w| w.line_of_sight(*eye, body))
+            }) || route_views.iter().any(|eye| {
+                self.graph.line_of_sight([eye[0], eye[1]], p)
+                    && world.is_none_or(|w| {
+                        w.line_of_sight(*eye, body) || w.line_of_sight(*eye, body_high)
+                    })
             })
         })
     }
@@ -3655,8 +3811,10 @@ impl PoliceSystem {
     }
 
     /// Scenario / test placement: a spike strip across the road at `pos`, perpendicular to
-    /// `dir`, attributed to `racer`, without a deploying unit and bypassing every dispatch rule
-    /// (see [`PoliceSystem::place_roadblock_at`]). Any racer crossing it is spiked. Emits
+    /// `dir`, attributed to `racer`, bypassing every dispatch rule (see
+    /// [`PoliceSystem::place_roadblock_at`]), the row-131 spawn view check included. Like
+    /// every strip it comes with a spike unit parked on the shoulder beside it (left of `dir`)
+    /// and is lifted when that unit leaves (PR #54). Any racer crossing it is spiked. Emits
     /// `SpikesPlaced`.
     pub fn place_spikes_at(&mut self, racer: EntityId, pos: [f32; 2], dir: [f32; 2]) -> ToolId {
         let sc = &self.cfg.tools.spikes;
@@ -3664,17 +3822,92 @@ impl PoliceSystem {
         let site = Self::scenario_site(pos, dir);
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
-        let strip = SpikeStrip::across(id, racer, site, length, None, self.now.plus(lifetime));
+        let post = add(
+            site.pos,
+            scale(
+                perp_left(site.dir),
+                ROAD_HALF_WIDTH_M + SPIKE_CAR_SHOULDER_M,
+            ),
+        );
+        let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, post, site.dir);
+        self.assign(
+            i,
+            Assignment::SpikeAt {
+                segment: site.segment,
+                tool: id,
+            },
+        );
+        let mut strip = SpikeStrip::across(id, racer, site, length, None, self.now.plus(lifetime));
+        strip.unit = Some(self.units[i].id);
+        strip.post = Some(post);
+        self.lay_spikes(strip);
+        id
+    }
+
+    /// Put `strip` on the road (its unit is beside it) and announce it (`SpikesPlaced`).
+    fn lay_spikes(&mut self, strip: SpikeStrip) {
         self.pending.push(PoliceEvent::SpikesPlaced {
-            tool: id,
-            racer,
+            tool: strip.id,
+            racer: strip.racer,
             a: [strip.a[0], strip.a[1], 0.0],
             b: [strip.b[0], strip.b[1], 0.0],
-            sight_m: 0.0,
+            sight_m: strip.site.sight_m,
         });
         self.spikes.push(strip);
-        self.stats.spikes += 1;
-        id
+    }
+
+    /// Whether strip `s` may stay on the road as far as its unit goes. A manned strip needs
+    /// its unit beside it: present, not wrecked, still on this strip's post and within
+    /// [`SPIKE_UNIT_LEASH_M`] of where it parked. Strips without a unit (scripted race-profile
+    /// strips; strips whose car's spot was in view) are exempt here; an unmanned dynamic strip
+    /// goes once its racer has passed it ([`Self::spike_passed`]).
+    fn spike_unit_holds(&self, s: &SpikeStrip) -> bool {
+        let Some(uid) = s.unit else {
+            return true;
+        };
+        let Some(u) = self.units.iter().find(|u| u.id == uid) else {
+            return false;
+        };
+        !u.wrecked
+            && matches!(u.assignment, Assignment::SpikeAt { tool, .. } if tool == s.id)
+            && dist(u.body.pos, s.post.unwrap_or(s.site.pos)) <= SPIKE_UNIT_LEASH_M
+    }
+
+    /// Whether an unmanned dynamic strip's racer is more than [`SPIKE_PASSED_M`] past it along
+    /// the road (the strip has done its job, or missed).
+    fn spike_passed(&self, s: &SpikeStrip) -> bool {
+        if s.unit.is_some() || s.scripted {
+            return false;
+        }
+        self.racers
+            .get(&s.racer)
+            .is_some_and(|r| dot(sub(xy(r.pos), s.site.pos), s.site.dir) > SPIKE_PASSED_M)
+    }
+
+    /// Remove strip `tool` from the road (no-op if already gone). Its unit is not touched.
+    fn lift_spikes(&mut self, tool: ToolId) {
+        let before = self.spikes.len();
+        self.spikes.retain(|s| s.id != tool);
+        if self.spikes.len() != before {
+            self.pending.push(PoliceEvent::ToolRemoved { tool });
+        }
+    }
+
+    /// The host could not give AI unit `unit` a physical car (vehicle cap, failed spawn). A
+    /// spike unit is then withdrawn and its strip lifted, so no strip lies on the road without
+    /// a visible police car; returns whether that happened. Other units are left as they are.
+    pub fn withdraw_unbodied_spike_unit(&mut self, unit: UnitId) -> bool {
+        let Some(i) = self.unit_index(unit) else {
+            return false;
+        };
+        if !matches!(self.units[i].assignment, Assignment::SpikeAt { .. })
+            || self.units[i].entity.is_some()
+            || self.units[i].player.is_some()
+        {
+            return false;
+        }
+        self.despawn(i);
+        true
     }
 
     /// Place a spike strip ahead of `racer` (optionally on a specific road).
@@ -3709,8 +3942,14 @@ impl PoliceSystem {
             min_sight_m: sc.min_sight_m,
             highway_ok: true,
         };
-        let site =
-            plan_site(&self.graph, p, v, &rules, road.map(|r| r.0)).map_err(CaptainError::Site)?;
+        // PR #54: the strip goes down with its car, so the site needs a shoulder spot the car
+        // can appear on (row 75: clear of parked cars and cones, and of other vehicles).
+        let parkable = |site: &ToolSite| {
+            let span = self.tool_span(site);
+            self.spot_clear(span.at(site.pos, span.outer + SPIKE_CAR_SHOULDER_M))
+        };
+        let site = plan_site_where(&self.graph, p, v, &rules, road.map(|r| r.0), &parkable)
+            .map_err(CaptainError::Site)?;
         let (length, lifetime, cooldown) =
             (sc.length_m, sc.lifetime_s, sc.cooldown_s.get(self.phase));
         let id = ToolId(self.next_tool);
@@ -3718,16 +3957,13 @@ impl PoliceSystem {
         // Row 133: the car parks on the right shoulder of the racer's own carriageway,
         // facing its traffic; on a one-way carriageway (a divided road's half) the strip
         // spans that carriageway, lane edge to median.
+        // PR #54 port (lead, 2026-10-23; rows 131 / 158: no police car appears in a racer's
+        // view): the strip goes down now. Its car is decided on the next think
+        // (`maintain_tool_cars`, which has the world for the view check): spot hidden, the car
+        // appears beside the strip; in view, no car and the strip stays unmanned, like a
+        // scripted race strip, until its racer passes it, the pursuit ends or it expires.
         let span = self.tool_span(&site);
-        self.tool_cars.push(PendingToolCar {
-            tool: id,
-            pos: span.at(site.pos, span.outer + SPIKE_CAR_SHOULDER_M),
-            heading: span.flow,
-            assignment: Assignment::SpikeAt {
-                segment: site.segment,
-                tool: id,
-            },
-        });
+        let post = span.at(site.pos, span.outer + SPIKE_CAR_SHOULDER_M);
         let expires = now.plus(lifetime);
         let strip = if span.oneway {
             let (a, b) = (span.at(site.pos, span.inner), span.at(site.pos, span.outer));
@@ -3735,14 +3971,16 @@ impl PoliceSystem {
         } else {
             SpikeStrip::across(id, racer, site, length, None, expires)
         };
-        self.pending.push(PoliceEvent::SpikesPlaced {
+        self.tool_cars.push(PendingToolCar {
             tool: id,
-            racer,
-            a: [strip.a[0], strip.a[1], 0.0],
-            b: [strip.b[0], strip.b[1], 0.0],
-            sight_m: site.sight_m,
+            pos: post,
+            heading: span.flow,
+            assignment: Assignment::SpikeAt {
+                segment: site.segment,
+                tool: id,
+            },
         });
-        self.spikes.push(strip);
+        self.lay_spikes(strip);
         self.captain.spikes_ready = now.plus(cooldown);
         self.stats.spikes += 1;
         self.stats.tool_sight_m.push(site.sight_m);
@@ -3774,28 +4012,29 @@ impl PoliceSystem {
         }
     }
 
-    /// Spawn the roadblock and spike-strip cars whose spots are now out of every racer's
-    /// view, now and along its road ahead (row 131); drop those whose tool has gone.
+    /// Spawn the roadblock cars whose spots are now out of every racer's view, now and along
+    /// its road ahead (row 131); drop those whose roadblock has gone. A spike car gets one
+    /// chance: spot hidden, it appears beside its strip (which becomes manned); in view, it is
+    /// dropped and the strip stays unmanned (PR #54 port).
     fn maintain_tool_cars(&mut self, world: &dyn WorldQuery) {
         let pending = std::mem::take(&mut self.tool_cars);
         for car in pending {
             let rb = self.roadblocks.iter().position(|r| r.id == car.tool);
             let sp = self.spikes.iter().position(|s| s.id == car.tool);
-            if rb.is_none() && sp.is_none() {
-                continue;
-            }
             // Row 140: by the time its spot is hidden the racer may have moved on, leaving the
             // spot on the far carriageway of its road now; such a car is not spawned at all.
             let racer = match (rb, sp) {
                 (Some(k), _) => self.roadblocks[k].racer,
-                (_, Some(k)) => self.spikes[k].racer,
-                _ => continue,
+                (None, Some(k)) => self.spikes[k].racer,
+                (None, None) => continue,
             };
             if self.far_side(&self.racer_corridor(racer), car.pos) {
                 continue;
             }
             if self.warmed_up && self.spawn_in_view(world, car.pos) {
-                self.tool_cars.push(car);
+                if rb.is_some() {
+                    self.tool_cars.push(car);
+                }
                 continue;
             }
             let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, car.pos, car.heading);
@@ -3807,6 +4046,7 @@ impl PoliceSystem {
             }
             if let Some(k) = sp {
                 self.spikes[k].unit = Some(uid);
+                self.spikes[k].post = Some(car.pos);
             }
         }
     }
@@ -3901,8 +4141,18 @@ impl PoliceSystem {
             }
             keep
         });
+        // PR #54: a strip whose unit has left its post (wrecked, shoved or driven away,
+        // reassigned, gone) is lifted, and so is an unmanned strip its racer has passed.
+        let unmanned: Vec<ToolId> = self
+            .spikes
+            .iter()
+            .filter(|s| !self.spike_unit_holds(s) || self.spike_passed(s))
+            .map(|s| s.id)
+            .collect();
         self.spikes.retain(|s| {
-            let keep = now < s.expires && (s.scripted || racer != Some(s.racer));
+            let keep = now < s.expires
+                && (s.scripted || racer != Some(s.racer))
+                && !unmanned.contains(&s.id);
             if !keep {
                 removed.push((s.id, s.unit.into_iter().collect()));
             }
@@ -4068,5 +4318,134 @@ fn offence_text(kind: &ViolationKind) -> &'static str {
         ViolationKind::WrongWay => "going the wrong way",
         ViolationKind::Collision => "hit a car",
         ViolationKind::Reckless => "driving like a maniac",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::{Occluder, RoadClass, RoadGraph};
+    use crate::scenario::ScenarioWorld;
+    use crate::{PoliceConfig, PoliceSetup};
+    use wp_contracts::{DamageMode, TimeOfDay};
+
+    /// Row 158: a spot hidden from the racer and from every point of its straightest road
+    /// ahead, but in plain view down a side street it can turn into within ROUTE_VIEW_S, is in
+    /// view for spawns (the straightest-road check let backup appear there, seen 1.5-2 s later).
+    #[test]
+    fn spawn_view_covers_every_road_the_racer_can_take() {
+        let mut g = RoadGraph::new();
+        let d = District::Core;
+        let a = g.add_node([0.0, -200.0], d);
+        let j1 = g.add_node([0.0, 0.0], d);
+        let b = g.add_node([0.0, 100.0], d);
+        let j2 = g.add_node([100.0, 0.0], d);
+        let s = g.add_node([100.0, -200.0], d);
+        for (x, y) in [(a, j1), (j1, b), (j1, j2), (j2, s)] {
+            g.add_segment(x, y, 20.0, RoadClass::Local, false);
+        }
+        // The block between the two north-south roads.
+        g.occluders.push(Occluder {
+            min: [8.0, -200.0],
+            max: [92.0, -8.0],
+        });
+        let setup = PoliceSetup {
+            seed: 1,
+            mode: DamageMode::Arcade,
+            internal_driving: true,
+            hazards: false,
+        };
+        let mut p = PoliceSystem::with_city(PoliceConfig::builtin(), g, setup);
+        let world = ScenarioWorld::clock(TimeOfDay::from_hours(12.0), 0.0);
+        let racer = crate::RacerView {
+            entity: EntityId(1),
+            pos: [0.0, -50.0, 0.0],
+            vel: [0.0, 50.0, 0.0],
+        };
+        let mut out = Vec::new();
+        p.step(&world, &[racer], &[], wp_contracts::PHYSICS_DT, &mut out);
+        // 150 m down the far road: hidden now, seen from the junction after a right turn.
+        let spot = [100.0, -150.0];
+        assert!(dist(spot, [0.0, -50.0]) > p.cfg.presence.response.never_closer_m);
+        assert!(
+            !p.in_racer_view(&world, spot),
+            "visible from where it is now"
+        );
+        assert!(
+            p.spawn_in_view(&world, spot),
+            "round the corner it will be in view"
+        );
+        // The straightest road alone (north) never sees it.
+        let north = p
+            .graph
+            .predict_path([0.0, -50.0], [0.0, 50.0], 150.0)
+            .points();
+        assert!(north.iter().all(|q| !p.graph.line_of_sight(*q, spot)));
+    }
+
+    /// Row 158: the session-start patrols appear out of the racer's sight too (one placed in
+    /// view beside a racer still wanted from before started a chase at once).
+    #[test]
+    fn session_start_patrols_spawn_out_of_view() {
+        let mut g = RoadGraph::new();
+        let d = District::Core;
+        // A 5 x 5 grid of 150 m blocks, buildings in every block.
+        let mut ids = Vec::new();
+        for y in 0..5 {
+            for x in 0..5 {
+                ids.push(g.add_node([x as f32 * 150.0, y as f32 * 150.0], d));
+            }
+        }
+        for y in 0..5 {
+            for x in 0..5 {
+                let k = y * 5 + x;
+                if x < 4 {
+                    g.add_segment(ids[k], ids[k + 1], 14.0, RoadClass::Local, false);
+                }
+                if y < 4 {
+                    g.add_segment(ids[k], ids[k + 5], 14.0, RoadClass::Local, false);
+                }
+            }
+        }
+        for y in 0..4 {
+            for x in 0..4 {
+                let (x0, y0) = (x as f32 * 150.0 + 10.0, y as f32 * 150.0 + 10.0);
+                g.occluders.push(Occluder {
+                    min: [x0, y0],
+                    max: [x0 + 130.0, y0 + 130.0],
+                });
+            }
+        }
+        let setup = PoliceSetup {
+            seed: 3,
+            mode: DamageMode::Arcade,
+            internal_driving: true,
+            hazards: false,
+        };
+        let mut p = PoliceSystem::with_city(PoliceConfig::builtin(), g, setup);
+        let world = ScenarioWorld::clock(TimeOfDay::from_hours(12.0), 0.0);
+        // Wanted from before, parked at the centre crossing.
+        p.set_heat(EntityId(1), 40.0);
+        let racer = crate::RacerView {
+            entity: EntityId(1),
+            pos: [300.0, 300.0, 0.0],
+            vel: [0.0; 3],
+        };
+        let mut out = Vec::new();
+        for _ in 0..(2.0 / wp_contracts::PHYSICS_DT) as usize {
+            p.step(&world, &[racer], &[], wp_contracts::PHYSICS_DT, &mut out);
+            if !p.units.is_empty() {
+                break;
+            }
+        }
+        assert!(!p.units.is_empty(), "no patrols at all");
+        for u in &p.units {
+            assert!(
+                !p.in_racer_view(&world, u.body.pos),
+                "unit {:?} placed in view at {:?}",
+                u.id,
+                u.body.pos
+            );
+        }
     }
 }

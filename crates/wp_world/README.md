@@ -25,6 +25,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `routes` | Lane-legal race routes, circuits, checkpoints, closures |
 | `props` | Parked cars (rules from `data/city/parking.json`, `ParkingTable`) and cones (static colliders) |
 | `clock` | `WorldClock`, `sun_direction` |
+| `progression` | Career time budget: `TimeProgression` (day free-roam / night racing shifts, activity costs, dusk/dawn transitions, carry-over), drives `WorldClock` via `apply` |
 | `geom` | Deterministic geometry (polylines, OBB, Bézier; re-exports `wp_math::{atan, atan2}`) |
 | `drive` | Shared AI driving: `DriveController` (pure pursuit + PID) and `PathFollower` (`follow_path` along any `DrivePath`) for traffic, police and racers |
 | `leader` | Leader / obstacle query (`find_leader`) + shared IDM (`CarFollowing`) so police and racers follow and stop behind vehicles like traffic does |
@@ -326,6 +327,28 @@ so what you see is what you drive on (`tools/city-import/tests/surface_match.rs`
 - `residential::driveway_cars` parks cars in 60 % of driveways; kerbside cars never stand in
   front of a driveway mouth (`blocks_driveway`). Trunks, hedges and fences are `wp_sim`
   colliders in cities with terrain. Details: `docs/integration/city-residential.md`.
+
+## Touge passes (`touge::generate`, `World::touge`, `gen-city --preset touge`)
+Four sealed mountain roads for one-on-one touge battles, specs in `data/touge/<id>.json`
+(embedded): Hollow Crown Pass (≈ 2.8 km, 280 m climb), Mistral Ridge (≈ 3.0 km, 200 m),
+Ashfall Grade (≈ 2.3 km, 260 m), Cedar Switchback (≈ 2.3 km, 210 m).
+- **Road:** a turtle path of straights and arcs (`legs`), sampled every 2 m; an elevation
+  profile that flattens the hairpins and both ends; banking from curvature. One 1+1 lane road
+  (`RoadClass::Collector` geometry, lanes tagged `LaneKind::Highway` so the surface code adds no
+  sidewalks, kerbs or guard rails), no traffic (one zone at density 0).
+- **Terrain:** coarse natural ground (16 m) resampled onto a 4 m heightfield, carved under the
+  road with a flat shelf, falling away as a cliff (`cliff_drop_m`) on the low side.
+- **Sealed:** `DecorKind::Fence` walls (0.5 × 1.2 m, solid colliders in `wp_sim`) along both
+  edges and across both ends, everywhere except the `krail` spans.
+- **K-rail spans:** on the outboard (cliff) edge the wall is replaced by loose K-rail props
+  (`PropKind::KRail`, 2 m × 0.6 m × 0.81 m, 600 kg): fixed until a car comes near, then
+  dynamic, so a car that hits them hard enough knocks them over the edge and follows them.
+  Whether a car went through is judged in `wp_race::touge::Boundary`.
+- **POIs:** `<name> base start`, `<name> summit finish`, `<name> summit start`,
+  `<name> base finish` (60 m / 40 m in from the ends) for uphill and downhill courses.
+- Tests (`touge::tests`): every pass parses and validates; long, steep and sealed; the road never
+  comes near itself; terrain stays under the road and falls away behind the K-rails; generation
+  is deterministic.
 
 ## Traffic AI
 

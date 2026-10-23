@@ -1,4 +1,4 @@
-// City-chase performance in headless Chromium: sim ms per frame and the real-time factor
+// Night-run performance in headless Chromium: sim ms per frame and the real-time factor
 // (sim seconds advanced per wall second). Usage: node e2e/chase_perf.mjs [car] [mode] [seconds]
 // (needs `npm run wasm`; starts its own Vite). Prints one JSON line. PANELS=0 turns R's panel
 // meshes (layer key 0, on by default) off for an A/B comparison; VIEWPORT=WxH (default 1280x720).
@@ -31,7 +31,7 @@ const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
 await page.goto(URL);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 60000 });
-await page.evaluate(([c, m]) => window.__wp.startCityChase(c || undefined, m), [car, mode]);
+await page.evaluate(([c, m]) => window.__wp.startNightRun(c || undefined, m), [car, mode]);
 const panelsOff = process.env.PANELS === "0";
 await page.evaluate(async (off) => {
   const { layers } = await import("/src/settings.ts");

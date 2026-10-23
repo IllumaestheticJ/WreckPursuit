@@ -1,4 +1,4 @@
-# simcli hashes scenario=panels_frontal_50_barrier_arcade systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
+# simcli hashes scenario=panels_frontal_50_barrier_arcade systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
 24 cc8928f3a6a36fb6
 48 ff30a00a4275ba17
 72 83e41421999981d2

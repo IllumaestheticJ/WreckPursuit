@@ -68,11 +68,15 @@ describe("pricing", () => {
   const [shiro, , ironside] = mockGarage();
   const [legit, crooked] = mockShops();
 
-  it("Arcade bills half of Simulation", () => {
-    const sim = quoteRepair({ ...shiro, insurance: null }, { kind: "RepairAll" }, legit, "Simulation", 1e9, false);
-    const arc = quoteRepair({ ...shiro, insurance: null }, { kind: "RepairAll" }, legit, "Arcade", 1e9, false);
-    expect(arc.total).toBeGreaterThan(0);
-    expect(Math.abs(arc.total * 2 - sim.total)).toBeLessThanOrEqual(sim.lines.length);
+  // Contract v0.4.0: Simulation is the old Arcade table (half the repair bill of Extreme, the old
+  // Simulation); the new Arcade only softens racers' damage and bills like Simulation.
+  it("Simulation bills half of Extreme; Arcade bills like Simulation", () => {
+    const quote = (mode: "Arcade" | "Simulation" | "Extreme") =>
+      quoteRepair({ ...shiro, insurance: null }, { kind: "RepairAll" }, legit, mode, 1e9, false);
+    const [arc, sim, ext] = [quote("Arcade"), quote("Simulation"), quote("Extreme")];
+    expect(sim.total).toBeGreaterThan(0);
+    expect(Math.abs(sim.total * 2 - ext.total)).toBeLessThanOrEqual(ext.lines.length);
+    expect(arc.total).toBe(sim.total);
   });
 
   it("denies insurance for damage outstanding at a capture", () => {

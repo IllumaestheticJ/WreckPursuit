@@ -15,7 +15,7 @@ import type { UiCommand } from "../model/commands";
 import { emptyUiState } from "../model/defaults";
 import { Store, type GameModel } from "../model/GameModel";
 import { escapeTimeS, heatWithinLevel, type PursuitStatus } from "../model/police";
-import type { BillRequest, HeatHud, UiState, Vec2 } from "../model/types";
+import type { BillRequest, HeatHud, MapBlip, UiState, Vec2 } from "../model/types";
 import { applyEvent, emptyPlayback, type Playback, type ReduceContext } from "../mock/reduce";
 import type { Run } from "../mock/runs";
 import { billFromWasm, DEFAULT_BILL_REQUEST, type LiveBillJson } from "./bill";
@@ -65,6 +65,11 @@ export interface LiveFrame {
   damageMode?: DamageMode;
   /** In-game clock, seconds since midnight. */
   timeOfDayS?: number;
+  /** Chase radar (ChaseHud): the player's pose and the blips around them (`chaseRadar` builds it
+   * from a `map_dynamic()` frame). Null clears it; omitted keeps the last one. The chase HUD shows
+   * the radar while it has blips, unless `hidden` (the host shows its own minimap); the "on you"
+   * note shows either way (PR #32). */
+  radar?: { pos: Vec2; headingRad: number; blips: MapBlip[]; hidden?: boolean } | null;
 }
 
 /** Host hooks. */
@@ -153,8 +158,10 @@ export function createLiveModel(opts: LiveOptions = {}): LiveModel {
           redlineRpm: v?.redlineRpm ?? s.hud.redlineRpm,
           gear: v?.gear ?? s.hud.gear,
           health: v?.health ?? s.hud.health,
-          pos: v?.pos ?? s.hud.pos,
-          headingRad: v?.headingRad ?? s.hud.headingRad,
+          pos: f.radar?.pos ?? v?.pos ?? s.hud.pos,
+          headingRad: f.radar?.headingRad ?? v?.headingRad ?? s.hud.headingRad,
+          blips: f.radar === undefined ? s.hud.blips : (f.radar?.blips ?? []),
+          radarHidden: f.radar === undefined ? s.hud.radarHidden : !!f.radar?.hidden,
           regions: playback.regions,
           detached: playback.detached,
           components: playback.components,

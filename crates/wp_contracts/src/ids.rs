@@ -39,7 +39,7 @@ pub enum Role {
     Spectator,
 }
 
-/// Damage mode. Both modes run the same code path with different [`crate::ModeTable`]s.
+/// Damage mode. Every mode runs the same code path with a different [`crate::ModeTable`].
 #[derive(
     Debug,
     Clone,
@@ -55,9 +55,12 @@ pub enum Role {
     JsonSchema,
 )]
 pub enum DamageMode {
-    /// Punishing but survivable; one hard hit degrades, several end the car.
+    /// Forgiving: the Simulation table with racer cars (player and AI racers) taking about 20 %
+    /// of the damage (`ModeTable::racer_damage_scale`); traffic and police take full damage.
     #[default]
     Arcade,
-    /// Real-world-ish; one hard hit at speed is a total loss.
+    /// Punishing but survivable; one hard hit degrades, several end the car.
     Simulation,
+    /// Real-world-ish; one hard hit at speed is a total loss (the pre-0.4 Simulation table).
+    Extreme,
 }
