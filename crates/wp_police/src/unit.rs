@@ -425,6 +425,9 @@ pub struct Unit {
     /// How long this unit has stood still while on an active job (row 86 audit), s.
     #[serde(skip)]
     pub active_stop_s: f32,
+    /// Since when the sim has reported this unit on its side or roof (row 75), if it is.
+    #[serde(default)]
+    pub flipped_since: Option<SimTime>,
     /// Branch and blocker when that stop began (row 86 audit).
     #[serde(skip)]
     pub active_stop_why: (u8, u8),
@@ -510,6 +513,7 @@ impl Unit {
             pro_dbg: (0.0, false),
             turning_round: false,
             active_stop_s: 0.0,
+            flipped_since: None,
             active_stop_why: (0, 0),
             chase_route: None,
             quiet: false,

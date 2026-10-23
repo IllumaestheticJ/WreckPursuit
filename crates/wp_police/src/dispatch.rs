@@ -67,6 +67,9 @@ fn sample_leg(a: [f32; 2], b: [f32; 2], out: &mut Corridor) {
     }
 }
 
+/// A car never appears closer than this to a parked car or cone (row 75), m.
+pub const SPAWN_PROP_CLEAR_M: f32 = 3.0;
+
 /// Row 86 audit: an active unit standing still longer than this is logged, s.
 pub const ACTIVE_STOP_S: f32 = 5.0;
 
@@ -877,9 +880,11 @@ impl PoliceSystem {
             // Its own spot is the clear one: nothing hems it in, so it is waiting for something
             // (traffic rules, a call) rather than stuck; only a unit the stuck detector flagged
             // (wedged on a wall, beached) is re-placed where it stands.
-            let pointless = spot.is_some_and(|(_, p, _)| {
-                dist(p, self.units[i].body.pos) < 1.0 && self.units[i].unstick.first.is_none()
-            });
+            // (A unit on its roof is righted where it lies: row 75.)
+            let pointless = self.units[i].flipped_since.is_none()
+                && spot.is_some_and(|(_, p, _)| {
+                    dist(p, self.units[i].body.pos) < 1.0 && self.units[i].unstick.first.is_none()
+                });
             if pointless {
                 self.units[i].unstick.reset_due = Some(now.plus(stuck::RESET_RETRY_S));
                 i += 1;
@@ -975,6 +980,20 @@ impl PoliceSystem {
     fn reset_wanted(&self, i: usize) -> Option<bool> {
         use crate::stuck;
         let u = &self.units[i];
+        // Row 75: on its side or roof (not a wreck): back on its wheels, whatever it was doing.
+        if u.kind == UnitKind::Car
+            && u.player.is_none()
+            && !u.wrecked
+            && u.flipped_since
+                .is_some_and(|t| self.now.since(t) >= stuck::FLIPPED_RESET_S)
+        {
+            return Some(matches!(
+                u.assignment,
+                Assignment::Pursue { .. }
+                    | Assignment::Intercept { .. }
+                    | Assignment::Respond { .. }
+            ));
+        }
         if u.kind != UnitKind::Car
             || u.player.is_some()
             || u.wrecked
@@ -1989,7 +2008,15 @@ impl PoliceSystem {
     /// Whether a ground unit may appear at `pos` (see [`crate::avoid::spawn_clear`]).
     pub(crate) fn spawn_clear(&mut self, pos: [f32; 2]) -> bool {
         self.rebuild_obstacles();
+        self.spot_clear(pos)
+    }
+
+    /// Whether a car may be placed at `pos` with the current obstacle list: clear of moving
+    /// and standing vehicles ([`crate::avoid::spawn_clear`]) and of parked cars and cones
+    /// (row 75: a unit spawned on a parked car was thrown upside down).
+    pub(crate) fn spot_clear(&self, pos: [f32; 2]) -> bool {
         crate::avoid::spawn_clear(pos, &self.obstacles, &self.cfg.pursuit.avoid)
+            && self.props.clear_of(pos, SPAWN_PROP_CLEAR_M)
     }
 
     pub(crate) fn despawn(&mut self, i: usize) {
@@ -2567,7 +2594,7 @@ impl PoliceSystem {
             .find(|(_, pos, dir, oneway)| {
                 !(*oneway && Self::on_far_carriageway(&corridor, *pos, *dir))
                     && !self.spawn_in_view(world, *pos)
-                    && crate::avoid::spawn_clear(*pos, &self.obstacles, &self.cfg.pursuit.avoid)
+                    && self.spot_clear(*pos)
             })
             .map(|(_, pos, dir, _)| (pos, dir))
     }
@@ -3130,9 +3157,7 @@ impl PoliceSystem {
                 let heading = normalize(sub(self.graph.node(route[1]).pos, start));
                 // In the right-hand lane, facing the first turn of the route.
                 let pos = add(start, scale([heading[1], -heading[0]], LANE_OFFSET_M));
-                if !crate::avoid::spawn_clear(pos, &self.obstacles, &self.cfg.pursuit.avoid)
-                    || self.spawn_in_view(world, pos)
-                {
+                if !self.spot_clear(pos) || self.spawn_in_view(world, pos) {
                     continue;
                 }
                 // The track runs on the centreline; the drive command adds the lane offset.
@@ -3230,7 +3255,7 @@ impl PoliceSystem {
                 || self.sees(world, n.pos, target)
                 || self.node_far_side(&corridor, NodeId(i as u32))
                 || self.spawn_in_view(world, n.pos)
-                || !crate::avoid::spawn_clear(n.pos, &self.obstacles, &self.cfg.pursuit.avoid)
+                || !self.spot_clear(n.pos)
             {
                 continue;
             }

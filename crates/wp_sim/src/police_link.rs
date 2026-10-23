@@ -439,6 +439,10 @@ impl Sim {
                     effects: slot.damage.handling_effects(),
                 },
             );
+            // How upright it is (police row 75: a unit on its side or roof is reset upright):
+            // world Z of the chassis up axis.
+            self.police
+                .sync_unit_upright(unit, 1.0 - 2.0 * (q[0] * q[0] + q[1] * q[1]));
             // What the driver feels: yaw rate (slides) and the grip the road leaves (weather).
             self.police.sync_unit_feel(
                 unit,

@@ -1053,6 +1053,78 @@ fn stuck_unit_backs_out_reroutes_and_respawns_out_of_sight() {
     assert!(gone < 12.0, "despawned at {gone} s");
 }
 
+/// Row 75: a physical unit the sim reports on its roof (chassis up axis pointing down) is
+/// reset upright in its lane within a few seconds once no racer sees it, damage kept.
+#[test]
+fn unit_on_its_roof_is_reset_upright() {
+    let mut h = Harness::new(12.0, 7);
+    h.run(1.0, &[]);
+    let racer = h.racer_view();
+    let rp = [racer.pos[0], racer.pos[1]];
+    let unit = h
+        .police
+        .units()
+        .iter()
+        .filter(|u| u.kind == UnitKind::Car && dist(u.body.pos, rp) > 400.0)
+        .max_by(|a, b| dist(a.body.pos, rp).total_cmp(&dist(b.body.pos, rp)))
+        .expect("a patrol far from the racer");
+    let (id, pos, heading) = (unit.id, unit.body.pos, unit.body.heading);
+    let entity = EntityId(951);
+    h.police
+        .bind_unit_entity(id, entity, SteerGeometry::default());
+    let mut taken = Vec::new();
+    for _ in 0..(6.0 / PHYSICS_DT) as u32 {
+        if !h.police.stats().resets.iter().any(|r| r.unit == id) {
+            // On its roof where it lies until it is reset.
+            h.police.sync_unit(
+                id,
+                UnitSync {
+                    pos: [pos[0], pos[1], 0.5],
+                    vel: [0.0; 3],
+                    heading,
+                    health: 0.7,
+                    effects: HandlingEffects::NEUTRAL,
+                },
+            );
+            h.police.sync_unit_upright(id, -1.0);
+        } else {
+            h.police.sync_unit_upright(id, 1.0);
+        }
+        let _ = h.police.unit_input(id, PHYSICS_DT);
+        let mut out = Vec::new();
+        h.police
+            .step(&h.world, &[h.racer_view()], &[], PHYSICS_DT, &mut out);
+        taken.extend(h.police.take_unit_resets());
+    }
+    let rec = *h
+        .police
+        .stats()
+        .resets
+        .iter()
+        .find(|r| r.unit == id)
+        .unwrap_or_else(|| {
+            panic!(
+                "never reset: {:?}",
+                h.police.units().iter().find(|u| u.id == id)
+            )
+        });
+    let at = rec.at.secs() - 1.0;
+    assert!(at <= 3.0, "reset {at} s after it rolled over");
+    assert!(!rec.in_view, "{rec:?}");
+    assert!(dist(rec.to, pos) <= 15.0, "{rec:?}");
+    assert!(
+        taken
+            .iter()
+            .any(|r| r.unit == id && r.entity == Some(entity)),
+        "wp_sim was told"
+    );
+    let u = h.police.units().iter().find(|u| u.id == id).unwrap();
+    assert!(
+        !u.wrecked && (u.health - 0.7).abs() < 1e-3,
+        "damage kept, not written off"
+    );
+}
+
 /// Reset in place (owner row 78): an un-wrecked unit that stands stuck while it wants to
 /// drive (here behind a car stopped across the road) is put on a clear spot in its lane within
 /// 15 m, keeps its damage, and `wp_sim` is told to place its car there as a ghost for a

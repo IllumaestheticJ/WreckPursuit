@@ -1337,6 +1337,23 @@ impl PoliceSystem {
         }
     }
 
+    /// Report how upright an externally driven unit is (row 75): `up_z` is the world Z of the
+    /// chassis up axis (1 upright, 0 on its side, -1 on its roof), after
+    /// [`PoliceSystem::sync_unit`]. A unit on its side or roof for
+    /// [`stuck::FLIPPED_RESET_S`] is reset upright in its lane (once no racer sees it).
+    /// Optional: without it a unit counts as upright.
+    pub fn sync_unit_upright(&mut self, unit: UnitId, up_z: f32) {
+        let now = self.now;
+        if let Some(i) = self.unit_index(unit) {
+            let u = &mut self.units[i];
+            if up_z < stuck::FLIPPED_UP_Z {
+                u.flipped_since.get_or_insert(now);
+            } else {
+                u.flipped_since = None;
+            }
+        }
+    }
+
     /// Add a player-driven chase unit. It receives [`UnitOrder`] suggestions, never control.
     pub fn add_player_unit(
         &mut self,
