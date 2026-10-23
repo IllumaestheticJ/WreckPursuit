@@ -12,7 +12,7 @@
 use std::time::Instant;
 
 use wp_contracts::{DamageMode, EntityId, VehicleInput};
-use wp_wasm::scenario::{night_run_in, city_spec};
+use wp_wasm::scenario::{city_spec, night_run_in};
 use wp_wasm::session::Session;
 
 fn main() {
