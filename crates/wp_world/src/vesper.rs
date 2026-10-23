@@ -1738,18 +1738,17 @@ fn profile(
     // Floors (decks over water) are not pinned: pinning one side of each corner where the
     // approach meets the deck height left it rounded on the other side only, and the final
     // clamp put the kink back (a 4.6 % grade break in 10 m on Loop 9's canal bridge launched
-    // cars at 59 m/s). Instead each floor is held a smoothing width further out on both
-    // sides and lifted by whatever the smoothing still took off it, until the smoothed
-    // profile clears it: the curvature limit holds over the deck too.
-    let sigma = smoothing_sigma(grade, kmax, ds);
-    let widen = (1.5 * sigma / ds).ceil() as usize;
+    // cars at 59 m/s). Instead nothing is pinned and each floor is lifted by whatever the
+    // smoothing still took off it, until the smoothed profile clears it: the curvature limit
+    // holds over the deck too. (Holding floors further out instead lengthens the
+    // embankments and lifts the lots beside them off the drawn terrain.)
     let mut lift = vec![0.0f32; floors.len()];
     let mut z = Vec::new();
     for _ in 0..8 {
         let held: Vec<(usize, usize, f32)> = floors
             .iter()
             .zip(&lift)
-            .map(|(&(i0, i1, f), &l)| (i0.saturating_sub(widen), (i1 + widen).min(n - 1), f + l))
+            .map(|(&(i0, i1, f), &l)| (i0, i1, f + l))
             .collect();
         z = profile_pass(desired, ds, anchors, internal, &held, pins, grade, kmax);
         let mut clear = true;
