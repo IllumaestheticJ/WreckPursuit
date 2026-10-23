@@ -464,6 +464,8 @@ pub struct StreetStep {
     /// Light-model permission changes (`Sim::set_light_when_far`, logged as
     /// `OpKind::LightWhenFar`): off for a racer racing the player, on again after.
     pub light: Vec<(EntityId, bool)>,
+    /// This tick's honk opened a challenge (the session's race spots then ignore it).
+    pub challenged: bool,
 }
 
 /// One NPC street racer.
@@ -648,7 +650,6 @@ pub struct StreetRacers {
     race: Option<Race>,
     result: Option<RaceResult>,
     seq: u32,
-    horn_was: bool,
     /// Tick the open offer was made.
     offer_tick: u64,
     /// Last tick's sim events (contacts and police events for the fields).
@@ -861,7 +862,6 @@ impl StreetRacers {
             race: None,
             result: None,
             seq: 0,
-            horn_was: false,
             offer_tick: 0,
             events: Vec::new(),
             cars: BTreeMap::new(),
@@ -1323,30 +1323,36 @@ impl StreetRacers {
         }
     }
 
+    /// A challenge is open or a street race is running (no other challenge then: the
+    /// session's race spots ignore the horn too).
+    pub fn busy(&self) -> bool {
+        self.offer.is_some() || self.race.is_some()
+    }
+
     /// Before the sim step: horn challenges, offers lapsing, roam routes, and every racer's
-    /// input and move for this tick. Reads the sim only; the session logs and applies the
-    /// result.
+    /// input and move for this tick. `honk` is the horn's rising edge this tick (the session
+    /// owns the one horn edge every challenge reads). Reads the sim only; the session logs
+    /// and applies the result.
     pub fn before_step(
         &mut self,
         sim: &Sim,
         player: EntityId,
-        horn: bool,
+        honk: bool,
         run_over: bool,
     ) -> StreetStep {
         #[cfg(test)]
         let t0 = std::time::Instant::now();
         let tick = sim.tick();
         let mut out = StreetStep::default();
-        let edge = horn && !self.horn_was;
-        self.horn_was = horn;
         let chased = pursued(sim, player);
-        if edge && !run_over && !chased && self.offer.is_none() && self.race.is_none() {
+        if honk && !run_over && !chased && self.offer.is_none() && self.race.is_none() {
             if let Some(k) = self.nearest_roaming(sim, player) {
                 let r = &mut self.racers[k];
                 r.mode = RacerMode::Waiting;
                 r.field = None;
                 self.offer = Some(k);
                 self.offer_tick = tick;
+                out.challenged = true;
             }
         }
         if let Some(k) = self.offer {

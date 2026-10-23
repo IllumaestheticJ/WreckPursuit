@@ -91,6 +91,9 @@ export interface VehicleInfo {
   /** wp_police unit id of a sim police vehicle (null / absent for every other vehicle and
    * older wasm builds): the same id as `police_units()` `unit_id`, stable across promotion. */
   police_unit?: number | null;
+  /** The police vehicle belongs to the Ashpeak County Sheriff's Office (ACSO livery); absent on
+   * older wasm builds. */
+  police_county?: boolean;
   /** wp_world agent id of promoted traffic (null / absent otherwise and on older builds): the
    * same id as `traffic_agents()` `agent_id`, so the car keeps its instanced twin's paint. */
   traffic_agent?: number | null;
@@ -517,6 +520,10 @@ export const sim = {
   /** Start a picker race (new session; the account carries over). Returns entity ids, player first. */
   raceStart: (id: string, car: string, mode: string, autopilot: boolean, tune?: CarTune): number[] =>
     Array.from(wasm.race_start_tuned(id, car, mode, autopilot, tune ? JSON.stringify(tune) : "")),
+  /** Honk-to-start meet spots on the session's map (`race_spots.ts`); `[]` during a race / replay / career. */
+  raceSpots: (): RaceSpot[] => JSON.parse(wasm.race_spots()),
+  /** The race the player just honked for in its spot (taken), or "". */
+  raceSpotHonked: (): string => wasm.race_spot_honked(),
   /** `[phase, countdown_s, elapsed_s, laps, gates, player, racers, closed, length_m, autopilot, kind, player_done]`; empty without a race. */
   raceInfo: (): Float32Array => wasm.race_info(),
   /** Standings, position order, RACE_STRIDE floats each (see layout.ts RS). */
@@ -737,6 +744,7 @@ export interface StreetPreview {
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";
 import type { RaceCard, RaceReport } from "../ui/race";
+import type { RaceSpot } from "../race_spots";
 import type { TougeCard, TougeChoice, TougeReport, Wager, WagerMenu } from "../ui/touge";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";

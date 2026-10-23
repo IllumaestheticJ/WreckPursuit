@@ -146,6 +146,19 @@ chassis body and static wheel loads from those fields, so spawning the Delivery 
 this car makes the cargo felt (400 kg in a sedan: 22 % less distance in 6 s from rest, 30 %
 longer stop from 25 m/s; `tests/cargo_physics.rs`).
 
+### Honk-to-start spots (`spots`)
+
+`race_spots(world)` puts a meet spot (radius `SPOT_RADIUS_M` = 12 m, ±4 m height window) at the
+pole position of every catalog race that runs on the world's city (`catalog::races_on`; Port
+Vesper's races run on `vesper_v2` and on the combined `ashpeak` map, `RaceCity::hosts`). A race
+whose course does not plan gets no spot. `honk_spot(spots, pos, speed)` is the spot a honk starts:
+the one the car stands in, slower than `HONK_MAX_SPEED_MPS` (3 m/s). The horn edge belongs to the
+browser session's one challenge system (round 12 street racers: a racer within honking range
+takes a honk first; `wp_wasm::session`, `wp_wasm::race_spots`); the race's money is the picker's
+existing stake (advertised buy-in / purse).
+Ashpeak County's races (`RaceCity::Ashpeak`) run on the combined `ashpeak` map only
+(`tests/race_spots.rs`).
+
 ### Touge battles (`touge`, `data/events/touge.toml`)
 
 One-on-one sprints on the four `wp_world::touge` passes. `TougeSetup` = pass × uphill/downhill ×

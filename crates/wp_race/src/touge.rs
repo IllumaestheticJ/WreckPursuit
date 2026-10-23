@@ -444,6 +444,8 @@ impl TougeSetup {
             ai: std::slice::from_ref(&self.racer().driver),
             seed: self.seed(),
             prior_meets: 0,
+            // Touge lays out its own single-file grid ([`plan_course`]); no picker override.
+            grid: None,
         }
     }
 }

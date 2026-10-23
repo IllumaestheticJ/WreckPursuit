@@ -154,10 +154,18 @@ pub(crate) fn clear_of_decor(map: &CityMap, p: V2, f: V2) -> bool {
     !map.net.decor.iter().any(|d| {
         let (hl, hw) = match d.kind {
             DecorKind::Driveway => return false,
-            DecorKind::StreetTree | DecorKind::YardTree => {
+            DecorKind::StreetTree | DecorKind::YardTree | DecorKind::PineTree => {
                 (crate::residential::TRUNK_R_M, crate::residential::TRUNK_R_M)
             }
-            DecorKind::Hedge | DecorKind::Fence => (d.size[1] * 0.5, d.size[0] * 0.5),
+            // Solid boxes, as `wp_sim::physics::decor_collider` builds them (Ashpeak County
+            // adds cranes, barriers, site fences, hay bales and billboards).
+            DecorKind::Hedge
+            | DecorKind::Fence
+            | DecorKind::Crane
+            | DecorKind::JerseyBarrier
+            | DecorKind::SiteFence
+            | DecorKind::HayBale
+            | DecorKind::Billboard => (d.size[1] * 0.5, d.size[0] * 0.5),
         };
         let c = [d.pos[0], d.pos[1]];
         geom::dist(c, p) < hl + 3.0

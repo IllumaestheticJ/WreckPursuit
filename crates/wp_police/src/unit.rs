@@ -453,6 +453,10 @@ pub struct Unit {
     /// Pro driver of a physical unit, created on first use.
     #[serde(skip)]
     pub pro: Option<crate::pro::ProDriver>,
+    /// Where the unit first appeared (XY, m). Presentation uses it to pick the unit's home
+    /// station (agency livery); the AI never reads it.
+    #[serde(default)]
+    pub spawn_pos: [f32; 2],
 }
 
 /// A pursuer's road route to the racer (see `PoliceSystem::chase_route`).
@@ -521,6 +525,7 @@ impl Unit {
             feel: crate::pro::UnitFeel::default(),
             limits: None,
             pro: None,
+            spawn_pos: pos,
         }
     }
 
