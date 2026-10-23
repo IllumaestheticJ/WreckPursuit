@@ -241,6 +241,10 @@ export interface SlotView {
   kind: string;
   /** Assembly slot it lives inside (engine internals: "engine"), or null. */
   parent: string | null;
+  /** Slot of the part it bolts onto (it comes off and goes on with that part), or null. */
+  mount?: string | null;
+  /** Fitted slots whose parts come off with this one (parts bolted onto it). */
+  takes_along?: string[];
   fitted: PartView | null;
   required: boolean;
   /** Fitted slots in the way (empty = the slot can be worked on). */
@@ -262,7 +266,8 @@ export interface LoosePart {
   condition: number;
   damage: unknown[];
   value: number;
-  /** Parts still inside a loose assembly (an engine's internals); `kind` is their slot. */
+  /** Parts inside a loose assembly (an engine's internals) or bolted onto a loose part (a
+   * bumper's splitter); `kind` is their slot. */
   contents?: LoosePart[];
 }
 

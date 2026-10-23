@@ -32,7 +32,7 @@ import type {
 import "./garage.css";
 
 /** Camera presets the host knows. */
-export type WorkshopCam = "overview" | "engine" | "under" | "wheels" | "stand";
+export type WorkshopCam = "overview" | "engine" | "rear" | "under" | "wheels" | "stand";
 
 /** What the host (3D side) does for the overlay. */
 export interface WorkshopHost {
@@ -167,7 +167,11 @@ function PartCard(props: {
   return (
     <Panel
       title={slot.name}
-      tag={<span class="wp-dim">{slot.parent ? `inside ${props.slotName(slot.parent).toLowerCase()}` : slot.group}</span>}
+      tag={
+        <span class="wp-dim">
+          {slot.parent ? `inside ${props.slotName(slot.parent).toLowerCase()}` : slot.mount ? `on the ${props.slotName(slot.mount).toLowerCase()}` : slot.group}
+        </span>
+      }
       class="wp-ws-card"
     >
       <div data-testid="ws-card" data-slot={slot.id} style={{ display: "grid", gap: "0.5em" }}>
@@ -202,14 +206,21 @@ function PartCard(props: {
           </Button>
         )}
         {f ? (
-          <Button
-            variant="primary"
-            disabled={!!slot.remove_blocker}
-            title={slot.remove_blocker ?? "take it off into the inventory"}
-            onClick={() => run(() => api.remove(slot.id))}
-          >
-            Remove
-          </Button>
+          <>
+            <Button
+              variant="primary"
+              disabled={!!slot.remove_blocker}
+              title={slot.remove_blocker ?? "take it off into the inventory"}
+              onClick={() => run(() => api.remove(slot.id))}
+            >
+              Remove
+            </Button>
+            {!slot.remove_blocker && (slot.takes_along?.length ?? 0) > 0 && (
+              <span class="wp-dim" data-testid="ws-takes-along">
+                comes off with it: {slot.takes_along!.map(props.slotName).join(", ")}
+              </span>
+            )}
+          </>
         ) : fits.length > 0 ? (
           fits.map((p) => (
             <Button key={p.part.uid} disabled={way.length > 0} onClick={() => run(() => api.fit(slot.id, p.part.uid))} title="fit this part">
@@ -594,6 +605,10 @@ function InventoryStrip(props: {
     >
       <span class="wp-ws-tile-name">{p.name}</span>
       <span class="wp-dim wp-mono">{p.part.kind.replace(/_/g, " ")}</span>
+      {/* Parts bolted onto it travel with it (an engine's internals show on the stand). */}
+      {!props.screen.stands.some((s) => s.uid === p.part.uid) && (p.part.contents?.length ?? 0) > 0 && (
+        <span class="wp-dim wp-mono">+ {p.part.contents!.map((c) => c.kind.replace(/_/g, " ")).join(", ")}</span>
+      )}
       {conditionBar(p.part.condition)}
     </button>
   );
@@ -733,6 +748,7 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
         <div class="wp-dim wp-mono wp-upper">View</div>
         {cam("overview", "Overview")}
         {cam("engine", "Engine bay")}
+        {cam("rear", "Rear")}
         {cam("under", "Underside")}
         {cam("wheels", "Wheels")}
         <div class="wp-dim wp-mono wp-upper">Lift</div>

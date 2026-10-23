@@ -29,6 +29,10 @@
 //!   car, in removal order, or on the **engine stand** ([`Economy::strip_part`],
 //!   [`Economy::build_part`]) while the assembly is loose. Stock children belong to an engine
 //!   family (the stock engine's car model, or the swap engine's mod id) and fit only it.
+//! - **Mounted parts.** A slot with a `mount` holds a part bolted onto the part in that slot
+//!   (a splitter on the front bumper, a wing on the trunk lid). It can be worked on while its
+//!   host is on, needs the host on to be fitted, and comes off with the host (in the loose
+//!   host's [`LoosePart::contents`]) and goes back on with it: nothing is left floating.
 //! - **Wear.** Assembly members (the block and its children) carry wear 0..=1 instead of reading
 //!   their condition from a repair line. When a damage report raises the assembly's repair-line
 //!   severity by `d`, each member's wear rises by `d × damage_share`. A shop repair of that line
@@ -129,6 +133,10 @@ pub struct SlotDef {
     /// Assembly slot this part lives inside (engine internals: `engine`).
     #[serde(default)]
     pub parent: Option<String>,
+    /// Slot of the part this one bolts onto (`front_splitter` on `front_bumper`): it comes off
+    /// and goes back on with that part (see the module docs).
+    #[serde(default)]
+    pub mount: Option<String>,
     /// Share of the assembly's damage this part takes as wear (see the module docs).
     #[serde(default)]
     pub damage_share: f32,
@@ -242,6 +250,19 @@ impl PartsTable {
         self.children(id).next().is_some()
     }
 
+    /// Slots bolted onto the part in `host`, in table order.
+    pub fn mounted<'a>(&'a self, host: &'a str) -> impl Iterator<Item = &'a SlotDef> + 'a {
+        self.slots
+            .iter()
+            .filter(move |s| s.mount.as_deref() == Some(host))
+    }
+
+    /// Slots whose parts leave the car with the part in `id`: an assembly's internals and the
+    /// parts mounted on it.
+    pub fn carried<'a>(&'a self, id: &'a str) -> impl Iterator<Item = &'a SlotDef> + 'a {
+        self.children(id).chain(self.mounted(id))
+    }
+
     /// The assembly `slot` belongs to: its parent, itself if it is an assembly, else `None`.
     pub fn assembly_of<'a>(&'a self, slot: &'a SlotDef) -> Option<&'a SlotDef> {
         match &slot.parent {
@@ -318,6 +339,28 @@ impl PartsTable {
                 return Err(invalid(
                     w,
                     "the assembly cannot be blocked by its own parts (they come out with it)",
+                ));
+            }
+        }
+        for s in &self.slots {
+            let Some(m) = &s.mount else { continue };
+            let w = format!("economy/parts.toml slot {}", s.id);
+            let Some(host) = self.slot(m) else {
+                return Err(invalid(w, format!("mount {m:?} is not a slot")));
+            };
+            if host.parent.is_some() || host.mount.is_some() || host.set.is_some() {
+                return Err(invalid(w, "the mount must be a plain top-level slot"));
+            }
+            if s.parent.is_some() || s.set.is_some() || s.repair.is_some() {
+                return Err(invalid(
+                    w,
+                    "a mounted part has no parent, set or repair item",
+                ));
+            }
+            if host.blocked_by.contains(&s.id) || s.blocked_by.contains(&host.id) {
+                return Err(invalid(
+                    w,
+                    "a mounted part and its host do not block each other (they move together)",
                 ));
             }
         }
@@ -478,6 +521,13 @@ pub struct SlotView {
     pub kind: String,
     /// Assembly slot it lives inside (engine internals), if any.
     pub parent: Option<String>,
+    /// Slot of the part it bolts onto (comes off and goes on with it), if any.
+    #[serde(default)]
+    pub mount: Option<String>,
+    /// Fitted slots whose parts come off with this one (mounted parts; an assembly's internals
+    /// are listed on the stand instead).
+    #[serde(default)]
+    pub takes_along: Vec<String>,
     /// Fitted part (`None` = empty).
     pub fitted: Option<PartView>,
     /// The car cannot leave while the slot is empty.
@@ -914,15 +964,25 @@ impl Economy {
         if parts.fitted(&slot.id).is_some() {
             return Some("the slot is not empty".into());
         }
-        if let Some(parent) = &slot.parent {
-            if parts.fitted(parent).is_none() {
-                let name = self.parts.slot(parent).map_or(parent.as_str(), |s| &s.name);
+        if let Some(holder) = slot.parent.as_ref().or(slot.mount.as_ref()) {
+            if parts.fitted(holder).is_none() {
+                let name = self.parts.slot(holder).map_or(holder.as_str(), |s| &s.name);
                 return Some(format!("no {} fitted", name.to_lowercase()));
             }
         }
         let blockers = self.blockers(parts, slot);
         if !blockers.is_empty() {
             return Some(self.blocker_reason(&blockers));
+        }
+        // What comes with the part goes back where it was: those slots must be free.
+        let taken: Vec<String> = p
+            .contents
+            .iter()
+            .filter(|q| parts.fitted(&q.kind).is_some())
+            .map(|q| q.kind.clone())
+            .collect();
+        if !taken.is_empty() {
+            return Some(self.blocker_reason(&taken));
         }
         if let Some(why) = self.underneath_reason(slot, |id| parts.fitted(id).is_some()) {
             return Some(why);
@@ -1017,6 +1077,13 @@ impl Economy {
                     group: s.group,
                     kind: s.kind().to_string(),
                     parent: s.parent.clone(),
+                    mount: s.mount.clone(),
+                    takes_along: self
+                        .parts
+                        .mounted(&s.id)
+                        .filter(|k| parts.fitted(&k.id).is_some())
+                        .map(|k| k.id.clone())
+                        .collect(),
                     fitted,
                     required: s.required,
                     blocked_by,
@@ -1139,6 +1206,8 @@ impl Economy {
                     group: s.group,
                     kind: s.kind().to_string(),
                     parent: s.parent.clone(),
+                    mount: None,
+                    takes_along: Vec::new(),
                     fitted,
                     required: s.required,
                     in_the_way: blocked_by.clone(),
@@ -1230,7 +1299,7 @@ impl Economy {
         }
         let mut next = parts.clone();
         next.slots.insert(slot.id.clone(), None);
-        for k in self.parts.children(&slot.id) {
+        for k in self.parts.carried(&slot.id) {
             next.slots.insert(k.id.clone(), None);
         }
         let next_mods = self.derive_mods(&car.mods, &next);
@@ -1256,30 +1325,36 @@ impl Economy {
             Some(parent) => self.family(c, &parts, parent),
             None => c.def_id.clone(),
         };
-        // An assembly takes its fitted parts with it.
+        // An assembly takes its fitted internals with it (stock ones of its engine family, worn
+        // as they were); a host takes the parts mounted on it (stock ones of the car's model).
         let family = fitted.grade.clone().unwrap_or_else(|| c.def_id.clone());
-        let inner: Vec<(String, FittedPart, Money)> = self
+        let inner: Vec<(String, FittedPart, Money, String, f32)> = self
             .parts
-            .children(slot)
+            .carried(slot)
             .filter_map(|k| {
                 let f = parts.fitted(&k.id)?.clone();
                 let v = self.new_part_value(c, k, f.grade.as_deref());
-                Some((k.id.clone(), f, v))
+                let (model, condition) = if k.parent.is_some() {
+                    (family.clone(), 1.0 - f.wear)
+                } else {
+                    (c.def_id.clone(), self.slot_condition(c, k))
+                };
+                Some((k.id.clone(), f, v, model, condition))
             })
             .collect();
         transact(acct, |tx| {
             let uid = tx.acct.next_part_uid.max(1);
             tx.acct.next_part_uid = uid + 1;
             let mut contents = Vec::new();
-            for (kind, f, value) in &inner {
+            for (kind, f, value, model, condition) in &inner {
                 let cuid = tx.acct.next_part_uid;
                 tx.acct.next_part_uid += 1;
                 contents.push(LoosePart {
                     uid: cuid,
                     kind: kind.clone(),
-                    model: f.grade.is_none().then(|| family.clone()),
+                    model: f.grade.is_none().then(|| model.clone()),
                     grade: f.grade.clone(),
-                    condition: 1.0 - f.wear,
+                    condition: *condition,
                     damage: Vec::new(),
                     value: *value,
                     contents: Vec::new(),
@@ -1351,7 +1426,9 @@ impl Economy {
         next.slots.insert(slot.to_string(), Some(fitted));
         for q in &p.contents {
             let mut f = FittedPart::grade(q.grade.clone());
-            f.wear = wear(q);
+            if member {
+                f.wear = wear(q);
+            }
             next.slots.insert(q.kind.clone(), Some(f));
         }
         let next_mods = self.derive_mods(&c.mods, &next);

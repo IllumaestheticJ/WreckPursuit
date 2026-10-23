@@ -31,22 +31,6 @@ const canards: Builder = (c) => {
   c.body(g, "FrontBumper", "front_splitter");
 };
 
-/** Front lip in black (aggressive: deeper, with a mesh centre and corner splitters). */
-const lip: Builder = (c, p) => {
-  const f = c.frame.bumperFront;
-  const w = f.max.x - f.min.x;
-  const g = new THREE.Group();
-  const aggro = p.style === "aggressive";
-  const lipH = aggro ? 0.07 : 0.045;
-  g.add(box(w * 0.94, 0.1, lipH, c.kit.black, 0, f.max.y - 0.03, f.min.z - lipH / 2 + 0.03));
-  if (aggro) {
-    const mesh = new THREE.MeshStandardMaterial({ map: meshTexture("#222428", 10, 6), transparent: true, alphaTest: 0.4, side: THREE.DoubleSide });
-    g.add(box(w * 0.5, 0.01, 0.13, mesh, 0, f.max.y + 0.012, f.min.z + 0.14));
-    for (const sx of [-1, 1]) g.add(box(0.2, 0.1, 0.02, c.kit.black, sx * w * 0.38, f.max.y + 0.01, f.min.z + 0.02));
-  }
-  c.body(g, "FrontBumper", "front_bumper");
-};
-
 /** Wheel-arch flares in body colour over one axle (widebody kits). */
 const flares: Builder = (c, p) => {
   for (const { info } of c.frame.axle(p.axle ?? "front")) {
@@ -81,16 +65,6 @@ const skirts: Builder = (c, p) => {
     flares(c, { piece: "flares", axle: "front" });
     flares(c, { piece: "flares", axle: "rear" });
   }
-};
-
-/** Rear valance: a black under-bumper panel with three fins. */
-const rearValance: Builder = (c) => {
-  const r = c.frame.bumperRear;
-  const w = r.max.x - r.min.x;
-  const g = new THREE.Group();
-  g.add(box(w * 0.9, 0.12, 0.05, c.kit.black, 0, r.min.y + 0.04, r.min.z + 0.01));
-  for (const x of [-0.25, 0, 0.25]) g.add(box(0.015, 0.14, 0.09, c.kit.black, x * w, r.min.y + 0.03, r.min.z + 0.05));
-  c.body(g, "RearBumper", "rear_bumper");
 };
 
 /** Diffuser: a carbon tray under the rear bumper with five tall fins. */
@@ -566,10 +540,8 @@ const plates: Builder = (c) => {
 export const BODY_BUILDERS: Record<string, Builder> = {
   splitter,
   canards,
-  lip,
   flares,
   skirts,
-  rear_valance: rearValance,
   diffuser,
   wing,
   hood_vents: hoodVents,

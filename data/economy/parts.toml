@@ -16,6 +16,9 @@
 #               damage price table prices the others)
 #   optional    no stock part: the slot is empty on a stock car and only takes aftermarket
 #               parts (a turbo, a wing)
+#   mount       the slot of the part this one bolts onto (a splitter on the front bumper). It can
+#               be worked on while that part is on, is fitted only onto it, and comes off and goes
+#               back on with it, so nothing is left floating. No set, parent or repair item.
 #   parent      the assembly slot this part lives inside (engine internals: parent = "engine").
 #               It leaves with the assembly and can be worked on in the car or on the stand.
 #               Stock internals belong to an engine family (the stock engine's car model, or the
@@ -74,7 +77,7 @@ id = "hood_vent"
 name = "Hood vent"
 group = "Body"
 lines = ["hood_style"]
-blocked_by = ["hood"]
+mount = "hood"
 optional = true
 
 [[slot]]
@@ -170,7 +173,7 @@ id = "front_splitter"
 name = "Front splitter"
 group = "Aero"
 lines = ["front_aero"]
-blocked_by = ["front_bumper"]
+mount = "front_bumper"
 optional = true
 
 [[slot]]
@@ -178,6 +181,7 @@ id = "rear_wing"
 name = "Rear wing"
 group = "Aero"
 lines = ["rear_aero"]
+mount = "trunk_lid"
 optional = true
 
 [[slot]]
@@ -185,7 +189,7 @@ id = "diffuser"
 name = "Rear diffuser"
 group = "Aero"
 lines = ["diffuser"]
-blocked_by = ["rear_bumper"]
+mount = "rear_bumper"
 optional = true
 
 [[slot]]

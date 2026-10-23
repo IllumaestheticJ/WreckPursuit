@@ -169,6 +169,31 @@ mechanic with the old part sold or kept, and sortable part lists.
   vanish when the region detaches; pieces are clickable in the workshop (`slotAt`).
 - `e2e/cosmetics.mjs`: every visible mod on four models, four themed builds, lamps, vinyl gallery.
 
+### Mounted parts, hardware and replacement panels (stage 6)
+- `parts.toml` slots take `mount = "<slot>"`: a top-level part bolted to another one (front
+  splitter → front bumper, hood vent → hood, rear wing → trunk lid, diffuser → rear bumper).
+  Removing the host takes the mounted parts along in the loose part's `contents` (sold and
+  refitted with it); a mounted part cannot go on while its host is off ("no front bumper
+  fitted"). `PartsTable::mounted`, `carried`; `SlotView.mount` and `takes_along` (the part card
+  says "on the front bumper" and "comes off with it: ...").
+- `src/workshop/mounts.ts`: every lamp / trim / mirror mesh part gets a host panel from the mesh
+  geometry (nearest touching bolt-on panel, unless the welded shell is as close), so the tail
+  lamps set into a rear bumper leave with it. `slotmap.slotsNeeded` = own slot, region panel,
+  host; a part is drawn only while all are fitted.
+- `src/workshop/hardware.ts`: slots no mesh part or look piece draws (battery, ECU, intake, fuel
+  pump, gearbox, shafts, diff, transfer case, tank, steering rack, shifter, bumper beams,
+  radiator on mid-engined cars, cab back glass on pickups) are built in the workshop from the
+  car's layout (engine place, driven axles), tier-coloured when aftermarket, clickable and
+  highlighted like mesh parts. The belly pan is hidden on the lift so the underside shows.
+  `workshop.undrawnSlots()` (automation) lists fitted slots drawn by nothing; `e2e/workshop.mjs`
+  checks it is empty. A "Rear" camera preset joins the views.
+- `render/cosmetics/shell.ts`: aftermarket bumpers (front aggressive / widebody, rear sport /
+  widebody), the front lip and carbon hood / trunk are new panels made from the car's own stock
+  panel mesh (reshaped; intakes with honeycomb; lip blade; canards; clear-coat twill weave) and
+  hide the stock cover. The old livery-painted carbon and black-box lip / valance are gone.
+- `e2e/workshop_mounts_shots.mjs`: review shots per car (`CARS`, `INSTALL`, `REMOVE`, `CAMS`,
+  `VIEWS`), printing the hardware and any undrawn slots.
+
 ## Needs
 - Nothing open. Stage 3 reads anchors straight from `data/panels/meshes/*.json`.
 
@@ -210,5 +235,6 @@ Workshop operations run on a button press, not per frame.
 - Internals wear only from crash damage, not from over-revving or mileage yet.
 - Gearbox internals are not modelled (the gearbox is one part).
 - AI and remote cars show no look yet; only the player's career car does.
-- The workshop part picker only knows parts the car meshes draw; slots with no mesh (gearbox,
-  ECU, fuel pump and similar) are reached through the Part list.
+- Workshop hardware (battery, diff, tank...) is drawn in the workshop only, not while driving.
+- Replacement bumpers hide the stock grille and indicators; the new cover draws its own intakes
+  and LED strips.
