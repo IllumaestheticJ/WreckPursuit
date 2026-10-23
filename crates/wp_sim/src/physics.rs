@@ -546,6 +546,11 @@ const BARRIER_FOOT_M: f32 = 0.3;
 /// Friction of barriers and rails: smooth concrete and steel a car slides along (row 164).
 const BARRIER_FRICTION: f32 = 0.3;
 
+/// Length of the 2D vector `(x, y)` (plain `sqrt`, which is exactly rounded, not `hypot`).
+fn len2(x: f32, y: f32) -> f32 {
+    (x * x + y * y).sqrt()
+}
+
 /// Chain `segs` (`a → b` pieces, in order) into polylines: a piece starting exactly where an
 /// open run ends extends it. Deterministic (runs keyed by their end point's bits).
 fn chain_segments(segs: &[([f32; 3], [f32; 3])]) -> Vec<Vec<[f32; 3]>> {
@@ -586,7 +591,7 @@ fn barrier_colliders(line: &[[f32; 3]], right: f32, half_w: f32, height: f32) ->
     for &p in line {
         if pts
             .last()
-            .is_none_or(|q: &[f32; 3]| (p[0] - q[0]).hypot(p[1] - q[1]) >= 0.05)
+            .is_none_or(|q: &[f32; 3]| len2(p[0] - q[0], p[1] - q[1]) >= 0.05)
         {
             pts.push(p);
         }
@@ -598,7 +603,7 @@ fn barrier_colliders(line: &[[f32; 3]], right: f32, half_w: f32, height: f32) ->
         .windows(2)
         .map(|w| {
             let (dx, dy) = (w[1][0] - w[0][0], w[1][1] - w[0][1]);
-            let l = dx.hypot(dy);
+            let l = len2(dx, dy);
             [dx / l, dy / l]
         })
         .collect();
@@ -615,7 +620,7 @@ fn barrier_colliders(line: &[[f32; 3]], right: f32, half_w: f32, height: f32) ->
                 right_of(dirs[k.min(n - 2)]),
             );
             let m = [ri[0] + ro[0], ri[1] + ro[1]];
-            let ml = m[0].hypot(m[1]).max(1e-6);
+            let ml = len2(m[0], m[1]).max(1e-6);
             let m = [m[0] / ml, m[1] / ml];
             let scale = 1.0 / (m[0] * ri[0] + m[1] * ri[1]).max(0.35);
             let c = [p[0] + m[0] * right * scale, p[1] + m[1] * right * scale];
