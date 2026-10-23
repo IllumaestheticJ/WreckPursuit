@@ -3,10 +3,12 @@
 //! City data tools (workstream 05, native only — never reachable from `wp_wasm`):
 //! - [`osm`]: OpenStreetMap `.osm.pbf` → `wp_world` road network.
 //! - [`glb`]: greybox mesh (`.greybox.glb`) for the testbed and art blockouts.
+//! - [`dedup`]: which parts of the `ashpeak` greybox the shared `vesper_v2` greybox draws.
 //! - binaries `city-import` (OSM) and `gen-city` (procedural fallback).
 
 #![warn(missing_docs)]
 
+pub mod dedup;
 pub mod glb;
 pub mod osm;
 
