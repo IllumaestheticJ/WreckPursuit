@@ -267,8 +267,7 @@ pub fn reset_pose(
         // 1. Lanes (and junction connectors) in range on the car's level, nearest first
         //    (opposing lanes and connectors charged a penalty); ties by id.
         let mut lanes: Vec<(f32, usize, f32, bool)> = Vec::new();
-        for i in 0..map.segs.len() {
-            let seg = &map.segs[i];
+        for (i, seg) in map.segs.iter().enumerate() {
             if !seg.drivable || seg.length <= 0.0 {
                 continue;
             }
