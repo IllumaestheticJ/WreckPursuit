@@ -303,7 +303,8 @@ impl Session {
 
     /// Live session. `scripted` = drive every entity by its scenario driver until
     /// `duration_s` (menu scenarios); otherwise every entity is live-controlled (free drive).
-    /// A free-drive city session spawns the first entity on the city's race start grid.
+    /// A free-drive city session spawns the first entity on the city's race start grid
+    /// (unless the scenario gives it a spawn away from the origin).
     pub fn new(sc: Scenario, scripted: bool) -> Result<Self, String> {
         Self::new_with_data(sc, scripted, mem_data())
     }
@@ -328,12 +329,16 @@ impl Session {
                     .iter()
                     .find(|p| p.kind == wp_world::network::PoiKind::RaceStartGrid);
                 if let (Some(p), Some(e)) = (grid, sc.entities.first_mut()) {
-                    e.pos = p.pos;
-                    e.yaw = p.heading_rad;
+                    if e.pos == [0.0; 3] {
+                        e.pos = p.pos;
+                        e.yaw = p.heading_rad;
+                    }
                 }
                 // Street racers join the scenario as entities before the sim is built, so a
                 // recording carries them and playback spawns them the same way.
                 if STREET_ENABLED.with(|c| c.get()) && crate::street::scenario_wants_racers(&sc) {
+                // Only a player left at the origin (free_drive_in's default): a scenario that
+                // sets a spawn keeps it (a career drive out of a garage starts at the shop).
                     let at = sc
                         .entities
                         .first()
@@ -1086,10 +1091,10 @@ impl Session {
 
     // ----- garage visits (lead; see `crate::garage_visit`) ------------------------------
 
-    /// The city's repair shops (empty without an economy run or a city, in picker races and in
-    /// career runs).
+    /// The city's repair shops (empty without an economy run or a city, and in picker races).
+    /// Career runs have them too: a visit there leads into the career garage.
     pub fn garages(&self) -> &[GarageSite] {
-        if self.race.is_some() || self.career {
+        if self.race.is_some() || self.run.is_none() {
             return &[];
         }
         &self.garages
@@ -1130,19 +1135,15 @@ impl Session {
             }
             return;
         }
-        // Not in picker races (a stop in a shop would hold a racer) nor career runs (the
-        // career garage screen owns repairs and the career account).
-        if self.garages.is_empty() || run.is_over() || self.race.is_some() || self.career {
+        // Not in picker races (a stop in a shop would hold a racer). In career runs the visit
+        // only offers the career garage at this shop (see `GarageOffer::career`).
+        if self.garages.is_empty() || run.is_over() || self.race.is_some() {
             return;
         }
         let Some(st) = self.vehicle(player).map(|v| v.vehicle.state()) else {
             return;
         };
-        let Some(site) = self
-            .garages
-            .iter()
-            .find(|g| g.contains([st.pos[0], st.pos[1]]))
-        else {
+        let Some(site) = self.garages.iter().find(|g| g.contains(st.pos)) else {
             self.garage_armed = true;
             return;
         };
@@ -1171,7 +1172,8 @@ impl Session {
         self.visit = Some(GarageOffer {
             seq: self.visit_seq,
             tick: self.sim.tick(),
-            can_repair: quote.as_ref().is_some_and(|q| q.player_pays <= cash),
+            can_repair: !self.career && quote.as_ref().is_some_and(|q| q.player_pays <= cash),
+            career: self.career,
             site,
             wanted,
             health,
@@ -1247,6 +1249,9 @@ impl Session {
         self.log_op(
             idx,
             OpKind::ResetAt {
+        if offer.career {
+            return Err("career runs repair in the career garage (\"Enter garage\")".into());
+        }
                 xy,
                 yaw,
                 near_z,

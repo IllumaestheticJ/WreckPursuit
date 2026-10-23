@@ -6,6 +6,12 @@
 //! ledger and repairs the car in place (replay op `Repair`); "Leave" just gives control back.
 //! The car has to leave every garage radius before another visit can open.
 //!
+//! Each shop sits on a street-level lane: [`sites`] puts it on the street-level, non-highway
+//! lane nearest its POI (the grid city's block POIs are 18 m off the road or under the
+//! viaduct), and a car more than [`GARAGE_HEIGHT_WINDOW_M`] above or below it is not inside.
+//! In a career run the visit offers "Enter garage" (the testbed ends the run there and opens
+//! the career garage priced at this shop) instead of an in-place repair.
+//!
 //! Like [`crate::run`], all of this sits outside the deterministic sim step: it reads the sim
 //! and only acts on it through logged inputs and ops, so replays reproduce a visit.
 //!
@@ -16,7 +22,7 @@
 use serde::Serialize;
 use wp_contracts::{DistrictId, WantedLevel};
 use wp_economy::{RepairQuote, ShopContext, ShopKind};
-use wp_world::network::PoiKind;
+use wp_world::network::{LaneKind, PoiKind, RoadNetwork};
 use wp_world::World;
 
 use crate::run::LedgerLine;
@@ -28,6 +34,15 @@ pub const GARAGE_RADIUS_M: f32 = 15.0;
 /// The car must be below this speed to pull into a garage, m/s (≈ 11 km/h): driving through
 /// one at speed does not stop the car.
 pub const GARAGE_ENTER_SPEED_MPS: f32 = 3.0;
+
+/// A car more than this far above or below a shop is not in it (bridges, viaducts), m.
+pub const GARAGE_HEIGHT_WINDOW_M: f32 = 4.0;
+
+/// A lane more than this far above the terrain is a deck, not a street, m.
+const STREET_DECK_GAP_M: f32 = 3.0;
+
+/// A shop moves onto a street lane at most this far from its POI, m (else it keeps the POI).
+const SHOP_SNAP_MAX_M: f32 = 60.0;
 
 /// Crooked shops by name (`docs/design/CITY.md` §5.2). Every other named shop there is legit.
 const CROOKED_SHOPS: [&str; 3] = ["Sal's Paint & Panel", "Gantry Garage", "Roundhouse Customs"];
@@ -68,9 +83,11 @@ impl GarageSite {
         }
     }
 
-    /// The point `[x, y]` is inside the garage radius.
-    pub fn contains(&self, xy: [f32; 2]) -> bool {
-        (xy[0] - self.pos[0]).hypot(xy[1] - self.pos[1]) <= self.radius_m
+    /// The point `pos` is inside the garage: within the radius horizontally and
+    /// [`GARAGE_HEIGHT_WINDOW_M`] vertically.
+    pub fn contains(&self, pos: [f32; 3]) -> bool {
+        (pos[0] - self.pos[0]).hypot(pos[1] - self.pos[1]) <= self.radius_m
+            && (pos[2] - self.pos[2]).abs() <= GARAGE_HEIGHT_WINDOW_M
     }
 }
 
@@ -87,25 +104,65 @@ pub fn shop_kind(name: &str, district: DistrictId) -> ShopKind {
     }
 }
 
-/// Every `Garage` POI of the world's road network, in POI order. Shops outside every zone are
-/// priced as residential.
+/// The pose on the street-level, non-highway drivable lane nearest `p` (3D distance), within
+/// [`SHOP_SNAP_MAX_M`]: `(pos, yaw)`. `None` when there is none.
+pub fn street_pose(net: &RoadNetwork, p: [f32; 3]) -> Option<([f32; 3], f32)> {
+    let mut best: Option<([f32; 3], f32, f32)> = None;
+    for l in &net.lanes {
+        if !l.kind.drivable() || matches!(l.kind, LaneKind::Highway | LaneKind::Parking) {
+            continue;
+        }
+        if net
+            .surfaces
+            .iter()
+            .any(|sf| sf.road == l.road && sf.highway)
+        {
+            continue;
+        }
+        for w in l.polyline.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let len2 = ab[0] * ab[0] + ab[1] * ab[1];
+            if len2 <= 0.0 {
+                continue;
+            }
+            let t = (((p[0] - a[0]) * ab[0] + (p[1] - a[1]) * ab[1]) / len2).clamp(0.0, 1.0);
+            let q = [a[0] + ab[0] * t, a[1] + ab[1] * t, a[2] + ab[2] * t];
+            if let Some(tf) = &net.terrain {
+                if q[2] - tf.height_at([q[0], q[1]]) > STREET_DECK_GAP_M {
+                    continue;
+                }
+            }
+            let (dx, dy, dz) = (q[0] - p[0], q[1] - p[1], q[2] - p[2]);
+            let d = (dx * dx + dy * dy + dz * dz).sqrt();
+            if d <= SHOP_SNAP_MAX_M && best.is_none_or(|b| d < b.2) {
+                best = Some((q, wp_math::atan2(-ab[0], ab[1]), d));
+            }
+        }
+    }
+    best.map(|b| (b.0, b.1))
+}
+
+/// Every `Garage` POI of the world's road network, in POI order, each on its nearest
+/// street-level lane ([`street_pose`]; the POI itself when there is none). Shops outside every
+/// zone are priced as residential.
 pub fn sites(world: &World) -> Vec<GarageSite> {
-    world
-        .network()
-        .pois
+    let net = world.network();
+    net.pois
         .iter()
         .filter(|p| p.kind == PoiKind::Garage)
         .enumerate()
         .map(|(i, p)| {
+            let (pos, heading_rad) = street_pose(net, p.pos).unwrap_or((p.pos, p.heading_rad));
             let district = world
                 .map()
-                .district_at([p.pos[0], p.pos[1]])
+                .district_at([pos[0], pos[1]])
                 .unwrap_or(DistrictId::Residential);
             GarageSite {
                 index: i as u32,
                 name: p.name.clone(),
-                pos: p.pos,
-                heading_rad: p.heading_rad,
+                pos,
+                heading_rad,
                 radius_m: GARAGE_RADIUS_M,
                 kind: shop_kind(&p.name, district),
                 district,
@@ -134,8 +191,11 @@ pub struct GarageOffer {
     pub note: Option<String>,
     /// Cash on the account.
     pub cash: i64,
-    /// "Repair" is possible (there is a quote and the player can pay it).
+    /// "Repair" is possible (there is a quote and the player can pay it; never in a career
+    /// run).
     pub can_repair: bool,
+    /// A career run: the panel offers "Enter garage" (the career garage at this shop).
+    pub career: bool,
 }
 
 /// What "Repair" at a garage did (`garage_repair`).
@@ -178,9 +238,9 @@ mod tests {
     }
 
     #[test]
-    fn every_city_has_garages() {
+    fn every_city_has_garages_on_a_street_lane() {
         use crate::data::mem_data;
-        for id in ["vesper_v2", "procedural_12x12"] {
+        for id in ["vesper_v2", "procedural_12x12", "ashpeak"] {
             let sc = crate::scenario::free_drive_in(
                 "debug_sedan",
                 wp_contracts::DamageMode::Arcade,
@@ -193,6 +253,29 @@ mod tests {
             let s = sites(&world);
             assert!(!s.is_empty(), "{id}: no garages");
             assert!(s.iter().enumerate().all(|(i, g)| g.index == i as u32));
+            for g in &s {
+                let (q, _) = street_pose(world.network(), g.pos)
+                    .unwrap_or_else(|| panic!("{id}: {} has no street lane", g.name));
+                let d = (q[0] - g.pos[0]).hypot(q[1] - g.pos[1]);
+                assert!(d < 0.5, "{id}: {} is {d:.1} m off its street lane", g.name);
+            }
         }
+    }
+
+    #[test]
+    fn a_car_above_or_below_a_shop_is_not_in_it() {
+        let g = GarageSite {
+            index: 0,
+            name: "Test".into(),
+            pos: [0.0, 0.0, 2.0],
+            heading_rad: 0.0,
+            radius_m: GARAGE_RADIUS_M,
+            kind: ShopKind::Legit,
+            district: DistrictId::Core,
+        };
+        assert!(g.contains([3.0, 4.0, 3.0]));
+        assert!(!g.contains([3.0, 4.0, 10.6]), "on a deck above");
+        assert!(!g.contains([3.0, 4.0, -4.5]), "in a tunnel below");
+        assert!(!g.contains([20.0, 0.0, 2.0]));
     }
 }

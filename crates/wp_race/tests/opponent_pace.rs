@@ -82,6 +82,9 @@ pub struct PaceOpts {
     pub seed: Option<u64>,
     /// Time of day override, h (`WP_PACE_TOD`).
     pub tod: Option<f32>,
+    /// Every seat keeps its own roster personality, skill included (the race as the picker
+    /// runs it); the `skill` argument is ignored (`WP_PACE_ROSTER`).
+    pub roster: bool,
 }
 
 impl PaceOpts {
@@ -95,6 +98,7 @@ impl PaceOpts {
             trace: var("WP_PACE_TRACE").and_then(|v| v.parse().ok()),
             seed: var("WP_PACE_SEED").and_then(|v| v.parse().ok()),
             tod: var("WP_PACE_TOD").and_then(|v| v.parse().ok()),
+            roster: var("WP_PACE_ROSTER").is_some(),
         }
     }
 }
@@ -327,9 +331,13 @@ pub fn race_pace_in(
         entity_ids.push(spec.id.clone());
         entrants.push(AiEntrant {
             racer: ids[i],
-            profile: DriverProfile {
-                skill,
-                ..personality(id, i)
+            profile: if opts.roster {
+                personality(id, i)
+            } else {
+                DriverProfile {
+                    skill,
+                    ..personality(id, i)
+                }
             },
             capability: if opts.geometry {
                 CarCapability::geometry_only(car)
@@ -942,6 +950,7 @@ fn pace_scenarios_hold_their_ranges() {
             .and_then(|v| v.parse().ok()),
         seed: None,
         tod: None,
+        roster: false,
     };
     let mut caps = BTreeMap::new();
     let mut fails = Vec::new();
@@ -1027,6 +1036,7 @@ fn loop9_traffic_field_finishes() {
                 trace: None,
                 seed: Some(seed),
                 tod: None,
+                roster: false,
             };
             let cars = race_pace("loop9_circuit", skill, &opts, &mut caps);
             all += cars.len();
@@ -1051,6 +1061,107 @@ fn loop9_traffic_field_finishes() {
             fails.push(format!(
                 "skill {skill}: mean time {mean:.1} s outside {lo:.1}..{hi:.1} s"
             ));
+        }
+    }
+    assert!(fails.is_empty(), "{fails:#?}");
+}
+
+/// Races audit P4: every picker race, as the picker runs it (every seat its own roster
+/// personality, the player seat a default driver in the scenario's car, traffic as in the
+/// picker), police off: `(race, winner time measured 2026-10-23 in s, finishers required)`.
+/// The winner must land within −10 % … +30 % of the measured time and within
+/// [`CATALOG_MAX_RATIO`] of its own car's ideal time.
+///
+/// Ashpeak Metro needs 4 of 6: Juno (risk 0.25) and Tito (0.30) stop at every red on the
+/// signalised downtown grid (77 s and 39 s of `signal` loss over two laps) and Juno misses the
+/// finish window; red-light behaviour is held for an owner decision (races audit Q2).
+const CATALOG_WINDOWS: [(&str, f32, usize); 17] = [
+    ("hollins_sprint", 58.6, 4),
+    ("loop9_circuit", 212.2, 6),
+    ("lantern_checkpoint", 47.7, 4),
+    ("grid_highway_sprint", 39.7, 4),
+    ("crowfoot_ascent", 165.1, 4),
+    ("crowfoot_descent", 99.5, 4),
+    ("harlan_dirt_run", 256.4, 4),
+    ("ashpeak_downtown_checkpoint", 42.1, 4),
+    ("route7_tunnel_sprint", 63.8, 5),
+    ("grizzly_grade_sprint", 58.3, 4),
+    ("waterfront_drag", 14.8, 2),
+    ("ashpeak_metro_circuit", 316.2, 4),
+    ("harbor_dash", 32.6, 4),
+    ("tunnel_run", 25.7, 5),
+    ("hollins_descent", 87.4, 4),
+    ("offramp_sprint", 95.1, 5),
+    ("grid_arterial_sprint", 60.2, 4),
+];
+
+/// The winner's time over its own car's ideal (traffic included: Loop 9 at density 2.0,
+/// Lantern and the grid highway lose 10–14 s to civilians).
+const CATALOG_MAX_RATIO: f32 = 1.40;
+
+/// Races audit P4: every picker race in the catalog runs to the flag with the AI in every
+/// seat, police off; see [`CATALOG_WINDOWS`]. `WP_PACE_RACES` narrows it. Release only.
+#[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "races every picker course to the flag (release only)"
+)]
+fn every_picker_race_finishes_in_its_window() {
+    let ids: Vec<&str> = catalog::races().iter().map(|d| d.id).collect();
+    assert_eq!(
+        ids.len(),
+        CATALOG_WINDOWS.len(),
+        "a catalog race without a window"
+    );
+    let only: Option<Vec<String>> = std::env::var("WP_PACE_RACES")
+        .ok()
+        .map(|v| v.split(',').map(str::to_string).collect());
+    let opts = PaceOpts {
+        police: false,
+        density: None,
+        solo: false,
+        geometry: false,
+        trace: None,
+        seed: None,
+        tod: None,
+        roster: true,
+    };
+    let mut caps = BTreeMap::new();
+    let mut fails = Vec::new();
+    for (id, winner_s, min_fin) in CATALOG_WINDOWS {
+        assert!(ids.contains(&id), "{id} is not in the catalog");
+        if only.as_ref().is_some_and(|o| !o.iter().any(|x| x == id)) {
+            continue;
+        }
+        let cars = race_pace(id, 0.5, &opts, &mut caps);
+        let fin: Vec<&CarPace> = cars.iter().filter(|c| c.time_s.is_some()).collect();
+        let Some(w) = fin
+            .iter()
+            .min_by(|a, b| a.time_s.unwrap().total_cmp(&b.time_s.unwrap()))
+        else {
+            fails.push(format!("{id}: nobody finished"));
+            continue;
+        };
+        let t = w.time_s.unwrap();
+        let ratio = t / w.ideal_s;
+        eprintln!(
+            "{id}: {}/{} finished, winner {} {t:.1} s (ideal {:.1}, ratio {ratio:.3}); {:?}",
+            fin.len(),
+            cars.len(),
+            w.car,
+            w.ideal_s,
+            cars.iter()
+                .map(|c| (c.car.as_str(), c.time_s, c.status.as_str()))
+                .collect::<Vec<_>>()
+        );
+        if fin.len() < min_fin {
+            fails.push(format!("{id}: {} of {} finished", fin.len(), cars.len()));
+        }
+        if !(0.9 * winner_s..=1.3 * winner_s).contains(&t) {
+            fails.push(format!("{id}: winner {t:.1} s, measured {winner_s} s"));
+        }
+        if ratio > CATALOG_MAX_RATIO {
+            fails.push(format!("{id}: winner {ratio:.3} × its ideal"));
         }
     }
     assert!(fails.is_empty(), "{fails:#?}");

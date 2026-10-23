@@ -949,3 +949,23 @@ fn a_car_with_a_torn_off_panel_and_mounted_parts_can_be_quoted_repaired_and_work
     assert!(c.workshop(uid).unwrap().view.missing.is_empty());
     assert!(c.start_blocker().is_none());
 }
+
+/// A career run has the city's shops: stopping in one opens a career visit ("Enter garage",
+/// no in-place repair); once the run is over the plain session has none.
+#[test]
+fn a_career_run_stops_at_a_shop_for_the_career_garage() {
+    let (mut c, _) = career_with("kestrel_ts", 20_000, DamageMode::Arcade);
+    let sc = crate::scenario::free_drive_in("x", DamageMode::Arcade, procedural_city());
+    let mut s = c.start_run(sc).unwrap();
+    assert!(!s.garages().is_empty(), "career runs have shops");
+    s.run_ticks(1);
+    let p = player(&s);
+    crate::run_tests::drive_into(&mut s, p, 0, 6.0, true);
+    let v = s.garage_visit().expect("a career visit opened").clone();
+    assert!(v.career);
+    assert!(!v.can_repair);
+    assert!(s.garage_repair().is_err(), "repairs go through the career garage");
+    assert!(s.held(p));
+    c.finish_run(&mut s).unwrap();
+    assert!(s.garages().is_empty(), "no shops once the career run ended");
+}

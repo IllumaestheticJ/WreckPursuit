@@ -409,8 +409,9 @@ fn health(s: &Session) -> f32 {
         .health()
 }
 
-/// Put the player in garage `i` at `speed_mps` and run `ticks`.
-fn pull_into(s: &mut Session, i: usize, speed_mps: f32, ticks: u64) {
+/// Put the player in garage `i` at `speed_mps` and run `ticks` (a teleport: for the
+/// pursuit test, where the drive itself does not matter).
+fn teleport_into(s: &mut Session, i: usize, speed_mps: f32, ticks: u64) {
     let g = s.garages()[i].clone();
     s.debug_sim_mut()
         .unwrap()
@@ -423,6 +424,64 @@ fn pull_into(s: &mut Session, i: usize, speed_mps: f32, ticks: u64) {
         )
         .unwrap();
     s.run_ticks(ticks);
+}
+
+/// Drive into garage `i` along its lane: start `GARAGE_APPROACH_M` short of it at
+/// `cruise_mps`, steer for the shop, and (with `stop`) brake inside the ring. Returns once a
+/// visit opens or after 20 s; the car's closest approach in m.
+pub(crate) fn drive_into(
+    s: &mut Session,
+    id: EntityId,
+    i: usize,
+    cruise_mps: f32,
+    stop: bool,
+) -> f32 {
+    const GARAGE_APPROACH_M: f32 = 35.0;
+    let g = s.garages()[i].clone();
+    let (sn, cs) = wp_math::sin_cos(g.heading_rad);
+    let fwd = [-sn, cs];
+    let start = [
+        g.pos[0] - fwd[0] * GARAGE_APPROACH_M,
+        g.pos[1] - fwd[1] * GARAGE_APPROACH_M,
+    ];
+    s.debug_sim_mut()
+        .unwrap()
+        .place_on_ground(id, start, g.heading_rad, cruise_mps, Some(g.pos[2]))
+        .unwrap();
+    // Aim 20 m past the shop on its lane line.
+    let aim = [g.pos[0] + fwd[0] * 20.0, g.pos[1] + fwd[1] * 20.0];
+    let mut closest = f32::INFINITY;
+    for _ in 0..240 * 20 {
+        let st = state(s, id);
+        let d = (st.pos[0] - g.pos[0]).hypot(st.pos[1] - g.pos[1]);
+        closest = closest.min(d);
+        let speed = st.lin_vel[0].hypot(st.lin_vel[1]);
+        let want = wp_math::atan2(-(aim[0] - st.pos[0]), aim[1] - st.pos[1]);
+        let fwd_now = wp_math::atan2(-st.lin_vel[0], st.lin_vel[1]);
+        let heading = if speed > 0.5 { fwd_now } else { g.heading_rad };
+        let err = wp_math::wrap_angle(want - heading);
+        let braking = stop && d < g.radius_m - 4.0;
+        let input = VehicleInput {
+            steer: (-2.0 * err).clamp(-1.0, 1.0),
+            throttle: if braking || speed > cruise_mps {
+                0.0
+            } else {
+                0.5
+            },
+            brake: if braking { 0.5 } else { 0.0 },
+            ..Default::default()
+        };
+        // The garage holds the car once the visit opens.
+        if s.garage_visit().is_some() || s.held(id) {
+            break;
+        }
+        s.set_input(id, input).unwrap();
+        s.run_ticks(1);
+        if !stop && d > g.radius_m + 5.0 && closest < g.radius_m {
+            break;
+        }
+    }
+    closest
 }
 
 /// Put the player 200 m away from every garage and run a tick.
@@ -455,7 +514,7 @@ fn stopping_in_a_garage_opens_repairs_and_repair_restores_the_car() {
     assert!(s.garage_visit().is_none());
     let cash0 = s.run().unwrap().account().cash;
 
-    pull_into(&mut s, 0, 0.0, 2);
+    drive_into(&mut s, PLAYER, 0, 6.0, true);
     let v = s.garage_visit().expect("a visit opened").clone();
     assert_eq!(v.seq, 1);
     assert_eq!(v.site.index, 0);
@@ -501,12 +560,13 @@ fn stopping_in_a_garage_opens_repairs_and_repair_restores_the_car() {
 fn garage_visit_needs_a_stop_and_a_fresh_entry() {
     let mut s = free_drive_city();
     // Driving through at speed does not stop the car.
-    pull_into(&mut s, 0, 12.0, 1);
+    let closest = drive_into(&mut s, PLAYER, 0, 12.0, false);
+    assert!(closest < 5.0, "drove through the shop ({closest} m)");
     assert!(s.garage_visit().is_none());
     drive_away(&mut s);
 
     // A pristine car: the visit opens with nothing to repair; "Repair" is refused.
-    pull_into(&mut s, 0, 0.0, 2);
+    drive_into(&mut s, PLAYER, 0, 6.0, true);
     let v = s.garage_visit().expect("a visit opened").clone();
     assert!(v.quote.is_none());
     assert_eq!(v.note.as_deref(), Some("nothing to repair"));
@@ -525,7 +585,7 @@ fn garage_visit_needs_a_stop_and_a_fresh_entry() {
 
     // Out and back in: a new visit.
     drive_away(&mut s);
-    pull_into(&mut s, 0, 0.0, 2);
+    drive_into(&mut s, PLAYER, 0, 6.0, true);
     assert_eq!(s.garage_visit().map(|v| v.seq), Some(2));
 }
 
@@ -543,7 +603,7 @@ fn a_pursuit_keeps_the_garage_shut() {
         crate::police::status(s.sim().police(), PLAYER).status,
         "Pursuit"
     );
-    pull_into(&mut s, 0, 0.0, 2);
+    teleport_into(&mut s, 0, 0.0, 2);
     assert!(
         matches!(
             crate::police::status(s.sim().police(), PLAYER).status,
@@ -552,4 +612,29 @@ fn a_pursuit_keeps_the_garage_shut() {
         "still chased"
     );
     assert!(s.garage_visit().is_none(), "no visit mid-chase");
+}
+
+/// Every shop of the grid city and Port Vesper can be driven into from its lane and stopped
+/// in (the grid's block POIs are 18 m off the road or under the viaduct; their shops sit on
+/// a street lane).
+#[test]
+fn every_garage_can_be_driven_into() {
+    for city in [procedural_city(), crate::scenario::city_spec("vesper_v2")] {
+        let sc = crate::scenario::free_drive_in("debug_sedan", DamageMode::Arcade, city);
+        let mut s = Session::new(sc, false).unwrap();
+        s.run_ticks(1);
+        let n = s.garages().len();
+        assert!(n > 0);
+        for i in 0..n {
+            drive_away(&mut s);
+            let closest = drive_into(&mut s, PLAYER, i, 6.0, true);
+            let name = s.garages()[i].name.clone();
+            let v = s
+                .garage_visit()
+                .unwrap_or_else(|| panic!("{name}: no visit (closest {closest:.1} m)"));
+            assert_eq!(v.site.index, i as u32, "{name}");
+            assert!(!v.career);
+            s.garage_leave();
+        }
+    }
 }
