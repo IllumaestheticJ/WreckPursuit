@@ -198,10 +198,21 @@ pub fn load_world(
             Some(wp_world::World::procedural(&pg, cfg))
         }
         CitySpec::Preset { name, seed } => {
+            if name == wp_world::ashpeak::CITY_ID {
+                let vc = wp_world::vesper::VesperConfig {
+                    seed: *seed,
+                    ..wp_world::ashpeak::default_config()
+                };
+                return Ok(Some(wp_world::World::ashpeak(&vc, cfg)));
+            }
             if name != wp_world::vesper::CITY_ID {
                 return Err(RunError::Scenario(
                     name.clone(),
-                    format!("unknown city preset (known: {})", wp_world::vesper::CITY_ID),
+                    format!(
+                        "unknown city preset (known: {}, {})",
+                        wp_world::vesper::CITY_ID,
+                        wp_world::ashpeak::CITY_ID
+                    ),
                 ));
             }
             let vc = wp_world::vesper::VesperConfig {

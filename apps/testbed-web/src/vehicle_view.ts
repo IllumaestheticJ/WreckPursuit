@@ -9,7 +9,7 @@ import { layers } from "./settings";
 import { autoHullSkin, SkinnedBody, skinFromBinding } from "./skin";
 import { PanelBody, loadCarMesh } from "./render/panels";
 import type { CarMeshJson } from "./render/panels";
-import { hasPoliceLivery, liveryBaseColour, setupPoliceLook } from "./render/livery";
+import { COUNTY_PAINT, countySkin, hasPoliceLivery, liveryBaseColour, setupPoliceLook } from "./render/livery";
 import { LightRig, patternFor, phaseFor, wigwag } from "./render/police_units";
 import { artStyle, makeHeadlightPool, vehiclePaint } from "./render/style";
 import { PALETTE, sirenLightIntensity } from "./render/palette";
@@ -146,6 +146,8 @@ export class VehicleView {
   private wigwagging = false;
   /** Police model (bar / siren / wig-wag, livery), whoever drives it. */
   private readonly police: boolean;
+  /** Ashpeak County Sheriff unit (vehicle_info police_county): ACSO livery and green paint. */
+  private readonly county: boolean;
   /** Stable id for unit numbers and flash phase: the wp_police unit id, else the entity. */
   readonly unitId: number;
   /** Per-panel car mesh (workstream R, render/panels.ts); replaces box, lamps and tires once loaded. */
@@ -182,6 +184,8 @@ export class VehicleView {
     // Sim police cars carry their wp_police unit id (vehicle_info), so a unit keeps its number
     // and flash phase when it is promoted from the fleet to a sim vehicle.
     this.unitId = this.info.police_unit ?? entity;
+    this.county = police && countySkin(this.info.police_county === true);
+    if (this.county) colour = COUNTY_PAINT;
     this.greyPaint = new THREE.Color(colour);
     this.background = this.info.kind === "Police" || this.info.kind === "Traffic";
 
@@ -641,10 +645,10 @@ export class VehicleView {
 
   /** Police panel mesh: livery + unit decals, and flash the mesh's light bar instead of the box bar. */
   private setupPolice(mesh: CarMeshJson): void {
-    setupPoliceLook(this.panels, mesh, this.unitId);
+    setupPoliceLook(this.panels, mesh, this.unitId, this.county);
     // The scheme's base colour (mirrors, the paint parts without the livery) is this car's
     // greybox paint from now on; re-style so low-poly dark maps it again.
-    const base = liveryBaseColour(mesh);
+    const base = liveryBaseColour(mesh, this.county);
     if (base) {
       this.greyPaint.copy(base);
       this.styleVersion = -1;

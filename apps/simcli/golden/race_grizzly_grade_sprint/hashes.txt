@@ -1,0 +1,11 @@
+# simcli hashes scenario=race_grizzly_grade_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+240 984c17287ca12748
+480 e43377a7163917a4
+720 b4a47b90997ca20b
+960 686577547be20fa5
+1200 3f4fc315f584e52a
+1440 244f84f586f7c856
+1680 4815bcebaf6beff2
+1920 6ca56993452530bb
+2160 2687692f72ac57b4
+2400 8ab2c20a1d8c36f5

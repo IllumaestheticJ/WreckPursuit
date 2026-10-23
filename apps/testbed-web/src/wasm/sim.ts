@@ -82,6 +82,9 @@ export interface VehicleInfo {
   /** wp_police unit id of a sim police vehicle (null / absent for every other vehicle and
    * older wasm builds): the same id as `police_units()` `unit_id`, stable across promotion. */
   police_unit?: number | null;
+  /** The police vehicle belongs to the Ashpeak County Sheriff's Office (ACSO livery); absent on
+   * older wasm builds. */
+  police_county?: boolean;
   /** wp_world agent id of promoted traffic (null / absent otherwise and on older builds): the
    * same id as `traffic_agents()` `agent_id`, so the car keeps its instanced twin's paint. */
   traffic_agent?: number | null;
@@ -388,6 +391,10 @@ export const sim = {
   /** Start a picker race (new session; the account carries over). Returns entity ids, player first. */
   raceStart: (id: string, car: string, mode: string, autopilot: boolean): number[] =>
     Array.from(wasm.race_start(id, car, mode, autopilot)),
+  /** Honk-to-start meet spots on the session's map (`race_spots.ts`); `[]` during a race / replay / career. */
+  raceSpots: (): RaceSpot[] => JSON.parse(wasm.race_spots()),
+  /** The race the player just honked for in its spot (taken), or "". */
+  raceSpotHonked: (): string => wasm.race_spot_honked(),
   /** `[phase, countdown_s, elapsed_s, laps, gates, player, racers, closed, length_m, autopilot, kind, player_done]`; empty without a race. */
   raceInfo: (): Float32Array => wasm.race_info(),
   /** Standings, position order, RACE_STRIDE floats each (see layout.ts RS). */
@@ -400,6 +407,8 @@ export const sim = {
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
   debugParkNearPolice: (entity: number, aheadM: number): number => wasm.debug_park_near_police(entity, aheadM),
+  /** Debug / e2e: put `entity` on the ground at (x, y) facing `yaw`, rolling at `speed` m/s. */
+  debugPlace: (entity: number, x: number, y: number, yaw: number, speed: number): void => wasm.debug_place(entity, x, y, yaw, speed),
   /** Aim `entity` at a parked car (`prop` < 0: the nearest) at `speed` m/s; returns the prop index. */
   debugKnockProp: (entity: number, prop: number, speed: number): number => wasm.debug_knock_prop(entity, prop, speed),
 
@@ -435,6 +444,7 @@ import type { CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest } from
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";
 import type { RaceCard, RaceReport } from "../ui/race";
+import type { RaceSpot } from "../race_spots";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 
 /** `simcli::car_stats::CarStatsTable` (data/stats/cars.json): bars are 0–1 on fixed scales. */

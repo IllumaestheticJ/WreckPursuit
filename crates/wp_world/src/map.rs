@@ -208,6 +208,8 @@ pub struct CityMap {
     pub covered_los: bool,
     /// Freeway paint derived at build time (dotted taper lines, gore chevrons).
     pub(crate) paint: crate::markings::FreewayPaint,
+    /// Paving per source road (`Lane::road`), from the road surfaces.
+    road_material: Arc<Vec<RoadMaterial>>,
 }
 
 impl CityMap {
@@ -395,7 +397,15 @@ impl CityMap {
             let (blo, bhi) = bbox2(&b.footprint);
             building_grid.insert_box(blo, bhi, i as u32);
         }
+        let roads = net.lanes.iter().map(|l| l.road + 1).max().unwrap_or(0) as usize;
+        let mut road_material = vec![RoadMaterial::Asphalt; roads];
+        for s in &net.surfaces {
+            if let Some(m) = road_material.get_mut(s.road as usize) {
+                *m = s.material;
+            }
+        }
         let mut map = Self {
+            road_material: Arc::new(road_material),
             zone_lane_km: vec![0.0; net.zones.len()],
             net: Arc::new(net),
             segs: Arc::new(segs),
@@ -840,6 +850,27 @@ impl CityMap {
     }
 }
 
+impl CityMap {
+    /// Paving of lane `l`'s road ([`RoadSurface::material`]; asphalt when the city has no
+    /// surfaces).
+    pub fn lane_material(&self, l: LaneId) -> RoadMaterial {
+        let road = self.net.lanes[l as usize].road;
+        self.road_material
+            .get(road as usize)
+            .copied()
+            .unwrap_or_default()
+    }
+}
+
+/// Wheel surface of an unpaved road material.
+fn material_surface(m: RoadMaterial) -> SurfaceType {
+    match m {
+        RoadMaterial::Asphalt => SurfaceType::Asphalt,
+        RoadMaterial::Gravel => SurfaceType::Gravel,
+        RoadMaterial::Dirt => SurfaceType::Dirt,
+    }
+}
+
 impl WorldQuery for CityMap {
     fn surface_at(&self, p: [f32; 3]) -> SurfaceType {
         if self.net.lanes.is_empty() {
@@ -870,8 +901,18 @@ impl WorldQuery for CityMap {
             // The lane, or the median half / shoulder beside it.
             if pr.dist <= half + s.paved_side[usize::from(pr.lateral > 0.0)] {
                 let highway = |l: LaneId| self.net.lanes[l as usize].kind == LaneKind::Highway;
+                let unpaved = |l: LaneId| self.lane_material(l);
                 return match s.kind {
                     SegKind::Lane { lane } if highway(lane) => SurfaceType::Concrete,
+                    SegKind::Lane { lane } if unpaved(lane) != RoadMaterial::Asphalt => {
+                        material_surface(unpaved(lane))
+                    }
+                    SegKind::Connector { from, to, .. }
+                        if unpaved(from) != RoadMaterial::Asphalt
+                            && unpaved(from) == unpaved(to) =>
+                    {
+                        material_surface(unpaved(from))
+                    }
                     // Through a freeway merge / diverge (radius-0 junction).
                     SegKind::Connector { from, to, node, .. }
                         if highway(from)

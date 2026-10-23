@@ -231,6 +231,14 @@ impl CitySpec {
         }
     }
 
+    /// Port Vesper + Ashpeak County with the default seed (`wp_world::ashpeak`).
+    pub fn ashpeak() -> Self {
+        CitySpec::Preset {
+            name: wp_world::ashpeak::CITY_ID.into(),
+            seed: 1,
+        }
+    }
+
     /// City id (data file stem / greybox name): `flat`, `procedural_12x12`, `vesper_v2`, or the
     /// file stem.
     pub fn city_id(&self) -> String {

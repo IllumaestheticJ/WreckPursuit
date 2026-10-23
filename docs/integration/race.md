@@ -538,3 +538,77 @@ call. I have not done it.
     triangle count does not depend on the machine (render content: LOD / props / art merges,
     FYI lead / testbed). The frame-time misses are partly the container's software GL.
     `perf_check.mjs` changed on `lead/round12` after db11e64 (now 608a50a), so re-check there.
+
+## Honk-to-start race spots + Ashpeak County races (2026-10-22, `ws/ashpeak`)
+
+Owner request: start the street races from designated spots on the map by honking, on Port
+Vesper and on the new combined map (Port Vesper + Ashpeak County, city id `ashpeak`).
+
+- **Spots** (`wp_race::spots`): `race_spots(world)` = one `RaceSpot { race_id, pos, heading_rad,
+  radius_m (12), length_m }` per catalog race that runs on the world's city, at the pole position
+  of its planned course (`course.start()`, same as `venue_pos`). `RaceCity::hosts()` /
+  `catalog::races_on(city)`: Port Vesper races run on `vesper_v2` **and** `ashpeak` (same
+  coordinates, same POIs), Ashpeak races only on `ashpeak`, the grid race only on the grid.
+- **Honk check** (Rust, `wp_wasm::session::Session::observe_horn` → `wp_wasm::race_spots::MeetSpots`):
+  after every live tick of a city session that is not a race, replay, scripted run or career
+  run, the player's horn rising edge (`VehicleInput::horn`) inside a spot at < 3 m/s records the
+  race. Read-only (no sim writes, hashes and replays unchanged); a held horn never retriggers;
+  spots are planned lazily (first `race_spots()` call or first press).
+- **wasm**: `race_spots()` → JSON `[{id, name, kind, laps, legality, x, y, z, heading, radius,
+  length_m}]` (`[]` when inactive); `race_spot_honked()` → race id or `""` (taken once).
+  `race_start(id, …)` now runs the race on the **current session's map when the race runs there**
+  (`race::race_city`): a Port Vesper race started on `ashpeak` stays on `ashpeak`; "Race again"
+  keeps the map. `race::race_scenario_in(def, car, mode, autopilot, city)` is the explicit form.
+  `RaceCard.cities` lists the hosts.
+- **Testbed** (`apps/testbed-web/src/race_spots.ts`, small hook in `main.ts`): ground ring + disc +
+  light pillar + direction arrow + name/kind/length label sprite per spot (unlit materials, glow
+  at night; orange street, red illegal), HUD prompt "Honk (Q) to start: <name> — <kind>,
+  <length>" ("Stop here to start" above 3 m/s); hidden during races, replays and crash replays.
+  Each frame `main.ts` polls `raceSpotHonked()` and calls `startRace(id, car, mode)`.
+- **New races** (`RaceCity::Ashpeak`): `crowfoot_ascent` (touge uphill, Crowfoot Ascent →
+  Crowfoot Summit), `crowfoot_descent` (Summit → Crowfoot North Foot), `harlan_dirt_run` (Harlan
+  Farm Run → Harlan Crossing), `ashpeak_downtown_checkpoint` (illegal daytime, Ashpeak Downtown →
+  Meridian Spire), `route7_tunnel_sprint` (Route 7 South → North through the Talon Tunnel),
+  `grizzly_grade_sprint` (Grizzly Grade → Route 12 north foot), `waterfront_drag` (new
+  `CourseSpec::PoiAhead`, 402 m from Ashpeak Waterfront, one AI), `ashpeak_metro_circuit` (2 laps
+  round the downtown core grid).
+
+- **Tests**: `wp_race` unit (`spots::tests`), `tests/race_spots.rs` (Port Vesper spots on
+  `vesper_v2` and `ashpeak`, no overlaps; the Ashpeak course test is ignored), `wp_wasm`
+  `race_spots_tests` (scripted drive into the Hollins spot, honk outside / moving / held = nothing,
+  stopped press = one start, on both maps). Browser: `npm run e2e:race-spots`
+  (`CITY=ashpeak` for the combined map), uses the new e2e helper `debug_place(entity, x, y, yaw,
+  speed)`.
+
+### Tuned on the merged districts (ws/ashpeak ff783f9)
+Every Ashpeak race plans and the AI field races it to the flag (`tests/race_picker.rs`,
+police presence 0; scenario files `pick_<id>.ron` + goldens written). The lane graph has no
+lane changes, so several finishes had to be put on the lane the start lane actually reaches:
+
+| race | course | length | AI result (seeded) |
+|---|---|---|---|
+| `crowfoot_ascent` | Crowfoot Ascent → Crowfoot Summit, single-file grid | 3543 m | 4/4, ~165 s |
+| `crowfoot_descent` | Summit → beside North Foot on the northbound carriageway, single-file grid (a two-wide grid put a car into roadside geometry: total loss) | 2892 m | 3/4, ~100 s |
+| `harlan_dirt_run` | Harlan Farm Run → the south gravel road short of Harlan Crossing (the AI overshot the turn up to the village) | 3978 m | 4/4, ~256 s (gravel-aware profile, below) |
+| `ashpeak_downtown_checkpoint` | `Points` from Southgate Blvd's inner eastbound lane beside the Ashpeak Downtown grid (its kerb lane only feeds the Crowfoot Interchange) → Foundry St at the Grand Concourse | 1254 m | 4/4, ~42 s |
+| `route7_tunnel_sprint` | Route 7 South → northbound past Northgate (the Route 7 North grid faces south) | 3461 m | 5/5, ~64 s |
+| `grizzly_grade_sprint` | Grizzly Grade → Route 12 northbound at the pass's north foot | 2193 m | 4/4, ~58 s |
+| `waterfront_drag` | 415 m ahead of Ashpeak Waterfront (snaps to ≈ 400 m) | 400 m | 2/2, ~15.7 s |
+| `ashpeak_metro_circuit` | Corwin Ave ↓, Southgate →, Juniper ↑, Union ← (one-block jink near Southgate, lane graph) × 2 laps | 4182 m/lap | 3/6, ~326 s |
+
+`RaceDef::grid` (new) overrides the grid layout; `None` everywhere except the two touge races.
+Known gaps: the Harlan run does not reach Harlan Crossing itself, the downtown run finishes a
+block east of the Spire, and the metro circuit has a jink; all three come from lane
+connectivity in the districts (no lane changes), not from the race code.
+
+
+**Gravel after the visuals merge (ws/ashpeak 438ec68).** Unpaved lanes lost their paint, and with
+it the near-asphalt grip of the painted centre and edge strips the AI had been running on. The
+AI's speed profile planned every course at its asphalt grip, so on Harlan's gravel the whole
+field ran 8–22 m wide at the bends. A car outside the gate corridor as it passed a gate never
+got that gate (they are taken in order) and stalled the race ("never finished": two cars held
+at gate 3, two at gate 17). Fix in `wp_opponent`: each `CorridorSample` carries the `surface`
+under it, `CarCapability::surface_grip` gives the car's tyre ratio for gravel / dirt / grass
+(1.0 on every paved surface, so paved courses keep the same profile bit for bit), and
+`SpeedProfile::build` scales cornering, braking and traction-limited drive per sample. After
+the fix the largest lateral offset logged on Harlan is 1.4 m and all four cars finish.

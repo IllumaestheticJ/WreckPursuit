@@ -161,6 +161,8 @@ pub struct RoadSpec {
     pub shoulder_right_m: f32,
     /// A median barrier runs along the left paved edge (see [`RoadSurface::median_barrier`]).
     pub median_barrier: bool,
+    /// Paving ([`RoadSurface::material`]).
+    pub material: RoadMaterial,
 }
 
 impl RoadSpec {
@@ -183,6 +185,7 @@ impl RoadSpec {
             shoulder_left_m: 0.0,
             shoulder_right_m: 0.0,
             median_barrier: false,
+            material: RoadMaterial::Asphalt,
         }
     }
 }
@@ -691,6 +694,8 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
                 inner + r.lanes_fwd as f32 * w + park + shoulder,
             )
         };
+        // Unpaved roads (gravel, dirt) have soft verges, no kerb and sidewalk.
+        let kerbed = r.class != RoadClass::Highway && r.material == RoadMaterial::Asphalt;
         surfaces.push(RoadSurface {
             road: ri as u32,
             centre: paved,
@@ -698,8 +703,9 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
             left_m: left_m + r.shoulder_left_m,
             right_m: right_m + r.shoulder_right_m,
             highway: r.class == RoadClass::Highway,
-            sidewalk: [r.class != RoadClass::Highway, r.class != RoadClass::Highway],
+            sidewalk: [kerbed, kerbed],
             median_barrier: r.median_barrier,
+            material: r.material,
         });
         let base_kind = match r.class {
             RoadClass::Highway => LaneKind::Highway,
