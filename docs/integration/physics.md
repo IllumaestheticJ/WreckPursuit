@@ -125,3 +125,15 @@ regenerated. Shipped table vs measured: identical (sanity check).
   are what cost the AI (even with correct limits).
 - Not shippable under "AI must not get slower or crash more". Owner round 2 (blind) asks which
   ingredient they felt: G vs shipped again, then G vs G_firm.
+
+### Round 2 (row physics-5): G confirmed, full G over G_firm. Near-G variants (held_search `CAND=G` + `G_YAW / G_SPRING / G_ARB / G_ROLL`)
+| variant | held | taps | handling fails |
+|---|---|---|---|
+| G | 2.59 s | 21 | 0 |
+| V1 yaw 1.0 | 1.87 s | 22 | 1 |
+| V2 yaw 1.15 | 2.19 s | 22 | 0 |
+| V3 arb 1.0 | 2.57 s | 21 | 0 |
+| V4 spring 1.5 | 2.50 s | 21 | 0 |
+| V5 spring 1.5 + arb 1.0 | 2.36 s | 21 | 0 |
+Yaw inertia × 1.35 is the essential ingredient; the bars / springs can firm up at a small cost.
+AI pace (measured limits, 4 seeds) for V3 / V4 / V5 / G_firm: running.

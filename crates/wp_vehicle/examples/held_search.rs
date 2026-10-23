@@ -518,6 +518,15 @@ fn main() {
             },
             other => panic!("unknown CAND {other}"),
         };
+        // G_YAW / G_SPRING / G_ARB / G_ROLL: override one of the named candidate's ride values.
+        let env = |k: &str, v: f32| std::env::var(k).ok().and_then(|x| x.parse().ok()).unwrap_or(v);
+        let p = Params {
+            yaw_inertia: env("G_YAW", p.yaw_inertia),
+            spring: env("G_SPRING", p.spring),
+            arb: env("G_ARB", p.arb),
+            roll_inertia: env("G_ROLL", p.roll_inertia),
+            ..p
+        };
         let s = score(&p, &drift, &hand);
         println!("cand {name} {s:?} {p:?}");
         return;
