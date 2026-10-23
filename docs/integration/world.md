@@ -1567,6 +1567,17 @@ threshold are not in that commit), so it is not a regression. The margin is thin
 | `cargo test --workspace` | 0 |
 | scenarios | 129/129 |
 | pace scenarios | lantern s50 unchanged (G is on it; identical numbers) |
+| `just pace-loop9` | **out at skill 0.5**: 42/48 (want ≥ 44), mean 236.1 s; skill 0.95: 48/48, 234.8 s |
+
+**`pace-loop9` at skill 0.5:**
+- Same test with only `vesper.rs` back at a7af2d79: 47/48 at skill 0.5, 45/48 at 0.95.
+- Totals are about even (90 against 92 out of 96); skill 0.95 is better.
+- Four of the six cars that don't finish are on seed 4, all `Dnf(FinishWindow)`. The pack sits
+  behind civilians and racers: civ + veh losses are 130-140 s each, with no wall hits, rejoins or
+  resets.
+- That is the traffic-draw swing the test's notes already describe (±3 cars per seed at 23:00 /
+  density 2.0), not a road fault.
+- Left to the lead and opponent-pace (G is reworking pack queueing); I did not widen the gate.
 
 ## PR #38 port (lead, 2026-10-23): river, canal, bridges, landmarks, hideouts; rows 160 and 162
 Ported from `claude/beautiful-einstein-b1noth` onto round12 1da95294 (with Ashpeak): a1c11a27,
