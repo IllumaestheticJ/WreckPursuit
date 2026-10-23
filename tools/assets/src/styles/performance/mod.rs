@@ -9,6 +9,9 @@
 //! | [`hatch`] | `vireo_xs` (90s FF hot hatch), `lindwurm_4t` (2010s AWD hot hatch) |
 //! | [`tuner`] | `kestrel_ts` (rally sedan), `shiro_turbo` (FR drift coupe), `hakone_gt` (90s GT), `sperber_32` (sport sedan), `debug_coupe` (sport coupe) |
 //! | [`exotic`] | `lucciola_350` (90s mid-engine wedge), `fulmine_v10` (2010s mid-engine supercar) |
+//! | [`supercar`] | `halberd_40`, `ombra_v12`, `kagero_hx` (mid-engine), `ostwind_6t` (rear-engine) |
+//! | [`race`] | `morrigan_55` (GT endurance), `nyx_proto` (sports prototype), `merlo_20t` (touring car) |
+//! | [`offroad`] | `mesquite_pr` (pre-runner pickup), `erg_hamada` (rally-raid prototype) |
 //!
 //! Each car = body knobs + one custom "body kit" detail function (see [`kit::Kit`]) that
 //! replaces the foundation's generic lamps / mirrors with the car's own shapes and adds the
@@ -24,6 +27,9 @@ pub mod exotic;
 pub mod hatch;
 pub mod kit;
 pub mod muscle;
+pub mod offroad;
+pub mod race;
+pub mod supercar;
 pub mod tuner;
 
 /// Style for a performance car id, or `None` if this module does not own it.
@@ -40,6 +46,15 @@ pub fn style(def: &VehicleDef) -> Option<CarStyle> {
         "debug_coupe" => tuner::debug_coupe(def),
         "lucciola_350" => exotic::lucciola(def),
         "fulmine_v10" => exotic::fulmine(def),
+        "halberd_40" => supercar::halberd(def),
+        "ombra_v12" => supercar::ombra(def),
+        "ostwind_6t" => supercar::ostwind(def),
+        "kagero_hx" => supercar::kagero(def),
+        "morrigan_55" => race::morrigan(def),
+        "nyx_proto" => race::nyx(def),
+        "merlo_20t" => race::merlo(def),
+        "mesquite_pr" => offroad::mesquite(def),
+        "erg_hamada" => offroad::erg(def),
         _ => return None,
     };
     Some(s)
