@@ -171,3 +171,176 @@ trigger_m = 80.0
 at = 0.85
 length_m = 4.0
 offset_m = 2.5
+
+# ---- Ashpeak County (PR #50, ported on lead/ashpeak-port). Round 12 gives every picker race
+# its own table; these eight are first proposals by the port (presence = the stake table's
+# default for the race's legality, so the field draws the same patrols it did on ws/ashpeak),
+# for the police workstream (E) to tune. County roads are worked by the Ashpeak County
+# Sheriff's Office units (county livery; same AI).
+
+# Midnight touge up Crowfoot Pass's hairpins. Proposed style: mountain tail. As on the Hollins
+# hill: no rams or PITs on the one-lane hairpins; the units follow and wait at the saddle.
+[crowfoot_ascent]
+name = "Mountain tail"
+summary = "Deputies tail the field up the hairpins without rams or PITs and wait for it at the saddle."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 300.0
+recognise_on_sight = false
+
+[crowfoot_ascent.tactics]
+roadblocks = false
+spikes = false
+helicopter = true
+box_in = true
+rolling_block = false
+junction_block = false
+pit = false
+rams = false
+
+[[crowfoot_ascent.stakeouts]]
+at = 0.92
+trigger_m = 50.0
+
+# Downhill touge from the Crowfoot saddle. Proposed style: valley net. Nobody chases down the
+# hairpins; the net is at the foot of the pass, where the road meets town.
+[crowfoot_descent]
+name = "Valley net"
+summary = "No chase down the hairpins; units wait at the foot of the pass and block the junction into town."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 300.0
+recognise_on_sight = false
+
+[crowfoot_descent.tactics]
+roadblocks = false
+spikes = false
+helicopter = false
+box_in = true
+rolling_block = false
+junction_block = true
+pit = false
+rams = false
+
+[[crowfoot_descent.stakeouts]]
+at = 0.9
+trigger_m = 60.0
+
+# Dusk run over Harlan Flats' gravel section roads. Proposed style: open country. Few units
+# out on the farm roads, so the helicopter does the spotting; no spikes on gravel.
+[harlan_dirt_run]
+name = "Open country"
+summary = "Thin patrols on the section roads; the helicopter spots and calls in units ahead."
+presence = 1.0
+backup_scale = 0.75
+tool_lifetime_s = 300.0
+recognise_on_sight = false
+
+[harlan_dirt_run.tactics]
+roadblocks = true
+spikes = false
+helicopter = true
+box_in = false
+rolling_block = true
+junction_block = true
+pit = true
+rams = true
+
+# Illegal daytime checkpoint run through Ashpeak City's downtown. Proposed style: downtown
+# crackdown: max presence (the stake table's), everything allowed, a unit staked out near the
+# last checkpoint.
+[ashpeak_downtown_checkpoint]
+name = "Downtown crackdown"
+summary = "Maximum presence downtown in daylight; every tactic allowed and a unit waiting near the last checkpoint."
+presence = 2.0
+backup_scale = 1.0
+tool_lifetime_s = 300.0
+recognise_on_sight = true
+
+[[ashpeak_downtown_checkpoint.stakeouts]]
+at = 0.8
+trigger_m = 60.0
+
+# Night sprint up Route 7 through the Talon Tunnel. Proposed style: tunnel exit. Rolling
+# blocks and PITs on the open freeway; a unit at the tunnel's north end.
+[route7_tunnel_sprint]
+name = "Tunnel exit"
+summary = "Rolling blocks and PITs on the open freeway, and a unit waiting past the tunnel's north portal."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 300.0
+recognise_on_sight = false
+
+[route7_tunnel_sprint.tactics]
+roadblocks = false
+spikes = false
+helicopter = true
+box_in = false
+rolling_block = true
+junction_block = false
+pit = true
+rams = true
+
+[[route7_tunnel_sprint.stakeouts]]
+at = 0.5
+trigger_m = 80.0
+
+# Night sprint over Route 12's Grizzly Grade. Proposed style: pass patrol. The highway patrol
+# works the grade: PITs on the climb, a roadblock allowed over the saddle.
+[grizzly_grade_sprint]
+name = "Pass patrol"
+summary = "Units work the climb with PITs; past the saddle the captain may block the road."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 300.0
+recognise_on_sight = false
+
+[grizzly_grade_sprint.tactics]
+roadblocks = true
+spikes = false
+helicopter = false
+box_in = false
+rolling_block = true
+junction_block = false
+pit = true
+rams = false
+
+# Quarter-mile drag on the waterfront. Proposed style: late response. Too short for a chase:
+# units only arrive at the end, no tools.
+[waterfront_drag]
+name = "Late response"
+summary = "Too short to chase: the nearest unit rolls in at the end of the strip."
+presence = 1.0
+backup_scale = 0.5
+tool_lifetime_s = 300.0
+recognise_on_sight = false
+
+[waterfront_drag.tactics]
+roadblocks = false
+spikes = false
+helicopter = false
+box_in = true
+rolling_block = false
+junction_block = true
+pit = false
+rams = false
+
+# Two night laps of the downtown block grid. Proposed style: block grid. Units cut through the
+# grid to block junctions ahead on the second lap; no spikes between the towers.
+[ashpeak_metro_circuit]
+name = "Block grid"
+summary = "Units cut across the grid to block the junctions ahead; no spikes between the towers."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 300.0
+recognise_on_sight = false
+
+[ashpeak_metro_circuit.tactics]
+roadblocks = true
+spikes = false
+helicopter = true
+box_in = true
+rolling_block = true
+junction_block = true
+pit = true
+rams = true

@@ -178,7 +178,8 @@ pub fn traffic_draw(sim: &Sim) -> Vec<f32> {
 /// One draw record per police unit (cars and helicopters, bound or not, in unit order),
 /// [`DRAW_STRIDE`] floats each:
 /// `[unit id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags, model]` with flags
-/// 1 helicopter, 2 pursuing / intercepting; `model` indexes [`SessionModels::police_models`]
+/// 1 helicopter, 2 pursuing / intercepting, 4 Ashpeak County unit
+/// ([`crate::police::FLAG_COUNTY`]); `model` indexes [`SessionModels::police_models`]
 /// (`Sim::police_fleet`, the `car_mix` fleet), -1 with a single police model. Bound units report their vehicle's
 /// state; unbound cars sit on the ground like a fresh police spawn; helicopters fly level at
 /// their altitude above the ground.
@@ -187,6 +188,7 @@ pub fn police_draw(sim: &Sim) -> Vec<f32> {
     let map = world.map();
     let terrain = sim.has_terrain();
     let poses = vehicle_poses(sim);
+    let agencies = crate::police::Agencies::of(Some(world.network()));
     let mut out = Vec::new();
     for u in sim.police().units() {
         let b = &u.body;
@@ -209,7 +211,7 @@ pub fn police_draw(sim: &Sim) -> Vec<f32> {
             }
             None => ([b.pos[0], b.pos[1], 0.0], yaw_quat(yaw)),
         };
-        let flags = heli as u32 | (chasing as u32) << 1;
+        let flags = heli as u32 | (chasing as u32) << 1 | agencies.flag(u);
         let model = sim.police_unit_model(u.id).map_or(-1.0, |m| m as f32);
         out.extend_from_slice(&[
             u.id.0 as f32,

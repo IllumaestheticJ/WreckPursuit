@@ -498,13 +498,13 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
 }
 
 /// Static collider of one piece of street / yard furniture: a tree trunk (cylinder up to the
-/// crown, 2.5 m), a hedge or fence (box). `None` for flush decor (driveways).
+/// crown, 2.5 m), a hedge, fence, crane mast, barrier, hay bale or billboard (box). `None` for flush decor (driveways).
 pub fn decor_collider(d: &wp_world::network::Decor) -> Option<Collider> {
     use wp_world::network::DecorKind;
     let (s, c) = wp_math::sin_cos(d.yaw * 0.5);
     let rot = rapier3d::math::Rotation::from_xyzw(0.0, 0.0, s, c);
     match d.kind {
-        DecorKind::StreetTree | DecorKind::YardTree => {
+        DecorKind::StreetTree | DecorKind::YardTree | DecorKind::PineTree => {
             let h = 2.5f32.min(d.size[2]);
             // Parry cylinders stand along local Y: rotate +90° about X so it stands on Z.
             let half = core::f32::consts::FRAC_1_SQRT_2;
@@ -519,7 +519,13 @@ pub fn decor_collider(d: &wp_world::network::Decor) -> Option<Collider> {
                     .build(),
             )
         }
-        DecorKind::Hedge | DecorKind::Fence => Some(
+        DecorKind::Hedge
+        | DecorKind::Fence
+        | DecorKind::Crane
+        | DecorKind::JerseyBarrier
+        | DecorKind::SiteFence
+        | DecorKind::HayBale
+        | DecorKind::Billboard => Some(
             ColliderBuilder::cuboid(d.size[0] * 0.5, d.size[1] * 0.5, d.size[2] * 0.5 + 0.1)
                 .position(Pose::from_parts(
                     Vector::new(d.pos[0], d.pos[1], d.pos[2] + d.size[2] * 0.5 - 0.1),

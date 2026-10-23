@@ -38,7 +38,7 @@ pub mod line;
 pub mod profile;
 pub mod pursuit;
 
-pub use capability::CarCapability;
+pub use capability::{CarCapability, LooseGrip};
 pub use corridor::{
     Corridor, CorridorOptions, CorridorPos, CorridorSample, OpposingLanes, CORRIDOR_STEP_M,
 };
