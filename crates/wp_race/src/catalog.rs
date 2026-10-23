@@ -62,6 +62,10 @@ pub enum CourseSpec {
         start: &'static str,
         /// Finish POI name.
         finish: &'static str,
+        /// The judged finish this far before the finish POI along the route, m (0: at it).
+        /// The rest of the road to the POI is the AI run-off past the line, where the POI
+        /// sits at the end of a dead-end road with nowhere else to run off to.
+        finish_back_m: f32,
     },
     /// Point to point from a named start POI (facing its heading) to a finish point.
     PoiToPoint {
@@ -266,11 +270,16 @@ pub fn races() -> Vec<RaceDef> {
             legality: Legality::Street,
             time_of_day_h: 23.0,
             traffic_density: 0.3,
+            // The finish 60 m short of the lot (lead-approved layout change, 2026-10-23,
+            // PLAYTEST_LOG): the lot is the end of a dead-end road, so with the line at the
+            // lot there was no run-off; the winner stopped on the line among the lot's parked
+            // cars and the cars behind could not reach it (AI s95 seeds 3 and 12).
             course: CourseSpec::PoiRoute {
                 start: "Hollins Ascent",
                 finish: "Knob Observatory Lot",
+                finish_back_m: 60.0,
             },
-            length_hint_m: 1001.0,
+            length_hint_m: 941.0,
             ai: &[MARA, VIC, JUNO],
             seed: 16,
             prior_meets: 0,
@@ -349,6 +358,28 @@ pub fn race_for_scenario(name: &str) -> Option<RaceDef> {
     races().into_iter().find(|r| r.scenario_name() == name)
 }
 
+/// The point `d` metres along `polyline` (`None` past either end).
+fn point_along(polyline: &[[f32; 3]], d: f32) -> Option<[f32; 3]> {
+    if d < 0.0 {
+        return None;
+    }
+    let mut left = d;
+    for w in polyline.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let len = wp_world::geom::dist(wp_world::geom::xy(a), wp_world::geom::xy(b));
+        if left <= len && len > 0.0 {
+            let t = left / len;
+            return Some([
+                a[0] + (b[0] - a[0]) * t,
+                a[1] + (b[1] - a[1]) * t,
+                a[2] + (b[2] - a[2]) * t,
+            ]);
+        }
+        left -= len;
+    }
+    None
+}
+
 fn poi(world: &World, name: &str) -> Option<usize> {
     world.network().pois.iter().position(|p| p.name == name)
 }
@@ -357,8 +388,19 @@ fn poi(world: &World, name: &str) -> Option<usize> {
 /// lane-legal route exists.
 pub fn plan_course(world: &World, def: &RaceDef) -> Option<CityRace> {
     let route = match def.course {
-        CourseSpec::PoiRoute { start, finish } => {
-            world.plan_route_between_pois(poi(world, start)?, poi(world, finish)?)?
+        CourseSpec::PoiRoute {
+            start,
+            finish,
+            finish_back_m,
+        } => {
+            let full = world.plan_route_between_pois(poi(world, start)?, poi(world, finish)?)?;
+            if finish_back_m > 0.0 {
+                let p = &world.network().pois[poi(world, start)?];
+                let end = point_along(&full.polyline, full.length_m - finish_back_m)?;
+                world.plan_route(p.pos, Some(wp_world::geom::dir_of_yaw(p.heading_rad)), end)?
+            } else {
+                full
+            }
         }
         CourseSpec::PoiToPoint { start, finish } => {
             let p = &world.network().pois[poi(world, start)?];

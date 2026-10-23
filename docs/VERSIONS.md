@@ -65,5 +65,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.55 | preview | Far street racers (>350 m) run a light kinematic mode (Vesper night sim 7.7 → 4.7 ms/frame); police skip far unwanted racers; replay hash every 4th tick; AI racers see physical traffic cars as traffic (Loop 9 finishers 91→96 / 89→90 of 96) |
 | 0.12.56 | preview | AI racers escape a box-in (reverse-and-turn round standing cars; Lantern police race always ends); minor-road traffic no longer starves at Priority junctions; wp_contracts 0.3.1 (DnfReason::Stuck, judge rule pending) |
 | 0.12.57 | preview | AI racers no longer stall behind a civilian in the next lane (phantom-drift deadband; Loop 9 s95 finishers 90 → 95 of 96); judge ends a race once every racer left has made no progress for 3 min (DnfReason::Stuck, "stuck" in results); Loop 9 pace guarded over 8 seeds |
-| 0.12.58 | preview | (next) |
+| 0.12.58 | preview | Hollins finish 60 m short of the Knob lot (941 m; the lot road is the AI run-off; all 4 AI finish in 64/64 runs per skill); stranded AI racers (off the corridor 20 s) are put back on the course, damage kept (player's picker-race rule unchanged); finishers roll on past a dead-end line; police stopped-while-active audit |
+| 0.12.59 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |

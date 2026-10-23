@@ -487,7 +487,18 @@ pub fn race_pace_in(
         }
         // `WP_PACE_DUMP=x,y,t`: every vehicle within 35 m of (x, y) at race time t (s).
         if let Ok(v) = std::env::var("WP_PACE_DUMP") {
-            let f: Vec<f32> = v.split(',').filter_map(|x| x.parse().ok()).collect();
+            let mut f: Vec<f32> = v.split(',').filter_map(|x| x.parse().ok()).collect();
+            if f.len() == 2 {
+                // `WP_PACE_DUMP=k,t`: round racer k.
+                let st = sim
+                    .vehicles()
+                    .iter()
+                    .find(|x| x.id == racers[f[0] as usize])
+                    .unwrap()
+                    .vehicle
+                    .state();
+                f = vec![st.pos[0], st.pos[1], f[1]];
+            }
             if f.len() == 3 && tick == green + (f[2] * 240.0) as u64 {
                 for a in sim.world().agents() {
                     let (dx, dy) = (a.pos[0] - f[0], a.pos[1] - f[1]);
@@ -520,6 +531,10 @@ pub fn race_pace_in(
                 .find(|r| r.racer == racers[k])
                 .is_some_and(|r| r.status == wp_race::RacerStatus::Running);
             if !running {
+                if opts.trace == Some(k) && tick.is_multiple_of(trace_every()) {
+                    let d = field.debug_of(k);
+                    eprintln!("  DONE t={:6.1} s={:7.1} tgt={:5.1} lim={:?} tac={:?} n={:5.2} ncmd={:5.2}", (tick - green) as f32 * PHYSICS_DT, d.s, d.v_target, d.limit, field.tactic_of(k), d.n, d.n_cmd);
+                }
                 continue;
             }
             let d = field.debug_of(k);

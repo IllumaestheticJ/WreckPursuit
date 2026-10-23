@@ -648,6 +648,14 @@ const CIV_DRIFT_DEADBAND: f32 = 0.025;
 /// How far along the corridor a relocated racer is looked for, either way, m.
 const RELOCATE_WINDOW_M: f32 = 1500.0;
 
+/// A finished racer whose corridor ends at the finish line rolls on this far past it before
+/// pulling over, m, at most this fast, m/s.
+const FINISH_CLEAR_M: f32 = 15.0;
+const FINISH_CLEAR_MPS: f32 = 5.0;
+/// A corridor that runs on less than this past the finish has no run-off leg (it ends at the
+/// line, give or take its sampling), m.
+const NO_RUN_OFF_M: f32 = 5.0;
+
 /// Lateral step between the pass positions tried beside a car (about a lane), m.
 const PASS_LANE_STEP_M: f32 = 3.5;
 
@@ -1913,6 +1921,15 @@ fn decide_racer(
             r.status,
             RacerStatus::Finished { .. } | RacerStatus::Disqualified
         );
+        // Finished where the corridor ends at the finish line itself (no run-off leg: Hollins
+        // finishes in the Knob Observatory Lot): roll on straight past the end into the space
+        // beyond before pulling over. Stopped on the line, the winner held the three behind it
+        // short of it until the finish window closed (s95 seed 3, 15-17 rejoins each).
+        let no_run_off =
+            !corridor.closed && finish_m.is_none_or(|f| f >= corridor.length_m - NO_RUN_OFF_M);
+        let clearing_line = matches!(r.status, RacerStatus::Finished { .. })
+            && no_run_off
+            && r.s_rel < corridor.length_m + FINISH_CLEAR_M;
         r.wide_on = match wide {
             Some((wl, wp)) if !fleeing && !finished_or_dq && r.flight.is_none() => {
                 let a_brk = wp.a_brake.max(3.0);
@@ -2131,8 +2148,14 @@ fn decide_racer(
             let on_grid = r.laps_done == 0 && r.progress < 30.0;
             let off =
                 !on_grid && (r.n < road_lo.min(pass_lo) - 1.0 || r.n > road_hi.max(pass_hi) + 1.0);
+            // Finished and past the open end of the corridor (clearing the finish line): that
+            // is meant to be off it, not a reason to drive back to it.
+            let past_end = matches!(r.status, RacerStatus::Finished { .. })
+                && !corridor.closed
+                && r.s_rel > corridor.length_m - 1.0;
             if r.tactic != Tactic::Reverse
                 && r.tactic != Tactic::Rejoin
+                && !past_end
                 && (off || heading_cos < 0.5)
             {
                 r.tactic = Tactic::Rejoin;
@@ -2143,7 +2166,7 @@ fn decide_racer(
             if v > 1.0 {
                 r.wants_room = false;
             }
-            let wants_to_move = v_line(r.s) > 3.0;
+            let wants_to_move = v_line(r.s) > 3.0 || clearing_line;
             let held_by_car = rel
                 .iter()
                 .any(|x| x.ds > 0.0 && x.gap < 4.0 && x.o.v_s.abs() < 1.0);
@@ -2813,6 +2836,10 @@ fn decide_racer(
 
         // ---- Longitudinal target ----
         let mut v_target = v_line(r.s + v * (0.15 + p.early_brake_s + r.brake_err_s));
+        if clearing_line {
+            // The profile stops at the corridor's end; roll on past it.
+            v_target = FINISH_CLEAR_MPS;
+        }
         let mut limit = SpeedLimit::Profile;
         let mut cap_to = |v_target: &mut f32, cap: f32, why: SpeedLimit| {
             if cap < *v_target {
@@ -2825,8 +2852,11 @@ fn decide_racer(
             r.tactic = Tactic::Park;
         }
         // Done with a point-to-point race: pull over before the corridor runs out (past its
-        // end there is only whatever the road leads into — a car park wall, a dead end).
-        if matches!(r.status, RacerStatus::Finished { .. })
+        // end there is only whatever the road leads into — a car park wall, a dead end), or
+        // once past its end where it ends at the finish line (`clearing_line`).
+        if clearing_line {
+            cap_to(&mut v_target, FINISH_CLEAR_MPS, SpeedLimit::Mode);
+        } else if matches!(r.status, RacerStatus::Finished { .. })
             && !corridor.closed
             && r.s > corridor.length_m - 25.0
         {
@@ -3228,7 +3258,19 @@ fn decide_racer(
         let inside = (k_mid * l_t * l_t / 8.0).clamp(-1.5, 1.5);
         let n_t = (n_cmd + follow_w * (line_n(s_t) - line_n(r.s)) + inside)
             .clamp(t_lo.min(n_cmd), t_hi.max(n_cmd));
-        let target = corridor.point(s_t, n_t);
+        let mut target = corridor.point(s_t, n_t);
+        // Clearing the finish line past the end of the corridor: straight on along its last
+        // direction.
+        if clearing_line && r.s_rel + ld > corridor.length_m {
+            // Towards the kerb on my side as I roll on, round whatever stands at the end of
+            // the road straight ahead (the Knob lot: a broken-down car in the entrance).
+            let (_, kerb) = limits(corridor.length_m);
+            let end = corridor.point(corridor.length_m, kerb);
+            let t = corridor.samples[corridor.samples.len() - 1].tangent;
+            // From where I am past the end (`s` stops at the end; `s_rel` runs on).
+            let past = r.s_rel + ld - corridor.length_m;
+            target = [end[0] + t[0] * past, end[1] + t[1] * past, end[2]];
+        }
         let pos_lag = geom::add(r.pos, geom::scale(r.vel, STEER_LAG_S));
         let (sn, cs) = wp_math::sin_cos(r.yaw_rate * STEER_LAG_S);
         let fwd_lag = [r.fwd[0] * cs - r.fwd[1] * sn, r.fwd[0] * sn + r.fwd[1] * cs];
@@ -4413,6 +4455,39 @@ mod tests {
         assert_ne!(next_lane_civ_limit(-0.4), SpeedLimit::Obstacle(1_000_001));
         // Changing lanes into mine: braked for.
         assert_eq!(next_lane_civ_limit(-1.5), SpeedLimit::Obstacle(1_000_001));
+    }
+
+    #[test]
+    fn a_finisher_rolls_on_past_a_corridor_that_ends_at_the_line_before_parking() {
+        // `straight()` ends at 398 m and the config has no run-off (`finish_m` unset): the
+        // finish line is the end of the corridor.
+        let mut f = field(1);
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        let dt = 4.0 * PHYSICS_DT;
+        let at = |f: &mut Field, y: f32, v: f32| {
+            f.observe(
+                &world,
+                &[obs(1, y, v, HandlingEffects::NEUTRAL)],
+                &NoPolice,
+                dt,
+            );
+            f.decide(0, &[], &[], None, None, dt);
+            (f.debug_of(0), f.tactic_of(0))
+        };
+        at(&mut f, 380.0, 10.0);
+        at(&mut f, 397.8, 8.0);
+        assert!(
+            matches!(f.racers[0].status, RacerStatus::Finished { .. }),
+            "{:?}",
+            f.racers[0].status
+        );
+        // 4 m past the line: still rolling on, not parked on it.
+        let (d, tac) = at(&mut f, 402.0, 4.0);
+        assert_ne!(tac, Tactic::Park);
+        assert!(d.v_target >= FINISH_CLEAR_MPS - 1e-3, "{d:?}");
+        // Clear of it: pull over.
+        let (_, tac) = at(&mut f, 398.0 + FINISH_CLEAR_M + 2.0, 4.0);
+        assert_eq!(tac, Tactic::Park);
     }
 
     #[test]
