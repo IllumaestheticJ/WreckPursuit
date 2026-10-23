@@ -115,10 +115,17 @@ impl RacerResult {
     /// Total-order ranking key: lower sorts first. Every component is an integer, so equal keys
     /// can only occur for the same racer (the last component is the entity id).
     ///
-    /// Order: finishers by elapsed time; then running/DNF racers by gates passed, distance
-    /// (cm) and how long they lasted; then DQs by the same; then grid slot; then entity id.
+    /// Order: finishers by elapsed time; then racers still running by gates passed and
+    /// distance (cm); then DNFs by gates passed, distance and how long they lasted; then DQs by
+    /// the same; then grid slot; then entity id. A racer still in the race outranks one who is
+    /// out of it (playtest B6: a busted AI showed ahead of the running player).
     pub fn rank_key(&self) -> (u8, u64, i64, i64, i64, u8, u32) {
-        let class = self.status.class();
+        let class = match self.status {
+            RacerStatus::Finished => 0,
+            RacerStatus::Running => 1,
+            RacerStatus::Dnf(_) => 2,
+            RacerStatus::Dq(_) => 3,
+        };
         if class == 0 {
             let time = self.elapsed_subticks.unwrap_or(u64::MAX);
             return (class, time, 0, 0, 0, self.grid_slot, self.racer.0);

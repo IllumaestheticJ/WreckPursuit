@@ -720,6 +720,68 @@ fn identical_racers_resolve_by_grid_slot() {
     assert_eq!(out.results[0].grid_slot, 0);
 }
 
+/// Playtest B6: during the race a racer still running ranks above one who is out (busted /
+/// DNF), even when the DNF racer had got further.
+#[test]
+fn a_running_racer_outranks_a_dnf_one() {
+    let e = |id| RacerEntry {
+        racer: EntityId(id),
+        redline_rpm: 7000.0,
+    };
+    let mut j = judge(RaceKind::Sprint, sprint_course());
+    j.enter(e(1)).unwrap();
+    j.enter(e(2)).unwrap();
+    let grid = j.grid();
+    let green = j.start(0).unwrap();
+    let sample = |id: u32, ahead: f32| {
+        let p = grid.iter().find(|(r, _)| r.0 == id).unwrap().1.pos;
+        RacerSample {
+            racer: EntityId(id),
+            pos: [p[0], p[1] + ahead, p[2]],
+            vel: [0.0, 10.0, 0.0],
+            speed_mps: 10.0,
+            throttle: 1.0,
+            gear: 2,
+            engine_rpm: 4000.0,
+        }
+    };
+    for t in 0..=green + 240 {
+        let k = t.saturating_sub(green) as f32 / 240.0;
+        // Racer 1 is twice as far along as racer 2.
+        j.observe(t, &[sample(1, 20.0 * k), sample(2, 10.0 * k)], &[]);
+    }
+    let r = j.results();
+    assert_eq!(r[0].racer, EntityId(1), "the leader leads while running");
+    j.dnf(EntityId(1), DnfReason::Captured, green + 240);
+    let r = j.results();
+    assert_eq!(r[0].racer, EntityId(2), "running beats busted: {r:?}");
+    assert_eq!(r[0].position, 1);
+    assert_eq!(r[1].status, RacerStatus::Dnf(DnfReason::Captured));
+}
+
+/// A withdraw keeps the full-capacity grid `enter` uses, so a later entrant never lands on a
+/// re-packed slot (bughunt F8).
+#[test]
+fn withdraw_then_enter_never_shares_a_slot() {
+    let e = |id| RacerEntry {
+        racer: EntityId(id),
+        redline_rpm: 7000.0,
+    };
+    let mut j = judge(RaceKind::Sprint, sprint_course());
+    for id in 1..=3 {
+        j.enter(e(id)).unwrap();
+    }
+    assert!(j.withdraw(EntityId(1)));
+    j.enter(e(4)).unwrap();
+    let g = j.grid();
+    for (i, (_, a)) in g.iter().enumerate() {
+        for (_, b) in &g[i + 1..] {
+            let (dx, dy) = (a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]);
+            assert!(dx * dx + dy * dy > 1.0, "two cars on one spot: {g:?}");
+        }
+    }
+}
+
 // ---------------------------------------------------------------- determinism / properties
 
 #[test]
