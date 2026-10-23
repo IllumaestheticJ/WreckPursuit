@@ -6,7 +6,7 @@
 // less) or tilt-to-steer; brake and throttle pedals bottom-right (analogue by the finger's
 // height on the pedal: low = light, high = full; slide to modulate); handbrake next to the
 // pedals; map / pause top-right; camera / reset / horn / steering mode above the steering
-// (the horn also challenges a street racer next to you, src/ui/street.ts). Portrait shows a
+// (the horn also challenges a street racer you are right behind, src/ui/street.ts). Portrait shows a
 // "rotate your phone" hint.
 //
 // Values reach the sim through `input.ts` exactly like the gamepad's (registered with
@@ -255,7 +255,7 @@ export class TouchControls {
     };
     edgeBtn("cameraCycle", "🎥", "camera", side);
     edgeBtn("reset", "↺", "reset the car", side);
-    // Horn (held): also challenges a street racer you are next to.
+    // Horn (held): also challenges a street racer you are right behind.
     this.hornEl = el("tc", "📯", side);
     this.hornEl.dataset.touch = "horn";
     this.hornEl.title = "horn (challenge a street racer)";

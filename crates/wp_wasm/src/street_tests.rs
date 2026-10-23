@@ -75,7 +75,7 @@ fn park_behind(s: &mut Session, k: usize) -> EntityId {
     racer
 }
 
-/// Honk next to racer `k`: the offer opens for it.
+/// Honk right behind racer `k`: the offer opens for it.
 fn challenge(s: &mut Session, k: usize) -> EntityId {
     let racer = park_behind(s, k);
     s.set_input(PLAYER, horn(true)).unwrap();
@@ -272,6 +272,49 @@ fn street_racers_only_in_live_free_drive_and_can_be_turned_off() {
         again.street().unwrap().entities(),
         s.street().unwrap().entities()
     );
+}
+
+/// A honk only challenges a racer the player is right behind: alongside, in front or facing
+/// the other way does nothing (owner request 2026-10-23).
+#[test]
+fn honk_challenges_only_from_right_behind() {
+    let mut s = city_session();
+    s.run_ticks(240 * 2);
+    let racer = s.street().unwrap().entities()[2];
+    let st = state(&s, racer);
+    let yaw = yaw_of(st.rot);
+    let (sn, cs) = wp_math::sin_cos(yaw);
+    // Racer forward = (-sin, cos); right = (cos, sin).
+    for (what, along, side, turn) in [
+        ("alongside", 0.0, 5.0, 0.0),
+        ("in front", 12.0, 0.0, 0.0),
+        (
+            "behind, facing the other way",
+            -9.0,
+            0.0,
+            std::f32::consts::PI,
+        ),
+        ("too far behind", -40.0, 0.0, 0.0),
+    ] {
+        let xy = [
+            st.pos[0] - sn * along + cs * side,
+            st.pos[1] + cs * along + sn * side,
+        ];
+        s.place_logged(PLAYER, xy, yaw + turn, st.pos[2]).unwrap();
+        assert!(
+            s.street().unwrap().challengeable(s.sim(), PLAYER).is_none(),
+            "no hint: {what}"
+        );
+        s.set_input(PLAYER, horn(true)).unwrap();
+        s.run_ticks(2);
+        s.set_input(PLAYER, horn(false)).unwrap();
+        s.run_ticks(2);
+        assert!(
+            s.street().unwrap().offer(s.sim(), s.run()).is_none(),
+            "a honk opens no challenge: {what}"
+        );
+    }
+    challenge(&mut s, 2);
 }
 
 #[test]
