@@ -180,7 +180,7 @@ export const PROP_STRIDE = 11;
 /** Offsets inside one props_static() record: kind, box-centre pos xyz, rot quaternion xyzw, half extents xyz. */
 export const P = { kind: 0, pos: 1, rot: 4, half: 8 } as const;
 /** props_static() kind codes. */
-export const PROP_KIND = { parkedCar: 0, cone: 1 } as const;
+export const PROP_KIND = { parkedCar: 0, cone: 1, krail: 2 } as const;
 /** Floats per record in props_moved(): [prop index, x, y, z, qx, qy, qz, qw]. */
 export const PROP_MOVED_STRIDE = 8;
 /** Floats per record in parked_wrecks() (crates/wp_wasm/src/props.rs). */

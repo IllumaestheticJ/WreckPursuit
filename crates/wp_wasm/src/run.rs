@@ -645,6 +645,51 @@ impl PlayerRun {
         Ok((fee, lines))
     }
 
+    /// Take a touge wager on this account (`wp_race::touge::place`: rep gates, side-bet
+    /// stake taken now on the run's cash ledger, as street-race wagers) with the run's car on
+    /// the line.
+    pub fn touge_place(
+        &mut self,
+        table: &wp_race::touge::TougeTable,
+        setup: wp_race::touge::TougeSetup,
+        wager: wp_race::touge::Wager,
+    ) -> Result<(wp_race::touge::WagerTicket, Vec<LedgerLine>), String> {
+        let (ticket, ev) =
+            wp_race::touge::place(&self.econ, &mut self.acct, table, setup, wager, self.car)
+                .map_err(|e| e.to_string())?;
+        let lines = ev.iter().map(LedgerLine::of).collect();
+        self.ledger.extend(ev);
+        Ok((ticket, lines))
+    }
+
+    /// Pay out a decided touge battle on this account (`wp_race::touge::settle`).
+    pub fn touge_settle(
+        &mut self,
+        table: &wp_race::touge::TougeTable,
+        ticket: &wp_race::touge::WagerTicket,
+        outcome: &wp_race::touge::BattleOutcome,
+        opponent: &wp_race::touge::OpponentCar,
+    ) -> Result<(wp_race::touge::TougeSettlement, Vec<LedgerLine>), String> {
+        let (out, ev) = wp_race::touge::settle(
+            &self.econ,
+            &mut self.acct,
+            table,
+            ticket,
+            outcome,
+            self.player,
+            opponent,
+        )
+        .map_err(|e| e.to_string())?;
+        let lines = ev.iter().map(LedgerLine::of).collect();
+        self.ledger.extend(ev);
+        Ok((out, lines))
+    }
+
+    /// Testbed only: set the account's rep (to try rep-gated touge battles outside a career).
+    pub fn debug_set_rep(&mut self, rep: i64) {
+        self.acct.rep = rep.max(0);
+    }
+
     /// Pay out a race result (G's `Economy::settle_race`: purse share, clean bonus, rep,
     /// bounty while wanted). `entry` = what [`PlayerRun::enter_race`] charged, for the report.
     pub fn settle_race(
