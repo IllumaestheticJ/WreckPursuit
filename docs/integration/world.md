@@ -1526,6 +1526,27 @@ on lead/round12 353744ec and on ws/world (debug and release: 1 go-around, contac
 failure opponent-pace saw on 0e84a9f7 predates a779ad57 (the fix and the re-aimed ≥ 1
 threshold are not in that commit), so it is not a regression. The margin is thin (exactly 1).
 
+## Lead (2026-10-23): `world_traffic_soak` on candidate G handling — 1 civilian collision
+**Cause (traffic driving, not G).** Both cars were kinematic civilians; no racer or police unit
+was involved. G only changed the timing.
+- Agent 241 began a 13 s kinematic turn-around with agent 420 queued 2.9 m behind it (bumper
+  gap). The turn-around holds its own lane at `TURN_OWN_HOLD_M` (8 m) behind the turner, but
+  420 was already closer than that.
+- So 420 never saw the hold. It saw the turning car's own entry as its leader and crept up to
+  its 1.8 m standstill gap during the turn.
+- The turn ends with the car lined up with the opposite lane, its nose swung back over the
+  own lane. That end pose cleared 420 by 0.29 m when the turn was planned; after the creep it
+  overlapped 420 by about 0.1 m.
+
+**Fix (`traffic/blocked.rs`).** `turn_own_hold_s`: the hold sits 8 m behind the turner, or
+0.5 m ahead of a follower already closer than that (`TURN_FOLLOWER_HOLD_GAP_M`), so that
+follower stays where it is until the turn ends. Unit test
+`a_follower_queued_close_behind_a_turn_is_held_where_it_is`.
+**Measured on `lead/opponent-pace` (0274348d, G).** `world_traffic_soak`: 0 civilian
+collisions on seeds 5–9. With the fix, 113 of 115 scenarios pass on G. The other two,
+`police_tunnel_escape_founders_cut*`, fail identically without it (same hashes), so they
+are G-side; they are not on physics.md's red list.
+
 ## Playtest row 164 — barriers: a glancing scrape slides the car along
 **Cause (physics only; the drawn barrier is already one swept profile).** Median barriers,
 deck guard rails and bare-sidewalk-back rails were one yaw-only box per segment
