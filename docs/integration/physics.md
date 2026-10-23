@@ -96,3 +96,13 @@ Base tyres, RACK=ref unless named; held s / taps of 36:
   Bench: held 2.59 s (2.24), taps 21 / 36 (20), handling fails 0. Next: AI pace sweep, tests,
   owner confirmation, then default.
 - TCS: Off preferred over Half (a player setting; no physics change).
+
+### Candidate G: AI pace sweep (opponent_pace, all races × skills 0.25 / 0.5 / 0.75 / 0.95)
+Mean race time, shipped → G (wall hits):
+- **lantern_checkpoint 0.75: 52.8 → 69.5 s; 0.95: 55.2 → 79.0 s (0 → 12 walls)**
+- **hollins_sprint 0.95: 62.4 → 72.3 s (1 → 3 walls)**; 0.5 / 0.75 ±0.6 s (walls 0 → 4, 2 → 4)
+- loop9 0.5: 210.9 → 234.8 s (base 2 walls, G 0; noisy), others ±7 s
+- grid_highway_sprint, city_sprint: unchanged
+G breaks the brief's rule "must not make AI racers slower or crash more". Not shippable as is.
+Split under way: G tyres + grip with the firm ride (G_firm, yaw inertia 1.35) and G tyres + grip
+alone, on lantern / hollins at skills 0.75 / 0.95.
