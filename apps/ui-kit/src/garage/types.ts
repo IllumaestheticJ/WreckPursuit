@@ -113,6 +113,43 @@ export interface DealerCar {
   price_used: number;
   price_worn: number;
   stats: StatsView;
+  /** Rep tier at which the dealer sells this class. */
+  unlock_tier: RepTier;
+  /** The player's tier is below `unlock_tier`. */
+  locked: boolean;
+}
+
+/** `wp_economy::RepTier`, lowest first. */
+export type RepTier = "Unknown" | "Street" | "Known" | "Respected" | "Feared" | "Legend";
+
+/** `wp_economy::Feature`. */
+export type CareerFeature = "city_races" | "city_betting" | "touge_races" | "touge_betting" | "boss_races" | "pink_slips" | "street_betting";
+
+/** `wp_economy::CareerProgress`: the rep ladder. */
+export interface CareerProgress {
+  tier: RepTier;
+  tier_name: string;
+  rep: number;
+  credits: number;
+  peak_tier: RepTier;
+  next: { tier: RepTier; name: string; min_rep: number; rep_needed: number; reward: number } | null;
+  /** 0–1 from this tier's start to the next. */
+  tier_fraction: number;
+  features: { feature: CareerFeature; unlocked: boolean; needs: RepTier; needed_rep: number }[];
+  classes: { class: string; unlocked: boolean; needs: RepTier }[];
+  max_bet_city: number;
+  max_bet_touge: number;
+  max_bet_street: number;
+}
+
+/** `wp_economy::ProgressUpdate`: what a run changed on the ladder. */
+export interface ProgressUpdate {
+  before: RepTier;
+  after: RepTier;
+  first_reached: RepTier[];
+  reward: number;
+  unlocked: CareerFeature[];
+  relocked: CareerFeature[];
 }
 
 /** `wp_wasm::run::LedgerLine`. */
@@ -160,6 +197,7 @@ export interface CareerView {
   insurance: { id: string; premium_per_day_frac: number; coverage: number; deductible: number }[];
   districts: { id: string; labour: number }[];
   stats: CareerStats;
+  progress: CareerProgress;
   captures: number;
   escapes: number;
   ledger: LedgerLine[];
@@ -203,6 +241,7 @@ export interface RunClose {
   carried_heat: number;
   cash: number;
   ledger: LedgerLine[];
+  progress: ProgressUpdate;
 }
 
 /** Which run the garage starts. */

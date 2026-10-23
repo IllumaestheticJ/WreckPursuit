@@ -53,6 +53,7 @@ pub mod police;
 pub mod props;
 pub mod race;
 pub mod reset;
+pub mod roam;
 pub mod run;
 pub mod scenario;
 pub mod session;
@@ -71,6 +72,8 @@ mod crash_replay_tests;
 mod police_audio_trace;
 #[cfg(test)]
 mod race_tests;
+#[cfg(test)]
+mod roam_tests;
 #[cfg(test)]
 mod run_tests;
 #[cfg(test)]
@@ -200,6 +203,34 @@ pub fn free_drive_city_json(car: &str, mode: &str, city_id: &str) -> Result<Stri
         mode,
         scenario::city_spec(city_id),
     )))
+}
+
+/// Free roam in a chosen city (`city_id` as in [`free_drive_city_json`]): free drive plus
+/// `roamers` AI street racers (0 = the default 10, at most 24) roaming the city's highways,
+/// touge, dirt roads, downtown and countryside. Start it with `init` like any scenario.
+#[wasm_bindgen]
+pub fn free_roam_city_json(
+    car: &str,
+    mode: &str,
+    city_id: &str,
+    roamers: u32,
+) -> Result<String, JsValue> {
+    let mode = data::parse_mode(mode).map_err(err)?;
+    let n = match roamers {
+        0 => roam::DEFAULT_ROAMERS,
+        n => n as usize,
+    };
+    Ok(json(
+        &roam::free_roam_in(car, mode, city_id, n).map_err(err)?,
+    ))
+}
+
+/// Free-roam status JSON (`null` outside free roam): every roamer's entity id, home haunt,
+/// phase, current leg's haunt, full-pace run or not, legs and distance driven; rescues so
+/// far; the last few roamer events.
+#[wasm_bindgen]
+pub fn roam_status_json() -> Result<String, JsValue> {
+    get(|s| json(&s.roam().map(roam::RoamRun::status)))
 }
 
 /// City chase in a chosen city (`city_id` as in [`free_drive_city_json`]).

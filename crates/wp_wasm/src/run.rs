@@ -364,15 +364,43 @@ impl PlayerRun {
         &self.ledger
     }
 
-    /// Street-race wager (`crate::street`): post `cash` (negative = stake paid, positive =
-    /// winnings) as a ledger line with `note`. A stake the account cannot cover is refused.
-    pub fn wager(&mut self, cash: i64, note: &str) -> Result<(), String> {
-        let (_, events) = self
+    /// Largest stake the account may bet at `venue` now (the career economy's `max_bet`: 0
+    /// when that betting is locked by rep tier, the player is broke or in debt).
+    pub fn max_bet(&self, venue: wp_economy::BetVenue) -> i64 {
+        self.econ.max_bet(&self.acct, venue)
+    }
+
+    /// Why betting at `venue` is locked for this account (`None` when it is open).
+    pub fn bet_lock(&self, venue: wp_economy::BetVenue) -> Option<String> {
+        self.econ
+            .require_unlocked(&self.acct, venue.feature())
+            .err()
+            .map(|e| e.to_string())
+    }
+
+    /// Take a bet's stake from the account (the career economy's `place_bet`: tier gate,
+    /// cap, debt; ledger note `bet:stake:<venue>:<label>`). The one betting wallet: street
+    /// racer challenges and picker-race bets both go through here. Nothing changes on an error.
+    pub fn place_bet(
+        &mut self,
+        venue: wp_economy::BetVenue,
+        stake: i64,
+        label: &str,
+    ) -> Result<wp_economy::BetTicket, String> {
+        let (ticket, ev) = self
             .econ
-            .adjust(&mut self.acct, cash, note)
+            .place_bet(&mut self.acct, venue, stake, label)
             .map_err(|e| e.to_string())?;
-        self.ledger.extend(events);
-        Ok(())
+        self.ledger.extend(ev);
+        Ok(ticket)
+    }
+
+    /// Pay a bet back: `gross` includes the stake (0 = lost, nothing posted; ledger note
+    /// `bet:payout:<venue>:<label>`).
+    pub fn settle_bet(&mut self, ticket: &wp_economy::BetTicket, gross: i64) {
+        if let Ok((_, ev)) = self.econ.settle_bet(&mut self.acct, ticket, gross) {
+            self.ledger.extend(ev);
+        }
     }
 
     /// The latest settlement, if any.

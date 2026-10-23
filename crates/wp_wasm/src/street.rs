@@ -24,7 +24,9 @@
 //!   row 151; gates the player passes within [`GATE_RADIUS_M`] before B counts), and a stake
 //!   inside the level's range (capped by their cash), then accepts. Not while the player is
 //!   wanted or chased (owner row 150): a honk does nothing and an open offer lapses.
-//! - **Race.** Accepting pays the stake (a ledger line), resets both cars side by side at the
+//! - **Race.** Accepting pays the stake (a betting ticket on the one career wallet:
+//!   `wp_economy` `place_bet`, venue `Street`, open from the start and capped only by cash and
+//!   the level's range; ledger note `bet:stake:street:…`), resets both cars side by side at the
 //!   start, at rest, facing along the route (logged moves, owner row 150),
 //!   holds both for a 3 s countdown, then the racer drives a full-pace `Field` like a picker
 //!   race's AI ([`wp_race::entrants`]): its level's [`DriverProfile`], the car's real
@@ -33,7 +35,7 @@
 //!   police until it finishes, is wrecked or is actually captured). First within
 //!   [`FINISH_RADIUS_M`] of B wins, by any path (shortcuts are fair); a wreck or a capture
 //!   decides it early; at the time limit the one further along the route wins. A win pays back
-//!   twice the stake (even money).
+//!   twice the stake (even money, `settle_bet`, `bet:payout:street:…`).
 //! - **Police.** Street racers are `VehicleKind::AiRacer` for the whole session (the kind is
 //!   not a replay op, so it cannot change mid-session): the police treat them as racers, as
 //!   they treat a picker race's AI. Roaming ones keep to the law, so they draw no heat; a
@@ -53,6 +55,7 @@ use serde::Serialize;
 use simcli::scenario::{AssistSpec, CitySpec, EntitySpec};
 use simcli::Scenario;
 use wp_contracts::{DamageSim, EntityId, LoadedCar, SimEvent, VehicleInput, VehicleSim};
+use wp_economy::{BetTicket, BetVenue};
 use wp_math::Rng;
 use wp_opponent::{
     CarCapability, CorridorOptions, DriverProfile, Field, OpposingLanes, RaceConfig, RacerSpec,
@@ -626,6 +629,8 @@ struct Race {
     course: Vec<f32>,
     length_m: f32,
     stake: i64,
+    /// The stake's betting ticket (career economy, venue Street).
+    ticket: BetTicket,
     go_tick: u64,
     limit_tick: u64,
     /// Player's progress along the route, m.
@@ -1212,9 +1217,12 @@ impl StreetRacers {
             }
             None => (pos, yaw),
         };
-        run.wager(
-            -stake,
-            &format!("street race stake vs {} ({})", self.racers[k].name, l.name),
+        // The one betting wallet (career economy, venue Street): open from the start, the
+        // level's range was checked above and cash covers it.
+        let ticket = run.place_bet(
+            BetVenue::Street,
+            stake,
+            &format!("vs {} ({})", self.racers[k].name, l.name),
         )?;
         let tick = sim.tick();
         let go_tick = tick + COUNTDOWN_TICKS;
@@ -1238,6 +1246,7 @@ impl StreetRacers {
             course: course_packed(&route.polyline, via),
             length_m: route.length_m,
             stake,
+            ticket,
             go_tick,
             limit_tick,
             player_s: 0.0,
@@ -1695,6 +1704,7 @@ impl StreetRacers {
             return;
         };
         let stake = race.stake;
+        let ticket = race.ticket.clone();
         let margin_m = if won {
             race.length_m - racer_s
         } else {
@@ -1709,10 +1719,7 @@ impl StreetRacers {
         if won {
             r.losses += 1;
             // Even money: the stake back plus the racer's.
-            let _ = run.wager(
-                2 * stake,
-                &format!("street race won vs {} ({})", r.name, l.name),
-            );
+            run.settle_bet(&ticket, 2 * stake);
         } else {
             r.wins += 1;
         }

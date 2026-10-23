@@ -20,7 +20,10 @@ fn econ() -> Economy {
 fn career_with(def_id: &str, cash: i64, mode: DamageMode) -> (Career, CarUid) {
     let mut c = Career::new(econ(), mode);
     c.profile_mut().account.cash = cash;
+    // Any class: lift the career's dealer gate for the purchase only.
+    c.profile_mut().account.rep = 1_000_000;
     let uid = c.buy_car(def_id, Condition::Used).unwrap();
+    c.profile_mut().account.rep = 0;
     c.set_active(uid).unwrap();
     (c, uid)
 }
@@ -680,4 +683,47 @@ fn the_workshop_shows_the_car_as_it_is_even_with_parts_missing() {
         "saved dents are shown"
     );
     assert!(!c.run_active(), "the workshop is not a run");
+}
+
+#[test]
+fn rep_tiers_gate_the_dealer_and_pay_their_bonus_once() {
+    let mut c = Career::new(econ(), DamageMode::Arcade);
+    c.profile_mut().account.cash = 500_000;
+    let view = c.view();
+    assert_eq!(view.progress.tier, wp_economy::RepTier::Unknown);
+    let exotic = view
+        .dealer
+        .iter()
+        .find(|d| d.class == wp_contracts::VehicleClass::Exotic)
+        .unwrap()
+        .clone();
+    assert!(exotic.locked);
+    assert!(view.dealer.iter().any(|d| !d.locked));
+    let err = c.buy_car(&exotic.def_id, Condition::New).unwrap_err();
+    assert!(err.contains("locked"), "{err}");
+
+    // Rep earned on the night pays each tier's bonus the first time only.
+    let feared = econ()
+        .progression
+        .tier_def(wp_economy::RepTier::Feared)
+        .min_rep;
+    c.profile_mut().account.rep = feared;
+    let cash = c.profile().account.cash;
+    c.next_night().unwrap();
+    let paid = c.profile().account.cash - cash;
+    let bonuses: i64 = econ().progression.tiers[1..=4]
+        .iter()
+        .map(|t| t.reward)
+        .sum();
+    assert!(paid >= bonuses - 1_000, "paid {paid}, bonuses {bonuses}");
+    let view = c.view();
+    assert_eq!(view.progress.tier, wp_economy::RepTier::Feared);
+    assert!(!view
+        .dealer
+        .iter()
+        .any(|d| d.def_id == exotic.def_id && d.locked));
+    c.buy_car(&exotic.def_id, Condition::Worn).unwrap();
+    let cash = c.profile().account.cash;
+    c.next_night().unwrap();
+    assert!(c.profile().account.cash <= cash, "no second bonus");
 }
