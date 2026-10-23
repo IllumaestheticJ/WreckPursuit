@@ -22,7 +22,7 @@
 use std::path::{Path, PathBuf};
 
 /// Crates whose `src/` is linted. Everything reachable from a simulation step.
-pub const SIM_CRATES: [&str; 9] = [
+pub const SIM_CRATES: [&str; 11] = [
     "wp_contracts",
     "wp_math",
     "wp_vehicle",
@@ -32,6 +32,9 @@ pub const SIM_CRATES: [&str; 9] = [
     "wp_economy",
     "wp_sim",
     "wp_weather",
+    // Race judge and AI racers run inside every tick (simcli, server, browser).
+    "wp_race",
+    "wp_opponent",
 ];
 
 /// Severity of a finding.
