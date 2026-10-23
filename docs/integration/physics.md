@@ -106,3 +106,22 @@ Mean race time, shipped → G (wall hits):
 G breaks the brief's rule "must not make AI racers slower or crash more". Not shippable as is.
 Split under way: G tyres + grip with the firm ride (G_firm, yaw inertia 1.35) and G tyres + grip
 alone, on lantern / hollins at skills 0.75 / 0.95.
+
+### Candidate G split, 4 seeds × lantern / hollins × skills 0.75 / 0.95 (mean s, wall hits)
+`m` = AI limits measured live (local diagnostic, not committed: `CarCapability::for_car` →
+`measure`), i.e. what the AI would use if the variant shipped and the capability table were
+regenerated. Shipped table vs measured: identical (sanity check).
+
+| race, skill | shipped | G | G (m) | G_firm | G_tyre | G_tyre (m) |
+|---|---|---|---|---|---|---|
+| hollins 0.75 | 63.7 / 8 | 64.0 / 16 | 65.0 / 19 | 64.7 / 20 | 63.8 / 4 | 63.9 / 4 |
+| hollins 0.95 | 62.9 / 4 | 74.5 / 9 | 62.9 / 16 | 62.0 / 0 | 62.6 / 0 | 62.8 / 4 |
+| lantern 0.75 | 63.0 / 0 | 74.9 / 0 | 66.9 / 0 | 68.6 / 0 | 63.1 / 0 | 64.7 / 0 |
+| lantern 0.95 | 63.1 / 0 | 60.7 / 0 | 71.0 / 0 | 66.9 / 0 | 70.2 / 0 | 68.7 / 0 |
+
+- G lowers measured lateral grip 0–6 % (most cars 2–4 %); G_tyre leaves it unchanged.
+- held_search: G 2.59 s, G_firm (G tyres + yaw inertia 1.35, firm ride) 2.36 s, **G_tyre 1.92 s**
+  (taps 22). G's drift gain comes from yaw inertia + the softer ride, not the tyres, and those
+  are what cost the AI (even with correct limits).
+- Not shippable under "AI must not get slower or crash more". Owner round 2 (blind) asks which
+  ingredient they felt: G vs shipped again, then G vs G_firm.

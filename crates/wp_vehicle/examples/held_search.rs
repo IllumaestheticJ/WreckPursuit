@@ -508,6 +508,14 @@ fn main() {
                 roll_inertia: Params::shipped().roll_inertia,
                 ..g
             },
+            // G's tyres and grip balance only; the shipped ride and inertia (AI-safest).
+            "G_tyre" => Params {
+                yaw_inertia: Params::shipped().yaw_inertia,
+                spring: Params::shipped().spring,
+                arb: Params::shipped().arb,
+                roll_inertia: Params::shipped().roll_inertia,
+                ..g
+            },
             other => panic!("unknown CAND {other}"),
         };
         let s = score(&p, &drift, &hand);
