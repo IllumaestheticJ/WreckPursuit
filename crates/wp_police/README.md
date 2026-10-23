@@ -168,7 +168,8 @@ call: spawned or not, start and road distance, stuck events, outcome (`Arrived`,
 ### Getting nowhere (`progress.rs`, every AI ground unit)
 Catches units that move but never get anywhere (lost, circling, outrun by the racer). Each
 unit's job has a goal: the racer it pursues or was called about, the crash it was sent to, its
-intercept point or patrol destination. Getting 25 m closer than its best since the job (or the
+intercept point or patrol destination, measured along its planned route (straight line for
+a pursuer, and within 40 m). Getting 25 m closer than its best since the job (or the
 patrol leg) began, or being within 40 m of the goal, is progress; an idle unit must drive 40 m
 from where it last did. 30 s without progress → despawn once out of every racer's sight and
 ≥ `despawn_min_m` away (call redispatched, patrol refilled out of sight; counted in

@@ -615,7 +615,20 @@ impl PoliceSystem {
                 i += 1;
                 continue;
             }
-            let goal_m = self.goal_of(i).map(|g| dist(self.units[i].body.pos, g));
+            // How far the goal is: along the unit's planned route where it drives one (roads
+            // bend away from a destination; the straight line can grow while it drives on),
+            // straight line for a pursuer (its track is local steering) and once close.
+            let goal_m = self.goal_of(i).map(|g| {
+                let u = &self.units[i];
+                let straight = dist(u.body.pos, g);
+                let routed =
+                    u.cmd.track.is_drivable() && !matches!(u.assignment, Assignment::Pursue { .. });
+                if straight <= crate::progress::ARRIVED_M || !routed {
+                    straight
+                } else {
+                    (u.cmd.track.length() - u.track_s).max(0.0)
+                }
+            });
             let u = &mut self.units[i];
             let leg = match u.assignment {
                 Assignment::Patrol { dest } => dest.0,

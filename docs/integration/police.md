@@ -1054,7 +1054,9 @@ despawn.
 - New `progress.rs`: `ProgressWatch` per unit (`Unit::progress`), updated at think rate by
   `dispatch::maintain_progress` (right after `maintain_stuck`). Goal per assignment: `Pursue` →
   racer, `Respond` → reported racer / crash, `Intercept` → point (ambush wait point included),
-  `Patrol` → destination node. Progress = 25 m closer than the best since the job / patrol leg
+  `Patrol` → destination node. Distance = remaining length of the unit's planned track (roads bend
+  away from a destination: straight-line distance despawned moving patrols in `traffic_soak`);
+  straight line for `Pursue` (local steering track) and once within 40 m. Progress = 25 m closer than the best since the job / patrol leg
   began, or within 40 m of the goal; `Idle` (no goal) = 40 m driven. 30 s without progress →
   despawn when `may_vanish` (out of every racer's sight, ≥ `despawn_min_m`); in sight it keeps
   going and is re-checked every think step.

@@ -6,9 +6,10 @@
 //! a racer that is pulling away, re-routing back and forth, pinned somewhere the stuck
 //! detector doesn't see as stuck).
 //!
-//! Every AI ground unit has a goal while it has a job ([`goal_of`] in `dispatch`): the racer
+//! Every AI ground unit has a goal while it has a job (`goal_of` in `dispatch`): the racer
 //! it pursues or was called about, the crash it was sent to, its intercept point or its
-//! patrol destination. Getting [`GAIN_M`] closer to the goal than it has been since the job
+//! patrol destination, measured along its planned route where it drives one (roads bend away
+//! from a destination). Getting [`GAIN_M`] closer to the goal than it has been since the job
 //! began (or since the last such gain) is **meaningful progress**; so is being within
 //! [`ARRIVED_M`] of the goal (on scene, waiting at an ambush point). A unit with no goal
 //! (idle) makes progress by driving [`MOVE_M`] from where it last did. A unit that has made
