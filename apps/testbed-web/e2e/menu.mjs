@@ -7,7 +7,9 @@
 // and a street race (race HUD); Esc pauses the sim and Esc resumes it; the menu is keyboard
 // navigable (pause → settings → units → back); a setting survives a reload; gamepad Start opens
 // the pause menu and the d-pad / B navigate it; Controls opens the rebinding panel and returns to
-// the menu; ?menu=1 opens the title screen with the developer panels off and starts a chase;
+// the menu; ?menu=1 opens the title screen (front door: career, free roam, races, touge, settings,
+// controls, developer) with the developer panels off; Developer toggles them; Free roam lists the
+// cities, saves the pick and starts a night run there behind the loading screen;
 // pause → Garage only mentions ending a career run during one; the race picker, the touge picker
 // and the garage opened from the title close on Esc and return to the title.
 import { spawn } from "node:child_process";
@@ -132,7 +134,12 @@ for (const dev of [1, 0]) {
   await layoutCheck(`chase dev ${dev ? "on" : "off"}`);
   await page.evaluate(() => {
     const w = window.__wp;
-    w.startRace(w.sim.raceList("lindwurm_4t", "Arcade")[0].id);
+    // A quick (non-career) race the car may enter: races refuse cars outside their entry band.
+    document.getElementById("career").checked = false;
+    for (const r of w.sim.raceList("lindwurm_4t", "Arcade")) {
+      w.startRace(r.id);
+      if (w.sim.scenario().name.startsWith("race_")) break;
+    }
   });
   await page.waitForFunction(() => !!document.querySelector(".wp-race-hud"), null, { timeout: 30000 });
   await layoutCheck(`race dev ${dev ? "on" : "off"}`);
@@ -252,7 +259,21 @@ await ready();
 await frames(3);
 m = await menu();
 const player = await page.evaluate(() => ({ player: document.body.classList.contains("wp-player"), devPanel: getComputedStyle(document.getElementById("controls")).display }));
-check(m.screen === "main" && m.visible && m.paused && m.focus === "gm-play-chase", `?menu=1 opens the main menu, paused, Night run focused (${m.screen}, ${m.focus})`);
+check(m.screen === "main" && m.visible && m.paused && m.focus === "gm-play-garage", `?menu=1 opens the main menu, paused, the career item focused (${m.screen}, ${m.focus})`);
+// Front door (F5): career / free roam / races / touge / settings / controls / developer.
+const door = await page.evaluate(() => [...document.querySelectorAll(".wp-gm-main [data-nav]")].map((e) => e.id));
+check(
+  ["gm-play-garage", "gm-play-free", "gm-play-races", "gm-play-touge", "gm-settings", "gm-controls", "gm-developer"].every((id) => door.includes(id)) &&
+    /career/i.test(await page.evaluate(() => document.querySelector("#gm-play-garage")?.textContent ?? "")),
+  `title front door items (${door.join(", ")})`,
+);
+await page.click("#gm-developer");
+await frames(2);
+const devOn = await page.evaluate(() => ({ dev: window.__wp.menu.settings.developer, on: window.__wp.devSwitch.on, label: document.querySelector("#gm-developer")?.textContent ?? "" }));
+await page.click("#gm-developer");
+await frames(2);
+const devOff = await page.evaluate(() => ({ dev: window.__wp.menu.settings.developer, on: window.__wp.devSwitch.on }));
+check(devOn.dev && devOn.on && /on/.test(devOn.label) && !devOff.dev && !devOff.on, `Developer item toggles the debug tools (${JSON.stringify(devOn)} → ${JSON.stringify(devOff)})`);
 check(player.player && player.devPanel === "none", `developer panels off by default there (${JSON.stringify(player)})`);
 await shot("menu_main.png");
 const keys = await page.evaluate(() => document.querySelector('[data-testid="gm-keys"]')?.textContent ?? "");
@@ -261,11 +282,25 @@ const live = await page.evaluate(() => {
   return { cam: b.keys.cameraCycle[0], clutch: b.keys.clutch[0] };
 });
 check(/F3 · R · M/.test(keys) && /shift up/.test(keys) && !/^C · /.test(keys), `title key hints follow the bindings (camera ${live.cam}, clutch ${live.clutch}): "${keys}"`);
-await press("Enter");
+// Free roam: the city (one line each), then the mode; the start runs behind the loading screen.
+await page.click("#gm-play-free");
+await frames(2);
+m = await menu();
+const cities = await page.evaluate(() => [...document.querySelectorAll('[data-testid="gm-cities"] button')].map((b) => [b.id, b.querySelector("small")?.textContent ?? ""]));
+check(m.screen === "roam" && cities.length === 3 && cities.every(([, hint]) => hint.length > 10), `Free roam lists the cities with a line each (${cities.map((c) => c[0]).join(", ")})`);
+await shot("menu_roam.png");
+await page.click("#gm-city-procedural_12x12");
+await frames(2);
+check(await page.evaluate(() => window.__wp.menu.settings.city === "procedural_12x12"), "the city choice is saved with the settings");
+await page.click("#gm-roam-chase");
+const sawLoading = await page.waitForFunction(() => window.__wp.loading.active, null, { timeout: 5000, polling: 50 }).then(() => true, () => false);
+const loadText = await page.evaluate(() => document.getElementById("wp-loading")?.innerText ?? "");
+await page.waitForFunction(() => !window.__wp.loading.active, null, { timeout: 120000 });
 await frames(4);
 m = await menu();
-const sc = await page.evaluate(() => window.__wp.sim.scenario().name);
-check(m.screen === "closed" && !m.paused && sc === "night_run", `Enter starts the night run (${sc}, menu ${m.screen})`);
+const sc = await page.evaluate(() => ({ name: window.__wp.sim.scenario().name, city: document.getElementById("city-map").value, loads: window.__wp.loading.loads }));
+check(sawLoading && /Night run · Grid city/.test(loadText) && /Tip: /.test(loadText), `loading screen with the title, a step and a tip (${JSON.stringify(loadText.slice(0, 80))})`);
+check(m.screen === "closed" && !m.paused && sc.name === "night_run" && sc.city === "procedural_12x12" && sc.loads >= 1, `Night run starts in the picked city (${JSON.stringify(sc)}, menu ${m.screen})`);
 
 // ----- 7. Pause outside a career run; pickers and the garage return to the title -----------------
 await press("Escape");

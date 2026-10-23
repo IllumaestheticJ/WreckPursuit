@@ -201,6 +201,46 @@ debug-layer hotkeys. It is the game menu's `developer` setting (Settings → Dev
   "city_betting" in the race picker lock text (`ui/race.tsx`); "racer #1" in police radio lines
   (`wp_police` text).
 
+### Front door, loading, onboarding and HUD features (owner-approved F2 / F5 / F44 / F46–F49)
+
+- **Title front door** (ui-kit `GameMenu.tsx`): Continue career (or New career; night · cash ·
+  rep · car from `career_view`, opens the garage) · Free roam · Street races · Touge battles ·
+  Settings · Controls · Developer tools (toggles the debug switch). **Free roam** (`roam` screen):
+  the city (Port Vesper / Port Vesper + Ashpeak County / Grid city, one line each; saved as
+  `GameSettings.city`, drives `#city-map`) and the mode (Free drive / Night run / Rainy night).
+  Host hooks: `GameMenuHost.cities()`, `career()`, `play(choice, { city })`.
+- **Loading screen** (`src/ui/loading.ts`, `front_door.ts`): starts from the title paint the
+  screen first, then build the session (blocking), wait for the car meshes (≤ 5 s) and one frame;
+  title, step, progress bar and a tip. `window.__wp.loading` (`active`, `loads`).
+- **Onboarding card** (`src/ui/onboarding.ts`): the first time a player drives with the debug tools
+  off — controls from the live bindings, gears (manual by default; a "Use automatic gears"
+  button), heat, how to start a race. Pauses the game; Enter / Esc / Got it closes it; shown once
+  per browser (`wp.testbed.onboarded.v1`). Never under automation unless `?onboard=1`.
+- **Crash report toast** (`src/ui/crash_toast.ts`): after a hit on the player (contact ≥ 6 m/s or
+  region damage, folded over 1 s of sim time): closing speed, regions hit with severity, failed
+  components, parts lost, repair quote delta (legit-shop quote before / after). Skips scrapes.
+- **Condensed pursuit banner**: PURSUIT / SEARCHING shrink to a chip right of the chase readout
+  after 3 s (`#pursuit-banner.chip`); ESCAPED / CAPTURED stay big.
+- **RPM arc + shift light** (`src/ui/rpm_gauge.ts`): the player cluster's tachometer arc with a red
+  band from the redline and five shift LEDs (from 80 % of the redline; the row flashes at the
+  redline with manual gears). The debug layout keeps the bar.
+- **HUD presets** (Settings → HUD, `GameSettings.hudPreset`; `src/ui/hud_prefs.ts`): Full; Minimal
+  (speed cluster, race / street panels, prompts); Off (prompts only, for recording). Player mode
+  only.
+- **Pinned readouts** (drawer row "pin", `wp.testbed.pins.v1`): fps / real-time factor / tick +
+  hash / gfx / camera lines that stay top-right (`#dbg-pins`) with the debug tools off.
+- **F49 — ui-kit `Hud` screen not adopted** (decided, documented): it is a whole-screen layout
+  (race top-left, heat + its own minimap top-right, scanner left, damage right, speed
+  bottom-centre) fed by the kit model's `hud` slice. Adopting it would mean feeding race standings,
+  street-race state and radio timing into the kit model, replacing or duplicating the testbed's
+  MapHud minimap (full map, street-racer extras, signals), race panel and voice-synced radio strip,
+  re-rendering the whole HUD through Preact per frame instead of the targeted DOM writes, and
+  reworking the touch layout and the e2e selectors (`.hud-main`, `.left-col`). The overlap it
+  would remove is the ~60-line speed cluster, so it would not simplify anything; the kit's pieces
+  (Panel / Stat / Minimap, ChaseHud, repair bill) are already used where they fit.
+- e2e: `e2e/hud_debug.mjs` (gauge, presets, pins, chip, crash toast, onboarding), `e2e/menu.mjs`
+  (front door, Developer item, Free roam cities, loading screen, night run in the picked city).
+
 ### Hotkeys (layer toggles persist in `localStorage`; layer keys need the debug tools on)
 
 **Player actions are rebindable** (round 12b): the **controls** button or F9 opens a panel with

@@ -13,7 +13,10 @@
 //  - ` toggles the tools; the choice is saved and survives a reload; the drawer folds to its
 //    header (also saved) and the layer checkboxes toggle layers;
 //  - a stored `developer: true` from before this change is reset once;
-//  - no HUD overlaps at 1280×720 and 1920×1080 in player mode (free drive and a race).
+//  - no HUD overlaps at 1280×720 and 1920×1080 in player mode (free drive and a race);
+//  - owner-approved features: rpm arc + shift light (F46), HUD presets Full / Minimal / Off (F47),
+//    pinned debug readouts (F48), the PURSUIT banner condensing to a chip (F44), the crash report
+//    toast after a barrier hit (F2), the first-run onboarding card (F5; `?onboard=1`).
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -24,7 +27,7 @@ import { hudBoxes, overlaps } from "./hud_layout.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
-const PORT = 5193;
+const PORT = 5241;
 const shots = process.env.HUD_SHOTS;
 if (shots) mkdirSync(shots, { recursive: true });
 const URL = `http://localhost:${PORT}/`;
@@ -194,7 +197,12 @@ for (const [w, h] of [[1280, 720], [1920, 1080]]) {
 }
 await page.evaluate(() => {
   const w = window.__wp;
-  w.startRace(w.sim.raceList("lindwurm_4t", "Arcade")[0].id);
+  // A quick (non-career) race the car may enter: races refuse cars outside their entry band.
+  document.getElementById("career").checked = false;
+  for (const r of w.sim.raceList("lindwurm_4t", "Arcade")) {
+    w.startRace(r.id);
+    if (w.sim.scenario().name.startsWith("race_")) break;
+  }
 });
 await page.waitForFunction(() => !!document.querySelector(".wp-race-hud"), null, { timeout: 30000 });
 for (const [w, h] of [[1280, 720], [1920, 1080]]) {
@@ -205,6 +213,88 @@ for (const [w, h] of [[1280, 720], [1920, 1080]]) {
   await shot(`hud_player_race_${w}.png`);
 }
 check((await visible([".wp-minimap"])).length === 0, "one minimap in a race (the race panel's)");
+
+// ----- 8. RPM arc + shift light (F46), HUD presets (F47) ----------------------------------------
+await page.setViewportSize({ width: 1280, height: 720 });
+await page.goto(`${URL}?city=vesper_v2&dev=auto`);
+await ready();
+await page.keyboard.down("KeyW");
+await page.waitForTimeout(2500);
+await page.keyboard.up("KeyW");
+await frames(3);
+const gauge = await page.evaluate(() => ({ shift: document.querySelector(".hud-main")?.dataset.shift ?? null }));
+check((await visible(["canvas.hud-gauge"])).length === 1 && (await visible([".hud-main .hud-rpm"])).length === 0 && gauge.shift !== null, `player cluster: rpm arc + shift light instead of the bar (shift ${gauge.shift})`);
+const presetVis = async (preset) => {
+  await page.evaluate((p) => window.__wp.menu.update({ hudPreset: p }), preset);
+  await frames(3);
+  return visible([".hud-main", ".wp-minimap", "#crash-offer"]);
+};
+const minimal = await presetVis("minimal");
+check(minimal.includes(".hud-main") && !minimal.includes(".wp-minimap"), `HUD Minimal: speed only (${minimal.join(", ")})`);
+await shot("hud_preset_minimal.png");
+const off = await presetVis("off");
+check(!off.includes(".hud-main") && !off.includes(".wp-minimap"), `HUD Off: no speed, no minimap (${off.join(", ") || "nothing"})`);
+const full = await presetVis("full");
+check(full.includes(".hud-main") && full.includes(".wp-minimap"), `HUD Full: speed and minimap back (${full.join(", ")})`);
+check(await page.evaluate(() => JSON.parse(localStorage.getItem("wp.gameSettings.v1") ?? "{}").hudPreset === "full"), "the HUD preset is saved with the settings");
+
+// ----- 9. Pinned readouts (F48) -------------------------------------------------------------------
+await page.keyboard.press("Backquote");
+await frames(3);
+await page.click('#pin-row input[data-pin="rtf"]');
+await page.evaluate(() => document.activeElement?.blur());
+await page.keyboard.press("Backquote");
+await frames(8);
+await page.waitForTimeout(300);
+const pin = await page.evaluate(() => ({ text: document.getElementById("dbg-pins")?.innerText ?? "", saved: localStorage.getItem("wp.testbed.pins.v1") }));
+check((await visible(["#dbg-pins"])).length === 1 && /real time/.test(pin.text) && !/fps/.test(pin.text), `a pinned readout stays with the debug tools off (${JSON.stringify(pin)})`);
+await page.evaluate(() => localStorage.setItem("wp.testbed.pins.v1", "[]"));
+
+// ----- 10. Condensed pursuit banner (F44) -----------------------------------------------------------
+const chipAfter = await page.evaluate(async () => {
+  const sim = window.__wp.sim;
+  const real = sim.policeStatus;
+  const base = real(window.__wp.app.player) ?? {};
+  sim.policeStatus = () => ({ ...base, level: "L2", heat: 40, status: "Pursuit", units_in_pursuit: 3, last_outcome: null, outcome_age_s: null });
+  const cls = () => document.getElementById("pursuit-banner").className;
+  await new Promise((r) => setTimeout(r, 600));
+  const early = cls();
+  await new Promise((r) => setTimeout(r, 3600));
+  const late = cls();
+  const text = document.querySelector("#pursuit-banner b")?.textContent;
+  sim.policeStatus = real;
+  return { early, late, text };
+});
+check(!/chip/.test(chipAfter.early) && /chip/.test(chipAfter.late) && chipAfter.text === "PURSUIT", `PURSUIT banner big first, a chip after 3 s (${JSON.stringify(chipAfter)})`);
+await shot("hud_banner_chip.png");
+
+// ----- 11. Crash report toast (F2) -------------------------------------------------------------------
+await page.goto(`${URL}?scenario=crash/barrier_frontal.ron&speed=60&dev=auto`);
+await ready();
+const toastShown = await page.waitForFunction(() => window.__wp.crashToast.count > 0, null, { timeout: 90000 }).then(() => true, () => false);
+const toast = await page.evaluate(() => document.getElementById("crash-toast")?.innerText ?? "");
+check(toastShown && /closing speed \d+ km\/h/.test(toast) && /hit: /.test(toast) && /repair \+\$/.test(toast), `crash report toast after the barrier hit: ${JSON.stringify(toast)}`);
+await shot("hud_crash_toast.png");
+
+// ----- 12. First-run onboarding card (F5) -------------------------------------------------------------
+await page.evaluate(() => localStorage.removeItem("wp.testbed.onboarded.v1"));
+await page.goto(`${URL}?city=vesper_v2&dev=auto&onboard=1`);
+await ready();
+await page.waitForFunction(() => window.__wp.onboarding.open, null, { timeout: 30000 }).catch(() => {});
+const onb = await page.evaluate(() => ({ open: window.__wp.onboarding.open, paused: window.__wp.app.paused, text: document.getElementById("wp-onboarding")?.innerText ?? "" }));
+check(onb.open && onb.paused && /Gears/.test(onb.text) && /Heat/.test(onb.text) && /Races/.test(onb.text), `the onboarding card shows once, game paused (gears / heat / races: ${onb.text.length} chars)`);
+await shot("hud_onboarding.png");
+const hadAuto = await page.evaluate(() => !!document.getElementById("onb-auto"));
+if (hadAuto) await page.click("#onb-auto");
+const auto = await page.evaluate(() => window.__wp.menu.settings.assists.autoGears);
+check(!hadAuto || auto, `"Use automatic gears" turns them on (${auto})`);
+await page.keyboard.press("Enter");
+await frames(3);
+check(await page.evaluate(() => !window.__wp.onboarding.open && !window.__wp.app.paused), "Enter closes it and the game runs");
+await page.goto(`${URL}?city=vesper_v2&dev=auto&onboard=1`);
+await ready();
+await frames(10);
+check(!(await page.evaluate(() => window.__wp.onboarding.open)), "…and it is not shown again");
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();
