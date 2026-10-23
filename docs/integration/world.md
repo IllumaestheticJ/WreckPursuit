@@ -556,7 +556,7 @@ when convenient.
   1.1 MB → 0.47 MB). `vesper_v2.road.bin` is generated in memory and not committed.
 - **Testbed:** the city chase and the free-drive "city" box use the city selector (default
   Port Vesper v2, "grid 12×12" keeps the old city); `?city=procedural_12x12`, `?chase=1`;
-  wasm `free_drive_city_json`, `city_chase_city_json`, `city_id`; police units drawn on the
+  wasm `free_drive_city_json`, `night_run_city_json`, `city_id`; police units drawn on the
   ground; `__wp.lookAt(from, to)` for docs shots (`e2e/city_v2_shots.mjs` →
   `docs/media/city-v2/`).
 **Checks (this branch)**

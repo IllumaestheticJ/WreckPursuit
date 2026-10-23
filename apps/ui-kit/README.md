@@ -183,7 +183,7 @@ const menu = mountGameMenu(overlayEl, {
   countersteer: false, // slider disabled until the host can set it
   host: { play, restart, garage, quitToMain, openControls, controlsOpen, apply, onOpenChange },
 });
-menu.openMain();   // title screen (City chase, Rainy night, Street races, Free drive, Garage, Settings, Controls)
+menu.openMain();   // title screen (Night run, Rainy night, Street races, Free drive, Garage, Settings, Controls)
 menu.openPause();  // Resume, Restart, Garage, Settings, Controls, Quit to main menu
 ```
 

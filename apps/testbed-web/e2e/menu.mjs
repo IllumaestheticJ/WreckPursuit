@@ -3,7 +3,7 @@
 // Env: CHROMIUM=/path/to/chrome, MENU_SHOTS=dir to write menu_*.png and layout_*.png.
 //
 // Checks: no HUD element overlaps another (bounding boxes) at 1280×720, 1366×768 and 1920×1080,
-// developer panels shown and hidden, in a rainy city chase (pursuit banner, weather line, feed)
+// developer panels shown and hidden, in a rainy night run (pursuit banner, weather line, feed)
 // and a street race (race HUD); Esc pauses the sim and Esc resumes it; the menu is keyboard
 // navigable (pause → settings → units → back); a setting survives a reload; gamepad Start opens
 // the pause menu and the d-pad / B navigate it; Controls opens the rebinding panel and returns to
@@ -233,14 +233,14 @@ await ready();
 await frames(3);
 m = await menu();
 const player = await page.evaluate(() => ({ player: document.body.classList.contains("wp-player"), devPanel: getComputedStyle(document.getElementById("controls")).display }));
-check(m.screen === "main" && m.visible && m.paused && m.focus === "gm-play-chase", `?menu=1 opens the main menu, paused, City chase focused (${m.screen}, ${m.focus})`);
+check(m.screen === "main" && m.visible && m.paused && m.focus === "gm-play-chase", `?menu=1 opens the main menu, paused, Night run focused (${m.screen}, ${m.focus})`);
 check(player.player && player.devPanel === "none", `developer panels off by default there (${JSON.stringify(player)})`);
 await shot("menu_main.png");
 await press("Enter");
 await frames(4);
 m = await menu();
 const sc = await page.evaluate(() => window.__wp.sim.scenario().name);
-check(m.screen === "closed" && !m.paused && sc === "city_chase", `Enter starts the city chase (${sc}, menu ${m.screen})`);
+check(m.screen === "closed" && !m.paused && sc === "night_run", `Enter starts the night run (${sc}, menu ${m.screen})`);
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();
