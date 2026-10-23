@@ -1579,6 +1579,19 @@ threshold are not in that commit), so it is not a regression. The margin is thin
   density 2.0), not a road fault.
 - Left to the lead and opponent-pace (G is reworking pack queueing); I did not widen the gate.
 
+**Seed 4 queue, dug out for the lead (skill 0.5, circuit finish window 90 s):**
+- Old map: leader kestrel 222.8 s; the other five 274-294 s, the slowest +71.6 s, so about
+  18 s from the cut-off already. civ + veh losses were 94-118 s each.
+- ws/world: the leader is bit-identical. Four of the five lose 130-140 s and get
+  `Dnf(FinishWindow)`.
+- Trace (hakone_gt, `WP_PACE_TRACE=1`): on the three-lane Loop 9 carriageways it follows one
+  obstacle at a time at 23-26 m/s for long stretches (one racer for 18 s, one civilian for 23 s,
+  then about 95 s behind civilians 102-105 and a racer). Only 12 passes in 180 s, with no
+  civilians side by side.
+- The pack rarely passes slow civilians on a multi-lane road, so the civilian draw decides its
+  time. The new deck heights moved a few buildings and spawn spots and reshuffled that draw.
+  No world change.
+
 ## PR #38 port (lead, 2026-10-23): river, canal, bridges, landmarks, hideouts; rows 160 and 162
 Ported from `claude/beautiful-einstein-b1noth` onto round12 1da95294 (with Ashpeak): a1c11a27,
 6b753b84, 166ee01b, 122def2d and 5b49526a. 823f87a8 was skipped (already on round12), and
