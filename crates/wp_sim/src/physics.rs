@@ -42,6 +42,9 @@ pub struct CityColliders {
     pub tunnel_boxes: usize,
     /// Tree trunks, hedges and fences (residential lots, playtest row 95).
     pub decor: usize,
+    /// Structure colliders: canopies and their pillars, landmark parts, bridge trusses
+    /// (`wp_world::network::CityFeatures::structures`, PR #38).
+    pub structures: usize,
     /// Median barrier segments between divided-highway carriageways (one smooth mesh collider
     /// per barrier line).
     pub barriers: usize,
@@ -405,6 +408,19 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
         if let Some(cb) = ColliderBuilder::convex_hull(&pts) {
             added.push(cb.friction(0.6).build());
             out.buildings += 1;
+        }
+    }
+
+    // Structures: canopies and pillars, landmarks, trusses (prisms, possibly floating).
+    for st in &net.features.structures {
+        let mut pts: Vec<Vector> = Vec::with_capacity(st.footprint.len() * 2);
+        for q in &st.footprint {
+            pts.push(Vector::new(q[0], q[1], st.z0_m));
+            pts.push(Vector::new(q[0], q[1], st.z1_m));
+        }
+        if let Some(cb) = ColliderBuilder::convex_hull(&pts) {
+            added.push(cb.friction(0.6).build());
+            out.structures += 1;
         }
     }
 

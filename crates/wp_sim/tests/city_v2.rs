@@ -372,3 +372,97 @@ fn solid_terrain_is_the_drawn_terrain() {
     assert!(off_road > 50_000, "{off_road}");
     assert!(worst < 0.02, "{worst}");
 }
+
+/// Every lane through the Hollins Tunnel (a covered span: both carriageways, all three lanes)
+/// and over the Iron Bridge's truss (PR #38), driven at the limit: no contact with the walls,
+/// roof, truss or terrain at the mouths, and the car stays on its lane.
+#[test]
+fn lanes_through_the_tunnel_and_the_truss_are_clear() {
+    use wp_world::drive::{DrivePath, FollowParams, PathFollower};
+    use wp_world::network::BridgeKind;
+    let car = load_car(data("cars/debug_sedan.json")).unwrap();
+    let n = net();
+    let span = n
+        .covered
+        .iter()
+        .find(|c| c.name == "Hollins Tunnel")
+        .unwrap();
+    let tunnel = wp_world::covered::CoverShape::new(span);
+    let iron = n
+        .features
+        .bridges
+        .iter()
+        .find(|b| b.kind == BridgeKind::Truss)
+        .unwrap();
+    // (path, speed): the lane from 120 m before the structure to 60 m after it.
+    let mut runs: Vec<(Vec<[f32; 3]>, f32)> = Vec::new();
+    for l in n.lanes.iter().filter(|l| l.kind.drivable()) {
+        let inside: Vec<usize> = (0..l.polyline.len())
+            .filter(|k| {
+                let p = l.polyline[*k];
+                tunnel.contains([p[0], p[1], p[2] + 1.0])
+                    || (l.road == iron.surface
+                        && iron
+                            .centre
+                            .iter()
+                            .any(|c| wp_world::geom::dist([c[0], c[1]], [p[0], p[1]]) < 8.0))
+            })
+            .collect();
+        let (Some(&a), Some(&b)) = (inside.first(), inside.last()) else {
+            continue;
+        };
+        let cum = wp_world::geom::cumulative(&l.polyline);
+        let s0 = (cum[a] - 120.0).max(0.0);
+        let s1 = (cum[b] + 60.0).min(cum[cum.len() - 1]);
+        let path: Vec<[f32; 3]> = l
+            .polyline
+            .iter()
+            .zip(&cum)
+            .filter(|(_, s)| **s >= s0 && **s <= s1)
+            .map(|(p, _)| *p)
+            .collect();
+        runs.push((path, l.speed_limit_mps));
+    }
+    assert!(runs.len() >= 8, "{} lanes", runs.len());
+    let mut s = sim(true);
+    let mut cars = Vec::new();
+    for (path, speed) in &runs {
+        let p = path[0];
+        let d = wp_world::geom::sub([path[1][0], path[1][1]], [p[0], p[1]]);
+        let yaw = wp_world::geom::yaw_of(wp_world::geom::normalize(d));
+        let id = s.spawn_vehicle(&car, [p[0], p[1], p[2]], yaw).unwrap();
+        s.place_on_ground(id, [p[0], p[1]], yaw, *speed, Some(p[2]))
+            .unwrap();
+        let follower = PathFollower::for_vehicle(&car.def, FollowParams::PURSUIT, *speed);
+        cars.push((id, DrivePath::new(path, false), follower, *speed, 0.0f32));
+    }
+    let dt = 1.0 / 240.0;
+    for _ in 0..(40.0 * 240.0) as usize {
+        let states = s.vehicle_states();
+        for (id, path, f, speed, worst) in cars.iter_mut() {
+            let st = &states.iter().find(|(e, _)| e == id).unwrap().1;
+            let out = f.follow(st, path, *speed, 0.0, dt);
+            *worst = worst.max(out.cross_track_m.abs());
+            s.set_input(*id, out.input).unwrap();
+        }
+        s.step_fixed();
+        for e in s.drain_events() {
+            if let wp_contracts::SimEvent::Contact { point, .. } = e {
+                panic!("contact at {point:?}");
+            }
+        }
+    }
+    for (id, path, _, _, worst) in &cars {
+        let st = &s
+            .vehicle_states()
+            .into_iter()
+            .find(|(e, _)| e == id)
+            .unwrap()
+            .1;
+        let end = path.points().last().copied().unwrap();
+        let left = wp_world::geom::dist([st.pos[0], st.pos[1]], [end[0], end[1]]);
+        assert!(left < 30.0, "car {id:?} stopped {left} m short");
+        // Pure pursuit cuts the tunnel's long sweeper by ~1.7 m at the limit.
+        assert!(*worst < 2.5, "car {id:?} {worst} m off its lane");
+    }
+}
