@@ -5,7 +5,8 @@
  *
  * - Top bar: car, cash, what is missing before the car can drive, back to the garage, drive.
  * - Left toolbar: camera views (overview, engine bay, underside, wheels), the lift, the parts
- *   catalog and the car's part list.
+ *   catalog (with the stats each part would give), the car's part list and the upgrades that
+ *   are not parts (paint, vinyls, gadgets, final drive...).
  * - Right: the part card of the selected slot (condition, what is fitted, remove; when empty, the
  *   inventory parts that fit and the catalog for that slot).
  * - Bottom: the inventory strip; choosing a part lights up where it fits.
@@ -17,7 +18,9 @@
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Badge, Button, Meter, Money, Panel, severityColor, Tabs } from "../ui/kit";
-import type { CatalogEntry, InventoryView, PartGroup, SlotView, StandView, WorkshopApi, WorkshopScreen } from "./types";
+import { words } from "../ui/format";
+import type { CatalogEntry, InventoryView, ModOption, PartGroup, SlotView, StandView, WorkshopApi, WorkshopScreen } from "./types";
+import { StatGrid } from "./StatGrid";
 import "./garage.css";
 
 /** Camera presets the host knows. */
@@ -171,6 +174,8 @@ function Catalog(props: {
   const first = props.kind ? props.screen.catalog.find((c) => c.kind === props.kind)?.group : undefined;
   const [group, setGroup] = useState<PartGroup>(first ?? groups[0] ?? "Body");
   const [kind, setKind] = useState<string | null>(props.kind);
+  const [hover, setHover] = useState<CatalogEntry | null>(null);
+  const after = hover?.grade ? props.screen.previews[hover.grade] : undefined;
   const rows = props.screen.catalog.filter((c) => c.group === group && (!kind || c.kind === kind));
   const byKind = new Map<string, CatalogEntry[]>();
   for (const r of rows) byKind.set(r.kind, [...(byKind.get(r.kind) ?? []), r]);
@@ -196,12 +201,24 @@ function Catalog(props: {
             </Button>
           </div>
         )}
+        <div class="wp-ws-preview" data-testid="ws-catalog-stats">
+          <div class="wp-dim wp-mono wp-upper">{hover ? `with ${hover.name}` : "build now"}</div>
+          <StatGrid now={props.screen.stats} after={after} />
+          {hover && hover.grade && !after && <span class="wp-dim">{hover.reason ?? "no change to the numbers"}</span>}
+        </div>
         <div class="wp-ws-catalog">
           {[...byKind].map(([k, entries]) => (
             <div key={k} class="wp-ws-catgroup">
               <div class="wp-dim wp-mono wp-upper">{entries[0].slot_name}</div>
               {entries.map((c) => (
-                <div key={c.grade ?? "stock"} class="wp-ws-catrow" data-testid="ws-catrow" data-kind={c.kind} data-grade={c.grade ?? ""}>
+                <div
+                  key={c.grade ?? "stock"}
+                  class="wp-ws-catrow"
+                  data-testid="ws-catrow"
+                  data-kind={c.kind}
+                  data-grade={c.grade ?? ""}
+                  onMouseEnter={() => setHover(c)}
+                >
                   <span>
                     {c.name}
                     {c.count > 1 && <span class="wp-dim"> ×{c.count}</span>}
@@ -221,6 +238,82 @@ function Catalog(props: {
               ))}
             </div>
           ))}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+const UPGRADE_GROUPS: ModOption["group"][] = ["performance", "durability", "tool", "cosmetic"];
+
+/** Mods that are not parts (paint, vinyls, gadgets, final drive...): installed on the car directly. */
+function Upgrades(props: { screen: WorkshopScreen; run: (f: () => WorkshopScreen) => void; api: WorkshopApi; onClose: () => void }) {
+  const all = props.screen.upgrade_options;
+  const groups = UPGRADE_GROUPS.filter((g) => all.some((m) => m.group === g));
+  const [group, setGroup] = useState<ModOption["group"]>(groups[0] ?? "cosmetic");
+  const [hover, setHover] = useState<string | null>(null);
+  const focus = all.find((m) => m.id === hover) ?? null;
+  return (
+    <div class="wp-ws-modal" data-testid="ws-upgrades">
+      <Panel
+        title="Upgrades"
+        tag={
+          <span class="wp-row" style={{ gap: "0.6em" }}>
+            <Money value={props.screen.cash} tone />
+            <Button size="sm" onClick={props.onClose} hotkey="Esc">
+              Close
+            </Button>
+          </span>
+        }
+      >
+        <div class="wp-ws-upgrades">
+          <div>
+            <Tabs tabs={groups.map((g) => ({ id: g, label: words(g) }))} value={group} onChange={setGroup} />
+            <table class="wp-table">
+              <tbody>
+                {all
+                  .filter((m) => m.group === group)
+                  .map((m) => (
+                    <tr key={m.id} onMouseEnter={() => setHover(m.id)} data-testid="ws-upgrade" data-mod={m.id}>
+                      <td>
+                        <b>{m.name}</b> <span class="wp-dim wp-mono">T{m.tier}</span>
+                        <div class="wp-dim" style={{ fontSize: "0.8em" }}>
+                          {m.tradeoff}
+                        </div>
+                        {!m.allowed && m.reason && (
+                          <div class="wp-warn" style={{ fontSize: "0.8em" }}>
+                            {m.reason}
+                          </div>
+                        )}
+                      </td>
+                      <td class="num">
+                        <Money value={m.price} />
+                      </td>
+                      <td>
+                        {m.installed ? (
+                          <Button size="sm" disabled={!m.allowed} onClick={() => props.run(() => props.api.uninstall(m.id))}>
+                            Remove
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="primary" disabled={!m.allowed} onClick={() => props.run(() => props.api.install(m.id))}>
+                            {m.replaces ? "Swap" : "Install"}
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+          <div class="wp-ws-preview">
+            <div class="wp-dim wp-mono wp-upper">{focus ? (focus.installed ? `without ${focus.name}` : `with ${focus.name}`) : "build now"}</div>
+            <StatGrid now={props.screen.stats} after={focus?.stats_after} />
+            {focus?.replaces && <p class="wp-dim">Replaces {focus.replaces} (refunded at 40 %).</p>}
+            {focus && focus.requires.length > 0 && <p class="wp-dim">Needs: {focus.requires.join(", ")}</p>}
+            <p class="wp-dim" style={{ fontSize: "0.8em" }}>
+              Parts (engine, wheels, brakes, body...) are in the catalog. Removing an upgrade refunds 40 %.
+            </p>
+          </div>
         </div>
       </Panel>
     </div>
@@ -437,6 +530,7 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
   const [screen, setScreen] = useState(props.initial);
   const [error, setError] = useState<string | null>(null);
   const [catalog, setCatalog] = useState<{ kind: string | null } | null>(null);
+  const [upgrades, setUpgrades] = useState(false);
   const [list, setList] = useState(false);
   const [stand, setStand] = useState(false);
   const [lift, setLift] = useState(false);
@@ -453,7 +547,7 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
   const back = useRef(host.back);
   back.current = host.back;
   const modal = useRef(false);
-  modal.current = !!catalog || stand;
+  modal.current = !!catalog || upgrades || stand;
   // A part picked on the stand engine in 3D opens the stand list at it.
   useEffect(() => {
     if (state.standSelected) setStand(true);
@@ -463,7 +557,7 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.preventDefault();
-      if (modal.current) (setCatalog(null), setStand(false));
+      if (modal.current) (setCatalog(null), setUpgrades(false), setStand(false));
       else back.current();
     };
     window.addEventListener("keydown", onKey);
@@ -525,6 +619,9 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
         <Button size="sm" pressed={list} onClick={() => setList(!list)}>
           Part list
         </Button>
+        <Button size="sm" onClick={() => setUpgrades(true)} title="paint, vinyls, gadgets, final drive: mods that are not parts">
+          Upgrades
+        </Button>
         {cam("stand", "Engine stand")}
         <Button size="sm" pressed={stand} onClick={() => (setStand(!stand), !stand && host.camera("stand"))} title="strip and build a loose engine">
           Stand parts{screen.stands.length > 0 ? ` (${screen.stands.length})` : ""}
@@ -556,13 +653,23 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
         ) : (
           <Panel title="Workshop">
             <p class="wp-dim">Click a part on the car to work on it. Drag to look around, scroll to zoom.</p>
-            {screen.upgrades.length > 0 && <p class="wp-dim">Other upgrades: {screen.upgrades.join(", ")}</p>}
+            <StatGrid now={screen.stats} />
+            {screen.upgrade_options.some((m) => m.installed) && (
+              <p class="wp-dim">
+                Upgrades:{" "}
+                {screen.upgrade_options
+                  .filter((m) => m.installed)
+                  .map((m) => m.name)
+                  .join(", ")}
+              </p>
+            )}
           </Panel>
         )}
       </aside>
       <InventoryStrip screen={screen} run={run} api={api} host={host} state={state} />
       {catalog && <Catalog screen={screen} kind={catalog.kind} run={run} api={api} onClose={() => setCatalog(null)} />}
-      {stand && !catalog && (
+      {upgrades && !catalog && <Upgrades screen={screen} run={run} api={api} onClose={() => setUpgrades(false)} />}
+      {stand && !catalog && !upgrades && (
         <EngineStand screen={screen} run={run} api={api} state={state} host={host} onClose={() => (setStand(false), state.set({ standSelected: null }))} />
       )}
     </div>

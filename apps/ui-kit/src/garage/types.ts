@@ -165,7 +165,7 @@ export interface CareerView {
   ledger: LedgerLine[];
 }
 
-/** `career::ModOption`. */
+/** `career::ModOption`: a mod with what installing it (or, installed, removing it) would do. */
 export interface ModOption {
   id: string;
   name: string;
@@ -181,13 +181,6 @@ export interface ModOption {
   replaces: string | null;
   stats_after: StatsView | null;
   requires: string[];
-}
-
-/** `career::ModTreeView`. */
-export interface ModTreeView {
-  uid: number;
-  stats: StatsView;
-  mods: ModOption[];
 }
 
 /** `career::ShopRequest`. */
@@ -212,14 +205,11 @@ export type RunKind = "free" | "chase";
  * returns the new view, or throws an Error whose message is shown to the player. */
 export interface CareerApi {
   view(): CareerView;
-  mods(uid: number): ModTreeView;
   quote(uid: number, req: ShopRequest): RepairQuote;
   buy(defId: string, condition: Condition): CareerView;
   floorCar(): CareerView;
   sell(uid: number): CareerView;
   setActive(uid: number): CareerView;
-  install(uid: number, modId: string): CareerView;
-  uninstall(uid: number, modId: string): CareerView;
   /** Set the car's free tune (no money). */
   setTune(uid: number, tune: CarTune): CareerView;
   repair(uid: number, req: ShopRequest): CareerView;
@@ -230,8 +220,8 @@ export interface CareerApi {
   exportSave(): void;
   importSave(text: string): CareerView;
   startRun(kind: RunKind): void;
-  /** Open the 3D garage workshop on car `uid` (optional: hosts without one hide the button). */
-  workshop?(uid: number): void;
+  /** Open the 3D garage workshop on car `uid`: parts, the parts catalog and upgrades. */
+  workshop(uid: number): void;
   close(): void;
 }
 
@@ -327,6 +317,7 @@ export interface WorkshopScreen {
   slots: SlotView[];
   /** Names of empty required slots. */
   missing: string[];
+  /** Ids of installed mods that are not parts (`upgrade_options` has them with names). */
   upgrades: string[];
   inventory: InventoryView[];
   /** Loose engines in the inventory, as the engine stand shows them. */
@@ -334,6 +325,12 @@ export interface WorkshopScreen {
   /** Engine torque left after worn parts (1 = nothing lost). */
   torque_factor: number;
   catalog: CatalogEntry[];
+  /** The car's stats as built. */
+  stats: StatsView;
+  /** Stats with a catalog grade fitted in place of what its slot has now, by mod id. */
+  previews: Record<string, StatsView>;
+  /** Mods that are not parts (paint, vinyls, gadgets, final drive...), installed straight on the car. */
+  upgrade_options: ModOption[];
   cash: number;
   def_id: string;
 }
@@ -349,4 +346,8 @@ export interface WorkshopApi {
   strip(assembly: number, slot: string): WorkshopScreen;
   /** Engine stand: put inventory part `part` into `slot` of loose engine `assembly`. */
   build(assembly: number, slot: string, part: number): WorkshopScreen;
+  /** Install an upgrade (one of `upgrade_options`; pays, a same-line upgrade is swapped). */
+  install(modId: string): WorkshopScreen;
+  /** Remove an upgrade (refunded at resale value). */
+  uninstall(modId: string): WorkshopScreen;
 }

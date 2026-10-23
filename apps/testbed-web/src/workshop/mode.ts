@@ -126,6 +126,8 @@ export class WorkshopMode {
       sell: (part) => this.after(sim.careerSellPart(uid, part), false),
       strip: (assembly, slot) => this.after(sim.careerStripPart(uid, assembly, slot), false),
       build: (assembly, slot, part) => this.after(sim.careerBuildPart(uid, assembly, slot, part), false),
+      install: (id) => this.after(sim.careerInstallUpgrade(uid, id)),
+      uninstall: (id) => this.after(sim.careerRemoveUpgrade(uid, id)),
     };
     const host: WorkshopHost = {
       highlight: (slots) => this.highlight(slots),

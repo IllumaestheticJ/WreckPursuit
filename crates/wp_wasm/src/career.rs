@@ -888,7 +888,8 @@ impl Career {
         }
     }
 
-    /// The mod tree for car `uid`, with the stats each change would give.
+    /// Every mod for car `uid`, with the stats each change would give (the workshop splits it
+    /// into catalog previews and upgrades).
     pub fn mod_tree(&self, uid: CarUid) -> Result<ModTreeView, String> {
         let c = self.profile.account.try_car(uid).map_err(e2s)?;
         let base = base_car(&c.def_id)?;
@@ -1137,13 +1138,28 @@ impl Career {
 
     // ----- garage workshop -----------------------------------------------------------------
 
-    /// The workshop screen of car `uid`: slots, missing parts, inventory and parts catalog.
+    /// The workshop screen of car `uid`: slots, missing parts, inventory, parts catalog with
+    /// the stats each grade would give, and the upgrades that are not parts.
     pub fn workshop(&self, uid: CarUid) -> Result<WorkshopScreen, String> {
         let a = &self.profile.account;
         let car = a.try_car(uid).map_err(e2s)?;
+        let tree = self.mod_tree(uid)?;
+        let slotted = self.econ.parts.slotted_lines();
+        let mut previews = BTreeMap::new();
+        let mut upgrades = Vec::new();
+        for m in tree.mods {
+            if !slotted.contains(m.line.as_str()) {
+                upgrades.push(m);
+            } else if let (false, Some(s)) = (m.installed, m.stats_after) {
+                previews.insert(m.id, s);
+            }
+        }
         Ok(WorkshopScreen {
             view: self.econ.workshop(a, uid, self.mode()).map_err(e2s)?,
             catalog: self.econ.part_catalog(a, uid, self.mode()).map_err(e2s)?,
+            stats: tree.stats,
+            previews,
+            upgrade_options: upgrades,
             cash: a.cash,
             def_id: car.def_id.clone(),
         })
@@ -1598,6 +1614,14 @@ pub struct WorkshopScreen {
     pub view: wp_economy::WorkshopView,
     /// Parts catalog for the car.
     pub catalog: Vec<wp_economy::CatalogEntry>,
+    /// The car's stats as built.
+    pub stats: StatsView,
+    /// Stats with a catalog grade fitted in place of what its slot has now, by mod id (only
+    /// grades that could go on).
+    pub previews: BTreeMap<String, StatsView>,
+    /// Mods that are not parts (paint, vinyls, gadgets, final drive...): installed and removed
+    /// straight on the car with [`career_install_upgrade`] / [`career_remove_upgrade`].
+    pub upgrade_options: Vec<ModOption>,
     /// Cash on hand.
     pub cash: Money,
     /// Car model (panel mesh id).
@@ -1724,12 +1748,6 @@ pub fn career_view_json() -> Result<String, JsValue> {
     with_career(view_json)
 }
 
-/// The mod tree of car `uid` ([`ModTreeView`] JSON).
-#[wasm_bindgen]
-pub fn career_mods_json(uid: u32) -> Result<String, JsValue> {
-    with_career(|c| c.mod_tree(CarUid(uid)).map(|t| json(&t)))
-}
-
 /// The current session is a career run.
 #[wasm_bindgen]
 pub fn career_run_active() -> bool {
@@ -1821,24 +1839,6 @@ pub fn career_set_tune(uid: u32, tune_json: &str) -> Result<String, JsValue> {
     })
 }
 
-/// Install mod `mod_id` on car `uid`. Returns the view JSON.
-#[wasm_bindgen]
-pub fn career_install_mod(uid: u32, mod_id: &str) -> Result<String, JsValue> {
-    with_career(|c| {
-        c.install_mod(CarUid(uid), mod_id)?;
-        view_json(c)
-    })
-}
-
-/// Remove mod `mod_id` from car `uid`. Returns the view JSON.
-#[wasm_bindgen]
-pub fn career_uninstall_mod(uid: u32, mod_id: &str) -> Result<String, JsValue> {
-    with_career(|c| {
-        c.uninstall_mod(CarUid(uid), mod_id)?;
-        view_json(c)
-    })
-}
-
 /// The garage workshop of car `uid`: `WorkshopScreen` JSON (slots with condition and what
 /// blocks them, missing parts, upgrades, inventory with where each part fits, parts catalog).
 #[wasm_bindgen]
@@ -1871,6 +1871,25 @@ pub fn career_buy_part(uid: u32, kind: &str, grade: &str) -> Result<String, JsVa
     with_career(|c| {
         let grade = (!grade.is_empty()).then_some(grade);
         c.buy_part(CarUid(uid), kind, grade)?;
+        c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Install upgrade `mod_id` (one of `WorkshopScreen::upgrade_options`) on car `uid`; pays,
+/// and a same-line upgrade is replaced and refunded. Returns the workshop JSON.
+#[wasm_bindgen]
+pub fn career_install_upgrade(uid: u32, mod_id: &str) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.install_mod(CarUid(uid), mod_id)?;
+        c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Remove upgrade `mod_id` from car `uid` (refund at resale value). Returns the workshop JSON.
+#[wasm_bindgen]
+pub fn career_remove_upgrade(uid: u32, mod_id: &str) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.uninstall_mod(CarUid(uid), mod_id)?;
         c.workshop(CarUid(uid)).map(|w| json(&w))
     })
 }

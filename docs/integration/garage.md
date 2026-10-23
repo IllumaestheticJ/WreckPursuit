@@ -50,14 +50,22 @@ Account state: `OwnedCar::parts: Option<CarParts>` (absent until the first works
 `PlayerAccount::inventory: Vec<LoosePart>`, `PlayerAccount::next_part_uid`. All `serde(default)`, so
 older saves load unchanged (profile version stays 2).
 
-The mod tree keeps working: `install_mod` / `uninstall_mod` update a stored parts state (the shop
-fits and takes off the parts itself); `record_damage` drops repair lines of empty slots (the
-removed part carries them).
+`install_mod` / `uninstall_mod` update a stored parts state (the shop fits and takes off the parts
+itself); the workshop uses them for upgrades that are not parts. `record_damage` drops repair
+lines of empty slots (the removed part carries them).
+
+**Workshop and mods merged (2026-10-23).** The career garage's separate Mods screen is gone: the
+workshop is the one place a car is modified. Part mods are bought in the parts catalog and fitted;
+the 59 mods on lines no slot owns (paint, vinyls, radar / scanner / plates, final drive, tint,
+weight strip, fog lights, underglow, exhaust tips, sidewalls...) are installed from the
+workshop's Upgrades panel. `career_mods_json`, `career_install_mod` and `career_uninstall_mod`
+are removed; `CareerApi` loses `mods` / `install` / `uninstall` and `workshop` is required.
 
 ### wasm (`wp_wasm::career`)
 | Export | Notes |
 |---|---|
-| `career_workshop_json(uid)` | `WorkshopScreen` = `WorkshopView` fields + `catalog`, `cash`, `def_id` |
+| `career_workshop_json(uid)` | `WorkshopScreen` = `WorkshopView` fields + `catalog`, `stats` (as built), `previews` (mod id → stats with that catalog grade fitted), `upgrade_options` (`ModOption`s for mods that are not parts), `cash`, `def_id` |
+| `career_install_upgrade(uid, id)`, `career_remove_upgrade(uid, id)` | an upgrade that is not a part (same rules as the old mod tree: price, same-line swap with 40 % refund, cage vs dented body); return the workshop JSON |
 | `career_remove_part(uid, slot)`, `career_fit_part(uid, slot, part)` | return the workshop JSON; go through the same structure check as mods (a cage cannot go in while the body is dented); fitting a new part repairs that area of the stored lattice and re-records the damage |
 | `career_buy_part(uid, kind, grade)`, `career_sell_part(uid, part)` | `grade = ""` = stock replacement |
 

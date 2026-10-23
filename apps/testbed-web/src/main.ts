@@ -322,14 +322,11 @@ async function main(): Promise<void> {
   };
   const careerApi: CareerApi = {
     view: () => sim.careerView(),
-    mods: (uid) => sim.careerMods(uid),
     quote: (uid, req) => sim.careerQuote(uid, req),
     buy: (id, c) => act(() => sim.careerBuy(id, c)),
     floorCar: () => act(() => sim.careerFloorCar()),
     sell: (uid) => act(() => sim.careerSell(uid)),
     setActive: (uid) => act(() => sim.careerSetActive(uid)),
-    install: (uid, id) => act(() => sim.careerInstall(uid, id)),
-    uninstall: (uid, id) => act(() => sim.careerUninstall(uid, id)),
     setTune: (uid, tune) => act(() => sim.careerSetTune(uid, tune)),
     repair: (uid, req) => act(() => sim.careerRepair(uid, req)),
     release: (uid) => act(() => sim.careerRelease(uid)),

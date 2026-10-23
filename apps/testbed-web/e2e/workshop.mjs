@@ -134,6 +134,32 @@ check(s.missing.length === 0 && (await slot("front_bumper")).fitted, "bumper bac
 const mods = await page.evaluate((u) => window.__wp.sim.careerView().cars.find((c) => c.uid === u).mods, uid);
 check(JSON.stringify(mods).includes("cooling_radiator_1"), "the fitted part counts as an installed mod");
 
+// The catalog shows what a part does to the numbers before buying it.
+await button("Catalog").click();
+await page.locator('[data-testid="ws-catalog"] [role="tab"]', { hasText: "Engine" }).click();
+await page.locator('[data-testid="ws-catrow"][data-grade="engine_intake_1"]').hover();
+const preview = await page.locator('[data-testid="ws-catalog-stats"]').textContent();
+await shot("workshop_catalog_preview.png");
+check(/with /i.test(preview), `hovering a catalog part previews the build (${preview.slice(0, 60)})`);
+await page.locator('[data-testid="ws-catalog"] button', { hasText: "Close" }).click();
+
+// Mods that are not parts (paint) are installed from the Upgrades panel, in the workshop.
+await button("Upgrades").click();
+await page.locator('[data-testid="ws-upgrades"] [role="tab"]', { hasText: "Cosmetic" }).click();
+await page.locator('[data-testid="ws-upgrade"][data-mod="paint_matte"] button', { hasText: "Install" }).click();
+await placed();
+await settle();
+s = await screen();
+check(s.upgrade_options.find((m) => m.id === "paint_matte")?.installed, "matte paint installed from the workshop's Upgrades panel");
+await page.locator('[data-testid="ws-upgrade"][data-mod="paint_matte"]').hover();
+await shot("workshop_upgrades.png");
+await page.locator('[data-testid="ws-upgrade"][data-mod="paint_matte"] button', { hasText: "Remove" }).click();
+await placed();
+s = await screen();
+check(!s.upgrade_options.find((m) => m.id === "paint_matte")?.installed, "and removed again");
+await page.locator('[data-testid="ws-upgrades"] button', { hasText: "Close" }).click();
+check(!(await page.locator('[data-testid="career-garage"] [data-testid="mod-tree"]').count()), "no separate mod tree");
+
 // Underside on the lift.
 await button("Underside").click();
 await settle(2500);

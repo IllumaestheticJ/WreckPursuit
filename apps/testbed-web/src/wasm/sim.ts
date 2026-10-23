@@ -547,7 +547,6 @@ export const sim = {
   careerSave: (): string => wasm.career_save_json(),
   careerExists: (): boolean => wasm.career_exists(),
   careerView: (): CareerView => JSON.parse(wasm.career_view_json()),
-  careerMods: (uid: number): ModTreeView => JSON.parse(wasm.career_mods_json(uid)),
   careerRunActive: (): boolean => wasm.career_run_active(),
   /** Start a career run of a scenario (the first entity becomes the career car). */
   careerStartRun: (scenarioJson: string): number[] => Array.from(wasm.career_start_run(scenarioJson)),
@@ -559,8 +558,6 @@ export const sim = {
   careerFloorCar: (): CareerView => JSON.parse(wasm.career_floor_car()),
   careerSell: (uid: number): CareerView => JSON.parse(wasm.career_sell_car(uid)),
   careerSetActive: (uid: number): CareerView => JSON.parse(wasm.career_set_active(uid)),
-  careerInstall: (uid: number, modId: string): CareerView => JSON.parse(wasm.career_install_mod(uid, modId)),
-  careerUninstall: (uid: number, modId: string): CareerView => JSON.parse(wasm.career_uninstall_mod(uid, modId)),
   /** Set a career car's free tune (no money). */
   careerSetTune: (uid: number, tune: CarTune): CareerView => JSON.parse(wasm.career_set_tune(uid, JSON.stringify(tune))),
   careerQuote: (uid: number, req: ShopRequest): RepairQuote => JSON.parse(wasm.career_quote_json(uid, JSON.stringify(req))),
@@ -603,9 +600,13 @@ export const sim = {
   careerStripPart: (uid: number, assembly: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_strip_part(uid, assembly, slot)),
   careerBuildPart: (uid: number, assembly: number, slot: string, part: number): WorkshopScreen =>
     JSON.parse(wasm.career_build_part(uid, assembly, slot, part)),
+  /** Install an upgrade that is not a part (paint, vinyl, gadget...) on car `uid`. */
+  careerInstallUpgrade: (uid: number, modId: string): WorkshopScreen => JSON.parse(wasm.career_install_upgrade(uid, modId)),
+  /** Remove an upgrade from car `uid` (40 % refund). */
+  careerRemoveUpgrade: (uid: number, modId: string): WorkshopScreen => JSON.parse(wasm.career_remove_upgrade(uid, modId)),
 };
 
-import type { CarTune, CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";
+import type { CarTune, CareerView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";
 
 /** A street-racer level (`wp_wasm::street::Level`). */
 export interface StreetLevel {

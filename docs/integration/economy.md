@@ -24,12 +24,11 @@ the run ends.
 |---|---|
 | `career_new(mode)`, `career_load_json(text)`, `career_save_json()`, `career_exists()` | save = `CareerProfile` JSON (versioned; `migrate` refuses newer saves). During a run `career_save_json` includes the live account and the car's current damage |
 | `career_view_json()` | `CareerView`: cash / debt / rep / bounty / net worth, carried heat + level, cars (condition, value, sale + scrap price, mods, insurance, `RepairAll` quote, priced repair lines, pound status, PI / mass / 0–100 / top speed), dealer (street roster, New/Used/Worn prices), floor car, insurance tiers, district labour, stats, ledger tail |
-| `career_mods_json(uid)` | mod tree for the car's class and mode: installed, allowed + reason, same-line replacement, stats after the change |
 | `career_start_run(scenario_json)` | any live scenario (free drive, city chase, a race): entity 0 becomes the active car with its mods (overlay data, same car id), saved lattice restored, career mode, carried heat as `police_heat`; ends a career run in progress first |
 | `career_end_run()` | `RunClose { end: Free/Captured/Wrecked, carried_heat, cash, ledger }`; stores the car's damage, applies carry-over, one night passes. Replacing the session (`init`, another start) also ends it |
 | `career_run_active()` | |
 | `career_buy_car(def, cond)`, `career_floor_car()`, `career_sell_car(uid)`, `career_set_active(uid)` | dealer = roster minus `debug_*` and police |
-| `career_install_mod(uid, id)`, `career_uninstall_mod(uid, id)` | a mod that changes the lattice structure (cages) is refused while the body is dented |
+| workshop exports (`career_workshop_json`, parts, `career_install_upgrade` / `career_remove_upgrade`) | the only way to change a car's mods; see `docs/integration/garage.md`. A mod that changes the lattice structure (cages) is refused while the body is dented |
 | `career_quote_json(uid, req)`, `career_repair(uid, req)` | `req = { option?: RepairAll / {RepairSelected:[items]} / Scrap, district?: DistrictId, shop?: Legit/Crooked }`; the stored lattice is repaired with `DamageSim::apply_repair` (full repair = pristine body); a legit shop reporting a wanted car raises carried heat |
 | `career_release(uid)`, `career_next_night()` | pound release; a night without driving (auction countdown, premiums) |
 | `career_insure(uid, tier)` | `"basic"`, `"full"`, `""` = drop the policy |

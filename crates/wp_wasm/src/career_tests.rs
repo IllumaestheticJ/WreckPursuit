@@ -665,6 +665,43 @@ fn workshop_swaps_a_crashed_bumper_and_radiator_and_blocks_a_car_with_parts_miss
 }
 
 #[test]
+fn the_workshop_sells_parts_with_stat_previews_and_installs_upgrades_that_are_not_parts() {
+    let (mut c, uid) = career_with("kestrel_ts", 60_000, DamageMode::Arcade);
+    let w = c.workshop(uid).unwrap();
+    // Part grades come with the stats they would give; they are not upgrades.
+    let intake = w.previews.get("engine_intake_1").expect("intake preview");
+    assert!(intake.class_index >= w.stats.class_index, "{intake:?}");
+    assert!(w.upgrade_options.iter().all(|m| m.id != "engine_intake_1"));
+    // Paint is not a part: it is an upgrade, installed and removed in the workshop.
+    let paint = w
+        .upgrade_options
+        .iter()
+        .find(|m| m.id == "paint_matte")
+        .expect("paint is an upgrade");
+    assert!(paint.allowed && !paint.installed, "{paint:?}");
+    assert!(!w.previews.contains_key("paint_matte"));
+    let cash = c.profile().account.cash;
+    c.install_mod(uid, "paint_matte").unwrap();
+    assert_eq!(c.profile().account.cash, cash - paint.price as i64);
+    let w = c.workshop(uid).unwrap();
+    let paint = w
+        .upgrade_options
+        .iter()
+        .find(|m| m.id == "paint_matte")
+        .unwrap();
+    assert!(paint.installed);
+    c.uninstall_mod(uid, "paint_matte").unwrap();
+    assert!(!c
+        .profile()
+        .account
+        .car(uid)
+        .unwrap()
+        .mods
+        .iter()
+        .any(|m| m == "paint_matte"));
+}
+
+#[test]
 fn the_workshop_shows_the_car_as_it_is_even_with_parts_missing() {
     let (mut c, uid) = career_with("kestrel_ts", 30_000, DamageMode::Arcade);
     drive_and_crash(&mut c, 35.0);

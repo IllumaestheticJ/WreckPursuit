@@ -3,15 +3,15 @@
  * a `CareerApi` (wp_wasm's `career_*` exports, wired by the testbed), so it holds no game
  * state of its own: every action returns the new `CareerView` and the screen redraws.
  *
- * Tabs: Cars (condition, value, repair per item at a district shop, insurance, sell, mods,
- * the free four-slider tune),
+ * Tabs: Cars (condition, value, repair per item at a district shop, insurance, sell, the
+ * workshop for parts and upgrades, the free four-slider tune),
  * Dealer (roster cars by class band, the economy-floor beater), Impound (release or let the
  * auction countdown run), Ledger. The head has cash / debt / rep / bounty / carried heat and
  * starts the next run (free drive or city chase) with the active car.
  */
 import { render, type ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { Badge, Button, Delta, Meter, Money, Panel, severityColor, Stat, Tabs } from "../ui/kit";
+import { Badge, Button, Meter, Money, Panel, severityColor, Stat, Tabs } from "../ui/kit";
 import { pct, words } from "../ui/format";
 import type {
   CareerApi,
@@ -20,27 +20,18 @@ import type {
   CarView,
   Condition,
   DamageMode,
-  ModOption,
-  ModTreeView,
   RepairItem,
   ShopKind,
   ShopRequest,
-  StatsView,
 } from "./types";
 import { pickTextFile } from "./store";
+import { StatGrid } from "./StatGrid";
 import { isStockTune, normalizeTune, STOCK_TUNE, TUNE_SLIDERS, TUNE_STEPS, tuneSummary } from "./tune";
 import "./garage.css";
 
 type Tab = "cars" | "dealer" | "pound" | "ledger";
 
 const itemKey = (i: RepairItem) => JSON.stringify(i);
-const fmt = {
-  pi: (v: number) => v.toFixed(0),
-  kg: (v: number) => `${v.toFixed(0)} kg`,
-  s: (v: number) => `${v.toFixed(2)} s`,
-  kmh: (v: number) => `${v.toFixed(0)} km/h`,
-  g: (v: number) => `${v.toFixed(2)} g`,
-};
 
 /** Ledger reason → short label (falls back to the reason with spaces). */
 const REASON: Record<string, string> = {
@@ -66,28 +57,6 @@ const REASON: Record<string, string> = {
   CarScrapped: "Scrapped",
   ShopReported: "Shop reported you",
 };
-
-function StatGrid({ now, after }: { now: StatsView; after?: StatsView | null }) {
-  const a = after ?? now;
-  return (
-    <div class="wp-cg-stats wp-mono">
-      <span class="wp-dim">PI</span>
-      <span>
-        <Delta before={now.class_index} after={a.class_index} format={fmt.pi} /> <span class="wp-dim">({a.bracket})</span>
-      </span>
-      <span class="wp-dim">Mass</span>
-      <Delta before={now.mass_kg} after={a.mass_kg} format={fmt.kg} higherIsBetter={false} epsilon={0.5} />
-      <span class="wp-dim">0–100</span>
-      <Delta before={now.est_0_100_s} after={a.est_0_100_s} format={fmt.s} higherIsBetter={false} epsilon={0.005} />
-      <span class="wp-dim">Top</span>
-      <Delta before={now.top_speed_kmh} after={a.top_speed_kmh} format={fmt.kmh} epsilon={0.5} />
-      <span class="wp-dim">Grip</span>
-      <Delta before={now.lateral_g} after={a.lateral_g} format={fmt.g} epsilon={0.005} />
-      <span class="wp-dim">Brakes</span>
-      <Delta before={now.brake_g} after={a.brake_g} format={fmt.g} epsilon={0.005} />
-    </div>
-  );
-}
 
 function CarCard({ car, selected, onSelect }: { car: CarView; selected: boolean; onSelect: () => void }) {
   return (
@@ -279,81 +248,6 @@ function InsurancePanel(props: { car: CarView; view: CareerView; api: CareerApi;
   );
 }
 
-const GROUPS: ModOption["group"][] = ["performance", "durability", "tool", "cosmetic"];
-
-function ModTree(props: { car: CarView; api: CareerApi; run: (f: () => CareerView) => void; onBack: () => void }) {
-  const { car, api } = props;
-  const [group, setGroup] = useState<ModOption["group"]>("performance");
-  const [hover, setHover] = useState<string | null>(null);
-  let tree: ModTreeView | null = null;
-  let error: string | null = null;
-  try {
-    tree = api.mods(car.uid);
-  } catch (e) {
-    error = String((e as Error).message ?? e);
-  }
-  if (!tree) return <Panel title="Mods">{error}</Panel>;
-  const shown = tree.mods.filter((m) => m.group === group);
-  const focus = tree.mods.find((m) => m.id === hover) ?? null;
-  return (
-    <div class="wp-cg-mods" data-testid="mod-tree">
-      <Panel title={`Mods · ${car.name}`} tag={<Button size="sm" onClick={props.onBack}>Back</Button>}>
-        <Tabs tabs={GROUPS.map((g) => ({ id: g, label: words(g) }))} value={group} onChange={setGroup} />
-        <table class="wp-table">
-          <thead>
-            <tr>
-              <th>Mod</th>
-              <th>Slot</th>
-              <th class="num">Price</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((m) => (
-              <tr key={m.id} onMouseEnter={() => setHover(m.id)} data-mod={m.id}>
-                <td>
-                  <b>{m.name}</b> <span class="wp-dim wp-mono">T{m.tier}</span>
-                  <div class="wp-dim" style={{ fontSize: "0.8em" }}>
-                    {m.tradeoff}
-                  </div>
-                  {!m.allowed && m.reason && (
-                    <div class="wp-warn" style={{ fontSize: "0.8em" }}>
-                      {m.reason}
-                    </div>
-                  )}
-                </td>
-                <td class="wp-dim">{words(m.slot)}</td>
-                <td class="num">
-                  <Money value={m.price} />
-                </td>
-                <td>
-                  {m.installed ? (
-                    <Button size="sm" disabled={!m.allowed} onClick={() => props.run(() => api.uninstall(car.uid, m.id))}>
-                      Remove
-                    </Button>
-                  ) : (
-                    <Button size="sm" variant="primary" disabled={!m.allowed} onClick={() => props.run(() => api.install(car.uid, m.id))}>
-                      {m.replaces ? "Swap" : "Install"}
-                    </Button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Panel>
-      <Panel title={focus ? (focus.installed ? `Without ${focus.name}` : `With ${focus.name}`) : "Build"} tag={focus ? `T${focus.tier}` : undefined}>
-        <StatGrid now={tree.stats} after={focus?.stats_after} />
-        {focus?.replaces && <p class="wp-dim">Replaces {focus.replaces} (refunded at 40 %).</p>}
-        {focus && focus.requires.length > 0 && <p class="wp-dim">Needs: {focus.requires.join(", ")}</p>}
-        <p class="wp-dim" style={{ fontSize: "0.8em" }}>
-          Hover a mod to see what it changes. Durability adds mass; removing a mod refunds 40 %.
-        </p>
-      </Panel>
-    </div>
-  );
-}
-
 /**
  * The free tune page (reference-game style): four 5-step sliders, 3 = stock, a line under each
  * saying what it does, and Reset. Every change is saved at once (no money) and applies when the
@@ -425,7 +319,6 @@ function TunePage(props: { car: CarView; api: CareerApi; run: (f: () => CareerVi
 function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
   const { view, api } = props;
   const [sel, setSel] = useState<number | null>(view.active_car);
-  const [mods, setMods] = useState(false);
   const [tuning, setTuning] = useState(false);
   const [sellAsk, setSellAsk] = useState(false);
   const car = view.cars.find((c) => c.uid === sel) ?? view.cars.find((c) => c.active) ?? view.cars[0];
@@ -441,7 +334,6 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
       </Panel>
     );
   }
-  if (mods && car.location === "Garage") return <ModTree car={car} api={api} run={props.run} onBack={() => setMods(false)} />;
   if (tuning && car.location === "Garage") return <TunePage car={car} api={api} run={props.run} onBack={() => setTuning(false)} />;
   return (
     <div class="wp-cg-cars">
@@ -466,13 +358,12 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
             <Button variant="primary" disabled={car.active || car.location !== "Garage"} onClick={() => props.run(() => api.setActive(car.uid))}>
               {car.active ? "Active car" : "Drive this car"}
             </Button>
-            {api.workshop && (
-              <Button disabled={car.location !== "Garage"} onClick={() => api.workshop!(car.uid)} title="work on the car yourself: take parts off, fit new ones">
-                Workshop
-              </Button>
-            )}
-            <Button disabled={car.location !== "Garage"} onClick={() => setMods(true)}>
-              Mods
+            <Button
+              disabled={car.location !== "Garage"}
+              onClick={() => api.workshop(car.uid)}
+              title="parts and upgrades: take parts off, fit new ones, buy from the catalog, paint and gadgets"
+            >
+              Workshop
             </Button>
             <Button disabled={car.location !== "Garage"} onClick={() => setTuning(true)} title="free: suspension, gearing, differential, brake balance">
               Tune
