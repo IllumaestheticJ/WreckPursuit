@@ -56,7 +56,7 @@ export type Wager = { kind: "none" } | { kind: "side_bet"; stake: number } | { k
 
 /** `wp_race::touge::TougeSettlement`. */
 export interface TougeSettlement {
-  result: "Won" | "Lost";
+  result: "Won" | "Lost" | "Draw";
   player_totaled: boolean;
   bet_payout: number;
   bet_net: number;
@@ -81,7 +81,7 @@ export interface TougeReport {
   wager: Wager;
   wager_taken: boolean;
   wager_error: string | null;
-  outcome: { result: "Won" | "Lost"; tick: number; totaled: number | null; breach: "ThroughWall" | "OffTheEdge" | null } | null;
+  outcome: { result: "Won" | "Lost" | "Draw"; tick: number; totaled: number | null; breach: "ThroughWall" | "OffTheEdge" | null } | null;
   opponent_health: number | null;
   opponent_totaled: boolean | null;
   settlement: TougeSettlement | null;
@@ -267,7 +267,7 @@ function BattlePanel(props: { report: TougeReport }) {
   const o = r.outcome;
   return (
     <div class="wp-touge-battle" data-testid="touge-battle" style={{ position: "absolute", left: "1em", bottom: "1em", width: "22em", pointerEvents: "auto" }}>
-      <Panel title={`${r.boss ? "Boss" : "Challenger"}: ${r.opponent}`} tag={o ? (o.result === "Won" ? "WON" : "LOST") : "BATTLE"}>
+      <Panel title={`${r.boss ? "Boss" : "Challenger"}: ${r.opponent}`} tag={o ? (o.result === "Won" ? "WON" : o.result === "Draw" ? "DRAW" : "LOST") : "BATTLE"}>
         <div class="wp-dim" style={{ fontSize: "0.85em" }}>
           “{r.title}” in the {r.opponent_car} · {DIR_LABEL[r.direction] ?? r.direction} · {r.daylight} · {r.surface}
         </div>
@@ -278,7 +278,9 @@ function BattlePanel(props: { report: TougeReport }) {
         </div>
         {o && (
           <div style={{ marginTop: "0.4em" }}>
-            <b class={o.result === "Won" ? "wp-ok" : "wp-danger"}>{o.result === "Won" ? "You won the battle" : "You lost the battle"}</b>
+            <b class={o.result === "Won" ? "wp-ok" : o.result === "Draw" ? "wp-dim" : "wp-danger"}>
+              {o.result === "Won" ? "You won the battle" : o.result === "Draw" ? "Draw: both cars stuck, stakes refunded" : "You lost the battle"}
+            </b>
             {o.breach && (
               <div class="wp-danger" style={{ fontSize: "0.85em" }}>
                 {o.result === "Won" ? `${r.opponent} ` : "You "}
