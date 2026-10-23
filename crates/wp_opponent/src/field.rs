@@ -286,6 +286,9 @@ struct Obstacle {
     facing: f32,
     /// A racer stuck nose-in that cannot back out because something stands right behind it.
     wants_room: bool,
+    /// A police unit (only known while some racer is wanted). Wanted racers shove and ram
+    /// these instead of keeping clear.
+    police: bool,
 }
 
 /// An obstacle relative to one racer: arc distance ahead (`ds` < 0 = behind) and the
@@ -387,6 +390,8 @@ struct Racer {
     get_run: Option<Who>,
     /// Seconds a chasing unit has been within [`YIELD_RADIUS_M`] (wanted below flee level).
     yield_s: f32,
+    /// Wanted (or fleeing): police cars are shoved and rammed, not given room.
+    wanted: bool,
     /// Seconds since the flight route was last planned.
     replan_s: f32,
     /// Fleeing racer that lost the police.
@@ -530,7 +535,11 @@ fn approach(x: f32, target: f32, max_step: f32) -> f32 {
     x + (target - x).clamp(-max_step, max_step)
 }
 
-const SIDE_GAP_M: f32 = 0.6;
+/// Side clearance kept to a car alongside (racer, player, police), m: careful drivers
+/// (aggression 0) .. hard chargers (aggression 1), who lean on the other car.
+const SIDE_GAP_M: (f32, f32) = (0.5, 0.2);
+/// Extra lateral room given to a car that is sliding / running wide / reversing, m.
+const UNSTABLE_EXTRA_M: f32 = 0.8;
 const MIN_GAP_M: f32 = 2.5;
 const LAT_MARGIN_M: f32 = 0.35;
 /// Distance from the start line over which racers hold their grid lane, m.
@@ -551,6 +560,15 @@ const FLIGHT_REPLAN_S: f32 = 6.0;
 /// Drivers below this risk stop for red lights on open roads; the others go through a red
 /// only when the junction is clear.
 pub const RED_LIGHT_RISK: f32 = 0.35;
+/// Only drivers below this risk pull over for a unit on their tail (wanted below their flee
+/// level); the rest race on and shove the police out of the way.
+pub const POLICE_YIELD_RISK: f32 = 0.35;
+/// Speed a wanted racer keeps above a police car in its way, m/s, at aggression 0 .. 1: it
+/// rams through rather than stopping behind it.
+const RAM_CLOSING_MPS: (f32, f32) = (4.0, 10.0);
+/// Drivers at or above this risk overtake on the opposing lanes of open roads whenever the
+/// pass checks find them clear; the others only round parked cars and crawlers.
+const OPPOSING_PASS_RISK: f32 = 0.5;
 /// Signals are looked up this far ahead, m.
 const SIGNAL_LOOKAHEAD_M: f32 = 150.0;
 /// After waiting this long at a junction for civilians that are standing still (each waiting
@@ -668,6 +686,7 @@ impl Field {
                 alongside_s: 0.0,
                 get_run: None,
                 yield_s: 0.0,
+                wanted: false,
                 replan_s: 0.0,
                 escaped: false,
                 junction_wait_s: 0.0,
@@ -884,12 +903,19 @@ impl Field {
             let dt = self.config.decision_ticks.max(1) as f32 * PHYSICS_DT;
             self.observe(world, vehicles, police, dt);
             self.update_still(world, vehicles, dt);
-            let snapshot = self.perceive_all(world, vehicles);
+            // Police unit positions, only while someone is wanted (only wanted racers treat
+            // police differently).
+            let police_at = if self.racers.iter().any(|r| r.wanted) {
+                police.police_positions()
+            } else {
+                Vec::new()
+            };
+            let snapshot = self.perceive_all(world, vehicles, &police_at);
             let civs = self.civilians_near(world);
             for k in 0..self.racers.len() {
                 let obstacles = match &self.racers[k].flight {
                     None => snapshot.clone(),
-                    Some(f) => self.perceive_on(&f.corridor, k, world, vehicles),
+                    Some(f) => self.perceive_on(&f.corridor, k, world, vehicles, &police_at),
                 };
                 let signal = self.signal_ahead(k, world);
                 let priority = self.priority_ahead(k, world);
@@ -1174,6 +1200,7 @@ impl Field {
             r.pressure = (r.pressure - 0.5 * dt).max(0.0);
             // Police heat.
             let lvl = police.wanted_level(r.entity);
+            r.wanted = lvl > 0 || (r.status == RacerStatus::Fled && !r.escaped);
             if lvl > 0 || r.status == RacerStatus::Fled || r.tactic == Tactic::Yield {
                 let at = police_at.get_or_insert_with(|| police.police_positions());
                 self.react_to_police(k, world, police, at, lvl, dt);
@@ -1273,7 +1300,11 @@ impl Field {
                         r.tactic_ticks = 0;
                         r.yield_s = 0.0;
                     }
-                } else if lvl > 0 && chased && nearest < YIELD_RADIUS_M {
+                } else if lvl > 0
+                    && chased
+                    && nearest < YIELD_RADIUS_M
+                    && r.profile.risk < POLICE_YIELD_RISK
+                {
                     r.yield_s += dt;
                     if r.yield_s >= YIELD_AFTER_S && r.tactic != Tactic::Park {
                         r.tactic = Tactic::Yield;
@@ -1361,7 +1392,12 @@ impl Field {
     }
 
     /// Step 2 for the shared corridor: every vehicle and nearby civilian as an obstacle.
-    fn perceive_all(&mut self, world: &World, vehicles: &[VehicleObs]) -> Vec<Obstacle> {
+    fn perceive_all(
+        &mut self,
+        world: &World,
+        vehicles: &[VehicleObs],
+        police_at: &[V2],
+    ) -> Vec<Obstacle> {
         let mut out = Vec::new();
         let range = self.racers.iter().fold(0.0f32, |m, r| m.max(r.ahead_m())) + 20.0;
         for v in vehicles {
@@ -1387,6 +1423,7 @@ impl Field {
                             parked: matches!(r.tactic, Tactic::Park | Tactic::Yield),
                             facing: 1.0,
                             wants_room: r.wants_room,
+                            police: false,
                         });
                         continue;
                     }
@@ -1402,6 +1439,7 @@ impl Field {
             self.hints.insert(v.entity, cp.index);
             if let Some(mut o) = vehicle_obstacle(&self.corridor, who, cp, v) {
                 o.parked = self.is_still(STILL_VEHICLE_KEY + v.entity.0 as u64);
+                o.police = is_police_at(police_at, pos);
                 out.push(o);
             }
         }
@@ -1422,6 +1460,7 @@ impl Field {
         k: usize,
         world: &World,
         vehicles: &[VehicleObs],
+        police_at: &[V2],
     ) -> Vec<Obstacle> {
         let me = &self.racers[k];
         let mut out = Vec::new();
@@ -1436,6 +1475,7 @@ impl Field {
             let cp = corridor.project_unclamped(pos, Some(me.hint), 80);
             if let Some(mut o) = vehicle_obstacle(corridor, Who::Vehicle(v.entity), cp, v) {
                 o.parked = self.is_still(STILL_VEHICLE_KEY + v.entity.0 as u64);
+                o.police = is_police_at(police_at, pos);
                 out.push(o);
             }
         }
@@ -1638,8 +1678,8 @@ fn decide_racer(
             }
         };
         let limits = |s: f32| to_limits(corridor.bounds(s));
-        // Overtaking may use the opposing lanes on open roads: risk-takers always, everyone
-        // to get round a pulled-over racer just ahead.
+        // Overtaking may use the opposing lanes on open roads: anyone from
+        // `OPPOSING_PASS_RISK` up always, everyone to get round a parked car or a crawler.
         let parked_ahead = obstacles.iter().any(|o| {
             o.parked && o.who != Who::Racer(k) && {
                 let ds = corridor.delta_s(r.s_rel, o.s);
@@ -1665,7 +1705,7 @@ fn decide_racer(
             });
         let may_use_opposing = corridor.opposing == OpposingLanes::ForOvertaking
             && !done_racing
-            && (r.profile.risk >= 0.5 || parked_ahead || crawler_ahead);
+            && (r.profile.risk >= OPPOSING_PASS_RISK || parked_ahead || crawler_ahead);
         let pass_limits = |s: f32| {
             if may_use_opposing {
                 to_limits(corridor.pass_bounds(s))
@@ -1932,10 +1972,23 @@ fn decide_racer(
             let hi = o.n.max(o.n + drift) + o.half_w + margin;
             band.0 < hi && band.1 > lo
         };
-        // Civilian clearance grows with my speed: creep past a stopped car with 0.4 m, pass
+        // Civilian clearance grows with my speed: creep past a stopped car with 0.3 m, pass
         // at 15 m/s or more with the full margin.
-        let civ_margin = 0.4 + (p.civilian_margin_m - 0.4) * (v / 15.0).clamp(0.0, 1.0);
+        let civ_margin = 0.3 + (p.civilian_margin_m - 0.3) * (v / 15.0).clamp(0.0, 1.0);
+        let side_gap_m = SIDE_GAP_M.0 + (SIDE_GAP_M.1 - SIDE_GAP_M.0) * r.profile.aggression;
+        // Wanted: police cars get no room at all (shoved alongside, rammed ahead).
+        let hostile = r.wanted;
+        let rams = |o: &Obstacle| hostile && o.police;
+        // Held up behind traffic for a while with no clean pass: accept rubbing it to get by
+        // (still steering round it, never aiming at it).
+        let bold = r.blocked_s > p.overtake_patience_s + 1.5;
         let margin_for = |o: &Obstacle| -> f32 {
+            if rams(o) {
+                return 0.0;
+            }
+            if bold && !matches!(o.who, Who::Racer(_)) && !o.police {
+                return 0.1;
+            }
             let base = if matches!(o.who, Who::Civilian(_)) {
                 civ_margin
             } else {
@@ -1944,7 +1997,7 @@ fn decide_racer(
             if parked_non_racer(o) {
                 return parked_gap(v, base);
             }
-            base + if o.unstable { 1.5 } else { 0.0 }
+            base + if o.unstable { UNSTABLE_EXTRA_M } else { 0.0 }
         };
 
         // Follow mode: who blocks the line? Held-up evidence = last decision's speed was set
@@ -2133,6 +2186,7 @@ fn decide_racer(
         let mut lo = act_lo.min(r.n);
         let mut hi = act_hi.max(r.n);
         let mut squeezed_by_ahead = false;
+        let mut shove: Option<f32> = None;
         for x in &rel {
             // Alongside, or (mirrors) coming up from behind fast enough to be alongside
             // within 1.5 s.
@@ -2148,11 +2202,25 @@ fn decide_racer(
             if !alongside && !arriving && !meeting {
                 continue;
             }
-            let civ_extra = if is_civ(&x.o) { civ_margin } else { 0.0 };
-            let side_gap = if parked_non_racer(&x.o) {
-                parked_gap(v, SIDE_GAP_M + civ_extra)
+            if rams(&x.o) {
+                // A police car beside me: no room given. Aggressive drivers lean into it.
+                if alongside && r.profile.aggression >= 0.4 {
+                    let side = (x.o.n - r.n).signum();
+                    shove = Some(x.o.n - side * (hw + x.o.half_w - 0.3));
+                }
+                continue;
+            }
+            let base_gap = if bold && !matches!(x.o.who, Who::Racer(_)) {
+                0.1
+            } else if is_civ(&x.o) {
+                civ_margin + 0.2
             } else {
-                SIDE_GAP_M + civ_extra
+                side_gap_m
+            };
+            let side_gap = if parked_non_racer(&x.o) {
+                parked_gap(v, base_gap)
+            } else {
+                base_gap
             };
             let need = hw + x.o.half_w + side_gap;
             // Lateral closing speed (either car drifting toward the other) eats clearance.
@@ -2175,6 +2243,9 @@ fn decide_racer(
                 .any(|x| x.ds > 0.0 && x.ds < hl + x.o.half_len + 1.5);
         } else {
             n_cmd = n_cmd.clamp(lo, hi.max(lo));
+        }
+        if let Some(t) = shove {
+            n_cmd = approach(r.n_cmd, t.clamp(act_lo, act_hi), 1.5 * dt);
         }
         r.n_cmd = n_cmd;
 
@@ -2333,8 +2404,8 @@ fn decide_racer(
                 let t_in = t_at(d_entry);
                 let clear = d_entry + box_len + 2.0 * hl;
                 let t_out = t_at(clear).max(t_in + (box_len + 2.0 * hl) / v_box);
-                // Crossing gap either side of my pass: 0.96 s (careful) .. 0.54 s (risk-taker).
-                let gap_s = 0.6 * p.civilian_headway_s;
+                // Crossing gap either side of my pass: 0.8 s (careful) .. 0.4 s (risk-taker).
+                let gap_s = 0.8 * p.civilian_headway_s;
                 // My swept strip through the box, in box coordinates (along `t_dir` from the
                 // box middle, across from the corridor centre): the lane band I occupy now
                 // and where my line takes me, the box length plus my car.
@@ -2435,8 +2506,20 @@ fn decide_racer(
             let closing = (v - o.v_s).max(0.5);
             // Arriving fast next to a car: want more lateral room the faster I close.
             let margin =
-                margin_for(o) + (0.15 * (closing - 2.0)).clamp(0.0, if civ { 0.5 } else { 1.0 });
+                margin_for(o) + (0.08 * (closing - 2.0)).clamp(0.0, if civ { 0.3 } else { 0.4 });
             if !overlaps(band, o, margin, x.gap / closing) {
+                continue;
+            }
+            if rams(o) {
+                // Wanted and a police car in my way: drive into it (shove it aside or
+                // knock it round) instead of stopping behind it.
+                let (c0, c1) = RAM_CLOSING_MPS;
+                let ram = c0 + (c1 - c0) * r.profile.aggression;
+                cap_to(
+                    &mut v_target,
+                    o.v_s.max(0.0) + ram,
+                    SpeedLimit::Obstacle(who_id(o.who)),
+                );
                 continue;
             }
             // Steering out round a parked car (pulled over, or standing for good): once the
@@ -2485,8 +2568,8 @@ fn decide_racer(
                 (p.headway_s * 0.5).max(0.3)
             } else {
                 p.headway_s
-            } * if o.unstable { 1.6 } else { 1.0 };
-            let min_gap = if civ { MIN_GAP_M + 2.0 } else { MIN_GAP_M };
+            } * if o.unstable { 1.25 } else { 1.0 };
+            let min_gap = if civ { MIN_GAP_M + 1.0 } else { MIN_GAP_M };
             let vo = o.v_s.max(0.0);
             // Hold a time gap behind it (closing it over ~1.2 s), and never more speed than
             // can be shed before reaching the minimum gap if it brakes as hard as I can.
@@ -2528,7 +2611,7 @@ fn decide_racer(
         // braking zone: back out.
         let alongside_ahead = rel
             .iter()
-            .find(|x| !is_civ(&x.o) && x.ds > 0.0 && x.ds < hl + x.o.half_len + 0.5);
+            .find(|x| !is_civ(&x.o) && !rams(&x.o) && x.ds > 0.0 && x.ds < hl + x.o.half_len + 0.5);
         if let Some(x) = alongside_ahead {
             let into_corner = brake_dist < v * p.side_by_side_s && r.tactic != Tactic::Overtake;
             if x.o.parked || x.o.v_s.abs() < 1.0 {
@@ -2640,7 +2723,7 @@ fn pass_margin(o: &Obstacle, p: &DriverParams) -> f32 {
     if parked_non_racer(o) {
         0.1
     } else if !matches!(o.who, Who::Racer(_)) {
-        0.3
+        0.15
     } else {
         p.overtake_margin_m
     }
@@ -2650,6 +2733,12 @@ fn pass_margin(o: &Obstacle, p: &DriverParams) -> f32 {
 /// speed when that is more.
 fn pass_horizon(v: f32, v_other: f32) -> f32 {
     30.0f32.max(3.5 * (v - v_other))
+}
+
+/// A sim vehicle at `pos` is a police unit: it sits on one of the police system's unit
+/// positions (same tick, so within a few cm).
+fn is_police_at(police_at: &[V2], pos: V2) -> bool {
+    police_at.iter().any(|q| geom::dist(*q, pos) < 1.0)
 }
 
 fn who_id(w: Who) -> u32 {
@@ -2687,11 +2776,14 @@ fn vehicle_obstacle(
         v_n: geom::dot(vel, geom::right_of(t)),
         half_len: 0.5 * (len * ca + w * sa),
         half_w: 0.5 * (w * ca + len * sa),
-        unstable: v_long > 8.0 && v_lat.abs() > 0.2 * v_long,
+        // A sliding sim vehicle (the player drifting, a cop sideways) counts as unstable only
+        // past ~19° of body slip: a controlled drift is not a loss of control.
+        unstable: v_long > 8.0 && v_lat.abs() > 0.35 * v_long,
         passing: false,
         parked: false,
         facing: geom::dot(fwd, t),
         wants_room: false,
+        police: false,
     })
 }
 
@@ -2745,6 +2837,7 @@ fn civilians_on(
             parked: a.speed_mps.abs() < 0.5 && (a.yielding || a.hazard_lights),
             facing: geom::dot(f, t),
             wants_room: false,
+            police: false,
         });
     }
     out
@@ -2980,6 +3073,7 @@ mod tests {
             parked: true,
             facing: -1.0,
             wants_room: false,
+            police: false,
         }
     }
 
@@ -3254,10 +3348,59 @@ mod tests {
         ];
         for _ in 0..40 {
             f.tick(&world, &side, &[], &NoPolice);
-            // Neither moves toward the other (they start 2.6 m apart, need 1.8 + 0.6).
+            // Neither moves toward the other (they start 2.6 m apart, need 1.8 + side gap).
             assert!(f.debug_of(0).n_cmd <= 1e-3, "{:?}", f.debug_of(0));
             assert!(f.debug_of(1).n_cmd >= 2.6 - 1e-3, "{:?}", f.debug_of(1));
         }
+    }
+
+    /// Wanted at level 1 with one unit at `unit`, chasing.
+    struct OneUnit(V2);
+
+    impl PoliceQuery for OneUnit {
+        fn wanted_level(&self, _racer: EntityId) -> u8 {
+            1
+        }
+        fn police_positions(&self) -> Vec<V2> {
+            vec![self.0]
+        }
+        fn in_pursuit(&self, _racer: EntityId) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn wanted_racer_rams_a_police_car_in_its_way_and_stops_for_anyone_else() {
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        // Racer at y = 100 m doing 20 m/s, a car standing on its line 20 m ahead.
+        let cars = [
+            obs(1, 100.0, 20.0, HandlingEffects::NEUTRAL),
+            obs(50, 124.6, 0.0, HandlingEffects::NEUTRAL),
+        ];
+        // Not wanted: it is just a car in the way (stop behind it).
+        let mut f = field(1);
+        for _ in 0..4 {
+            f.tick(&world, &cars, &[], &NoPolice);
+        }
+        let calm = f.debug_of(0);
+        assert!(matches!(calm.limit, SpeedLimit::Obstacle(50)), "{calm:?}");
+        assert!(calm.v_target < 15.0, "{calm:?}");
+        // Wanted, and that car is a police unit: drive into it.
+        let mut f = field(1);
+        let unit = OneUnit([0.0, 124.6]);
+        for _ in 0..4 {
+            f.tick(&world, &cars, &[], &unit);
+        }
+        let d = f.debug_of(0);
+        let (c0, c1) = RAM_CLOSING_MPS;
+        let ram = c0 + (c1 - c0) * DriverProfile::default().aggression;
+        assert!(d.v_target >= ram - 1e-3, "{d:?}");
+        // ... and never pulls over for it (risk 0.4 is above the yield line).
+        assert!(DriverProfile::default().risk >= POLICE_YIELD_RISK);
+        for _ in 0..240 {
+            f.tick(&world, &cars, &[], &unit);
+        }
+        assert_ne!(f.tactic_of(0), Tactic::Yield);
     }
 
     fn side_state() -> VehicleState {

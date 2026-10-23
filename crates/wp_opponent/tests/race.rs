@@ -517,7 +517,11 @@ fn sweep_open_roads_progress() {
     let only: Option<u64> = std::env::var("WP_SWEEP_SEED")
         .ok()
         .and_then(|v| v.parse().ok());
-    for seed in 1..=8u64 {
+    let seeds: u64 = std::env::var("WP_SWEEP_SEEDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8);
+    for seed in 1..=seeds {
         if only.is_some_and(|o| o != seed) {
             continue;
         }

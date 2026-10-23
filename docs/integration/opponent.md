@@ -339,3 +339,50 @@ trig).
 - **Report to K / race (judge)**: police units spawned during the race are not in the judge's
   police list, so a racer's low-speed bump with one (Hollins seed 5, unit 14 arriving at a
   capture) counts as a civilian hit (`civilian_hits`).
+
+## Bolder AI racers: traffic, the player, police (owner, 2026-10-23)
+
+Owner report: "AI cars are still massive pussies around traffic and the player car"; then
+"make it so AI racers aren't afraid to ram / get aggressive with police" and "aren't afraid
+to [hit] traffic cars as well (but will still try to avoid it)". All in `wp_opponent`; no
+contract change; Arcade and Simulation identical (no `DamageMode` branching).
+
+What made them timid (before):
+- **Player / any sliding sim vehicle**: body slip > ~11° flagged a car unstable, and every
+  racer then gave it 1.5 m more lateral room and 1.6× the time gap: a drifting player was a
+  car-and-a-half wide to the AI.
+- **Side constraints**: 0.6 m to any car alongside (+ the civilian margin, up to 1.6 m, beside
+  traffic); arriving fast added up to 1.0 m of lateral margin (0.15 m per m/s of closing).
+- **Following / passing**: time gaps 0.45–0.9 s to racers and the player, 0.9–1.6 s plus a
+  4.5 m minimum gap to civilians; 0.9–1.6 m extra beside a racer being passed; 0.6–2.5 s
+  patience before a pass; 0.5–3 s side by side into a braking zone.
+- **Police**: a wanted racer below its flee level pulled over for any unit within 30 m for 2 s,
+  and police cars got the same margins as anyone.
+
+Changes:
+- `DriverProfile::params`: headway 0.6 → 0.25 s, overtake margin 0.9 → 0.35 m, side-by-side
+  1.2 → 4 s, patience 1.2 → 0.3 s (aggression 0 → 1); civilian margin 0.6 → 0.35 m, civilian
+  headway 1.0 → 0.5 s (risk 0 → 1). Junction crossing gap 0.8 × civilian headway (0.4–0.8 s).
+- Side gap to racers / the player / police `SIDE_GAP_M` 0.5 → 0.2 m with aggression; beside
+  civilians the civilian margin + 0.2 m. Closing-speed extra margin 0.08 m per m/s, ≤ 0.4 m
+  (≤ 0.3 m civilians). Civilian minimum gap 4.5 → 3.5 m. Pass margin beside non-racers 0.15 m.
+- Sim vehicles (player, police, physical traffic) count as unstable only past ~19° of slip;
+  unstable cars get 0.8 m and 1.25× the gap.
+- **Bold**: held up by traffic for `overtake_patience_s` + 1.5 s with no clean pass → 0.1 m to
+  any non-racer (lateral margin and side gap): it squeezes past and accepts a rub. It still
+  plans round traffic and never aims at it.
+- **Police**: units are recognised from `PoliceQuery::police_positions()` (fetched only while
+  some racer is wanted). A wanted or fleeing racer gives police cars no room: zero lateral
+  margin, no side constraint, aggression ≥ 0.4 leans into a unit alongside (0.3 m overlap),
+  and a unit in its path is rammed at `RAM_CLOSING_MPS` (4–10 m/s with aggression) above the
+  unit's speed instead of stopped behind. Only drivers with risk < `POLICE_YIELD_RISK` (0.35)
+  still pull over; the rest race on.
+
+Tried and dropped (measured on the 24-seed open-road sweep, see below): letting risk ≥ 0.3
+drivers use the opposing lanes (−4 % progress: aborted passes for oncoming traffic), creeping
+round any standing non-racer, not just parked ones (−9 %: racers nosed in beside cars queuing
+at lights and blocked the queue), and a quicker crawler rule (2 s / 80 %, noise).
+
+Measured: `sweep_open_roads_progress` (now `WP_SWEEP_SEEDS=24`, 4 racers, 25 % traffic,
+90 s): total progress 86.8 → 90.2 km, longest wait 36 → 39 s, zero DQs, zero racer contacts
+≥ 400 N·s in all 24 seeds before and after.
