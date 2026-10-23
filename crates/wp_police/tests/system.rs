@@ -177,9 +177,9 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
         })
         .unwrap_err();
     assert!(matches!(err, CaptainError::Locked { .. }), "{err:?}");
-    // Raise heat: spikes unlock, a second request hits the cooldown.
-    h.police.set_heat(RACER, 45.0);
-    assert!(h.police.wanted_level(RACER) >= WantedLevel::L2);
+    // Raise heat: spikes unlock (level 4, owner row 156), a second request hits the cooldown.
+    h.police.set_heat(RACER, 75.0);
+    assert!(h.police.wanted_level(RACER) >= WantedLevel::L4);
     // A valid site (straight approach ≥ 120 m) comes up as the racer drives on.
     let mut r = Err(CaptainError::Budget);
     for _ in 0..40 {
