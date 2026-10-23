@@ -2,7 +2,7 @@
   "id": "sentinel_harrier",
   "display_name": "Sentinel Harrier",
   "class": "PoliceInterceptor",
-  "analog_of": "2010s American muscle-coupe pursuit car, 5.0 L DOHC V8, RWD, 2-door, pursuit package",
+  "analog_of": "2010s American muscle-coupe pursuit car, 5.2 L supercharged DOHC V8, RWD, 2-door, pursuit package",
   "body_size_m": [1.93, 4.82, 1.37],
   "mass_kg": 1812.7,
   "front_weight_frac": 0.55,
@@ -16,27 +16,26 @@
   "lift_rear": 0.1,
   "engine": {
     "torque_curve_nm": [
-      [1000, 350],
-      [1500, 395],
-      [2000, 430],
-      [2500, 460],
-      [3000, 485],
-      [3500, 505],
-      [4000, 522],
-      [4250, 529],
-      [4750, 525],
-      [5250, 515],
-      [5750, 500],
-      [6250, 482],
-      [6750, 452],
-      [7000, 435],
-      [7400, 395]
+      [1000, 450],
+      [1500, 560],
+      [2000, 680],
+      [2500, 780],
+      [3000, 830],
+      [3500, 855],
+      [4000, 865],
+      [4500, 865],
+      [5000, 855],
+      [5500, 840],
+      [6000, 820],
+      [6500, 800],
+      [7000, 765],
+      [7400, 700]
     ],
     "idle_rpm": 700.0,
     "redline_rpm": 7000.0,
     "rev_limit_rpm": 7400.0,
-    "inertia_kgm2": 0.22,
-    "engine_brake_nm": 53.0
+    "inertia_kgm2": 0.24,
+    "engine_brake_nm": 86.0
   },
   "drivetrain": {
     "layout": "Rwd",
@@ -51,7 +50,7 @@
         "ramp_coast": 0.35
       }
     },
-    "clutch_max_nm": 850.0,
+    "clutch_max_nm": 1380.0,
     "shift_time_s": 0.25,
     "torque_converter": {
       "stall_rpm": 2400.0,

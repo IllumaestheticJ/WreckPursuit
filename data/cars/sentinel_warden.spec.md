@@ -4,11 +4,11 @@
 
 | Class | Archetype | Durability | Base price |
 |---|---|---|---|
-| PoliceCruiser | late-80s American full-size body-on-frame RWD police sedan, 5.7 L pushrod V8 police package, 4-speed automatic, boxy three-box body | 4 / 5 | 26,000 |
+| PoliceCruiser | late-80s American full-size body-on-frame RWD police sedan, 7.4 L big-block V8 police package, 4-speed automatic, boxy three-box body | 4 / 5 | 26,000 |
 
 ## Design note
 
-The old workhorse still in service: a long, soft, boxy V8 sedan that leans, floats and squats like a boat, with drum rear brakes that fade after a few hard stops. It has the low-end shove to close on ordinary traffic and nothing for a sports car beyond 120 km/h — but it is a full-length steel frame on wheels, and nobody wants it in their door.
+The old workhorse still in service: a long, soft, boxy V8 sedan that leans, floats and squats like a boat, with drum rear brakes that fade after a few hard stops. The big-block has the low-end shove to close on anything ordinary and to hang on to a sports car to highway speed — but it is a full-length steel frame on wheels, and nobody wants it in their door.
 
 ## How this car breaks
 
@@ -59,29 +59,29 @@ Frontal area A = 0.85·W·H = 2.41 m²; Cd = 0.40 → **CdA = 1.013 m²** + 0.05
 
 ## Engine
 
-5.7 L OHV 16-valve V8, throttle-body injection, police package (performance cam, dual exhaust, high-flow intake). Class-typical late-80s 5.7 L throttle-body police V8 (~27 kW/L, ~155 kW at 4000 rpm, ~412 N·m at 2800) per fleet spec-class data and period road tests: all low-end torque, nothing above 4500 rpm.
+7.4 L OHV 16-valve big-block V8, port injection, police package (performance cam, dual exhaust, high-flow intake). Class-typical big-block police V8 (~29 kW/L, ~215 kW at 4400 rpm, ~550 N·m at 2800) per fleet spec-class data and period road tests: a wall of low-end torque, nothing above 4500 rpm. Pursuit tuning (owner, 2026-10-23): replaces the 155 kW 5.7 L so the old unit is no longer left standing.
 
 | rpm | N·m | kW |
 |---|---|---|
-| 800 | 290 | 24.3 |
-| 1200 | 340 | 42.7 |
-| 1600 | 380 | 63.7 |
-| 2000 | 400 | 83.8 |
-| 2400 | 410 | 103.0 |
-| 2800 | 412 | 120.8 |
-| 3200 | 405 | 135.7 |
-| 3600 | 392 | 147.8 |
-| 4000 | 370 | 155.0 |
-| 4400 | 330 | 152.1 |
-| 4800 | 290 | 145.8 |
-| 5000 | 265 | 138.8 |
-| 5200 | 240 | 130.7 |
+| 800 | 380 | 31.8 |
+| 1200 | 450 | 56.5 |
+| 1600 | 500 | 83.8 |
+| 2000 | 530 | 111.0 |
+| 2400 | 545 | 137.0 |
+| 2800 | 550 | 161.3 |
+| 3200 | 545 | 182.6 |
+| 3600 | 530 | 199.8 |
+| 4000 | 505 | 211.5 |
+| 4400 | 470 | 216.6 |
+| 4800 | 425 | 213.6 |
+| 5000 | 400 | 209.4 |
+| 5200 | 370 | 201.5 |
 
-Peak **155 kW @ 4000 rpm**, **412 N·m @ 2800 rpm**. Idle 600 / redline 5000 / limiter 5200 rpm. Rotating inertia 0.26 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 12% of peak torque = 49 N·m. Power-to-weight 83 kW/t.
+Peak **217 kW @ 4400 rpm**, **550 N·m @ 2800 rpm**. Idle 600 / redline 5000 / limiter 5200 rpm. Rotating inertia 0.30 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 12% of peak torque = 66 N·m. Power-to-weight 116 kW/t.
 
 ## Drivetrain
 
-4-speed automatic with overdrive and lock-up torque converter, clutch-type rear LSD (police option) on a coil-sprung live axle. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 60 N·m, power ramp 0.40, coast ramp 0.20. Torque converter: stall 2000 rpm, 2.0× at stall, couples 1:1 from 2400 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 660 N·m. Shift time 0.40 s.
+4-speed automatic with overdrive and lock-up torque converter, clutch-type rear LSD (police option) on a coil-sprung live axle. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 60 N·m, power ramp 0.40, coast ramp 0.20. Torque converter: stall 2000 rpm, 2.0× at stall, couples 1:1 from 2400 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 880 N·m. Shift time 0.40 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -138,7 +138,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
 | sim | 8.8 s | 202 km/h | 40.3 m | 0.83 g | — |
-| estimate | 8.6 s | 207 km/h | 37.5 m | 0.91 g | 455 |
+| estimate | 7.0 s | 234 km/h | 37.5 m | 0.91 g | 515 |
 
 ## Damage lattice (`data/lattices/sentinel_warden.json`)
 

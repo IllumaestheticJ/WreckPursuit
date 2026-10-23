@@ -1045,3 +1045,30 @@ once passed.
   racer's line (one joined while still turning in from its side road).
 - Test: `tests/system.rs::nearby_patrols_sent_as_backup_also_wait_ahead` (default pool; two
   patrol units set up ahead and join facing the racer's way, heading · travel 0.96 / 1.00).
+
+## No pursuit speed cap; faster police cars (owner request, 2026-10-23)
+
+Owner: "cop cars get smoked even by a stock Hakone GT"; "remove the AI pursuit speed cap" (all
+damage modes — the owner rule keeps Arcade and Simulation identical outside car damage).
+
+- **Cap removed.** `pursuit_cap_mps` (32–40 m/s by phase) and `[chase] cap_scale` are gone from
+  `PursuitFile` / `ChaseConfig` and `pursuit.toml`. Every place that clamped to the cap now
+  clamps to the unit car's own top speed (`PoliceSystem::unit_top_speed_mps`: the unit's
+  measured `CarLimits`, else `[pro] default_limits`), including the built-in point-mass driver
+  of kinematic units, which has no top speed of its own. Closing on the racer is still
+  `max(racer speed × (1 + speed_margin), 10 m/s)`; units far behind, PIT and ram approaches go
+  up to the car's top speed (the old `cap + 6/7 m/s` allowances are gone). Ambush timing
+  (`dispatch.rs`) bounds the respond pace by the default car's top speed.
+- **Cars** (`tools/specsheet/roster_inputs.py`, regenerated): measured 0–100 / ¼ mile / Vmax,
+  before → after (stock `hakone_gt`: 6.00 s / 14.28 s @ 169 km/h / 282 km/h):
+  - `sentinel_cruiser` 6.2 L supercharged V8, 276 → 390 kW: 6.40 → 5.93 s, 14.69 → 13.93 s,
+    260 → 293 km/h.
+  - `sentinel_wolfhound` 3.5 TT V6 pursuit tune, 272 → 415 kW: 5.92 → 4.88 s, 14.21 → 12.95 s,
+    244 → 290 km/h.
+  - `sentinel_harrier` 5.2 L supercharged V8, 319 → 561 kW: 5.77 → 5.46 s, 13.82 → 12.90 s,
+    275 → 323 km/h.
+  - `sentinel_warden` 7.4 L big-block V8, 155 → 217 kW: 8.82 → 6.91 s, 201 → 229 km/h.
+  - `sentinel_bastion` 6.2 L V8, 265 → 334 kW: 7.97 → 6.72 s, 215 → 227 km/h.
+- Regenerated: car JSON + spec sheets, `validation_results.json`, `ROSTER.md`, `VALIDATION.md`,
+  `data/stats/cars.json`, `wp_opponent` capability table; `[pro] default_limits` (Sentinel
+  Cruiser) 4.35 → 4.68 m/s², 72.4 → 81.5 m/s.

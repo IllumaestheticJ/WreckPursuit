@@ -14,16 +14,16 @@
 | Lindwurm 4T | `lindwurm_4t` | Sport | AWD on-demand (≤ 50 % rear) | 1554 | 220 | 141 | 5.5 | 259 | 0.97 | 608 | 3 | 34,000 | sport |
 | Lucciola 350 | `lucciola_350` | Exotic | RWD | 1344 | 278 | 207 | 4.6 | 297 | 1.02 | 692 | 1 | 120,000 | sport |
 | Hauler 1500 | `hauler_1500` | Truck | RWD | 2438 | 265 | 109 | 8.0 | 221 | 0.71 | 440 | 5 | 32,000 | all_terrain |
-| Sentinel Cruiser | `sentinel_cruiser` | PoliceCruiser | RWD | 2048 | 276 | 135 | 6.2 | 267 | 0.91 | 559 | 5 | 30,000 | police_pursuit |
-| Sentinel Wolfhound | `sentinel_wolfhound` | PoliceInterceptor | AWD on-demand (≤ 50 % rear) | 2049 | 272 | 133 | 6.1 | 255 | 0.91 | 558 | 4 | 45,000 | police_pursuit |
-| Sentinel Bastion | `sentinel_bastion` | PoliceSuv | RWD | 2638 | 265 | 100 | 7.6 | 224 | 0.81 | 472 | 5 | 48,000 | police_pursuit |
+| Sentinel Cruiser | `sentinel_cruiser` | PoliceCruiser | RWD | 2048 | 390 | 190 | 5.7 | 301 | 0.91 | 601 | 5 | 30,000 | police_pursuit |
+| Sentinel Wolfhound | `sentinel_wolfhound` | PoliceInterceptor | AWD on-demand (≤ 50 % rear) | 2049 | 415 | 202 | 4.7 | 291 | 0.91 | 665 | 4 | 45,000 | police_pursuit |
+| Sentinel Bastion | `sentinel_bastion` | PoliceSuv | RWD | 2638 | 334 | 127 | 6.3 | 235 | 0.81 | 524 | 5 | 48,000 | police_pursuit |
 | Junkyard Beater | `junkyard_beater` | Beater | FWD | 1048 | 65 | 62 | 14.3 | 150 | 0.77 | 324 | 2 | 3,000 | vintage_bias |
 | Tansy 1.3 | `tansy_13` | Compact | FWD | 1058 | 66 | 62 | 12.1 | 176 | 0.90 | 381 | 2 | 7,000 | street |
 | Drayman Cargo | `drayman_cargo` | Truck | RWD | 2481 | 207 | 83 | 10.9 | 207 | 0.74 | 381 | 4 | 20,000 | street |
 | Furrow 2.4 | `furrow_24` | Truck | RWD | 1373 | 107 | 78 | 10.7 | 183 | 0.83 | 391 | 4 | 21,000 | street |
 | Fulmine V10 | `fulmine_v10` | Exotic | AWD 30/70 | 1634 | 449 | 275 | 3.6 | 336 | 0.98 | 816 | 3 | 125,000 | sport |
-| Sentinel Warden | `sentinel_warden` | PoliceCruiser | RWD | 1873 | 155 | 83 | 8.6 | 207 | 0.91 | 455 | 4 | 26,000 | police_pursuit |
-| Sentinel Harrier | `sentinel_harrier` | PoliceInterceptor | RWD | 1813 | 319 | 176 | 5.7 | 282 | 0.95 | 601 | 4 | 52,000 | sport |
+| Sentinel Warden | `sentinel_warden` | PoliceCruiser | RWD | 1873 | 217 | 116 | 7.0 | 234 | 0.91 | 515 | 4 | 26,000 | police_pursuit |
+| Sentinel Harrier | `sentinel_harrier` | PoliceInterceptor | RWD | 1813 | 561 | 309 | 5.4 | 341 | 0.95 | 639 | 4 | 52,000 | sport |
 | Debug Coupe | `debug_coupe` | Sport | RWD | 1500 | 303 | 202 | 4.9 | 299 | 1.00 | 667 | 3 | 52,000 | sport |
 | Debug Sedan | `debug_sedan` | Compact | FWD | 1400 | 151 | 108 | 7.2 | 241 | 0.87 | 501 | 3 | 18,000 | street |
 

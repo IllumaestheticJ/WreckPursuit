@@ -862,3 +862,10 @@ has radiator / rack thresholds ×1.5). **Request (optional, H's call):** `sentin
 driveshaft `intrusion_fail_m` 0.10 → ~0.14 (and `intrusion_total_m` to match). The 0.6 m cabin
 case from round 12b is covered: Arcade's limit is now 0.78 m. Measure with
 `WP_KINDS=mixed,wall-angle WP_SPEEDS=100 cargo run --release -p simcli --example damage_toughness -- arcade sentinel_cruiser hakone_gt`.
+## Police power package (lead, 2026-10-23) — owner: "cop cars get smoked by a stock Hakone GT"
+Engines changed in `roster_inputs.py` for all five police cars (cruiser 6.2 L supercharged V8
+390 kW, wolfhound 3.5 TT pursuit tune 415 kW, harrier 5.2 L supercharged V8 561 kW, warden
+7.4 L big-block 217 kW, bastion 6.2 L V8 334 kW); gearing, chassis, brakes, lattices and prices
+unchanged. Measured before → after and the matching `wp_police` change (no pursuit speed cap)
+in `police.md`. H: please review the curves and the shared engine/audio assets (displacements
+changed in `analog_of`).

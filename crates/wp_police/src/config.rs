@@ -488,8 +488,6 @@ pub struct ChaseConfig {
     pub brake_mps2: f32,
     /// Closing on the racer: up to its speed × (1 + this).
     pub speed_margin: f32,
-    /// `pursuit_cap_mps` × this per level.
-    pub cap_scale: [f32; 5],
     /// Shadow (tail) gap band behind the racer per level, m: nearest.
     pub shadow_min_m: [f32; 5],
     /// ... farthest.
@@ -536,8 +534,6 @@ pub struct PursuitFile {
     pub patrol_speed_factor: f32,
     /// Responding (lights, no pursuit) speed as a fraction of the limit.
     pub respond_speed_factor: f32,
-    /// Absolute pursuit speed cap, m/s.
-    pub pursuit_cap_mps: PhaseTable<f32>,
     /// Pursuers may go this fraction faster than the target.
     pub target_speed_margin: f32,
     /// Lateral acceleration the AI plans corners with, g, while patrolling.

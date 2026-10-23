@@ -143,8 +143,8 @@ impl Default for ProParams {
             default_limits: CarLimits {
                 lat_g: 0.83,
                 brake_g: 0.98,
-                accel_mps2: 4.35,
-                top_speed_mps: 72.4,
+                accel_mps2: 4.68,
+                top_speed_mps: 81.5,
             },
             lat_usage: 0.95,
             brake_usage: 0.92,
@@ -525,7 +525,7 @@ pub struct DriveCtx {
     pub damage_grip: f32,
     /// Engine power left, 0..1.
     pub power_scale: f32,
-    /// Speed the tactic asks for (pursuit cap, limit factor, obstacle cap), m/s.
+    /// Speed the tactic asks for (racer speed margin, limit factor, obstacle cap), m/s.
     pub target_mps: f32,
     /// Corner-planning cap from the assignment, g (patrol drives gently); `None` = the limit.
     pub cornering_cap_g: Option<f32>,

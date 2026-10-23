@@ -2320,9 +2320,9 @@ impl PoliceSystem {
         }
         let start = self.start_node(pos, heading)?;
         let to_start = sub(self.graph.node(start).pos, pos);
-        let cap = self.cfg.pursuit.pursuit_cap_mps.get(self.phase);
+        let top = self.cfg.pursuit.pro.default_limits.top_speed_mps;
         let v = (seg.speed_limit_mps * self.cfg.pursuit.respond_speed_factor * 1.15)
-            .min(cap)
+            .min(top)
             .max(1.0);
         let mut lead_in = dist(pos, self.graph.node(start).pos) / v * AMBUSH_PACE_MARGIN;
         if crate::graph::dot(to_start, heading) < 0.0 {
@@ -2350,13 +2350,13 @@ impl PoliceSystem {
     /// padded by [`AMBUSH_PACE_MARGIN`] plus [`AMBUSH_JUNCTION_S`] for every junction passed.
     fn route_time_s(&self, route: &[NodeId]) -> f32 {
         let p = &self.cfg.pursuit;
-        let cap = p.pursuit_cap_mps.get(self.phase);
+        let top = p.pro.default_limits.top_speed_mps;
         let mut t = AMBUSH_JUNCTION_S * route.len().saturating_sub(1) as f32;
         for w in route.windows(2) {
             if let Some(&(s, _)) = self.graph.outgoing(w[0]).iter().find(|(_, n)| *n == w[1]) {
                 let seg = self.graph.segment(s);
                 let v = (seg.speed_limit_mps * p.respond_speed_factor * 1.15)
-                    .min(cap)
+                    .min(top)
                     .max(1.0);
                 t += seg.length_m / v * AMBUSH_PACE_MARGIN;
             }
