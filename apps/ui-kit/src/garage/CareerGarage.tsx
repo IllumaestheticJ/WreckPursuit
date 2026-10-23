@@ -259,8 +259,9 @@ const WHEELS = ["Front left", "Front right", "Rear left", "Rear right"];
 function TiresPanel(props: { car: CarView; view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
   const { car, view, api } = props;
   const t = car.tires;
-  const [picked, setPicked] = useState<boolean[]>(t.worn_out.slice());
-  if (car.location !== "Garage") return null;
+  const [picked, setPicked] = useState<boolean[]>(t ? t.worn_out.slice() : []);
+  // `tires` is missing only with a wasm package older than the car lots port.
+  if (car.location !== "Garage" || !t) return null;
   const n = picked.filter(Boolean).length;
   const cost = n * t.price_each;
   return (

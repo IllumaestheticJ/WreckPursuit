@@ -550,6 +550,8 @@ export const sim = {
   garageRepair: (): GarageRepairReport => JSON.parse(wasm.garage_repair()),
   /** "Leave" the open visit without repairing. */
   garageLeave: (): void => wasm.garage_leave(),
+  /** Buy informant tip `tier` in the open visit (crooked shop, wanted car); throws if refused. */
+  garageBuyTip: (tier: string): TipReport => JSON.parse(wasm.garage_buy_tip(tier)),
   /** Touge passes with their challenger and boss (`wp_wasm::touge::TougeCard[]`). */
   tougeList: (): TougeCard[] => JSON.parse(wasm.touge_list_json()),
   /** Rep-gated wager menu for one battle, on the account the battle will use (`career`: the
@@ -769,8 +771,8 @@ import type { BetCard, RaceCard, RaceReport, RegularCard } from "../ui/race";
 import type { RaceSpot } from "../race_spots";
 import type { TougeCard, TougeChoice, TougeReport, Wager, WagerMenu } from "../ui/touge";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
-export type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
-import type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
+export type { GarageOffer, GarageRepairReport, GarageSite, TipReport } from "../ui/garageVisit";
+import type { GarageOffer, GarageRepairReport, GarageSite, TipReport } from "../ui/garageVisit";
 
 /** `simcli::car_stats::CarStatsTable` (data/stats/cars.json): bars are 0–1 on fixed scales. */
 export interface CarStatsTable {

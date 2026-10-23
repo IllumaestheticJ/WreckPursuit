@@ -563,6 +563,7 @@ pub fn apply_op(
         OpKind::Ghost { ticks } => sim.set_ghost(id, u32::from(ticks))?,
         OpKind::Dormant { on } => sim.set_dormant(id, on)?,
         OpKind::LightWhenFar { on } => sim.set_light_when_far(id, on)?,
+        OpKind::SetHeat { heat } => sim.police_mut().set_heat(id, heat),
     }
     Ok(())
 }

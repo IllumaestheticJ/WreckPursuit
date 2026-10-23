@@ -641,6 +641,39 @@ impl PlayerRun {
         Ok(report)
     }
 
+    /// Informant tiers on offer (`stakes.toml [informant.*]`), cheapest first: `(tier, cost,
+    /// heat_reduction)`.
+    pub fn informant_tiers(&self) -> Vec<(String, wp_economy::Money, f32)> {
+        let mut v: Vec<(String, wp_economy::Money, f32)> = self
+            .econ
+            .stakes
+            .informant
+            .iter()
+            .map(|(k, t)| (k.clone(), t.cost, t.heat_reduction))
+            .collect();
+        v.sort_by_key(|t| t.1);
+        v
+    }
+
+    /// Pay informant `tier` from the run's account (`InformantTip` ledger line). Returns the
+    /// heat reduction the police should apply (the caller caps and applies it), the ledger
+    /// lines and the cash afterwards.
+    pub fn buy_informant_tip(
+        &mut self,
+        tier: &str,
+    ) -> Result<(f32, Vec<LedgerLine>, wp_economy::Money), String> {
+        if self.over {
+            return Err("the run is over".into());
+        }
+        let (cut, events) = self
+            .econ
+            .buy_informant_tip(&mut self.acct, tier)
+            .map_err(|e| e.to_string())?;
+        let lines = events.iter().map(LedgerLine::of).collect();
+        self.ledger.extend(events);
+        Ok((cut, lines, self.acct.cash))
+    }
+
     /// The `RepairAll` quote the car will get once out of the pound (quoted on a copy).
     fn quote_after_release(&self) -> Option<RepairQuote> {
         let mut probe = self.acct.clone();

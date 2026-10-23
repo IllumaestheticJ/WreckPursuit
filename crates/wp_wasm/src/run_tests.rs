@@ -638,3 +638,56 @@ fn every_garage_can_be_driven_into() {
         }
     }
 }
+
+/// A crooked shop sells a wanted car an informant tip: paid from the account, heat lowered by
+/// at most one wanted level (a logged op), once per visit; a legit shop offers none.
+#[test]
+fn a_crooked_shop_sells_an_informant_tip() {
+    let sc = crate::scenario::free_drive_in(
+        "debug_sedan",
+        DamageMode::Arcade,
+        crate::scenario::city_spec("vesper_v2"),
+    );
+    let mut s = Session::new(sc, false).unwrap();
+    s.run_ticks(1);
+    let crooked = s
+        .garages()
+        .iter()
+        .position(|g| g.kind == wp_economy::ShopKind::Crooked)
+        .unwrap();
+    let legit = s
+        .garages()
+        .iter()
+        .position(|g| g.kind == wp_economy::ShopKind::Legit)
+        .unwrap();
+    s.debug_sim_mut()
+        .unwrap()
+        .police_mut()
+        .set_heat(PLAYER, 35.0);
+    drive_away(&mut s);
+    teleport_into(&mut s, legit, 0.0, 2);
+    let v = s.garage_visit().expect("legit visit").clone();
+    assert!(v.tips.is_empty() && v.tip_note.is_none());
+    assert!(s.garage_buy_tip("whisper").is_err());
+    s.garage_leave();
+    drive_away(&mut s);
+    teleport_into(&mut s, crooked, 0.0, 2);
+    let v = s.garage_visit().expect("crooked visit").clone();
+    assert!(!v.tips.is_empty(), "{v:?}");
+    let cash0 = s.run().unwrap().account().cash;
+    let r = s.garage_buy_tip("contact").unwrap();
+    assert_eq!(r.heat_before, 35.0);
+    // 35 - 25 = 10: the bottom of L1 (an L2 car drops one level at most).
+    assert_eq!(r.heat_after, 10.0);
+    assert!(r.ledger.iter().any(|l| l.reason == "InformantTip"));
+    assert!(s.run().unwrap().account().cash < cash0);
+    s.run_ticks(1);
+    let heat = s.sim().police().racer(PLAYER).unwrap().heat;
+    assert!(heat <= 10.5, "heat {heat}");
+    assert!(s.garage_buy_tip("whisper").is_err(), "one tip per visit");
+    let rp = s.record_stop().unwrap();
+    assert!(rp
+        .ops
+        .iter()
+        .any(|o| matches!(o.op, OpKind::SetHeat { .. })));
+}

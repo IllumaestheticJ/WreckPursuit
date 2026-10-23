@@ -196,6 +196,55 @@ pub struct GarageOffer {
     pub can_repair: bool,
     /// A career run: the panel offers "Enter garage" (the career garage at this shop).
     pub career: bool,
+    /// Informant tips on offer (crooked shops, a wanted car, none bought this visit or within
+    /// [`TIP_COOLDOWN_TICKS`] of the last); empty otherwise.
+    pub tips: Vec<TipOffer>,
+    /// Why there are no tips at this crooked shop (`None` at a legit shop or with tips).
+    pub tip_note: Option<String>,
+}
+
+/// Ticks between informant tips (5 minutes of sim time): a tip is a nudge, not a heat reset.
+pub const TIP_COOLDOWN_TICKS: u64 = 240 * 300;
+
+/// One informant tier offered at a crooked shop.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TipOffer {
+    /// Tier id (`stakes.toml [informant.<tier>]`).
+    pub tier: String,
+    /// Price.
+    pub cost: i64,
+    /// Heat it removes, capped so the car drops at most one wanted level.
+    pub heat_cut: f32,
+    /// The player can pay it.
+    pub affordable: bool,
+}
+
+/// What an informant tip did (`garage_buy_tip`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TipReport {
+    /// Tier bought.
+    pub tier: String,
+    /// Heat before and after.
+    pub heat_before: f32,
+    /// Heat after the tip.
+    pub heat_after: f32,
+    /// Cash afterwards.
+    pub cash_after: i64,
+    /// Ledger lines it added.
+    pub ledger: Vec<LedgerLine>,
+}
+
+/// Heat after a tip of `cut` at `heat`: lowered by `cut`, but never below the bottom of the
+/// wanted level under the current one (`thresholds` = heat where L1..L5 begin), so one tip
+/// drops at most one level.
+pub fn heat_after_tip(heat: f32, cut: f32, thresholds: &[f32; 5]) -> f32 {
+    let level = thresholds.iter().filter(|t| heat >= **t).count();
+    let floor = if level >= 2 {
+        thresholds[level - 2]
+    } else {
+        0.0
+    };
+    (heat - cut).max(floor).max(0.0)
 }
 
 /// What "Repair" at a garage did (`garage_repair`).
@@ -260,6 +309,15 @@ mod tests {
                 assert!(d < 0.5, "{id}: {} is {d:.1} m off its street lane", g.name);
             }
         }
+    }
+
+    #[test]
+    fn a_tip_drops_at_most_one_wanted_level() {
+        let t = [10.0, 30.0, 50.0, 70.0, 90.0];
+        assert_eq!(heat_after_tip(55.0, 10.0, &t), 45.0);
+        assert_eq!(heat_after_tip(55.0, 60.0, &t), 30.0, "L3 → L2 floor");
+        assert_eq!(heat_after_tip(15.0, 60.0, &t), 0.0, "L1 → clear");
+        assert_eq!(heat_after_tip(95.0, 60.0, &t), 70.0);
     }
 
     #[test]

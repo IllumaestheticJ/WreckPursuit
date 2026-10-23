@@ -99,6 +99,12 @@ pub enum OpKind {
         /// Allowed (`true`) or not.
         on: bool,
     },
+    /// `PoliceSystem::set_heat` (an informant tip bought at a crooked garage lowers the
+    /// player's heat; wp_wasm `garage_buy_tip`).
+    SetHeat {
+        /// The racer's heat afterwards (0..max_heat).
+        heat: f32,
+    },
 }
 
 /// An op applied before tick `tick`'s inputs.
@@ -263,6 +269,10 @@ impl Replay {
                     w.push(7);
                     w.push(on as u8);
                 }
+                OpKind::SetHeat { heat } => {
+                    w.push(8);
+                    put_f32(&mut w, heat);
+                }
             }
         }
         put_u64(&mut w, self.tick_hashes.len() as u64);
@@ -383,6 +393,7 @@ impl Replay {
                     7 => OpKind::LightWhenFar {
                         on: r.take(1)?[0] != 0,
                     },
+                    8 => OpKind::SetHeat { heat: r.f32()? },
                     k => return Err(RunError::Replay(format!("bad op kind {k}"))),
                 };
                 ops.push(OpEvent { tick, entity, op });

@@ -544,6 +544,7 @@ async function main(): Promise<void> {
     leave: () => sim.garageLeave(),
     // Career runs: end the run at this shop and open the career garage priced there.
     enter: (offer) => openGarage(null, offer.site),
+    tip: (tier) => sim.garageBuyTip(tier),
   });
   // The city's regulars remember their results between visits (wp_race::roster records).
   const ROSTER_KEY = "wp.roster.v1";

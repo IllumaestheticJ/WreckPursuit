@@ -50,7 +50,31 @@ export interface GarageOffer {
   can_repair: boolean;
   /** A career run: "Enter garage" (the career garage at this shop) instead of Repair. */
   career: boolean;
+  /** Informant tips on offer (crooked shop, wanted car). */
+  tips: TipOffer[];
+  /** Why a crooked shop offers no tips now. */
+  tip_note: string | null;
 }
+
+/** `wp_wasm::garage_visit::TipOffer`. */
+export interface TipOffer {
+  tier: string;
+  cost: number;
+  heat_cut: number;
+  affordable: boolean;
+}
+
+/** `wp_wasm::garage_visit::TipReport`. */
+export interface TipReport {
+  tier: string;
+  heat_before: number;
+  heat_after: number;
+  cash_after: number;
+  ledger: LedgerLine[];
+}
+
+/** Informant tier names for the panel. */
+const TIP_LABEL: Record<string, string> = { whisper: "A whisper", contact: "A contact", inside_man: "An inside man" };
 
 /** `wp_wasm::garage_visit::GarageRepairReport`. */
 export interface GarageRepairReport {
@@ -68,10 +92,12 @@ const MAX_LINES = 6;
 /** How long the "repaired" toast stays up, ms. */
 const TOAST_MS = 4000;
 
-function GaragePanel(props: { offer: GarageOffer; error: string | null; onRepair: () => void; onEnter: () => void; onLeave: () => void }) {
+function GaragePanel(props: { offer: GarageOffer; error: string | null; tipped: TipReport | null; onRepair: () => void; onEnter: () => void; onTip: (tier: string) => void; onLeave: () => void }) {
   const o = props.offer;
   const q = o.quote;
   const lines = q ? [...q.lines].sort((a, b) => b.total - a.total) : [];
+  // `tips` is missing only with a wasm package older than the informant tips.
+  const tips = o.tips ?? [];
   // Centred under the pursuit banner: clear of the speed / HUD block (top-left).
   return (
     <div style={{ position: "absolute", left: "50%", top: "22%", transform: "translateX(-50%)", width: "min(340px, calc(100vw - 32px))", pointerEvents: "auto", zIndex: 70 }}>
@@ -116,6 +142,26 @@ function GaragePanel(props: { offer: GarageOffer; error: string | null; onRepair
           <p class="wp-dim" style={{ fontSize: "0.85em" }} data-testid="garage-note">
             {o.note.charAt(0).toUpperCase() + o.note.slice(1)}.
           </p>
+        )}
+        {(tips.length > 0 || o.tip_note || props.tipped) && (
+          <div style={{ marginTop: "0.6em" }} data-testid="garage-tips">
+            <div class="wp-dim" style={{ fontSize: "0.8em" }}>
+              Informants: pay to make the police lose interest (one wanted level at most)
+            </div>
+            {props.tipped && (
+              <p class="wp-ok" style={{ fontSize: "0.85em" }} data-testid="garage-tipped">
+                Paid. Heat {Math.round(props.tipped.heat_before)} → {Math.round(props.tipped.heat_after)}.
+              </p>
+            )}
+            {!props.tipped && o.tip_note && <p class="wp-dim" style={{ fontSize: "0.85em" }}>{o.tip_note}.</p>}
+            <div style={{ display: "flex", gap: "0.4em", flexWrap: "wrap", marginTop: "0.3em" }}>
+              {tips.map((t, i) => (
+                <Button key={t.tier} size="sm" disabled={!t.affordable || t.heat_cut <= 0} onClick={() => props.onTip(t.tier)} hotkey={String(i + 1)} testid={`garage-tip-${t.tier}`}>
+                  {TIP_LABEL[t.tier] ?? t.tier} <Money value={t.cost} /> · −{Math.round(t.heat_cut)} heat
+                </Button>
+              ))}
+            </div>
+          </div>
         )}
         <p class="wp-dim" style={{ fontSize: "0.8em", marginTop: "0.5em" }} data-testid="garage-account">
           {o.career
@@ -171,7 +217,7 @@ export class GarageVisitView {
 
   constructor(
     private readonly el: HTMLElement,
-    private readonly actions: { repair: () => GarageRepairReport; leave: () => void; enter: (offer: GarageOffer) => void },
+    private readonly actions: { repair: () => GarageRepairReport; leave: () => void; enter: (offer: GarageOffer) => void; tip: (tier: string) => TipReport },
   ) {
     // Capture phase: Enter / Esc act on the panel before the pause menu or driving keys see them.
     window.addEventListener("keydown", (e) => this.onKey(e), true);
@@ -180,7 +226,9 @@ export class GarageVisitView {
   /** Enter = the primary button, Esc / Backspace = Leave, while a visit is open. */
   private onKey(e: KeyboardEvent): void {
     if (!this.offer || e.repeat) return;
+    const digit = /^Digit([1-9])$/.exec(e.code);
     if (e.code === "Enter" || e.code === "NumpadEnter") this.primary();
+    else if (digit && this.offer.tips?.[Number(digit[1]) - 1]) this.tip(this.offer.tips[Number(digit[1]) - 1].tier);
     else if (e.code === "Escape" || e.code === "Backspace") this.leave();
     else return;
     e.preventDefault();
@@ -232,8 +280,14 @@ export class GarageVisitView {
       this.near = near;
       if (!offer) this.draw(nowMs);
     }
+    if (offer && this.refresh && offer.seq === this.offer?.seq) {
+      this.refresh = false;
+      this.offer = offer;
+      this.draw(nowMs);
+    }
     if (offer?.seq !== this.offer?.seq) {
       if (offer) this.lastShop = offer.site.name;
+      this.tipped = null;
       this.offer = offer;
       this.error = null;
       this.draw(nowMs);
@@ -277,6 +331,25 @@ export class GarageVisitView {
     this.actions.enter(o);
   }
 
+  /** The tip bought in the open visit (shown until it closes). */
+  tipped: TipReport | null = null;
+
+  /** Buy informant tip `tier`; the visit stays open (with the new cash and no more tips). */
+  tip(tier: string): void {
+    try {
+      this.tipped = this.actions.tip(tier);
+      this.error = null;
+    } catch (e) {
+      this.error = String(e).replace(/^Error: /, "");
+    }
+    // Re-read the visit (cash, tips) on the next update.
+    this.refresh = true;
+    this.draw(performance.now());
+  }
+
+  /** Redraw from the next `update` even when the visit is the same. */
+  private refresh = false;
+
   /** "Leave". */
   leave(): void {
     this.actions.leave();
@@ -291,7 +364,7 @@ export class GarageVisitView {
     if (o) {
       render(
         <div class="wp-ui wp-root" style={{ position: "absolute", inset: 0, pointerEvents: "none" }} data-testid="garage-visit">
-          <GaragePanel offer={o} error={this.error} onRepair={() => this.repair()} onEnter={() => this.enter()} onLeave={() => this.leave()} />
+          <GaragePanel offer={o} error={this.error} tipped={this.tipped} onRepair={() => this.repair()} onEnter={() => this.enter()} onTip={(t) => this.tip(t)} onLeave={() => this.leave()} />
         </div>,
         this.el,
       );

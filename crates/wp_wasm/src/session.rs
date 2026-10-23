@@ -121,6 +121,8 @@ pub struct Session {
     garage_armed: bool,
     /// Garage visits opened so far.
     visit_seq: u32,
+    /// Tick of the last informant tip bought at a garage (cooldown).
+    last_tip_tick: Option<u64>,
     playback: Option<Playback>,
     mode: DamageMode,
     live_end_hash: Option<u64>,
@@ -277,6 +279,7 @@ impl Session {
             visit: None,
             garage_armed: false,
             visit_seq: 0,
+            last_tip_tick: None,
             script_end: if scripted { sc.ticks() } else { 0 },
             mode: sc.mode,
             sc,
@@ -1210,6 +1213,7 @@ impl Session {
         };
         let cash = run.account().cash;
         let health = damage.map_or(1.0, |(d, _)| d.summary().health);
+        let (tips, tip_note) = self.tip_offers(&site, wanted, cash);
         self.visit_seq += 1;
         self.garage_armed = false;
         self.visit = Some(GarageOffer {
@@ -1223,7 +1227,94 @@ impl Session {
             quote,
             note,
             cash,
+            tips,
+            tip_note,
         });
+    }
+
+    /// The informant tips a visit at `site` offers to a car at `wanted` with `cash` (crooked
+    /// shops only; see `GarageOffer::tips`).
+    fn tip_offers(
+        &self,
+        site: &GarageSite,
+        wanted: wp_contracts::WantedLevel,
+        cash: i64,
+    ) -> (Vec<crate::garage_visit::TipOffer>, Option<String>) {
+        use crate::garage_visit::{heat_after_tip, TipOffer, TIP_COOLDOWN_TICKS};
+        if site.kind != wp_economy::ShopKind::Crooked {
+            return (Vec::new(), None);
+        }
+        if wanted == wp_contracts::WantedLevel::None {
+            return (Vec::new(), Some("informants only help a wanted car".into()));
+        }
+        if self
+            .last_tip_tick
+            .is_some_and(|t| self.sim.tick() < t + TIP_COOLDOWN_TICKS)
+        {
+            return (Vec::new(), Some("the informants are lying low (a tip in the last 5 minutes)".into()));
+        }
+        let (Some(run), Some(rec)) = (
+            self.run.as_ref(),
+            self.run.as_ref().and_then(|r| self.sim.police().racer(r.player())),
+        ) else {
+            return (Vec::new(), None);
+        };
+        let t = &self.sim.police().config().heat.heat.level_thresholds;
+        let tips = run
+            .informant_tiers()
+            .into_iter()
+            .map(|(tier, cost, cut)| TipOffer {
+                heat_cut: rec.heat - heat_after_tip(rec.heat, cut, t),
+                affordable: cost <= cash,
+                tier,
+                cost,
+            })
+            .collect();
+        (tips, None)
+    }
+
+    /// Buy informant tip `tier` in the open visit (a crooked shop, a wanted car): pay from the
+    /// run's account and lower the player's heat by at most one wanted level (logged replay op
+    /// `SetHeat`). The visit stays open without tips.
+    pub fn garage_buy_tip(&mut self, tier: &str) -> Result<crate::garage_visit::TipReport, String> {
+        use crate::garage_visit::{heat_after_tip, TipReport};
+        self.live_check()?;
+        let offer = self.visit.as_ref().ok_or("not in a garage")?;
+        if !offer.tips.iter().any(|t| t.tier == tier) {
+            return Err(offer
+                .tip_note
+                .clone()
+                .unwrap_or_else(|| format!("no informant tip {tier:?} here")));
+        }
+        let run = self.run.as_mut().ok_or("no economy run in this session")?;
+        let player = run.player();
+        let heat_before = self
+            .sim
+            .police()
+            .racer(player)
+            .map_or(0.0, |r| r.heat);
+        let (cut, ledger, cash_after) = run.buy_informant_tip(tier)?;
+        let heat_after = heat_after_tip(
+            heat_before,
+            cut,
+            &self.sim.police().config().heat.heat.level_thresholds,
+        );
+        let idx = self.idx(player)?;
+        self.log_op(idx, OpKind::SetHeat { heat: heat_after })?;
+        self.last_tip_tick = Some(self.sim.tick());
+        if let Some(v) = self.visit.as_mut() {
+            v.tips.clear();
+            v.tip_note = Some("you already paid an informant here".into());
+            v.cash = cash_after;
+            v.can_repair = v.can_repair && v.quote.as_ref().is_some_and(|q| q.player_pays <= cash_after);
+        }
+        Ok(TipReport {
+            tier: tier.to_string(),
+            heat_before,
+            heat_after,
+            cash_after,
+            ledger,
+        })
     }
 
     /// Release the player's car after a hold: neutral input, headlights kept.
@@ -1995,6 +2086,7 @@ impl Session {
             visit: None,
             garage_armed: false,
             visit_seq: 0,
+            last_tip_tick: None,
             sc: self.sc.clone(),
             scripted: self.scripted,
             script_end: self.script_end,
