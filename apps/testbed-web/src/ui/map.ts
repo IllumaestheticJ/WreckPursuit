@@ -22,6 +22,8 @@ export class MapOverlay {
   private lastFrame = -Infinity;
   /** The chase radar from the last map_dynamic() fetch (null: none yet / nothing to show). */
   private lastRadar: Radar | null = null;
+  /** Hide the corner minimap for now (a picker race draws its own in the race panel). */
+  minimapHeld = false;
 
   constructor(parent: HTMLElement, onOpenChange?: (open: boolean) => void) {
     // Bottom-right corner (playtest row 67): clear of the developer panel (bottom-left), the race
@@ -42,8 +44,12 @@ export class MapOverlay {
   /** One frame (after the sim step). `mayRest`: the frame loop is slow (software GL, < 8 fps)
    * and this frame may skip the minimap redraw (its canvas upload + composite cost ~10 ms there). */
   frame(player: number, nowMs: number, mayRest = false): void {
-    if (!this.city) return;
-    const minimap = layers.on("minimap");
+    if (!this.city) {
+      // No city (flat test world): no empty minimap ring.
+      this.hud.setMinimapVisible(false);
+      return;
+    }
+    const minimap = layers.on("minimap") && !this.minimapHeld;
     this.hud.setMinimapVisible(minimap);
     this.hud.setSignals(layers.on("mapSignals"));
     // The chase HUD's radar reads the same frame (PR #32).

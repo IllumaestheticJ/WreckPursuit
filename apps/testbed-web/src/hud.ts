@@ -100,6 +100,14 @@ export interface HudFrame {
 
 export class Hud {
   private readonly main: HTMLElement;
+  /** Player cluster rows inside `.hud-main` (speed + gear, rpm, car line, chips). */
+  private readonly speedEl: HTMLElement;
+  private readonly rpmEl: HTMLElement;
+  private readonly carText: HTMLElement;
+  private readonly slowChip: HTMLElement;
+  private readonly toast: HTMLElement;
+  /** Debug lines (badges, perf, tick / hash): hidden in player mode by CSS (`.hud-dbg`). */
+  private readonly dbg: HTMLElement;
   private readonly comps: HTMLElement;
   private readonly regions: HTMLElement;
   private readonly feed: HTMLElement;
@@ -107,10 +115,29 @@ export class Hud {
   private readonly inputs: HTMLElement;
   private readonly help: HTMLElement;
   private readonly silhouette: HTMLCanvasElement;
+  /** Small damage silhouette in the player cluster. */
+  private readonly miniSil: HTMLCanvasElement;
+  /** Last mode + assist summary shown (a change pops the toast); "" before the first frame. */
+  private lastSetup = "";
+  private toastUntil = 0;
+  /** Wall ms since the real-time factor first dropped below the warning level (null: fine). */
+  private slowSince: number | null = null;
 
   constructor(root: HTMLElement) {
     const left = el("div", "left-col", root);
     this.main = el("div", "panel hud-main", left);
+    this.speedEl = el("div", "speed", this.main);
+    this.rpmEl = el("div", "hud-rpm", this.main);
+    const car = el("div", "hud-car", this.main);
+    this.miniSil = document.createElement("canvas");
+    this.miniSil.width = 28;
+    this.miniSil.height = 48;
+    this.miniSil.className = "hud-mini-sil";
+    car.appendChild(this.miniSil);
+    this.carText = el("span", "hud-car-text", car);
+    this.slowChip = el("div", "hud-slow hidden", this.main, "⚠ slow motion: the browser can't keep up");
+    this.toast = el("div", "hud-toast hidden", this.main);
+    this.dbg = el("div", "hud-dbg", this.main);
     const right = el("div", "right-col", root);
     this.silhouette = document.createElement("canvas");
     this.silhouette.width = 120;
@@ -129,19 +156,25 @@ export class Hud {
    * the bound horn and map controls for the street-racer line (`bindingText`). */
   setControlsHelp(bindingLines: string[], street: { horn: string; map: string } = { horn: "the horn binding", map: "the map binding" }): void {
     this.help.innerHTML =
-      `<b>WreckPursuit testbed — controls</b> <span class="dim">(change them in the controls panel: F9 by default, or the “controls” button)</span><br>` +
+      `<b>WreckPursuit — controls</b> <span class="dim">(change them in Settings → Controls, or the controls panel: F9)</span><br>` +
       `<div class="help-binds">${bindingLines.join("<br>")}</div>` +
       `<br>Inside the city map: drag / wheel / arrows / + − / 0 whole city / F follow (driving input is paused while it is open)<br>` +
       `<b>Street racers</b> (city): pull up right behind one and honk (horn — ${street.horn}; 📯 on touch) to challenge · the city map (${street.map}) opens as the finish picker: tap / click sets B (pad: left stick + A), pick the bet (pad LB / RB), Race (Enter / pad Menu) or Decline (Esc / pad B) · dot colour and number = driver level (names and colours in the city map legend)<br>` +
       `<b>Cameras</b> ${CAMERA_HELP}<br>` +
-      `. frame step (replay) · [ / ] replay speed · − / = indicator left / right (cosmetic, cancels after the turn)<br>` +
-      `<b>Photo mode</b> F7 or the photo button (live or replay): free camera, filters, save / copy PNG — keys listed in its panel<br><br>` +
-      `<b>Countersteer help</b> (slider, keyboard/gamepad): in a slide, <i>let go</i> of the steering ` +
+      `− / = indicator left / right (cosmetic, cancels after the turn)<br>` +
+      `<b>Photo mode</b> F7 (live or replay): free camera, filters, save / copy PNG — keys listed in its panel<br>` +
+      `<b>Reduced flashing</b> F6: slow police lights<br><br>` +
+      `<b>Countersteer help</b> (Settings → Assists): in a slide, <i>let go</i> of the steering ` +
       `and the front wheels follow the car's travel (straighten); press <i>against</i> the slide for a ` +
       `fast catch (0 % off, 100 % fastest). It never fights your input, and the handbrake turns the ` +
-      `car freely. Handling tune panel (debug): F7 or ?tune=1; test pad: ?drift=w.<br><br>` +
-      `<b>Debug layers</b><br>` +
-      LAYERS.map((l) => `${l.key.replace(/^(Key|Digit)/, "")} — ${l.label}`).join("<br>") +
+      `car freely.` +
+      `<div class="help-dbg"><br><b>Debug tools</b> (the debug key, \` by default, or ⚙ top right): developer drawer, overlays and the layer keys below. ` +
+      `. / , frame step (replay) · [ / ] replay speed · handling tune panel: F10 or ?tune=1; test pad: ?drift=w.<br>` +
+      `<b>Debug layers</b> (keys work while the debug tools are on)<br>` +
+      LAYERS.filter((l) => l.id !== "reducedFlashing")
+        .map((l) => `${l.key.replace(/^(Key|Digit)/, "")} — ${l.label}`)
+        .join("<br>") +
+      `</div>` +
       `<br><br>${AUDIO_CREDITS}`;
   }
 
@@ -184,9 +217,30 @@ export class Hud {
     const badge = (on: boolean, txt: string) => `<span class="badge ${on ? "on" : "off"}">${txt}</span>`;
     const hh = Math.floor(f.hours);
     const mm = Math.floor((f.hours - hh) * 60);
-    this.main.innerHTML =
-      `<div class="speed">${Math.abs(speed).toFixed(0)}<small> ${mph ? "mph" : "km/h"}</small> <span class="gear">${gearTxt}</span></div>` +
-      `<div>rpm ${rpm.toFixed(0)} ${bar(rpm / limit, rpm > redline ? "#ff4040" : "#40c0ff")}</div>` +
+    this.speedEl.innerHTML = `${Math.abs(speed).toFixed(0)}<small> ${mph ? "mph" : "km/h"}</small> <span class="gear">${gearTxt}</span>`;
+    this.rpmEl.innerHTML = `<span class="hud-rpm-txt">rpm ${rpm.toFixed(0)}</span> ${bar(rpm / limit, rpm > redline ? "#ff4040" : "#40c0ff")}`;
+    // Player car line: health and only the assists a player would want to know are reduced.
+    const health = t ? Math.round(t[T.health] * 100) : null;
+    const reduced = a ? [a.abs !== "Full" ? levelTag("ABS", a.abs) : "", a.tcs !== "Full" && a.tcs !== "Off" ? levelTag("TCS", a.tcs) : ""].filter(Boolean) : [];
+    this.carText.innerHTML =
+      `car <b style="color:#${healthColour(health === null ? 1 : health / 100).getHexString()}">${health === null ? "–" : `${health}%`}</b>` +
+      (reduced.length ? ` <span class="hud-assists">· ${reduced.join(" · ")}</span>` : "") +
+      (f.replay ? ` <span class="badge on">REPLAY</span>` : "");
+    // Mode / assist change: a short toast (the full set lives in the pause menu).
+    const now = performance.now();
+    const setup = a
+      ? `${f.mode} · ABS ${a.abs.toLowerCase()} · TCS ${a.tcs.toLowerCase()}${a.esc ? " · ESC" : ""} · ${a.auto_gears ? "auto" : "manual"} gears`
+      : f.mode;
+    if (this.lastSetup && setup !== this.lastSetup && !f.replay) {
+      this.toast.textContent = setup;
+      this.toastUntil = now + 2500;
+    }
+    if (!f.replay) this.lastSetup = setup;
+    this.toast.classList.toggle("hidden", now > this.toastUntil);
+    // Slow motion: the player sees a chip only once it lasts (> 3 s); the debug line is live.
+    this.slowSince = f.rtf < RTF_WARN ? (this.slowSince ?? now) : null;
+    this.slowChip.classList.toggle("hidden", this.slowSince === null || now - this.slowSince < 3000);
+    this.dbg.innerHTML =
       `<div>${badge(true, f.mode)}${f.replay ? badge(true, "REPLAY") : ""}${f.recording ? '<span class="badge rec">● REC</span>' : ""}</div>` +
       (a
         ? `<div>${badge(a.abs !== "Off", levelTag("ABS", a.abs))}${badge(a.tcs !== "Off", levelTag("TCS", a.tcs))}${badge(a.esc, "ESC")}${badge(a.steer_speed_sensitivity > 0, "STEER")}` +
@@ -200,7 +254,8 @@ export class Hud {
       `<div class="dim">tick ${f.tick} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")} · cam ${f.camera} · hash ${f.hash}</div>` +
       `<div class="dim">health ${t ? (t[T.health] * 100).toFixed(0) : "–"}% · ${f.info?.display_name ?? ""} · F1 help</div>`;
 
-    this.drawSilhouette(f);
+    this.drawSilhouette(f, this.silhouette, true);
+    this.drawSilhouette(f, this.miniSil, false);
 
     this.comps.style.display = layers.on("components") ? "" : "none";
     if (layers.on("components") && t && f.info) {
@@ -241,19 +296,23 @@ export class Hud {
     }
   }
 
-  /** Top-down damage silhouette: each region's node bounding box coloured by its energy. */
-  private drawSilhouette(f: HudFrame): void {
-    const c = this.silhouette.getContext("2d")!;
-    c.clearRect(0, 0, this.silhouette.width, this.silhouette.height);
-    c.fillStyle = "rgba(0,0,0,0.55)";
-    c.fillRect(0, 0, this.silhouette.width, this.silhouette.height);
+  /** Top-down damage silhouette on `canvas`: each region's node bounding box coloured by its
+   * energy. `caption`: the debug version (title, dark backing); the player cluster's small one
+   * draws on its panel. */
+  private drawSilhouette(f: HudFrame, canvas: HTMLCanvasElement, caption: boolean): void {
+    const c = canvas.getContext("2d")!;
+    c.clearRect(0, 0, canvas.width, canvas.height);
+    if (caption) {
+      c.fillStyle = "rgba(0,0,0,0.55)";
+      c.fillRect(0, 0, canvas.width, canvas.height);
+    }
     if (!f.rest || !f.regionsOfNodes || !f.info) return;
     const [w, l] = f.info.body_size_m;
-    const sx = (this.silhouette.width - 20) / w;
-    const sy = (this.silhouette.height - 30) / l;
-    const s = Math.min(sx, sy);
-    const cx = this.silhouette.width / 2;
-    const cy = this.silhouette.height / 2 + 6;
+    const padX = caption ? 20 : 4;
+    const padY = caption ? 30 : 6;
+    const s = Math.min((canvas.width - padX) / w, (canvas.height - padY) / l);
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2 + (caption ? 6 : 1);
     const boxes = new Map<number, [number, number, number, number]>();
     for (let n = 0; n < f.regionsOfNodes.length; n++) {
       const r = f.regionsOfNodes[n];
@@ -262,9 +321,11 @@ export class Hud {
       const b = boxes.get(r) ?? [x, y, x, y];
       boxes.set(r, [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)]);
     }
-    c.font = "10px monospace";
-    c.fillStyle = "#ccc";
-    c.fillText("damage (top view)", 4, 11);
+    if (caption) {
+      c.font = "10px monospace";
+      c.fillStyle = "#ccc";
+      c.fillText("damage (top view)", 4, 11);
+    }
     for (const [r, [x0, y0, x1, y1]] of boxes) {
       const e = f.energy ? f.energy[r] : 0;
       c.fillStyle = e > 1 ? `#${heat(e / ENERGY_RED).getHexString()}` : "#6a7078";
@@ -276,6 +337,7 @@ export class Hud {
     c.strokeStyle = "#888";
     c.strokeRect(cx - (w / 2) * s, cy - (l / 2) * s, w * s, l * s);
     c.fillStyle = "#ffee88";
-    c.fillRect(cx - 6, cy - (l / 2) * s - 6, 12, 4); // nose marker
+    const nose = caption ? 6 : 3;
+    c.fillRect(cx - nose, cy - (l / 2) * s - nose, nose * 2, caption ? 4 : 2); // nose marker
   }
 }

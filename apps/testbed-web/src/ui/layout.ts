@@ -10,6 +10,10 @@
 //   bottom-left   developer panel (#controls), the audio panel stacked above it
 //   bottom-centre telemetry plots, right of the developer panel
 //
+// That is the layout with the debug tools on. In player mode (src/ui/dev_toggle.ts) CSS moves the
+// speedo to a bottom-right cluster and the minimap to the bottom-left, the debug panels are gone,
+// and the race / street panel sits alone at the top-left (the centred lines keep clear of it).
+//
 // Most of it is CSS; this pass handles the stacks whose sizes change at run time (the race HUD
 // appears, panels fold, the feed grows). It only writes styles, reading a handful of rects, and
 // runs on resize and at most every 100 ms (`frame()`).
@@ -51,16 +55,23 @@ export class HudLayout {
     // Top-left stack.
     const left = q(".left-col");
     let leftBottom = shown(left) ? left.getBoundingClientRect().bottom : MARGIN;
+    // Right edge of the top-left stack (player mode: the race panel alone; the speed cluster is
+    // bottom-right there), for the centred lines below.
+    let leftRight = shown(left) ? left.getBoundingClientRect().right : MARGIN;
     const race = q(".wp-race-hud");
     if (shown(race)) {
       race.style.top = `${Math.round(leftBottom + GAP)}px`;
-      leftBottom = race.getBoundingClientRect().bottom;
+      const r = race.getBoundingClientRect();
+      leftBottom = r.bottom;
+      leftRight = Math.max(leftRight, r.right);
     }
     // Street race panel (src/ui/street.ts): same slot, never shown with a picker race.
     const street = q("#street-hud");
     if (shown(street)) {
       street.style.top = `${Math.round(leftBottom + GAP)}px`;
-      leftBottom = street.getBoundingClientRect().bottom;
+      const r = street.getBoundingClientRect();
+      leftBottom = r.bottom;
+      leftRight = Math.max(leftRight, r.right);
     }
 
     // Bottom-right minimap.
@@ -118,7 +129,7 @@ export class HudLayout {
     if (shown(wx)) {
       const chase = q(".wp-chase-col");
       const top = shown(chase) ? chase.getBoundingClientRect().bottom + GAP : MARGIN + 4;
-      const lo = shown(left) ? left.getBoundingClientRect().right + GAP : MARGIN;
+      const lo = leftRight + GAP;
       const hi = shown(right) ? right.getBoundingClientRect().left - GAP : vw - MARGIN;
       Object.assign(wx.style, { top: `${Math.round(top)}px`, transform: "none", whiteSpace: "normal", maxWidth: `${Math.max(120, hi - lo)}px`, boxSizing: "border-box" });
       const w = wx.getBoundingClientRect().width;
@@ -133,7 +144,7 @@ export class HudLayout {
       let top = MARGIN + 4;
       if (shown(chase)) top = chase.getBoundingClientRect().bottom + GAP;
       if (shown(wx)) top = Math.max(top, wx.getBoundingClientRect().bottom + GAP);
-      const lo = shown(left) ? left.getBoundingClientRect().right + GAP : MARGIN;
+      const lo = leftRight + GAP;
       const hi = shown(right) ? right.getBoundingClientRect().left - GAP : vw - MARGIN;
       const width = Math.max(160, Math.min(520, hi - lo));
       let bottom = vh - MARGIN;

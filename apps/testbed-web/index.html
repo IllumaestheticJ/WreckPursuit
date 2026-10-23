@@ -13,7 +13,8 @@
       .panel { background: rgba(0, 0, 0, 0.6); padding: 6px 8px; border-radius: 4px; pointer-events: auto; }
       .hidden { display: none !important; }
       .left-col { position: absolute; top: 8px; left: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
-      .hud-main { min-width: 300px; }
+      /* max-width: the perf line wraps instead of reaching the top-centre chase readout (about 510–528 px at 1280). */
+      .hud-main { min-width: 300px; max-width: 480px; box-sizing: border-box; }
       .hud-main .speed { font-size: 28px; color: #fff; }
       .hud-main .gear { font-size: 28px; color: #ffdc00; margin-left: 12px; }
       .dim { color: #999; }
@@ -25,16 +26,47 @@
       .bar { display: inline-block; position: relative; width: 140px; height: 9px; background: #222; margin-left: 6px; vertical-align: middle; }
       .bar i { position: absolute; top: 0; bottom: 0; left: 0; }
       .bar b { position: absolute; top: -2px; bottom: -2px; left: 50%; width: 1px; background: #888; }
-      /* HUD corners (playtest row 67; stacks sized at run time by src/ui/layout.ts): top-left speedo +
-         race HUD, top-centre chase readout / banner, top-right damage column, bottom-right minimap,
-         bottom-left developer + audio panels, telemetry between them. */
+      /* HUD corners with the debug tools on (playtest row 67; stacks sized at run time by
+         src/ui/layout.ts): top-left speedo + race HUD, top-centre chase readout / banner, top-right
+         damage column, bottom-right minimap, bottom-left developer drawer + audio panel, telemetry
+         between them. Player mode (below): race HUD top-left, chase / radio top-centre, minimap
+         bottom-left, speed cluster bottom-right. */
       .right-col { position: absolute; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; overflow: hidden; }
       .right-col > canvas { flex: 0 0 auto; }
       .right-col > .comps, .right-col > .regions, .right-col > .feed { flex: 0 1 auto; min-height: 0; }
-      /* Player mode (game menu, developer panels off): only the game HUD. */
+      /* Player mode (debug tools off, src/ui/dev_toggle.ts): only the game HUD. */
       body.wp-player #controls, body.wp-player .telemetry, body.wp-player .comps, body.wp-player .regions,
       body.wp-player .feed, body.wp-player .inputs, body.wp-player #audio-panel, body.wp-player #error,
-      body.wp-player .hud-main .dim { display: none !important; }
+      body.wp-player .hud-main .dim, body.wp-player .hud-main .hud-dbg, body.wp-player .hud-rpm-txt,
+      body.wp-player .right-col .silhouette, body.wp-player .help .help-dbg { display: none !important; }
+      /* Player speed cluster (src/hud.ts), bottom-right; touch keeps its own compact top-left speedo. */
+      .hud-car { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: #aab; }
+      .hud-car b { font-weight: 700; }
+      body:not(.wp-player) .hud-mini-sil { display: none; }
+      .hud-slow { color: #ffb020; font-size: 11px; margin-top: 3px; }
+      .hud-toast { margin-top: 4px; font-size: 11px; color: #9fd; }
+      html:not(.wp-touch) body.wp-player .hud-main { position: fixed; right: 16px; bottom: 16px; min-width: 220px; padding: 8px 12px 10px; border-radius: 8px; background: rgba(8, 12, 18, 0.62); font: 13px/1.35 system-ui, sans-serif; }
+      html:not(.wp-touch) body.wp-player .hud-main .speed { display: flex; align-items: baseline; font: 800 50px/1 system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+      html:not(.wp-touch) body.wp-player .hud-main .speed small { font: 400 14px system-ui, sans-serif; color: #aab; margin-left: 4px; }
+      html:not(.wp-touch) body.wp-player .hud-main .speed .gear { margin-left: auto; padding-left: 16px; font-size: 42px; }
+      html:not(.wp-touch) body.wp-player .hud-main .bar { display: block; width: 100%; height: 8px; margin: 8px 0 0; border-radius: 4px; overflow: hidden; }
+      html:not(.wp-touch) body.wp-player .wp-minimap { left: 16px !important; right: auto !important; bottom: 16px !important; }
+      /* Under menus and full-screen panels the player HUD steps aside. */
+      body.wp-player.wp-covered .left-col, body.wp-player.wp-covered .right-col, body.wp-player.wp-covered #ui-chase,
+      body.wp-player.wp-covered #radio-strip, body.wp-player.wp-covered .wp-minimap, body.wp-player.wp-covered #weather-hud,
+      body.wp-player.wp-covered #pursuit-banner { visibility: hidden !important; }
+      /* Debug tools button: fades in at the top right while the mouse moves (player mode only). */
+      #dev-toggle { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; z-index: 7; border-radius: 6px; border: 1px solid #555; background: rgba(0, 0, 0, 0.45); color: #ccc; font: 15px/1 system-ui, sans-serif; cursor: pointer; opacity: 0; pointer-events: auto; transition: opacity 0.3s; }
+      #dev-toggle.shown { opacity: 0.75; }
+      #dev-toggle:hover { opacity: 1; }
+      body:not(.wp-player) #dev-toggle, html.wp-touch #dev-toggle, body.demo #dev-toggle { display: none; }
+      @media (prefers-reduced-motion: reduce) { #dev-toggle { transition: none; } }
+      /* Developer drawer header (sticky) and fold (src/ui/dev_toggle.ts). */
+      #controls .dev-head { position: sticky; top: -6px; z-index: 1; display: flex; gap: 4px; align-items: center; margin: -6px -8px 4px; padding: 4px 8px; background: rgba(0, 0, 0, 0.92); border-bottom: 1px solid #333; }
+      #controls .dev-head b { margin-right: auto; color: #fff; }
+      body.wp-dev-folded #controls > :not(.dev-head) { display: none !important; }
+      body.wp-dev-folded #controls .dev-head { margin-bottom: -6px; border-bottom: 0; }
+      #layer-row label { white-space: nowrap; }
       #pursuit-banner { position: absolute; top: 34%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; text-shadow: 0 2px 6px #000; }
       #pursuit-banner b { display: block; font: 900 44px/1 system-ui, sans-serif; letter-spacing: 0.12em; }
       #pursuit-banner span { display: block; margin-top: 4px; font-size: 13px; color: #ddd; }

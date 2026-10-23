@@ -10,7 +10,7 @@
 // tier 1 warnings, ▲ for tier 2 escalation) and stay on screen longer; tier 3 (impacts,
 // wrecks) gets an urgent red style; tiers 4–5 are dimmed. Tier 0 = unknown (plain).
 
-/** Lines kept on the strip. */
+/** Lines kept on the strip by default (debug tools on). */
 const MAX_LINES = 3;
 /** A line is fully visible this long, then fades, ms. */
 const SHOW_MS = 7000;
@@ -60,6 +60,8 @@ export class RadioStrip {
   count = 0;
   /** Latest lines' text, newest last (e2e, debugging). */
   readonly recent: string[] = [];
+  /** Lines kept on the strip (3; 2 in player mode, set by the debug switch). */
+  maxLines = MAX_LINES;
 
   constructor(parent: HTMLElement) {
     this.el = document.createElement("div");
@@ -96,7 +98,7 @@ export class RadioStrip {
     line.append(chip, body);
     this.el.appendChild(line);
     this.shown.push({ el: line, born: nowMs, show: showMs(tier) });
-    while (this.shown.length > MAX_LINES) this.shown.shift()!.el.remove();
+    while (this.shown.length > this.maxLines) this.shown.shift()!.el.remove();
     this.count++;
     this.recent.push(text);
     if (this.recent.length > 8) this.recent.shift();

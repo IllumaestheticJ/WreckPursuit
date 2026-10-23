@@ -40,7 +40,7 @@ import { actionsForKey, bindingsHelp, bindingText, keyName, padName, type Action
 import { CrashReplayDirector, autoCrashReplay, onAutoCrashReplayChange, setAutoCrashReplay } from "./crash_replay";
 import { installTouch, setTouchSteerMode, touchSteerMode } from "./touch";
 import { ControlsPanel } from "./ui/controls";
-import { DEBUG_LAYERS, layers, store, bytesToBase64, base64ToBytes } from "./settings";
+import { ALWAYS_LIVE_LAYERS, layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
 import { clearDebris, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
@@ -81,6 +81,7 @@ import { quickTune } from "../../ui-kit/src/garage/tune";
 import { PhotoMode, PHOTO_HIDDEN_LAYERS } from "./photo";
 import { IndicatorStalk } from "./indicator_stalk";
 import { StreetUi } from "./ui/street";
+import { DevSwitch, resetStoredDeveloperOnce } from "./ui/dev_toggle";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -1369,6 +1370,7 @@ async function main(): Promise<void> {
         map.toggle();
         break;
       case "followNext": {
+        if (!devSwitch.on) break;
         const ids = [...app.views.keys()];
         app.focus = ids[(ids.indexOf(app.focus) + 1) % ids.length];
         rig.setMode(rig.mode, app.views.get(app.focus)?.root);
@@ -1389,6 +1391,9 @@ async function main(): Promise<void> {
       case "mute":
         audio.toggleMute();
         break;
+      case "debug":
+        devSwitch.toggle();
+        break;
       default:
         // Analogue / held actions and gears are read every frame by readInput.
         break;
@@ -1406,8 +1411,9 @@ async function main(): Promise<void> {
       for (const a of actions) doAction(a);
       return;
     }
+    // Debug-layer keys only with the debug tools on (reduced flashing, F6, always).
     const layer = layers.byKey(e.code);
-    if (layer) return layers.toggle(layer.id);
+    if (layer) return void ((devSwitch.on || ALWAYS_LIVE_LAYERS.includes(layer.id)) && layers.toggle(layer.id));
     const n = Number(e.key);
     if (n >= 1 && n <= CAMERA_MODES.length) return rig.choose(CAMERA_MODES[n - 1], app.views.get(app.focus)?.root);
     switch (e.code) {
@@ -1440,12 +1446,24 @@ async function main(): Promise<void> {
   });
 
   // ----- game menu (UI kit, playtest row 68) ---------------------------------------------
-  // Main / pause / settings for players. The developer panels stay behind Settings → Developer
-  // (on by default in the testbed preview, off in the demo build and with ?menu=1).
+  // Main / pause / settings for players. The developer panels are the debug tools: off by default,
+  // the debug key (`), the ⚙ button or Settings → Developer panels (src/ui/dev_toggle.ts).
   const demo = document.body.classList.contains("demo");
   const menuOnLoad = demo || params.get("menu") === "1";
-  const devParam = params.get("dev");
-  const devDefault = !menuOnLoad;
+  // Debug tools switch (src/ui/dev_toggle.ts): off by default; the menu's `developer` setting.
+  resetStoredDeveloperOnce();
+  const devSwitch = new DevSwitch({
+    params,
+    titleOnLoad: menuOnLoad,
+    overlay,
+    request: (on) => menu?.update({ developer: on }),
+    onApply: (on) => {
+      ui.quietWhenClear = !on;
+      radioStrip.maxLines = on ? 3 : 2;
+      layout.update();
+    },
+  });
+  const devDefault = devSwitch.defaultOn;
   // First run: seed the menu from what this browser already chose (assist boxes, audio panel, gfx).
   const seed = (): GameSettings => {
     const d = defaultGameSettings(devDefault);
@@ -1464,10 +1482,7 @@ async function main(): Promise<void> {
     gameSettings = next;
     setDeviceControls(next.controls);
     controls.refreshShaping();
-    const dev = devParam === "1" ? true : devParam === "0" ? false : next.developer;
-    document.body.classList.toggle("wp-player", !dev);
-    if (dev) document.body.classList.remove("demo");
-    layers.suppress(dev ? [] : DEBUG_LAYERS);
+    devSwitch.apply(next.developer);
     // Graphics (an explicit ?gfx= wins on load).
     if (prev || !params.get("gfx")) scene.quality.setMode(next.gfx);
     const drawParam = Number(params.get("draw"));
@@ -1639,7 +1654,12 @@ async function main(): Promise<void> {
 
     // Touch controls: hidden under menus / full-screen panels (they sit above #overlay), only
     // map + pause while paused or with the full map open.
-    touch?.setCovered(!!menu?.isOpen || controls.isOpen || garage.open || workshop.active || runEnd.open || !!raceView.cards);
+    const covered = !!menu?.isOpen || controls.isOpen || garage.open || workshop.active || runEnd.open || !!raceView.cards;
+    touch?.setCovered(covered);
+    // Player HUD hides under menus; the ⚙ button fades with the mouse (src/ui/dev_toggle.ts).
+    devSwitch.frame(now, covered || !!tougeView.cards);
+    // Player mode: one minimap in a picker race (the race panel's own).
+    map.minimapHeld = !devSwitch.on && !!raceView.raceId;
     touch?.setDriving(!replay && !app.paused && !map.isOpen && !app.bench);
     const { input, source, edges } = readInput(dt);
     // Photo mode reads the pad itself (sticks fly, B / Start leave): no game actions meanwhile.
@@ -2084,6 +2104,8 @@ async function main(): Promise<void> {
     menu,
     /** HUD layout pass (src/ui/layout.ts). */
     layout,
+    /** Debug tools switch (src/ui/dev_toggle.ts). */
+    devSwitch,
     /** Police radio strip (src/radio_strip.ts): `radioStrip.count`, `radioStrip.recent`. */
     radioStrip,
     /** Honk-to-start spots view (src/race_spots.ts): `raceSpots.inside`, `raceSpots.group`. */

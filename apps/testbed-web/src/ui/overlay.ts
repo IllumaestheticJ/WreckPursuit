@@ -34,6 +34,8 @@ export class UiOverlay {
   private endBillShown = false;
   /** Latest police status of the player (null = no police in this session). */
   status: PoliceStatus | null = null;
+  /** Hide the chase readout while the player is clear (player mode; set by the debug switch). */
+  quietWhenClear = false;
 
   constructor(parent: HTMLElement) {
     this.model = createLiveModel({
@@ -62,9 +64,12 @@ export class UiOverlay {
   /** Feed one frame (call after draining events). */
   frame(tick: number, player: number, events: SimEvent[], hours: number, mode: string, radar: Radar | null = null): void {
     const chase = layers.on("chase");
-    this.chaseEl.classList.toggle("hidden", !chase);
     const status = sim.policeStatus(player);
     this.status = status;
+    // Player mode: no "CLEAR / no police interest" box while nobody is after the player (no
+    // police in the session, or clear with no heat and no fresh outcome). Debug keeps it.
+    const quiet = this.quietWhenClear && (!status || (status.status === "Clear" && status.heat <= 0 && bannerFor(status) === null));
+    this.chaseEl.classList.toggle("hidden", !chase || quiet);
     this.showBanner(chase ? bannerFor(status) : null);
     // A capture or a wreck ends the run: show what the damage costs. (An escape does not: the
     // player is still driving.)
