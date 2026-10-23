@@ -253,6 +253,56 @@ fn server_reset_is_not_a_teleport() {
 }
 
 #[test]
+fn a_stranded_ai_racer_is_put_back_after_its_grace_and_the_player_is_not() {
+    // Resets off (a picker race): only racer 1, an AI entrant, is on the stranded rule.
+    let mut j = judge(RaceKind::Sprint, sprint_course());
+    j.set_stranded_reset(&[EntityId(1)]);
+    for id in [1, 2] {
+        j.enter(RacerEntry {
+            racer: EntityId(id),
+            redline_rpm: 0.0,
+        })
+        .unwrap();
+    }
+    let green = j.start(0).unwrap();
+    let at = |id: u32, x: f32, y: f32| RacerSample {
+        racer: EntityId(id),
+        pos: [x, y, 0.0],
+        vel: [0.0, 0.0, 0.0],
+        speed_mps: 0.0,
+        throttle: 0.0,
+        gear: 1,
+        engine_rpm: 1000.0,
+    };
+    // Both on course at y = 120, then both 40 m to the side.
+    for id in [1, 2] {
+        j.relocate(EntityId(id), [0.0, 120.0, 0.0], green);
+    }
+    j.observe(green, &[at(1, 0.0, 120.0), at(2, 0.0, 120.0)], &[]);
+    for id in [1, 2] {
+        j.relocate(EntityId(id), [40.0, 120.0, 0.0], green);
+    }
+    let grace = (crate::judge::STRANDED_GRACE_S / wp_contracts::PHYSICS_DT) as u64;
+    let mut resets = Vec::new();
+    for k in 1..=grace + 240 {
+        j.observe(green + k, &[at(1, 40.0, 120.0), at(2, 40.0, 120.0)], &[]);
+        let r = j.drain_resets();
+        if !r.is_empty() {
+            // Not before the grace is up (the AI keeps trying to rejoin until then).
+            assert!(k > grace, "reset at tick {k}, grace {grace}");
+        }
+        resets.extend(r);
+    }
+    assert_eq!(resets.len(), 1, "{resets:?}");
+    assert_eq!(resets[0].racer, EntityId(1));
+    assert!(
+        resets[0].pos[0].abs() < 1e-3 && (resets[0].pos[1] - 120.0).abs() < 1e-3,
+        "{:?}",
+        resets[0]
+    );
+}
+
+#[test]
 fn reset_mode_puts_an_off_course_racer_back_instead_of_a_dq() {
     let mut j = judge(RaceKind::Sprint, sprint_course());
     j.set_reset_off_course(true);

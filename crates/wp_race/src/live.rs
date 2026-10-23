@@ -67,8 +67,8 @@ pub struct StepOut {
     /// Heat to add per racer (the stake's heat for illegal races, at the green light).
     pub add_heat: Vec<(EntityId, f32)>,
     /// Racers that stayed off the course too long: move each car to the reset pose (on the
-    /// route, at rest) and call [`LiveRace::relocate`]. Empty while the judge's reset option
-    /// is off (it is, for picker races).
+    /// route, at rest) and call [`LiveRace::relocate`]. In picker races only AI entrants
+    /// stranded off the course ([`crate::judge::STRANDED_GRACE_S`]).
     pub resets: Vec<CourseReset>,
 }
 
@@ -167,7 +167,9 @@ impl LiveRace {
         );
         // Off route is never a DQ and never a reset in a picker race (owner, 2026-10-21): take
         // any line, the gates still have to be driven through in order. The judge's reset
-        // option stays off, so `StepOut::resets` is always empty here.
+        // option stays off. The AI entrants alone are put back on the course once stranded
+        // outside the corridor for `STRANDED_GRACE_S` (a bank they cannot climb; lead,
+        // 2026-10-23): those are the only `StepOut::resets` here.
         let mut order = Vec::new();
         for e in ai.iter().chain(std::iter::once(&player)) {
             judge
@@ -196,6 +198,9 @@ impl LiveRace {
         }
         let closed = def.legality == Legality::Sanctioned;
         let field = AiEntrants::new(world, &race, def.kind, closed, &drivers, def.seed)?;
+        // AI entrants only: the player's car keeps "never a reset", autopilot or not.
+        let ai_ids: Vec<EntityId> = ai.iter().map(|e| e.entity).collect();
+        judge.set_stranded_reset(&ai_ids);
         judge.start(tick).expect("enough racers");
 
         let venue = Venue {
@@ -326,6 +331,7 @@ impl LiveRace {
     /// The server moved a racer on purpose (reset, respawn): not judged as a teleport.
     pub fn relocate(&mut self, racer: EntityId, pos: [f32; 3], tick: u64) {
         self.judge.relocate(racer, pos, tick);
+        self.ai.relocate(racer, pos);
     }
 
     /// The race has not gone green yet at `tick` (cars must stay on the grid).
