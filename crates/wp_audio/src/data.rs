@@ -246,6 +246,11 @@ pub struct EngineMix {
     /// `blip_ref_rpm / rpm` times (≤ 2.5×), since a rev-match's rpm step scales with rpm.
     #[serde(default = "default_blip_ref_rpm")]
     pub blip_ref_rpm: f32,
+    /// An upshift under throttle (the gear steps up) holds the upshift note at full depth this
+    /// long, s, even when the rpm falls slower than `shift_rate_onset_rpm_s` (a converter
+    /// automatic without a torque cut, e.g. the police cruiser flat out). 0 = rpm-rate cue only.
+    #[serde(default = "default_upshift_cue_s")]
+    pub upshift_cue_s: f32,
     /// Engine LOD for every car except the focus: closer than this it keeps its two loudest
     /// layers (the crossfade pair), farther only the loudest one; the dropped layers' energy
     /// moves into the kept ones, so loudness is unchanged. Saves Engine-bus voices so a crowd
@@ -266,6 +271,10 @@ pub struct EngineMix {
 
 fn default_blip_ref_rpm() -> f32 {
     4000.0
+}
+
+fn default_upshift_cue_s() -> f32 {
+    0.15
 }
 
 fn default_physical_max_others() -> usize {

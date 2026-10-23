@@ -318,7 +318,7 @@ pub struct PoliceStats {
     /// Built-in driver: ran wide and crashed.
     pub run_wide_crashes: u32,
     /// Built-in driver: near misses, traffic collisions and run-wide crashes by units while
-    /// pursuing or intercepting (what the risk budget and pursuit caps govern).
+    /// pursuing or intercepting (what the risk budget governs).
     pub pursuit_harm: u32,
     /// Built-in driver: seconds pursuing / intercepting units spent cornering above
     /// `pursuit.risk.lateral_g`, summed over units.
@@ -1890,9 +1890,18 @@ impl PoliceSystem {
         // Push-through (row 61): with lights on, blocked by a stopped civilian or parked car
         // it can't pass, shove it aside at low speed; if that doesn't move it, un-stick.
         let av = self.cfg.pursuit.avoid.clone();
+        // Never shove a racer or another unit: a push that started on traffic ends when the
+        // car in front turns out to be one (PR #60 port: a cruiser on Patrol kept shoving a
+        // captured, held player car down the road with the stronger engine).
+        let shoving_racer_or_unit = match u.avoid.blocked_by {
+            Some(avoid::BlockedBy::Vehicle(e)) => self.racers.contains_key(&e),
+            Some(avoid::BlockedBy::Unit(_)) => true,
+            _ => false,
+        };
+        let u = &mut self.units[i];
         if let stuck::Phase::Push { from, until } = u.unstick.phase {
             let moved = graph::dist(pos, from);
-            if moved < PUSH_DONE_M && now < until && !disabled {
+            if moved < PUSH_DONE_M && now < until && !disabled && !shoving_racer_or_unit {
                 // Straight ahead, a little left (nudging the blocker to the kerb): a shove,
                 // not a turn (steering for the track swung units across the road).
                 let tgt = graph::add(
@@ -1916,7 +1925,7 @@ impl PoliceSystem {
             u.unstick.phase = stuck::Phase::Drive;
             u.unstick.push_ready = now.plus(av.push_cooldown_s);
             u.avoid.push_wait_s = 0.0;
-            if moved < av.push_min_progress_m && !disabled {
+            if moved < av.push_min_progress_m && !disabled && !shoving_racer_or_unit {
                 // Didn't budge: back out / re-route / respawn like any stuck unit.
                 self.on_stuck(i, true);
             }

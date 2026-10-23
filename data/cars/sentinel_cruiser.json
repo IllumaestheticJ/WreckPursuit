@@ -2,7 +2,7 @@
   "id": "sentinel_cruiser",
   "display_name": "Sentinel Cruiser",
   "class": "PoliceCruiser",
-  "analog_of": "2010s American full-size RWD police sedan, 5.7 L pushrod V8, pursuit package",
+  "analog_of": "2010s American full-size RWD police sedan, 6.2 L supercharged pushrod V8, pursuit package",
   "body_size_m": [1.91, 5.08, 1.48],
   "mass_kg": 2048.2,
   "front_weight_frac": 0.55,
@@ -16,25 +16,25 @@
   "lift_rear": 0.12,
   "engine": {
     "torque_curve_nm": [
-      [800, 400],
-      [1200, 440],
-      [1600, 470],
-      [2000, 490],
-      [2500, 505],
-      [3000, 515],
-      [3500, 525],
-      [4000, 533],
-      [4400, 535],
-      [4800, 528],
-      [5200, 505],
-      [5600, 470],
-      [5900, 440]
+      [800, 430],
+      [1200, 520],
+      [1600, 590],
+      [2000, 640],
+      [2500, 675],
+      [3000, 695],
+      [3500, 705],
+      [4000, 705],
+      [4500, 695],
+      [5000, 680],
+      [5500, 660],
+      [6000, 620],
+      [6200, 595]
     ],
     "idle_rpm": 600.0,
-    "redline_rpm": 5800.0,
-    "rev_limit_rpm": 5900.0,
+    "redline_rpm": 6000.0,
+    "rev_limit_rpm": 6200.0,
     "inertia_kgm2": 0.24,
-    "engine_brake_nm": 54.0
+    "engine_brake_nm": 70.0
   },
   "drivetrain": {
     "layout": "Rwd",
@@ -49,7 +49,7 @@
         "ramp_coast": 0.15
       }
     },
-    "clutch_max_nm": 860.0,
+    "clutch_max_nm": 1130.0,
     "shift_time_s": 0.3,
     "torque_converter": {
       "stall_rpm": 2300.0,

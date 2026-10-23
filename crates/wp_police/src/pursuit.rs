@@ -77,7 +77,7 @@ const CHASE_ROUTE_REFRESH_S: f32 = 1.5;
 /// starts searching (`Intercept` to search points), s.
 const LOST_SEARCH_AFTER_S: f32 = 2.0;
 
-/// Interceptors drive at up to this × the local limit (capped by the pursuit cap).
+/// Interceptors drive at up to this × the local limit (capped by the unit car's top speed).
 const INTERCEPT_LIMIT_FACTOR: f32 = 2.2;
 
 /// An interceptor faster than this keeps its route rather than switch to one that starts with
@@ -130,6 +130,10 @@ const RESPOND_YIELD_CREEP_MPS: f32 = 2.0;
 /// How far further right a yielding responder pulls over, m.
 const RESPOND_YIELD_SHIFT_M: f32 = 1.2;
 
+/// A racer slower than this is stopped for the chase tactics: shadowing units close in for the
+/// arrest and no rolling block is started ahead of it, m/s.
+const ARREST_RACER_MPS: f32 = 3.0;
+
 /// How far ahead a responder looks for a junction to meet a reported racer at, s.
 const RESPOND_HORIZON_S: f32 = 12.0;
 
@@ -150,8 +154,9 @@ pub(crate) fn in_view(
     dot(heading, to) >= wp_math::sin_cos(half).1 * d
 }
 
-/// Pursuit speed: `min(max(target × (1 + margin), floor), cap)`. The floor (10 m/s) lets units
-/// close on a stopped racer for the arrest.
+/// Pursuit speed: `min(max(target × (1 + margin), floor), cap)`, where `cap` is the unit car's
+/// top speed (there is no separate pursuit speed cap). The floor (10 m/s) lets units close on a
+/// stopped racer for the arrest.
 pub fn pursuit_speed_cap(target_speed: f32, margin: f32, cap: f32) -> f32 {
     (target_speed * (1.0 + margin)).max(10.0).min(cap)
 }
@@ -785,6 +790,15 @@ impl PoliceSystem {
         Some(NodeId(cands[self.rng.below(cands.len() as u32) as usize]))
     }
 
+    /// Top speed of unit `i`'s car (measured limits, else the `[pro]` defaults), m/s. Pursuing
+    /// and intercepting units are capped only by this.
+    pub(crate) fn unit_top_speed_mps(&self, i: usize) -> f32 {
+        self.units[i]
+            .limits
+            .unwrap_or(self.cfg.pursuit.pro.default_limits)
+            .top_speed_mps
+    }
+
     fn limit_at(&self, p: [f32; 2]) -> f32 {
         self.graph
             .nearest_on_road(p)
@@ -1301,9 +1315,9 @@ impl PoliceSystem {
                         // still headed for it; otherwise intercept as usual.
                         if self.ambush_holds(target, wait) {
                             let lim = self.limit_at(self.units[i].body.pos);
-                            let cap = p.pursuit_cap_mps.get(self.phase);
+                            let top = self.unit_top_speed_mps(i);
                             self.units[i].cmd.speed_mps =
-                                (lim * p.respond_speed_factor * 1.15).min(cap);
+                                (lim * p.respond_speed_factor * 1.15).min(top);
                         } else {
                             // Still intercepting (no new radio line); replan next think.
                             let u = &mut self.units[i];
@@ -1346,10 +1360,9 @@ impl PoliceSystem {
                         self.units[i].cmd.speed_mps = lim * p.respond_speed_factor;
                         continue;
                     }
-                    let li = rec.level.table_index();
                     let lim = self.limit_at(self.units[i].body.pos);
-                    let cap = p.pursuit_cap_mps.get(self.phase) * p.chase.cap_scale[li];
-                    let intercept_speed = (lim * INTERCEPT_LIMIT_FACTOR).min(cap);
+                    let top = self.unit_top_speed_mps(i);
+                    let intercept_speed = (lim * INTERCEPT_LIMIT_FACTOR).min(top);
                     // Wanted level 3+: an interceptor that got to a junction on the racer's
                     // path first parks across it (track ends there) until the racer arrives.
                     let u = &self.units[i];
@@ -1506,8 +1519,6 @@ impl PoliceSystem {
             } else {
                 0.0
             };
-            let cap_abs = p.pursuit_cap_mps.get(self.phase) * ch.cap_scale[li];
-            let cap = pursuit_speed_cap(v_r, ch.speed_margin, cap_abs);
             let rp = xy(rec.pos);
             // (gap along track, lateral, unit index)
             let mut pursuers: Vec<(f32, f32, usize)> = Vec::new();
@@ -1611,6 +1622,9 @@ impl PoliceSystem {
             let mut shadow_rank = 0.0f32;
             let mut behind_rank = 0usize;
             for &(gap, i) in &active {
+                // No pursuit speed cap: the unit's own car is the limit.
+                let top = self.unit_top_speed_mps(i);
+                let cap = pursuit_speed_cap(v_r, ch.speed_margin, top);
                 let u = &self.units[i];
                 let has_budget = u.risk > budget_floor;
                 let ready = now >= u.pit_ready;
@@ -1631,7 +1645,14 @@ impl PoliceSystem {
                     Tactic::BoxIn(
                         [BoxSlot::Rear, BoxSlot::FrontLeft, BoxSlot::FrontRight][k.min(2)],
                     )
-                } else if gap < -5.0 && level >= unlocks.rolling_block_level && has_budget && seen {
+                } else if gap < -5.0
+                    && level >= unlocks.rolling_block_level
+                    && has_budget
+                    && seen
+                    && v_r >= ARREST_RACER_MPS
+                {
+                    // A rolling block slows a moving racer; a stopped one is arrested instead
+                    // (a block ahead of it would wait there forever).
                     Tactic::RollingBlock
                 } else {
                     let rank = behind_rank;
@@ -1664,15 +1685,18 @@ impl PoliceSystem {
                         // Close in for the arrest when the racer stops (by straight-line
                         // distance: a unit on the cross street can project right next to it
                         // on the trail).
-                        let arrest = v_r < 3.0 && seen;
+                        let arrest = v_r < ARREST_RACER_MPS && seen;
+                        // Past a stopped racer (it pulled off behind the unit): back to it by
+                        // the roads, not on along its trail.
+                        let past_racer = arrest && gap < 0.0;
                         let want_gap = if arrest { 6.0 } else { mid };
                         let gap = if arrest {
                             gap.max(dist(u.body.pos, rp))
                         } else {
                             gap
                         };
-                        // Far behind: close the gap at up to the pursuit cap, braking in time
-                        // to arrive at the shadow gap.
+                        // Far behind: close the gap at up to the car's top speed, braking in
+                        // time to arrive at the shadow gap.
                         let excess = gap - want_gap;
                         let mut sp = if excess > 0.0 {
                             v_r + (2.0 * SHADOW_CLOSE_DECEL_MPS2 * excess).sqrt()
@@ -1684,13 +1708,13 @@ impl PoliceSystem {
                             sp = lim_here * p.respond_speed_factor;
                         }
                         let far = gap > ch.shadow_max_m[li] + 15.0;
-                        let base_cap = if far { cap_abs } else { cap };
+                        let base_cap = if far { top } else { cap };
                         let own_cap = if has_budget {
                             base_cap
                         } else {
                             base_cap.min(lim_here * 1.3)
                         };
-                        let tr = if close {
+                        let tr = if close && !past_racer {
                             track.clone()
                         } else {
                             routed = true;
@@ -1707,7 +1731,7 @@ impl PoliceSystem {
                             let closing = (0.9 * (gap - ch.pit_turn_in_gap_m)).clamp(0.0, 10.0);
                             (side * ch.pit_side_offset_m, v_r + closing)
                         };
-                        (offset_track(&track, lat), sp.min(cap_abs + 6.0))
+                        (offset_track(&track, lat), sp.min(top))
                     }
                     Tactic::Ram(kind) => {
                         // Close fast from farther back, at the ram's closing speed at the end.
@@ -1733,7 +1757,7 @@ impl PoliceSystem {
                         } else {
                             offset_track(&track, lat)
                         };
-                        (tr, sp.clamp(0.0, cap_abs + 7.0))
+                        (tr, sp.clamp(0.0, top))
                     }
                     Tactic::RollingBlock => {
                         let ahead = -gap;

@@ -185,9 +185,6 @@ impl Default for RaceTactics {
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RaceSpeed {
-    /// Absolute pursuit speed cap in every day phase, m/s (`pursuit_cap_mps`).
-    #[serde(default)]
-    pub pursuit_cap_mps: Option<f32>,
     /// PIT allowed below this racer speed per wanted level, km/h (`chase.pit_max_kmh`).
     #[serde(default)]
     pub pit_max_kmh: Option<[f32; 5]>,
@@ -343,12 +340,6 @@ impl RaceProfile {
         if let Some(m) = self.speed.speed_margin {
             chase.speed_margin = m;
         }
-        if let Some(cap) = self.speed.pursuit_cap_mps {
-            let c = &mut cfg.pursuit.pursuit_cap_mps;
-            for v in [&mut c.dawn, &mut c.day, &mut c.dusk, &mut c.night] {
-                *v = cap;
-            }
-        }
         if !t.helicopter {
             let h = &mut cfg.presence.helicopter;
             h.min_level = NEVER_LEVEL;
@@ -380,11 +371,6 @@ impl RaceProfile {
             || !self.spikes.is_empty();
         if tools && self.tool_lifetime_s <= 0.0 {
             return Err(format!("{id}: scripted tools need tool_lifetime_s > 0"));
-        }
-        if let Some(c) = self.speed.pursuit_cap_mps {
-            if c <= 0.0 {
-                return Err(format!("{id}: speed.pursuit_cap_mps must be > 0"));
-            }
         }
         for b in &self.route_blocks {
             if !frac(b.at) || b.gap_m < 0.0 {
@@ -1216,10 +1202,6 @@ mod tests {
             assert_eq!(lvl, NEVER_LEVEL);
         }
         assert!(u.pit_level <= 5, "PIT stays");
-        assert!(
-            cfg.pursuit.pursuit_cap_mps.night >= 60.0,
-            "highway speed chase"
-        );
         assert!(cfg.pursuit.chase.pit_max_kmh[2] >= 180.0);
     }
 
