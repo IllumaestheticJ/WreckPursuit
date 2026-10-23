@@ -448,10 +448,13 @@ export class MapHud {
     const toolM = (s: number) => [1, 0, 0, -1, s / 2, s / 2] as [number, number, number, number, number, number];
     row("Roadblock", (c, s) => drawTool(c, { kind: "roadblock", x: 0, y: 0, dir: [1, 0], halfLenM: s * 0.4 }, toolM(s), 1.6, pal));
     row("Spike strip", (c, s) => drawTool(c, { kind: "spikes", x: 0, y: 0, dir: [1, 0], halfLenM: s * 0.4 }, toolM(s), 1.6, pal));
-    row("Garage", (c, s) => drawPoi(c, "Garage", s / 2, s / 2, s * 0.32, pal));
-    row("Safehouse", (c, s) => drawPoi(c, "Safehouse", s / 2, s / 2, s * 0.32, pal));
+    row("Garage, legit (stop inside to visit)", (c, s) => drawPoi(c, "Garage", s / 2, s / 2, s * 0.32, pal, "Legit"));
+    row("Garage, crooked (no questions asked, dearer labour)", (c, s) => drawPoi(c, "Garage", s / 2, s / 2, s * 0.32, pal, "Crooked"));
+    row("Race meet (stop inside, honk to start)", (c, s) => drawPoi(c, "RaceSpot", s / 2, s / 2, s * 0.32, pal));
+    row("Safehouse (wait inside, no police near, to lose them)", (c, s) => drawPoi(c, "Safehouse", s / 2, s / 2, s * 0.32, pal));
     row("Police station", (c, s) => drawPoi(c, "PoliceStation", s / 2, s / 2, s * 0.32, pal));
-    row("Race start", (c, s) => drawPoi(c, "RaceStartGrid", s / 2, s / 2, s * 0.32, pal));
+    row("Police helipad", (c, s) => drawPoi(c, "Helipad", s / 2, s / 2, s * 0.32, pal));
+    row("Rest stop", (c, s) => drawPoi(c, "RestStop", s / 2, s / 2, s * 0.32, pal));
     const road = (cls: number, deck = false) => (c: CanvasRenderingContext2D, s: number) => {
       c.lineCap = "butt";
       if (deck) {

@@ -11,8 +11,8 @@
  * bounty / carried heat and
  * starts the next run (free drive or night run) with the active car.
  */
-import { render, type ComponentChildren } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { createContext, render, type ComponentChildren } from "preact";
+import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import { Badge, Button, Delta, Meter, Money, Panel, severityColor, Stat, Tabs } from "../ui/kit";
 import { pct, words } from "../ui/format";
 import type {
@@ -120,10 +120,23 @@ function CarCard({ car, selected, onSelect }: { car: CarView; selected: boolean;
   );
 }
 
+/** The city shop the player drove into (a career garage visit): repairs are priced there, in
+ * its district and as its kind; `null` = the garage opened from the menu (pick freely). */
+export interface VisitShop {
+  name: string;
+  district: string;
+  kind: ShopKind;
+}
+
+const VisitShopContext = createContext<VisitShop | null>(null);
+
 function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
   const { car, view, api } = props;
-  const [district, setDistrict] = useState("Residential");
-  const [shop, setShop] = useState<ShopKind>("Legit");
+  const visit = useContext(VisitShopContext);
+  const [pickedDistrict, setDistrict] = useState("Residential");
+  const [pickedShop, setShop] = useState<ShopKind>("Legit");
+  const district = visit?.district ?? pickedDistrict;
+  const shop = visit?.kind ?? pickedShop;
   const [picked, setPicked] = useState<string[]>([]);
   const [scrapAsk, setScrapAsk] = useState(false);
   if (car.location !== "Garage") return null;
@@ -141,10 +154,16 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; ru
   const wanted = view.carried_level !== "None";
   return (
     <Panel title="Repair" tag={`${view.mode} prices`}>
+      {visit && (
+        <p class="wp-mono wp-dim" data-testid="repair-shop">
+          At {visit.name} · {words(visit.district)} · {visit.kind === "Crooked" ? "crooked shop (no questions asked)" : "legit shop"}
+        </p>
+      )}
       {car.repair_lines.length === 0 ? (
         <p class="wp-dim">Nothing to repair.</p>
       ) : (
         <>
+          {!visit && (
           <div class="wp-row" style={{ gap: "0.6em", flexWrap: "wrap", marginBottom: "0.5em" }}>
             <label class="wp-mono wp-dim">
               district{" "}
@@ -163,6 +182,7 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; ru
               Crooked shop
             </Button>
           </div>
+          )}
           {wanted && shop === "Legit" && <p class="wp-warn">You are wanted ({view.carried_level}): a legit shop will report you.</p>}
           <table class="wp-table" data-testid="repair-lines">
             <thead>
@@ -871,16 +891,23 @@ export class CareerGarageView {
     };
   }
 
+  /** The shop the garage was opened at (a career garage visit), or null. */
+  shop: VisitShop | null = null;
+
   /** Show the garage (re-reads the career). `message` is shown at the top (e.g. why a run
-   * could not start). Clears any dismiss callback; set one with `onClose` after showing. */
-  show(message: string | null = null): void {
+   * could not start); `shop` = the city shop the player drove into (repairs priced there).
+   * Clears any dismiss callback; set one with `onClose` after showing. */
+  show(message: string | null = null, shop: VisitShop | null = null): void {
     this.open = true;
     this.onDismiss = null;
+    this.shop = shop;
     this.key++;
     const view = this.api.view();
     render(
       <div class="wp-ui wp-root" style={{ position: "absolute", inset: 0, pointerEvents: "auto", zIndex: 80 }}>
-        <GarageScreen key={this.key} api={this.screenApi} initial={view} message={message} />
+        <VisitShopContext.Provider value={shop}>
+          <GarageScreen key={this.key} api={this.screenApi} initial={view} message={message ?? (shop ? `${shop.name}: repairs, parts and tuning at this shop.` : null)} />
+        </VisitShopContext.Provider>
       </div>,
       this.el,
     );
@@ -896,6 +923,7 @@ export class CareerGarageView {
   hide(): void {
     this.open = false;
     this.onDismiss = null;
+    this.shop = null;
     render(null, this.el);
   }
 }

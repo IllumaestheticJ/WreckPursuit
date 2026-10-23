@@ -409,15 +409,19 @@ function line(ctx: Ctx, a: [number, number], b: [number, number]): void {
   ctx.stroke();
 }
 
-/** POI icon at `(x, y)` screen px, size `s`. */
-export function drawPoi(ctx: Ctx, kind: MapPoi["kind"], x: number, y: number, s: number, pal: MapPalette): void {
+/** Legit garage colour (the 3D marker's blue, `scene.ts` GARAGE_COLOUR). */
+export const LEGIT_GARAGE = "#3399ff";
+
+/** POI icon at `(x, y)` screen px, size `s`; `shop` colours a garage (legit blue, crooked
+ * amber; unknown amber). */
+export function drawPoi(ctx: Ctx, kind: MapPoi["kind"], x: number, y: number, s: number, pal: MapPalette, shop?: MapPoi["shop"]): void {
   ctx.save();
   ctx.translate(x, y);
   ctx.lineWidth = Math.max(1, s * 0.14);
   ctx.strokeStyle = "#000";
   switch (kind) {
     case "Garage":
-      ctx.fillStyle = pal.warn;
+      ctx.fillStyle = shop === "Legit" ? LEGIT_GARAGE : pal.warn;
       ctx.fillRect(-s * 0.6, -s * 0.6, s * 1.2, s * 1.2);
       ctx.strokeRect(-s * 0.6, -s * 0.6, s * 1.2, s * 1.2);
       glyph(ctx, "G", s, "#000");
@@ -462,6 +466,20 @@ export function drawPoi(ctx: Ctx, kind: MapPoi["kind"], x: number, y: number, s:
       ctx.fill();
       ctx.stroke();
       glyph(ctx, "P", s * 0.9, "#000");
+      break;
+    case "RaceSpot":
+      // Race meet (stop + honk): a chequered flag square on the race-spot orange.
+      ctx.fillStyle = "#ff9a2e";
+      ctx.beginPath();
+      ctx.arc(0, 0, s * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#000";
+      ctx.fillRect(-s * 0.4, -s * 0.4, s * 0.4, s * 0.4);
+      ctx.fillRect(0, 0, s * 0.4, s * 0.4);
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, -s * 0.4, s * 0.4, s * 0.4);
+      ctx.fillRect(-s * 0.4, 0, s * 0.4, s * 0.4);
       break;
     case "RaceStartGrid":
       ctx.fillStyle = pal.ink;

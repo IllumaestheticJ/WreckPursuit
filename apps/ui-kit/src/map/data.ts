@@ -30,9 +30,13 @@ export interface MapZone {
 
 /** Point of interest. */
 export interface MapPoi {
-  kind: "Safehouse" | "Garage" | "PoliceStation" | "Helipad" | "RaceStartGrid" | "RestStop";
+  /** `RaceSpot` is a host-added honk-to-start race meet (the testbed replaces the city's
+   * `RaceStartGrid` POIs with the session's race spots). */
+  kind: "Safehouse" | "Garage" | "PoliceStation" | "Helipad" | "RaceStartGrid" | "RestStop" | "RaceSpot";
   name: string;
   pos: [number, number];
+  /** Garages from the session's shop list: legit (blue) or crooked (amber). */
+  shop?: "Legit" | "Crooked";
 }
 
 /** `map_static_json()`. */

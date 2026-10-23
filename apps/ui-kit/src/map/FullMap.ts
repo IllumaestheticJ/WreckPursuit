@@ -163,23 +163,6 @@ export class FullMapRenderer {
       ctx.fillText(text, sx, sy);
       ctx.globalAlpha = 1;
     }
-    // POIs
-    const ps = 7 * dpr;
-    const names = k > 0.35;
-    ctx.font = `${Math.round(10 * dpr)}px ui-monospace, Menlo, Consolas, monospace`;
-    ctx.textAlign = "left";
-    for (const poi of map.pois) {
-      if (poi.kind === "RaceStartGrid" && k < 0.3) continue;
-      const [sx, sy] = worldToFull(v, poi.pos[0], poi.pos[1]);
-      drawPoi(ctx, poi.kind, sx, sy, ps, pal);
-      if (names && poi.kind !== "Helipad") {
-        ctx.lineWidth = 3 * dpr;
-        ctx.strokeStyle = "rgba(0,0,0,0.85)";
-        ctx.strokeText(poi.name, sx + ps * 1.1, sy);
-        ctx.fillStyle = pal.ink;
-        ctx.fillText(poi.name, sx + ps * 1.1, sy);
-      }
-    }
   }
 
   /** Draw one frame. */
@@ -245,6 +228,27 @@ export class FullMapRenderer {
       for (const fl of ex.flags) {
         const [sx, sy] = worldToFull(v, fl.x, fl.y);
         drawFlag(ctx, fl, sx, sy, 20 * dpr);
+      }
+    }
+    // POIs above the host markers (street racers sat on top of shops, garage audit F7). Shops
+    // and race meets keep a readable size and their names at every zoom.
+    ctx.font = `${Math.round(10 * dpr)}px ui-monospace, Menlo, Consolas, monospace`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    const map = this.map;
+    for (const poi of map?.pois ?? []) {
+      if (poi.kind === "RaceStartGrid" && k < 0.3) continue;
+      const [sx, sy] = worldToFull(v, poi.pos[0], poi.pos[1]);
+      if (sx < -40 || sy < -40 || sx > w + 200 || sy > h + 40) continue;
+      const key = poi.kind === "Garage" || poi.kind === "RaceSpot";
+      const ps = (key ? 9 : 7) * dpr;
+      drawPoi(ctx, poi.kind, sx, sy, ps, pal, poi.shop);
+      if (poi.kind !== "Helipad" && (k > 0.35 || (key && k > 0.12))) {
+        ctx.lineWidth = 3 * dpr;
+        ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        ctx.strokeText(poi.name, sx + ps * 1.1, sy);
+        ctx.fillStyle = pal.ink;
+        ctx.fillText(poi.name, sx + ps * 1.1, sy);
       }
     }
     if (this.crosshair) {
