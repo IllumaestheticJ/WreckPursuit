@@ -1,4 +1,4 @@
-# simcli hashes scenario=golden_city_chase systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=golden_city_chase systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
 24 4896166b665b0b96
 48 bc779e3ab7c6015d
 72 81be351b595b3a58

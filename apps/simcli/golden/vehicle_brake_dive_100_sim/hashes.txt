@@ -1,4 +1,4 @@
-# simcli hashes scenario=vehicle_brake_dive_100_sim systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=vehicle_brake_dive_100_sim systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
 240 0d8ca205dcfed895
 480 6fad2f378b47cd51
 720 3951931a02ce8480

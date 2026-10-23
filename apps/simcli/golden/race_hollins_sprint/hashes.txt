@@ -1,4 +1,4 @@
-# simcli hashes scenario=race_hollins_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=race_hollins_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
 240 9e3b62c898600322
 480 3e15b4a91ff97a28
 720 77a5cb0e216b4e1d

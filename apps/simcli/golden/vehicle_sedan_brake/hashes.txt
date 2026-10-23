@@ -1,4 +1,4 @@
-# simcli hashes scenario=vehicle_sedan_brake systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=vehicle_sedan_brake systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
 240 60939c64f7d747c2
 480 39e6f63d968f11ad
 720 3036150beb463047

@@ -1,4 +1,4 @@
-# simcli hashes scenario=golden_roadblock systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=golden_roadblock systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
 24 8f6346349a13e61c
 48 8e8ae40f9eedf28b
 72 d2a480cfef52408a

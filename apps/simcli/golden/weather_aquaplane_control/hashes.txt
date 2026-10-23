@@ -1,4 +1,4 @@
-# simcli hashes scenario=weather_aquaplane_control systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=weather_aquaplane_control systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
 240 70ec8f83687149cf
 480 088135b7eb042794
 720 616a76d1157ea9ad
