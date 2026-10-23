@@ -1164,3 +1164,32 @@ fn far_racers_drive_light_and_the_race_opponent_never_does() {
     }
     assert!(!light, "the race opponent never drives light");
 }
+
+/// main's career time progression (PR #45, `wp_world::progression`) composes with the street
+/// racers: every moment of a night shift's budget is `DayPhase::Night`, which is what turns the
+/// night-shift street racers on ([`street::is_night`]), and every moment of a day shift is
+/// `DayPhase::Day`. The 18→20 / 04→08 transitions are the only stretches outside the windows.
+#[test]
+fn career_time_shifts_line_up_with_the_street_racers_day_and_night() {
+    use wp_contracts::DayPhase;
+    use wp_world::{Shift as CareerShift, TimeProgression, TimeRules};
+    for (shift, want) in [
+        (CareerShift::Day, DayPhase::Day),
+        (CareerShift::Night, DayPhase::Night),
+    ] {
+        let mut t = TimeProgression::starting_at(TimeRules::default(), 1, shift);
+        let mut events = Vec::new();
+        let mut samples = 0;
+        while t.shift() == shift && !t.is_transitioning() {
+            assert_eq!(
+                t.time_of_day().phase(),
+                want,
+                "{shift:?} at {:.2} h",
+                t.time_of_day().hours()
+            );
+            t.step(1.0, &mut events);
+            samples += 1;
+        }
+        assert!(samples > 100, "{shift:?}: {samples} samples");
+    }
+}
