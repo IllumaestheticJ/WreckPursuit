@@ -6,7 +6,8 @@
 // crash point, repaired (health 100 %), and the R is a replay op that plays back without drift;
 // in the night run R lands on a lane, keeps the police heat and makes the car a blinking ghost
 // for 1 s; in a career run R does not
-// repair (repairs are bought in the garage).
+// repair (repairs are bought in the garage); on the grid viaduct through an interchange and far
+// off-road R still reaches a road (playtester B1).
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -164,6 +165,29 @@ const career = await page.evaluate(() => {
 });
 check(career.active && career.r && career.r.repaired === false, `career run: R resets in place without repairing (${JSON.stringify(career.r)})`);
 await page.evaluate(() => localStorage.removeItem("wp.career.v1"));
+
+// 4. Stuck spots (playtester B1): on the grid viaduct where it runs through an interchange,
+//    and wedged far off-road, R still reaches a road (it used to leave the car where it was).
+await page.evaluate(() => window.__wp.startFreeDrive(undefined, "Arcade", true));
+await page.waitForFunction(() => window.__wp.sim.cityId() === "procedural_12x12", null, { timeout: 120000 }).catch(() => {});
+const stuck = await page.evaluate(async () => {
+  const wp = window.__wp;
+  const p = wp.app.player;
+  const settle = () => new Promise((r) => setTimeout(r, 600));
+  wp.sim.debugPlaceVehicle(p, 10.75, 100, 0);
+  await settle();
+  const deck = wp.sim.resetInPlace(p);
+  // The middle of a block: the free-drive start lane is x = 10.75, blocks are 100 m+ wide.
+  wp.sim.debugPlaceVehicle(p, 60, -660, 0);
+  await settle();
+  const off = wp.sim.resetInPlace(p);
+  return { deck, off };
+});
+check(
+  stuck.deck.on_lane && stuck.deck.via === "lane" && Math.abs(stuck.deck.y - 100) <= 15,
+  `viaduct over an interchange: reset lands on the deck (${JSON.stringify(stuck.deck)})`,
+);
+check(stuck.off.on_lane && stuck.off.via !== "in_place", `far off-road: reset reaches a road (${JSON.stringify(stuck.off)})`);
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();
