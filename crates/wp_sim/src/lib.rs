@@ -919,6 +919,12 @@ impl Sim {
             .ok_or(SimError::UnknownEntity(id))?;
         let (pos, yaw) = slot.spawn;
         let rb = &mut self.physics.bodies[slot.body.body];
+        // A reset car is awake and on full physics, as a placed one (`place_vehicle`).
+        if slot.dormant || slot.light.is_some() {
+            slot.dormant = false;
+            slot.light = None;
+            rb.set_body_type(rapier3d::prelude::RigidBodyType::Dynamic, true);
+        }
         slot.vehicle.place_body(rb, pos, yaw, 0.0, 0.0);
         slot.damage.reset();
         Ok(())
@@ -1688,6 +1694,35 @@ mod tests {
         }
         let state = sim.vehicle_states()[0].1.clone();
         (sim.state_hash(), state)
+    }
+
+    /// A reset wakes a dormant car, as a placement does (bughunt F4): it drives off again.
+    #[test]
+    fn reset_wakes_a_dormant_vehicle() {
+        let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        let mut sim = Sim::new(SimConfig {
+            seed: 3,
+            mode,
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 10.0,
+        });
+        let id = sim.spawn_vehicle(&car, [0.0; 3], 0.0).unwrap();
+        sim.set_dormant(id, true).unwrap();
+        sim.reset_vehicle(id).unwrap();
+        assert_eq!(sim.is_dormant(id), Some(false));
+        sim.set_input(
+            id,
+            VehicleInput {
+                throttle: 1.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for _ in 0..480 {
+            sim.step_fixed();
+        }
+        assert!(sim.vehicle_states()[0].1.speed_mps > 3.0);
     }
 
     /// A stock tune spawns exactly the car file; a tuned spawn carries the tuned definition and
