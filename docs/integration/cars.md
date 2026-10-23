@@ -75,6 +75,19 @@ mechanical-spec row; menu stats (`data/stats/cars.json`); AI capability row
   dispatch in `styles/performance/mod.rs`, panels + meshes for the new ids only, and a new
   `tools/assets/mesh_shots.mjs` (rest-pose PNGs of a mesh, no testbed / wasm build needed).
 
+### Models (wave 3)
+
+Per-car body kits in `tools/assets/src/styles/performance/{supercar,race,offroad}.rs` (lamps
+with a distinct tail pattern per car, intakes, vents, louvres, splitters, wings, diffusers,
+number panels / stripes as plain colour patches, tube bumpers, light bars, chase rack, spare
+wheels, sand ladders, window nets, …). Hero tier, all under the 20k budget: halberd_40 18,586, ombra_v12 18,670, ostwind_6t 17,148, kagero_hx 17,626, morrigan_55 19,136, nyx_proto 18,388, merlo_20t 18,156, mesquite_pr 19,527, erg_hamada 18,536 tris.
+Kit-helper gaps found (worked around locally): no dome/blister or tube helper, `louvres` /
+`wing` / `diffuser` / `splitter` use fixed part names (once per car), `top_stripe` density is
+not settable, `mud_flaps` is all-four only. `Tips::HighCentre` draws four touching tips in a row
+(also on `fulmine_v10`); `nyx_proto` uses `Centre`, `halberd_40` `QuadHigh`. The pre-runner's
+bumper light bar and exo-bumper pods are detail parts in lamp materials (the four-lens test
+counts light parts per end), so they may not switch on with the head/tail lamps.
+
 ### New requests (wave 3)
 
 | # | To | Request |
