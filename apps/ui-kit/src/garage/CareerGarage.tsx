@@ -247,7 +247,7 @@ function insuranceNote(view: CareerView, car: CarView): string {
     const premium = Math.max(1, Math.round(t.premium_per_day_frac * car.value));
     return `${words(t.id)}: pays ${pct(t.coverage)} of the repair bill above $${t.deductible}, $${premium}/night`;
   });
-  return `${tiers.join(". ")}. Nothing for damage taken while wanted.`;
+  return `${tiers.join(". ")}. Covers damage taken while wanted too; only damage still on the car when you are caught is not paid.`;
 }
 
 function InsurancePanel(props: { car: CarView; view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
@@ -265,7 +265,7 @@ function InsurancePanel(props: { car: CarView; view: CareerView; api: CareerApi;
             key={t.id}
             pressed={car.insurance === t.id}
             onClick={() => car.insurance !== t.id && props.run(() => api.insure(car.uid, t.id))}
-            title={`covers ${pct(t.coverage)} after a ${t.deductible} deductible; not damage taken while wanted`}
+            title={`covers ${pct(t.coverage)} after a ${t.deductible} deductible, chases included; not damage still on the car when you are caught`}
           >
             {words(t.id)} · <Money value={Math.max(1, Math.round(t.premium_per_day_frac * car.value))} />
             /night
