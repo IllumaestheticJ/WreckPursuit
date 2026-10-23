@@ -37,7 +37,7 @@ import {
   type InputSource,
 } from "./input";
 import { actionsForKey, bindingsHelp, bindingText, keyName, padName, type ActionId } from "./bindings";
-import { CrashReplayDirector, autoCrashReplay, onAutoCrashReplayChange, setAutoCrashReplay } from "./crash_replay";
+import { CrashReplayDirector, autoCrashReplay, crashReplayOffer, onAutoCrashReplayChange, onCrashReplayOfferChange, setAutoCrashReplay, setCrashReplayOffer, type CrashReplayOffer } from "./crash_replay";
 import { installTouch, setTouchSteerMode, touchSteerMode } from "./touch";
 import { ControlsPanel } from "./ui/controls";
 import { ALWAYS_LIVE_LAYERS, layers, store, bytesToBase64, base64ToBytes } from "./settings";
@@ -466,6 +466,11 @@ async function main(): Promise<void> {
   autoBox.checked = autoCrashReplay();
   autoBox.onchange = () => setAutoCrashReplay(autoBox.checked);
   onAutoCrashReplayChange((on) => (autoBox.checked = on));
+  // Which crashes offer a replay (F43; also Settings → Crash replays in the game menu).
+  const offerSel = $("rp-crash-offer") as HTMLSelectElement;
+  offerSel.value = crashReplayOffer();
+  offerSel.onchange = () => setCrashReplayOffer(offerSel.value as CrashReplayOffer);
+  onCrashReplayOfferChange((m) => (offerSel.value = m));
   /** Garage: ends a career run in progress (its result goes into the career), pauses. `shop`:
    * the city shop the player drove into (garage visit "Enter garage"): repairs are priced there
    * and closing the garage drives out of that shop. Closing the garage after it ended a run
@@ -2185,6 +2190,9 @@ async function main(): Promise<void> {
     crash,
     /** Settings hook (pause menu): play crash replays without asking. */
     setAutoCrashReplay,
+    /** Which crashes offer a replay: "off" | "big" (default) | "all" (F43). */
+    setCrashReplayOffer,
+    crashReplayOffer,
     bindings: getBindings,
     /** City map HUD (UI kit): `map.hud.stats()`, `map.toggle()`. */
     map,

@@ -42,6 +42,52 @@ export function onAutoCrashReplayChange(cb: (on: boolean) => void): void {
   listeners.push(cb);
 }
 
+/** Which crashes offer a replay (feature F43, Settings → Crash replays): none, only big ones
+ * (default; see [`isBigCrash`]), or every crash the sim detects. Persisted per viewer. */
+export type CrashReplayOffer = "off" | "big" | "all";
+const OFFER_KEY = "wp.crashReplay.offer.v1";
+const OFFERS: readonly CrashReplayOffer[] = ["off", "big", "all"];
+const readOffer = (): CrashReplayOffer => {
+  const v = store.get(OFFER_KEY) as CrashReplayOffer | null;
+  return v && OFFERS.includes(v) ? v : "big";
+};
+let offerMode: CrashReplayOffer = readOffer();
+const offerListeners: ((m: CrashReplayOffer) => void)[] = [];
+
+/** Settings hook: which crashes offer a replay (persisted). */
+export function setCrashReplayOffer(mode: CrashReplayOffer): void {
+  if (!OFFERS.includes(mode)) return;
+  offerMode = mode;
+  store.set(OFFER_KEY, mode);
+  for (const cb of offerListeners) cb(mode);
+}
+
+/** Current "crash replays" setting. */
+export const crashReplayOffer = (): CrashReplayOffer => offerMode;
+
+/** Called whenever the "crash replays" setting changes (keeps a selector in sync). */
+export function onCrashReplayOfferChange(cb: (m: CrashReplayOffer) => void): void {
+  offerListeners.push(cb);
+}
+
+/** "Big crashes only": a crash at least this fast (closing speed), m/s (~50 km/h; the sim's
+ * own detector starts at 7 m/s, so routine chase bumps no longer pop the offer). */
+export const BIG_CLOSING_MPS = 14;
+/** …or with at least this much speed change, m/s. */
+export const BIG_DELTA_V_MPS = 8;
+/** …or that cost at least this much health. */
+export const BIG_HEALTH_DROP = 0.15;
+
+/** Is this detected crash "big" (worth offering under the default setting)? */
+export function isBigCrash(m: Pick<CrashMark, "closing_mps" | "delta_v_mps" | "health_drop">): boolean {
+  return m.closing_mps >= BIG_CLOSING_MPS || m.delta_v_mps >= BIG_DELTA_V_MPS || m.health_drop >= BIG_HEALTH_DROP;
+}
+
+/** Does the current setting offer a replay of `m`? */
+export function offersReplay(m: Pick<CrashMark, "closing_mps" | "delta_v_mps" | "health_drop">, mode: CrashReplayOffer = offerMode): boolean {
+  return mode === "all" || (mode === "big" && isBigCrash(m));
+}
+
 const smooth = (a: number, b: number, x: number) => {
   const t = Math.min(Math.max((x - a) / (b - a), 0), 1);
   return t * t * (3 - 2 * t);
@@ -95,6 +141,8 @@ export class CrashReplayDirector {
   last: CrashReplayResult | null = null;
   /** Crashes seen this session (automation). */
   crashes = 0;
+  /** Crashes the "crash replays" setting did not offer (e2e reads it). */
+  skipped = 0;
   private readonly offerEl: HTMLDivElement;
   private readonly barEl: HTMLDivElement;
   private readonly boxEl: HTMLDivElement;
@@ -173,6 +221,11 @@ export class CrashReplayDirector {
   onCrash(mark: CrashMark): void {
     this.crashes++;
     if (this.phase === "playing") return;
+    // Settings → Crash replays (F43): only the crashes the player wants offered.
+    if (!offersReplay(mark)) {
+      this.skipped++;
+      return;
+    }
     this.mark = mark;
     this.phase = "pending";
     this.hideOffer();
