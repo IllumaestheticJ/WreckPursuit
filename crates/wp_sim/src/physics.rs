@@ -45,8 +45,8 @@ pub struct CityColliders {
     /// Structure colliders: canopies and their pillars, landmark parts, bridge trusses
     /// (`wp_world::network::CityFeatures::structures`, PR #38).
     pub structures: usize,
-    /// Median barrier segments between divided-highway carriageways (one smooth mesh collider
-    /// per barrier line).
+    /// Concrete barrier segments: medians between divided-highway carriageways and the outer
+    /// edges of highways and ramps (one smooth mesh collider per barrier line).
     pub barriers: usize,
 }
 
@@ -434,7 +434,12 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     }
     // Median barriers between divided-highway carriageways: 0.5 m wide, 0.81 m tall concrete,
     // one smooth mesh per barrier line.
-    for line in wp_world::surface::median_barriers(net) {
+    // And along the outer edges of highways and ramps (row 160; open at ramp tapers, gores
+    // and rest-stop ramps, on decks and in covered spans).
+    for line in wp_world::surface::median_barriers(net)
+        .into_iter()
+        .chain(wp_world::surface::edge_barriers(map))
+    {
         added.extend(barrier_colliders(
             &line,
             0.0,

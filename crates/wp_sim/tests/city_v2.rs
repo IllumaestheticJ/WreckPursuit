@@ -466,3 +466,51 @@ fn lanes_through_the_tunnel_and_the_truss_are_clear() {
         assert!(*worst < 2.5, "car {id:?} {worst} m off its lane");
     }
 }
+
+/// Swerving off the right lane towards the verge at 90 km/h, the car hits the outer edge
+/// barrier and stays on the carriageway.
+#[test]
+fn the_edge_barrier_keeps_a_car_off_the_verge() {
+    let car = load_car(data("cars/debug_sedan.json")).unwrap();
+    let mut s = sim(true);
+    let grid = net()
+        .pois
+        .iter()
+        .find(|p| p.name == "Loop 9 sprint")
+        .unwrap()
+        .clone();
+    let f = wp_world::geom::dir_of_yaw(grid.heading_rad);
+    let right = [f[1], -f[0]];
+    let start = [grid.pos[0] + f[0] * 30.0, grid.pos[1] + f[1] * 30.0];
+    let yaw = grid.heading_rad - 25f32.to_radians();
+    let id = s
+        .spawn_vehicle(&car, [start[0], start[1], 0.0], yaw)
+        .unwrap();
+    s.place_on_ground(id, start, yaw, 25.0, Some(grid.pos[2]))
+        .unwrap();
+    let lines = wp_world::surface::edge_barriers(&wp_world::CityMap::new(net().clone()));
+    let near = |p: [f32; 3]| {
+        lines
+            .iter()
+            .map(|l| {
+                let cum = wp_world::geom::cumulative(l);
+                wp_world::geom::project(l, &cum, [p[0], p[1]])
+            })
+            .min_by(|a, b| a.dist.total_cmp(&b.dist))
+            .unwrap()
+    };
+    let before = near(s.vehicle_states()[0].1.pos);
+    assert!(before.dist < 8.0, "{before:?} (right {right:?})");
+    let side = before.lateral.signum();
+    let mut hit = false;
+    for _ in 0..(3.0 * 240.0) as usize {
+        s.step_fixed();
+        hit |= s
+            .drain_events()
+            .iter()
+            .any(|e| matches!(e, wp_contracts::SimEvent::Contact { .. }));
+        let pr = near(s.vehicle_states()[0].1.pos);
+        assert!(pr.lateral * side > 0.0, "went through the barrier: {pr:?}");
+    }
+    assert!(hit, "no contact with the barrier");
+}

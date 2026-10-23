@@ -5711,4 +5711,62 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn highway_edges_are_walled_except_at_ramps_decks_and_the_tunnel() {
+        let (net, _) = city();
+        let lines = crate::surface::edge_barriers(&crate::CityMap::new(net.clone()));
+        let walled: f32 = lines.iter().map(|l| geom::cumulative(l)[l.len() - 1]).sum();
+        let mut edges = 0.0;
+        for s in net.surfaces.iter().filter(|s| s.highway) {
+            let len = geom::cumulative(&s.centre)[s.centre.len() - 1];
+            edges += if s.median_barrier { len } else { 2.0 * len };
+        }
+        assert!(walled > 0.7 * edges, "walled {walled} of {edges} m");
+        // Never on any paving (ramp joins stay open), never in a covered span (the Hollins
+        // Tunnel's walls; the barrier stops at its portals).
+        let covers: Vec<CoverShape> = net.covered.iter().map(CoverShape::new).collect();
+        for l in &lines {
+            for p in l {
+                assert!(
+                    !crate::surface::inside_other_paving(net, usize::MAX, *p),
+                    "barrier on paving at {p:?}"
+                );
+                assert!(
+                    !covers.iter().any(|c| c.contains([p[0], p[1], p[2] + 1.0])),
+                    "barrier in a covered span at {p:?}"
+                );
+            }
+        }
+        // Row 160: every ramp (the rest-stop ramps too) meets its carriageway and its terminal
+        // through an open gap: the 40 m at each end of an undivided highway surface have no
+        // other barrier line across their paved width.
+        let mut ends = 0;
+        for (si, s) in net.surfaces.iter().enumerate() {
+            if !s.highway || s.median_barrier {
+                continue;
+            }
+            let cum = geom::cumulative(&s.centre);
+            let len = cum[cum.len() - 1];
+            for at in [0.0f32, 10.0, 20.0, 30.0, 40.0]
+                .iter()
+                .flat_map(|d| [*d, len - *d])
+                .filter(|a| (0.0..=len).contains(a))
+            {
+                let q = geom::xy(geom::point_at(&s.centre, &cum, at).0);
+                // (Its own edge barriers stand 0.25 m outside its paved edges.)
+                for l in &lines {
+                    for w in l.windows(2) {
+                        let d = geom::point_segment_distance(q, geom::xy(w[0]), geom::xy(w[1]));
+                        assert!(
+                            d > s.left_m.min(s.right_m) - 0.1,
+                            "surface {si}: a barrier {d:.2} m from its centre {at:.0} m along"
+                        );
+                    }
+                }
+                ends += 1;
+            }
+        }
+        assert!(ends > 20, "{ends}");
+    }
 }
