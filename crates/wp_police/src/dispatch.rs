@@ -67,6 +67,14 @@ fn sample_leg(a: [f32; 2], b: [f32; 2], out: &mut Corridor) {
     }
 }
 
+/// Two police units count as nose to nose (row 86) facing each other this squarely (cosine)...
+const HEAD_ON_UNITS_COS: f32 = -0.7;
+/// ...and this close, m.
+const HEAD_ON_UNITS_M: f32 = 20.0;
+/// The unit that keeps its route waits through this many held events before un-sticking
+/// itself like any other (in case the other one cannot get out of the way).
+const HEAD_ON_KEEP_TRIES: u32 = 3;
+
 /// Row 86 audit: an active unit standing still longer than this is logged, s.
 pub const ACTIVE_STOP_S: f32 = 5.0;
 
@@ -581,9 +589,30 @@ impl PoliceSystem {
         let (id, heading) = (u.id, u.body.heading);
         let behind_clear = self.room_behind(i, stuck::REVERSE_M);
         let recovery = self.unstick_recovery;
+        // Row 86: two police units nose to nose both backed out and re-routed at the same time,
+        // met again and stood (the bench's largest active-stop cause). The one with the lower
+        // id keeps its route and waits; only the other backs out and turns away.
+        let head_on_keep = held
+            && recovery
+            && match u.avoid.blocked_by {
+                Some(crate::avoid::BlockedBy::Unit(b)) if b > id => {
+                    self.unit_index(b).is_some_and(|j| {
+                        let o = &self.units[j];
+                        let rel = sub(o.body.pos, pos);
+                        crate::graph::dot(o.body.heading, heading) < HEAD_ON_UNITS_COS
+                            && crate::graph::dot(rel, heading) > 0.0
+                            && len(rel) < HEAD_ON_UNITS_M
+                    })
+                }
+                _ => false,
+            };
         let st = &mut self.units[i].unstick;
         st.slow_s = 0.0;
         st.held_s = 0.0;
+        if head_on_keep && st.attempts < HEAD_ON_KEEP_TRIES {
+            st.attempts += 1;
+            return;
+        }
         if !recovery {
             self.stats.stuck.push(stuck::StuckRecord {
                 unit: id,
@@ -1005,9 +1034,10 @@ impl PoliceSystem {
             return None;
         }
         let target = u.assignment.target();
+        // Row 86: a responder on its way to a call is as active as a chaser.
         let active = matches!(
             u.assignment,
-            Assignment::Pursue { .. } | Assignment::Intercept { .. }
+            Assignment::Pursue { .. } | Assignment::Intercept { .. } | Assignment::Respond { .. }
         );
         // Standing over a stopped racer it is after (inside the capture radius): an arrest,
         // not a jam. Farther out and held up (Hollins hairpin: 20 m off behind other cars, for

@@ -109,7 +109,7 @@ pub const STAND_M: f32 = 8.0;
 /// block, not arresting a stopped racer it is after) snaps to a clear spot in its lane within
 /// [`RESET_RADIUS_M`], upright, damage kept, and drives on as a ghost for [`RESET_GHOST_S`]. A
 /// unit on a pursuit or search, s.
-pub const RESET_ACTIVE_S: f32 = 8.0;
+pub const RESET_ACTIVE_S: f32 = 5.0;
 /// ... any other unit (patrol, call, give-way stand-offs), s.
 pub const RESET_IDLE_S: f32 = 15.0;
 /// ... a unit that is not chasing and only waits behind civilian traffic (a jam clears by
