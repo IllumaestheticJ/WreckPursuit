@@ -27,6 +27,7 @@ USAGE:
   simcli police-bench [--full] [--seeds N] [--duration S] [--threads N] [--label TEXT]
                 [--city vesper,grid] [--phase day,night] [--weather clear,rain]
                 [--level 1,2,3] [--skill casual,good,expert] [--mode arcade|simulation|extreme]
+                [--clean-start]                                  every cell from no heat: time to L1..L5
                 [--out FILE.md | --no-write] [--json FILE]       police competency benchmark
 
 LIST is comma-separated from vehicle,damage,world,police,net (or `all`).
@@ -553,6 +554,19 @@ fn cmd_police_bench(args: &Args) -> Result<bool, String> {
     if cells.is_empty() {
         return Err("no benchmark cells match the filters".into());
     }
+    // Row 157: every cell from a clean start (no heat), timing the first offence -> L1..L5.
+    let clean = args.has("--clean-start");
+    let cells: Vec<BenchCell> = if clean {
+        let mut v: Vec<BenchCell> = cells
+            .into_iter()
+            .map(|c| BenchCell { level: 0, ..c })
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    } else {
+        cells
+    };
     let seeds: u64 = args.num("--seeds")?.unwrap_or(8);
     // Default Simulation: the police bench's published numbers were measured in the old Arcade
     // table, which is Simulation since contract v0.4.0 (main-sync round 4).
@@ -583,6 +597,12 @@ fn cmd_police_bench(args: &Args) -> Result<bool, String> {
     let (cells, rollups) = pb::summaries(&runs);
     println!("{}", pb::table(&rollups));
     println!("{}", pb::table(&cells));
+    if clean {
+        println!(
+            "heat timeline (first offence -> wanted level):\n{}",
+            pb::heat_timeline_table(&runs)
+        );
+    }
     eprintln!(
         "police-bench: {:.0} s wall",
         started.elapsed().as_secs_f32()

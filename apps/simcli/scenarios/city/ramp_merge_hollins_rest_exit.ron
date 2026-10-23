@@ -1,0 +1,35 @@
+// Playtest row 162 from the player's seat (keyboard assists): out of the Hollins Rest Area,
+// down its exit ramp and through the merge onto Loop 9's outer carriageway at the ramp limit
+// (45 mph), then south to the Loop 9 sprint grid. Before the fix the ramp stood up to 0.7 m
+// below the carriageway's paved edge along the taper (a wall in its lane), the taper strip was
+// level across the banked ribbons (4-5 cm steps) and the carriageway's edge barrier began at
+// the gore. Expect: no contact damage, never airborne, on the road throughout, arrives. (At
+// 25 m/s the route driver runs 3-4 m wide on the ramp's S-bend, built for 20 m/s, and the
+// ramp's own edge barrier catches it.)
+(
+    name: "city_ramp_merge_hollins_rest_exit",
+    seed: 162,
+    city: preset(name: "vesper_v2", seed: 1),
+    time_of_day_h: 12.0,
+    time_ratio: 1.0,
+    traffic_density: 0.0,
+    parked_cars: false,
+    police_cars: false,
+    assists: keyboard,
+    entities: [
+        (
+            id: "player",
+            car: "debug_sedan",
+            driver: follow_route(route_id: "Hollins Rest Area -> Loop 9 sprint", target_speed: 20.1),
+        ),
+    ],
+    duration_s: 120.0,
+    expect: [
+        metric(name: "route_progress", min: 0.97, max: 1.0),
+        metric(name: "off_road_s", min: 0.0, max: 0.5),
+        metric(name: "max_airborne_s", min: 0.0, max: 0.05),
+        metric(name: "crush_depth_m", min: 0.0, max: 0.02),
+        metric(name: "max_speed_mps", min: 18.0, max: 22.0),
+        total_loss(expected: false),
+    ],
+)

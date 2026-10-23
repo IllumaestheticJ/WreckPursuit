@@ -398,7 +398,9 @@ pub fn races() -> Vec<RaceDef> {
                 finish: "Knob Observatory Lot",
                 finish_back_m: 60.0,
             },
-            length_hint_m: 941.0,
+            // 796 m since the PR #38 port (the Hollins Ascent grid moved east across the
+            // Hollins Gorge Bridge); 941 m before.
+            length_hint_m: 796.0,
             ai: &[MARA, VIC, JUNO],
             seed: 16,
             prior_meets: 0,
