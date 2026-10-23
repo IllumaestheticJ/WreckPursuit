@@ -662,6 +662,8 @@ const NO_RUN_OFF_M: f32 = 5.0;
 const EDGE_MARGIN_M: f32 = 0.5;
 /// Room kept to the kerb when pulled over (parked, yielding, out of the race), m.
 const PARK_EDGE_MARGIN_M: f32 = 0.25;
+/// Room kept to the edge of the lanes while passing, m (the pre-G racing margin).
+const PASS_EDGE_MARGIN_M: f32 = 0.25;
 
 /// Lateral step between the pass positions tried beside a car (about a lane), m.
 const PASS_LANE_STEP_M: f32 = 3.5;
@@ -2065,12 +2067,19 @@ fn decide_racer(
                     junction_arms_empty(geom::xy(corridor.sample(i0 + j).pos), &others, t_clear)
                 })
         };
+        // Passing keeps the pre-G edge room: a pass is brief and planned with its own
+        // clearances, and the wider racing margin left the pack queueing on Lantern's narrow
+        // streets (G, s50: 10 s more per car held behind another racer).
+        let widen = |(lo, hi): (f32, f32)| {
+            let d = EDGE_MARGIN_M - PASS_EDGE_MARGIN_M;
+            (lo - d, hi + d)
+        };
         let pass_limits = |s: f32| {
-            if may_use_opposing {
+            widen(if may_use_opposing {
                 to_limits(corridor.pass_bounds(s))
             } else {
                 limits(s)
-            }
+            })
         };
         let v_line = |s: f32| corridor.interp(&profile.v, s);
         let me_who = Who::Racer(k);
