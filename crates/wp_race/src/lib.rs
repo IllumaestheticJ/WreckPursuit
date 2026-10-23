@@ -59,6 +59,7 @@ pub mod territory;
 pub mod touge;
 pub mod trace;
 mod trail;
+pub mod validate;
 
 pub use course::{Course, Gate, GridLayout, GridSlot};
 pub use crew::{Challenge, ChallengeId, ChallengeOutcome, Crew, CrewCut, CrewRegistry};
