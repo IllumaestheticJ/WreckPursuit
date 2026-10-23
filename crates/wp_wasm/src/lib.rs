@@ -274,7 +274,7 @@ pub fn scenario_from_ron(text: &str) -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn scenario_with_speed(scenario_json: &str, target_mps: f32) -> Result<String, JsValue> {
     let sc: simcli::Scenario = serde_json::from_str(scenario_json).map_err(err)?;
-    Ok(json(&scenario::with_cruise_speed(sc, target_mps)))
+    Ok(json(&scenario::with_cruise_speed(sc, pack::finite(target_mps))))
 }
 
 /// Advance by `dt_seconds` of frame time: runs the whole fixed ticks it covers (at most 60)
@@ -318,8 +318,8 @@ pub fn contract_version() -> String {
 /// before the first tick (the spawn becomes part of the scenario setup). Returns the entity id.
 #[wasm_bindgen]
 pub fn spawn_vehicle(car_id: &str, pos: &[f32], yaw: f32) -> Result<u32, JsValue> {
-    let p = std::array::from_fn(|i| pos.get(i).copied().unwrap_or(0.0));
-    with(|s| s.spawn(car_id, p, yaw).map(|e| e.0))
+    let p = std::array::from_fn(|i| pos.get(i).copied().map_or(0.0, pack::finite));
+    with(|s| s.spawn(car_id, p, pack::finite(yaw)).map(|e| e.0))
 }
 
 /// Set a vehicle's input from a packed array
@@ -410,7 +410,7 @@ pub fn set_countersteer(entity: u32, percent: f32) -> Result<(), JsValue> {
         let mut p = s
             .assists(id)
             .ok_or_else(|| format!("unknown entity {entity}"))?;
-        p.countersteer_help = (percent / 100.0).clamp(0.0, 1.0);
+        p.countersteer_help = (pack::finite(percent) / 100.0).clamp(0.0, 1.0);
         s.set_assists(id, p)
     })
 }
@@ -1150,7 +1150,9 @@ pub fn street_status_json() -> Result<String, JsValue> {
 
 /// Waypoints from a flat `[x0, y0, x1, y1, …]` array.
 fn waypoints(via: &[f32]) -> Vec<[f32; 2]> {
-    via.chunks_exact(2).map(|c| [c[0], c[1]]).collect()
+    via.chunks_exact(2)
+        .map(|c| [pack::finite(c[0]), pack::finite(c[1])])
+        .collect()
 }
 
 /// Plan the open challenge's route from the player through the waypoints `via` (flat
@@ -1158,7 +1160,8 @@ fn waypoints(via: &[f32]) -> Vec<[f32; 2]> {
 /// length, snapped finish and gates, centreline, whether it is raceable).
 #[wasm_bindgen]
 pub fn street_preview(x: f32, y: f32, via: Vec<f32>) -> Result<String, JsValue> {
-    with(|s| s.street_preview([x, y], &waypoints(&via)).map(|p| json(&p)))
+    let b = [pack::finite(x), pack::finite(y)];
+    with(|s| s.street_preview(b, &waypoints(&via)).map(|p| json(&p)))
 }
 
 /// Accept the open challenge: race through the waypoints `via` (as in [`street_preview`]) to
@@ -1167,7 +1170,8 @@ pub fn street_preview(x: f32, y: f32, via: Vec<f32>) -> Result<String, JsValue> 
 /// challenge, or while the police are after the player.
 #[wasm_bindgen]
 pub fn street_accept(x: f32, y: f32, via: Vec<f32>, stake: f64) -> Result<(), JsValue> {
-    with(|s| s.street_accept([x, y], &waypoints(&via), stake.round() as i64))
+    let b = [pack::finite(x), pack::finite(y)];
+    with(|s| s.street_accept(b, &waypoints(&via), stake.round() as i64))
 }
 
 /// The street race's gates (waypoints, then B) and route, as [`race_course`] lays them out:
@@ -1213,6 +1217,7 @@ pub fn map_lanes() -> Result<Vec<f32>, JsValue> {
 /// ground. Not recorded in replays.
 #[wasm_bindgen]
 pub fn debug_place_vehicle(entity: u32, x: f32, y: f32, yaw: f32) -> Result<(), JsValue> {
+    let (x, y, yaw) = (pack::finite(x), pack::finite(y), pack::finite(yaw));
     with(|s| {
         let sim = s.debug_sim_mut()?;
         let z = sim.world().map().ground_height([x, y], None);
@@ -1497,6 +1502,7 @@ pub fn debug_knock_prop(entity: u32, prop: i32, speed_mps: f32) -> Result<u32, J
 /// replays.
 #[wasm_bindgen]
 pub fn debug_place(entity: u32, x: f32, y: f32, yaw: f32, speed_mps: f32) -> Result<(), JsValue> {
+    let [x, y, yaw, speed_mps] = [x, y, yaw, speed_mps].map(pack::finite);
     with(|s| {
         s.debug_sim_mut()?
             .place_on_ground(EntityId(entity), [x, y], yaw, speed_mps, None)

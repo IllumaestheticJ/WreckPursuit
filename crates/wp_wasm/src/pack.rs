@@ -130,11 +130,21 @@ pub fn pack_state(entity: u32, s: &VehicleState, out: &mut Vec<f32>) {
     }
 }
 
+/// `v` if it is finite, else 0. Numbers from JS that reach the sim go through this:
+/// `f32::clamp` keeps NaN, so nothing downstream should have to cope with one.
+pub fn finite(v: f32) -> f32 {
+    if v.is_finite() {
+        v
+    } else {
+        0.0
+    }
+}
+
 /// Decode `set_input()`'s array:
 /// `[steer, throttle, brake, handbrake, clutch, flags, tool_use]` with flags bit 0 gear_up,
 /// 1 gear_down, 2 horn, 3 headlights, 4 siren. Missing trailing values are 0.
 pub fn unpack_input(a: &[f32]) -> VehicleInput {
-    let at = |i: usize| a.get(i).copied().unwrap_or(0.0);
+    let at = |i: usize| a.get(i).copied().map_or(0.0, finite);
     let flags = at(5) as u32;
     VehicleInput {
         steer: at(0).clamp(-1.0, 1.0),

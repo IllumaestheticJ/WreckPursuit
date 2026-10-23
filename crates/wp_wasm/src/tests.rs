@@ -527,3 +527,31 @@ fn night_run_uses_mixed_police_and_traffic_fleets() {
         assert!(u[6] >= 0.0 && u[7] >= -1.0 && u[7] < 5.0, "{u:?}");
     }
 }
+
+/// NaN / inf from JS (a filter dividing by zero, a bad gamepad axis) is read as 0 at the wasm
+/// surface (`f32::clamp` keeps NaN), and the car stays finite even when a non-finite input
+/// reaches the session directly (bughunt F3).
+#[test]
+fn non_finite_input_is_ignored() {
+    let mut s = Session::new(free_drive("debug_sedan", DamageMode::Arcade, false), false).unwrap();
+    let p = EntityId(1);
+    let packed = crate::pack::unpack_input(&[f32::NAN, f32::INFINITY, f32::NAN, 0.0, f32::NAN]);
+    assert_eq!(packed.steer, 0.0);
+    assert_eq!(packed.throttle, 0.0);
+    s.set_input(
+        p,
+        VehicleInput {
+            steer: f32::NAN,
+            throttle: f32::NAN,
+            brake: f32::NEG_INFINITY,
+            ..drive(0.5, 0.0)
+        },
+    )
+    .unwrap();
+    s.run_ticks(240);
+    let st = s.sim().vehicle_states()[0].1.clone();
+    assert!(
+        st.pos.iter().chain(&st.lin_vel).all(|v| v.is_finite()),
+        "{st:?}"
+    );
+}
