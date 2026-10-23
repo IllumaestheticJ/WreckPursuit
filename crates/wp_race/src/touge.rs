@@ -23,7 +23,7 @@
 //! the damage model and keeps the lattice state of a won car.
 
 use serde::{Deserialize, Serialize};
-use wp_contracts::{EntityId, Legality, RaceKind, VehicleClass};
+use wp_contracts::{DnfReason, EntityId, Legality, RaceKind, RacerStatus, VehicleClass};
 use wp_economy::{CarUid, Economy, EconomyError, EconomyEvent, Money, PlayerAccount, WonCar};
 use wp_opponent::DriverProfile;
 use wp_world::geom::{self, V3};
@@ -523,6 +523,24 @@ pub enum BattleResult {
     Won,
     /// The NPC won.
     Lost,
+    /// Neither: the judge ended both cars as stuck (`DnfReason::Stuck`). Stakes are refunded,
+    /// no rep either way, a pink slip keeps both cars.
+    Draw,
+}
+
+/// The battle's result from the judge's statuses of the player and the NPC when nobody went
+/// through a wall: the first across the line wins; a DNF or DQ while the other still runs
+/// loses; both ended as stuck by the judge is a [`BattleResult::Draw`]. `None` while undecided.
+pub fn judge_result(player: RacerStatus, npc: RacerStatus) -> Option<BattleResult> {
+    use RacerStatus::{Dnf, Dq, Finished, Running};
+    match (player, npc) {
+        (Finished, _) => Some(BattleResult::Won),
+        (_, Finished) => Some(BattleResult::Lost),
+        (Dnf(DnfReason::Stuck), Dnf(DnfReason::Stuck)) => Some(BattleResult::Draw),
+        (Running, Dnf(_) | Dq(_)) => Some(BattleResult::Won),
+        (Dnf(_) | Dq(_), _) => Some(BattleResult::Lost),
+        _ => None,
+    }
 }
 
 /// The decided battle.
@@ -608,13 +626,21 @@ impl TougeBattle {
     /// Decide from the judge when nobody went through a wall: `player_won` = the player
     /// finished ahead (or the NPC did not finish). Ignored once decided.
     pub fn decide(&mut self, tick: u64, player_won: bool) {
+        self.decide_as(
+            tick,
+            if player_won {
+                BattleResult::Won
+            } else {
+                BattleResult::Lost
+            },
+        );
+    }
+
+    /// Decide with `result` (e.g. from [`judge_result`]). Ignored once decided.
+    pub fn decide_as(&mut self, tick: u64, result: BattleResult) {
         if self.outcome.is_none() {
             self.outcome = Some(BattleOutcome {
-                result: if player_won {
-                    BattleResult::Won
-                } else {
-                    BattleResult::Lost
-                },
+                result,
                 tick,
                 totaled: None,
                 breach: None,
@@ -1054,6 +1080,16 @@ pub fn settle(
         car_won_id: None,
         car_lost: None,
     };
+    if outcome.result == BattleResult::Draw {
+        // Both stuck: the stake comes back, no rep, no purse, every car stays where it is.
+        if ticket.stake > 0 {
+            let ((), ev) = econ.adjust(&mut work, ticket.stake, &bet_note(setup, "refunded"))?;
+            events.extend(ev);
+            out.bet_payout = ticket.stake;
+        }
+        *acct = work;
+        return Ok((out, events));
+    }
     if ticket.stake > 0 {
         let payout = if won {
             (ticket.stake as f32 * stakes.side_bet_payout).round() as Money
@@ -1524,6 +1560,78 @@ mod tests {
         // In debt: no betting at all.
         acct.cash = -10;
         assert_eq!(wager_menu(&acct, &table, &s).max_stake, 0);
+    }
+
+    #[test]
+    fn judge_statuses_decide_the_battle_and_both_stuck_is_a_draw() {
+        use RacerStatus::{Dnf, Finished, Running};
+        let stuck = Dnf(DnfReason::Stuck);
+        assert_eq!(judge_result(Running, Running), None);
+        assert_eq!(judge_result(Finished, Running), Some(BattleResult::Won));
+        assert_eq!(judge_result(Finished, stuck), Some(BattleResult::Won));
+        assert_eq!(judge_result(stuck, Finished), Some(BattleResult::Lost));
+        assert_eq!(
+            judge_result(Running, Dnf(DnfReason::TotalLoss)),
+            Some(BattleResult::Won)
+        );
+        assert_eq!(
+            judge_result(Dnf(DnfReason::TotalLoss), Running),
+            Some(BattleResult::Lost)
+        );
+        assert_eq!(judge_result(stuck, stuck), Some(BattleResult::Draw));
+        // Only both stuck is a draw.
+        assert_eq!(
+            judge_result(Dnf(DnfReason::TotalLoss), stuck),
+            Some(BattleResult::Lost)
+        );
+    }
+
+    #[test]
+    fn draw_refunds_the_stake_pays_no_rep_and_moves_no_car() {
+        let table = TougeTable::embedded();
+        let draw = BattleOutcome {
+            result: BattleResult::Draw,
+            tick: 240 * 180,
+            totaled: None,
+            breach: None,
+        };
+        let opp = OpponentCar {
+            class: VehicleClass::Sport,
+            base_price: 34_000,
+            damage: wp_economy::DamageSnapshot::pristine(),
+        };
+        // Side bet on a boss: stake back, no purse, no rep.
+        let s = setup(2, Direction::Uphill, Opponent::Boss);
+        let (econ, mut acct, car) = account(feared(), 20_000);
+        let rep0 = acct.rep;
+        let (ticket, _) = place(
+            &econ,
+            &mut acct,
+            &table,
+            s,
+            Wager::SideBet { stake: 2_000 },
+            car,
+        )
+        .unwrap();
+        assert_eq!(acct.cash, 18_000);
+        let (out, _) = settle(&econ, &mut acct, &table, &ticket, &draw, EntityId(1), &opp).unwrap();
+        assert_eq!(out.result, BattleResult::Draw);
+        assert_eq!(
+            (out.bet_payout, out.bet_net, out.purse, out.rep),
+            (2_000, 0, 0, 0)
+        );
+        assert_eq!(acct.cash, 20_000);
+        assert_eq!(acct.rep, rep0);
+        // Pink slip: both cars stay put.
+        let (econ, mut acct, car) = account(feared(), 20_000);
+        let garage = acct.garage.clone();
+        let (ticket, _) = place(&econ, &mut acct, &table, s, Wager::PinkSlip, car).unwrap();
+        let (out, ev) =
+            settle(&econ, &mut acct, &table, &ticket, &draw, EntityId(1), &opp).unwrap();
+        assert!(ev.is_empty(), "nothing posted: {ev:?}");
+        assert_eq!((out.car_won, out.car_lost), (None, None));
+        assert_eq!(acct.garage, garage);
+        assert_eq!(acct.rep, feared());
     }
 
     #[test]
