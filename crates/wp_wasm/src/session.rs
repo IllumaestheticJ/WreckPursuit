@@ -742,7 +742,7 @@ impl Session {
     /// Refresh the player's last on-road spot (every [`CRUMB_EVERY_TICKS`]; pure function of
     /// the sim state, so live and playback agree).
     fn record_crumb(&mut self) {
-        if self.sim.tick() % CRUMB_EVERY_TICKS != 0 {
+        if !self.sim.tick().is_multiple_of(CRUMB_EVERY_TICKS) {
             return;
         }
         let Some(&player) = self.ids.first() else {
