@@ -3,7 +3,7 @@
 // city and map_dynamic(player) every frame. While the full map is open the testbed sends the
 // player's car neutral input with light braking (input paused; the sim keeps running).
 import { mountMapHud, type MapHud } from "../../../ui-kit/src/live";
-import { chaseRadar, decodeMapDynamic } from "../../../ui-kit/src/map/data";
+import { chaseRadar, decodeMapDynamic, type MapPoi, type MapStatic } from "../../../ui-kit/src/map/data";
 import type { MapBlip, Vec2 } from "../../../ui-kit/src/model/types";
 
 /** The chase HUD's radar (ChaseHud, PR #32): the player's pose and the blips around them. */
@@ -22,6 +22,8 @@ export class MapOverlay {
   private lastFrame = -Infinity;
   /** The chase radar from the last map_dynamic() fetch (null: none yet / nothing to show). */
   private lastRadar: Radar | null = null;
+  /** The city's static map as `map_static_json()` gave it (POIs before the session's own). */
+  private cityMap: MapStatic | null = null;
   /** Hide the corner minimap for now (a picker race draws its own in the race panel). */
   minimapHeld = false;
 
@@ -31,14 +33,20 @@ export class MapOverlay {
     this.hud = mountMapHud(parent, { onOpenChange, minimapPlacement: { right: "8px", bottom: "8px", left: "auto", top: "auto" } });
   }
 
-  /** New session: fetch the static map when the city changed. */
+  /** New session: fetch the static map when the city changed, and put this session's shops
+   * and race meets on it (garage audit): garages from `garages()` where a stop opens a visit
+   * (legit / crooked colour; none in picker races or sessions without an economy), race meets
+   * from `race_spots()` instead of the city's `RaceStartGrid` POIs (many are scenario route
+   * ends with no race, and some race meets had no icon). */
   reset(): void {
     this.lastFrame = -Infinity;
     this.lastRadar = null;
     const id = sim.worldInfo()[W.city] > 0.5 ? sim.cityId() : "";
-    if (id === this.city) return;
-    this.city = id;
-    this.hud.setStatic(id ? sim.mapStaticJson() : null);
+    if (id !== this.city) {
+      this.city = id;
+      this.cityMap = id ? (JSON.parse(sim.mapStaticJson()) as MapStatic | null) : null;
+    }
+    this.hud.setStatic(this.cityMap ? { ...this.cityMap, pois: sessionPois(this.cityMap.pois) } : null);
   }
 
   /** One frame (after the sim step). `mayRest`: the frame loop is slow (software GL, < 8 fps)
@@ -79,4 +87,13 @@ export class MapOverlay {
   toggle(): void {
     this.hud.toggle();
   }
+}
+
+/** The city's POIs as this session uses them: shops at their street-lane spot with their kind,
+ * race meets from the session's race spots, everything else as the city gives it. */
+export function sessionPois(city: MapPoi[]): MapPoi[] {
+  const out = city.filter((p) => p.kind !== "Garage" && p.kind !== "RaceStartGrid");
+  for (const g of sim.garages()) out.push({ kind: "Garage", name: g.name, pos: [g.pos[0], g.pos[1]], shop: g.kind });
+  for (const r of sim.raceSpots()) out.push({ kind: "RaceSpot", name: r.name, pos: [r.x, r.y] });
+  return out;
 }

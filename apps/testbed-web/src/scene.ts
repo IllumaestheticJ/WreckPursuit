@@ -526,6 +526,9 @@ export class SceneView {
         if (o instanceof THREE.Mesh) {
           o.geometry.dispose();
           (o.material as THREE.Material).dispose();
+        } else if (o instanceof THREE.Sprite) {
+          o.material.map?.dispose();
+          o.material.dispose();
         }
       });
     }
@@ -547,7 +550,9 @@ export class SceneView {
       // CylinderGeometry runs along +Y; the world group is +Z up.
       beam.rotation.x = Math.PI / 2;
       beam.position.z = GARAGE_BEAM_M / 2;
-      holder.add(ring, beam);
+      const label = garageLabel(g.name, g.kind === "Crooked" ? "Crooked garage · stop inside" : "Garage · stop inside", colour);
+      label.position.z = 7;
+      holder.add(ring, beam, label);
       holder.name = `garage:${g.name}`;
       this.garages.add(holder);
     }
@@ -848,4 +853,37 @@ async function fetchGreyboxB64(cityId: string): Promise<string> {
     parts.push((await r.text()).trim());
   }
   return parts.join("");
+}
+
+/** A garage's floating sign: its name and what to do (unlit, readable at night). */
+function garageLabel(name: string, sub: string, colour: number): THREE.Sprite {
+  const w = 512;
+  const h = 150;
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const g = c.getContext("2d");
+  if (g) {
+    const hex = `#${colour.toString(16).padStart(6, "0")}`;
+    g.fillStyle = "rgba(8,10,16,0.72)";
+    g.beginPath();
+    g.roundRect(4, 4, w - 8, h - 8, 22);
+    g.fill();
+    g.lineWidth = 5;
+    g.strokeStyle = hex;
+    g.stroke();
+    g.textAlign = "center";
+    g.fillStyle = "#ffffff";
+    g.font = "700 44px system-ui, sans-serif";
+    g.fillText(name, w / 2, 66, w - 40);
+    g.fillStyle = hex;
+    g.font = "600 32px system-ui, sans-serif";
+    g.fillText(sub, w / 2, 118, w - 40);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false }));
+  sprite.scale.set(14, 4.1, 1);
+  sprite.renderOrder = 10;
+  return sprite;
 }

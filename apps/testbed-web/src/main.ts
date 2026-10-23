@@ -18,7 +18,7 @@
 // car in the mod shop).
 // ?roam=N opens main's free roam (wp_opponent::roam, N roamers; dev only and dormant: the
 // street racers of free drive / night run are the game's racer population, main-sync.md).
-import { assistLevel, loadWasm, sim, type AssistProfile, type CarStatsTable, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
+import { assistLevel, loadWasm, sim, type AssistProfile, type CarStatsTable, type DriverInput, type GarageSite, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { DRAW_STRIDE, META_STRIDE, MODE_NAMES, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
 import {
@@ -422,15 +422,22 @@ async function main(): Promise<void> {
   autoBox.checked = autoCrashReplay();
   autoBox.onchange = () => setAutoCrashReplay(autoBox.checked);
   onAutoCrashReplayChange((on) => (autoBox.checked = on));
-  /** Garage: ends a career run in progress (its result goes into the career), pauses. */
-  const openGarage = (message: string | null = null) => {
+  /** Garage: ends a career run in progress (its result goes into the career), pauses. `shop`:
+   * the city shop the player drove into (garage visit "Enter garage"): repairs are priced there
+   * and closing the garage drives out of that shop. Closing the garage after it ended a run
+   * starts a new career drive (the old session has no run left to drive in; garage audit F2). */
+  const openGarage = (message: string | null = null, shop: GarageSite | null = null) => {
     workshop.close();
     crash.reset();
-    if (sim.careerRunActive()) sim.careerEndRun();
+    const ended = sim.careerRunActive();
+    const kind: RunKind = sim.scenario().name === "night_run" ? "chase" : "free";
+    if (ended) sim.careerEndRun();
     persistCareer();
     runEnd.reset();
+    garageView.reset();
     app.paused = true;
-    garage.show(message);
+    garage.show(message, shop ? { name: shop.name, district: shop.district, kind: shop.kind } : null);
+    if (ended) garage.onClose(() => void startCareerRun(shop ? "free" : kind, shop));
   };
   let careerSavedSeq = -1;
   let careerSavedAt = 0;
@@ -476,6 +483,8 @@ async function main(): Promise<void> {
   const garageView = new GarageVisitView(garageVisitEl, {
     repair: () => sim.garageRepair(),
     leave: () => sim.garageLeave(),
+    // Career runs: end the run at this shop and open the career garage priced there.
+    enter: (offer) => openGarage(null, offer.site),
   });
   // The city's regulars remember their results between visits (wp_race::roster records).
   const ROSTER_KEY = "wp.roster.v1";
@@ -629,7 +638,9 @@ async function main(): Promise<void> {
     // Every session: the tune panel's saved debug overrides (none = the shipped handling) and
     // raw keys; the test pad (?drift=w) also gets its course and the reference assists.
     driftLabW.setActive(sc.name === DRIFT_LAB_W);
-    scene.setGarages(sim.garages());
+    const garageSites = sim.garages();
+    scene.setGarages(garageSites);
+    garageView.sites = garageSites;
     const city = sim.worldInfo()[W.city] > 0.5;
     const cityId = city ? sim.cityId() : "";
     void scene.setCity(cityId || null);
@@ -872,14 +883,24 @@ async function main(): Promise<void> {
   };
 
   /** A career run: the night run or a free drive (city box) with the career car, its saved
-   * damage and mods. Opens the garage instead when the car cannot go out. */
-  const startCareerRun = (kind: RunKind): boolean => {
-    const json =
+   * damage and mods. Opens the garage instead when the car cannot go out. `from`: a city shop
+   * to drive out of (a free drive on the current city, starting on the shop's lane). */
+  const startCareerRun = (kind: RunKind, from: GarageSite | null = null): boolean => {
+    let json =
       kind === "chase"
         ? sim.nightRunCityJson(DEFAULT_CAR, "Arcade", citySel.value)
-        : ($("city") as HTMLInputElement).checked
+        : ($("city") as HTMLInputElement).checked || from
           ? sim.freeDriveCityJson(DEFAULT_CAR, "Arcade", citySel.value)
           : sim.freeDriveJson(DEFAULT_CAR, "Arcade", false);
+    if (from) {
+      const sc = JSON.parse(json);
+      if (sc.entities?.[0]) {
+        sc.entities[0].pos = from.pos;
+        sc.entities[0].yaw = from.heading_rad;
+        sc.entities[0].speed_mps = 0;
+      }
+      json = JSON.stringify(sc);
+    }
     app.scenarioFile = null;
     app.scenario = null;
     app.result = null;
@@ -1524,7 +1545,7 @@ async function main(): Promise<void> {
   };
   /** Something else owns the screen or the Esc key right now. */
   // Photo mode takes Esc (and gamepad Start) to leave itself, so no pause menu meanwhile.
-  const canOpenMenu = () => !photo.active && !menu?.isOpen && !map.isOpen && !controls.isOpen && !garage.open && !workshop.active && !runEnd.open && !raceView.cards && !isReplay();
+  const canOpenMenu = () => !garageView.offer && !photo.active && !menu?.isOpen && !map.isOpen && !controls.isOpen && !garage.open && !workshop.active && !runEnd.open && !raceView.cards && !isReplay();
   let menuPausedBefore = false;
   let menuShown = false;
   menu = mountGameMenu(overlay, {
@@ -1816,7 +1837,8 @@ async function main(): Promise<void> {
       prof.lap("map");
       if (!replay) {
         runEnd.update(sim.runResult(), now);
-        garageView.update(sim.garageVisit(), now);
+        const pp = app.views.get(app.player)?.root.position;
+        garageView.update(sim.garageVisit(), now, pp ? [pp.x, pp.y, pp.z] : null);
       }
       // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
       if (!replay && sim.careerRunActive()) {
