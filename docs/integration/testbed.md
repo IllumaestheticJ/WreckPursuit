@@ -934,6 +934,23 @@ Owner rows 67 / 68, details in `docs/integration/ui.md` → "Round 12". Small gl
 - `HudFrame.units` in `hud.ts` (km/h / mph).
 - `e2e/menu.mjs` runs at the end of `npm run e2e` (36 checks).
 
+### Reset in place fallbacks (2026-10-23, playtester B1)
+The 15 m lane search could leave a car stuck for good: wedged off-road more than 15 m from a
+lane, or on the grid city's viaduct where it runs through an interchange (connectors only, no
+"lane" in range; the traffic queued below also blocked the deck, the obstacle test was 2D), R
+reported `on_lane: false` and put the car back on the same spot. `reset::reset_pose` now:
+1. searches lanes **and junction connectors** (+3 m) within 15 m, only on the car's level
+   (`LEVEL_DZ_M` = 4 m), with obstacles only counting within 3 m in height;
+2. else the player's **last on-road spot** (`reset::Crumb`, refreshed every 30 ticks by
+   `Session::record_crumb` while the player is upright, moving > 2 m/s and on a lane of its
+   level; within 400 m);
+3. else the **nearest clear lane anywhere** (24 nearest, same level first);
+4. else upright in place (no city).
+`reset_in_place` JSON gains `via` (`lane` / `last_road` / `nearest_lane` / `in_place`). The pose is
+still logged as `ResetAt`, so replays and goldens are unchanged. Tests:
+`reset_tests::{reset_on_the_viaduct_lands_on_a_deck_lane, reset_far_off_road_goes_to_the_nearest_lane,
+reset_far_off_road_returns_to_the_last_road_spot, crumbs_need_an_upright_moving_car_on_a_lane}`.
+
 ### Ghost window after a reset in place (2026-10-20, owner request, playtest row 65)
 The owner asked for the ghost window directly, so I added it in wp_sim (lead-owned crate; small
 and additive, **lead please review**). Base: merged `origin/lead/round12` @ `608a50a`.

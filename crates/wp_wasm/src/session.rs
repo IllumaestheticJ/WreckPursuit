@@ -145,7 +145,13 @@ pub struct Session {
     crash: CrashRecorder,
     /// The street AI (live sessions whose scenario has street racers; see [`crate::street`]).
     street: Option<StreetRacers>,
+    /// The player's last on-road spot (recorded every [`CRUMB_EVERY_TICKS`] while it drives on
+    /// a lane): where reset in place falls back to when no lane is near (playtester B1).
+    road_crumb: Option<crate::reset::Crumb>,
 }
+
+/// How often the player's last on-road spot is refreshed, physics ticks (0.125 s).
+const CRUMB_EVERY_TICKS: u64 = 30;
 
 fn opts(systems: Option<Selection>) -> RunOptions {
     RunOptions {
@@ -259,6 +265,7 @@ impl Session {
         };
         Ok(Self {
             street,
+            road_crumb: None,
             crash,
             race,
             meet_spots: MeetSpots::default(),
@@ -703,7 +710,8 @@ impl Session {
     }
 
     /// Reset in place (testbed R, playtest row 65): pick the nearest clear lane spot within
-    /// 15 m heading the car's own way ([`crate::reset::reset_pose`]), put the car there upright
+    /// 15 m heading the car's own way, else the player's last on-road spot, else the nearest
+    /// clear lane anywhere ([`crate::reset::reset_pose`]), put the car there upright
     /// and at rest, and repair it if `repair` (false in a career run). Logged as the replay op
     /// `OpKind::ResetAt` carrying the pose, so playback does not redo the search. Police heat,
     /// pursuit and the run carry on; a race is told the car moved on purpose (position and lap
@@ -718,7 +726,40 @@ impl Session {
             .map(|v| v.vehicle.state())
             .ok_or_else(|| format!("unknown vehicle {id:?}"))?;
         let dir = crate::reset::travel_dir(st.rot, st.lin_vel);
-        self.reset_near(id, st.pos, dir, repair)
+        let crumb = if self.ids.first() == Some(&id) {
+            self.road_crumb
+        } else {
+            None
+        };
+        self.reset_near(id, st.pos, dir, repair, crumb)
+    }
+
+    /// The player's last on-road spot, if one was recorded (see [`crate::reset::Crumb`]).
+    pub fn road_crumb(&self) -> Option<crate::reset::Crumb> {
+        self.road_crumb
+    }
+
+    /// Refresh the player's last on-road spot (every [`CRUMB_EVERY_TICKS`]; pure function of
+    /// the sim state, so live and playback agree).
+    fn record_crumb(&mut self) {
+        if self.sim.tick() % CRUMB_EVERY_TICKS != 0 {
+            return;
+        }
+        let Some(&player) = self.ids.first() else {
+            return;
+        };
+        let Some(st) = self.vehicle(player).map(|v| v.vehicle.state()) else {
+            return;
+        };
+        let q = st.rot;
+        // World z of the chassis up axis (+Z rotated by q).
+        let up_z = 1.0 - 2.0 * (q[0] * q[0] + q[1] * q[1]);
+        let dir = crate::reset::travel_dir(st.rot, st.lin_vel);
+        if let Some(c) =
+            crate::reset::crumb_at(self.sim.world().map(), st.pos, dir, st.speed_mps, up_z)
+        {
+            self.road_crumb = Some(c);
+        }
     }
 
     /// Put racer `id` back on the race course at `pos` heading `dir` (the judge's off-course
@@ -726,17 +767,19 @@ impl Session {
     /// [`Self::reset_in_place`].
     fn reset_onto_course(&mut self, id: EntityId, pos: [f32; 3], dir: [f32; 2]) {
         // Only an unknown id fails, and a racer is always a scenario entity.
-        let _ = self.reset_near(id, pos, dir, false);
+        let _ = self.reset_near(id, pos, dir, false, None);
     }
 
     /// The shared part of [`Self::reset_in_place`] and [`Self::reset_onto_course`]: the
-    /// nearest clear lane spot to `origin` heading `dir` ([`crate::reset::reset_pose`]).
+    /// nearest clear lane spot to `origin` heading `dir` ([`crate::reset::reset_pose`]; `crumb`
+    /// = the car's last on-road spot, its fallback).
     fn reset_near(
         &mut self,
         id: EntityId,
         origin: [f32; 3],
         dir: [f32; 2],
         repair: bool,
+        crumb: Option<crate::reset::Crumb>,
     ) -> Result<crate::reset::ResetPose, String> {
         use crate::reset::{reset_pose, Obstacle, OTHER_HALF};
         self.live_check()?;
@@ -780,7 +823,7 @@ impl Session {
                 half: [p.half_extents[0], p.half_extents[1]],
             });
         }
-        let pose = reset_pose(Some(world.map()), origin, dir, &obstacles);
+        let pose = reset_pose(Some(world.map()), origin, dir, &obstacles, crumb);
         self.log_op(
             idx,
             OpKind::ResetAt {
@@ -1573,6 +1616,7 @@ impl Session {
         }
         self.sim.step_fixed();
         self.sync_cars();
+        self.record_crumb();
         let drained = self.sim.drain_events();
         self.observe_run(&drained);
         if let Some(roam) = &mut self.roam {
@@ -1945,6 +1989,7 @@ impl Session {
             // No street AI in a crash replay: the racers are scenario entities, so the snapshot
             // holds their cars and the log their inputs and moves, like any other entity.
             street: None,
+            road_crumb: None,
             // A crash replay is playback: no garage visits.
             garages: Vec::new(),
             visit: None,

@@ -78,6 +78,8 @@ mod race_spots_tests;
 #[cfg(test)]
 mod race_tests;
 #[cfg(test)]
+mod reset_tests;
+#[cfg(test)]
 mod roam_tests;
 #[cfg(test)]
 mod run_tests;
@@ -485,16 +487,18 @@ pub fn reset_vehicle(entity: u32) -> Result<(), JsValue> {
 }
 
 /// Reset in place (testbed R, playtest row 65): the car goes back on its wheels at rest on the
-/// nearest clear lane within 15 m, heading its own way, and is fully repaired — except in a
-/// career run, where repairs are bought in the garage. Heat, pursuit and race progress carry
-/// on. The car is a ghost for 1 s (passes through other cars, props and debris). Logged as
-/// replay ops. Returns `{ x, y, yaw, on_lane, repaired, ghost_ticks }` as JSON.
+/// nearest clear lane within 15 m on its level, heading its own way — else on the player's
+/// last on-road spot, else on the nearest clear lane anywhere ([`reset::reset_pose`]) — and is
+/// fully repaired, except in a career run, where repairs are bought in the garage. Heat,
+/// pursuit and race progress carry on. The car is a ghost for 1 s (passes through other cars,
+/// props and debris). Logged as replay ops. Returns `{ x, y, yaw, on_lane, via, repaired,
+/// ghost_ticks }` as JSON (`via`: "lane" | "last_road" | "nearest_lane" | "in_place").
 #[wasm_bindgen]
 pub fn reset_in_place(entity: u32) -> Result<String, JsValue> {
     let repair = !career::career_run_active();
     with(|s| s.reset_in_place(EntityId(entity), repair)).map(|p| {
         json(&serde_json::json!({
-            "x": p.xy[0], "y": p.xy[1], "yaw": p.yaw, "on_lane": p.on_lane, "repaired": repair,
+            "x": p.xy[0], "y": p.xy[1], "yaw": p.yaw, "on_lane": p.on_lane, "via": p.via.name(), "repaired": repair,
             "ghost_ticks": reset::GHOST_TICKS,
         }))
     })
