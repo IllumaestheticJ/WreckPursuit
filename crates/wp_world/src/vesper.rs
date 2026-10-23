@@ -16,7 +16,14 @@
 //!   carriageways, shoulders and a concrete median barrier, reached only through six
 //!   interchanges (five diamonds whose crossroad bridges the highway, a half diamond at the
 //!   port; see `divide_loop`). **Route 40 West** passes under it (the loop rises on an
-//!   overpass) and **Route 40 North** dips under it (underpass).
+//!   overpass) and **Route 40 North** dips under it (underpass). Its north leg runs through
+//!   the **Hollins Tunnel** under Hollins Heights' northern shoulder.
+//! - **Vesper River** runs north to south between Larkspur and downtown into the sea, crossed
+//!   by eight bridges (among them the steel-truss **Iron Bridge**); the level **Calder Canal**
+//!   branches west through Canal Flats to a turning basin under three more.
+//! - **Landmarks** (Lantern Tower, Vesper Point Lighthouse, Hollins Observatory, Calder Mill
+//!   Chimney, the Gantry Cranes, Larkspur Water Tower) and **hideouts** (the tunnel and five
+//!   canopies that hide a car from the helicopter), all in [`CityFeatures`].
 //!
 //! - **Covered roads** (backlog B04): the **Hollins Tunnel** carries Loop 9 through the
 //!   northern shoulder of Hollins Heights (ground backfilled over the roof), and **Founders
@@ -122,22 +129,149 @@ const BLUFF: V2 = [1000.0, 950.0];
 const MAP_LO: V2 = [-1700.0, -1300.0];
 const MAP_HI: V2 = [1700.0, 1750.0];
 
-/// The natural (uncarved) ground.
+/// Water surface of the sea and every waterway mouth, m.
+const SEA: f32 = SEA_LEVEL_M;
+
+/// A river or canal channel in the natural ground.
+struct Channel {
+    name: &'static str,
+    kind: WaterwayKind,
+    /// Centreline, source to mouth, about every 10 m.
+    pts: Vec<V2>,
+    /// Water surface per point, m.
+    zw: Vec<f32>,
+    /// Water half width per point, m.
+    half: Vec<f32>,
+    /// Bank width beyond the water's edge to natural ground, m.
+    bank: f32,
+    depth: f32,
+    lo: V2,
+    hi: V2,
+}
+
+impl Channel {
+    fn new(
+        name: &'static str,
+        kind: WaterwayKind,
+        pts: Vec<V2>,
+        zw: Vec<f32>,
+        half: Vec<f32>,
+        bank: f32,
+        depth: f32,
+    ) -> Self {
+        let reach = half.iter().copied().fold(0.0f32, f32::max) + bank;
+        let mut lo = [f32::INFINITY; 2];
+        let mut hi = [f32::NEG_INFINITY; 2];
+        for p in &pts {
+            lo = [lo[0].min(p[0] - reach), lo[1].min(p[1] - reach)];
+            hi = [hi[0].max(p[0] + reach), hi[1].max(p[1] + reach)];
+        }
+        Self {
+            name,
+            kind,
+            pts,
+            zw,
+            half,
+            bank,
+            depth,
+            lo,
+            hi,
+        }
+    }
+
+    /// Nearest centreline point: (distance, water surface, half width), or `None` beyond
+    /// the bounding box. Coarse search over every 6th segment, then refined around it.
+    fn near(&self, p: V2) -> Option<(f32, f32, f32)> {
+        if p[0] < self.lo[0] || p[0] > self.hi[0] || p[1] < self.lo[1] || p[1] > self.hi[1] {
+            return None;
+        }
+        let n = self.pts.len();
+        let seg = |i: usize| -> (f32, f32) {
+            let (a, b) = (self.pts[i], self.pts[i + 1]);
+            let ab = geom::sub(b, a);
+            let l2 = geom::dot(ab, ab).max(1e-6);
+            let t = (geom::dot(geom::sub(p, a), ab) / l2).clamp(0.0, 1.0);
+            (geom::dist(p, geom::add(a, geom::scale(ab, t))), t)
+        };
+        let mut best = (f32::INFINITY, 0usize, 0.0f32);
+        let mut i = 0;
+        while i + 1 < n {
+            let (d, t) = seg(i);
+            if d < best.0 {
+                best = (d, i, t);
+            }
+            i += 6;
+        }
+        let (a, b) = (best.1.saturating_sub(8), (best.1 + 8).min(n - 2));
+        for i in a..=b {
+            let (d, t) = seg(i);
+            if d < best.0 {
+                best = (d, i, t);
+            }
+        }
+        let (d, i, t) = best;
+        let zw = self.zw[i] + (self.zw[i + 1] - self.zw[i]) * t;
+        let half = self.half[i] + (self.half[i + 1] - self.half[i]) * t;
+        Some((d, zw, half))
+    }
+
+    /// Ground carved into the channel at `p` (`land` beyond the banks).
+    fn carve(&self, p: V2, land: f32) -> f32 {
+        let Some((d, zw, half)) = self.near(p) else {
+            return land;
+        };
+        if d >= half + self.bank {
+            return land;
+        }
+        let bed = zw - self.depth;
+        // A flat bed, then a bank rising through the water's edge to natural ground.
+        let t = smoothstep(half - 0.5 * self.depth - 3.0, half + self.bank, d);
+        land.min(bed + (land - bed) * t)
+    }
+
+    /// Whether `p` is in the channel (water or bank), with `margin` m extra.
+    fn covers(&self, p: V2, margin: f32) -> bool {
+        self.near(p)
+            .is_some_and(|(d, _, half)| d < half + self.bank + margin)
+    }
+
+    fn waterway(&self) -> Waterway {
+        Waterway {
+            name: self.name.into(),
+            kind: self.kind,
+            centre: self
+                .pts
+                .iter()
+                .zip(&self.zw)
+                .map(|(p, z)| [p[0], p[1], *z])
+                .collect(),
+            half_width_m: self.half.clone(),
+            depth_m: self.depth,
+        }
+    }
+}
+
+/// The natural (uncarved) ground: hills, the sea, and the Vesper River and Calder Canal
+/// channels.
 struct Natural {
     n1: ValueNoise,
     n2: ValueNoise,
     /// A region generated together with Port Vesper ([`Region`]): its ground from the point
     /// and Port Vesper's own ground there.
     ext: Option<Box<dyn Fn(V2, f32) -> f32>>,
+    channels: Vec<Channel>,
 }
 
 impl Natural {
     fn new(rng: &mut Rng) -> Self {
-        Self {
+        let mut nat = Self {
             n1: ValueNoise::new(rng, MAP_LO, MAP_HI, 420.0),
             n2: ValueNoise::new(rng, MAP_LO, MAP_HI, 150.0),
             ext: None,
-        }
+            channels: Vec::new(),
+        };
+        nat.channels = vec![nat.river(), nat.canal()];
+        nat
     }
 
     fn z(&self, p: V2) -> f32 {
@@ -148,8 +282,49 @@ impl Natural {
         }
     }
 
-    /// Port Vesper's own ground (inside its map; meaningless far outside).
-    fn vesper_z(&self, p: V2) -> f32 {
+    /// The Vesper River: north edge to the sea, between Larkspur and downtown. Its surface
+    /// follows the ground 3 m down, never rising towards the mouth.
+    fn river(&self) -> Channel {
+        let pts = resample(&catmull_rom(&RIVER, 10.0), 10.0);
+        let n = pts.len();
+        let raw: Vec<f32> = pts.iter().map(|p| self.land(*p) - 3.0).collect();
+        let smooth = smooth_series(&raw, 8);
+        let mut zw = Vec::with_capacity(n);
+        let mut lowest = f32::INFINITY;
+        for (k, z) in smooth.iter().enumerate() {
+            lowest = lowest.min(*z).min(raw[k] + 0.5);
+            zw.push(lowest.max(SEA));
+        }
+        let half: Vec<f32> = (0..n)
+            .map(|k| 16.0 + 14.0 * k as f32 / (n - 1) as f32)
+            .collect();
+        Channel::new(
+            "Vesper River",
+            WaterwayKind::River,
+            pts,
+            zw,
+            half,
+            12.0,
+            2.5,
+        )
+    }
+
+    /// The Calder Canal: a level cut west from the river through Canal Flats, ending in a
+    /// turning basin.
+    fn canal(&self) -> Channel {
+        let pts = resample(&catmull_rom(&CANAL, 10.0), 10.0);
+        let cum = cum2(&pts);
+        let total = cum[cum.len() - 1];
+        let half: Vec<f32> = cum
+            .iter()
+            .map(|s| 10.0 + 20.0 * smoothstep(total - 90.0, total - 20.0, *s))
+            .collect();
+        let zw = vec![SEA; pts.len()];
+        Channel::new("Calder Canal", WaterwayKind::Canal, pts, zw, half, 4.0, 3.0)
+    }
+
+    /// Ground before the waterways are cut.
+    fn land(&self, p: V2) -> f32 {
         let base = 2.5 + 22.0 * smoothstep(-650.0, 1400.0, p[1]);
         let hill = 88.0 * bump(p, HILL, 560.0);
         let plateau = 26.0 * smoothstep(520.0, 330.0, geom::dist(p, BLUFF));
@@ -161,7 +336,45 @@ impl Natural {
         let sea = smoothstep(-1110.0, -1180.0, p[1]).max(smoothstep(1600.0, 1660.0, p[0]));
         land + (-3.0 - land) * sea
     }
+
+    /// Port Vesper's own ground (inside its map; meaningless far outside): the land with the
+    /// river and canal channels cut into it.
+    fn vesper_z(&self, p: V2) -> f32 {
+        let land = self.land(p);
+        self.channels
+            .iter()
+            .fold(land, |z, c| z.min(c.carve(p, land)))
+    }
+
+    /// Whether `p` is in a river or canal channel (water or bank), with `margin` m extra.
+    fn wet(&self, p: V2, margin: f32) -> bool {
+        self.channels.iter().any(|c| c.covers(p, margin))
+    }
 }
+
+/// Vesper River control points, source (north edge) to mouth (into the sea).
+const RIVER: [V2; 11] = [
+    [-560.0, 1800.0],
+    [-525.0, 1500.0],
+    [-495.0, 1200.0],
+    [-512.0, 950.0],
+    [-500.0, 650.0],
+    [-515.0, 350.0],
+    [-495.0, 50.0],
+    [-508.0, -250.0],
+    [-500.0, -600.0],
+    [-505.0, -950.0],
+    [-505.0, -1250.0],
+];
+
+/// Calder Canal control points, from the river west to its basin.
+const CANAL: [V2; 4] = [
+    [-505.0, -822.0],
+    [-800.0, -815.0],
+    [-1050.0, -824.0],
+    [-1240.0, -820.0],
+];
+
 
 /// Road style.
 #[derive(Debug, Clone, Copy)]
@@ -1052,7 +1265,13 @@ impl Gen {
         // The loop is cut half-way between interchanges (plain bend nodes), but not near
         // where Route 40 West / North cross it (their grade separations need the room).
         site_s.sort_by(f32::total_cmp);
-        let route_40 = [[-1530.0, 100.0], [0.0, 1390.0]];
+        // Nor over the river (its bridges).
+        let route_40 = [
+            [-1530.0, 100.0],
+            [0.0, 1390.0],
+            [-505.0, 1370.0],
+            [-505.0, -1065.0],
+        ];
         let cuts: Vec<f32> = (0..site_s.len())
             .map(|k| {
                 let a = site_s[k];
@@ -1118,7 +1337,7 @@ impl Gen {
         let bcum = cum2(&blvd);
         let blvd_x = [
             -1000.0, -600.0, -300.0, -200.0, 0.0, 200.0, 300.0, 450.0, 720.0, 920.0, 1120.0,
-            -1110.0, -800.0, -450.0,
+            -1110.0, -900.0, -700.0,
         ];
         let bcuts: Vec<f32> = blvd_x
             .iter()
@@ -1195,7 +1414,8 @@ impl Gen {
         }
 
         // ---- Canal Flats (industrial, south-west waterfront) ---------------------------
-        let cx = [-1110.0, -800.0, -450.0];
+        // West of the river; the Calder Canal runs between the two rows.
+        let cx = [-1110.0, -900.0, -700.0];
         let cy = [-900.0, -740.0];
         let canal = self.warped_grid(&cx, &cy, 12.0, 10.0, 0.0, &|_, _| SERVICE, "Canal Flats");
         self.link(canal[1][0], bj[11], 4.0, SERVICE, "Canal Flats");
@@ -1315,7 +1535,7 @@ impl Gen {
             KNOB,
             [-900.0, 1240.0],
             [-700.0, 1300.0],
-            [-480.0, 1190.0],
+            [-430.0, 1160.0],
             [-300.0, 1000.0],
             self.pos(mer[3][1]),
         ];
@@ -1781,6 +2001,45 @@ fn profile_roads(
         out.push(r);
     }
     out
+}
+
+/// Bridge every road over the river and the canal: the road is held at deck height across
+/// the channel (water + banks) and that stretch is a deck (not carved). Deck height: the
+/// banks' mean, but at least the clearance above the water.
+fn plan_water_crossings(g: &mut Gen) {
+    for di in 0..g.drafts.len() {
+        let path = g.drafts[di].path.clone();
+        let highway = g.drafts[di].st.class == RoadClass::Highway;
+        let cum = cum2(&path);
+        let len = cum[cum.len() - 1];
+        for c in &g.nat.channels {
+            for (s_road, _, _) in path_crossings(&path, &c.pts) {
+                let wet = |s: f32| c.covers(point_on(&path, &cum, s).0, 3.0);
+                let (mut s0, mut s1) = (s_road, s_road);
+                while s0 > 0.0 && wet(s0) {
+                    s0 -= 2.0;
+                }
+                while s1 < len && wet(s1) {
+                    s1 += 2.0;
+                }
+                if s0 <= 0.0 || s1 >= len {
+                    continue;
+                }
+                let za = g.nat.z(point_on(&path, &cum, s0 - 4.0).0);
+                let zb = g.nat.z(point_on(&path, &cum, s1 + 4.0).0);
+                let zw = c.near(point_on(&path, &cum, s_road).0).map_or(SEA, |n| n.1);
+                let clear = match (highway, c.kind) {
+                    (true, _) => 4.5,
+                    (false, WaterwayKind::River) => 3.0,
+                    (false, WaterwayKind::Canal) => 2.2,
+                };
+                let deck = (za.min(zb) + 0.3).max(zw + clear);
+                let d = &mut g.drafts[di];
+                d.anchors.push((s0, s1, deck));
+                d.decks.push((s0 - 3.0, s1 + 3.0));
+            }
+        }
+    }
 }
 
 /// Plan grade separations where the highway crosses another road.
@@ -2709,7 +2968,8 @@ fn node_radii(built: &Built, nodes: &[NodeSpec]) -> Vec<f32> {
 }
 
 /// Carve `hf` (natural ground) to the built road surfaces and junction areas. `deck(road,
-/// point index)` says whether a surface point is a bridge deck (left uncarved).
+/// point index)` says whether a surface point is a bridge deck (left uncarved, ground kept
+/// below it).
 fn carve(
     hf: &mut Heightfield,
     built: &Built,
@@ -2955,6 +3215,139 @@ fn carve(
 }
 
 // ------------------------------------------------------------------------------------------
+// Bridges
+// ------------------------------------------------------------------------------------------
+
+/// Name and kind of the bridge carrying road `road` over `channel` at `p`.
+fn bridge_name(road: &str, channel: &Channel, p: V2) -> (String, BridgeKind) {
+    if channel.kind == WaterwayKind::Canal {
+        let name = if p[0] < -1000.0 {
+            "Basin Bridge"
+        } else if p[0] < -800.0 {
+            "Mill Bridge"
+        } else {
+            "Lock Bridge"
+        };
+        return (name.into(), BridgeKind::Beam);
+    }
+    match road {
+        "Loop 9" if p[1] > 0.0 => ("Vesper Viaduct".into(), BridgeKind::Viaduct),
+        "Loop 9" => ("Mouth Viaduct".into(), BridgeKind::Viaduct),
+        "Canal Street" => ("Iron Bridge".into(), BridgeKind::Truss),
+        "Hollins Drive" => ("Hollins Gorge Bridge".into(), BridgeKind::Beam),
+        "Lantern Way" => ("Lantern Bridge".into(), BridgeKind::Beam),
+        other => (format!("{other} Bridge"), BridgeKind::Beam),
+    }
+}
+
+/// Every deck stretch of a built road over a river or canal.
+fn find_bridges(built: &Built, infos: &[RoadInfo], nat: &Natural) -> Vec<Bridge> {
+    let mut out = Vec::new();
+    for (si, s) in built.surfaces.iter().enumerate() {
+        for c in &nat.channels {
+            let n = s.centre.len();
+            let over: Vec<bool> = s
+                .centre
+                .iter()
+                .map(|p| {
+                    c.near(geom::xy(*p))
+                        .is_some_and(|(d, zw, half)| d < half + 1.0 && p[2] > zw + 1.0)
+                })
+                .collect();
+            let mut k = 0;
+            while k < n {
+                if !over[k] {
+                    k += 1;
+                    continue;
+                }
+                let start = k;
+                while k < n && over[k] {
+                    k += 1;
+                }
+                let (a, b) = (start.saturating_sub(2), (k + 1).min(n - 1));
+                let centre = s.centre[a..=b].to_vec();
+                if centre.len() < 2 {
+                    continue;
+                }
+                let mid = geom::xy(centre[centre.len() / 2]);
+                let (name, kind) = bridge_name(infos[si].name, c, mid);
+                out.push(Bridge {
+                    name,
+                    kind,
+                    surface: si as u32,
+                    centre,
+                    half_width_m: s.left_m.max(s.right_m),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Steel truss over a truss bridge: posts beside both paved edges every ~8 m, top chords and
+/// cross beams 5.5 m over the deck (cars pass under).
+fn truss(b: &Bridge) -> Vec<Structure> {
+    let pts: Vec<V2> = b.centre.iter().map(|p| geom::xy(*p)).collect();
+    let cum = cum2(&pts);
+    let len = cum[cum.len() - 1];
+    let n = ((len / 8.0).round() as usize).max(1);
+    let half = b.half_width_m;
+    let mut out = Vec::new();
+    let frame = |s: f32| {
+        let (p, t) = point_on(&pts, &cum, s);
+        let c3 = geom::point_at(&b.centre, &geom::cumulative(&b.centre), s).0;
+        (p, t, c3[2])
+    };
+    let quad = |c: V2, t: V2, a0: f32, a1: f32, l0: f32, l1: f32| {
+        let r = geom::right_of(t);
+        let mut fp: Vec<V2> = [(a0, l0), (a1, l0), (a1, l1), (a0, l1)]
+            .iter()
+            .map(|(a, l)| geom::add(c, geom::add(geom::scale(t, *a), geom::scale(r, *l))))
+            .collect();
+        if signed_area(&fp) < 0.0 {
+            fp.reverse();
+        }
+        fp
+    };
+    for k in 0..=n {
+        let s = len * k as f32 / n as f32;
+        let (p, t, z) = frame(s);
+        for side in [-1.0f32, 1.0] {
+            let l = side * (half + 0.45);
+            out.push(Structure {
+                kind: StructureKind::Truss,
+                footprint: quad(p, t, -0.18, 0.18, l - 0.18, l + 0.18),
+                z0_m: z - 0.3,
+                z1_m: z + 5.9,
+            });
+        }
+        if k % 2 == 0 {
+            out.push(Structure {
+                kind: StructureKind::Truss,
+                footprint: quad(p, t, -0.2, 0.2, -half - 0.65, half + 0.65),
+                z0_m: z + 5.5,
+                z1_m: z + 5.9,
+            });
+        }
+        if k < n {
+            let s1 = len * (k + 1) as f32 / n as f32;
+            let (_, _, z1) = frame(s1);
+            let seg = s1 - s;
+            for side in [-1.0f32, 1.0] {
+                let l = side * (half + 0.45);
+                out.push(Structure {
+                    kind: StructureKind::Truss,
+                    footprint: quad(p, t, 0.0, seg, l - 0.2, l + 0.2),
+                    z0_m: z.max(z1) + 5.5,
+                    z1_m: z.max(z1) + 5.9,
+                });
+            }
+        }
+    }
+    out
+}
+
+// ------------------------------------------------------------------------------------------
 // Zones, buildings, POIs
 // ------------------------------------------------------------------------------------------
 
@@ -3077,6 +3470,413 @@ impl SurfaceGrid {
     }
 }
 
+// ------------------------------------------------------------------------------------------
+// Landmarks and hideouts
+// ------------------------------------------------------------------------------------------
+
+/// A free, dry, fairly level lot (axis-aligned) for a landmark or hideout.
+struct Lot {
+    obb: Obb,
+    zmin: f32,
+    zmax: f32,
+}
+
+/// What a lot must satisfy.
+struct LotRule {
+    /// Half size along x and y, m.
+    half: V2,
+    /// Minimum distance from any paved edge, m.
+    clear: f32,
+    /// Some probe must be at most this far from a paved edge (reachable from the road).
+    reach: Option<f32>,
+    /// Allowed ground height range over the lot, m.
+    relief: f32,
+}
+
+/// Search outwards from `target` (square rings 6 m apart, up to 180 m) for the first lot
+/// that satisfies `rule` and overlaps nothing in `taken`.
+fn find_lot(
+    grid: &SurfaceGrid,
+    built: &Built,
+    hf: &Heightfield,
+    nat: &Natural,
+    taken: &[Obb],
+    target: V2,
+    rule: &LotRule,
+) -> Option<Lot> {
+    let fits = |c: V2| -> Option<Lot> {
+        let obb = Obb {
+            c,
+            f: [0.0, 1.0],
+            hl: rule.half[1],
+            hw: rule.half[0],
+        };
+        let k = obb_corners(&obb);
+        let mid = |a: V2, b: V2| geom::scale(geom::add(a, b), 0.5);
+        let probes = [
+            k[0],
+            k[1],
+            k[2],
+            k[3],
+            c,
+            mid(k[0], k[1]),
+            mid(k[1], k[2]),
+            mid(k[2], k[3]),
+            mid(k[3], k[0]),
+        ];
+        let clear: Vec<f32> = probes.iter().map(|q| grid.clearance(built, *q)).collect();
+        if clear.iter().any(|d| *d < rule.clear) {
+            return None;
+        }
+        if rule
+            .reach
+            .is_some_and(|r| clear.iter().copied().fold(f32::INFINITY, f32::min) > r)
+        {
+            return None;
+        }
+        if probes.iter().any(|q| nat.wet(*q, 3.0)) {
+            return None;
+        }
+        let zs: Vec<f32> = probes.iter().map(|q| hf.height_at(*q)).collect();
+        let zmin = zs.iter().copied().fold(f32::INFINITY, f32::min);
+        let zmax = zs.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        if zmin < 1.0 || zmax - zmin > rule.relief {
+            return None;
+        }
+        if taken.iter().any(|t| geom::obb_overlap(t, &obb)) {
+            return None;
+        }
+        Some(Lot { obb, zmin, zmax })
+    };
+    for r in 0..=30i32 {
+        let mut ring: Vec<(i32, i32)> = Vec::new();
+        if r == 0 {
+            ring.push((0, 0));
+        }
+        for k in -r..r {
+            ring.extend([(k, -r), (r, k), (-k, r), (-r, -k)]);
+        }
+        for (dx, dy) in ring {
+            let c = [target[0] + 6.0 * dx as f32, target[1] + 6.0 * dy as f32];
+            if let Some(l) = fits(c) {
+                return Some(l);
+            }
+        }
+    }
+    None
+}
+
+/// Regular octagon (counter-clockwise) of circumradius `r` around `c`.
+fn octagon(c: V2, r: f32) -> Vec<V2> {
+    (0..8)
+        .map(|k| {
+            let (s, co) = wp_math::sin_cos((k as f32 + 0.5) / 8.0 * std::f32::consts::TAU);
+            [c[0] + co * r, c[1] + s * r]
+        })
+        .collect()
+}
+
+/// Axis-aligned square of half size `h` around `c`.
+fn square(c: V2, h: f32) -> Vec<V2> {
+    rect(c[0] - h, c[1] - h, c[0] + h, c[1] + h)
+}
+
+/// The parts of a landmark at `c` on ground `z` (relative heights), and its height.
+fn landmark_parts(kind: LandmarkKind, c: V2, z: f32) -> (Vec<(Vec<V2>, f32, f32)>, f32) {
+    let [x, y] = c;
+    let parts: Vec<(Vec<V2>, f32, f32)> = match kind {
+        LandmarkKind::Tower => vec![
+            (square(c, 13.0), 0.0, 150.0),
+            (square(c, 9.0), 150.0, 185.0),
+            (square(c, 1.25), 185.0, 230.0),
+        ],
+        LandmarkKind::Lighthouse => vec![
+            (octagon(c, 6.0), 0.0, 3.0),
+            (octagon(c, 3.6), 3.0, 30.0),
+            (octagon(c, 4.4), 30.0, 31.0),
+            (octagon(c, 2.6), 31.0, 35.0),
+            (octagon(c, 1.2), 35.0, 37.0),
+        ],
+        LandmarkKind::Observatory => vec![
+            (octagon(c, 10.0), 0.0, 7.0),
+            (octagon(c, 7.5), 7.0, 10.0),
+            (octagon(c, 4.5), 10.0, 12.0),
+            (octagon(c, 1.5), 12.0, 13.0),
+        ],
+        LandmarkKind::Chimney => vec![
+            (octagon(c, 4.5), 0.0, 6.0),
+            (octagon(c, 3.2), 6.0, 55.0),
+            (octagon(c, 3.8), 55.0, 56.5),
+        ],
+        LandmarkKind::Crane => {
+            let mut v: Vec<(Vec<V2>, f32, f32)> = Vec::new();
+            for (dx, dy) in [(-8.0, -6.0), (8.0, -6.0), (8.0, 6.0), (-8.0, 6.0)] {
+                v.push((square([x + dx, y + dy], 0.6), 0.0, 40.0));
+            }
+            for dy in [-6.0, 6.0] {
+                v.push((
+                    rect(x - 9.0, y + dy - 0.6, x + 9.0, y + dy + 0.6),
+                    37.0,
+                    40.0,
+                ));
+            }
+            // Boom out over the shore, the back reach over the quay; A-frame on top.
+            v.push((rect(x - 1.5, y - 52.0, x + 1.5, y + 26.0), 40.0, 42.5));
+            v.push((rect(x - 1.0, y + 3.0, x + 1.0, y + 6.0), 42.5, 55.0));
+            v
+        }
+        LandmarkKind::WaterTower => {
+            let mut v: Vec<(Vec<V2>, f32, f32)> = Vec::new();
+            for (dx, dy) in [(-4.0, -4.0), (4.0, -4.0), (4.0, 4.0), (-4.0, 4.0)] {
+                v.push((square([x + dx, y + dy], 0.4), 0.0, 24.5));
+            }
+            v.push((octagon(c, 6.5), 24.0, 32.0));
+            v.push((octagon(c, 3.0), 32.0, 34.0));
+            v
+        }
+        LandmarkKind::Bridge | LandmarkKind::Tunnel => Vec::new(),
+    };
+    let top = parts.iter().map(|p| p.2).fold(0.0f32, f32::max);
+    (
+        parts
+            .into_iter()
+            .map(|(fp, a, b)| (fp, z + a, z + b))
+            .collect(),
+        top,
+    )
+}
+
+/// Place the landmarks (tower, lighthouse, observatory, chimney, cranes, water tower; plus
+/// the Iron Bridge and Hollins Tunnel already built) and the canopy hideouts (plus the
+/// tunnel). Returns the lots to keep clear of ordinary buildings.
+fn place_landmarks_and_hideouts(
+    features: &mut CityFeatures,
+    built: &Built,
+    hf: &Heightfield,
+    nat: &Natural,
+    covered: &[CoveredSpan],
+    grid: &SurfaceGrid,
+) -> Vec<Obb> {
+    let mut taken: Vec<Obb> = Vec::new();
+    let landmarks: [(&str, LandmarkKind, V2, LotRule); 8] = [
+        (
+            "Lantern Tower",
+            LandmarkKind::Tower,
+            [50.0, 100.0],
+            LotRule {
+                half: [13.0, 13.0],
+                clear: 3.0,
+                reach: None,
+                relief: 4.0,
+            },
+        ),
+        (
+            "Vesper Point Lighthouse",
+            LandmarkKind::Lighthouse,
+            [1560.0, -1080.0],
+            LotRule {
+                half: [6.0, 6.0],
+                clear: 6.0,
+                reach: None,
+                relief: 3.0,
+            },
+        ),
+        (
+            "Hollins Observatory",
+            LandmarkKind::Observatory,
+            [-1085.0, 1150.0],
+            LotRule {
+                half: [10.5, 10.5],
+                clear: 3.0,
+                reach: None,
+                relief: 7.0,
+            },
+        ),
+        (
+            "Calder Mill Chimney",
+            LandmarkKind::Chimney,
+            [-1010.0, -650.0],
+            LotRule {
+                half: [4.5, 4.5],
+                clear: 4.0,
+                reach: None,
+                relief: 3.0,
+            },
+        ),
+        (
+            "Gantry Crane 1",
+            LandmarkKind::Crane,
+            [600.0, -985.0],
+            LotRule {
+                half: [9.0, 7.0],
+                clear: 2.5,
+                reach: None,
+                relief: 2.5,
+            },
+        ),
+        (
+            "Gantry Crane 2",
+            LandmarkKind::Crane,
+            [820.0, -985.0],
+            LotRule {
+                half: [9.0, 7.0],
+                clear: 2.5,
+                reach: None,
+                relief: 2.5,
+            },
+        ),
+        (
+            "Gantry Crane 3",
+            LandmarkKind::Crane,
+            [1060.0, -985.0],
+            LotRule {
+                half: [9.0, 7.0],
+                clear: 2.5,
+                reach: None,
+                relief: 2.5,
+            },
+        ),
+        (
+            "Larkspur Water Tower",
+            LandmarkKind::WaterTower,
+            [-1150.0, 180.0],
+            LotRule {
+                half: [7.0, 7.0],
+                clear: 4.0,
+                reach: None,
+                relief: 4.0,
+            },
+        ),
+    ];
+    for (name, kind, target, rule) in &landmarks {
+        let Some(lot) = find_lot(&grid, built, hf, nat, &taken, *target, rule) else {
+            continue;
+        };
+        let base = lot.zmin - 0.3;
+        let (parts, top) = landmark_parts(*kind, lot.obb.c, base);
+        let first = features.structures.len() as u32;
+        for (fp, z0, z1) in parts {
+            features.structures.push(Structure {
+                kind: StructureKind::Landmark,
+                footprint: fp,
+                z0_m: z0,
+                z1_m: z1,
+            });
+        }
+        features.landmarks.push(Landmark {
+            name: (*name).into(),
+            kind: *kind,
+            pos: [lot.obb.c[0], lot.obb.c[1], base],
+            height_m: top,
+            structures: (first..features.structures.len() as u32).collect(),
+        });
+        taken.push(Obb {
+            hl: lot.obb.hl + 4.0,
+            hw: lot.obb.hw + 4.0,
+            ..lot.obb
+        });
+    }
+    // The truss bridge and the tunnel are landmarks too (their parts are already built).
+    let truss_parts: Vec<u32> = (0..features.structures.len() as u32)
+        .filter(|i| features.structures[*i as usize].kind == StructureKind::Truss)
+        .collect();
+    if let Some(b) = features
+        .bridges
+        .iter()
+        .find(|b| b.kind == BridgeKind::Truss)
+    {
+        let c = b.centre[b.centre.len() / 2];
+        features.landmarks.push(Landmark {
+            name: b.name.clone(),
+            kind: LandmarkKind::Bridge,
+            pos: c,
+            height_m: 5.9,
+            structures: truss_parts,
+        });
+    }
+    // The Hollins Tunnel (a covered span, its walls and roof are the span's): a landmark and
+    // the hideout the helicopter cannot see into.
+    if let Some(c) = covered.iter().find(|c| c.name == "Hollins Tunnel") {
+        let shape = CoverShape::new(c);
+        let len = shape.length();
+        let mid = geom::point_at(&c.centre, &shape.cum, len * 0.5).0;
+        features.landmarks.push(Landmark {
+            name: c.name.clone(),
+            kind: LandmarkKind::Tunnel,
+            pos: mid,
+            height_m: c.clearance_m,
+            structures: Vec::new(),
+        });
+        features.hideouts.push(Hideout {
+            name: c.name.clone(),
+            kind: HideoutKind::Tunnel,
+            pos: mid,
+            radius_m: 0.5 * len,
+        });
+    }
+    // Canopies: a roof slab 4.2 m over the lot on pillars, close to a road.
+    let canopies: [(&str, V2, V2); 5] = [
+        ("Calder Mill Shed", [-950.0, -640.0], [18.0, 12.0]),
+        ("Gantry Row Reefer Dock", [660.0, -840.0], [16.0, 10.0]),
+        ("Larkspur Carports", [-1000.0, -210.0], [14.0, 6.0]),
+        ("Eastgate Parking Deck", [820.0, 40.0], [20.0, 15.0]),
+        ("Lantern Row Arcade", [-150.0, -200.0], [12.0, 8.0]),
+    ];
+    for (name, target, half) in canopies {
+        let rule = LotRule {
+            half,
+            clear: 2.0,
+            reach: Some(12.0),
+            relief: 2.5,
+        };
+        let Some(lot) = find_lot(&grid, built, hf, nat, &taken, target, &rule) else {
+            continue;
+        };
+        let c = lot.obb.c;
+        let roof = lot.zmax + 4.2;
+        features.structures.push(Structure {
+            kind: StructureKind::Canopy,
+            footprint: rect(
+                c[0] - half[0],
+                c[1] - half[1],
+                c[0] + half[0],
+                c[1] + half[1],
+            ),
+            z0_m: roof,
+            z1_m: roof + 0.5,
+        });
+        let cols = ((2.0 * half[0] / 12.0).ceil() as usize).max(1);
+        let rows = ((2.0 * half[1] / 12.0).ceil() as usize).max(1);
+        for a in 0..=cols {
+            for b in 0..=rows {
+                if a != 0 && a != cols && b != 0 && b != rows {
+                    continue;
+                }
+                let px = c[0] - half[0] + 0.6 + (2.0 * half[0] - 1.2) * a as f32 / cols as f32;
+                let py = c[1] - half[1] + 0.6 + (2.0 * half[1] - 1.2) * b as f32 / rows as f32;
+                features.structures.push(Structure {
+                    kind: StructureKind::Pillar,
+                    footprint: square([px, py], 0.3),
+                    z0_m: lot.zmin - 0.3,
+                    z1_m: roof,
+                });
+            }
+        }
+        features.hideouts.push(Hideout {
+            name: name.into(),
+            kind: HideoutKind::Canopy,
+            pos: [c[0], c[1], hf.height_at(c)],
+            radius_m: half[0].min(half[1]),
+        });
+        taken.push(Obb {
+            hl: lot.obb.hl + 14.0,
+            hw: lot.obb.hw + 14.0,
+            ..lot.obb
+        });
+    }
+    taken
+}
+
 fn obb_corners(o: &Obb) -> [V2; 4] {
     let r = geom::right_of(o.f);
     let f = geom::scale(o.f, o.hl);
@@ -3121,7 +3921,8 @@ fn surface_z_bank(s: &RoadSurface, cum: &[f32], at: f32) -> (f32, f32) {
 /// ([`surface::verge_street`]). Returns the buildings and the decor.
 ///
 /// Clear of `reserved` (hand-placed buildings, Ashpeak County) and `reserved_decor`, only
-/// where `allowed`, and none along the `no_buildings` roads (the Loop 9 rest stops).
+/// where `allowed`, and none along the `no_buildings` roads (the Loop 9 rest stops), on the
+/// landmark and hideout `lots` or in the water (`wet`: the river and canal channels).
 #[allow(clippy::too_many_arguments)]
 fn buildings(
     rng: &mut Rng,
@@ -3135,6 +3936,8 @@ fn buildings(
     reserved: &[Building],
     reserved_decor: &[Decor],
     allowed: &dyn Fn(V2) -> bool,
+    lots: &[Obb],
+    wet: &dyn Fn(V2) -> bool,
 ) -> (Vec<Building>, Vec<Decor>) {
     // Junction / bend areas with the turning paths through them, plus a sidewalk.
     let node_r = node_radii(built, nodes);
@@ -3155,6 +3958,9 @@ fn buildings(
     for b in reserved {
         placed.insert(footprint_obb(&b.footprint));
     }
+    for o in lots {
+        placed.insert(*o);
+    }
     for d in reserved_decor {
         solid_decor.insert(Obb {
             c: [d.pos[0], d.pos[1]],
@@ -3171,6 +3977,7 @@ fn buildings(
         let corners = obb_corners(o);
         let probes = [corners[0], corners[1], corners[2], corners[3], o.c];
         probes.iter().all(|q| grid.clearance(built, *q) >= clear)
+            && !probes.iter().any(|q| wet(*q))
             && !probes
                 .iter()
                 .any(|q| junctions.iter().any(|(c, r)| geom::dist(*q, *c) < *r))
@@ -3743,6 +4550,8 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
     if let Some(r) = region {
         r.layout(&mut g);
     }
+    // Every road over the river and the canal is a bridge deck.
+    plan_water_crossings(&mut g);
     let draft_crossings = plan_crossings(&mut g);
     plan_covers(&mut g, &region.map_or_else(Vec::new, |r| r.covers()));
     let opt = BuildOptions::default();
@@ -3844,6 +4653,15 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
     carve(&mut hf, &built, &g.nodes, &deck);
     let covered = covered_spans(&g, &built, &ring, &loop_drafts, &remap, &divided);
     backfill_covers(&mut hf, &g.nat, &covered);
+    // Bridges and waterways (the Hollins Tunnel is a covered span).
+    let mut features = CityFeatures::default();
+    features.bridges = find_bridges(&built, &infos, &g.nat);
+    for b in &features.bridges {
+        if b.kind == BridgeKind::Truss {
+            features.structures.extend(truss(b));
+        }
+    }
+    features.waterways = g.nat.channels.iter().map(Channel::waterway).collect();
 
     let mut zones = region.map_or_else(Vec::new, |r| r.zones());
     zones.extend(self::zones());
@@ -3876,6 +4694,9 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
         None => (Vec::new(), Vec::new()),
     };
     let generic_at = |p: V2| region.is_none_or(|r| r.generic_buildings_at(p));
+    // Landmarks and canopy hideouts first: their lots are kept clear of buildings.
+    let lots = place_landmarks_and_hideouts(&mut features, &built, &hf, &g.nat, &covered, &grid);
+    let wet = |q: V2| g.nat.wet(q, 2.0);
     let (mut buildings, mut decor) = buildings(
         &mut g.rng,
         &built,
@@ -3888,6 +4709,8 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
         &extra_b,
         &extra_d,
         &generic_at,
+        &lots,
+        &wet,
     );
     buildings.extend(extra_b);
     decor.extend(extra_d);
@@ -3931,6 +4754,23 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
             d.name == "Lantern Way" && geom::dist(g.nodes[d.b].pos, [-300.0, 150.0]) < 1.0
         })
         .map_or(0, road_of);
+    // The Hollins climb starts across the gorge bridge (a staggered grid does not fit on the
+    // deck between its parapets).
+    let ascent_s = features
+        .bridges
+        .iter()
+        .find(|b| b.name == "Hollins Gorge Bridge")
+        .and_then(|b| {
+            let lane = *built.road_lanes[hollins].fwd.last()?;
+            let l = &built.lanes[lane as usize];
+            let cum = geom::cumulative(&l.polyline);
+            let s_end = [b.centre[0], b.centre[b.centre.len() - 1]]
+                .iter()
+                .map(|q| geom::project(&l.polyline, &cum, geom::xy(*q)).s)
+                .fold(0.0f32, f32::max);
+            Some(s_end + 45.0)
+        })
+        .unwrap_or(12.0);
     for (kind, name, road, s, fwd) in [
         (PoiKind::RaceStartGrid, "Lantern Run", lantern, 40.0, true),
         (
@@ -3944,7 +4784,7 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
             PoiKind::RaceStartGrid,
             "Hollins Ascent",
             hollins,
-            12.0,
+            ascent_s,
             true,
         ),
         (
@@ -4137,6 +4977,7 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
     ];
     net.terrain = Some(hf);
     net.covered = covered;
+    net.features = features;
     let report = VesperReport {
         crossings,
         skipped_roads: g.skipped,
@@ -4658,5 +5499,156 @@ mod tests {
             .buildings
             .iter()
             .all(|b| !in_cover_corridor(&shapes, &b.footprint)));
+    }
+
+    #[test]
+    fn river_canal_and_their_bridges() {
+        let (net, _) = city();
+        let f = &net.features;
+        let kinds: Vec<WaterwayKind> = f.waterways.iter().map(|w| w.kind).collect();
+        assert_eq!(kinds, [WaterwayKind::River, WaterwayKind::Canal]);
+        let river = &f.waterways[0];
+        // The river falls (never rises) to the sea.
+        for w in river.centre.windows(2) {
+            assert!(w[1][2] <= w[0][2] + 1e-4);
+        }
+        assert!(river.centre[0][2] > 15.0);
+        assert!((river.centre[river.centre.len() - 1][2] - SEA).abs() < 1e-4);
+        for name in [
+            "Vesper Viaduct",
+            "Mouth Viaduct",
+            "Ridge Road Bridge",
+            "Hollins Gorge Bridge",
+            "Lantern Bridge",
+            "Larkspur Avenue Bridge",
+            "Iron Bridge",
+            "Harbor Boulevard Bridge",
+            "Basin Bridge",
+            "Mill Bridge",
+            "Lock Bridge",
+        ] {
+            assert!(f.bridges.iter().any(|b| b.name == name), "no {name}");
+        }
+        assert_eq!(
+            f.bridges
+                .iter()
+                .filter(|b| b.kind == BridgeKind::Truss)
+                .count(),
+            1
+        );
+        // Every road that crosses a waterway does so on a bridge, well above the water.
+        for (si, s) in net.surfaces.iter().enumerate() {
+            let xy: Vec<V2> = s.centre.iter().map(|p| geom::xy(*p)).collect();
+            for w in &f.waterways {
+                let wxy: Vec<V2> = w.centre.iter().map(|p| geom::xy(*p)).collect();
+                for (_, sw, p) in path_crossings(&xy, &wxy) {
+                    let b = f
+                        .bridges
+                        .iter()
+                        .find(|b| b.surface as usize == si)
+                        .unwrap_or_else(|| panic!("surface {si} crosses {} at {p:?}", w.name));
+                    let wc = cum2(&wxy);
+                    let k = wc.partition_point(|c| *c <= sw).min(wc.len() - 1);
+                    let deck = b.centre.iter().map(|q| q[2]).fold(f32::INFINITY, f32::min);
+                    assert!(deck > w.centre[k][2] + 1.5, "{} deck {deck}", b.name);
+                }
+            }
+        }
+        let map = crate::CityMap::new(net.clone());
+        let mid = |w: &Waterway| geom::xy(w.centre[w.centre.len() / 2]);
+        assert!(map.water_surface_at(mid(river)).is_some());
+        assert!(map.water_surface_at(mid(&f.waterways[1])).is_some());
+        assert!(map.water_surface_at([0.0, 0.0]).is_none());
+        // The Iron Bridge's steel-grate deck.
+        let iron = f.bridges.iter().find(|b| b.name == "Iron Bridge").unwrap();
+        let c = iron.centre[iron.centre.len() / 2];
+        assert_eq!(
+            wp_contracts::WorldQuery::surface_at(&map, [c[0], c[1], c[2] + 0.1]),
+            wp_contracts::SurfaceType::Metal
+        );
+    }
+
+    #[test]
+    fn hollins_tunnel_hides_cars_from_the_air() {
+        // The Hollins Tunnel is a covered span; the features list it as a landmark and the
+        // hideout a car is invisible from the air in.
+        let (net, _) = city();
+        let f = &net.features;
+        let h = f
+            .hideouts
+            .iter()
+            .find(|h| h.kind == HideoutKind::Tunnel && h.name == "Hollins Tunnel")
+            .expect("tunnel hideout");
+        assert!(h.radius_m > 150.0, "{h:?}");
+        assert!(f
+            .landmarks
+            .iter()
+            .any(|l| l.kind == LandmarkKind::Tunnel && l.name == "Hollins Tunnel"));
+        let map = crate::CityMap::new(net.clone());
+        let car = [h.pos[0], h.pos[1], h.pos[2] + 1.2];
+        assert!(map.in_tunnel(car));
+        assert!(!map.line_of_sight([car[0] + 60.0, car[1] + 40.0, car[2] + 150.0], car));
+    }
+
+    #[test]
+    fn landmarks_and_canopy_hideouts() {
+        let (net, _) = city();
+        let f = &net.features;
+        for k in [
+            LandmarkKind::Tower,
+            LandmarkKind::Lighthouse,
+            LandmarkKind::Observatory,
+            LandmarkKind::Chimney,
+            LandmarkKind::Crane,
+            LandmarkKind::WaterTower,
+            LandmarkKind::Bridge,
+            LandmarkKind::Tunnel,
+        ] {
+            assert!(f.landmarks.iter().any(|l| l.kind == k), "no {k:?}");
+        }
+        let tower = f
+            .landmarks
+            .iter()
+            .find(|l| l.kind == LandmarkKind::Tower)
+            .unwrap();
+        assert!(tower.height_m > 200.0);
+        let canopies: Vec<&Hideout> = f
+            .hideouts
+            .iter()
+            .filter(|h| h.kind == HideoutKind::Canopy)
+            .collect();
+        assert_eq!(canopies.len(), 5);
+        let map = crate::CityMap::new(net.clone());
+        for h in &canopies {
+            let car = [h.pos[0], h.pos[1], h.pos[2] + 1.0];
+            assert!(
+                !map.line_of_sight([h.pos[0] + 30.0, h.pos[1] + 20.0, h.pos[2] + 150.0], car),
+                "{} seen from the air",
+                h.name
+            );
+        }
+        // Ordinary buildings stay off landmark and hideout lots.
+        let bbox = |fp: &[V2]| {
+            fp.iter().fold(
+                ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]),
+                |(lo, hi), p| {
+                    (
+                        [lo[0].min(p[0]), lo[1].min(p[1])],
+                        [hi[0].max(p[0]), hi[1].max(p[1])],
+                    )
+                },
+            )
+        };
+        for st in f.structures.iter().filter(|s| {
+            matches!(s.kind, StructureKind::Landmark | StructureKind::Pillar)
+                && s.z0_m < 15.0 + net.ground_z(s.footprint[0])
+        }) {
+            let (lo, hi) = bbox(&st.footprint);
+            for b in &net.buildings {
+                let (blo, bhi) = bbox(&b.footprint);
+                let overlap = blo[0] < hi[0] && bhi[0] > lo[0] && blo[1] < hi[1] && bhi[1] > lo[1];
+                assert!(!overlap, "building on a {:?} at {lo:?}", st.kind);
+            }
+        }
     }
 }

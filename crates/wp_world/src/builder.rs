@@ -316,6 +316,7 @@ impl Built {
             terrain: None,
             covered: Vec::new(),
             decor: Vec::new(),
+            features: CityFeatures::default(),
         }
     }
 }
