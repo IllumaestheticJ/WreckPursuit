@@ -1682,3 +1682,4 @@ The city total per phase must stay ≥ 1: `PoliceSystem::unit_cap` reads a zero 
 - Mechanism tests that need several units near the racer (`pursued_at` in `tests/system.rs`, the `radio_chatter` harness) use `dense_patrols`, the old table. The two call tests set `call_min_heat = 0`.
 - `escape_break_contact_night`: 7 escapes in 10, max 6 → 9.
 - With fewer pool units, more calls go to spawned responders and some are not met within the 60 s run (61 = never). `response_day_core` max 15 → 25 s (presence.toml's target). `response_day_suburb` mean 28 → 40 s, max 38 → 61. `response_night_core` 25 s reached 0.85 → 0.6, mean 17 → 30 s, max 40 → 61.
+- **Outside wp_police (test only):** `crates/wp_sim/tests/police_passby.rs` builds its police with the old dense table so it still finds a cop on a straight.
