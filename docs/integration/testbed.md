@@ -163,7 +163,45 @@ hash per tick dominate). `simcli replay file.replay.bin` verifies a browser reco
 
 ## Browser testbed
 
-### Hotkeys (layer toggles persist in `localStorage`)
+### Debug tools switch and player HUD (HUD cleanup, 2026-10-23)
+
+Owner request: "clean up the HUD to be more player friendly, keep the debugging tools but hide the
+buttons when not being used". One switch (`src/ui/dev_toggle.ts`) shows or hides every debug tool:
+the developer drawer (`#controls`, all ids unchanged), the debug overlays (telemetry, input bars,
+component / region / event panels, perf / tick / hash lines, the big damage silhouette) and the
+debug-layer hotkeys. It is the game menu's `developer` setting (Settings → Developer panels).
+
+- **Off by default.** Which value wins: a toggle in the page > `?dev=1` / `?dev=0` > `?menu=1` or
+  the demo build (off) > automation (`navigator.webdriver`: on, so the e2e scripts keep clicking
+  the drawer; `?dev=auto` disables this) > the saved setting. A saved `developer: true` from before
+  this change is reset once (`wp.testbed.devReset.v1`).
+- **Toggle:** the debug key (**`**, rebindable action `debug`), the ⚙ button (top right, fades in
+  while the mouse moves, hides after 3 s; player mode only, never on touch or in the demo) or the
+  drawer's ✕. The choice is saved.
+- **Drawer:** a sticky header with section links (session / car / replay / layers), « fold to the
+  header (saved in `wp.testbed.devFolded.v1`; the overlays stay) and ✕; a **layers** row of
+  checkboxes (until now the layers were hotkeys only).
+- **Layer keys** only act with the debug tools on (F6, reduced flashing, always). In player mode the
+  non-debug layers (body, panels, traffic, signals, minimap, chase) read at their defaults, so a
+  stray X no longer hides the traffic.
+- **Player HUD** (debug off): speed / gear / rpm bar / car health % with a small damage silhouette
+  in a bottom-right cluster (assists only when reduced, e.g. "TCS HALF"; a 2.5 s toast when the mode
+  or assists change; a slow-motion chip only after 3 s below 0.95× real time); minimap bottom-left
+  (hidden on the flat world); chase readout only once police are interested; picker races keep only
+  the race panel's minimap; radio strip 2 lines; the player HUD hides under menus and pickers; F1
+  help without the debug section. Touch keeps its compact layout (`touch.ts`). With the debug
+  tools on the layout is the old one (speedo top-left, minimap bottom-right).
+- **Capture / wreck sequence** (playtest B5, `ui/overlay.ts`): the outcome banner alone for 2.5 s,
+  then the end-of-run card, then the repair bill 1.5 s later; the banner steps aside while the bill
+  is open. Cars in the chase readout / bill are "you", "a police car", the car's name or "a traffic
+  car" (no entity numbers).
+- e2e: `npm run e2e:hud` (`e2e/hud_debug.mjs`).
+- Not done here (other owners): the title screen hint "C · R · M camera · reset · map" in
+  `ui-kit/src/menu/GameMenu.tsx` (C is the clutch; build it from the live bindings);
+  "city_betting" in the race picker lock text (`ui/race.tsx`); "racer #1" in police radio lines
+  (`wp_police` text).
+
+### Hotkeys (layer toggles persist in `localStorage`; layer keys need the debug tools on)
 
 **Player actions are rebindable** (round 12b): the **controls** button or F9 opens a panel with
 two keyboard and two gamepad slots per action; saved in `localStorage` `wp.bindings.v1`; the F1
@@ -173,15 +211,15 @@ help lists the live bindings. Defaults (`src/bindings.ts`):
 |---|---|---|
 | steer left / right | A / D, ← / → (ramped) | left stick X (analogue; deadzone 12 %, curve 1.0, both adjustable) |
 | throttle / brake | W / S, ↑ / ↓ (ramped) | RT / LT (analogue, 5 % deadzone) |
-| clutch (used with **clutch: manual**) | unbound — bind any key (ramped in 0.1 s / out 0.3 s) | unbound — bind a button, trigger, stick direction or a **wheel pedal axis** (full range) |
+| clutch (used with **clutch: manual**) | C (ramped in 0.1 s / out 0.3 s) | unbound — bind a button, trigger, stick direction or a **wheel pedal axis** (full range) |
 | handbrake | Space | A or X |
 | shift up / down | Shift / Ctrl | RB / LB |
 | horn | Q | L3 |
 | look back (hold) | V | R3 |
-| next camera | C (remembered in `wp.testbed.camera.v1`) | View |
+| next camera | **F3** (C is the clutch since 2026-10-21; remembered in `wp.testbed.camera.v1`) | View |
 | reset car | R | Y |
 | headlights | O | d-pad ↓ |
-| follow the next car | ` | – |
+| follow the next car (debug tools on) | **PageDown** (was `, now the debug key) | – |
 | city map | M or Tab | d-pad → |
 | pause (replay: play/pause) | P | Menu |
 | help | F1 or ? | – |
@@ -189,6 +227,7 @@ help lists the live bindings. Defaults (`src/bindings.ts`):
 | audio mute | **F8** (was V, which also held look-back) | – |
 | repair bill | F | – |
 | crash replay: play / skip (lead, `docs/integration/crash-replay.md`) | Enter | d-pad ↑ (R2 / RT is the throttle) |
+| debug tools (drawer + overlays + layer keys) | ` | – |
 
 Fixed keys:
 
@@ -196,6 +235,9 @@ Fixed keys:
 |---|---|
 | 1–8 | camera: near chase (default), far chase, hood, bumper, cockpit, side tracking, TV / cinematic, orbit / free (debug) |
 | mouse drag | look around (springs back on release; right stick on a pad, not rebindable) |
+| F7 | photo mode |
+| F10 | handling tune panel (also `?tune=1`) |
+| F6 | reduced flashing (works with the debug tools off) |
 | . / , | replay frame step forward / back (4 ticks) |
 | [ / ] | replay speed down / up |
 | B | body box / skinned body |
