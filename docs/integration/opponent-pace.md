@@ -1133,3 +1133,36 @@ traffic-body fix and the box-in escape. They were measured over several seeds wh
 - **Single-seed RONs widened.** `pace_loop9_circuit_s50/s95` now allow today's times −40 % .. +40 %
   and best_ratio up to today's × 1.4. They only catch gross breakage; the RON comments point at
   the 8-seed check.
+
+## Weaving v2, step 1: no phantom drift from a civilian holding its lane (2026-10-23)
+
+**Cause of most s95 Loop 9 DNFs.** On seed 1 at s95, three cars ran out of the finish window
+(`Dnf(FinishWindow)`), each losing 33–74 s behind civilians. A trace showed the cause. A
+civilian keeping its lane reads a few tenths of a m/s across the corridor (±0.37 m/s at
+27 m/s): the corridor's sampled direction differs from its lane's by about 0.8°. The 3 s
+civilian drift look-ahead in `overlaps` turned that into about a metre of drift into the next
+lane. A racer one lane over, even at the road edge (n −7.7 against a civilian at −3.6), was
+held at the civilian's speed for 50 s, and its overtakes never cleared it.
+
+**Fix.** A civilian whose speed across the corridor is below 2.5 % of its speed along it
+(`CIV_DRIFT_DEADBAND`, about 1.4°) gets no drift look-ahead. A fixed 0.6 m/s deadband was
+tried first and dropped: it also hid slow city cars pulling across, and Lantern s95 got 17 s
+slower on its pace seed. Test: `a_civilian_keeping_its_lane_next_to_mine_does_not_hold_me_up`
+fails without the fix.
+
+**Measured on round12 984bc3e4.**
+
+| race | skill | seeds | finishers before → after | mean time before → after (s) | walls |
+|---|---|---|---|---|---|
+| Loop 9 | 0.50 | 1–16 | 96/96 → 96/96 | 239.1 → 238.7 | 16 → 16 |
+| Loop 9 | 0.95 | 1–16 | 90/96 → 95/96 | 229.4 → 228.9 | 18 → 39 |
+| Loop 9 (`just pace-loop9`) | 0.50 / 0.95 | 1–8 | 48/48, 44/48 → 48/48, 48/48 | 242.0 / 220.0 → 245.2 / 229.5 | |
+
+City sprint, Grid highway, Hollins and Lantern, seeds 1–8 at s50 and s95: unchanged (Lantern
+s50 within 0.1 s). The s95 floor criterion (≥ 46/48 over seeds 1–8) is met: 48/48.
+
+**Caveat: walls.** With the fixed deadband, the extra walls were one car, sperber_32 on seed 13
+at s95. A racer hit it (`hit 2`) at about 40 m/s, it spun off to the right (n +16) and never
+rejoined: 30 rejoin and reverse cycles until the window closed, 36 wall contacts. The speed-scaled
+run has the same total; its per-car split was not checked. This is a rejoin problem off the road
+after a spin, not this fix's code. It is a follow-up.
