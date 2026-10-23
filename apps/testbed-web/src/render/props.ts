@@ -337,14 +337,17 @@ export class PropView {
     }
     if (this.parkedCount > 0) {
       const h = this.half.subarray(firstCar * 3, firstCar * 3 + 3);
-      this.trafficModel = models.traffic;
-      const info = models.traffic ? sim.carModelInfo(models.traffic) : boxCarInfo([h[0], h[1], h[2]]);
+      // Parked cars are drawn as the model they dent with (`models.parked`); older wasm
+      // builds only name the traffic model.
+      const parkedModel = models.parked ?? models.traffic;
+      this.trafficModel = parkedModel;
+      const info = parkedModel ? sim.carModelInfo(parkedModel) : boxCarInfo([h[0], h[1], h[2]]);
       this.proxyGeo = proxyGeoms(info);
       this.proxyFit = fitOf([this.proxyGeo.paint, this.proxyGeo.detail]);
       this.farGeo = farCarGeometry();
       for (const props of byCell.values()) this.addChunk(props, mats);
-      if (models.traffic) {
-        const carId = models.traffic;
+      if (parkedModel) {
+        const carId = parkedModel;
         // The mid LOD (render/panels.ts loadCarMidMesh), as the fleet's near cars.
         const now = carMidMeshNow(carId);
         if (now) this.setFullMesh(now, info);

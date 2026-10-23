@@ -105,12 +105,45 @@ export class CarFrame {
     return this.parts((p) => p.kind === "interior") ?? new THREE.Box3(new THREE.Vector3(-this.halfW + 0.15, -1.0, 0.22), new THREE.Vector3(this.halfW - 0.15, 0.9, 0.85));
   }
 
-  /** Engine bay contents box (engine kind parts in the front frame). */
+  /** Engine parts (no coolers) in one frame region, or null. */
+  private engineParts(region: "FrameFront" | "FrameRear"): THREE.Box3 | null {
+    return this.parts((p) => p.kind === "engine" && p.region === region && !p.name.includes("radiator") && !p.name.includes("intercooler"));
+  }
+
+  /**
+   * Engine ahead of the cabin. False for mid- and rear-engined models, whose mesh puts the
+   * engine parts in `FrameRear` (lucciola_350, fulmine_v10): their bay is under the trunk /
+   * engine cover, and engine-bay pieces must go there, not in the front trunk.
+   */
+  get frontEngine(): boolean {
+    return this.engineParts("FrameFront") !== null || this.engineParts("FrameRear") === null;
+  }
+
+  /** Frame region the engine is mounted on (bolt-ons in the bay ride with it). */
+  get engineRegion(): "FrameFront" | "FrameRear" {
+    return this.frontEngine ? "FrameFront" : "FrameRear";
+  }
+
+  /** Panel over the engine: the hood, or the trunk / engine cover of a mid-engined car. */
+  get engineLid(): "hood" | "trunk" {
+    return this.frontEngine ? "hood" : "trunk";
+  }
+
+  /** Box of the panel over the engine (`engineLid`). */
+  get engineLidBox(): THREE.Box3 {
+    return this.frontEngine ? this.hood : this.trunk;
+  }
+
+  /** Space under the front lid: the engine bay, or the front trunk of a mid-engined car. */
+  get frontBay(): THREE.Box3 {
+    const front = this.engineParts("FrameFront");
+    if (front) return front;
+    return new THREE.Box3(new THREE.Vector3(-0.45, this.hood.min.y + 0.1, 0.15), new THREE.Vector3(0.4, this.hood.max.y - 0.5, 0.72));
+  }
+
+  /** Engine bay contents box (engine kind parts in the frame region the engine sits on). */
   get engine(): THREE.Box3 {
-    return (
-      this.parts((p) => p.kind === "engine" && p.region === "FrameFront" && !p.name.includes("radiator") && !p.name.includes("intercooler")) ??
-      new THREE.Box3(new THREE.Vector3(-0.45, this.hood.min.y + 0.1, 0.15), new THREE.Vector3(0.4, this.hood.max.y - 0.5, 0.72))
-    );
+    return this.engineParts(this.engineRegion) ?? this.frontBay;
   }
 
   /** Windshield box (null for a model without one). */

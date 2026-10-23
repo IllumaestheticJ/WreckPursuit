@@ -414,7 +414,8 @@ const steelBumper: Builder = (c, p) => {
 /** Aluminium skid plate under the engine. */
 const skidPlate: Builder = (c) => {
   const f = c.frame.bumperFront;
-  const e = c.frame.engine;
+  // Under the front bay (the front trunk of a mid-engined car), never the whole underside.
+  const e = c.frame.frontBay;
   const y0 = e.min.y - 0.1;
   const y1 = f.max.y - 0.08;
   const g = new THREE.Group();

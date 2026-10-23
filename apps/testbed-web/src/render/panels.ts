@@ -1031,6 +1031,17 @@ export interface PanelBodyOptions {
    * tail lamp) like any lamp.
    */
   indicators?: { amber: { left: THREE.Material; right: THREE.Material }; red: { left: THREE.Material; right: THREE.Material } };
+  /**
+   * Material of the reverse lamps (parts named `reverse_lamp*`, which mesh files put in the
+   * `headlight` slot): the owner lights it in reverse gear. Unset: they keep the headlight
+   * material (instanced fleet copies).
+   */
+  reverse?: THREE.Material;
+}
+
+/** Reverse-lamp parts of a mesh (`reverse_lamp_l`, `reverse_lamp_r`, `reverse_lamps`). */
+export function isReversePart(name: string): boolean {
+  return name.startsWith("reverse_lamp");
 }
 
 /** Material keys PanelBody.applyStyle leaves alone (lamps belong to their owner; flashing lenses,
@@ -1042,6 +1053,7 @@ const UNSTYLED = (k: string) =>
   k.startsWith("lightbar_") ||
   k === "emissive_amber" ||
   k === "underglow" ||
+  k === "reverse" ||
   k.startsWith(IND_KEY);
 /** Material keys of indicator lenses (`PanelBodyOptions.indicators`): IND_KEY + "amber" / "red",
  * with "@r" on the right. */
@@ -1116,6 +1128,8 @@ export class PanelBody {
   private readonly keepPaint: boolean;
   /** Indicator parts draw the owner's blink materials (`PanelBodyOptions.indicators`). */
   private indicatorLenses = false;
+  /** Reverse-lamp parts draw `opts.reverse` (key `reverse`). */
+  private reverseLenses = false;
   private onReady: (() => void) | null = null;
   /** Nodes array of the last re-skin (VehicleView swaps in a new array only when they move). */
   private skinnedNodes: Float32Array | null = null;
@@ -1165,6 +1179,10 @@ export class PanelBody {
       this.mats[`${IND_KEY}amber@r`] = ind.amber.right;
       this.mats[`${IND_KEY}red`] = ind.red.left;
       this.mats[`${IND_KEY}red@r`] = ind.red.right;
+    }
+    if (opts.reverse) {
+      this.reverseLenses = true;
+      this.mats.reverse = opts.reverse;
     }
     this.brokenLamp = sm.brokenLamp;
     warmSkinVertices();
@@ -1361,6 +1379,9 @@ export class PanelBody {
       const hue = material === "taillight" ? "red" : "amber";
       return `${IND_KEY}${hue}${indicatorRight(name, rest) ? "@r" : ""}`;
     }
+    // Reverse lamps are white lenses in the headlight slot: they must not glow with the
+    // headlights (cars audit F8); the owner lights them in reverse.
+    if (this.reverseLenses && isReversePart(name)) return "reverse";
     if (!SIDED(material)) return material;
     let cx = 0;
     const n = rest.length / 3;

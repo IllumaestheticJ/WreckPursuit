@@ -15,6 +15,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { store } from "./settings";
+import { carMeshNow, type CarMeshJson } from "./render/panels";
 
 /** Every camera angle. `cinematic` keeps its old id (URL `?cam=`, replay default). */
 export type CameraMode = "chase" | "chaseFar" | "hood" | "bumper" | "cockpit" | "side" | "cinematic" | "orbit";
@@ -163,6 +164,8 @@ export class CameraRig {
   // Cockpit: own car hidden on a layer the camera does not render, plus a dash placeholder.
   private hiddenRoot: THREE.Object3D | null = null;
   private dash: THREE.Group | null = null;
+  /** Eye point the dash was built around (rebuilt when the model's mount points arrive). */
+  private dashEye: THREE.Vector3 | null = null;
   // TV camera.
   private tv: TvShot | null = null;
   private tvCount = 0;
@@ -386,24 +389,25 @@ export class CameraRig {
     size: [number, number, number],
     lookBack: boolean,
   ): number {
-    const [w, l, h] = size;
+    const [, l, h] = size;
+    const mounts = mountPoints(target.userData.carId as string | undefined, size);
     let eye: THREE.Vector3;
     let fov: number;
     if (lookBack) {
       eye = new THREE.Vector3(0, -l / 2 - 0.05, h * 0.75);
       fov = 70;
     } else if (this.mode === "hood") {
-      eye = new THREE.Vector3(0, l * 0.18, h + 0.15);
+      eye = mounts.hood.clone();
       fov = 75;
     } else if (this.mode === "bumper") {
       eye = new THREE.Vector3(0, l / 2 + 0.05, 0.45);
       fov = 75;
     } else {
-      eye = new THREE.Vector3(-w * 0.2, -l * 0.04, h * 0.8);
+      eye = mounts.eye.clone();
       fov = 72;
     }
     const cockpit = this.mode === "cockpit" && !lookBack;
-    if (this.mode === "cockpit") this.hideOwnCar(target, size, cockpit);
+    if (this.mode === "cockpit") this.hideOwnCar(target, size, mounts.eye, cockpit);
     // View direction in chassis space, turned by look-around.
     const yaw = this.lookYaw + (lookBack ? Math.PI : 0);
     const dir = new THREE.Vector3(-Math.sin(yaw), Math.cos(yaw), this.mode === "bumper" ? -0.008 : -0.03 + this.lookPitch);
@@ -416,10 +420,11 @@ export class CameraRig {
   }
 
   /** Cockpit: hide the focused car's own geometry and show a simple dash placeholder. */
-  private hideOwnCar(target: THREE.Object3D, size: [number, number, number], showDash: boolean): void {
-    if (!this.dash || this.hiddenRoot !== target) {
+  private hideOwnCar(target: THREE.Object3D, size: [number, number, number], eye: THREE.Vector3, showDash: boolean): void {
+    if (!this.dash || this.hiddenRoot !== target || this.dashEye !== eye) {
       this.showOwnCar();
-      this.dash = buildDash(size);
+      this.dash = buildDash(size, eye);
+      this.dashEye = eye;
       target.add(this.dash);
       this.hiddenRoot = target;
     }
@@ -585,8 +590,74 @@ const isDrawable = (o: THREE.Object3D) =>
   o instanceof THREE.Mesh || o instanceof THREE.Line || o instanceof THREE.Points || o instanceof THREE.Sprite;
 
 /** Placeholder interior in chassis space: dash top, A-pillars, roof header and a wheel. */
-function buildDash(size: [number, number, number]): THREE.Group {
+/** Driver's eye and hood-camera points of a car, chassis space (+Y forward, +Z up), metres. */
+export interface MountPoints {
+  eye: THREE.Vector3;
+  hood: THREE.Vector3;
+}
+
+/** Mount points by car model, from its panel mesh (null: mesh not loaded / no glass parts). */
+const mountCache = new Map<string, MountPoints | null>();
+
+/** Box of one named mesh part, metres (null when the model has none). */
+function partBox(mesh: CarMeshJson, name: string): THREE.Box3 | null {
+  const part = mesh.parts.find((p) => p.name === name && p.wheel == null);
+  if (!part) return null;
+  const b = new THREE.Box3();
+  const v = new THREE.Vector3();
+  const a = part.positions_mm;
+  for (let i = 0; i < a.length; i += 3) b.expandByPoint(v.set(a[i] * 1e-3, a[i + 1] * 1e-3, a[i + 2] * 1e-3));
+  return b;
+}
+
+/**
+ * Where the driver's eye and the hood camera sit on a model, from its windshield and roof
+ * (cars audit F7): the eye is 0.4 m behind the top of the windshield (but inside the roof, so
+ * cab-forward vans and mid-engined exotics keep the eye in their short cabins, not over the
+ * engine), at 62 % of the windshield's height, on the left seat. The hood camera sits ahead of
+ * the windshield base, at most 0.75 m above it (vans: no longer above the roof). Exported for
+ * tests / e2e.
+ */
+export function mountPointsFromMesh(mesh: CarMeshJson, size: [number, number, number]): MountPoints | null {
+  const ws = partBox(mesh, "windshield");
+  const roof = partBox(mesh, "roof");
+  if (!ws || !roof) return null;
   const [w, l, h] = size;
+  const eyeY = Math.min(Math.max(ws.min.y - 0.4, roof.min.y + 0.2), ws.min.y);
+  const eyeZ = ws.min.z + 0.62 * (ws.max.z - ws.min.z);
+  return {
+    eye: new THREE.Vector3(-w * 0.2, eyeY, eyeZ),
+    hood: new THREE.Vector3(0, Math.max(l * 0.18, ws.max.y - 0.25), Math.min(h + 0.15, ws.min.z + 0.75)),
+  };
+}
+
+/** Mount points of the car `carId` (cached per model), or the body-size formulas when its
+ * mesh has not loaded. */
+export function mountPoints(carId: string | undefined, size: [number, number, number]): MountPoints {
+  if (carId) {
+    let m = mountCache.get(carId);
+    if (m === undefined) {
+      const mesh = carMeshNow(carId);
+      if (mesh !== undefined) mountCache.set(carId, (m = mesh ? mountPointsFromMesh(mesh, size) : null));
+    }
+    if (m) return m;
+  }
+  const [w, l, h] = size;
+  const key = `size ${w} ${l} ${h}`;
+  let f = mountCache.get(key);
+  if (!f) {
+    f = { eye: new THREE.Vector3(-w * 0.2, -l * 0.04, h * 0.8), hood: new THREE.Vector3(0, l * 0.18, h + 0.15) };
+    mountCache.set(key, f);
+  }
+  return f;
+}
+
+/** Placeholder interior around the driver's `eye` (chassis space): dash top, A-pillars, roof
+ * header and a wheel. Proportions follow the eye height (the old body-size layout had the eye
+ * at 0.8 h). */
+function buildDash(size: [number, number, number], eye: THREE.Vector3): THREE.Group {
+  const w = size[0];
+  const h = eye.z / 0.8;
   const g = new THREE.Group();
   g.name = "cockpit-dash";
   const mat = new THREE.MeshStandardMaterial({ color: 0x1c1f24, roughness: 0.9 });
@@ -597,17 +668,17 @@ function buildDash(size: [number, number, number]): THREE.Group {
     g.add(mesh);
     return mesh;
   };
-  const dashY = l * 0.1;
+  const dashY = eye.y + 0.62;
   add(new THREE.BoxGeometry(w * 0.92, 0.5, 0.18), mat, 0, dashY, h * 0.6);
   // Instrument binnacle in front of the driver.
-  add(new THREE.BoxGeometry(0.42, 0.18, 0.1), trim, -w * 0.2, dashY - 0.22, h * 0.7);
+  add(new THREE.BoxGeometry(0.42, 0.18, 0.1), trim, eye.x, dashY - 0.22, h * 0.7);
   // A-pillars lean back toward the roof.
   for (const sx of [-1, 1]) {
     const p = add(new THREE.BoxGeometry(0.07, 0.07, h * 0.42), mat, sx * w * 0.44, dashY - 0.05, h * 0.84);
     p.rotation.x = -0.6;
   }
   add(new THREE.BoxGeometry(w * 0.92, 0.25, 0.06), mat, 0, dashY - 0.3, h * 1.0);
-  const wheel = add(new THREE.TorusGeometry(0.19, 0.025, 8, 28), trim, -w * 0.2, dashY - 0.42, h * 0.62);
+  const wheel = add(new THREE.TorusGeometry(0.19, 0.025, 8, 28), trim, eye.x, dashY - 0.42, h * 0.62);
   wheel.rotation.x = Math.PI / 2 - 0.45;
   return g;
 }

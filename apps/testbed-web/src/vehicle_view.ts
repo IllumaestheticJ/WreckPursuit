@@ -28,6 +28,9 @@ const tmpColor = new THREE.Color();
 const HEAD_GLOW = new THREE.Color(0xfff2c0);
 /** Head-lamp lens base colour (greybox). */
 const HEAD_LENS = 0xfff6d0;
+/** Reverse-lamp lens (clear, unlit) and its glow in reverse gear. */
+const REVERSE_LENS = 0xd8d8d8;
+const REVERSE_GLOW = 0xf4f4ff;
 /** Unlit indicator lens colour over its hue (lit by the scene like the other lenses): amber
  * plastic, and red lenses about as dark as the tail lamps. */
 const IND_LENS_AMBER = 0.4;
@@ -151,6 +154,10 @@ export class VehicleView {
   private readonly headMat: THREE.MeshStandardMaterial;
   private readonly headMatR: THREE.MeshStandardMaterial;
   private readonly tailMat: THREE.MeshStandardMaterial;
+  /** Reverse-lamp lenses of the panel mesh: lit while the car is in reverse gear. */
+  private readonly reverseMat: THREE.MeshStandardMaterial;
+  /** In reverse gear (state record `gear` < 0), from the last update(). */
+  private reversing = false;
   /** Head lamps currently wig-wagging (lens colours modulated). */
   private wigwagging = false;
   /** Police light kit (bar, siren, wig-wag): police units and police models driven by anyone
@@ -225,6 +232,8 @@ export class VehicleView {
   constructor(readonly entity: number, colour: number, livery = false) {
     this.livery = livery;
     this.info = sim.info(entity);
+    // The camera rig reads the model to place the driver's eye and the hood camera (cameras.ts).
+    this.root.userData.carId = this.info.car_id;
     const [w, l, h] = this.info.body_size_m;
     const police = this.info.kind === "Police" || this.info.car_id.startsWith("sentinel_");
     this.lightKit = police;
@@ -249,6 +258,7 @@ export class VehicleView {
     this.headMat = new THREE.MeshStandardMaterial({ color: HEAD_LENS, emissive: 0x000000, flatShading: true, side: THREE.DoubleSide });
     this.headMatR = this.headMat.clone();
     this.tailMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0x000000, flatShading: true, side: THREE.DoubleSide });
+    this.reverseMat = new THREE.MeshStandardMaterial({ color: REVERSE_LENS, emissive: 0x000000, flatShading: true, side: THREE.DoubleSide });
     for (const sx of [-1, 1]) {
       const head = new THREE.Mesh(box(0.3, 0.05, 0.14), sx < 0 ? this.headMat : this.headMatR);
       head.position.set(sx * (w / 2 - 0.25), l / 2 + 0.01, h * 0.45);
@@ -329,6 +339,7 @@ export class VehicleView {
     this.panels = new PanelBody(entity, this.info.car_id, colour, { left: this.headMat, right: this.headMatR }, this.tailMat, {
       keepPaint: this.background,
       indicators: this.indLens,
+      reverse: this.reverseMat,
     });
     this.root.add(this.panels.root);
     // Sim-spawned traffic / police are stock; scenario cars may carry mods.
@@ -381,6 +392,7 @@ export class VehicleView {
   /** Apply interpolated pose + per-frame debug data. `rec`/`prev` are the entity's state
    * records (offset `o` / `po`), `alpha` the interpolation factor, `tel` its telemetry. */
   update(cur: Float32Array, o: number, prev: Float32Array, po: number, alpha: number, tel: Float32Array, dt: number): void {
+    this.reversing = cur[o + S.gear] < -0.5;
     const p = S.pos;
     this.root.position.set(
       prev[po + p] + (cur[o + p] - prev[po + p]) * alpha,
@@ -668,6 +680,8 @@ export class VehicleView {
     // a quarter of the brake glow, which is already ×4 in the hex above).
     this.headMat.emissiveIntensity = this.headMatR.emissiveIntensity = lowpoly ? PALETTE.headlightGlow : 1;
     this.tailMat.emissiveIntensity = lowpoly ? PALETTE.brakeGlow : 1;
+    this.reverseMat.emissive.setHex(this.reversing ? REVERSE_GLOW : 0x000000);
+    this.reverseMat.emissiveIntensity = lowpoly ? PALETTE.headlightGlow : 1;
     const pool = lowpoly && headlights && artStyle.night > 0.2;
     this.headPool.visible = pool;
     if (pool) (this.headPool.material as THREE.ShaderMaterial).uniforms.uStrength.value = 0.35 * Math.min(1, (artStyle.night - 0.2) * 2.5);
@@ -884,6 +898,7 @@ export class VehicleView {
   }
 
   dispose(): void {
+    this.reverseMat.dispose();
     this.look?.dispose();
     this.panels.dispose();
     this.root.removeFromParent();

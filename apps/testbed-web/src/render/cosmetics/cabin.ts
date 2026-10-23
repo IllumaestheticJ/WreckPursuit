@@ -201,8 +201,17 @@ const radiator: Builder = (c, p) => {
 
 /** Front-mount intercooler in the bumper opening, piped into the bay. */
 const intercooler: Builder = (c) => {
-  const f = c.frame.bumperFront;
   const e = c.frame.engine;
+  if (!c.frame.frontEngine) {
+    // Mid / rear engine: a side-mount core beside the engine, fed from the side intake.
+    const g = new THREE.Group();
+    const x = e.max.x + 0.08;
+    g.add(box(0.06, Math.min(0.45, e.max.y - e.min.y), 0.22, c.kit.core, x, (e.min.y + e.max.y) / 2, e.max.z - 0.15));
+    g.add(tube(V(x, e.max.y - 0.1, e.max.z - 0.1), V(0.1, e.max.y - 0.12, e.max.z - 0.05), 0.035, c.kit.alloy));
+    c.body(g, c.frame.engineRegion, "intercooler");
+    return;
+  }
+  const f = c.frame.bumperFront;
   const w = (f.max.x - f.min.x) * 0.62;
   const y = f.max.y - 0.13;
   const z = f.min.z + 0.2;
@@ -221,7 +230,7 @@ const oilCooler: Builder = (c) => {
   const x = (f.max.x - f.min.x) * 0.3;
   const g = new THREE.Group();
   g.add(box(0.24, 0.04, 0.11, c.kit.core, x, f.max.y - 0.1, f.min.z + 0.12));
-  g.add(tube(V(x - 0.1, f.max.y - 0.12, f.min.z + 0.12), V(0.15, c.frame.engine.max.y - 0.2, f.min.z + 0.2), 0.012, c.kit.black));
+  g.add(tube(V(x - 0.1, f.max.y - 0.12, f.min.z + 0.12), V(0.15, c.frame.frontBay.max.y - 0.2, f.min.z + 0.2), 0.012, c.kit.black));
   c.body(g, "FrontBumper", "oil_cooler");
 };
 
@@ -235,7 +244,7 @@ const intake: Builder = (c, p) => {
     g.add(f);
     g.add(cylX(0.078, 0.02, c.kit.chrome, V(at.x + 0.08, at.y, at.z), 14));
   };
-  if (p.style === "cold_air") {
+  if (p.style === "cold_air" && c.frame.frontEngine) {
     const f = c.frame.bumperFront;
     const low = V(f.max.x - 0.25, f.max.y - 0.2, f.min.z + 0.2);
     g.add(bentTube([V(0.1, e.max.y - 0.15, e.max.z - 0.08), V(e.max.x - 0.05, e.max.y - 0.05, e.max.z - 0.1), V(low.x, low.y, e.max.z - 0.25), V(low.x + 0.05, low.y, low.z)], 0.035, c.kit.alloy));
@@ -244,7 +253,7 @@ const intake: Builder = (c, p) => {
     g.add(tube(V(0.05, e.max.y - 0.15, e.max.z - 0.08), V(e.max.x - 0.12, e.max.y - 0.1, e.max.z - 0.1), 0.035, c.kit.alloy));
     filter(V(e.max.x - 0.05, e.max.y - 0.1, e.max.z - 0.1));
   }
-  c.body(g, "FrameFront", "intake");
+  c.body(g, c.frame.engineRegion, "intake");
 };
 
 /** Turbo on the exhaust side of the engine (bigger per stage), with a blow-off valve. */
@@ -262,17 +271,18 @@ const turbo: Builder = (c, p) => {
   const bov = cylY(0.025, 0.05, c.kit.chrome, V(at.x + 0.15, at.y + 0.08, at.z + 0.1));
   bov.rotation.x = Math.PI / 2;
   g.add(bov);
-  if ((p.size ?? 1) >= 3) {
+  if ((p.size ?? 1) >= 3 && c.frame.frontEngine) {
     const f = c.frame.bumperFront;
     g.add(bentTube([V(at.x + 0.12, at.y, at.z), V(at.x + 0.12, f.min.y - 0.1, at.z - 0.1), V(at.x + 0.2, f.max.y - 0.15, f.min.z + 0.25)], 0.032, c.kit.alloy));
   }
-  c.body(g, "FrameFront", "turbo");
+  c.body(g, c.frame.engineRegion, "turbo");
 };
 
-/** Supercharger on top of the engine; stage 2 is a big blower through the hood with a scoop. */
+/** Supercharger on top of the engine; stage 2 is a big blower through the hood (the engine
+ * cover on a mid-engined car) with a scoop. */
 const blower: Builder = (c, p) => {
   const e = c.frame.engine;
-  const h = c.frame.hood;
+  const h = c.frame.engineLidBox;
   const y = (e.min.y + e.max.y) / 2;
   const g = new THREE.Group();
   const big = (p.size ?? 1) >= 2;
@@ -281,7 +291,7 @@ const blower: Builder = (c, p) => {
     for (let k = 0; k < 6; k++) g.add(box(0.29, 0.015, 0.012, c.kit.alloy, 0, y - 0.15 + k * 0.06, e.max.z + 0.1));
     g.add(cylX(0.07, 0.04, c.kit.chrome, V(0, y + 0.2, e.max.z + 0.02)).rotateZ(Math.PI / 2));
   } else {
-    const hoodZ = c.frame.surfaceZ("hood", 0, y, h.max.z);
+    const hoodZ = c.frame.surfaceZ(c.frame.engineLid, 0, y, h.max.z);
     const top = hoodZ + 0.2;
     const base = e.max.z;
     g.add(box(0.34, 0.48, top - base, c.kit.chrome, 0, y, (top + base) / 2));
@@ -291,7 +301,7 @@ const blower: Builder = (c, p) => {
     g.add(box(0.26, 0.012, 0.1, c.kit.hole, 0, y + 0.172, top + 0.07));
     for (const x of [-0.07, 0.07]) g.add(box(0.1, 0.004, 0.08, c.kit.alloy, x, y + 0.176, top + 0.07));
   }
-  c.body(g, "FrameFront", "turbo");
+  c.body(g, c.frame.engineRegion, "turbo");
 };
 
 /** V8 dress-up: chrome rocker covers and a round air cleaner. */
@@ -307,7 +317,7 @@ const engineDress: Builder = (c) => {
   }
   g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.06, 24).rotateX(Math.PI / 2), c.kit.chrome).translateY(y).translateZ(e.max.z + 0.05));
   g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.065, 24).rotateX(Math.PI / 2), c.kit.core).translateY(y).translateZ(e.max.z + 0.05));
-  c.body(g, "FrameFront", "engine");
+  c.body(g, c.frame.engineRegion, "engine");
 };
 
 /** Fuel rails: two red rails with blue fittings along the top of the engine. */
@@ -320,7 +330,7 @@ const fuelRail: Builder = (c) => {
     g.add(tube(V(sx * 0.12, y0, e.max.z), V(sx * 0.12, y1, e.max.z), 0.012, c.kit.red, 8));
     for (const y of [y0, y1]) g.add(box(0.03, 0.03, 0.03, c.kit.blue, sx * 0.12, y, e.max.z));
   }
-  c.body(g, "FrameFront", "fuel_system");
+  c.body(g, c.frame.engineRegion, "fuel_system");
 };
 
 /** Material looks: recorded in the tweaks and applied by look.ts after every style change. */
