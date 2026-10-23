@@ -108,10 +108,10 @@ impl Params {
             lock: c.lock, // fixed: never searched
             rear_stiffness: g.rear_stiffness,
             front_stiffness: g.front_stiffness,
-            yaw_inertia: RideTune::owner().yaw_inertia,
-            spring: RideTune::owner().spring,
-            arb: RideTune::owner().arb,
-            roll_inertia: RideTune::owner().roll_inertia,
+            yaw_inertia: RideTune::shipped().yaw_inertia,
+            spring: RideTune::shipped().spring,
+            arb: RideTune::shipped().arb,
+            roll_inertia: RideTune::shipped().roll_inertia,
             front_peak_slip: c.front_peak_slip,
             front_lat_c: c.front_lat_c,
             front_deep_falloff: c.front_deep_falloff,
@@ -179,7 +179,7 @@ impl Params {
             spring: self.spring,
             arb: self.arb,
             roll_inertia: self.roll_inertia,
-            ..RideTune::owner()
+            ..RideTune::shipped()
         }));
     }
 
@@ -519,7 +519,12 @@ fn main() {
             other => panic!("unknown CAND {other}"),
         };
         // G_YAW / G_SPRING / G_ARB / G_ROLL: override one of the named candidate's ride values.
-        let env = |k: &str, v: f32| std::env::var(k).ok().and_then(|x| x.parse().ok()).unwrap_or(v);
+        let env = |k: &str, v: f32| {
+            std::env::var(k)
+                .ok()
+                .and_then(|x| x.parse().ok())
+                .unwrap_or(v)
+        };
         let p = Params {
             yaw_inertia: env("G_YAW", p.yaw_inertia),
             spring: env("G_SPRING", p.spring),

@@ -345,13 +345,16 @@ fn roster_diff_hashes_are_pinned() {
     // handling (the owner's spin-model tyres, ride and step-14 balance; `wp_vehicle::lab_scope`)
     // and the auto box holds its gear while sliding: tyre / suspension / gearbox changes, not
     // a differential change.
+    // Re-recorded [bless] for candidate G as the shipped handling (physics lead, 2026-10-23,
+    // owner rows physics-4 / physics-5): spin-model tyres, grip balance and ride (yaw inertia
+    // × 1.35, softer springs / bars); tyre / suspension changes, not a differential change.
     let pinned: [(&str, u64); 6] = [
-        ("shiro_turbo", 0x96762dfa9a0ef27a),
-        ("hakone_gt", 0x039ad3a1e0da61e0),
-        ("sperber_32", 0x6e9a9325742bbb98),
-        ("lindwurm_4t", 0xd4407407a6e845d4),
-        ("sentinel_wolfhound", 0xdba3700cd0465e18),
-        ("junkyard_beater", 0x23f0ef1f2a408b23),
+        ("shiro_turbo", 0xcf5038b3b584291d),
+        ("hakone_gt", 0xae7c1261e524a821),
+        ("sperber_32", 0xf336e9adc929d2fc),
+        ("lindwurm_4t", 0x64ff111bc78a5d44),
+        ("sentinel_wolfhound", 0xbd4eca69f5c33034),
+        ("junkyard_beater", 0x6bd2bd830746706f),
     ];
     let mut got = Vec::new();
     for (id, _) in pinned {
