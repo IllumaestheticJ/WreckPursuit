@@ -135,7 +135,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 9.8 s | 197 km/h | 55.0 m | 0.60 g | — |
+| sim | 9.7 s | 194 km/h | 57.6 m | 0.62 g | — |
 | estimate | 9.1 s | 202 km/h | 50.9 m | 0.69 g | 403 |
 
 ## Damage lattice (`data/lattices/brigand_400.json`)

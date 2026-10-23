@@ -1,0 +1,15 @@
+{
+  "id": "halberd_40",
+  "engine": {
+    "cylinders": 8,
+    "layout": "V",
+    "firing": "Even",
+    "induction_exhaust_balance": 0.45,
+    "turbo": true,
+    "supercharger": false,
+    "gain": 1.15
+  },
+  "engine_pack": "engine_rec_v8",
+  "world_pack": "world_rec",
+  "horn_cue": "horn/standard"
+}

@@ -147,7 +147,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 15.7 s | 146 km/h | 46.6 m | 0.69 g | — |
+| sim | 15.6 s | 145 km/h | 46.3 m | 0.71 g | — |
 | estimate | 14.3 s | 150 km/h | 43.6 m | 0.77 g | 324 |
 
 ## Damage lattice (`data/lattices/junkyard_beater.json`)

@@ -139,7 +139,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 5.2 s | 240 km/h | 37.2 m | 0.93 g | — |
+| sim | 5.5 s | 240 km/h | 37.2 m | 0.94 g | — |
 | estimate | 5.6 s | 246 km/h | 35.4 m | 0.99 g | 599 |
 
 ## Damage lattice (`data/lattices/talus_20t.json`)

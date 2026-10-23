@@ -1,0 +1,163 @@
+{
+  "id": "morrigan_55",
+  "display_name": "Morrigan 5.5",
+  "class": "Exotic",
+  "analog_of": "2010s front-mid-engine GT endurance race car, 5.5 L naturally aspirated pushrod V8 (air-restricted), RWD, 6-speed sequential rear transaxle, carbon bodywork, full roll cage",
+  "body_size_m": [2.05, 4.65, 1.18],
+  "mass_kg": 1287.8,
+  "front_weight_frac": 0.48,
+  "wheelbase_m": 2.71,
+  "track_front_m": 1.7,
+  "track_rear_m": 1.68,
+  "cg_height_m": 0.36,
+  "inertia_kgm2": [470.0, 2030.0, 2270.0],
+  "drag_cd_a_m2": 0.925,
+  "lift_front": -0.4,
+  "lift_rear": -0.5,
+  "engine": {
+    "torque_curve_nm": [
+      [1000, 380],
+      [2000, 500],
+      [3000, 580],
+      [3500, 615],
+      [4000, 640],
+      [4500, 655],
+      [5000, 660],
+      [5500, 655],
+      [6000, 640],
+      [6500, 615],
+      [7000, 580],
+      [7300, 550],
+      [7500, 520]
+    ],
+    "idle_rpm": 1500.0,
+    "redline_rpm": 7300.0,
+    "rev_limit_rpm": 7500.0,
+    "inertia_kgm2": 0.12,
+    "engine_brake_nm": 79.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [2.9, 2.07, 1.62, 1.32, 1.11, 0.96],
+    "final_drive": 3.42,
+    "reverse_ratio": 2.8,
+    "diff_front": "Open",
+    "diff_rear": {
+      "Lsd": {
+        "preload_nm": 120.0,
+        "ramp_power": 0.55,
+        "ramp_coast": 0.4
+      }
+    },
+    "clutch_max_nm": 1060.0,
+    "shift_time_s": 0.15
+  },
+  "wheels": [
+    {
+      "position_m": [-0.85, 1.355, 0.331],
+      "radius_m": 0.331,
+      "width_m": 0.305,
+      "mass_kg": 24.0,
+      "tire_id": "semi_slick",
+      "steerable": true,
+      "max_steer_rad": 0.506,
+      "ackermann_frac": 0.3,
+      "camber_rad": -0.0524,
+      "toe_rad": -0.0017,
+      "caster_rad": 0.1222
+    },
+    {
+      "position_m": [0.85, 1.355, 0.331],
+      "radius_m": 0.331,
+      "width_m": 0.305,
+      "mass_kg": 24.0,
+      "tire_id": "semi_slick",
+      "steerable": true,
+      "max_steer_rad": 0.506,
+      "ackermann_frac": 0.3,
+      "camber_rad": -0.0524,
+      "toe_rad": -0.0017,
+      "caster_rad": 0.1222
+    },
+    {
+      "position_m": [-0.84, -1.355, 0.348],
+      "radius_m": 0.348,
+      "width_m": 0.325,
+      "mass_kg": 26.0,
+      "tire_id": "semi_slick",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0349,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.84, -1.355, 0.348],
+      "radius_m": 0.348,
+      "width_m": 0.325,
+      "mass_kg": 26.0,
+      "tire_id": "semi_slick",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0349,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 76100.0,
+      "damper_bump_ns_per_m": 3910.0,
+      "damper_rebound_ns_per_m": 7820.0,
+      "travel_m": 0.06,
+      "preload_m": 0.02,
+      "arb_n_per_m": 6600.0,
+      "bump_stop_n_per_m": 300000.0
+    },
+    {
+      "spring_n_per_m": 76100.0,
+      "damper_bump_ns_per_m": 3910.0,
+      "damper_rebound_ns_per_m": 7820.0,
+      "travel_m": 0.06,
+      "preload_m": 0.02,
+      "arb_n_per_m": 6600.0,
+      "bump_stop_n_per_m": 300000.0
+    },
+    {
+      "spring_n_per_m": 95600.0,
+      "damper_bump_ns_per_m": 4560.0,
+      "damper_rebound_ns_per_m": 9120.0,
+      "travel_m": 0.08,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 300000.0
+    },
+    {
+      "spring_n_per_m": 95600.0,
+      "damper_bump_ns_per_m": 4560.0,
+      "damper_rebound_ns_per_m": 9120.0,
+      "travel_m": 0.08,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 300000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 2620.0,
+    "max_torque_rear_nm": 1390.0,
+    "bias_front": 0.5,
+    "handbrake_rear_nm": 1730.0
+  },
+  "steering": {
+    "ratio": 11.5,
+    "rack_speed_rad_per_s": 2.2,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.4, 0.85],
+  "lattice_id": "morrigan_55",
+  "base_price": 120000,
+  "durability_class": 3,
+  "fuel_capacity_l": 100.0
+}

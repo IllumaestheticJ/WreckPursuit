@@ -62,6 +62,16 @@ TARGETS = {
     "fulmine_v10": dict(t0100=(3.2, 3.8), lat=(0.95, 1.08), brake=(31, 36), why="road tests of 2010s mid-engine NA V10 AWD supercars (dual-clutch, launch control)"),
     "sentinel_warden": dict(t0100=(8.0, 10.0), lat=(0.75, 0.85), brake=(39, 46), why="period fleet evaluations of late-80s 5.7 L body-on-frame police sedans"),
     "sentinel_vigil": dict(t0100=(5.2, 6.2), lat=(0.85, 0.95), brake=(35, 40), why="fleet evaluation figures for 2010s 5.0 V8 muscle-coupe pursuit cars (automatic)"),
+    # Wave 3 (2026-10-23): supercars, race cars, rally raid / pre-runner.
+    "halberd_40": dict(t0100=(2.8, 3.4), lat=(1.08, 1.22), brake=(29, 33.5), why="road tests of 2020s mid-engine TT V8 RWD supercars on factory track tyres (launch control)"),
+    "ombra_v12": dict(t0100=(2.9, 3.5), lat=(0.98, 1.08), brake=(30, 35), why="road tests of 2010s mid-engine NA V12 AWD flagships (automated manual, launch control)"),
+    "ostwind_6t": dict(t0100=(2.7, 3.3), lat=(0.95, 1.05), brake=(30, 35), why="road tests of 2020s rear-engine TT flat-six AWD flagships (dual-clutch, launch control)"),
+    "kagero_hx": dict(t0100=(3.0, 3.6), lat=(0.95, 1.05), brake=(31, 35), why="road tests of 2010s mid-engine hybrid AWD supercars"),
+    "morrigan_55": dict(t0100=(3.4, 4.2), lat=(1.12, 1.35), brake=(28, 33), why="on-board telemetry of 2010s GT endurance cars (low-speed skidpad, aero not yet working; semi-slick stand-in for slicks)"),
+    "nyx_proto": dict(t0100=(3.0, 3.8), lat=(1.20, 1.50), brake=(27, 32), why="on-board telemetry of 2010s spec sports prototypes (semi-slick stand-in for slicks)"),
+    "merlo_20t": dict(t0100=(4.8, 5.6), lat=(1.02, 1.20), brake=(30, 35), why="on-board telemetry of 2010s FWD touring-car racers (semi-slick stand-in for slicks)"),
+    "mesquite_pr": dict(t0100=(7.0, 8.5), lat=(0.60, 0.72), brake=(44, 55), why="road tests of 2010s full-size off-road performance pickups on 35-inch all-terrains"),
+    "erg_hamada": dict(t0100=(5.5, 7.0), lat=(0.62, 0.80), brake=(42, 50), why="stage telemetry of rally-raid prototypes, tarmac figures on all-terrain rubber"),
 }
 
 # Barrier matrix (prompt 03). Expected outcome per durability class in Simulation mode; Arcade
@@ -331,11 +341,20 @@ SIM_NOTES = {
     ("Furrow 2.4", "100-0"): "0.2 m short of the band: same cause as the van — an empty light pickup on car-type `street` tires stops a little better than period road tests on 90s LT tires.",
     ("Sentinel Bastion", "skidpad"): "C — ≤ 0.01 g under; tall body-on-frame SUV.",
     ("Brigand 400", "skidpad"): "same cause as the Ironside: 02's `vintage_bias` on a soft, two-tonne, 0.56 m-CG chassis gives 0.60 g vs 0.66-0.76 g period figures. Not retuned on the chassis side; the joint `vintage_bias` re-tune with 02 covers both 70s cars.",
+    ("Halberd 40", "0-100"): "A + traction: 513 kW through the rears only (345 kW/t). The estimate (3.7 s) assumes a perfect launch; the sim's TCS-on launch holds wheelspin well below the semi-slick's peak in 1st and 2nd. On `sport` tyres it was 4.45 s. Road tests use launch control; the AWD Fulmine/Ombra are the off-the-line kings by design.",
+    ("Ombra V12", "100-0"): "A — 0.6 m over; heaviest-but-one supercar on `sport` tyres with the 1.5 × lock-torque ABS ceiling (Fulmine 35.4 m, same cause).",
+    ("Ostwind 6T", "0-100"): "A — 0.5 s over with a fixed 30 % front split (was 4.85 s on `AwdOnDemand`, which is built for front-biased cars and stayed open at launch). The estimate is 3.8 s too: 61 % rear weight on `sport` tyres, 8-speed first is short (56 km/h) so it shifts twice.",
+    ("Ostwind 6T", "100-0"): "A — 1.1 m over on `sport` tyres; rear calipers enlarged (390 → 410 mm, 2 pistons 40/36) took it from 37.8 to 36.1 m. Same ABS-cycle cause as the Fulmine.",
+    ("Kagero HX", "0-100"): "A — 0.3 s over; 1833 kg on `sport` tyres. The electric-assist torque is modelled at the crank (no separate motor model), so the TCS launch treats it like any other engine.",
+    ("Kagero HX", "100-0"): "A — 1.2 m over: heaviest supercar on `sport` tyres; regenerative braking is not modelled.",
+    ("Morrigan 5.5", "0-100"): "A + gearing: race-tall first gear (96 km/h) on a restricted V8; standing starts are not what the car is geared for (endurance races start rolling). 0.1 s over.",
+    ("Nyx Proto", "0-100"): "A + gearing: 122 km/h first gear and a 9200 rpm engine with little low-end torque; the sim's TCS-on clutch launch bogs it. Rolling-start car; 0.2 s over.",
 }
 
 BARRIER_NOTES = {
     ("Sentinel Cruiser", "offset 40% 56 km/h"): "near miss: struck-side front suspension intrusion 0.084 m vs its 0.09 m failure threshold (health 0.51; wheel mount 0.078 m) — the `cruiser` profile's reinforced rails and double bumper beam plus the push bar spread the offset load. Total loss anyway (engine, radiator, battery, rack failed). Appeared with B's ab6970d generator (rail bracing); not patched.",
     ("Sentinel Wolfhound", "offset 40% 56 km/h"): "same near miss as the Cruiser (same `cruiser` profile + push bar); total loss anyway.",
+    ("Nyx Proto", "frontal 56 km/h"): "crush ≈ 1.3-1.4 m vs the 0.35-1.3 band (total loss as expected, cabin intrusion ≈ 0). gen-lattice has no flat sports-prototype profile: the 1.05 m-tall, 60 mm-clearance mid-engine body is a `coupe` lattice whose whole 1 m nose cone folds. Durability 2 → 3, lattice mass 0.16 → 0.20 and a ×1.8 crash nose took it from 1.91 m; strength and nose section beyond that move it non-monotonically (beam-breaking order), so it is left as a documented miss for 03 (prototype profile request in docs/integration/cars.md).",
 }
 
 

@@ -139,7 +139,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 6.0 s | 282 km/h | 38.9 m | 0.93 g | — |
+| sim | 5.9 s | 276 km/h | 38.5 m | 0.90 g | — |
 | estimate | 5.7 s | 289 km/h | 35.4 m | 0.98 g | 607 |
 
 ## Damage lattice (`data/lattices/hakone_gt.json`)

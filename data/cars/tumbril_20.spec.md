@@ -138,7 +138,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 17.7 s | 142 km/h | 45.0 m | 0.68 g | — |
+| sim | 17.5 s | 140 km/h | 45.6 m | 0.72 g | — |
 | estimate | 15.6 s | 147 km/h | 41.4 m | 0.78 g | 315 |
 
 ## Damage lattice (`data/lattices/tumbril_20.json`)

@@ -1,0 +1,164 @@
+{
+  "id": "nyx_proto",
+  "display_name": "Nyx Proto",
+  "class": "Exotic",
+  "analog_of": "2010s closed-cockpit endurance sports prototype, 4.2 L naturally aspirated V8 (air-restricted), RWD, 6-speed sequential, carbon monocoque, very high downforce",
+  "body_size_m": [1.9, 4.65, 1.05],
+  "mass_kg": 977.1,
+  "front_weight_frac": 0.45,
+  "wheelbase_m": 3.0,
+  "track_front_m": 1.62,
+  "track_rear_m": 1.58,
+  "cg_height_m": 0.3,
+  "inertia_kgm2": [270.0, 1330.0, 1480.0],
+  "drag_cd_a_m2": 0.83,
+  "lift_front": -0.9,
+  "lift_rear": -1.1,
+  "engine": {
+    "torque_curve_nm": [
+      [1500, 360],
+      [2500, 420],
+      [3500, 465],
+      [4500, 495],
+      [5500, 510],
+      [6000, 515],
+      [6500, 515],
+      [7000, 510],
+      [7500, 500],
+      [8000, 490],
+      [8500, 470],
+      [9000, 445],
+      [9200, 430],
+      [9400, 400]
+    ],
+    "idle_rpm": 1800.0,
+    "redline_rpm": 9200.0,
+    "rev_limit_rpm": 9400.0,
+    "inertia_kgm2": 0.1,
+    "engine_brake_nm": 72.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [3.0, 2.2, 1.75, 1.45, 1.24, 1.08],
+    "final_drive": 3.3,
+    "reverse_ratio": 2.8,
+    "diff_front": "Open",
+    "diff_rear": {
+      "Lsd": {
+        "preload_nm": 100.0,
+        "ramp_power": 0.5,
+        "ramp_coast": 0.4
+      }
+    },
+    "clutch_max_nm": 820.0,
+    "shift_time_s": 0.15
+  },
+  "wheels": [
+    {
+      "position_m": [-0.81, 1.5, 0.331],
+      "radius_m": 0.331,
+      "width_m": 0.305,
+      "mass_kg": 20.0,
+      "tire_id": "semi_slick",
+      "steerable": true,
+      "max_steer_rad": 0.511,
+      "ackermann_frac": 0.3,
+      "camber_rad": -0.0559,
+      "toe_rad": -0.0017,
+      "caster_rad": 0.1047
+    },
+    {
+      "position_m": [0.81, 1.5, 0.331],
+      "radius_m": 0.331,
+      "width_m": 0.305,
+      "mass_kg": 20.0,
+      "tire_id": "semi_slick",
+      "steerable": true,
+      "max_steer_rad": 0.511,
+      "ackermann_frac": 0.3,
+      "camber_rad": -0.0559,
+      "toe_rad": -0.0017,
+      "caster_rad": 0.1047
+    },
+    {
+      "position_m": [-0.79, -1.5, 0.348],
+      "radius_m": 0.348,
+      "width_m": 0.325,
+      "mass_kg": 22.0,
+      "tire_id": "semi_slick",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0384,
+      "toe_rad": 0.0035,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.79, -1.5, 0.348],
+      "radius_m": 0.348,
+      "width_m": 0.325,
+      "mass_kg": 22.0,
+      "tire_id": "semi_slick",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0384,
+      "toe_rad": 0.0035,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 71000.0,
+      "damper_bump_ns_per_m": 3170.0,
+      "damper_rebound_ns_per_m": 6340.0,
+      "travel_m": 0.045,
+      "preload_m": 0.02,
+      "arb_n_per_m": 2500.0,
+      "bump_stop_n_per_m": 350000.0
+    },
+    {
+      "spring_n_per_m": 71000.0,
+      "damper_bump_ns_per_m": 3170.0,
+      "damper_rebound_ns_per_m": 6340.0,
+      "travel_m": 0.045,
+      "preload_m": 0.02,
+      "arb_n_per_m": 2500.0,
+      "bump_stop_n_per_m": 350000.0
+    },
+    {
+      "spring_n_per_m": 99700.0,
+      "damper_bump_ns_per_m": 4160.0,
+      "damper_rebound_ns_per_m": 8320.0,
+      "travel_m": 0.06,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 350000.0
+    },
+    {
+      "spring_n_per_m": 99700.0,
+      "damper_bump_ns_per_m": 4160.0,
+      "damper_rebound_ns_per_m": 8320.0,
+      "travel_m": 0.06,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 350000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 1780.0,
+    "max_torque_rear_nm": 960.0,
+    "bias_front": 0.5,
+    "handbrake_rear_nm": 1710.0
+  },
+  "steering": {
+    "ratio": 10.5,
+    "rack_speed_rad_per_s": 2.4,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.6, 0.8],
+  "lattice_id": "nyx_proto",
+  "base_price": 125000,
+  "durability_class": 3,
+  "fuel_capacity_l": 75.0
+}

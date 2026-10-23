@@ -138,7 +138,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 8.1 s | 206 km/h | 44.9 m | 0.65 g | — |
+| sim | 8.0 s | 205 km/h | 44.5 m | 0.63 g | — |
 | estimate | 8.0 s | 221 km/h | 45.1 m | 0.71 g | 440 |
 
 ## Damage lattice (`data/lattices/hauler_1500.json`)

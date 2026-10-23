@@ -142,3 +142,49 @@ reason = "late-80s body-on-frame police sedan: limited-slip rear from the police
 [cars.sentinel_vigil]
 rear = { type = "clutch", preload_nm = 60.0, accel = 0.50, decel = 0.35 }
 reason = "2010s V8 pursuit coupe: factory clutch LSD (performance package)"
+
+# Wave 3 (PR #61 port, 2026-10-23). Same setups as their car files (no behaviour change).
+
+[cars.halberd_40]
+rear = { type = "clutch", preload_nm = 50.0, accel = 0.40, decel = 0.25 }
+reason = "2020s mid-engine TT V8 supercar, RWD: clutch-type rear LSD (factory e-diff stand-in)"
+
+[cars.ombra_v12]
+front = { type = "open" }
+rear = { type = "clutch", preload_nm = 60.0, accel = 0.45, decel = 0.30 }
+centre = { type = "default" }
+reason = "2010s mid-engine V12 flagship: permanent AWD (25 % front), open front, clutch rear LSD"
+
+[cars.ostwind_6t]
+front = { type = "open" }
+rear = { type = "clutch", preload_nm = 60.0, accel = 0.45, decel = 0.30 }
+centre = { type = "default" }
+reason = "2020s rear-engine TT flat-six flagship: rear-biased AWD (30 % front), clutch rear LSD"
+
+[cars.kagero_hx]
+front = { type = "clutch", preload_nm = 30.0, accel = 0.30, decel = 0.10 }
+rear = { type = "clutch", preload_nm = 50.0, accel = 0.40, decel = 0.25 }
+centre = { type = "default" }
+reason = "2010s mid-engine hybrid supercar: electric front axle modelled as a 35 % AWD split, plate LSDs"
+
+[cars.morrigan_55]
+rear = { type = "clutch", preload_nm = 120.0, accel = 0.55, decel = 0.40 }
+reason = "2010s GT endurance racer: high-preload plated race diff"
+
+[cars.nyx_proto]
+rear = { type = "clutch", preload_nm = 100.0, accel = 0.50, decel = 0.40 }
+reason = "2010s sports prototype: plated race diff"
+
+[cars.merlo_20t]
+front = { type = "clutch", preload_nm = 80.0, accel = 0.60, decel = 0.35 }
+reason = "2010s FWD touring-car racer: plated front race diff (torque steer is part of the job)"
+
+[cars.mesquite_pr]
+rear = { type = "clutch", preload_nm = 80.0, accel = 0.50, decel = 0.30 }
+reason = "2010s off-road performance pickup: rear limited-slip (locker stand-in)"
+
+[cars.erg_hamada]
+front = { type = "clutch", preload_nm = 100.0, accel = 0.50, decel = 0.40 }
+rear = { type = "clutch", preload_nm = 100.0, accel = 0.50, decel = 0.40 }
+centre = { type = "default" }
+reason = "2020s rally-raid prototype: permanent 50/50 4WD with plated diffs front and rear"

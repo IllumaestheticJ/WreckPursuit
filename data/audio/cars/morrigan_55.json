@@ -1,0 +1,15 @@
+{
+  "id": "morrigan_55",
+  "engine": {
+    "cylinders": 8,
+    "layout": "V",
+    "firing": "CrossPlane",
+    "induction_exhaust_balance": 0.35,
+    "turbo": false,
+    "supercharger": false,
+    "gain": 1.25
+  },
+  "engine_pack": "engine_rec_v8",
+  "world_pack": "world_rec",
+  "horn_cue": "horn/standard"
+}

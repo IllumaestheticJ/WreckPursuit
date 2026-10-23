@@ -1,0 +1,175 @@
+{
+  "id": "kagero_hx",
+  "display_name": "Kagero HX",
+  "class": "Exotic",
+  "analog_of": "2010s Japanese mid-engine hybrid supercar, 3.5 L twin-turbo V6 plus electric front axle (modelled as fixed AWD split), 9-speed dual-clutch",
+  "body_size_m": [1.94, 4.49, 1.21],
+  "mass_kg": 1833.0,
+  "front_weight_frac": 0.42,
+  "wheelbase_m": 2.63,
+  "track_front_m": 1.665,
+  "track_rear_m": 1.63,
+  "cg_height_m": 0.41,
+  "inertia_kgm2": [620.0, 2510.0, 2780.0],
+  "drag_cd_a_m2": 0.662,
+  "lift_front": -0.05,
+  "lift_rear": -0.12,
+  "engine": {
+    "torque_curve_nm": [
+      [1000, 520],
+      [1500, 600],
+      [2000, 640],
+      [2500, 646],
+      [3000, 646],
+      [3500, 646],
+      [4000, 646],
+      [4500, 640],
+      [5000, 630],
+      [5500, 620],
+      [6000, 610],
+      [6500, 600],
+      [7000, 570],
+      [7400, 535],
+      [7600, 510]
+    ],
+    "idle_rpm": 900.0,
+    "redline_rpm": 7400.0,
+    "rev_limit_rpm": 7600.0,
+    "inertia_kgm2": 0.14,
+    "engine_brake_nm": 65.0
+  },
+  "drivetrain": {
+    "layout": {
+      "Awd": {
+        "front_split": 0.35
+      }
+    },
+    "gear_ratios": [3.84, 2.86, 2.2, 1.73, 1.37, 1.1, 0.89, 0.72, 0.61],
+    "final_drive": 3.45,
+    "reverse_ratio": 2.9,
+    "diff_front": {
+      "Lsd": {
+        "preload_nm": 30.0,
+        "ramp_power": 0.3,
+        "ramp_coast": 0.1
+      }
+    },
+    "diff_rear": {
+      "Lsd": {
+        "preload_nm": 50.0,
+        "ramp_power": 0.4,
+        "ramp_coast": 0.25
+      }
+    },
+    "clutch_max_nm": 940.0,
+    "shift_time_s": 0.18
+  },
+  "wheels": [
+    {
+      "position_m": [-0.833, 1.315, 0.317],
+      "radius_m": 0.317,
+      "width_m": 0.245,
+      "mass_kg": 22.0,
+      "tire_id": "sport",
+      "steerable": true,
+      "max_steer_rad": 0.548,
+      "ackermann_frac": 0.5,
+      "camber_rad": -0.0209,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1222
+    },
+    {
+      "position_m": [0.833, 1.315, 0.317],
+      "radius_m": 0.317,
+      "width_m": 0.245,
+      "mass_kg": 22.0,
+      "tire_id": "sport",
+      "steerable": true,
+      "max_steer_rad": 0.548,
+      "ackermann_frac": 0.5,
+      "camber_rad": -0.0209,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1222
+    },
+    {
+      "position_m": [-0.815, -1.315, 0.332],
+      "radius_m": 0.332,
+      "width_m": 0.295,
+      "mass_kg": 24.0,
+      "tire_id": "sport",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0279,
+      "toe_rad": 0.0035,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.815, -1.315, 0.332],
+      "radius_m": 0.332,
+      "width_m": 0.295,
+      "mass_kg": 24.0,
+      "tire_id": "sport",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0279,
+      "toe_rad": 0.0035,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 49000.0,
+      "damper_bump_ns_per_m": 3040.0,
+      "damper_rebound_ns_per_m": 6080.0,
+      "travel_m": 0.12,
+      "preload_m": 0.02,
+      "arb_n_per_m": 13300.0,
+      "bump_stop_n_per_m": 200000.0
+    },
+    {
+      "spring_n_per_m": 49000.0,
+      "damper_bump_ns_per_m": 3040.0,
+      "damper_rebound_ns_per_m": 6080.0,
+      "travel_m": 0.12,
+      "preload_m": 0.02,
+      "arb_n_per_m": 13300.0,
+      "bump_stop_n_per_m": 200000.0
+    },
+    {
+      "spring_n_per_m": 84200.0,
+      "damper_bump_ns_per_m": 4700.0,
+      "damper_rebound_ns_per_m": 9410.0,
+      "travel_m": 0.13,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 200000.0
+    },
+    {
+      "spring_n_per_m": 84200.0,
+      "damper_bump_ns_per_m": 4700.0,
+      "damper_rebound_ns_per_m": 9410.0,
+      "travel_m": 0.13,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 200000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 2960.0,
+    "max_torque_rear_nm": 1530.0,
+    "bias_front": 0.5,
+    "handbrake_rear_nm": 2600.0
+  },
+  "steering": {
+    "ratio": 14.0,
+    "rack_speed_rad_per_s": 1.7,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "kagero_hx",
+  "base_price": 100000,
+  "durability_class": 3,
+  "fuel_capacity_l": 59.0
+}

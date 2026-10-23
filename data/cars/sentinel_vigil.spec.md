@@ -143,7 +143,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 5.7 s | 275 km/h | 38.2 m | 0.87 g | — |
+| sim | 5.7 s | 270 km/h | 38.2 m | 0.87 g | — |
 | estimate | 5.7 s | 282 km/h | 36.3 m | 0.95 g | 601 |
 
 ## Damage lattice (`data/lattices/sentinel_vigil.json`)

@@ -373,7 +373,9 @@ def derive(c: dict) -> tuple[dict, dict]:
             "rack_speed_rad_per_s": r(st["rack_speed"], 2),
             "ffb_scale": 1.0,
         },
-        "aero_downforce_coeffs": [0.0, 0.0],
+        # Optional add-on aero (wings, splitters) on top of the body's lift: race cars and
+        # active-aero supercars set `downforce`; everything else leaves it to mods.
+        "aero_downforce_coeffs": [r(x, 3) for x in c.get("downforce", (0.0, 0.0))],
         "lattice_id": c["id"],
         "base_price": int(c["price"]),
         "durability_class": int(c["durability"]),
@@ -440,6 +442,7 @@ ERA = {
     "90s": ("hss", 0.75),
     "2000s": ("hss", 0.90),
     "2010s": ("hss", 1.00),
+    "2020s": ("hss", 1.00),
 }
 
 # gen-lattice DEFAULT_SECTIONS (m², for a 1400 kg car at strength 1), used to recognise beam
@@ -549,7 +552,23 @@ def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
             f"{v} {k}" for k, v in sorted(counts.items()))
             + f" → {era_mat} × {era_k:.2f} section" + (" (no door intrusion beams: × 0.5)" if c["era"] == "70s" else "") + ".")
     else:
-        log.append("Era `2010s`: gen-lattice's default HSS passenger cell kept as is.")
+        log.append(f"Era `{c['era']}`: gen-lattice's default HSS passenger cell kept as is.")
+
+    # 1b. Roll cage / composite survival cell: the same cabin roles again, × `cell_scale`.
+    cell = lt.get("cell_scale")
+    if cell:
+        n_cell = 0
+        for bm in beams:
+            if bm["a"] in engine or bm["b"] in engine:
+                continue
+            regions = {reg(bm["a"]), reg(bm["b"])}
+            if not regions <= {"Cabin", "FrameLeft", "FrameRight"}:
+                continue
+            if bm["material_id"] in ("hss", "mild_steel") and bm["area_m2"] >= SEC["cross_member"] * ms * 0.5:
+                bm["area_m2"] *= cell
+                n_cell += 1
+        log.append(f"{lt['cell_why']}: {n_cell} passenger-cell beams (cabin, sills, pillars, roof "
+                   f"rails, cross-members) × {cell:.2f} section.")
 
     # 2. Panels, hood, bumpers.
     n_hood = n_panel = n_bump = 0
@@ -700,6 +719,19 @@ def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
                    f"{n_alu} rear-subframe beams → aluminum ×1.5 section (sacrificial); gearbox "
                    f"and half-shafts at the rear axle, side fuel tanks at the sills behind the "
                    f"seats; engine fails at 0.12 m, gearbox 0.08 m.")
+
+    # 4b. Reinforced front crash structure (bonded crash boxes / homologated crash nose) on top
+    # of the rails: same front-rail beams as the mid-engine step, × `nose_scale`.
+    if lt.get("nose_scale"):
+        n_nose = 0
+        for bm in beams:
+            a_, b_ = bm["a"], bm["b"]
+            if (bm["material_id"] == "hss" and reg(a_) == "FrameFront" and reg(b_) == "FrameFront"
+                    and is_rail_x(a_) and is_rail_x(b_) and close(pos(a_)[0], pos(b_)[0])
+                    and abs(pos(a_)[1] - pos(b_)[1]) > 1e-3 and close(pos(a_)[2], pos(b_)[2])):
+                bm["area_m2"] *= lt["nose_scale"]
+                n_nose += 1
+        log.append(f"{lt['nose_why']}: {n_nose} front-rail beams × {lt['nose_scale']:.2f} section.")
 
     # 5. Layout-specific component placement.
     lay = c["trans"]["layout"]
@@ -912,10 +944,19 @@ def spec_md(c: dict, j: dict, d: dict, est: dict, lat_log: list[str], lat: dict)
     ]))
     o.append("\n## Aerodynamics\n")
     extra = f" + {c['extra_cda']:.2f} m² (lightbar/push bar)" if c["extra_cda"] else ""
+    if c.get("downforce"):
+        df = c["downforce"]
+        net_f, net_r = df[0] - c["lift"][0], df[1] - c["lift"][1]
+        q250 = 0.5 * 1.225 * (250 / 3.6) ** 2
+        aero_txt = (f"Add-on aero `aero_downforce_coeffs` = {df[0]:.2f} F / {df[1]:.2f} R m² "
+                    f"({c['downforce_why']}). Net downforce Cl·A {net_f:.2f} F / {net_r:.2f} R m² "
+                    f"→ {(net_f + net_r) * q250 / G:.0f} kg at 250 km/h, "
+                    f"{net_f / (net_f + net_r):.0%} front (static weight {c['front_frac']:.0%} front).")
+    else:
+        aero_txt = "No add-on aero (`aero_downforce_coeffs` = 0, mods add it)."
     o.append(f"Frontal area A = {c['area_k']:.2f}·W·H = {d['area']:.2f} m²; Cd = {c['cd']:.2f} → "
              f"**CdA = {d['cda']:.3f} m²**{extra}. Lift Cl·A front/rear = {c['lift'][0]:+.2f} / "
-             f"{c['lift'][1]:+.2f} m² (class-typical; positive = lift). No add-on aero "
-             f"(`aero_downforce_coeffs` = 0, mods add it).\n")
+             f"{c['lift'][1]:+.2f} m² (class-typical; positive = lift). {aero_txt}\n")
 
     o.append("## Engine\n")
     o.append(f"{e['desc']}. {e['why']}\n")

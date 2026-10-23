@@ -145,7 +145,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 3.6 s | 337 km/h | 34.9 m | 0.95 g | — |
+| sim | 3.6 s | 333 km/h | 35.6 m | 0.98 g | — |
 | estimate | 3.5 s | 336 km/h | 34.7 m | 0.98 g | 820 |
 
 ## Damage lattice (`data/lattices/fulmine_v10.json`)
