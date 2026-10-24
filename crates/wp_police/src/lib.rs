@@ -461,6 +461,11 @@ pub(crate) struct RacerObs {
     pub(crate) nearest_unit_m: f32,
     /// Nearest ground unit chasing this racer, m.
     pub(crate) nearest_chaser_m: f32,
+    /// Nearest ground unit / chaser that is not standing in the racer's lane in front of it
+    /// (row 168: [`crate::heat::RuleInputs::blocked_ahead_only`]), m.
+    pub(crate) nearest_unit_free_m: f32,
+    /// See `nearest_unit_free_m`, m.
+    pub(crate) nearest_chaser_free_m: f32,
 }
 
 /// Police state for one instance.
@@ -495,6 +500,9 @@ pub struct PoliceSystem {
     /// Racer velocity reported on the previous step, m/s: how the racer came into this tick's
     /// contacts (by the time a contact is reported, the hit has already changed its velocity).
     pub(crate) prev_vel: BTreeMap<EntityId, [f32; 3]>,
+    /// Each racer's direction of travel when it last moved faster than 1 m/s (unit vector):
+    /// which way a stopped racer faces (row 168, queues).
+    pub(crate) racer_dir: BTreeMap<EntityId, [f32; 2]>,
     pub(crate) units: Vec<Unit>,
     pub(crate) next_unit: u32,
     pub(crate) incidents: Vec<Incident>,
@@ -684,6 +692,7 @@ impl PoliceSystem {
             trails: BTreeMap::new(),
             prev_pos: BTreeMap::new(),
             prev_vel: BTreeMap::new(),
+            racer_dir: BTreeMap::new(),
             units: Vec::new(),
             next_unit: 1,
             incidents: Vec::new(),
@@ -775,6 +784,19 @@ impl PoliceSystem {
             self.prev_vel.insert(r.entity, rec.vel);
             rec.pos = r.pos;
             rec.vel = r.vel;
+            let sp = (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt();
+            if sp > 1.0 {
+                let d = [r.vel[0] / sp, r.vel[1] / sp];
+                // Backing out of a queue flips the velocity at once; a turn sweeps round
+                // through the angles in between. Keep the facing through a reversal.
+                let flipped = self
+                    .racer_dir
+                    .get(&r.entity)
+                    .is_some_and(|o| o[0] * d[0] + o[1] * d[1] < -0.5);
+                if !flipped {
+                    self.racer_dir.insert(r.entity, d);
+                }
+            }
             let p = xy(r.pos);
             // Spike strips.
             if let Some(prev) = self.prev_pos.get(&r.entity).copied() {

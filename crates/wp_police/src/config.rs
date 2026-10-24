@@ -285,6 +285,15 @@ pub struct CaptureConfig {
     /// police held up behind other cars 20 m away is captured rather than waited for forever
     /// (Hollins hairpin, lead/opponent-pace), m.
     pub pinned_unit_radius_m: f32,
+    /// Row 168: both rules wait at least this long, s, when the only units that count stand
+    /// in the racer's lane in front of it (a pursuer, interceptor or patrol, not a roadblock,
+    /// spike car or box-in).
+    #[serde(default = "default_blocked_ahead_stop_time_s")]
+    pub blocked_ahead_stop_time_s: f32,
+}
+
+fn default_blocked_ahead_stop_time_s() -> f32 {
+    12.0
 }
 
 /// Safehouse rule.
