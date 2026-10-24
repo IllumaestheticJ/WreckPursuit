@@ -77,7 +77,16 @@ impl DetachedPart {
                     .iter()
                     .map(|p| Vector::new(p[0], p[1], p[2]))
                     .collect();
-                (rot, ColliderBuilder::convex_hull(&pts)?.mass(mass).build())
+                // Box mass properties, not the hull's own (`hull::box_mass_properties`: the
+                // hull's inertia frame is not bit-identical between native and wasm).
+                let mprops =
+                    crate::hull::bounding_box_mass_properties(&self.hull_points_local, mass);
+                (
+                    rot,
+                    ColliderBuilder::convex_hull(&pts)?
+                        .mass_properties(mprops)
+                        .build(),
+                )
             }
             DetachedKind::Wheel { .. } => {
                 // Parry cylinders run along local Y; turn the axle onto chassis X.
@@ -100,5 +109,41 @@ impl DetachedPart {
             .linvel(world_vel)
             .build();
         Some((body, collider))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A torn-off panel's collider carries the box mass properties of its hull points
+    /// (axis-aligned, so Rapier never derives a principal frame from the hull: see
+    /// `hull::box_mass_properties`).
+    #[test]
+    fn part_collider_has_axis_aligned_mass_properties() {
+        let part = DetachedPart {
+            kind: DetachedKind::Part {
+                group: 1,
+                region: BodyRegion::Hood,
+            },
+            mass_kg: 12.0,
+            hull_points_local: vec![
+                [-0.8, -0.1, -0.2],
+                [0.8, -0.1, -0.2],
+                [0.7, 0.3, -0.2],
+                [-0.6, 0.2, 0.3],
+                [0.1, -0.1, 0.25],
+            ],
+            centroid_local: [0.0, 2.0, 0.5],
+            velocity_local: [0.0; 3],
+        };
+        let (_, col) = part
+            .to_rapier([0.0; 3], [0.0, 0.0, 0.0, 1.0], [0.0; 3], 0.3, 0.2)
+            .expect("hull");
+        let mp = col.mass_properties();
+        assert_eq!(mp.principal_inertia_local_frame, Rotation::IDENTITY);
+        assert!((mp.mass() - 12.0).abs() < 1e-4);
+        let want = crate::hull::bounding_box_mass_properties(&part.hull_points_local, 12.0);
+        assert_eq!(mp.local_com, want.local_com);
     }
 }
