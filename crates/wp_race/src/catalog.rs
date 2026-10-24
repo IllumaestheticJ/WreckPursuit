@@ -534,7 +534,9 @@ pub fn races() -> Vec<RaceDef> {
                 start: ap::POI_FARM_RUN,
                 finish: [-3500.0, -364.0, 0.0],
             },
-            length_hint_m: 3978.0,
+            // 3978 m before the county's own random stream (ashpeak de-dup, 2026-10-24) moved
+            // the farm section roads.
+            length_hint_m: 4295.0,
             ai: &[DEZ, TITO, VIC],
             seed: 43,
             prior_meets: 0,
