@@ -914,3 +914,32 @@ fn a_car_with_a_torn_off_panel_and_mounted_parts_can_be_quoted_repaired_and_work
     assert!(c.workshop(uid).unwrap().view.missing.is_empty());
     assert!(c.start_blocker().is_none());
 }
+
+/// Playtest row 167: a picker race started from the career garage is a career run, and its
+/// buy-in comes off the career's account (not the session's throwaway one).
+#[test]
+fn a_picker_race_from_the_garage_charges_the_career_account() {
+    let (mut c, _) = career_with("kestrel_ts", 50_000, DamageMode::Arcade);
+    let def = wp_race::catalog::race("hollins_sprint").unwrap();
+    let sc =
+        crate::race::race_scenario_in(&def, "ignored", DamageMode::Arcade, false, def.city.id())
+            .unwrap();
+    let before = c.profile().account.cash;
+    let s = c.start_run(sc).unwrap();
+    assert!(s.is_career());
+    assert_eq!(
+        s.scenario().entities[0].car,
+        "kestrel_ts",
+        "the career car races"
+    );
+    let run = s.run().expect("economy run");
+    let paid = before - run.account().cash;
+    assert!(
+        paid > 0,
+        "the buy-in is charged on the career account ({paid})"
+    );
+    assert!(run
+        .ledger()
+        .iter()
+        .any(|e| e.cash_delta < 0 && e.cash_after == run.account().cash));
+}

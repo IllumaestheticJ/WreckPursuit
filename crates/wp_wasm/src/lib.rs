@@ -996,6 +996,26 @@ pub fn race_list(car: &str, mode: &str) -> Result<String, JsValue> {
     Ok(json(&race::race_cards(car.as_ref(), mode)))
 }
 
+/// Scenario JSON of race `id` for `career_start_run` (the career garage's "Street races",
+/// playtest row 167): the player in `car` (the career puts its own car in), on `city` when the
+/// race runs there (the main menu's map: a Port Vesper race on `ashpeak` stays on it), else on
+/// the race's own city (`city` "" = its own). Buy-in, purse, bets and rep then go through the
+/// career account.
+#[wasm_bindgen]
+pub fn race_scenario_json(
+    id: &str,
+    car: &str,
+    mode: &str,
+    autopilot: bool,
+    city: &str,
+) -> Result<String, JsValue> {
+    let def = wp_race::catalog::race(id).ok_or_else(|| err(format!("unknown race {id:?}")))?;
+    let city = race::race_city(&def, city);
+    let sc = race::race_scenario_in(&def, car, parse_mode(mode).map_err(err)?, autopilot, city)
+        .map_err(err)?;
+    Ok(json(&sc))
+}
+
 /// Start race `id` with the player in `car` (`mode` `"Arcade"` | `"Simulation"`): a new live
 /// session on the race's grid, countdown running, AI field on the slots ahead. `autopilot`
 /// hands the player's car to the AI (tests / e2e). The account carries over like a restart.

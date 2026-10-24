@@ -35,6 +35,7 @@
 // 68). Re-seeded 60 -> 58.
 (
     name: "police_tunnel_escape_founders_cut_control",
+    // Lead 2026-10-24: re-seeded 60 -> 58 after merging D's canal-bridge fix (ws/world 3affce58) with the PR #60 police power port; seed 60's main run became a capture. Seeds 50-70: both files pass on 11 of 21; 56-59 is the widest run, 58 its middle.
     seed: 58,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,

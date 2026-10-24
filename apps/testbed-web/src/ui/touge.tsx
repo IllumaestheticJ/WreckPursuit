@@ -105,6 +105,10 @@ export interface TougeActions {
   start: (c: TougeChoice, wager: Wager) => void;
   /** Testbed only: set the plain session's rep (null: refused, e.g. during a career). */
   setRep: ((rep: number) => string | null) | null;
+  /** The player closed the picker (the career garage reopens when it opened it). */
+  closed?: () => void;
+  /** During a career run: "Back to garage" on the decided battle's panel (null otherwise). */
+  garage?: () => (() => void) | null;
 }
 
 const toggle = <T extends string>(value: T, options: [T, string][], set: (v: T) => void, testid: string) => (
@@ -261,7 +265,7 @@ function Picker(props: {
 
 const DIR_LABEL: Record<string, string> = { up: "uphill", down: "downhill" };
 
-function BattlePanel(props: { report: TougeReport }) {
+function BattlePanel(props: { report: TougeReport; onGarage: (() => void) | null }) {
   const r = props.report;
   const s = r.settlement;
   const o = r.outcome;
@@ -317,6 +321,14 @@ function BattlePanel(props: { report: TougeReport }) {
           </div>
         )}
         {r.settle_error && <p class="wp-danger" style={{ fontSize: "0.85em" }}>{r.settle_error}</p>}
+        {o && props.onGarage && (
+          // A career battle (playtest row 167): settled on the career; back to its garage.
+          <div style={{ marginTop: "0.6em" }}>
+            <Button variant="primary" onClick={props.onGarage} testid="touge-to-garage">
+              Back to garage
+            </Button>
+          </div>
+        )}
       </Panel>
     </div>
   );
@@ -388,7 +400,7 @@ export class TougeView {
     const setRep = this.actions.setRep;
     render(
       <div class="wp-ui wp-root" style={{ position: "absolute", inset: 0, pointerEvents: "none" }} data-testid="touge-view">
-        {this.report && <BattlePanel report={this.report} />}
+        {this.report && <BattlePanel report={this.report} onGarage={this.actions.garage?.() ?? null} />}
         {this.cards && (
           <Picker
             cards={this.cards}
@@ -421,7 +433,10 @@ export class TougeView {
               this.repNote = setRep ? setRep(rep) : null;
               this.refreshMenu();
             }}
-            onClose={() => this.closePicker()}
+            onClose={() => {
+              this.closePicker();
+              this.actions.closed?.();
+            }}
           />
         )}
       </div>,

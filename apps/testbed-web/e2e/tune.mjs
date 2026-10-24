@@ -59,7 +59,7 @@ await ready();
   await page.click("#sc-garage");
   await page.waitForSelector(G, { timeout: 10000 });
   await page.click(`${G} button[role="tab"]:has-text("Dealer")`);
-  await page.click(`${G} tr[data-car="junkyard_beater"] td:last-child button`);
+  await page.click(`${G} tr[data-car="junkyard_beater"] td:nth-last-child(2) button`);
   await page.click(`${G} button[role="tab"]:has-text("Cars")`);
   await page.click(`${G} button:text-is("Tune")`);
   const opened = await page.waitForSelector('[data-testid="tune-page"]', { timeout: 5000 }).then(() => true).catch(() => false);
