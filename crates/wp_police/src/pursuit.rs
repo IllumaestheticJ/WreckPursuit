@@ -133,6 +133,17 @@ const RESPOND_YIELD_SHIFT_M: f32 = 1.2;
 /// A racer slower than this is stopped for the chase tactics: shadowing units close in for the
 /// arrest and no rolling block is started ahead of it, m/s.
 const ARREST_RACER_MPS: f32 = 3.0;
+/// Row 168, queues: a stopped racer with another racer this far ahead of it, m, ...
+const QUEUE_AHEAD_M: f32 = 12.0;
+/// ... and within this of its line of travel, m (its lane), is waiting, not caught.
+const QUEUE_LANE_M: f32 = 3.0;
+/// Row 168: a unit more than [`PAST_RACER_M`] past a stopped racer drives on at least this
+/// fast, m/s, on its way back by the roads, instead of standing in the racer's lane: a car
+/// that cut in ahead of a racer and stopped there was a roadblock (the racer stopped behind
+/// it, the unit then "arrested" it), on courses whose profile has roadblocks off.
+const PAST_RACER_MPS: f32 = 8.0;
+/// ... past by more than this, m along the racer's trail (beside it is not past it).
+const PAST_RACER_M: f32 = 3.0;
 
 /// How far ahead a responder looks for a junction to meet a reported racer at, s.
 const RESPOND_HORIZON_S: f32 = 12.0;
@@ -200,6 +211,8 @@ impl PoliceSystem {
             let mut o = RacerObs {
                 nearest_unit_m: f32::INFINITY,
                 nearest_chaser_m: f32::INFINITY,
+                nearest_unit_free_m: f32::INFINITY,
+                nearest_chaser_free_m: f32::INFINITY,
                 ..Default::default()
             };
             let mut best_spot = f32::INFINITY;
@@ -211,13 +224,29 @@ impl PoliceSystem {
                 let d = dist(u.body.pos, p);
                 match u.kind {
                     UnitKind::Car => {
-                        // Booking another racer: not there to arrest this one.
-                        let booking = self.arresting.get(&u.id).is_some_and(|t| self.now < *t);
+                        // Booking another racer: not there to arrest this one. Nor is a car
+                        // wedged against a wall trying to free itself (row 168: a cruiser
+                        // stuck on a hairpin "arrested" the race field queued behind it).
+                        let booking = self.arresting.get(&u.id).is_some_and(|t| self.now < *t)
+                            || u.unstick.wedged(self.now);
+                        // In the racer's lane in front of it, not placed there as a tool or a
+                        // box-in (row 168).
+                        let in_the_way = !matches!(
+                            u.assignment,
+                            Assignment::RoadblockAt { .. } | Assignment::SpikeAt { .. }
+                        ) && !matches!(u.tactic, Tactic::BoxIn(_))
+                            && self.blocks_racer_lane(u.body.pos, id);
                         if !booking {
                             o.nearest_unit_m = o.nearest_unit_m.min(d);
+                            if !in_the_way {
+                                o.nearest_unit_free_m = o.nearest_unit_free_m.min(d);
+                            }
                         }
                         if !booking && u.assignment.target() == Some(id) {
                             o.nearest_chaser_m = o.nearest_chaser_m.min(d);
+                            if !in_the_way {
+                                o.nearest_chaser_free_m = o.nearest_chaser_free_m.min(d);
+                            }
                         }
                         if u.assignment == Assignment::OutOfService {
                             continue;
@@ -292,6 +321,50 @@ impl PoliceSystem {
         }
     }
 
+    /// Whether a unit at `p` stands in racer `id`'s lane in front of it (row 168): more than
+    /// [`PAST_RACER_M`] and at most [`QUEUE_AHEAD_M`] ahead along the racer's last direction
+    /// of travel, within [`QUEUE_LANE_M`] of that line.
+    pub(crate) fn blocks_racer_lane(&self, p: [f32; 2], id: EntityId) -> bool {
+        let (Some(dir), Some(r)) = (self.racer_dir.get(&id), self.racers.get(&id)) else {
+            return false;
+        };
+        let me = xy(r.pos);
+        let d = [p[0] - me[0], p[1] - me[1]];
+        let along = d[0] * dir[0] + d[1] * dir[1];
+        let across = (d[0] * dir[1] - d[1] * dir[0]).abs();
+        along > PAST_RACER_M && along <= QUEUE_AHEAD_M && across <= QUEUE_LANE_M
+    }
+
+    /// Whether racer `id` waits behind another racer (row 168): one within
+    /// [`QUEUE_AHEAD_M`] in front of it, within [`QUEUE_LANE_M`] of its line of travel, and
+    /// closer than any ground unit in that same box. Facing: its last direction of travel.
+    pub(crate) fn held_up_by_racer(&self, id: EntityId) -> bool {
+        let Some(dir) = self.racer_dir.get(&id).copied() else {
+            return false;
+        };
+        let me = xy(self.racers[&id].pos);
+        // Along / across its line of travel, for a point in the box ahead of it.
+        let ahead = |q: [f32; 2]| -> Option<f32> {
+            let d = [q[0] - me[0], q[1] - me[1]];
+            let along = d[0] * dir[0] + d[1] * dir[1];
+            let across = (d[0] * dir[1] - d[1] * dir[0]).abs();
+            (along > 0.0 && along <= QUEUE_AHEAD_M && across <= QUEUE_LANE_M).then_some(along)
+        };
+        let racer = self
+            .racers
+            .iter()
+            .filter(|(e, _)| **e != id)
+            .filter_map(|(_, r)| ahead(xy(r.pos)))
+            .fold(f32::INFINITY, f32::min);
+        let unit = self
+            .units
+            .iter()
+            .filter(|u| u.kind == UnitKind::Car && !u.wrecked)
+            .filter_map(|u| ahead(u.body.pos))
+            .fold(f32::INFINITY, f32::min);
+        racer.is_finite() && racer < unit
+    }
+
     pub(crate) fn update_racer_rules(&mut self, tdt: f32) {
         let ids: Vec<EntityId> = self.racers.keys().copied().collect();
         let cfg = self.cfg.heat.clone();
@@ -304,6 +377,8 @@ impl PoliceSystem {
             let o = self.obs.get(&id).copied().unwrap_or(RacerObs {
                 nearest_unit_m: f32::INFINITY,
                 nearest_chaser_m: f32::INFINITY,
+                nearest_unit_free_m: f32::INFINITY,
+                nearest_chaser_free_m: f32::INFINITY,
                 ..Default::default()
             });
             let p = xy(self.racers[&id].pos);
@@ -316,11 +391,19 @@ impl PoliceSystem {
                 (v[0] * v[0] + v[1] * v[1]).sqrt()
             };
             let district = self.graph.district_at(p);
+            let held_up_by_racer =
+                speed < self.cfg.heat.capture.stop_speed_mps && self.held_up_by_racer(id);
             let inp = RuleInputs {
                 seen: o.seen,
                 nearest_unit_m: o.nearest_unit_m,
                 nearest_chaser_m: o.nearest_chaser_m,
                 in_safehouse,
+                held_up_by_racer,
+                blocked_ahead_only: {
+                    let cap = &self.cfg.heat.capture;
+                    o.nearest_unit_free_m > cap.unit_radius_m
+                        && o.nearest_chaser_free_m > cap.pinned_unit_radius_m
+                },
                 speed_mps: speed,
                 district,
                 phase: self.phase,
@@ -1705,6 +1788,12 @@ impl PoliceSystem {
                         } else {
                             v_r + 0.6 * excess
                         };
+                        // Standing in a stopped racer's lane in front of it: clear the lane
+                        // (row 168). By the racer's last direction of travel: the trail ends
+                        // at the racer, so a unit ahead of it projects onto that end (gap 0).
+                        if arrest && self.blocks_racer_lane(u.body.pos, racer) {
+                            sp = sp.max(PAST_RACER_MPS);
+                        }
                         if !seen {
                             // Lost contact: to the last known position at a measured pace.
                             sp = lim_here * p.respond_speed_factor;

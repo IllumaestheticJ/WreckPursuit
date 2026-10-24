@@ -111,6 +111,15 @@ pub struct RuleInputs {
     pub nearest_chaser_m: f32,
     /// Racer is inside a safehouse POI.
     pub in_safehouse: bool,
+    /// Stopped behind another racer that is closer ahead than any unit (a race field queued
+    /// on a one-lane road, row 168): neither the stop nor the pinned rule counts while it
+    /// waits. A box-in or a unit right in front still captures.
+    pub held_up_by_racer: bool,
+    /// Every unit that counts for the stop rule (within `unit_radius_m`) and the pinned rule
+    /// (a chaser within `pinned_unit_radius_m`) stands in the racer's lane in front of it, a
+    /// pursuer, interceptor or patrol (row 168): both rules then take at least
+    /// `blocked_ahead_stop_time_s`.
+    pub blocked_ahead_only: bool,
     /// Racer speed, m/s.
     pub speed_mps: f32,
     /// District the racer is in.
@@ -287,12 +296,20 @@ impl RacerRecord {
                     outcome = Some(RuleOutcome::Escaped);
                 }
             }
-            // Capture: stopped with a unit close by.
+            // Capture: stopped with a unit close by (not while queued behind another racer).
             if inp.speed_mps < cfg.capture.stop_speed_mps
                 && inp.nearest_unit_m <= cfg.capture.unit_radius_m
+                && !inp.held_up_by_racer
             {
                 self.stopped_s += dt;
-                if self.stopped_s >= cfg.capture.stop_time_s {
+                let need = if inp.blocked_ahead_only {
+                    cfg.capture
+                        .stop_time_s
+                        .max(cfg.capture.blocked_ahead_stop_time_s)
+                } else {
+                    cfg.capture.stop_time_s
+                };
+                if self.stopped_s >= need {
                     outcome = Some(RuleOutcome::Captured);
                 }
             } else {
@@ -300,7 +317,8 @@ impl RacerRecord {
             }
             // Pinned: boxed in and rocking back and forth, never getting away.
             let p = [self.pos[0], self.pos[1]];
-            let close = inp.nearest_chaser_m <= cfg.capture.pinned_unit_radius_m;
+            let close =
+                inp.nearest_chaser_m <= cfg.capture.pinned_unit_radius_m && !inp.held_up_by_racer;
             match self.pin_anchor {
                 Some(a)
                     if close
@@ -308,7 +326,14 @@ impl RacerRecord {
                             <= cfg.capture.pinned_radius_m * cfg.capture.pinned_radius_m =>
                 {
                     self.pinned_s += dt;
-                    if self.pinned_s >= cfg.capture.pinned_time_s {
+                    let need = if inp.blocked_ahead_only {
+                        cfg.capture
+                            .pinned_time_s
+                            .max(cfg.capture.blocked_ahead_stop_time_s)
+                    } else {
+                        cfg.capture.pinned_time_s
+                    };
+                    if self.pinned_s >= need {
                         outcome = Some(RuleOutcome::Captured);
                     }
                 }
@@ -356,6 +381,8 @@ mod tests {
             nearest_unit_m: nearest,
             nearest_chaser_m: nearest,
             in_safehouse: false,
+            held_up_by_racer: false,
+            blocked_ahead_only: false,
             speed_mps: speed,
             district: District::Core,
             phase: DayPhase::Day,
@@ -458,6 +485,38 @@ mod tests {
             (t - c.capture.pinned_time_s).abs() < 0.3,
             "captured at {t} s"
         );
+    }
+
+    #[test]
+    fn racer_queued_behind_another_racer_is_not_captured_until_the_queue_clears() {
+        // Row 168: a race field stopped behind its leader on a one-lane road, a unit 8 m off
+        // (stop rule) and chasing it (pinned rule): waiting is not being caught.
+        let c = cfg();
+        let dt = 0.1;
+        let mut r = RacerRecord::new(EntityId(1));
+        r.add_heat(15.0, &c);
+        r.start_pursuit(SimTime::ZERO);
+        let queued = |now: f32| RuleInputs {
+            held_up_by_racer: true,
+            ..inputs(true, 8.0, 0.0, now)
+        };
+        for k in 0..300 {
+            assert_eq!(
+                r.update(&queued(k as f32 * dt), dt, &c),
+                None,
+                "captured at {k}"
+            );
+        }
+        // The racer ahead drives off and this one stays put next to the unit: caught.
+        let mut t = 0.0;
+        loop {
+            t += dt;
+            if let Some(o) = r.update(&inputs(true, 8.0, 0.0, 30.0 + t), dt, &c) {
+                assert_eq!(o, RuleOutcome::Captured);
+                break;
+            }
+            assert!(t < c.capture.stop_time_s + 0.5, "no capture by {t} s");
+        }
     }
 
     #[test]
