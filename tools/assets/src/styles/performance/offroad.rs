@@ -14,12 +14,15 @@
 use wp_contracts::{BodyRegion, VehicleDef};
 
 use crate::builder::{Builder, PartKey};
-use crate::mesh::MaterialSlot as M;
+use crate::mesh::{MaterialSlot as M, PartKind};
 use crate::style::{
     ArchShape, BodyStyle, CapKind, CarStyle, DetailCtx, HoodScoop, RimKind, Silhouette,
 };
 
-use super::kit::{dkey, headlight_key, lkey, sided, taillight_key, top_band, Kit, SIDES};
+use super::kit::{
+    dkey, headlight_key, indicator_front_key, indicator_rear_key, lkey, sided, taillight_key,
+    top_band, Kit, SIDES,
+};
 use super::{kit_detail, rgb, wheels};
 
 /// Radius of the kit's tube work (bumpers, rack, frames), m.
@@ -499,8 +502,15 @@ fn mesquite_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         [0.03, ys + 0.17, floor + 2.0 * r_sp + 0.03],
     );
     for sx in SIDES {
-        let kb = sided(&dkey("bypass_shock_l", fr, M::Metal), sx);
-        let kc = sided(&dkey("bypass_cap_l", fr, M::Accent), sx);
+        // Suspension hardware (kind `Suspension`): out of the mid LOD like every car's shocks.
+        let kb = sided(
+            &PartKey::body("bypass_shock_l", fr, PartKind::Suspension, M::Metal),
+            sx,
+        );
+        let kc = sided(
+            &PartKey::body("bypass_cap_l", fr, PartKind::Suspension, M::Accent),
+            sx,
+        );
         let x = sx * (p.half_width(ar.0) - 0.36);
         let z0 = ar.1 + ar.2 + 0.06;
         for (i, dy) in [0.16f32, -0.02, -0.20].into_iter().enumerate() {
@@ -628,14 +638,8 @@ fn mesquite_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         for i in 0..3 {
             let z = t0 + 0.02 + h * i as f32;
             let key = if i == 2 {
-                sided(
-                    &lkey(
-                        "indicator_rear_l",
-                        BodyRegion::RearLeftQuarter,
-                        M::EmissiveAmber,
-                    ),
-                    sx,
-                )
+                // The top cell is the turn signal, in the rear frame like every car's.
+                indicator_rear_key(sx, M::EmissiveAmber)
             } else {
                 tk.clone()
             };
@@ -797,14 +801,8 @@ fn erg_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.024,
             0.0,
         );
-        let ka = sided(
-            &lkey(
-                "indicator_front_l",
-                BodyRegion::FrontLeftFender,
-                M::EmissiveAmber,
-            ),
-            sx,
-        );
+        // Turn signal under the head lamp, in the front frame like every car's.
+        let ka = indicator_front_key(sx);
         k.front_box(
             &ka,
             sx * 0.60,
@@ -1075,9 +1073,15 @@ fn erg_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [sx * (xo - 0.12), yl + 0.02, lz0],
             [sx * xo, yl - 0.025, lz1],
         );
-        for (a, c) in [(0.015, 0.045), (0.065, 0.095)] {
+        // Outer strip: tail / stop; inner strip: red-on-red turn signal.
+        for (j, (a, c)) in [(0.015, 0.045), (0.065, 0.095)].into_iter().enumerate() {
+            let key = if j == 0 {
+                tk.clone()
+            } else {
+                indicator_rear_key(sx, M::Taillight)
+            };
             k.bx(
-                &tk,
+                &key,
                 [sx * (xo - c), yl - 0.02, lz0 + 0.02],
                 [sx * (xo - a), yl - 0.04, lz1 - 0.02],
             );
