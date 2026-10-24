@@ -177,29 +177,40 @@ offset_m = 2.5
 # for the police workstream (E) to tune. County roads are worked by the Ashpeak County
 # Sheriff's Office units (county livery; same AI).
 
-# Midnight touge up Crowfoot Pass's hairpins. Proposed style: mountain tail. As on the Hollins
-# hill: no rams or PITs on the one-lane hairpins; the units follow and wait at the saddle.
+# Midnight touge up Crowfoot Pass's hairpins. Style: mountain tail. Deputies follow the field
+# up, never past it: no rams, PITs, box-ins, rolling or junction blocks on the one-lane
+# hairpins, and pursuers close only to the racer's own speed (speed_margin 0), so nobody is
+# planted across the road ahead of the field. Fresh units wait at the saddle and take over
+# there. No helicopter: on the pass it called units in head-on at intercept speed, where they
+# wedged on the hairpin walls and pinned the field behind them (row 168).
 [crowfoot_ascent]
 name = "Mountain tail"
-summary = "Deputies tail the field up the hairpins without rams or PITs and wait for it at the saddle."
-presence = 1.0
-backup_scale = 1.0
+summary = "Deputies tail you up the hairpins and never pass; the net is at the saddle, where fresh units wait."
+presence = 0.5
+backup_scale = 0.5
 tool_lifetime_s = 300.0
 recognise_on_sight = false
 
 [crowfoot_ascent.tactics]
 roadblocks = false
 spikes = false
-helicopter = true
-box_in = true
+helicopter = false
+box_in = false
 rolling_block = false
 junction_block = false
 pit = false
 rams = false
 
+[crowfoot_ascent.speed]
+speed_margin = 0.0
+
 [[crowfoot_ascent.stakeouts]]
-at = 0.92
-trigger_m = 50.0
+at = 0.9
+trigger_m = 60.0
+
+[[crowfoot_ascent.stakeouts]]
+at = 0.95
+trigger_m = 60.0
 
 # Downhill touge from the Crowfoot saddle. Proposed style: valley net. Nobody chases down the
 # hairpins; the net is at the foot of the pass, where the road meets town.
@@ -225,17 +236,18 @@ rams = false
 at = 0.9
 trigger_m = 60.0
 
-# Dusk run over Harnell Flats' gravel section roads. Proposed style: open country. Few units
-# out on the farm roads, so the helicopter does the spotting; no spikes on gravel.
-# Row 168 tuning (2026-10-24, race_picker with police on, seeds 1-4): presence 1.0 -> 0.5,
-# backup 0.75 -> 0.5. The field was captured on 3 of 4 seeds; now it finishes on 2.
+# Dusk run over Harnell Flats' gravel section roads. Style: open country. Thin patrols out on
+# the farm roads (presence 0.5, row 168), so the county works the run from fixed points: a
+# deputy parked at the crossroads a third of the way in and one on the approach to Harnell
+# Crossing, both of whom know the field on sight, and the helicopter spots for them. No
+# spikes on gravel; the section roads' crossings may be blocked once a chase is on.
 [harnell_dirt_run]
 name = "Open country"
-summary = "Thin patrols on the section roads; the helicopter spots and calls in units ahead."
+summary = "Thin patrols on the section roads: deputies parked at the crossroads and outside Harnell Crossing, the helicopter spotting for them."
 presence = 0.5
 backup_scale = 0.5
 tool_lifetime_s = 300.0
-recognise_on_sight = false
+recognise_on_sight = true
 
 [harnell_dirt_run.tactics]
 roadblocks = true
@@ -247,16 +259,44 @@ junction_block = true
 pit = true
 rams = true
 
-# Illegal daytime checkpoint run through Ashpeak City's downtown. Proposed style: downtown
-# crackdown: max presence (the stake table's), everything allowed, a unit staked out near the
-# last checkpoint.
+[[harnell_dirt_run.stakeouts]]
+at = 0.35
+trigger_m = 80.0
+
+[[harnell_dirt_run.stakeouts]]
+at = 0.8
+trigger_m = 80.0
+
+# Illegal daytime checkpoint run through Ashpeak City's downtown. Style: downtown crackdown,
+# the county's answer to Port Vesper's Lantern lockdown: maximum presence in daylight, a
+# roadblock across the route halfway with one lane open, the side streets off the back half
+# sealed so the field has to run the gauntlet to the Spire, and units staked out at the
+# checkpoints that know the field on sight. As on the Lantern run, the police may take the
+# whole field (owner brief for illegal daytime).
 [ashpeak_downtown_checkpoint]
 name = "Downtown crackdown"
-summary = "Maximum presence downtown in daylight; every tactic allowed and a unit waiting near the last checkpoint."
+summary = "Maximum presence downtown in daylight: a roadblock across the route with one lane open, the side streets sealed, units waiting at the checkpoints."
 presence = 2.0
 backup_scale = 1.0
 tool_lifetime_s = 300.0
 recognise_on_sight = true
+
+[[ashpeak_downtown_checkpoint.route_blocks]]
+at = 0.5
+gap_m = 3.5
+gap_side = "left"
+units = 2
+
+[[ashpeak_downtown_checkpoint.side_blocks]]
+from = 0.5
+to = 0.95
+count = 2
+into_m = 25.0
+units = 1
+
+[[ashpeak_downtown_checkpoint.stakeouts]]
+at = 0.3
+trigger_m = 60.0
 
 [[ashpeak_downtown_checkpoint.stakeouts]]
 at = 0.8
@@ -338,25 +378,32 @@ rams = false
 at = 0.9
 trigger_m = 60.0
 
-# Two night laps of the downtown block grid. Proposed style: block grid. Units cut through the
-# grid to block junctions ahead on the second lap; no spikes between the towers.
+# Two night laps of the downtown block grid. Style: block grid. The deputies don't chase into
+# the towers' grid at speed: no rams, PITs or box-ins between the buildings (a car rammed into
+# a lane there stands across it for the rest of the field, row 168), and pursuers close only
+# to the racer's speed. They work the grid instead: interceptors cut across to park across
+# the junction ahead, and the helicopter keeps the field in sight between the towers.
+# Thinner patrols than the stake default (presence 0.6).
 [ashpeak_metro_circuit]
 name = "Block grid"
-summary = "Units cut across the grid to block the junctions ahead; no spikes between the towers."
-presence = 1.0
-backup_scale = 1.0
+summary = "No ramming between the towers: units cut across the grid to block the junctions ahead while the helicopter keeps you in sight."
+presence = 0.6
+backup_scale = 0.5
 tool_lifetime_s = 300.0
 recognise_on_sight = false
 
 [ashpeak_metro_circuit.tactics]
-roadblocks = true
+roadblocks = false
 spikes = false
 helicopter = true
-box_in = true
-rolling_block = true
+box_in = false
+rolling_block = false
 junction_block = true
-pit = true
-rams = true
+pit = false
+rams = false
+
+[ashpeak_metro_circuit.speed]
+speed_margin = 0.0
 
 # --- The five city races from PR #47 (lead/career-port). Light profiles: stakeouts that join
 # the chase plus each course's tactic style, and no scripted roadblocks or spikes on the
