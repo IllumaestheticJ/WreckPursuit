@@ -173,3 +173,12 @@ G_firm) is the default for every car on `lead/physics`:
 - scenario `world_traffic_soak`: 1 civilian collision (limit 0).
 - AI pace (measured limits, 4 seeds): lantern / hollins at skills 0.75 / 0.95 slower by up to
   ~8 s, more wall hits at hollins.
+
+## 2026-10-24: G shipped on main (PR #67, 431232c5; public demo 0.12.68)
+- Barrier scrape under G (row 164 test, concave case): the car barrel-rolled (~315°/s, climbed
+  2.8 m) after a downward-normal contact 0.7 m outboard. The cause was a world bug (D: a duplicate
+  outer-edge barrier 0.25 m beside the median; fixed ws/world 4f4038e1). No handling change.
+- **On file (not applied):** suspension travel × 2.2 (RideTune::shipped `travel` 1.4 → 2.2)
+  also cures that tipping contact on all three barrier cases and leaves open-road driving
+  unchanged (held_search: held 2.585 s, taps 21, handling fails 0). Use it if tipping contacts
+  show up in playtests. `held_search` `TRAVEL=` / `DBUMP=` reproduce the bench numbers.
