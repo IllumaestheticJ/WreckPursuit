@@ -11,6 +11,10 @@
 // Re-aimed for main's highway layout (merge into ws/harness): unit 1 now turns east onto
 // y = 53.3 and the racer comes the other way along y = 56.75 from x = -15, steering left (-0.3)
 // at 11.3 s into its flank (x = -11 … -17 and steer -0.25 … -0.35 pass, -19 misses).
+// Re-aimed for the road network centreline fix (playtest row 115): unit 1's patrol stops
+// near x = -142 on y = 53.3 and crawls (0.6 m/s) while the racer comes the other way, so the
+// racer now starts at x = -44 and steers left (-0.3) at 12.8 s: contact at 13.8 s, sideways
+// (about 970 N·s). Steer 12.4-13.2 s x -0.25 … -0.35 pass; 11.3 s misses at every start x.
 (
     name: "police_sideswipe_patrol_night",
     seed: 24,
@@ -25,22 +29,22 @@
         (
             id: "racer",
             car: "debug_sedan",
-            pos: (-15.0, 56.75, 0.0),
+            pos: (-44.0, 56.75, 0.0),
             yaw: 1.5708,
             driver: cruise(target_mps: 8.33, from_s: 1.0),
             inputs: [
-                (t_s: 11.3, input: (steer: -0.3)),
-                (t_s: 12.1, input: ()),
+                (t_s: 12.8, input: (steer: -0.3)),
+                (t_s: 13.6, input: ()),
             ],
         ),
     ],
-    duration_s: 14.0,
+    duration_s: 15.5,
     hash_every: 24,
     expect: [
         speed_at(entity: "racer", t_s: 11.0, min: 7.5, max: 9.0),
         event_count(event: "Contact", entity: "racer", min: 1, max: 40),
-        // Wanted-level change and pursuit within 1.1 s of the 12.0 s contact.
-        police_event_before(kind: 2, t_s: 13.1),
-        pursuit_started_before(t_s: 13.1),
+        // Wanted-level change and pursuit within 1.1 s of the 13.8 s contact.
+        police_event_before(kind: 2, t_s: 14.9),
+        pursuit_started_before(t_s: 14.9),
     ],
 )

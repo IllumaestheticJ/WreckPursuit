@@ -47,6 +47,7 @@ fn main() {
         parked_cars: true,
         police_cars: true,
         covered_los: true,
+        police_tools: true,
         police_presence: Some(1.0),
         car_mix: false,
         systems: None,

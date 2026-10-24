@@ -31,6 +31,12 @@
 // ≈ 77 s. He still reaches the Cut first and is lost inside at ≈ 112.5 s with the units holding
 // the portals (nearest ≈ 135 m), so the escape lands at ≈ 152.5 s: the run is 170 s long and the
 // escape window ends at 170 s.
+//
+// After the road network centreline fix (playtest row 115) the AI captain finds a spike-strip
+// site (120 m+ sight) on the straight before the first bend, 300-700 m ahead of the racer, and
+// the flat tyres stop him at 79% of the route. This scenario is about covered-road line of
+// sight, not tools, so `police_tools: false` keeps the captain's own spikes and roadblocks out
+// of it. Measured: Escaped 135.6 s after 29.9 s unseen in the Cut.
 (
     name: "police_tunnel_escape_founders_cut",
     seed: 51,
@@ -41,6 +47,7 @@
     traffic_density: 0.0,
     parked_cars: false,
     police_presence: 1.0,
+    police_tools: false,
     assists: ai,
     slow: true,
     entities: [

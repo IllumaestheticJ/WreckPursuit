@@ -47,6 +47,12 @@ pub struct Scenario {
     /// (`wp_world::World::set_covered_los`).
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub covered_los: bool,
+    /// Whether the AI police captain lays spike strips and roadblocks on its own (default on).
+    /// `false` isolates a scenario about something else (a tunnel escape) from where the
+    /// captain happens to find a tool site; exact-spot orders (`spikes_at`, `roadblock_at`)
+    /// still work.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub police_tools: bool,
     /// Police patrol multiplier on `data/police/presence.toml`'s per-district, per-phase patrol
     /// counts (1 = default, 0 = no patrols); `None` = 1. Needs a city.
     #[serde(default, skip_serializing_if = "Option::is_none")]
