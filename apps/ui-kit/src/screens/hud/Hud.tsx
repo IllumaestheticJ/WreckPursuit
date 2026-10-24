@@ -14,6 +14,7 @@ import { clock, gap, gearLabel, raceTime, speed, words } from "../../ui/format";
 import { Badge, Meter, severityColor } from "../../ui/kit";
 import { DamageSilhouette } from "./DamageSilhouette";
 import { visibleFeed } from "./feed";
+import { airCallsign, HeliBadge } from "./HeliIcon";
 import { Minimap } from "./Minimap";
 import "./hud.css";
 
@@ -125,8 +126,8 @@ function Alerts({ entries, nowS }: { entries: ScannerEntry[]; nowS: number }) {
   return (
     <ul class="wp-hud-alerts" aria-live="polite">
       {recent.map(({ entry: e, opacity }) => (
-        <li key={e.id} data-sev={e.severity} data-ch={e.channel} style={{ opacity }}>
-          <span class="wp-hud-alert-ch">{e.channel === "dispatch" ? "DISP" : e.channel === "unit" ? "UNIT" : e.channel === "civil" ? "CIV" : "SYS"}</span>
+        <li key={e.id} data-sev={e.severity} data-ch={e.channel} data-air={e.air ? "true" : undefined} style={{ opacity }}>
+          {e.air ? <HeliBadge text={airCallsign(e.text)} /> : <span class="wp-hud-alert-ch">{e.channel === "dispatch" ? "DISP" : e.channel === "unit" ? "UNIT" : e.channel === "civil" ? "CIV" : "SYS"}</span>}
           {e.text}
         </li>
       ))}
@@ -216,9 +217,11 @@ function Speedo({ hud, units }: { hud: HudState; units: "metric" | "imperial" })
 
 function AssistBadges({ hud }: { hud: HudState }) {
   const a = hud.assists;
+  // TCS / ABS show their level (Off / Half / Full); a legacy bool reads as Full / Off.
+  const lvl = (v: unknown) => (v === true ? "Full" : v === false ? "Off" : String(v));
   const items: [string, boolean][] = [
-    ["ABS", a.abs],
-    ["TCS", a.tcs],
+    [lvl(a.abs) === "Full" ? "ABS" : `ABS ${lvl(a.abs).toUpperCase()}`, lvl(a.abs) !== "Off"],
+    [lvl(a.tcs) === "Full" ? "TCS" : `TCS ${lvl(a.tcs).toUpperCase()}`, lvl(a.tcs) !== "Off"],
     ["ESC", a.esc],
     ["STEER", a.countersteer_help > 0 || a.steer_speed_sensitivity > 0],
     ["AUTO", a.auto_gears],

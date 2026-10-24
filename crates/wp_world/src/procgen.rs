@@ -52,7 +52,7 @@ const RAMP_PARALLEL_M: f32 = 90.0;
 /// Ramp lane centre beside a carriageway (from the carriageway centreline), m.
 const RAMP_LANE_OFFSET_M: f32 = 2.0 * HW_LANE_M;
 /// Ramp terminal junctions on a crossing row, from the highway centreline, m.
-const TERMINAL_X_M: f32 = 21.0;
+const TERMINAL_X_M: f32 = 22.0;
 /// Flat run of a ramp into its terminal junction, m.
 const TERMINAL_FLAT_M: f32 = 15.0;
 /// Ramp speed limit, m/s.
@@ -734,6 +734,27 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
     }
     // Residential blocks (playtest row 95): houses on lots along all four block edges, front
     // yards, garages, driveways, fences / hedges, yard trees, street trees on the verge.
+    // Lots, fences, hedges and trees also keep out of every junction box: a big junction's
+    // turning paths (the 27.5 m five-way junctions on the diagonals) sweep through the corner
+    // lots 14 m from the block corner (lead/main-sync: a fence on a right-turn path).
+    let junctions: Vec<(V2, f32)> = built
+        .intersections
+        .iter()
+        .filter(|ix| ix.radius_m > 0.0)
+        .map(|ix| {
+            (
+                geom::xy(built.nodes[ix.node as usize].pos),
+                ix.radius_m + 1.0,
+            )
+        })
+        .collect();
+    let lot_blocked = |lo: V2, hi: V2, alley_y: Option<f32>| -> bool {
+        blocked(lo, hi, alley_y)
+            || junctions.iter().any(|(c, r)| {
+                let q = [c[0].clamp(lo[0], hi[0]), c[1].clamp(lo[1], hi[1])];
+                geom::dist(q, *c) < *r
+            })
+    };
     let decor = residential_blocks(
         cfg,
         &xs,
@@ -741,7 +762,7 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
         &row_class,
         &col_class,
         &block_kinds,
-        &blocked,
+        &lot_blocked,
         &mut buildings,
     );
     // Outer bands: warehouses (port/industrial) and houses (suburb) between street ends.
@@ -1196,10 +1217,12 @@ mod tests {
         ] {
             assert!(net.intersections.iter().any(|i| i.control == c));
         }
-        // No cramped junctions: every drivable lane holds at least two cars.
+        // No cramped junctions: every drivable lane holds at least two cars (12 m: the
+        // crossroads between main's ramp terminals and the next street come out at exactly
+        // that with round 12's setbacks).
         for (i, l) in net.lanes.iter().enumerate() {
             let len = *geom::cumulative(&l.polyline).last().unwrap();
-            assert!(len > 12.0, "lane {i} only {len} m");
+            assert!(len >= 11.99, "lane {i} only {len} m");
         }
         // Every drivable lane can be left (connections) — the city is closed.
         for (i, l) in net.lanes.iter().enumerate() {

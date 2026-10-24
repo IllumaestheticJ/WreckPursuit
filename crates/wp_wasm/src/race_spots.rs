@@ -1,28 +1,33 @@
 //! Honk-to-start race spots in the browser session (`wp_race::spots`).
 //!
-//! In a live free-drive or city-chase session on a city (not a race, replay, scripted menu run
+//! In a live free-drive or night-run session on a city (not a race, replay, scripted menu run
 //! or career run), every picker race that can run on the session's city has a meet spot at its
-//! start. When the player's car stands in a spot (slower than
-//! `wp_race::spots::HONK_MAX_SPEED_MPS`) and the horn is pressed (rising edge of
-//! `VehicleInput::horn`, checked every tick after the step), the session records the race as
-//! *honked*. The testbed polls `race_spot_honked()` and starts it with the player's car and
-//! damage mode exactly like the picker's "Race" button (`race_start`, which keeps the player
-//! on the current map when the race runs there, e.g. a Port Vesper race on the `ashpeak` map).
+//! start. Spots are part of round 12's one challenge system on the horn action
+//! (`crate::street`): the session reads one horn edge per tick and a street racer within
+//! honking range takes it first; otherwise, when the player's car stands in a spot (slower
+//! than `wp_race::spots::HONK_MAX_SPEED_MPS`), the session records the race as *honked*. The
+//! same rules apply as to a street challenge: not while the player is wanted or chased, not
+//! with a street challenge or street race open, not with the run over.
 //!
-//! The check reads the session's state after each tick and never writes to the sim, so state
-//! hashes, replays and recordings are unchanged. Spots are planned lazily (the first
-//! `race_spots()` call or the first horn press).
+//! The testbed polls `race_spot_honked()` and starts it with the player's car and damage mode
+//! exactly like the picker's "Race" button (`race_start`, which keeps the player on the current
+//! map when the race runs there, e.g. a Port Vesper race on the `ashpeak` map). The money is
+//! the picker race's existing stake (advertised buy-in and purse, `race_list`): no second
+//! betting system.
+//!
+//! The check reads the session's state and never writes to the sim, so state hashes, replays
+//! and recordings are unchanged. Spots are planned lazily (the first `race_spots()` call or
+//! the first honk).
 
 use serde::Serialize;
 use wp_race::catalog;
-use wp_race::spots::{race_spots, HonkTrigger, RaceSpot};
+use wp_race::spots::{honk_spot, race_spots, RaceSpot};
 use wp_world::World;
 
-/// The session's meet spots and horn trigger.
+/// The session's meet spots and the race honked for.
 #[derive(Debug, Clone, Default)]
 pub struct MeetSpots {
     spots: Option<Vec<RaceSpot>>,
-    trigger: HonkTrigger,
     honked: Option<&'static str>,
 }
 
@@ -32,22 +37,15 @@ impl MeetSpots {
         self.spots.get_or_insert_with(|| race_spots(world))
     }
 
-    /// One tick of the player's car: horn, position, speed. Records the race when the horn was
-    /// just pressed in a spot at a near stop (the first such race stays until taken).
-    pub fn tick(&mut self, world: &World, horn: bool, pos: [f32; 3], speed_mps: f32) {
-        let spots = &mut self.spots;
-        let hit = self.trigger.update(horn, pos, speed_mps, move || {
-            spots.get_or_insert_with(|| race_spots(world)).as_slice()
-        });
+    /// A honk by the player's car at `pos` moving at `speed_mps`: records the race of the spot
+    /// it stands in when nearly stopped (the first such race stays until taken). Returns
+    /// whether it hit a spot.
+    pub fn honk(&mut self, world: &World, pos: [f32; 3], speed_mps: f32) -> bool {
+        let hit = honk_spot(self.spots(world), pos, speed_mps).map(|s| s.race_id);
         if self.honked.is_none() {
             self.honked = hit;
         }
-    }
-
-    /// Track the horn without triggering (the session is not eligible this tick), so a horn
-    /// held into an eligible tick is not a fresh press.
-    pub fn track_horn(&mut self, horn: bool) {
-        self.trigger.pressed(horn);
+        hit.is_some()
     }
 
     /// Take the honked race id, if any.

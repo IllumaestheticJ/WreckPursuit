@@ -23,13 +23,17 @@ pub fn procedural_city() -> CitySpec {
 }
 
 /// City by id for the testbed's selector: `"vesper_v2"` (Port Vesper v2, the default city),
-/// `"ashpeak"` (Port Vesper + Ashpeak County),
-/// `"procedural_12x12"` (the old grid); anything else is the flat world.
+/// `"ashpeak"` (Port Vesper + Ashpeak County), `"procedural_12x12"` (the old grid), a touge
+/// pass (`"touge_*"`); anything else is the flat world.
 pub fn city_spec(city_id: &str) -> CitySpec {
     match city_id {
         wp_world::vesper::CITY_ID => CitySpec::vesper(),
         wp_world::ashpeak::CITY_ID => CitySpec::ashpeak(),
         "procedural_12x12" => procedural_city(),
+        id if wp_world::touge::is_touge(id) => CitySpec::Preset {
+            name: id.to_string(),
+            seed: 1,
+        },
         _ => CitySpec::Flat,
     }
 }
@@ -64,12 +68,14 @@ pub fn free_drive_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
         police_cars: true,
         covered_los: true,
         police_presence: None,
+        restart_after_capture: false,
         car_mix: false,
         slow: false,
         // Hinged panels + per-panel meshes in the browser (workstream R).
         panels: true,
         systems: None,
         barriers: Vec::new(),
+        parked: Vec::new(),
         police_orders: Vec::new(),
         weather: None,
         entities: vec![entity("player", car, [0.0; 3], 0.0)],
@@ -82,11 +88,11 @@ pub fn free_drive_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
 }
 
 /// Speed the night-run player starts at, m/s (~110 km/h: well over the city limits).
-pub const NIGHT_RUN_SPEED_MPS: f32 = 30.0;
+pub const CITY_CHASE_SPEED_MPS: f32 = 30.0;
 
 /// "Night run" preset: Port Vesper v2 (hills, curves, highway loop) at 23:00 with full
 /// police presence and traffic; the live player starts on the race grid (Loop 9) already
-/// speeding ([`NIGHT_RUN_SPEED_MPS`]), which the world reports as violations and the police
+/// speeding ([`CITY_CHASE_SPEED_MPS`]), which the world reports as violations and the police
 /// turn into heat. Same seed every time, so chases are reproducible and replayable.
 pub fn night_run(car: &str, mode: DamageMode) -> Scenario {
     night_run_in(car, mode, CitySpec::vesper())
@@ -101,7 +107,7 @@ pub fn night_run_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
     sc.police_presence = Some(1.0);
     // All five police versions (by heat) and seven civilian models (simcli `car_mix`).
     sc.car_mix = true;
-    sc.entities[0].speed_mps = NIGHT_RUN_SPEED_MPS;
+    sc.entities[0].speed_mps = CITY_CHASE_SPEED_MPS;
     sc
 }
 
@@ -110,11 +116,14 @@ pub fn entity(id: &str, car: &str, pos: [f32; 3], yaw: f32) -> EntitySpec {
     EntitySpec {
         id: id.into(),
         car: car.into(),
+        mods: Vec::new(),
         pos,
         yaw,
         speed_mps: 0.0,
         police_heat: 0.0,
         assists: None,
+        player_steering: None,
+        tune: Default::default(),
         driver: Driver::Scripted,
         inputs: Vec::new(),
     }

@@ -160,6 +160,7 @@ function LotScreen({ api }: { api: LotVisitApi }) {
                 <span class="wp-dim wp-mono">{words(c.class)}</span>
                 {c.rare && <Badge tone="info">rare</Badge>}
                 {c.sold && <Badge>sold</Badge>}
+                {c.locked && <Badge tone="dim">needs {c.unlock_tier}</Badge>}
                 {c.runs === false && <Badge tone="danger">dead</Badge>}
                 {c.missing.length > 0 && <Badge tone="warn">parts missing</Badge>}
               </div>
@@ -175,7 +176,13 @@ function LotScreen({ api }: { api: LotVisitApi }) {
             <Button size="sm" onClick={() => step(-1)} title="previous car (←)">
               ◀
             </Button>
-            <Button variant="primary" disabled={car.price > view.cash || view.run_active} onClick={buy} data-testid="lot-buy">
+            <Button
+              variant="primary"
+              disabled={car.locked || car.price > view.cash || view.run_active}
+              onClick={buy}
+              data-testid="lot-buy"
+              title={car.locked ? `needs ${car.unlock_tier} rep tier` : undefined}
+            >
               Buy <Money value={car.price} />
             </Button>
             <Button size="sm" onClick={() => step(1)} title="next car (→)">

@@ -1,11 +1,11 @@
-# simcli hashes scenario=race_waterfront_drag systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
-240 12511923b98994e7
-480 765228fe097bf483
-720 77a26349243ed535
-960 417c3d2c634f4d09
-1200 58813afe5d6ce574
-1440 0e49d5eb57e7911f
-1680 4fd209722021fdd5
-1920 d95c37681852083b
-2160 0edcb828debbcf3a
-2400 4ffa81bc38419079
+# simcli hashes scenario=race_waterfront_drag systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 abc58f86f3355c29
+480 c1620752b17cee44
+720 487886b26000c705
+960 2876551c52e994f4
+1200 7a74aa4d103cda0a
+1440 25336229f9f8dbfd
+1680 de98236e38daa03f
+1920 06a305138925b481
+2160 df68a8edce278918
+2400 20c5ffeb031b3e42

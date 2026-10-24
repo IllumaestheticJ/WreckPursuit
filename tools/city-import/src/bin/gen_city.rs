@@ -4,12 +4,18 @@
 //! writes `<out>/procedural_<W>x<H>.road.bin`, `.road.json`, `.greybox.glb` and
 //! `.greybox.b64.txt`.
 //! `gen-city --preset vesper_v2 [--seed 1] [--out data/city] [--json]` writes Port Vesper v2
-//! (`vesper_v2.road.bin`, `.greybox.glb`, `.greybox.b64.txt`; the JSON dump, ≈ 6 MB of
-//! terrain, only with `--json`).
+//! (`vesper_v2.road.bin`, `.greybox.glb`; the JSON dump, ≈ 6 MB of terrain, only with
+//! `--json`). It and `--preset ashpeak` also rewrite the greybox parts of both maps
+//! (`city_import::parts`: `vesper_v2.shared`, `vesper_v2.own`, `ashpeak.county<N>`, as
+//! `.greybox.glb` + `.greybox.b64.txt`, and `<id>.greybox.parts.json`).
+//! `gen-city --preset touge_hollow_crown [--out data/city]` (or any id in
+//! `wp_world::touge::TOUGE_IDS`, or `--preset touge` for all four) writes a touge pass the
+//! same way.
 
 use std::path::PathBuf;
 
 use wp_world::procgen::{generate, ProcGenConfig};
+use wp_world::touge;
 use wp_world::vesper::{self, VesperConfig};
 
 fn main() {
@@ -40,11 +46,33 @@ fn main() {
                 println!("gen-city --grid 12x12 --seed 1 [--spacing 110] [--out data/city]");
                 println!("gen-city --preset vesper_v2 [--seed 1] [--out data/city] [--json]");
                 println!("gen-city --preset ashpeak [--seed 1] [--out data/city] [--json]");
+                println!("gen-city --preset touge|<touge id> [--out data/city] [--json]");
                 return;
             }
             other => panic!("unknown argument {other}"),
         }
         i += 2;
+    }
+    if let Some(p) = preset
+        .as_deref()
+        .filter(|p| *p == "touge" || touge::is_touge(p))
+    {
+        let ids: Vec<&str> = if p == "touge" {
+            touge::TOUGE_IDS.to_vec()
+        } else {
+            vec![p]
+        };
+        for id in ids {
+            let build = touge::generate_builtin(id).expect("touge pass");
+            city_import::write_city_files(&build.net, &out, json).expect("write city files");
+            println!(
+                "{id}: {:.0} m, {} K-rail sections -> {}",
+                build.track.length_m,
+                build.krails.len(),
+                out.display()
+            );
+        }
+        return;
     }
     let net = match preset.as_deref() {
         None => generate(&cfg),
@@ -64,6 +92,17 @@ fn main() {
     };
     let json = json || preset.is_none();
     city_import::write_city_files(&net, &out, json).expect("write city files");
+    // Port Vesper and Ashpeak ship as parts (Port Vesper once): both presets rewrite them,
+    // since the split compares the two maps.
+    if preset.as_deref() == Some(vesper::CITY_ID)
+        || preset.as_deref() == Some(wp_world::ashpeak::CITY_ID)
+    {
+        for (stem, bytes) in
+            city_import::parts::write_greybox_parts(&out).expect("write greybox parts")
+        {
+            println!("  part {stem}: {:.2} MB glb", bytes as f64 / 1e6);
+        }
+    }
     println!(
         "{}: {} nodes, {} lanes, {} intersections ({} signalised), {} buildings, {} POIs -> {}",
         net.id,

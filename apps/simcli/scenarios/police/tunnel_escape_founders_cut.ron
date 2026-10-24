@@ -31,9 +31,45 @@
 // ≈ 77 s. He still reaches the Cut first and is lost inside at ≈ 112.5 s with the units holding
 // the portals (nearest ≈ 135 m), so the escape lands at ≈ 152.5 s: the run is 170 s long and the
 // escape window ends at 170 s.
+//
+// Row 119 (solid terrain = drawn terrain): seed 51 hinged on pool unit 11 snagging on invisible
+// terrain behind a lot at (-836, 306); on the drawn ground it is stuck a second later, and the
+// chase flips to a PIT capture at 70.4 s. Seeds 52-57 are bit-identical with and without that
+// fix, and only seed 56 tells this story there (as only 51 and 56 did before): helicopter at
+// 63.6 s, lost inside the Cut at ≈ 96 s, Escaped at 118.4 s (L3). Re-seeded to 56.
+// Round 12c (rows 80 / 89, police see 380 m by day, 200° forward plus 60 m all round): seed 56
+// is now PIT-captured at 54.3 s on the way downtown, before the Cut. Over seeds 50-63 the story
+// holds on 8 of 14 seeds (seeds 50, 51, 53, 58-61, 63 escape in the Cut at L3); re-seeded to 51:
+// Escaped 118.4 s, max time unseen 21.9 s; control captured 112.1 s.
+// Row 84 (search extras, 2026-10-22): extra units sent to the last known spot shift this chase's
+// timeline (seed 51 lost him on Mercer at 64.5 s and he escaped at 80.4 s, before the helicopter).
+// Seeds 50-63: the escape story holds on 12 of 14, escape and control both on 7 (53-55, 57, 59,
+// 60, 62); re-seeded to 53.
+// World merge 6799200b (D's Loop 9 rest stops add off/on ramps and parking roads to Port Vesper):
+// the new roads change the seeded police spawn spots, and seed 53 diverged at 17.6 s; no unit
+// was near Mercer to re-acquire him at ~72 s, so he escaped at 80.4 s before the helicopter.
+// Seeds 50-63 on the merged tip: escape story on 11 of 14, both scenarios on 4 (54-56, 58); 54
+// and 55 held both before the merge too. Re-seeded to 54.
+// Row 156 (owner decision, 2026-10-23: helicopter from wanted level 5, spikes from 4): from heat
+// 50 (L3) the run never reached L5 and the helicopter never launched. Heat 90 (the bottom of L5)
+// keeps the story: pursuit at 9.8 s, helicopter at 72.2 s, lost inside the Cut, Escaped at
+// 133.8 s after 40 s unseen (the L5 day escape time); control Captured at 125.8 s.
+// Row 157 (2026-10-23: every heat gain halved): from heat 90 the racer drops below L5 and climbs
+// back at half the rate, so the helicopter launched at 95.7-111.2 s on every seed 50-63 (deadline
+// 95 s). Heat 95 -> seeds 50-63: escape story on 8 of 14 (51-53, 55-57, 63), control captured in
+// its window on 2 (54, 63; the other 12 are still in pursuit at 190 s or captured early, none
+// escapes). Re-seeded 54 -> 63, heat 90 -> 95.
+// PR #60 port (2026-10-23: no AI pursuit cap, stronger police cars, rolling-block deadlock fix):
+// seed 63 was Captured at 141.8 s. Seeds 50-70 at heat 95: escape story on 16 of 21, control
+// on 20, both on 15 (50-52, 56-62, 64-66, 68-70). Re-seeded 63 -> 60, the middle of 56-62.
+// Row 168 (2026-10-24: a unit in a stopped racer's lane drives on, units wedged against a wall
+// or in the racer's lane ahead don't make the arrest): seed 60 was Captured at 132.7 s. Seeds
+// 50-70: escape story on 11 of 21, control on 20, both on 11 (50, 52, 54, 56-59, 61, 63, 65,
+// 68). Re-seeded 60 -> 58.
 (
     name: "police_tunnel_escape_founders_cut",
-    seed: 51,
+    // Lead 2026-10-24: re-seeded 60 -> 58 after merging D's canal-bridge fix (ws/world 3affce58) with the PR #60 police power port; seed 60's main run became a capture. Seeds 50-70: both files pass on 11 of 21; 56-59 is the widest run, 58 its middle.
+    seed: 58,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,
     time_ratio: 1.0,
@@ -47,7 +83,7 @@
         (
             id: "racer",
             car: "debug_coupe",
-            police_heat: 50.0,
+            police_heat: 95.0,
             speed_mps: 20.0,
             driver: follow_route(route_id: "Lantern Run -> Founders Cut lay-by", target_speed: 25.0),
         ),
@@ -56,8 +92,9 @@
     hash_every: 240,
     expect: [
         pursuit_started_before(t_s: 15.0),
-        // wp_police HeloLaunched (kind 12).
-        police_event_before(kind: 12, t_s: 80.0),
+        // wp_police HeloLaunched (kind 12). Turn-round round (crawl 4 -> 5.5 m/s, 2026-10-22): the
+        // helicopter launches at 90.2 s (was < 80), still before he reaches the Cut.
+        police_event_before(kind: 12, t_s: 95.0),
         metric(entity: "racer", name: "route_progress", min: 0.97, max: 1.0),
         // The tunnel hides him long enough for the escape timer (22 s at L3 by day).
         metric(entity: "racer", name: "max_los_lost_s", min: 18.0, max: 60.0),

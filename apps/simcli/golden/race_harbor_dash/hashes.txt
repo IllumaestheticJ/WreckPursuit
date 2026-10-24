@@ -1,0 +1,11 @@
+# simcli hashes scenario=race_harbor_dash systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 a8a448285382f66f
+480 37ce018b4913a4df
+720 14818eb75970df0e
+960 92259c473879af0d
+1200 c992e35a14bb78d8
+1440 9b2716117b3bdfac
+1680 d7082ee8df9ebb6e
+1920 3324983668455201
+2160 c5fe5b3465aafc1a
+2400 d5d7ee603f6caf02

@@ -67,6 +67,9 @@
   margin: 0.5em 0 1em;
   color: var(--ink-2);
 }
+.wp-gm-map {
+  margin: 0 0 0.6rem;
+}
 .wp-gm-list {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -121,12 +121,14 @@ pub fn repair_quote_json(entity: u32, request_json: &str) -> Result<String, JsVa
                     handling: v.damage.handling_effects(),
                     outstanding: estimate.clone(),
                     lattice_state: Vec::new(),
-                    sustained_while_wanted: req.wanted != WantedLevel::None,
+                    sustained_before_capture: false,
                 },
                 location: CarLocation::Garage,
                 insurance: None,
                 purchase_price: None,
                 tires: Default::default(),
+                tune: Default::default(),
+                parts: None,
             };
             // A throwaway account holding just this car (cash only pays an optional premium).
             let mut acct = PlayerAccount::empty(PlayerId(1));

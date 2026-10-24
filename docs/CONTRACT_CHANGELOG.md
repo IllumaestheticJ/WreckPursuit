@@ -5,6 +5,19 @@
 changed, why, and which workstreams must update. Only the integration lead edits the contract.
 Every session reads this file at start.
 
+## v0.4.1 — applied 2026-10-23 (branch `lead/main-sync`, merge of main into round 12)
+
+One version for the two lines that each bumped the contract on their own: round 12's v0.3.1
+(below) and main's v0.4.0 (below, PR #48). Both additions are kept as they were; nothing else
+changed. `CONTRACT_VERSION` 0.3.1 / 0.4.0 → **0.4.1**: wp_net clients and servers, meta and
+replays from either line must be rebuilt (the version is in the wire handshake and in every
+golden's `contract=` header).
+- `DnfReason::Stuck` (v0.3.1, round 12): appended last in `DnfReason`.
+- `DamageMode::Extreme` and `ModeTable::racer_damage_scale` (v0.4.0, main): `Extreme` appended
+  last in `DamageMode` (wire u8 2); `racer_damage_scale` with `#[serde(default)]` = 1.0.
+Schemas regenerated (`mode_table` from v0.4.0; `DnfReason` is not in a schema). ui-kit's
+generated `src/model/contracts.ts` updated to match (see `docs/integration/main-sync.md`).
+
 ## v0.4.0 — applied 2026-10-22 (branch `claude/project-thread-fsdnoo`, owner request)
 
 Owner request (project thread "Arcade, simulation and extreme damage", 2026-10-22): "Make arcade
@@ -34,8 +47,45 @@ Goldens: every simcli scenario switched `Arcade` → `Simulation` and `Simulatio
 Barrier scenarios renamed `*_arcade` → `*_sim`, `*_sim` → `*_extreme`. Schemas regenerated
 (`mode_table`).
 
+## v0.3.1 — applied 2026-10-22 (branch `lead/round12`)
+
+- Additive (**lead-approved**, request from opponent-pace in `docs/integration/opponent-pace.md`
+  "Contract change requests"): `DnfReason::Stuck`, appended last (existing ordering and serde
+  names unchanged). Meaning: the racer made no course progress for the judge's stuck limit
+  while every other racer still running was stuck too, so the judge ended the race. It is a
+  safety net so a box-in (row 154 follow-up (a)) can never leave a race unjudged; it is not a
+  racer giving up (owner rule: racers never give up). **Who updates:** wp_race adds the judge
+  rule (`stuck_limit_s`, default 180 s); any exhaustive `match` on `DnfReason` adds an arm
+  (UI labels: "Stuck"). Patch bump 0.3.0 → 0.3.1 (wp_net clients and servers must match).
+
 ## v0.3.0 — applied 2026-10-19 (branch `lead/contract-v0.3.0`)
 
+- Amendment (**lead-approved**, owner requests 2026-10-21, playtest rows 137 / 142; branch
+  `lead/grip-balance`): `AssistProfile::keyboard_default().countersteer_help` 0.6 → **0.3**
+  (row 137 set it to 0; row 142 replaces that with the measured value). On player cars the
+  help is now only the hands-off self-alignment of the reference game: with no steer key held
+  the front wheels follow the slide, capped at 30 % of full lock. A held key overrides it at
+  once (`wp_vehicle::plain::PlainSteer::self_align`). 0.3 is the value whose hands-off angle
+  and timing best match the owner's keyboard clips (`docs/reference/wf-clips`,
+  `examples/owner_replay.rs`). A default value only: no type, wire or data change, version
+  kept at 0.3.0. Gamepad (0.3), wheel and AI defaults are unchanged; the testbed's touch
+  preset keeps 0.6. **Who updates:** nobody. The testbed migrates untouched old defaults
+  (60 %, 50 % or the 0 shipped in 0.12.44) to 30 %; a value the player changed is kept.
+- Amendment (**lead-approved**, owner request 2026-10-20, rows 104/105; branch `lead/assist-levels`):
+  `TcsLevel { Off, Half, Full }` and `AbsLevel { Off, Half, Full }` replace the `tcs` / `abs`
+  bools in `AssistProfile` (the reference game's levels). Wire / data compatible: a level
+  serialises as the string `"Off"` / `"Half"` / `"Full"` (JSON and RON alike; in RON write
+  `tcs: "Half"`), and deserialisation still accepts the legacy bool (`true` → `Full`,
+  `false` → `Off`), so saves, scenarios and replays written before load
+  unchanged. simcli `replay.bin` keeps its format: assists-op flags gain bit 32 (ABS is Half)
+  and 64 (TCS is Half); old files read as Full / Off. Helpers: `ALL`, `is_on`, `name`,
+  `from_name`, `from_bool`, `From<bool>`, `Display`. Device defaults keep their old meaning
+  (`true` → `Full`), so no golden hash changed from the contract itself. **Who updates:** any
+  code matching `assists.tcs` / `assists.abs` as bools (done in this branch for A, C, F, I, J,
+  10 and the UI kit); TS: `AssistProfile.tcs` / `.abs` are `"Off" | "Half" | "Full"`
+  (`apps/ui-kit/src/generated/contracts.ts` regenerated). Version kept at 0.3.0 like the other
+  amendments (no wire or data break). Behaviour lives in `wp_vehicle` (see
+  `docs/integration/assist-levels.md`).
 - Amendment (lead round 8): `LocalConditions::visibility_m` + `CLEAR_VISIBILITY_M` (machine K; fog/rain sight for police LOS).
 - Amendment (lead round 8, additive): `DnfReason::Fled` (AI entrants abandoning a race to flee police; machine L).
 

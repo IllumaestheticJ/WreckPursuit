@@ -456,6 +456,8 @@ impl Economy {
             location: CarLocation::Garage,
             insurance: None,
             purchase_price: Some(listing.price),
+            tune: Default::default(),
+            parts: None,
             tires: listing.tires,
         };
         transact(acct, |tx| {

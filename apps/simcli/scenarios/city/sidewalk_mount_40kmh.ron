@@ -17,7 +17,7 @@
         (
             id: "mounter",
             car: "debug_sedan",
-            // The quay's outer eastbound lane (kerb at y = -932.0; main moved the quay 25 m north), heading 8° to the right.
+            // Lane 507 (eastbound, kerb at y = -932.0; was lane 463 at -957 before main moved the port streets), heading 8° to the right.
             pos: (470.0, -930.25, 2.5),
             yaw: -1.7104,
             speed_mps: 11.11,
@@ -31,7 +31,7 @@
         (
             id: "walker",
             car: "debug_sedan",
-            // On the sidewalk of the quay's westbound side (kerb at y = -918.0), 1.5 m in.
+            // On the sidewalk of lane 509 (westbound, kerb at y = -918.0), 1.5 m in.
             pos: (890.0, -916.5, 2.65),
             yaw: 1.5708,
             speed_mps: 11.11,

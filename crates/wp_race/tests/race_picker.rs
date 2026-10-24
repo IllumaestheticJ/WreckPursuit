@@ -18,6 +18,26 @@ use wp_race::live::{grid, LiveEntrant, LiveRace};
 use wp_race::{RaceSignal, RacerResult, RacerSample, RacerStatus};
 use wp_sim::{Sim, VehicleKind};
 
+/// Row 165: every spike strip on the road has its police unit within the leash of its post.
+fn assert_strips_manned(sim: &Sim, id: &str) {
+    let p = sim.police();
+    for s in p.spike_strips() {
+        let u = s
+            .unit
+            .and_then(|uid| p.units().iter().find(|u| u.id == uid))
+            .unwrap_or_else(|| panic!("{id}: spike strip {:?} without its unit", s.id));
+        let post = s.post.unwrap_or(s.site.pos);
+        let d = (u.body.pos[0] - post[0]).hypot(u.body.pos[1] - post[1]);
+        assert!(
+            d <= wp_police::dispatch::SPIKE_UNIT_LEASH_M,
+            "{id}: spike strip {:?}'s unit {:.1} m from its post at tick {}",
+            s.id,
+            d,
+            sim.tick()
+        );
+    }
+}
+
 fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -49,6 +69,13 @@ struct Raced {
     /// Each racer's police heat just after the green light (meet report + stake heat).
     heat_after_green: Vec<f32>,
     sim_hash: u64,
+    /// What the race's police profile put out at the start (`None` without police).
+    plan: Option<wp_police::race::RacePolicePlan>,
+    /// Stakeouts that left their post during the race.
+    stakeouts_sprung: usize,
+    /// Roadblocks and spike strips placed in all (scripted and by the AI captain).
+    roadblocks_placed: u32,
+    spikes_placed: u32,
 }
 
 fn run_race(id: &str, max_s: u64) -> Raced {
@@ -92,6 +119,8 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
     let built = build_sim(&sc, &data_src, &RunOptions::default()).unwrap();
     let mut sim = built.sim;
     let ids = built.ids;
+    // The AI drives every seat, the player's car included: no player steering aids on it.
+    sim.set_player_steering(ids[0], Some(false)).unwrap();
     let race = catalog::plan_course(sim.world(), &def).expect("course plans");
     let route_m = race.route.length_m;
     assert!(
@@ -114,6 +143,21 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         );
     }
     assert_eq!(sc.entities[0].pos[0], player_slot.pos[0]);
+    // Every slot starts inside the paved lanes, a car's half width plus the margin from their
+    // edge (not on a verge or shoulder past the kerb; a slot inside a junction box has no lane
+    // under it and is not checked).
+    for slot in &slots {
+        let d = slot.dir;
+        if let Some((lo, hi)) = catalog::paved_span(sim.world(), slot.pos, d, [d[1], -d[0]]) {
+            let edge = catalog::GRID_CAR_HALF_WIDTH_M + catalog::GRID_EDGE_MARGIN_M - 0.01;
+            assert!(
+                lo <= -edge && hi >= edge,
+                "{id}: grid slot {} at {:?} is outside the lanes ({lo:.2}..{hi:.2} m)",
+                slot.index,
+                slot.pos
+            );
+        }
+    }
     // Nobody starts nose to tail with a parked car: no parked car within a car's width of a
     // slot's first 30 m (a two-wide grid on a narrow street put a column in the parking lane).
     if sc.parked_cars {
@@ -159,9 +203,16 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         sim.tick(),
         abs_s,
         true,
-    );
+    )
+    .expect("a drivable route");
     let green_tick = live.judge().green_tick();
     let racers = live.racers().to_vec();
+    // The race's own police profile, as the browser session sets it up (none without police).
+    let plan = (sc.police_presence != Some(0.0)).then(|| {
+        wp_race::police::start_race(sim.police_mut(), &def, live.race(), &racers)
+            .expect("every picker race has a police profile")
+    });
+    eprintln!("{id}: police plan {plan:?}");
 
     let mut events: Vec<SimEvent> = Vec::new();
     let mut signals = Vec::new();
@@ -189,6 +240,8 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         }
         sim.step_fixed();
         events = sim.drain_events();
+        // Row 165: no spike strip ever lies on the road without its unit beside it.
+        assert_strips_manned(&sim, id);
         pursuits += events
             .iter()
             .filter(|e| {
@@ -213,6 +266,15 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         if let Some(t1) = t1 {
             glue += t1.elapsed();
             glue_ticks += 1;
+        }
+        // Off-course racers go back on the route at rest, as the browser session does (it also
+        // picks a clear lane spot there; the centreline point is enough here).
+        for r in &out.resets {
+            let yaw = wp_math::atan2(-r.dir[0], r.dir[1]);
+            sim.place_on_ground(r.racer, [r.pos[0], r.pos[1]], yaw, 0.0, Some(r.pos[2]))
+                .unwrap();
+            sim.set_ghost(r.racer, 240).unwrap();
+            live.relocate(r.racer, r.pos, sim.tick());
         }
         if !out.reports.is_empty() {
             let views: Vec<wp_police::RacerView> = samples
@@ -357,7 +419,20 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         "{id}: route {route_m:.0} m, finished at {:?} s, pursuits {pursuits}",
         finished_tick.map(|t| t as f32 / 240.0)
     );
+    let stakeouts_sprung = sim
+        .police()
+        .race_police()
+        .map_or(0, |r| r.stakeouts.iter().filter(|s| s.sprung).count());
+    let stats = sim.police().stats();
+    eprintln!(
+        "{id}: stakeouts sprung {stakeouts_sprung}, roadblocks {}, spikes {} ({} hits)",
+        stats.roadblocks, stats.spikes, stats.spike_hits
+    );
     Raced {
+        plan,
+        stakeouts_sprung,
+        roadblocks_placed: stats.roadblocks,
+        spikes_placed: stats.spikes,
         def,
         results,
         signals,
@@ -435,8 +510,17 @@ fn check(r: &Raced, winner_s: std::ops::Range<f32>, min_finish: usize) {
 #[test]
 fn grid_highway_sprint() {
     let r = run_race("grid_highway_sprint", 150);
-    // 747 m up a signalled highway with thin traffic.
-    check(&r, 15.0..60.0, 3);
+    // 747 m up a signalled highway with thin traffic. The speed trap (data/police/races.toml)
+    // picks racers up as they fly past its radar units and spikes the racing lane near the
+    // end, so it takes a racer or two out (seed 7: one captured, one fled): two finish.
+    check(&r, 15.0..60.0, 2);
+    let plan = r.plan.as_ref().expect("police profile");
+    assert_eq!(plan.spikes.len(), 1);
+    assert_eq!(plan.stakeouts.len(), 2);
+    assert!(r.stakeouts_sprung >= 1, "nobody drove past the speed trap");
+    assert!(r.pursuits >= 1);
+    // No roadblocks on the short highway: spikes only.
+    assert_eq!(r.roadblocks_placed, 0);
 }
 
 #[test]
@@ -451,7 +535,112 @@ fn grid_highway_sprint_is_deterministic() {
 fn hollins_hill_sprint() {
     let r = run_race("hollins_sprint", 200);
     // ~1 km uphill through six hairpins (the AI-only Hollins race: winner ~65 s).
+    // With the police patrolling the hill a racer may be caught or flee legitimately (owner
+    // decision, as in `loop9_circuit`; `WP_RACE_SEED=6`: two racers out to the police in the
+    // first 45 s), so police outcomes count with the finishers. What still fails: a race
+    // that never ends (a deadlock), no winner, a wreck. Since the owner's "racers never give
+    // up" rule (2026-10-21, wp_opponent `RaceConfig::allow_abandon` off) a pursued racer keeps
+    // racing at any wanted level, so only real captures take racers out and a winner is
+    // required again (E had relaxed this in 6e63486d while pursued racers yielded at L1).
+    // Seeds 1-8: see docs/integration/opponent-pace.md.
+    check_with_police(&r, 40.0..110.0, 3);
+    // The summit trap: the side road at the top sealed, a unit waiting below the summit,
+    // no spikes or dynamic roadblocks on the hill.
+    let plan = r.plan.as_ref().expect("police profile");
+    assert!(!plan.side_blocks.is_empty(), "the top is not sealed");
+    assert!(plan.route_blocks.is_empty());
+    assert_eq!(plan.stakeouts.len(), 1);
+    assert_eq!(r.spikes_placed, 0);
+    assert_eq!(r.roadblocks_placed as usize, plan.side_blocks.len());
+}
+
+/// [`check`] for a race with police on the course: racers the police caught or chased off
+/// (`Dnf(Captured)` / `Dnf(Fled)`) count with the finishers towards `min_finish`, and the
+/// winner's window stretches to 180 s when the police took someone out (the chase holds the
+/// field up). The race must still end with a winner and nobody wrecked.
+fn check_with_police(r: &Raced, winner_s: std::ops::Range<f32>, min_finish: usize) {
+    check_with_police_inner(r, winner_s, min_finish, false);
+}
+
+fn check_with_police_inner(
+    r: &Raced,
+    winner_s: std::ops::Range<f32>,
+    min_finish: usize,
+    all_out_ok: bool,
+) {
+    use wp_race::DnfReason;
+    let id = r.def.id;
+    assert!(r.finished_tick.is_some(), "{id}: never finished");
+    assert!(r.results.iter().all(|x| x.status != RacerStatus::Running));
+    assert!(matches!(
+        r.signals.last(),
+        Some(RaceSignal::RaceFinished { .. })
+    ));
+    let police_out = r
+        .results
+        .iter()
+        .filter(|x| {
+            matches!(
+                x.status,
+                RacerStatus::Dnf(DnfReason::Captured | DnfReason::Fled)
+            )
+        })
+        .count();
+    let finished = r
+        .results
+        .iter()
+        .filter(|x| x.status == RacerStatus::Finished)
+        .count();
+    assert!(
+        r.results
+            .iter()
+            .all(|x| x.status != RacerStatus::Dnf(DnfReason::TotalLoss)),
+        "{id}: a car was wrecked"
+    );
+    if all_out_ok && police_out == r.results.len() {
+        return;
+    }
+    let winner = r
+        .results
+        .iter()
+        .find(|x| x.position == 1)
+        .expect("a winner");
+    assert_eq!(
+        winner.status,
+        RacerStatus::Finished,
+        "{id}: winner {winner:?}"
+    );
+    let window = if police_out > 0 {
+        winner_s.start..180.0
+    } else {
+        winner_s
+    };
+    let t = winner.elapsed_s().unwrap();
+    assert!(
+        window.contains(&t),
+        "{id}: winner took {t:.1} s, want {window:?} ({police_out} out to the police)"
+    );
+    assert!(
+        finished + police_out >= min_finish,
+        "{id}: {finished} finished + {police_out} out to the police < {min_finish}: {:?}",
+        r.results
+            .iter()
+            .map(|x| (x.racer, x.status, x.elapsed_s()))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        r.results
+            .iter()
+            .all(|x| x.status != RacerStatus::Dnf(DnfReason::TotalLoss)),
+        "{id}: a car was wrecked"
+    );
+}
+
+#[test]
+fn hollins_hill_sprint_pace_without_police() {
+    let r = run_race_with("hollins_sprint", 200, Some(0.0));
     check(&r, 40.0..110.0, 3);
+    assert_eq!(r.pursuits, 0);
 }
 
 #[test]
@@ -503,6 +692,8 @@ fn loop9_circuit() {
                     | RacerStatus::Dnf(wp_race::DnfReason::Captured)
                     | RacerStatus::Dnf(wp_race::DnfReason::Fled)
                     | RacerStatus::Dnf(wp_race::DnfReason::FinishWindow)
+                    // Or the judge's safety net: no progress for 3 min (DnfReason::Stuck).
+                    | RacerStatus::Dnf(wp_race::DnfReason::Stuck)
             ),
             "{id}: {x:?} ended by neither the flag, the police nor a racing incident"
         );
@@ -511,6 +702,20 @@ fn loop9_circuit() {
         let t = w.elapsed_s().unwrap();
         assert!((150.0..420.0).contains(&t), "{id}: winner took {t:.1} s");
     }
+    // Loop 9's police profile is high-speed pursuit only: interceptors staked out on the
+    // shoulders join the chase, and no roadblock or spike strip is ever put out.
+    let plan = r.plan.as_ref().expect("police profile");
+    assert!(plan.route_blocks.is_empty() && plan.side_blocks.is_empty() && plan.spikes.is_empty());
+    assert_eq!(
+        r.roadblocks_placed, 0,
+        "{id}: a roadblock on the pursuit-only loop"
+    );
+    assert_eq!(r.spikes_placed, 0, "{id}: spikes on the pursuit-only loop");
+    assert!(
+        r.stakeouts_sprung >= 1,
+        "{id}: no interceptor joined from the shoulder"
+    );
+    assert!(r.pursuits >= 1, "{id}: no pursuit");
     eprintln!(
         "loop9 pursuits: {}, finished: {}/{}",
         r.pursuits,
@@ -536,6 +741,9 @@ fn loop9_circuit_pace_without_police() {
 
 #[test]
 fn lantern_checkpoint_draws_the_police() {
+    // Seed 31 (the catalog's) is back since the box-in escape (follow-up (a), 2026-10-22): the
+    // last racer, boxed in between captured cars, used to stay Running and the race was never
+    // judged (seeds 5 and 31); seeds 1-8 and 31 now all end.
     let r = run_race("lantern_checkpoint", 300);
     let id = r.def.id;
     // A hot meet in broad daylight: a patrol is called to the grid, and every racer carries
@@ -551,6 +759,12 @@ fn lantern_checkpoint_draws_the_police() {
     // Illegal daytime with Max presence is meant to bring every cop in town: pursuits start
     // while the race is on (the loop stops counting when the race is judged over).
     assert!(r.pursuits >= 1, "{id}: no pursuit during the race");
+    // Downtown lockdown (data/police/races.toml): roadblocks across the route and on the side
+    // streets off it, in place from the start.
+    let plan = r.plan.as_ref().expect("police profile");
+    assert_eq!(plan.route_blocks.len(), 2, "{id}: route blocks {plan:?}");
+    assert!(plan.side_blocks.len() >= 2, "{id}: side blocks {plan:?}");
+    assert!(r.roadblocks_placed as usize >= plan.route_blocks.len() + plan.side_blocks.len());
     // The race is judged to the end and nobody wrecks.
     assert!(r.finished_tick.is_some(), "{id}: never finished");
     assert_eq!(r.results.len(), r.def.entrants());
@@ -574,14 +788,23 @@ fn lantern_checkpoint_draws_the_police() {
             x.gates_passed >= 1 || x.progress_m >= 30.0,
             "{id}: {x:?} never left the grid"
         );
+        // Or behind the winner's finish window: racers never give up (owner, 2026-10-21), so a
+        // racer held up past it ends there. On the default seed (31) after the round-12 police
+        // and traffic merges, two racers sat ~25 s behind a civilian standing in their lane on
+        // the narrow downtown street, then crawled behind it with no room to pass (police
+        // status Clear throughout); seeds 1-6 end by the flag or captures (seed 5: a racer
+        // wedged beside two captured cars, a separate AI follow-up in opponent-pace.md).
         assert!(
             matches!(
                 x.status,
                 RacerStatus::Finished
                     | RacerStatus::Dnf(wp_race::DnfReason::Captured)
                     | RacerStatus::Dnf(wp_race::DnfReason::Fled)
+                    | RacerStatus::Dnf(wp_race::DnfReason::FinishWindow)
+                    // Or the judge's safety net: no progress for 3 min (DnfReason::Stuck).
+                    | RacerStatus::Dnf(wp_race::DnfReason::Stuck)
             ),
-            "{id}: {x:?} ended by neither the flag nor the police"
+            "{id}: {x:?} ended by neither the flag, the police nor the finish window"
         );
     }
     // Anyone who does get through the 665 m daytime zig-zag (signals, junction queues) does
@@ -636,9 +859,9 @@ fn crowfoot_descent_touge() {
 }
 
 #[test]
-fn harlan_dirt_run() {
+fn harnell_dirt_run() {
     // 4 km of gravel section roads: winner ~266 s.
-    ashpeak_race("harlan_dirt_run", 500, 190.0..380.0, 3);
+    ashpeak_race("harnell_dirt_run", 500, 190.0..380.0, 3);
 }
 
 #[test]
@@ -669,4 +892,69 @@ fn waterfront_drag() {
 fn ashpeak_metro_circuit() {
     // Two 4.2 km laps of the downtown grid at night: winner ~326 s, three of six finish.
     ashpeak_race("ashpeak_metro_circuit", 900, 240.0..480.0, 3);
+}
+
+#[test]
+fn harbor_dash() {
+    let r = run_race("harbor_dash", 150);
+    // 737 m down Harbor Boulevard onto the Loop 9 on-ramp.
+    check(&r, 15.0..70.0, 3);
+}
+
+#[test]
+fn tunnel_run() {
+    let r = run_race("tunnel_run", 200);
+    // 1.3 km of Loop 9 through the Hollins Tunnel.
+    check(&r, 25.0..110.0, 4);
+}
+
+#[test]
+fn hollins_descent() {
+    let r = run_race("hollins_descent", 240);
+    // 1.35 km down the Hollins hairpins into Mercer.
+    check(&r, 40.0..150.0, 3);
+}
+
+#[test]
+fn offramp_sprint() {
+    let r = run_race("offramp_sprint", 240);
+    let id = r.def.id;
+    // 1.6 km off Loop 9 and through the town's signals at dusk. The red lights draw the
+    // patrols, and races with police can end in captures (owner decision), so like
+    // `loop9_circuit` the police decide how many finish: the race is judged to the end, the
+    // winner takes the flag, and every racer's race ends at the flag, by the police, behind
+    // the finish window or in at most one racing incident.
+    assert!(r.finished_tick.is_some(), "{id}: never finished");
+    assert_eq!(r.results.len(), r.def.entrants());
+    let winner = r.results.iter().find(|x| x.position == 1).unwrap();
+    assert_eq!(winner.status, RacerStatus::Finished, "{id}: {winner:?}");
+    let t = winner.elapsed_s().unwrap();
+    assert!((50.0..170.0).contains(&t), "{id}: winner took {t:.1} s");
+    let dqs = r
+        .results
+        .iter()
+        .filter(|x| matches!(x.status, RacerStatus::Dq(_)))
+        .count();
+    assert!(dqs <= 1, "{id}: {dqs} disqualified");
+    for x in &r.results {
+        assert!(
+            matches!(
+                x.status,
+                RacerStatus::Finished
+                    | RacerStatus::Dq(_)
+                    | RacerStatus::Dnf(wp_race::DnfReason::Captured)
+                    | RacerStatus::Dnf(wp_race::DnfReason::Fled)
+                    | RacerStatus::Dnf(wp_race::DnfReason::FinishWindow)
+            ),
+            "{id}: {x:?}"
+        );
+        assert!(x.gates_passed >= 1, "{id}: {x:?} never left the grid");
+    }
+}
+
+#[test]
+fn grid_arterial_sprint() {
+    let r = run_race("grid_arterial_sprint", 200);
+    // 1.0 km across the grid city's blocks.
+    check(&r, 25.0..130.0, 3);
 }

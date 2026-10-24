@@ -33,10 +33,29 @@ export interface Volumes {
   ambience: number;
 }
 
+/** TCS / ABS level (the reference game's Off / Half / Full; contract `TcsLevel` / `AbsLevel`). */
+export type AssistLevel = "Off" | "Half" | "Full";
+
+/** The levels in menu order. */
+export const ASSIST_LEVELS: readonly AssistLevel[] = ["Off", "Half", "Full"];
+
+/** An assist level from untrusted data: a level name (any case), or a legacy bool (true → Full,
+ * false → Off, as the contract reads saves from before the levels); anything else → `d`. */
+export function assistLevel(v: unknown, d: AssistLevel): AssistLevel {
+  if (typeof v === "boolean") return v ? "Full" : "Off";
+  if (typeof v === "string") {
+    const hit = ASSIST_LEVELS.find((l) => l.toLowerCase() === v.trim().toLowerCase());
+    if (hit) return hit;
+  }
+  return d;
+}
+
 /** Driving assists the menu exposes (independent of the damage mode). */
 export interface AssistSettings {
-  abs: boolean;
-  tcs: boolean;
+  /** Anti-lock brakes level. */
+  abs: AssistLevel;
+  /** Traction control level (Off = the throttle you press). */
+  tcs: AssistLevel;
   esc: boolean;
   autoGears: boolean;
   /** Speed-sensitive steering (the input-device preset's value, or 0 when off). */
@@ -55,6 +74,10 @@ export interface GameSettings {
   /** Speak police radio lines (browser speech; owner playtest row 79). Off = squelch, static
    * and the radio strip's text only. The volume is the Police radio slider. */
   radioVoice: boolean;
+  /** "Radio: Important only / All" (owner playtest row 144): "important" plays only police
+   * radio tiers 1–3 (roadblocks, spikes, helicopter, units ahead; heat changes and takeovers;
+   * impacts and wrecks). Default "all". */
+  radioFilter: RadioFilter;
   assists: AssistSettings;
   damageMode: "Arcade" | "Simulation" | "Extreme";
   units: SpeedUnits;
@@ -65,6 +88,9 @@ export interface GameSettings {
   /** Input shaping per device (dead zones, saturation, sensitivity; see `controls.ts`). */
   controls: Record<ControlDevice, DeviceControls>;
 }
+
+/** Which police radio lines are played (row 144). */
+export type RadioFilter = "all" | "important";
 
 /** localStorage key. */
 export const SETTINGS_KEY = "wp.gameSettings.v1";
@@ -77,7 +103,8 @@ export function defaultGameSettings(developer = true): GameSettings {
     drawDistanceM: 0,
     volumes: { master: 0.8, engine: 1, effects: 1, police: 1, ambience: 0.5 },
     radioVoice: true,
-    assists: { abs: true, tcs: false, esc: false, autoGears: false, steerHelp: true, countersteer: 0.5 },
+    radioFilter: "all",
+    assists: { abs: "Full", tcs: "Off", esc: false, autoGears: false, steerHelp: true, countersteer: 0.3 },
     damageMode: "Arcade",
     units: "kmh",
     camera: "",
@@ -89,6 +116,24 @@ export function defaultGameSettings(developer = true): GameSettings {
 const clamp01 = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : d);
 const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
 const oneOf = <T extends string>(v: unknown, opts: readonly T[], d: T): T => (opts.includes(v as T) ? (v as T) : d);
+
+/** The menu's countersteer default before playtest row 137 (50 %); 0.12.44 shipped 0, row
+ * 142 sets 30 % (the reference game's hands-off alignment). */
+export const OLD_COUNTERSTEER_DEFAULT = 0.5;
+
+/** Stored-settings mark: saved after the row 142 countersteer default (30 %). */
+export const COUNTERSTEER_REV = 142;
+
+/** Stored countersteer strength. Untouched old defaults read as the new default (30 %): 50 %
+ * in settings saved before row 137 (no `countersteerRev` mark) and 0 in settings saved with
+ * the row 137 mark (0.12.44 shipped 0). A value the player changed is kept. Saved settings
+ * carry the current mark from then on ([`saveGameSettings`]). */
+function migrateCountersteer(r: Record<string, unknown>, a: Record<string, unknown>, d: number): number {
+  const v = clamp01(a.countersteer, d);
+  if (r.countersteerRev === COUNTERSTEER_REV) return v;
+  const oldDefault = r.countersteerRev === 137 ? 0 : OLD_COUNTERSTEER_DEFAULT;
+  return v === oldDefault ? d : v;
+}
 
 /** Merge untrusted data (stored JSON) onto `base`, field by field; bad fields keep the base. */
 export function normalizeSettings(raw: unknown, base: GameSettings): GameSettings {
@@ -108,13 +153,14 @@ export function normalizeSettings(raw: unknown, base: GameSettings): GameSetting
       ambience: clamp01(v.ambience, base.volumes.ambience),
     },
     radioVoice: bool(r.radioVoice, base.radioVoice),
+    radioFilter: oneOf(r.radioFilter, ["all", "important"] as const, base.radioFilter),
     assists: {
-      abs: bool(a.abs, base.assists.abs),
-      tcs: bool(a.tcs, base.assists.tcs),
+      abs: assistLevel(a.abs, base.assists.abs),
+      tcs: assistLevel(a.tcs, base.assists.tcs),
       esc: bool(a.esc, base.assists.esc),
       autoGears: bool(a.autoGears, base.assists.autoGears),
       steerHelp: bool(a.steerHelp, base.assists.steerHelp),
-      countersteer: clamp01(a.countersteer, base.assists.countersteer),
+      countersteer: migrateCountersteer(r, a, base.assists.countersteer),
     },
     damageMode: oneOf(r.damageMode, ["Arcade", "Simulation", "Extreme"] as const, base.damageMode),
     units: oneOf(r.units, ["kmh", "mph"] as const, base.units),
@@ -161,7 +207,7 @@ export function loadGameSettings(base: GameSettings, storage: SettingsStorage | 
 export function saveGameSettings(s: GameSettings, storage: SettingsStorage | null = browserStorage()): boolean {
   try {
     if (!storage) return false;
-    storage.setItem(SETTINGS_KEY, JSON.stringify(s));
+    storage.setItem(SETTINGS_KEY, JSON.stringify({ ...s, countersteerRev: COUNTERSTEER_REV }));
     return true;
   } catch {
     return false;

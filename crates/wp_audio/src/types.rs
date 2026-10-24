@@ -96,12 +96,14 @@ pub mod slot {
     pub const CRUNCH: u32 = 0x0000_01A2;
     /// Tire squeal loop (paved surfaces).
     pub const SQUEAL: u32 = 0x0000_0200;
-    /// Loose-surface scrub loop (gravel, dirt, grass).
+    /// Loose-surface scrub loop (gravel, dirt).
     pub const SCRUB: u32 = 0x0000_0201;
     /// Driven-wheel spin loop (paved surfaces).
     pub const SPIN: u32 = 0x0000_0202;
     /// Driven-wheel spin loop (loose surfaces).
     pub const SPIN_LOOSE: u32 = 0x0000_0203;
+    /// Grass scrub loop (a tire sliding or spinning on turf).
+    pub const SCRUB_GRASS: u32 = 0x0000_0204;
     /// Surface rolling noise for `SurfaceType` index `i`: `SURFACE + i`.
     pub const SURFACE: u32 = 0x0000_0210;
     /// Siren loop for pattern index `i` (`SirenPattern::index`): `SIREN + i`.
@@ -143,6 +145,10 @@ pub struct VoiceParams {
     pub load: f32,
     /// Cycle phase 0..1 for periodic synths (sirens); 0 otherwise.
     pub phase: f32,
+    /// Cue-specific timbre blend 0..=1 (tire squeal: 0 = cornering slide, 1 = braking lock-up);
+    /// 0 otherwise. Absent from the JSON when 0, so every other voice serialises as before.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub timbre: f32,
     /// Air-absorption low-pass cutoff from distance, Hz.
     pub lowpass_hz: f32,
     /// Doppler ratio that was folded into `pitch` and `freq_hz` (debug display).
@@ -153,6 +159,11 @@ pub struct VoiceParams {
     /// absent from the JSON) for every other voice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<crate::engine_model::EngineFrame>,
+}
+
+/// `skip_serializing_if` helper: an exactly-zero `f32` is left out of the JSON.
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
 }
 
 /// One instruction for the audio backend. Serialized externally tagged
@@ -212,6 +223,10 @@ pub enum AudioCommand {
         text: String,
         /// Line priority.
         priority: crate::RadioPriority,
+        /// Police priority tier (row 144): 1 = actionable … 5 = routine, 0 = unknown. The
+        /// testbed styles the strip by it, adds a tone before tier 1 and shouts tier 3.
+        #[serde(default)]
+        tier: u8,
         /// Time the director reserves for the line, s.
         duration_s: f32,
         /// Voice pitch multiplier derived from the unit (each unit sounds different).

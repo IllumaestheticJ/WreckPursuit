@@ -28,13 +28,10 @@ use wp_world::World;
 
 use crate::bridge::CityRace;
 use crate::course::v2;
+use crate::error::RaceSetupError;
 use crate::judge::{RaceJudge, RacePhase};
 use crate::kind::RaceKind;
 use crate::result::DnfReason;
-
-/// How far past the course's half width an AI racer's corridor reaches, m (the old judge
-/// margin of 2 m less half a metre to spare).
-const AI_CORRIDOR_MARGIN_M: f32 = 1.5;
 
 /// The AI corridor runs this far past a point-to-point finish line, m. `wp_opponent` parks
 /// at the end of its corridor; without run-off it would stop short of the judge's finish gate.
@@ -102,6 +99,7 @@ impl AiEntrants {
     /// Build the field on `race.route`. `closed` = the route is closed to traffic
     /// (`TrafficMode::Suppressed`): the AI may use opposing lanes. `seed` feeds the drivers'
     /// noise streams (use the event's seed so every machine drives the same race).
+    /// [`RaceSetupError::NoDrivableRoute`] when the route has nothing to drive.
     pub fn new(
         world: &World,
         race: &CityRace,
@@ -109,7 +107,7 @@ impl AiEntrants {
         closed: bool,
         entrants: &[AiEntrant],
         seed: u64,
-    ) -> AiEntrants {
+    ) -> Result<AiEntrants, RaceSetupError> {
         let laps = match kind {
             RaceKind::Circuit { laps } => laps.max(1) as u32,
             _ => 1,
@@ -125,9 +123,13 @@ impl AiEntrants {
                 } else {
                     OpposingLanes::ForOvertaking
                 },
-                // Stay near the course: its half width plus AI_CORRIDOR_MARGIN_M. Leaving it is
-                // no longer a DQ (owner call), but the gates are on it.
-                max_half_width_m: Some(race.course.corridor_half_width_m + AI_CORRIDOR_MARGIN_M),
+                // Keep the AI on the route's corridor: its half width plus the gate margin,
+                // less half a metre to spare. (Leaving the route is no longer a DQ, but the AI
+                // still races the route; the margin is the old `rules.toml` value, 2 m.)
+                max_half_width_m: Some(
+                    race.course.corridor_half_width_m + crate::catalog::GATE_CORRIDOR_MARGIN_M
+                        - 0.5,
+                ),
                 ..CorridorOptions::default()
             },
             ..RaceConfig::default()
@@ -146,7 +148,8 @@ impl AiEntrants {
             finish_m: (!race.route.closed_loop).then_some(race.route.length_m),
             ..config
         };
-        let field = Field::from_route(world, &ai_route, &specs, config);
+        let field = Field::try_from_route(world, &ai_route, &specs, config)
+            .ok_or(RaceSetupError::NoDrivableRoute)?;
         let hold = entrants
             .iter()
             .map(|e| {
@@ -161,13 +164,13 @@ impl AiEntrants {
                 )
             })
             .collect();
-        AiEntrants {
+        Ok(AiEntrants {
             field,
             racers: entrants.iter().map(|e| e.racer).collect(),
             reported: BTreeSet::new(),
             log: Vec::new(),
             hold,
-        }
+        })
     }
 
     /// Inputs for every AI racer this tick, in entrant order. Before the judge's green tick
@@ -211,6 +214,12 @@ impl AiEntrants {
         }
     }
 
+    /// The server moved racer `racer` on purpose (a reset back onto the course): its driver
+    /// finds itself on the corridor again and drives on from rest. Ignored for other cars.
+    pub fn relocate(&mut self, racer: EntityId, pos: [f32; 3]) {
+        self.field.relocate(racer, [pos[0], pos[1]]);
+    }
+
     /// AI racer entities, in entrant order.
     pub fn racers(&self) -> &[EntityId] {
         &self.racers
@@ -245,6 +254,61 @@ mod tests {
             ..Default::default()
         };
         World::procedural(&pg, wp_world::WorldConfig::default())
+    }
+
+    /// Row 154: a route with nothing to drive (one segment whose end lies behind its start, as
+    /// `World::plan_route` can return, or no route at all) refuses the race instead of
+    /// panicking. (A sprint gets a run-off leg past its finish, which can give the AI a
+    /// corridor even then; a loop gets none.)
+    #[test]
+    fn a_route_with_nothing_to_drive_refuses_the_race() {
+        let world = city();
+        let mut race = plan_city_race(
+            &world,
+            [60.55, -437.0, 0.0],
+            [0.0, 1.0],
+            [60.55, -230.0, 0.0],
+            3.0,
+        )
+        .unwrap();
+        let map = world.map();
+        let (id, seg) = map
+            .segs
+            .iter()
+            .enumerate()
+            .find(|(_, s)| s.lane().is_some() && s.length > 50.0)
+            .expect("a long lane");
+        let (a, _) = seg.point_at(seg.length * 0.8);
+        let (b, _) = seg.point_at(seg.length * 0.2);
+        race.route = wp_world::Route {
+            segs: vec![id as u32],
+            lanes: Vec::new(),
+            polyline: vec![a, b],
+            checkpoints: Vec::new(),
+            length_m: 0.0,
+            closed_loop: false,
+        };
+        let car = wp_contracts::load_car(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../data/cars/debug_sedan.json"
+        ))
+        .unwrap();
+        let entrants = [AiEntrant {
+            racer: EntityId(1),
+            profile: DriverProfile::default(),
+            capability: CarCapability::geometry_only(&car),
+        }];
+        // As a circuit (no run-off leg is added to a loop) it has nothing to drive.
+        race.route.closed_loop = true;
+        let kind = RaceKind::Circuit { laps: 1 };
+        let ai = AiEntrants::new(&world, &race, kind, false, &entrants, 1);
+        assert_eq!(ai.err(), Some(RaceSetupError::NoDrivableRoute));
+        // No route at all.
+        race.route.closed_loop = false;
+        race.route.segs.clear();
+        race.route.polyline.clear();
+        let ai = AiEntrants::new(&world, &race, RaceKind::Sprint, false, &entrants, 1);
+        assert_eq!(ai.err(), Some(RaceSetupError::NoDrivableRoute));
     }
 
     #[test]
@@ -290,7 +354,8 @@ mod tests {
                 }
             })
             .collect();
-        let mut ai = AiEntrants::new(&world, &race, RaceKind::Sprint, false, &entrants, 1);
+        let mut ai = AiEntrants::new(&world, &race, RaceKind::Sprint, false, &entrants, 1)
+            .expect("a drivable route");
         assert_eq!(ai.racers(), &ids);
         // Before the start the cars are held on the handbrake.
         let held = ai.tick(&judge, 0, &world, &[], &[], &wp_opponent::NoPolice);

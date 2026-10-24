@@ -82,7 +82,36 @@ the fee and returns the car with exactly the damage it went in with, to be repai
 | `career` | scripted multi-night career used for tuning (the 20-night scenario) |
 
 Data: `data/economy/{prices,stakes,consequences,market,lots}.toml`, `data/mods/*.json` (16 packs,
-106 mods). The damage mode tables in `data/modes/` are read (not owned) for `repair_cost_scale`.
+157 mods). The damage mode tables in `data/modes/` are read (not owned) for `repair_cost_scale`.
+
+## Free car tune
+
+`OwnedCar::tune` holds the car's four-slider tune (`CarTune`, 1..=5, 3 = stock;
+`docs/integration/tune.md`). `Economy::set_tune` is free and writes no ledger line; the car must
+be in the garage (like mod work). The field is `#[serde(default)]` and skipped when stock, so
+career saves keep version 2. Tests: `cargo test -p wp_economy --test tune`.
+
+## Garage workshop (`parts`)
+
+Parts on a car: `data/economy/parts.toml` lists the slots (front bumper, radiator, the four
+wheels...), the mod lines each takes and the removal order. Taking a part off puts it in
+`PlayerAccount::inventory`; fitting takes it back; the car's `mods` are rebuilt from its fitted
+parts, so the mod tree, preview and the sim need no change. Condition comes from the damage
+snapshot. The engine is an **assembly**: 16 internals (`parent = "engine"`) come out with it,
+or one by one in order, or on the engine stand (`strip_part` / `build_part`) once it is out.
+Engine damage wears the internals by their `damage_share`; replacing the worn ones rebuilds the
+engine yourself (the shop rebuild resets all wear). `clear_way` takes off whatever is in the
+way of a slot in one go; `mechanic_install` pays the mechanic to swap a part (inventory or
+bought now) and put everything back, selling or keeping the old one. Details and wasm exports:
+`docs/integration/garage.md`.
+
+```rust
+let (part, _) = econ.remove_part(&mut acct, car, "front_bumper")?;
+let (new, ev) = econ.buy_part(&mut acct, car, "radiator", Some("cooling_radiator_1"), mode)?;
+let (fit, _) = econ.fit_part(&mut acct, car, "radiator", new[0], mode)?; // fit.restore → lattice
+let view = econ.workshop(&acct, car, mode)?;
+let (job, _) = econ.mechanic_install(&mut acct, car, "radiator", &PartSource::Buy(None), true, mode)?;
+```
 
 ## Economy design
 
@@ -123,7 +152,9 @@ Data: `data/economy/{prices,stakes,consequences,market,lots}.toml`, `data/mods/*
   charge normal rates but report cars at wanted level 2+ (`EventReason::ShopReported`).
 - Towing (flat by class) is a penalty charged when the sim reports the car was towed.
 - Insurance (`basic` 50 % / `full` 80 % after deductible, premium per day as a fraction of value)
-  does not pay for damage sustained while wanted and is voided by a capture while wanted. An
+  pays regardless of pursuit status (damage taken while wanted is covered if you get away). Only
+  getting caught matters: a capture voids the policy, and damage outstanding at the capture is
+  never paid, even by a policy bought afterwards. An
   unaffordable premium lapses the policy (it never creates debt).
 
 ### Getting caught
@@ -188,6 +219,17 @@ and tyres are not on the estimate. `replace_tires(car, wheels)` fits new ones at
 a deflation (1 = flat); `wear_tires` takes `wear_per_hour × hours driven` off and keeps
 spike-strip flats.
 
+### Career progression (`progression`, `data/economy/career.toml`)
+Credits are cash; rep is `PlayerAccount::rep`. On top sits a tier ladder decided by *current*
+rep: Unknown (0) → Street (500) → Known (2 000) → Respected (5 000) → Feared (10 000) → Legend
+(20 000). Tiers gate features (city betting at Street, touge at Known, touge betting and boss
+races at Respected, pink slips at Feared) and dealer classes (Sport / Muscle at Known, Exotic at
+Feared). The first time a tier is reached its bonus is paid once (`career.peak_tier`); a capture
+can drop you a tier and close what it opened. Bets are capped per tier and at 50 % of cash, and
+refused in debt. The scripted mid-skill racer makes ~250 rep a night: Street after ~2 nights,
+Known ~8, Respected ~20, Feared ~40 (`tests/progression.rs::tier_pacing`). API and ledger notes:
+`docs/integration/career-progression.md`.
+
 ### Payouts
 `winner purse = max(min, per_km × km) × class × day phase × mode × wanted`; places 1–4 get
 100/50/25/10 %; clean race (no contact, no violations beyond speeding) +25 %. Buy-in =
@@ -220,8 +262,21 @@ same line at an equal or higher tier, so upgrading a prerequisite never strands 
 - `Cosmetic { kind, value }` — no gameplay effect, except body-kit pieces produce
   `DetachableRequest`s (existing group if the lattice has one, otherwise a request for prompt
   03's `gen-lattice`).
+- `Cosmetic` mods (and every other mod that can be seen) are drawn by the testbed from
+  `data/cosmetics/visuals.json`; `tests/visuals.rs` keeps that table in step with the catalog.
 - `Tool { kind, tier }` — radar detector, scanner, run-flat, reinforced cooling, fake plates,
   nitrous → `ToolLoadout`.
+
+**What a build looks like** (`visuals`, `Economy::build_visuals`): every mod that changes
+something you could see on a real car says so, and a build resolves to `BuildVisuals` — the parts
+to draw (`PartKind` + style + the body regions it is mounted on, so the renderer binds it to that
+region's lattice nodes: it dents, swings and detaches with that panel), per-wheel tire width /
+radius / compound from the *modified* `VehicleDef`, and the ride-height change. Parts come from
+`Cosmetic` effects and `wheels.tire_id` automatically, and from a mod's optional
+`"visuals": [{"part": "RearWing", "style": "gt"}]` list for parts whose effects are numbers
+(aero, brake kits, cages, bars, exhaust, intercooler, supercharger, carbon panels). Styles are
+validated at load; a test fails if any mod in a visible slot (wheels, tires, aero, body, hood,
+roof, paint, vinyls) draws nothing. The browser draws them in `apps/testbed-web/src/render/mod_parts.ts`.
 
 Every durability mod documents its trade-off in `tradeoff` (e.g. roll cage: +28 kg high in the
 cabin, raises the CG; reinforced front bumper: +20 kg in the nose, more understeer).
@@ -399,3 +454,7 @@ Browser numbers not measured yet (expect ~2× native).
   validated by typed loaders with `deny_unknown_fields` and completeness checks.
 - CI runs without `--features native`, so the SQLite tests only run locally until CI adds that
   line (requested).
+- Career ledger entries (tier bonuses, bets, extra rep) are `Adjustment`s with `career:` /
+  `bet:` notes until the contract has typed reasons (`career-progression.md`, request #1). Tier
+  rewards are paid when the caller runs `update_progression` (the browser career does it at the
+  end of every run and night; the server path does not call it yet).

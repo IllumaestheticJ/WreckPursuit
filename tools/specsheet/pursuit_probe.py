@@ -5,13 +5,12 @@ Through the full `wp_sim` via `apps/simcli` (scenario format v2, temp dir,
 nothing written to the repo):
 
 **Straight-line acceleration** — every car, full throttle from rest for 40 s on the flat (Arcade, metric-style assists: ABS + TCS, automatic gears). Reports the times to 100 km/h
-   and to each `wp_police` pursuit speed cap (`data/police/pursuit.toml`: night 32, dawn/dusk
-   36, day 40 m/s), the 80 → 144 km/h rolling time and the speed reached. `--chase` adds a
-   straight-line chase: target 30 m ahead, both leaving a corner at 15 m/s with full throttle;
-   the cruiser's speed is limited like `wp_police` limits it (`min(target·1.1, cap)`, here the
-   day cap; column "+10%") or by the cap alone (column "cap": what the car itself can do) —
-   reports whether and when the gap closes within 400 m of target travel (a long city
-   straight).
+   and to 115 / 130 / 144 km/h (the old `wp_police` pursuit caps; `wp_police` has no pursuit
+   speed cap since 2026-10-23), the 80 → 144 km/h rolling time and the speed reached. `--chase`
+   adds a straight-line chase: target 30 m ahead, both leaving a corner at 15 m/s with full
+   throttle; the cruiser's speed is limited to the target's + 10 % (column "+10%") or only by
+   the car itself (column "cap": what the car can do) — reports whether and when the gap closes
+   within 400 m of target travel (a long city straight).
 
 Durability under repeated rams is measured by the `ram-probe` tool (`ram_probe/`), on the
 damage model alone: a scripted rear-ram sequence through the full sim needs a steering driver
@@ -105,7 +104,7 @@ def accel(car: str, td: str) -> dict:
     return res
 
 
-def chase(cop: dict, tgt: dict, cap: float = 40.0, gap0: float = 30.0, v0: float = 15.0,
+def chase(cop: dict, tgt: dict, cap: float = float("inf"), gap0: float = 30.0, v0: float = 15.0,
           max_target_travel: float = 400.0, margin: float | None = MARGIN):
     """Straight-line chase from the two cars' full-throttle traces (both start at v0)."""
     def from_v0(tr):

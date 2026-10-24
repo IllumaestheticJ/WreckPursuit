@@ -213,6 +213,25 @@ body size for every sim vehicle. Events: `drain_events()` (`LapCompleted`, `Fini
 `Overtook`… see `OpponentEvent`); `standings()`, `debug_of(k)` (speed target, what limits it,
 lateral command, pass-decision counters), `state_hash()`.
 
+## Evader bot (`evader`, police benchmark)
+`Evader` is a scripted escapee for `simcli police-bench` (`docs/integration/police-bench.md`).
+It is not a race opponent: it perceives police cars it can see (line of sight within its sense
+range) or hear (close by), acts on what it saw `reaction_s` ago, plans over the lane graph
+(Dijkstra out to `foresight_m`, roads near known units cost more, ends far from every unit
+score best, bonuses for tunnels / covered roads and turns, seeded noise), keeps the next
+max(40 m, 2.5 s) of its route unless a unit is on it, drives it with the shared
+`PathFollower` near the car's limit (wet roads: `set_grip_scale`), changes lane round stopped
+cars and past slower traffic, reverses out of dead stops and turns round when reversing twice
+in one place. Skills (`EvaderSkill::{Casual, Good, Expert}`):
+
+| | reaction s | replan s | foresight m | sense m | lateral m/s² | top m/s | min target m/s | steer noise | overtakes |
+|---|---|---|---|---|---|---|---|---|---|
+| casual | 1.2 | 3.0 | 300 | 150 | 5.5 | 30 | 16 | 0.05 | no (only round stopped cars) |
+| good | 0.6 | 1.5 | 600 | 250 | 6.8 | 40 | 22 | 0.025 | yes |
+| expert | 0.25 | 0.75 | 1000 | 350 | 7.8 | 48 | 28 | 0.01 | yes |
+
+It reads only positions it could see — never police assignments or plans.
+
 ## Tests
 ```sh
 cargo test -p wp_opponent                       # unit + full-sim races (~3 min debug, ~12 s release)

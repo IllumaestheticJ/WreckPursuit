@@ -2,6 +2,7 @@
 // JSON only for rare structured data.
 import initWasm, * as wasm from "./pkg/wp_wasm.js";
 import type { PoliceStatus } from "../police";
+import type { BuildVisuals } from "../render/mod_parts";
 
 /** Driver input in the testbed (packed to Float32Array for set_input). */
 /** Result of `resetInPlace`. */
@@ -34,17 +35,25 @@ export interface WheelInfo {
   width_m: number;
   steerable: boolean;
   travel_m: number;
+  /** Strut compression at rest, m (the wheel centre sits at position_m there). Optional for
+   * stand-in models (props); fall back to half the travel. */
+  static_compression_m?: number;
   tire_id: string;
 }
 
 /** session_car_models() JSON (crates/wp_wasm/src/lod.rs `SessionModels`). */
 export interface SessionModels {
-  /** Every model, without duplicates (preload them all). */
   cars: string[];
-  /** Traffic models in model-index order (traffic_draw() `model`); empty without city traffic cars. */
-  traffic: string[];
-  /** Police car models in fleet-index order (police_draw() `model`); empty without police cars. */
-  police: string[];
+  traffic: string | null;
+  police: string | null;
+  /** Traffic models in draw-record `model` order (`traffic_draw()`); [] without city traffic.
+   * Absent on older wasm builds. */
+  traffic_models?: string[];
+  /** Police models in draw-record `model` order (`police_draw()`, the `car_mix` fleet); [] for a
+   * single-model fleet (`police`). Absent on older wasm builds. */
+  police_models?: string[];
+  /** Model parked cars are drawn as and dent with (null / absent: none parked). */
+  parked?: string | null;
 }
 
 /** car_model_info(car_id) JSON. */
@@ -90,9 +99,24 @@ export interface VehicleInfo {
   traffic_agent?: number | null;
 }
 
+/** TCS / ABS level (contract `TcsLevel` / `AbsLevel`). The sim also accepts a legacy bool
+ * (true = Full, false = Off) but always returns a level. */
+export type AssistLevel = "Off" | "Half" | "Full";
+
+/** A level from anything stored or typed (legacy bool, any case); `d` otherwise. */
+export function assistLevel(v: unknown, d: AssistLevel = "Off"): AssistLevel {
+  if (v === true) return "Full";
+  if (v === false) return "Off";
+  if (typeof v === "string") {
+    const l = v.trim().toLowerCase();
+    if (l === "off" || l === "half" || l === "full") return (l[0].toUpperCase() + l.slice(1)) as AssistLevel;
+  }
+  return d;
+}
+
 export interface AssistProfile {
-  abs: boolean;
-  tcs: boolean;
+  abs: AssistLevel;
+  tcs: AssistLevel;
   esc: boolean;
   steer_speed_sensitivity: number;
   countersteer_help: number;
@@ -115,7 +139,7 @@ export interface Scenario {
   mode: "Arcade" | "Simulation" | "Extreme";
   duration_s: number;
   barriers?: Barrier[];
-  entities: { id: string; car: string; pos: number[]; yaw: number }[];
+  entities: { id: string; car: string; pos: number[]; yaw: number; mods?: string[] }[];
   [k: string]: unknown;
 }
 
@@ -195,6 +219,20 @@ export interface CrashTuning {
   cooldown_ticks: number;
 }
 
+/** One entry of `mod_catalog_json(car)`: `wp_economy::ModDef` plus the parts it draws. */
+export interface ModEntry {
+  id: string;
+  name: string;
+  slot: string;
+  line: string;
+  tier: number;
+  price: number;
+  requires?: string[];
+  tradeoff: string;
+  /** `[PartKind, style]` pairs (`wp_economy::visuals::mod_parts`); empty = nothing visible. */
+  parts: [string, string][];
+}
+
 /** SimEvent as decoded by events_decode (serde externally tagged). */
 export type SimEvent = Record<string, Record<string, unknown>>;
 
@@ -248,6 +286,18 @@ export const sim = {
   carIds: (): string[] => JSON.parse(wasm.car_ids()),
   /** Menu stat bars for every car (`wp_wasm::car_stats_json`, no session needed). */
   carStats: (): CarStatsTable => JSON.parse(wasm.car_stats_json()),
+  /** Mods the car's class may fit, with the parts each draws (no session needed). */
+  modCatalog: (car: string): ModEntry[] => JSON.parse(wasm.mod_catalog_json(car)),
+  /** What a mod set looks like on a car; throws the economy's reason for an illegal set. */
+  buildVisuals: (car: string, mods: string[]): BuildVisuals => JSON.parse(wasm.build_visuals_json(car, JSON.stringify(mods))),
+  /** Parts of a live entity's installed mods (scenario `mods`); null if unavailable. */
+  entityVisuals: (entity: number): BuildVisuals | null => {
+    try {
+      return JSON.parse(wasm.entity_visuals_json(entity)) as BuildVisuals;
+    } catch {
+      return null;
+    }
+  },
   spawn: (carId: string, pos: [number, number, number], yaw: number): number =>
     wasm.spawn_vehicle(carId, new Float32Array(pos), yaw),
   setInput: (entity: number, input: DriverInput): boolean => wasm.set_input(entity, packInput(input)),
@@ -257,15 +307,79 @@ export const sim = {
   /** Countersteer help slider, 0..100 % (owner row 57). */
   setCountersteer: (entity: number, percent: number): void => wasm.set_countersteer(entity, percent),
   countersteer: (entity: number): number => wasm.countersteer(entity),
+  /** Drift Lab B: drift-assist constants in effect / shipped defaults (wp_vehicle::drift::DriftTuning). */
+  driftTuning: (): Record<string, number | boolean> => JSON.parse(wasm.drift_tuning_json()),
+  driftTuningDefaults: (): Record<string, number | boolean> => JSON.parse(wasm.drift_tuning_defaults_json()),
+  /** Set the runtime override from JSON ("" = defaults). */
+  driftTuningSet: (json: string): void => wasm.drift_tuning_set(json),
+  /** Unify A/B (wp_vehicle::lab_scope): the pre-unify stock handling where no override is set. */
+  labScopeSetLegacy: (on: boolean): void => wasm.lab_scope_set_legacy(on),
+  labScopeLegacy: (): boolean => wasm.lab_scope_legacy(),
+  /** Unify A/B: plain steering off for player cars too. */
+  labScopeSetPlainOff: (on: boolean): void => wasm.lab_scope_set_plain_off(on),
+  labScopePlainOff: (): boolean => wasm.lab_scope_plain_off(),
+  /** Re-apply a vehicle's body inertia after a ride override (live and replay sessions). */
+  refreshBodyInertia: (entity: number): void => wasm.refresh_body_inertia(entity),
+  /** Whether a vehicle gets the player steering aids (player cars; not AI, police or traffic). */
+  playerInput: (entity: number): boolean => wasm.player_input(entity),
+  /** [mode, slide_deg, onset, envelope_deg, authority, throttle_scale, key_throttle, engine_throttle]; mode 0 off … 5 exceeded. */
+  driftReadout: (entity: number): Float32Array => wasm.drift_readout(entity),
+  /** Plain keyboard steering constants a player's car drives with (override or shipped; null = off / legacy) / the shipped defaults (wp_vehicle::plain::PlainSteer). */
+  plainSteer: (): Record<string, number> | null => JSON.parse(wasm.plain_steer_json()),
+  plainSteerDefaults: (): Record<string, number> => JSON.parse(wasm.plain_steer_defaults_json()),
+  /** Set the plain steering override with these constants ("" = the shipped default; plain off: labScopeSetPlainOff). */
+  plainSteerSet: (json: string): void => wasm.plain_steer_set(json),
+  /** [steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg, heading_deg,
+   * auto_clutch (1/0), clutch engagement 0..1, clutch_locked (1/0), engine_rpm, driven_wheel_rpm, clutch_pedal]. */
+  plainReadout: (entity: number): Float32Array => wasm.plain_readout(entity),
+  /** Drift Lab W ride tuning in effect (null = car data) / {data, lab} defaults (wp_vehicle::ride_lab::RideTune). */
+  rideTune: (): Record<string, number> | null => JSON.parse(wasm.ride_tune_json()),
+  rideTuneDefaults: (): { data: Record<string, number>; lab: Record<string, number>; slow_weight: Record<string, number>; medium_weight: Record<string, number>; firm: Record<string, number>; owner: Record<string, number>; shipped: Record<string, number> } =>
+    JSON.parse(wasm.ride_tune_defaults_json()),
+  /** Set the ride tuning override ("" = the shipped ride). */
+  rideTuneSet: (json: string): void => wasm.ride_tune_set(json),
+  /** [roll_hz, roll_zeta, roll_deg_per_g, pitch_hz, pitch_zeta, body_roll_deg]. */
+  rideReadout: (entity: number): Float32Array => wasm.ride_readout(entity),
+  /** Drift Lab W car / tyre experiments in effect (null = data) / {data, spin_damper, spin} (wp_vehicle::car_lab::CarTune). */
+  carTune: (): Record<string, number | boolean> | null => JSON.parse(wasm.car_tune_json()),
+  carTuneDefaults: (): {
+    data: Record<string, number | boolean>;
+    spin_damper: Record<string, number | boolean>;
+    spin: Record<string, number | boolean>;
+    spin_lock: Record<string, number | boolean>;
+    spin_vr_plain: Record<string, number>;
+    transition_plain: Record<string, number>;
+    spin_v2: Record<string, number | boolean>;
+    spin_v2_plain: Record<string, number>;
+    step22: Record<string, number | boolean>;
+    shipped: Record<string, number | boolean>;
+  } =>
+    JSON.parse(wasm.car_tune_defaults_json()),
+  /** Set the car / tyre override ("" = the shipped tyres). */
+  carTuneSet: (json: string): void => wasm.car_tune_set(json),
+  /** Grip-balance lab in effect (null = data) / {before, new} (wp_vehicle::grip_lab::GripBalance). */
+  gripBalance: (): Record<string, number | boolean | string> | null => JSON.parse(wasm.grip_balance_json()),
+  gripBalanceDefaults: (): {
+    before: Record<string, number | boolean | string>;
+    new: Record<string, number | boolean | string>;
+    grip: Record<string, number | boolean | string>;
+    step14: Record<string, number | boolean | string>;
+    step2: Record<string, number | boolean | string>;
+    slow_weight: Record<string, number | boolean | string>;
+    drift_best: Record<string, number | boolean | string>;
+    lock_only: Record<string, number | boolean | string>;
+    shipped: Record<string, number | boolean | string>;
+    owner_ref: Record<string, number | boolean | string>;
+  } =>
+    JSON.parse(wasm.grip_balance_defaults_json()),
+  /** Set the grip-balance override ("" = the shipped balance). */
+  gripBalanceSet: (json: string): void => wasm.grip_balance_set(json),
+  /** Drift Lab W reference-parity test cars (not in carIds()). */
+  parityCarIds: (): string[] => JSON.parse(wasm.parity_car_ids()),
   /** Clutch mode "auto" | "manual" (owner row 59). */
   setClutchMode: (entity: number, mode: "auto" | "manual"): void => wasm.set_clutch_mode(entity, mode),
   clutchMode: (entity: number): string => wasm.clutch_mode(entity),
   engineStalled: (entity: number): boolean => wasm.engine_stalled(entity),
-  /** Drift-assist tuning (drift lab dev override; 9 values, see wp_wasm DRIFT_TUNING_FIELDS). */
-  setDriftTuning: (entity: number, values: Float32Array): void => wasm.set_drift_tuning(entity, values),
-  driftTuning: (entity: number): number[] => Array.from(wasm.drift_tuning(entity)),
-  /** [body slip °, assist mode (0 off, 1 straighten, 2 catch, 3 hold, 4 exceeded), envelope °, throttle smoothing in effect]. */
-  driftState: (entity: number): number[] => Array.from(wasm.drift_state(entity)),
   /** One-click presets in menu order: ["Rookie", "Street", "Sim"]. */
   assistPresets: (): string[] => JSON.parse(wasm.assist_presets()),
   /** Damage mode + assists of a one-click preset for a driver on `source`. */
@@ -307,11 +421,18 @@ export const sim = {
   policeUnits: (): Float32Array => wasm.police_units(),
   /** Roadblock barriers and spike strips as oriented boxes (layout.ts TOOL_STRIDE, TL, TOOL_KIND). */
   policeTools: (): Float32Array => wasm.police_tools(),
+  /** Police priority tier of a radio line just spoken (row 144): 1 actionable … 5 routine,
+   * 0 unknown; `unit` 0 = dispatch. */
+  policeRadioTier: (unit: number, text: string): number => wasm.police_radio_tier(unit, text),
   /** Tyre deflation per vehicle, 4 floats each (FL, FR, RL, RR), same order as states(). */
   tirePunctures: (): Float32Array => wasm.tire_punctures(),
+  /** 4 per vehicle (FL FR RL RR): 1 = a flat tyre on its rim in ground contact. */
+  tireRimContact: (): Float32Array => wasm.tire_rim_contact(),
   /** Every traffic agent at any LOD (layout.ts DRAW_STRIDE / D): id, entity, ground-seated pose, flags, model. */
   trafficDraw: (): Float32Array => wasm.traffic_draw(),
-  /** Every police unit, bound or not (layout.ts DRAW_STRIDE / D), with its model. */
+  /** Floats per traffic_draw() / police_draw() record in this wasm build (layout.ts DRAW_STRIDE). */
+  lodDrawStride: (): number => wasm.lod_draw_stride(),
+  /** Every police unit, bound or not (layout.ts DRAW_STRIDE / D; model indexes `police_models`). */
   policeDraw: (): Float32Array => wasm.police_draw(),
   /** Every city prop once per session (layout.ts PROP_STRIDE / P): kind, box-centre pose, half extents. */
   propsStatic: (): Float32Array => wasm.props_static(),
@@ -319,10 +440,18 @@ export const sim = {
   propsMoved: (): Float32Array => wasm.props_moved(),
   /** The sim's pose of one prop `[x, y, z, qx, qy, qz, qw]` (automation). */
   propPose: (index: number): Float32Array => wasm.prop_pose(index),
-  /** Car models this session can show: every id, plus the traffic and police models by index. */
+  /** Dented parked cars (layout.ts WRECK_STRIDE / WK), ascending prop index. Once per frame. */
+  parkedWrecks: (): Float32Array => wasm.parked_wrecks(),
+  /** Entity id of prop 0's dented parked car; prop i is this + i (lattice_* / vehicle_info). */
+  parkedEntityBase: (): number => wasm.parked_entity_base(),
+  /** Region indices (vehicle_info().regions) of a dented parked car's shattered glass. */
+  parkedWreckShattered: (entity: number): Uint32Array => wasm.parked_wreck_shattered(entity),
+  /** Car models this session can show: every id, plus the traffic and police models (or null). */
   sessionCarModels: (): SessionModels => JSON.parse(wasm.session_car_models()),
   /** Body size and wheels of a car model (no vehicle needed). */
   carModelInfo: (carId: string): CarModelInfo => JSON.parse(wasm.car_model_info(carId)),
+  /** Tracking helicopters: [x, y, z, aimX, aimY, aimZ, coneHalfAngle, flags (1 visual)] each. */
+  policeHelicopters: (): Float32Array => wasm.police_helicopters(),
   policeStatus: (entity: number): PoliceStatus | null => JSON.parse(wasm.police_status(entity)),
   /** Static city map for the UI kit's minimap / full map (`wp_wasm::map`); `null` on the flat world. Once per city. */
   mapStaticJson: (): string => wasm.map_static_json(),
@@ -389,8 +518,14 @@ export const sim = {
   /** Race picker for a player in `car` (`wp_wasm::race::RaceCard[]`). */
   raceList: (car: string, mode: string): RaceCard[] => JSON.parse(wasm.race_list(car, mode)),
   /** Start a picker race (new session; the account carries over). Returns entity ids, player first. */
-  raceStart: (id: string, car: string, mode: string, autopilot: boolean): number[] =>
-    Array.from(wasm.race_start(id, car, mode, autopilot)),
+  /** Start picker race `id`; `map` (a city id, e.g. the main menu's map) runs it there when it
+   * can, else on its own city; "" / omitted = the current session's map. */
+  raceStart: (id: string, car: string, mode: string, autopilot: boolean, tune?: CarTune, map = ""): number[] =>
+    Array.from(wasm.race_start_on(id, car, mode, autopilot, tune ? JSON.stringify(tune) : "", map)),
+  /** Scenario JSON of race `id` for `careerStartRun` (the career garage's "Street races"); on
+   * `city` when the race runs there, else its own city ("" = its own). */
+  raceScenarioJson: (id: string, car: string, mode: string, autopilot: boolean, city: string): string =>
+    wasm.race_scenario_json(id, car, mode, autopilot, city),
   /** Honk-to-start meet spots on the session's map (`race_spots.ts`); `[]` during a race / replay / career. */
   raceSpots: (): RaceSpot[] => JSON.parse(wasm.race_spots()),
   /** The race the player just honked for in its spot (taken), or "". */
@@ -401,19 +536,57 @@ export const sim = {
   raceStandings: (): Float32Array => wasm.race_standings(),
   /** Gates + route of the race (race_marker.ts parseCourse). */
   raceCourse: (): Float32Array => wasm.race_course(),
+  /** Bet on yourself during the countdown (`odds[].label` from the picker). Throws if refused. */
+  raceBet: (label: string, stake: number): BetCard => JSON.parse(wasm.race_bet(label, stake)),
+  /** Picker-race betting (venue City) on the current account: max stake and why it is locked (null = open). */
+  raceBetStatus: (): { max: number; lock: string | null } => JSON.parse(wasm.race_bet_status()),
+  /** The city's regulars with their records, strongest first. */
+  rosterList: (): RegularCard[] => JSON.parse(wasm.roster_json()),
+  /** The regulars' records as text (local save). */
+  rosterSave: (): string => wasm.roster_state(),
+  /** Restore the regulars' records from `rosterSave()` output. Throws if unreadable. */
+  rosterLoad: (text: string): void => wasm.roster_state_load(text),
   /** Results once the player is done (`wp_wasm::race::RaceReport`), else null. */
   raceResult: (): RaceReport | null => JSON.parse(wasm.race_result_json()),
+  /** The city's repair shops (`wp_wasm::garage_visit::GarageSite`); fetch once per session. */
+  garages: (): GarageSite[] => JSON.parse(wasm.garages_json()),
+  /** The open garage visit (the car stopped inside a garage), or null. */
+  garageVisit: (): GarageOffer | null => JSON.parse(wasm.garage_visit_json()),
+  /** "Repair" in the open visit: pays the shop, repairs the car, releases the brakes. Throws if refused. */
+  garageRepair: (): GarageRepairReport => JSON.parse(wasm.garage_repair()),
+  /** "Leave" the open visit without repairing. */
+  garageLeave: (): void => wasm.garage_leave(),
+  /** Touge passes with their challenger and boss (`wp_wasm::touge::TougeCard[]`). */
+  tougeList: (): TougeCard[] => JSON.parse(wasm.touge_list_json()),
+  /** Rep-gated wager menu for one battle, on the account the battle will use (`career`: the
+   * loaded career's, else the session's). Throws on unknown keys. */
+  tougeMenu: (c: TougeChoice, career: boolean): WagerMenu =>
+    JSON.parse(wasm.touge_menu_json(c.map, c.direction, c.daylight, c.surface, c.opponent, career)),
+  /** Touge battle scenario JSON (for `careerStartRun`); remembers `wager` for the next session. */
+  tougeScenarioJson: (c: TougeChoice, car: string, mode: string, wager: Wager, autopilot: boolean): string =>
+    wasm.touge_scenario_json(c.map, c.direction, c.daylight, c.surface, c.opponent, car, mode, JSON.stringify(wager), autopilot),
+  /** Start a touge battle as a plain session. Returns entity ids, player first. */
+  tougeStart: (c: TougeChoice, car: string, mode: string, wager: Wager, autopilot: boolean): number[] =>
+    Array.from(wasm.touge_start(c.map, c.direction, c.daylight, c.surface, c.opponent, car, mode, JSON.stringify(wager), autopilot)),
+  /** Battle panel (`wp_wasm::touge::TougeReport`), null outside a touge battle. */
+  tougeResult: (): TougeReport | null => JSON.parse(wasm.touge_result_json()),
+  /** Testbed only: set the plain session's rep (throws during a career or without an account). */
+  tougeDebugSetRep: (rep: number): void => wasm.touge_debug_set_rep(rep),
   /** Debug / e2e: set a racer's police heat (not recorded in replays). */
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
+  /** Debug / e2e: park street racer `entity` idle at Loop 9 rest stop `name` (logged move). */
+  debugStreetParkAtRestStop: (entity: number, name: string): void => wasm.debug_street_park_at_rest_stop(entity, name),
+  /** The Loop 9 rest stops (row 153): name, position, heading. */
+  restStops: (): { name: string; pos: [number, number, number]; heading_rad: number }[] => JSON.parse(wasm.rest_stops_json()),
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
   debugParkNearPolice: (entity: number, aheadM: number): number => wasm.debug_park_near_police(entity, aheadM),
-  /** Debug / e2e: put `entity` on the ground at (x, y) facing `yaw`, rolling at `speed` m/s. */
-  debugPlace: (entity: number, x: number, y: number, yaw: number, speed: number): void => wasm.debug_place(entity, x, y, yaw, speed),
   /** Aim `entity` at a parked car (`prop` < 0: the nearest) at `speed` m/s; returns the prop index. */
   debugKnockProp: (entity: number, prop: number, speed: number): number => wasm.debug_knock_prop(entity, prop, speed),
 
   // ----- career (machine G; crates/wp_wasm/src/career.rs). Every call throws on refusal. ---
   careerNew: (mode: string): CareerView => JSON.parse(wasm.career_new(mode)),
+  /** New career with a custom opening balance (preview / demo builds start rich). */
+  careerNewWithCash: (mode: string, cash: number): CareerView => JSON.parse(wasm.career_new_with_cash(mode, cash)),
   careerLoad: (text: string): CareerView => JSON.parse(wasm.career_load_json(text)),
   careerSave: (): string => wasm.career_save_json(),
   careerExists: (): boolean => wasm.career_exists(),
@@ -432,6 +605,8 @@ export const sim = {
   careerSetActive: (uid: number): CareerView => JSON.parse(wasm.career_set_active(uid)),
   careerInstall: (uid: number, modId: string): CareerView => JSON.parse(wasm.career_install_mod(uid, modId)),
   careerUninstall: (uid: number, modId: string): CareerView => JSON.parse(wasm.career_uninstall_mod(uid, modId)),
+  /** Set a career car's free tune (no money). */
+  careerSetTune: (uid: number, tune: CarTune): CareerView => JSON.parse(wasm.career_set_tune(uid, JSON.stringify(tune))),
   careerQuote: (uid: number, req: ShopRequest): RepairQuote => JSON.parse(wasm.career_quote_json(uid, JSON.stringify(req))),
   careerRepair: (uid: number, req: ShopRequest): CareerView => JSON.parse(wasm.career_repair(uid, JSON.stringify(req))),
   careerRelease: (uid: number): CareerView => JSON.parse(wasm.career_release(uid)),
@@ -445,15 +620,174 @@ export const sim = {
   careerVisitLot: (lotId: string): number[] => Array.from(wasm.career_visit_lot(lotId)),
   /** The lot being visited, or null when the session is not a lot visit. */
   lotVisit: (): LotVisit | null => JSON.parse(wasm.lot_visit_json()),
+  /** Put a police helicopter on a pursued racer now, offsetM away at altitude. Returns its unit id. */
+  debugLaunchHelicopter: (entity: number, offsetM: number): number => wasm.debug_launch_helicopter(entity, offsetM),
+  /** Debug / e2e: put `entity` on the ground at [x, y], facing `yaw`, at `speedMps` (not recorded in replays). */
+  debugPlace: (entity: number, x: number, y: number, yaw: number, speedMps: number): void => wasm.debug_place(entity, x, y, yaw, speedMps),
+  /** Debug / e2e: put `entity` stopped at (x, y) facing `yaw` (not recorded in replays). */
+  debugPlaceVehicle: (entity: number, x: number, y: number, yaw: number): void => wasm.debug_place_vehicle(entity, x, y, yaw),
+  /** Spawn NPC street racers in city sessions started after this call (default on). */
+  setStreetRacers: (on: boolean): void => wasm.set_street_racers(on),
+  /** Street racers for the map: [entity, level, x, y, yaw, mode] each (mode 0 roam, 1 waiting, 2 racing). */
+  streetRacers: (): Float32Array => wasm.street_racers(),
+  /** Levels, roster, challenge hint, open offer, race in progress and latest result; null without street racers. */
+  streetStatus: (): StreetStatus | null => JSON.parse(wasm.street_status_json()),
+  /** Plan the open challenge's route from the player through the waypoints `via` (in order) to
+   * (x, y). Throws when no route. */
+  streetPreview: (x: number, y: number, via: [number, number][] = []): StreetPreview => JSON.parse(wasm.street_preview(x, y, new Float32Array(via.flat()))),
+  /** Accept the open challenge: race through `via` to (x, y) for `stake` dollars; both cars are
+   * reset side by side at the start. Throws if refused (also while the police are after you). */
+  streetAccept: (x: number, y: number, stake: number, via: [number, number][] = []): void => wasm.street_accept(x, y, new Float32Array(via.flat()), stake),
+  /** The street race's gates (waypoints, then B) and route, in `raceCourse()`'s layout. */
+  streetCourse: (): Float32Array => wasm.street_course(),
+  /** Decline the open challenge. */
+  streetDecline: (): void => wasm.street_decline(),
+  /** Drivable lanes for the map: [n, x0, y0, …] per lane; fetch once per session. */
+  mapLanes: (): Float32Array => wasm.map_lanes(),
+  // ----- garage workshop (crates/wp_wasm/src/career.rs; throws on refusal) ---------------------
+  /** Show career car `uid` in the workshop: a sandbox session of `scenarioJson` (flat lot). */
+  careerWorkshopSession: (uid: number, scenarioJson: string): number[] => Array.from(wasm.career_workshop_session(uid, scenarioJson)),
+  careerWorkshop: (uid: number): WorkshopScreen => JSON.parse(wasm.career_workshop_json(uid)),
+  careerRemovePart: (uid: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_remove_part(uid, slot)),
+  careerFitPart: (uid: number, slot: string, part: number): WorkshopScreen => JSON.parse(wasm.career_fit_part(uid, slot, part)),
+  careerBuyPart: (uid: number, kind: string, grade: string | null): WorkshopScreen => JSON.parse(wasm.career_buy_part(uid, kind, grade ?? "")),
+  careerSellPart: (uid: number, part: number): WorkshopScreen => JSON.parse(wasm.career_sell_part(uid, part)),
+  careerStripPart: (uid: number, assembly: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_strip_part(uid, assembly, slot)),
+  careerBuildPart: (uid: number, assembly: number, slot: string, part: number): WorkshopScreen =>
+    JSON.parse(wasm.career_build_part(uid, assembly, slot, part)),
+  careerClearWay: (uid: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_clear_way(uid, slot)),
+  /** Pay the mechanic: inventory part `part` (0 = buy `grade` now, null = stock). */
+  careerMechanicInstall: (uid: number, slot: string, part: number, grade: string | null, sellOld: boolean): MechanicResult =>
+    JSON.parse(wasm.career_mechanic_install(uid, slot, part, grade ?? "", sellOld)),
 };
 
-import type { CareerView, LotStockView, LotVisit, ModTreeView, RepairQuote, RunClose, ShopRequest } from "../../../ui-kit/src/garage/types";
+import type {
+  CarTune,
+  CareerView,
+  LotStockView,
+  LotVisit,
+  MechanicResult,
+  ModTreeView,
+  RepairQuote,
+  RunClose,
+  ShopRequest,
+  WorkshopScreen,
+} from "../../../ui-kit/src/garage/types";
+
+/** A street-racer level (`wp_wasm::street::Level`). */
+export interface StreetLevel {
+  level: number;
+  name: string;
+  colour: string;
+  cars: string[];
+  bet_min: number;
+  bet_max: number;
+  /** Rep for beating a racer of this level. */
+  win_rep: number;
+}
+
+/** One street racer (`wp_wasm::street::RosterEntry`). */
+export interface StreetRacer {
+  entity: number;
+  name: string;
+  level: number;
+  level_name: string;
+  colour: string;
+  car: string;
+  mode: "Roam" | "Waiting" | "Racing" | "OffDuty";
+  /** When they are out (row 152): all day, nights only, or nights lapping Loop 9. */
+  shift: "AllDay" | "Night" | "Loop";
+  wins: number;
+  losses: number;
+}
+
+/** Open challenge (`wp_wasm::street::Offer`). */
+export interface StreetOffer extends Omit<StreetRacer, "mode" | "shift"> {
+  bet_min: number;
+  bet_max: number;
+  cash: number;
+  affordable: boolean;
+  start: [number, number];
+  /** The Loop 9 rest stop this meet is at (row 153). */
+  rest_stop: string | null;
+  /** At a rest stop: a Loop 9 lap back to it (B + waypoints). */
+  loop_lap: { finish: [number, number]; via: [number, number][] } | null;
+}
+
+/** Race in progress (`wp_wasm::street::RaceView`). */
+export interface StreetRace {
+  entity: number;
+  name: string;
+  level: number;
+  level_name: string;
+  colour: string;
+  stake: number;
+  countdown_s: number;
+  elapsed_s: number;
+  time_left_s: number;
+  length_m: number;
+  player_left_m: number;
+  racer_left_m: number;
+  finish: [number, number];
+  start: [number, number];
+  /** Waypoint gates before B, in order. */
+  gates: [number, number][];
+  /** The player's next gate (`gates.length` = on to B). */
+  next_gate: number;
+  polyline: [number, number][];
+}
+
+/** Race result (`wp_wasm::street::RaceResult`). */
+export interface StreetResult {
+  seq: number;
+  won: boolean;
+  reason: string;
+  name: string;
+  level: number;
+  level_name: string;
+  colour: string;
+  stake: number;
+  net: number;
+  /** Rep earned (the level's win_rep on a win, 0 on a loss). */
+  rep: number;
+  cash_after: number;
+  time_s: number;
+  margin_m: number;
+}
+
+/** `street_status_json()`. */
+export interface StreetStatus {
+  levels: StreetLevel[];
+  roster: StreetRacer[];
+  hint: StreetRacer | null;
+  /** The police are after the player: no challenges (row 150). */
+  pursued: boolean;
+  /** The racer in honking range while the police are after the player (hint: lose them). */
+  blocked: StreetRacer | null;
+  offer: StreetOffer | null;
+  race: StreetRace | null;
+  result: StreetResult | null;
+}
+
+/** `street_preview()` (`wp_wasm::street::Preview`). */
+export interface StreetPreview {
+  ok: boolean;
+  reason: string | null;
+  length_m: number;
+  finish: [number, number];
+  /** The waypoints snapped onto the route, in order. */
+  gates: [number, number][];
+  polyline: [number, number][];
+}
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";
-import type { RaceCard, RaceReport } from "../ui/race";
+import type { BetCard, RaceCard, RaceReport, RegularCard } from "../ui/race";
 import type { RaceSpot } from "../race_spots";
+import type { TougeCard, TougeChoice, TougeReport, Wager, WagerMenu } from "../ui/touge";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
+export type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
+import type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
 
 /** `simcli::car_stats::CarStatsTable` (data/stats/cars.json): bars are 0–1 on fixed scales. */
 export interface CarStatsTable {

@@ -3,6 +3,11 @@
   "mods": [
     {"id": "wheels_steel", "name": "Steel Wheels", "slot": "Wheels", "line": "rims", "tier": 1, "price": 200, "effects": [{"Cosmetic": {"kind": "Wheels", "value": "steel"}}], "tradeoff": "Cosmetic."},
     {"id": "wheels_mesh", "name": "Mesh Wheels", "slot": "Wheels", "line": "rims", "tier": 2, "price": 1200, "effects": [{"Cosmetic": {"kind": "Wheels", "value": "mesh"}}], "tradeoff": "Cosmetic."},
-    {"id": "wheels_forged", "name": "Forged Wheels", "slot": "Wheels", "line": "rims", "tier": 3, "price": 3500, "effects": [{"Cosmetic": {"kind": "Wheels", "value": "forged_5spoke"}}, {"Vehicle": {"param": "wheels.mass_kg", "op": "Add", "value": -3.5}}], "tradeoff": "Bend easily on kerbs (flavour)."}
+    {"id": "wheels_forged", "name": "Forged Wheels", "slot": "Wheels", "line": "rims", "tier": 3, "price": 3500, "effects": [{"Cosmetic": {"kind": "Wheels", "value": "forged_5spoke"}}, {"Vehicle": {"param": "wheels.mass_kg", "op": "Add", "value": -3.5}}], "tradeoff": "Bend easily on kerbs (flavour)."},
+    {"id": "wheels_black_steel", "name": "Black Steel Wheels", "slot": "Wheels", "line": "rims", "tier": 1, "price": 250, "effects": [{"Cosmetic": {"kind": "Wheels", "value": "black_steel"}}], "tradeoff": "Cosmetic."},
+    {"id": "wheels_turbofan", "name": "Turbofan Wheels", "slot": "Wheels", "line": "rims", "tier": 2, "price": 1400, "effects": [{"Cosmetic": {"kind": "Wheels", "value": "turbofan"}}], "tradeoff": "Cosmetic."},
+    {"id": "wheels_deep_dish", "name": "Deep-Dish Wheels", "slot": "Wheels", "line": "rims", "tier": 2, "price": 1600, "effects": [{"Cosmetic": {"kind": "Wheels", "value": "deep_dish"}}], "tradeoff": "Cosmetic."},
+    {"id": "wheels_split_spoke", "name": "Split-Spoke Wheels", "slot": "Wheels", "line": "rims", "tier": 3, "price": 3000, "effects": [{"Cosmetic": {"kind": "Wheels", "value": "split_spoke"}}], "tradeoff": "Cosmetic."},
+    {"id": "wheels_gold_mesh", "name": "Gold Mesh Wheels", "slot": "Wheels", "line": "rims", "tier": 3, "price": 2800, "effects": [{"Cosmetic": {"kind": "Wheels", "value": "gold_mesh"}}], "tradeoff": "Cosmetic."}
   ]
 }

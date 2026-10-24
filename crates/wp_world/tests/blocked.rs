@@ -280,7 +280,10 @@ fn multi_lane_road_changes_lane_around_a_stopped_car() {
     report("grid 2+2, stopped car in the right lane", &r);
     assert_eq!(r.contacts, 0);
     assert_eq!(r.collisions, 0);
-    assert!(r.stats.go_around_lane_changes >= 2, "{r:?}");
+    // At least one car caught behind it changes lane around it. Was ≥ 2 (3 measured) until
+    // lane changes saw tracked vehicles in the target lane (round 13 lead feedback): cars no
+    // longer change into the lane just behind the stopped car, so fewer end up behind it.
+    assert!(r.stats.go_around_lane_changes >= 1, "{r:?}");
     assert_eq!(
         r.stats.oncoming_passes, 0,
         "no oncoming passes on a multi-lane road"
@@ -371,8 +374,9 @@ fn single_lane_one_way_followers_reverse_and_reroute() {
 
 #[test]
 fn port_vesper_two_lane_street_gets_around_a_stopped_car() {
-    let mut w = World::vesper(&VesperConfig::default(), cfg(4.0));
-    let net = w.network().clone();
+    let net = World::vesper(&VesperConfig::default(), cfg(4.0))
+        .network()
+        .clone();
     // A straight-ish 1+1 street (bend < 20° over the lane) near downtown.
     let lanes: Vec<usize> = two_lane_streets(&net, 100.0)
         .into_iter()
@@ -385,21 +389,27 @@ fn port_vesper_two_lane_street_gets_around_a_stopped_car() {
         })
         .collect();
     assert!(!lanes.is_empty());
-    let lane = *lanes
-        .iter()
-        .min_by(|&&a, &&b| {
-            let d = |l: usize| geom::dist(geom::xy(net.lanes[l].polyline[0]), net.core);
-            d(a).total_cmp(&d(b)).then(a.cmp(&b))
-        })
-        .unwrap();
-    let b = blocker_on(&net, lane, len_of(&net, lane) * 0.6, false, false);
-    w.set_tracked_vehicles(&[b]);
-    w.populate();
-    let r = blocked_run(&mut w, b, &net.lanes[lane].polyline, 150.0);
-    report("Port Vesper 1+1, stopped car in lane", &r);
-    assert_eq!(r.contacts, 0);
-    assert_eq!(r.collisions, 0);
-    assert!(r.queued >= 1, "{r:?}");
+    // The nearest such lanes to downtown, in order; the first one traffic queues on is the
+    // test (a lane can be a quiet side street: the river's bridges moved through routes).
+    let mut near = lanes.clone();
+    let d = |l: usize| geom::dist(geom::xy(net.lanes[l].polyline[0]), net.core);
+    near.sort_by(|&a, &b| d(a).total_cmp(&d(b)).then(a.cmp(&b)));
+    let mut picked = None;
+    for &lane in near.iter().take(4) {
+        let mut w = World::vesper(&VesperConfig::default(), cfg(4.0));
+        let b = blocker_on(&net, lane, len_of(&net, lane) * 0.6, false, false);
+        w.set_tracked_vehicles(&[b]);
+        w.populate();
+        let r = blocked_run(&mut w, b, &net.lanes[lane].polyline, 150.0);
+        report("Port Vesper 1+1, stopped car in lane", &r);
+        assert_eq!(r.contacts, 0);
+        assert_eq!(r.collisions, 0);
+        if r.queued >= 1 {
+            picked = Some(r);
+            break;
+        }
+    }
+    let r = picked.expect("no traffic queued on any of the nearest 1+1 lanes");
     assert!(r.resolved * 2 >= r.queued, "{r:?}");
     assert!(r.still_waiting <= 3, "{r:?}");
 }

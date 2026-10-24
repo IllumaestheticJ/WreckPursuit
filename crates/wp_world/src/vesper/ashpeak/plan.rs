@@ -9,7 +9,7 @@
 //!  4000 │               │     ══════ Crosstown Expressway ═════════│══│
 //!       │   foothills   │ Grizzly   │  ▲ Crowfoot Pass (touge)     │ Silver Gorge Br.
 //!  2600 │               │ Grade     │  ▲▲ Ashpeak ▲  saddle   ▲▲   │Talon Tunnel
-//!       │  HARLAN FLATS │ (R12 pass)│      ASHPEAK RANGE           │R7│
+//!       │  HARNELL FLATS │ (R12 pass)│      ASHPEAK RANGE           │R7│
 //!  1750 │  (farmland)   ├───────────┴──────────────────────────────┴──┤
 //!       │   Sable R.    │                PORT VESPER                   │
 //! -1300 └──────────────────────────────────────────────────────────────┘
@@ -39,7 +39,7 @@ pub const BLEND_M: f32 = 250.0;
 /// Route 40 North's dead end at Port Vesper's north edge: Crowfoot Pass Road starts here
 /// ([`super::mountains`]).
 pub const R40N_END: V2 = [0.0, 1650.0];
-/// Route 40 West's dead end at Port Vesper's west edge: Harlan Road starts here
+/// Route 40 West's dead end at Port Vesper's west edge: Harnell Road starts here
 /// ([`super::farms`]).
 pub const R40W_END: V2 = [-1650.0, 100.0];
 /// Near the Uptown Connector interchange on Loop 9 (north): Route 7 starts at its outer
@@ -50,13 +50,13 @@ pub const LANTERN_SITE: V2 = [-1515.0, 420.0];
 
 // ---- Districts ----------------------------------------------------------------------------
 
-/// Harlan Flats farmland (x < this west of Port Vesper, south of [`RANGE_SOUTH_Y`] plus the
+/// Harnell Flats farmland (x < this west of Port Vesper, south of [`RANGE_SOUTH_Y`] plus the
 /// north-west foothill farms), m.
 pub const FARMS_EAST_X: f32 = -1700.0;
 /// The Sable River runs south to the sea near this x (meanders ± 150 m), m.
 pub const SABLE_RIVER_X: f32 = -2500.0;
-/// Harlan Crossing, the farm village on Harlan Road.
-pub const HARLAN_CROSSING: V2 = [-3300.0, 150.0];
+/// Harnell Crossing, the farm village on Harnell Road.
+pub const HARNELL_CROSSING: V2 = [-3300.0, 150.0];
 
 /// Southern foot of the Ashpeak Range, m.
 pub const RANGE_SOUTH_Y: f32 = 1900.0;
@@ -100,7 +100,7 @@ pub const ROUTE_7: &[V2] = &[
     [500.0, 5500.0],
 ];
 
-/// Route 12: from Lantern Way's outer terminal west through Harlan Flats, north up the
+/// Route 12: from Lantern Way's outer terminal west through Harnell Flats, north up the
 /// valley, over the Grizzly Grade (mountain pass) and down the west side of Ashpeak City.
 pub const ROUTE_12: &[V2] = &[
     [-1680.0, 420.0],
@@ -134,9 +134,9 @@ pub const POI_CROWFOOT_NORTH: &str = "Crowfoot North Foot";
 /// ([`super::mountains`]).
 pub const POI_OBSERVATORY: &str = "Halcyon Observatory";
 /// Start of the farm dirt run on a dirt / gravel road ([`super::farms`]).
-pub const POI_FARM_RUN: &str = "Harlan Farm Run";
-/// Harlan Crossing village centre on Harlan Road ([`super::farms`]).
-pub const POI_HARLAN_CROSSING: &str = "Harlan Crossing";
+pub const POI_FARM_RUN: &str = "Harnell Farm Run";
+/// Harnell Crossing village centre on Harnell Road ([`super::farms`]).
+pub const POI_HARNELL_CROSSING: &str = "Harnell Crossing";
 /// Downtown Ashpeak City start (core grid avenue) ([`super::metro`]).
 pub const POI_DOWNTOWN: &str = "Ashpeak Downtown";
 /// At the foot of the Meridian Spire ([`super::metro`]).
@@ -180,7 +180,7 @@ pub struct InterchangePlan {
 /// see [`FREEWAY_ENDS`].
 pub const INTERCHANGES: &[InterchangePlan] = &[
     InterchangePlan {
-        name: "Harlan Road",
+        name: "Harnell Road",
         freeway: "Route 12",
         a: [-2650.0, 1040.0],
         a_by: "farms",

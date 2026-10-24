@@ -8,7 +8,7 @@ Owner files: `tools/assets/src/mechanical/` (`mod.rs`, `spec.rs`, `prim.rs`, `br
 ## How a car's mechanical look is resolved
 
 1. `spec::table(id)` is a per-car table covering all 22 roster ids, including `fulmine_v10`,
-   `sentinel_warden` and `sentinel_harrier`. Its values come from `research_mechanical.md` §1.3,
+   `sentinel_warden` and `sentinel_vigil`. Its values come from `research_mechanical.md` §1.3,
    §2.3, §3.3 and §4.4: rim design and size, lugs and PCD, finish, disc or drum sizes, caliper
    type and clock position, engine type and mount, cover finish, suspension per axle, frame
    rails, tinted or rusty springs, AWD, and exhaust layout. An unknown id falls back to its class

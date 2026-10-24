@@ -1,0 +1,741 @@
+# Garage workshop part slots (wp_economy::parts). Owned by the garage workstream.
+#
+# A slot is a place on the car that holds one part. Fields:
+#   id          unique snake_case id
+#   name        display name (generic, no trademarks)
+#   group       UI grouping (PartGroup)
+#   set         slots sharing a set (the four wheels) take the same kind of part; a mod line on
+#               a set counts as installed only when every slot of the set holds that grade
+#   repair      the damage line that gives the fitted part its condition, and that a fresh part
+#               clears ({ Region = "..." } or { Component = "..." })
+#   puncture    corner index 0-3 (FL, FR, RL, RR) whose tyre puncture gives the condition
+#   lines       mod lines whose parts fit here (data/mods); each line belongs to one slot or set
+#   required    the car cannot leave the garage while this slot is empty
+#   blocked_by  slots that must be empty before this one can be worked on (removal order)
+#   stock_price price of a stock replacement part when the slot has no `repair` line (the
+#               damage price table prices the others)
+#   optional    no stock part: the slot is empty on a stock car and only takes aftermarket
+#               parts (a turbo, a wing)
+#   mount       the slot of the part this one bolts onto (a splitter on the front bumper). It can
+#               be worked on while that part is on, is fitted only onto it, and comes off and goes
+#               back on with it, so nothing is left floating. No set, parent or repair item.
+#   parent      the assembly slot this part lives inside (engine internals: parent = "engine").
+#               It leaves with the assembly and can be worked on in the car or on the stand.
+#               Stock internals belong to an engine family (the stock engine's car model, or the
+#               swap engine's mod id) and fit only that family.
+#   damage_share  how much of the assembly's damage this part takes as wear (wear rises by
+#               damage_share x the rise in the assembly's repair-line severity)
+#   torque_loss fraction of engine torque lost when the part is fully worn
+#   wear_limit  most wear the part can have for the assembly to count as rebuilt (default 0.05)
+#
+# [mechanic]  what the garage mechanic charges to install a part for you (wp_economy
+#             `Economy::mechanic_install`): call_out once per job, per_part for every part
+#             taken off and put back (the part itself and everything in its way).
+#
+# Mod lines that are not in any slot (paint, vinyls, tyre width, brake pads, gadgets...) stay plain
+# upgrades bought through the mod tree.
+
+[[slot]]
+id = "front_bumper"
+name = "Front bumper"
+group = "Body"
+repair = { Region = "FrontBumper" }
+lines = ["front_kit"]
+
+[[slot]]
+id = "front_bumper_beam"
+name = "Front crash beam"
+group = "Protection"
+lines = ["front_bumper"]
+blocked_by = ["front_bumper"]
+stock_price = 180
+
+[[slot]]
+id = "rear_bumper"
+name = "Rear bumper"
+group = "Body"
+repair = { Region = "RearBumper" }
+lines = ["rear_kit"]
+
+[[slot]]
+id = "rear_bumper_beam"
+name = "Rear crash beam"
+group = "Protection"
+lines = ["rear_bumper"]
+blocked_by = ["rear_bumper"]
+stock_price = 160
+
+[[slot]]
+id = "hood"
+name = "Hood"
+group = "Body"
+repair = { Region = "Hood" }
+lines = ["hood_panel"]
+
+[[slot]]
+id = "hood_vent"
+name = "Hood vent"
+group = "Body"
+lines = ["hood_style"]
+mount = "hood"
+optional = true
+
+[[slot]]
+id = "trunk_lid"
+name = "Trunk lid"
+group = "Body"
+repair = { Region = "Trunk" }
+lines = ["trunk_panel"]
+
+[[slot]]
+id = "fender_fl"
+name = "Front left fender"
+group = "Body"
+repair = { Region = "FrontLeftFender" }
+blocked_by = ["front_bumper"]
+
+[[slot]]
+id = "fender_fr"
+name = "Front right fender"
+group = "Body"
+repair = { Region = "FrontRightFender" }
+blocked_by = ["front_bumper"]
+
+[[slot]]
+id = "door_fl"
+name = "Front left door"
+group = "Body"
+repair = { Region = "LeftDoorF" }
+
+[[slot]]
+id = "door_fr"
+name = "Front right door"
+group = "Body"
+repair = { Region = "RightDoorF" }
+
+[[slot]]
+id = "door_rl"
+name = "Rear left door"
+group = "Body"
+repair = { Region = "LeftDoorR" }
+
+[[slot]]
+id = "door_rr"
+name = "Rear right door"
+group = "Body"
+repair = { Region = "RightDoorR" }
+
+[[slot]]
+id = "door_bars"
+name = "Door impact bars"
+group = "Protection"
+lines = ["side_impact"]
+blocked_by = ["door_fl", "door_fr"]
+optional = true
+
+[[slot]]
+id = "side_skirts"
+name = "Side skirts"
+group = "Body"
+lines = ["side_kit"]
+optional = true
+
+[[slot]]
+id = "lights"
+name = "Lights"
+group = "Body"
+repair = { Component = "Lights" }
+lines = ["lights"]
+
+[[slot]]
+id = "roof_rack"
+name = "Roof accessory"
+group = "Body"
+lines = ["roof_style"]
+optional = true
+
+[[slot]]
+id = "windshield"
+name = "Windshield"
+group = "Glass"
+repair = { Region = "Windshield" }
+lines = ["glass"]
+required = true
+
+[[slot]]
+id = "rear_glass"
+name = "Rear glass"
+group = "Glass"
+repair = { Region = "RearGlass" }
+
+[[slot]]
+id = "front_splitter"
+name = "Front splitter"
+group = "Aero"
+lines = ["front_aero"]
+mount = "front_bumper"
+optional = true
+
+[[slot]]
+id = "rear_wing"
+name = "Rear wing"
+group = "Aero"
+lines = ["rear_aero"]
+mount = "trunk_lid"
+optional = true
+
+[[slot]]
+id = "diffuser"
+name = "Rear diffuser"
+group = "Aero"
+lines = ["diffuser"]
+mount = "rear_bumper"
+optional = true
+
+[[slot]]
+id = "radiator_guard"
+name = "Radiator guard"
+group = "Cooling"
+lines = ["rad_guard"]
+blocked_by = ["front_bumper"]
+optional = true
+
+[[slot]]
+id = "radiator"
+name = "Radiator"
+group = "Cooling"
+repair = { Component = "Radiator" }
+lines = ["radiator"]
+required = true
+blocked_by = ["front_bumper", "radiator_guard"]
+
+[[slot]]
+id = "intercooler"
+name = "Intercooler"
+group = "Cooling"
+lines = ["intercooler"]
+blocked_by = ["front_bumper"]
+optional = true
+
+[[slot]]
+id = "oil_cooler"
+name = "Oil cooler"
+group = "Cooling"
+lines = ["oil_cooler"]
+blocked_by = ["front_bumper"]
+optional = true
+
+[[slot]]
+id = "intake"
+name = "Intake"
+group = "Engine"
+lines = ["intake"]
+required = true
+stock_price = 220
+
+[[slot]]
+id = "exhaust"
+name = "Exhaust"
+group = "Engine"
+repair = { Component = "Exhaust" }
+lines = ["exhaust"]
+
+[[slot]]
+id = "turbo"
+name = "Turbo or supercharger"
+group = "Engine"
+lines = ["forced_induction"]
+blocked_by = ["intake"]
+optional = true
+
+[[slot]]
+id = "fuel_system"
+name = "Fuel pump and injectors"
+group = "Engine"
+lines = ["fuel"]
+required = true
+blocked_by = ["intake"]
+stock_price = 300
+
+[[slot]]
+id = "engine"
+name = "Engine block"
+group = "Engine"
+repair = { Component = "Engine" }
+lines = ["swap"]
+required = true
+blocked_by = ["radiator", "intake", "exhaust", "turbo", "fuel_system", "gearbox"]
+damage_share = 0.4
+torque_loss = 0.3
+wear_limit = 0.5
+
+# Engine internals: parts inside the engine (parent = "engine"). They come out with the engine
+# and can be stripped on the engine stand, or one by one while it is in the car.
+
+[[slot]]
+id = "intake_manifold"
+name = "Intake manifold"
+group = "Engine"
+parent = "engine"
+lines = ["intake_manifold"]
+required = true
+blocked_by = ["intake"]
+stock_price = 240
+damage_share = 0.3
+torque_loss = 0.1
+
+[[slot]]
+id = "throttle_body"
+name = "Throttle body"
+group = "Engine"
+parent = "engine"
+lines = ["throttle_body"]
+required = true
+blocked_by = ["intake"]
+stock_price = 160
+damage_share = 0.3
+torque_loss = 0.1
+
+[[slot]]
+id = "exhaust_manifold"
+name = "Exhaust manifold"
+group = "Engine"
+parent = "engine"
+lines = ["headers"]
+required = true
+blocked_by = ["exhaust", "turbo"]
+stock_price = 260
+damage_share = 0.5
+torque_loss = 0.1
+
+[[slot]]
+id = "valve_cover"
+name = "Valve cover"
+group = "Engine"
+parent = "engine"
+required = true
+blocked_by = ["intake_manifold"]
+stock_price = 90
+damage_share = 0.4
+
+[[slot]]
+id = "timing"
+name = "Timing belt and gears"
+group = "Engine"
+parent = "engine"
+lines = ["timing"]
+required = true
+stock_price = 180
+damage_share = 0.9
+torque_loss = 0.25
+
+[[slot]]
+id = "camshafts"
+name = "Camshafts"
+group = "Engine"
+parent = "engine"
+lines = ["camshaft"]
+required = true
+blocked_by = ["valve_cover", "timing"]
+stock_price = 450
+damage_share = 0.5
+torque_loss = 0.15
+
+[[slot]]
+id = "valvetrain"
+name = "Valves and springs"
+group = "Engine"
+parent = "engine"
+lines = ["valvetrain"]
+required = true
+blocked_by = ["camshafts"]
+stock_price = 380
+damage_share = 1.0
+torque_loss = 0.25
+
+[[slot]]
+id = "cylinder_head"
+name = "Cylinder head"
+group = "Engine"
+parent = "engine"
+lines = ["head"]
+required = true
+blocked_by = ["intake_manifold", "throttle_body", "exhaust_manifold", "camshafts", "valvetrain"]
+stock_price = 900
+damage_share = 0.6
+torque_loss = 0.2
+
+[[slot]]
+id = "head_gasket"
+name = "Head gasket"
+group = "Engine"
+parent = "engine"
+lines = ["head_gasket"]
+required = true
+blocked_by = ["cylinder_head"]
+stock_price = 120
+damage_share = 1.2
+torque_loss = 0.3
+
+[[slot]]
+id = "oil_pan"
+name = "Oil pan"
+group = "Engine"
+parent = "engine"
+required = true
+stock_price = 140
+damage_share = 1.3
+torque_loss = 0.05
+
+[[slot]]
+id = "oil_pump"
+name = "Oil pump"
+group = "Engine"
+parent = "engine"
+lines = ["oil_pump"]
+required = true
+blocked_by = ["oil_pan"]
+stock_price = 260
+damage_share = 0.8
+torque_loss = 0.1
+
+[[slot]]
+id = "pistons"
+name = "Pistons and rings"
+group = "Engine"
+parent = "engine"
+lines = ["internals"]
+required = true
+blocked_by = ["head_gasket"]
+stock_price = 800
+damage_share = 0.9
+torque_loss = 0.35
+
+[[slot]]
+id = "con_rods"
+name = "Connecting rods"
+group = "Engine"
+parent = "engine"
+lines = ["rods"]
+required = true
+blocked_by = ["oil_pan", "pistons"]
+stock_price = 700
+damage_share = 0.7
+torque_loss = 0.2
+
+[[slot]]
+id = "crankshaft"
+name = "Crankshaft"
+group = "Engine"
+parent = "engine"
+lines = ["crank"]
+required = true
+blocked_by = ["con_rods", "oil_pump", "timing", "flywheel"]
+stock_price = 1100
+damage_share = 0.5
+torque_loss = 0.2
+
+[[slot]]
+id = "ecu"
+name = "Engine computer"
+group = "Electronics"
+lines = ["ecu"]
+required = true
+stock_price = 350
+
+[[slot]]
+id = "battery"
+name = "Battery"
+group = "Electronics"
+repair = { Component = "Battery" }
+lines = ["battery"]
+required = true
+
+[[slot]]
+id = "gearbox"
+name = "Gearbox"
+group = "Drivetrain"
+repair = { Component = "Gearbox" }
+lines = ["gearset"]
+required = true
+blocked_by = ["driveshaft"]
+
+[[slot]]
+id = "clutch"
+name = "Clutch"
+group = "Drivetrain"
+parent = "engine"
+lines = ["clutch"]
+required = true
+blocked_by = ["gearbox"]
+stock_price = 320
+
+[[slot]]
+id = "flywheel"
+name = "Flywheel"
+group = "Drivetrain"
+parent = "engine"
+lines = ["flywheel"]
+required = true
+blocked_by = ["clutch"]
+stock_price = 260
+
+[[slot]]
+id = "shifter"
+name = "Shifter"
+group = "Drivetrain"
+lines = ["shifter"]
+required = true
+stock_price = 120
+
+[[slot]]
+id = "driveshaft"
+name = "Driveshaft"
+group = "Drivetrain"
+repair = { Component = "Driveshaft" }
+required = true
+
+[[slot]]
+id = "differential"
+name = "Differential"
+group = "Drivetrain"
+lines = ["lsd"]
+required = true
+blocked_by = ["driveshaft"]
+stock_price = 600
+
+[[slot]]
+id = "transfer_case"
+name = "All-wheel-drive kit"
+group = "Drivetrain"
+lines = ["awd"]
+blocked_by = ["gearbox", "driveshaft"]
+optional = true
+
+[[slot]]
+id = "fuel_tank"
+name = "Fuel tank"
+group = "Fuel"
+repair = { Component = "FuelTank" }
+lines = ["fuel_cell"]
+required = true
+blocked_by = ["rear_bumper"]
+
+[[slot]]
+id = "tyre_fl"
+name = "Tyre, front left"
+group = "Wheels"
+set = "tyres"
+puncture = 0
+lines = ["compound"]
+required = true
+stock_price = 140
+
+[[slot]]
+id = "tyre_fr"
+name = "Tyre, front right"
+group = "Wheels"
+set = "tyres"
+puncture = 1
+lines = ["compound"]
+required = true
+stock_price = 140
+
+[[slot]]
+id = "tyre_rl"
+name = "Tyre, rear left"
+group = "Wheels"
+set = "tyres"
+puncture = 2
+lines = ["compound"]
+required = true
+stock_price = 140
+
+[[slot]]
+id = "tyre_rr"
+name = "Tyre, rear right"
+group = "Wheels"
+set = "tyres"
+puncture = 3
+lines = ["compound"]
+required = true
+stock_price = 140
+
+[[slot]]
+id = "wheel_fl"
+name = "Wheel, front left"
+group = "Wheels"
+set = "wheels"
+repair = { Component = "WheelFL" }
+lines = ["rims"]
+required = true
+
+[[slot]]
+id = "wheel_fr"
+name = "Wheel, front right"
+group = "Wheels"
+set = "wheels"
+repair = { Component = "WheelFR" }
+lines = ["rims"]
+required = true
+
+[[slot]]
+id = "wheel_rl"
+name = "Wheel, rear left"
+group = "Wheels"
+set = "wheels"
+repair = { Component = "WheelRL" }
+lines = ["rims"]
+required = true
+
+[[slot]]
+id = "wheel_rr"
+name = "Wheel, rear right"
+group = "Wheels"
+set = "wheels"
+repair = { Component = "WheelRR" }
+lines = ["rims"]
+required = true
+
+[[slot]]
+id = "brake_fl"
+name = "Brake, front left"
+group = "Brakes"
+set = "brakes"
+repair = { Component = "BrakeFL" }
+lines = ["brake_kit"]
+required = true
+blocked_by = ["wheel_fl"]
+
+[[slot]]
+id = "brake_fr"
+name = "Brake, front right"
+group = "Brakes"
+set = "brakes"
+repair = { Component = "BrakeFR" }
+lines = ["brake_kit"]
+required = true
+blocked_by = ["wheel_fr"]
+
+[[slot]]
+id = "brake_rl"
+name = "Brake, rear left"
+group = "Brakes"
+set = "brakes"
+repair = { Component = "BrakeRL" }
+lines = ["brake_kit"]
+required = true
+blocked_by = ["wheel_rl"]
+
+[[slot]]
+id = "brake_rr"
+name = "Brake, rear right"
+group = "Brakes"
+set = "brakes"
+repair = { Component = "BrakeRR" }
+lines = ["brake_kit"]
+required = true
+blocked_by = ["wheel_rr"]
+
+[[slot]]
+id = "suspension_fl"
+name = "Suspension, front left"
+group = "Suspension"
+set = "suspension"
+repair = { Component = "SuspensionFL" }
+lines = ["springs"]
+required = true
+blocked_by = ["wheel_fl"]
+
+[[slot]]
+id = "suspension_fr"
+name = "Suspension, front right"
+group = "Suspension"
+set = "suspension"
+repair = { Component = "SuspensionFR" }
+lines = ["springs"]
+required = true
+blocked_by = ["wheel_fr"]
+
+[[slot]]
+id = "suspension_rl"
+name = "Suspension, rear left"
+group = "Suspension"
+set = "suspension"
+repair = { Component = "SuspensionRL" }
+lines = ["springs"]
+required = true
+blocked_by = ["wheel_rl"]
+
+[[slot]]
+id = "suspension_rr"
+name = "Suspension, rear right"
+group = "Suspension"
+set = "suspension"
+repair = { Component = "SuspensionRR" }
+lines = ["springs"]
+required = true
+blocked_by = ["wheel_rr"]
+
+[[slot]]
+id = "arb_front"
+name = "Front anti-roll bar"
+group = "Suspension"
+lines = ["arb_front"]
+optional = true
+
+[[slot]]
+id = "arb_rear"
+name = "Rear anti-roll bar"
+group = "Suspension"
+lines = ["arb_rear"]
+optional = true
+
+[[slot]]
+id = "steering_rack"
+name = "Steering rack"
+group = "Steering"
+repair = { Component = "SteeringRack" }
+lines = ["steering"]
+required = true
+
+[[slot]]
+id = "skid_plate"
+name = "Skid plate"
+group = "Protection"
+lines = ["skid"]
+optional = true
+
+[[slot]]
+id = "push_bar"
+name = "Push bar"
+group = "Protection"
+lines = ["push_bar"]
+optional = true
+
+[[slot]]
+id = "seats"
+name = "Seats"
+group = "Interior"
+lines = ["seats"]
+required = true
+stock_price = 400
+
+[[slot]]
+id = "roll_cage"
+name = "Roll cage"
+group = "Interior"
+lines = ["cage"]
+blocked_by = ["seats"]
+optional = true
+
+[[slot]]
+id = "nitrous"
+name = "Nitrous kit"
+group = "Electronics"
+lines = ["nitrous"]
+optional = true
+
+[mechanic]
+call_out = 60
+per_part = 30

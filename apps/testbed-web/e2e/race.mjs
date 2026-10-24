@@ -61,6 +61,11 @@ await page.waitForSelector('[data-testid="race-picker"]', { timeout: 10000 });
 const cards = await page.$$eval("[data-race]", (els) => els.map((e) => e.getAttribute("data-race")));
 check(cards.length >= 4, `race picker lists ${cards.length} races (${cards.join(", ")})`);
 for (const id of ["hollins_sprint", "loop9_circuit", "lantern_checkpoint", "grid_highway_sprint"]) check(cards.includes(id), `picker offers ${id}`);
+for (const id of ["harbor_dash", "tunnel_run", "hollins_descent", "offramp_sprint", "grid_arterial_sprint"]) check(cards.includes(id), `picker offers ${id}`);
+// Betting: every card prices the player (odds on yourself); a fresh account below Street rep
+// sees them with the lock reason, an unlocked one gets the bet slip.
+const betRows = await page.$$eval('[data-testid="bet-locked"], [data-testid="bet-slip"]', (els) => els.map((e) => e.textContent ?? ""));
+check(betRows.length === cards.length && betRows.every((t) => /\d\.\d\d/.test(t)), `every race card shows odds on the player (${betRows[0] ?? "none"})`);
 await shot("race_picker.png");
 
 // 2. Pick the grid highway sprint from the menu: a race session with countdown and HUD.
@@ -155,6 +160,60 @@ await page2.waitForSelector('[data-testid="race-payout"]', { timeout: 5000 });
 const raceEvents = await page2.evaluate(() => (window.__wp.app.eventCounts.Race ?? 0) + (window.__raceEvents ?? 0));
 check(raceEvents > 3, `SimEvent::Race events reach the page (${raceEvents})`);
 if (shots) await page2.screenshot({ path: join(shots, "race_results.png") });
+
+// Playtest row 167: the career garage's "Street races" opens the picker as a career run: the
+// career car races, the buy-in comes off the career, and the results lead back to the garage.
+{
+  const page3 = await context.newPage();
+  page3.on("pageerror", (e) => errors.push(String(e)));
+  await page3.goto(`${URL}?autopilot=1`);
+  await page3.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 30000 });
+  const G = '[data-testid="career-garage"]';
+  const before = await page3.evaluate(() => {
+    const wp = window.__wp;
+    wp.careerApi.newCareer("Arcade");
+    const v = wp.careerApi.buy("junkyard_beater", "Worn");
+    wp.openGarage();
+    return v;
+  });
+  await page3.waitForSelector(G, { timeout: 10000 });
+  await page3.click('[data-testid="career-races"]');
+  await page3.waitForSelector('[data-race="grid_highway_sprint"]', { timeout: 10000 });
+  const pickerOpen = await page3.evaluate(() => !window.__wp.garage.open && (window.__wp.raceView.cards?.length ?? 0) >= 9);
+  check(pickerOpen, "career garage: Street races opens the race picker (garage closed)");
+  await page3.click('[data-race="grid_highway_sprint"] button:has-text("Race")');
+  const started = await page3.evaluate(() => {
+    const wp = window.__wp;
+    return { active: wp.sim.careerRunActive(), name: wp.sim.scenario().name, car: wp.sim.scenario().entities[0].car, cash: wp.sim.runAccount()?.cash ?? null };
+  });
+  check(
+    started.active && started.name.startsWith("race_grid_highway_sprint") && started.car === "junkyard_beater" && started.cash !== null && started.cash < before.cash,
+    `career race: a career run with the career car (${started.car}), buy-in off the career ($${before.cash} → $${started.cash})`,
+  );
+  for (let i = 0; i < 80; i++) {
+    const done = await page3.evaluate(() => {
+      for (let k = 0; k < 120; k++) window.__wp.sim.step(1 / 60);
+      return window.__wp.sim.raceInfo()[0] === 2;
+    });
+    if (done) break;
+  }
+  await page3.waitForFunction(() => window.__wp.raceView.report?.final_results === true, null, { timeout: 60000 });
+  const back = await page3.waitForSelector('[data-testid="race-to-garage"]', { timeout: 10000 }).then(() => true).catch(() => false);
+  check(back, "career race results offer Back to garage");
+  if (back) await page3.click('[data-testid="race-to-garage"]');
+  const after = await page3.evaluate(() => ({ open: window.__wp.garage.open, active: window.__wp.sim.careerRunActive(), view: window.__wp.careerApi.view() }));
+  check(
+    after.open && !after.active && after.view.day === before.day + 1 && after.view.cash !== before.cash,
+    `career race → garage: run settled on the career (night ${before.day} → ${after.view.day}, $${before.cash} → $${after.view.cash})`,
+  );
+  // Closing a career picker without racing lands back in the garage too.
+  await page3.click('[data-testid="career-races"]');
+  await page3.waitForSelector('[data-race]', { timeout: 10000 });
+  await page3.click('[data-testid="race-picker"] button:has-text("close")');
+  const closed = await page3.evaluate(() => window.__wp.garage.open && !window.__wp.raceView.cards);
+  check(closed, "closing the career race picker returns to the garage");
+  await page3.close();
+}
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();

@@ -11,9 +11,11 @@ fn econ() -> Economy {
     crate::garage::with_economy(|e| e.clone())
 }
 
+/// A career with plenty of cash and Legend rep (every class unlocked).
 fn rich(mode: DamageMode) -> Career {
     let mut c = Career::new(econ(), mode);
     c.profile_mut().account.cash = 5_000_000;
+    c.profile_mut().account.rep = 20_000;
     c
 }
 
@@ -198,4 +200,26 @@ fn visiting_a_lot_parks_todays_stock_in_its_spaces() {
         visit.cars.iter().all(|v| v.slot != d.slot),
         "the bought car left the lot"
     );
+}
+
+#[test]
+fn rep_tier_class_locks_apply_at_the_lots_too() {
+    let mut c = rich(DamageMode::Arcade);
+    let (lot, l) = find(&mut c, LotKind::Dealership, |l| {
+        l.class == wp_contracts::VehicleClass::Exotic
+    });
+    c.profile_mut().account.rep = 0;
+    let view = c.lot_view(&lot).unwrap();
+    let shown = view.cars.iter().find(|x| x.slot == l.slot).unwrap();
+    assert!(shown.locked, "an Exotic needs a higher rep tier");
+    let cash = c.profile().account.cash;
+    assert!(c.buy_listing(&lot, l.slot).is_err());
+    assert_eq!(
+        c.profile().account.cash,
+        cash,
+        "a refused purchase takes nothing"
+    );
+    c.profile_mut().account.rep = 20_000;
+    assert!(!c.lot_view(&lot).unwrap().cars.iter().any(|x| x.locked));
+    c.buy_listing(&lot, l.slot).unwrap();
 }

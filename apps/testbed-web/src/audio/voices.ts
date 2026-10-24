@@ -2,6 +2,15 @@
 // that executes wp_audio's Play / Set / Stop commands. One panner per voice (sources sit on
 // their entity); distance attenuation and Doppler are already folded into the parameters by
 // the Rust director, so panners only pan (rolloff 0).
+//
+// Audio-thread cost (playtest: the whole mix cut in and out in busy scenes): a PannerNode
+// whose position, or the listener's, has automation pending renders per sample (azimuth,
+// elevation and gains recomputed every sample), and so does a BiquadFilter whose frequency is
+// automated (new coefficients every sample). `setTargetAtTime` never finishes, so one call per
+// frame kept every voice on that path for good. Positions and the air-absorption low-pass are
+// therefore plain `.value` writes (applied per 128-sample block); only gain and pitch, which
+// are cheap per sample and audible when stepped, keep their short glides. A busy night run
+// renders ~40 % cheaper (offline: 1.00× → 0.61× real time on the test container).
 
 import type { EngineSynthHost } from "./engine_host";
 import { engineInstrument, makeSynth, type EngineMix, type EngineSynth, type SynthVoice } from "./synth";
@@ -13,6 +22,7 @@ import {
   type AudioLibrary,
   type Bus,
   type CueDef,
+  type MasterMix,
   type SampleStatus,
   type SoundSource,
   type VoiceId,
@@ -24,48 +34,137 @@ interface BusNodes {
   /** Impact sidechain: a big crash briefly ducks the other buses (owner row 74). */
   side: GainNode;
   duck: GainNode;
+  /** Fixed headroom trim (`MasterMix::bus_gain_db`); its output feeds the master. */
+  trim: GainNode;
 }
 
 /** Buses an impact's sidechain ducks (the impact itself plays on World). */
 const SIDECHAIN_BUSES: Bus[] = ["Engine", "Police", "Music"];
 
-/** Mixer buses with per-bus user gain (debug sliders) and a duck stage driven by the director. */
+/**
+ * Shipped master stage (mirror of `data/audio/audio_config.json` → `master`; used when a caller
+ * has no library at hand; e2e/audio_mix.mjs fails if the two drift apart).
+ */
+export const DEFAULT_MASTER: MasterMix = {
+  bus_gain_db: { Engine: -6, World: -6, Police: -6, Ui: -6, Music: -6 },
+  compressor: { threshold_db: -8, knee_db: 6, ratio: 4, attack_s: 0.003, release_s: 0.3 },
+  trim_db: 0,
+  clip_knee: 0.7,
+  clip_ceiling: 0.89,
+};
+
+const dbToLin = (db: number) => 10 ** (db / 20);
+const linToDb = (x: number) => 20 * Math.log10(x);
+
+/**
+ * The automatic make-up gain a DynamicsCompressorNode applies with these settings (linear).
+ * Web Audio leaves it unspecified and it cannot be switched off; Chromium, Firefox and Safari
+ * all run the same compressor kernel (WebKit's DynamicsCompressorKernel), which scales its
+ * output by `(1 / curve(0 dBFS)) ^ 0.6`, where `curve` is the static compression curve: a
+ * soft knee `thr + (1 − e^(−k·(x − thr))) / k` from the threshold to threshold + knee (k chosen
+ * so the knee ends at slope 1 / ratio), then a constant ratio. Ported from that kernel
+ * (`kneeCurve`, `saturate`, `kAtSlope`, `updateStaticCurveParameters`), float for float.
+ * A gentle `threshold −10 dB / knee 30 dB` gives +0.34 dB, a hard `−24 / 0 / 12` gives +12 dB:
+ * every signal below threshold got that much louder, and pushed the next stage harder.
+ */
+export function compressorMakeupGain(thresholdDb: number, kneeDb: number, ratio: number): number {
+  const linThr = dbToLin(thresholdDb);
+  const knee = (x: number, k: number) => (x < linThr ? x : linThr + (1 - Math.exp(-k * (x - linThr))) / k);
+  const slopeAt = (x: number, k: number) => {
+    if (x < linThr) return 1;
+    const x2 = x * 1.001;
+    return (linToDb(knee(x2, k)) - linToDb(knee(x, k))) / (linToDb(x2) - linToDb(x));
+  };
+  // kAtSlope: bisect k (geometric mean) so the knee's slope at its end is 1 / ratio.
+  const xKnee = dbToLin(thresholdDb + kneeDb);
+  let minK = 0.1;
+  let maxK = 10000;
+  let k = 5;
+  for (let i = 0; i < 15; i++) {
+    if (slopeAt(xKnee, k) < 1 / ratio) maxK = k;
+    else minK = k;
+    k = Math.sqrt(minK * maxK);
+  }
+  const kneeThrDb = thresholdDb + kneeDb;
+  const yKneeThrDb = linToDb(knee(dbToLin(kneeThrDb), k));
+  // saturate(1, k): the curve's output for a full-scale input.
+  const full = 1 < dbToLin(kneeThrDb) ? knee(1, k) : dbToLin(yKneeThrDb + (0 - kneeThrDb) / ratio);
+  return (1 / full) ** 0.6;
+}
+
+/**
+ * Soft clip transfer curve for a WaveShaper fed through a 0.5 pre-gain (curve input ±1 = signal
+ * ±2): identity below `knee`, then a tanh knee that approaches `ceiling` and never reaches it.
+ */
+export function softClipCurve(knee: number, ceiling: number, n = 4096): Float32Array<ArrayBuffer> {
+  const c = new Float32Array(n);
+  const w = Math.max(ceiling - knee, 1e-3);
+  for (let i = 0; i < n; i++) {
+    const x = ((i / (n - 1)) * 2 - 1) * 2;
+    const a = Math.abs(x);
+    c[i] = a < knee ? x : Math.sign(x) * (knee + w * Math.tanh((a - knee) / w));
+  }
+  return c;
+}
+
+/**
+ * Mixer buses with per-bus user gain (debug sliders / game menu), a duck stage driven by the
+ * director and a fixed headroom trim, summed into the master stage.
+ *
+ * Gain staging (docs/integration/audio.md "Mix headroom"): sources are calibrated against each
+ * other (engine pack levels, cue gains); the bus trims give the sum its headroom, so a busy
+ * chase peaks a few dB under full scale with the user's master at its default 1.0. The master
+ * compressor only catches peaks (crash transients, several sirens at once) and its automatic
+ * make-up gain is divided out, so below threshold the master stage is unity gain. The tanh soft
+ * clip after it is a safety net that keeps sample peaks under `clip_ceiling` (−1 dBFS).
+ */
 export class AudioMixer {
   readonly master: GainNode;
   readonly buses: Record<Bus, BusNodes>;
+  /** Master compressor (e2e reads its `reduction`). */
+  readonly comp: DynamicsCompressorNode;
   /** Radio EQ input (band-limited, slightly driven) feeding the Police bus. */
   readonly radioIn: AudioNode;
   /** Last node before the destination (offline renders tap it). */
   readonly out: AudioNode;
+  /** Master stage settings in use. */
+  readonly settings: MasterMix;
 
-  constructor(readonly ctx: AudioContext) {
+  constructor(
+    readonly ctx: AudioContext,
+    settings?: MasterMix,
+  ) {
+    const m = (this.settings = settings ?? DEFAULT_MASTER);
     this.master = ctx.createGain();
-    this.master.gain.value = 0.8;
-    // Gentle limiter so a 24-car pile-up cannot clip.
-    const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -10;
-    comp.ratio.value = 6;
-    // Safety soft clip after it (owner row 74): a big crash's transient can still overshoot the
-    // compressor's attack; tanh keeps the output under full scale instead of hard clipping.
-    // Identity below 0.7, a tanh knee to 0.99 above (input range ±2 via the 0.5 pre-gain).
+    this.master.gain.value = 1.0;
+    const comp = (this.comp = ctx.createDynamicsCompressor());
+    comp.threshold.value = m.compressor.threshold_db;
+    comp.knee.value = m.compressor.knee_db;
+    comp.ratio.value = m.compressor.ratio;
+    comp.attack.value = m.compressor.attack_s;
+    comp.release.value = m.compressor.release_s;
+    // Undo the compressor's automatic make-up gain (read back the clamped AudioParam values),
+    // then the final trim.
+    const post = ctx.createGain();
+    post.gain.value = dbToLin(m.trim_db) / compressorMakeupGain(comp.threshold.value, comp.knee.value, comp.ratio.value);
+    // Safety soft clip (owner row 74): a crash transient can still overshoot the compressor's
+    // attack; tanh keeps it under the ceiling instead of hard clipping. Input range ±2 via the
+    // 0.5 pre-gain.
     const pre = ctx.createGain();
     pre.gain.value = 0.5;
     const clip = ctx.createWaveShaper();
-    const cc = new Float32Array(4096);
-    for (let i = 0; i < cc.length; i++) {
-      const x = ((i / (cc.length - 1)) * 2 - 1) * 2;
-      cc[i] = Math.abs(x) < 0.7 ? x : Math.sign(x) * (0.7 + 0.29 * Math.tanh((Math.abs(x) - 0.7) / 0.29));
-    }
-    clip.curve = cc;
-    this.master.connect(comp).connect(pre).connect(clip).connect(ctx.destination);
+    clip.curve = softClipCurve(m.clip_knee, m.clip_ceiling);
+    this.master.connect(comp).connect(post).connect(pre).connect(clip).connect(ctx.destination);
     this.out = clip;
     const buses = {} as Record<Bus, BusNodes>;
     for (const b of BUSES) {
       const user = ctx.createGain();
       const side = ctx.createGain();
       const duck = ctx.createGain();
-      user.connect(side).connect(duck).connect(this.master);
-      buses[b] = { user, side, duck };
+      const trim = ctx.createGain();
+      trim.gain.value = dbToLin(m.bus_gain_db[b] ?? 0);
+      user.connect(side).connect(duck).connect(trim).connect(this.master);
+      buses[b] = { user, side, duck, trim };
     }
     this.buses = buses;
     const hp = ctx.createBiquadFilter();
@@ -87,6 +186,11 @@ export class AudioMixer {
     drive.curve = curve;
     hp.connect(lp).connect(mid).connect(drive).connect(buses.Police.user);
     this.radioIn = hp;
+  }
+
+  /** A bus's output where it enters the master stage (offline renders tap it). */
+  busOut(bus: Bus): AudioNode {
+    return this.buses[bus].trim;
   }
 
   input(bus: Bus): AudioNode {
@@ -139,6 +243,67 @@ interface Voice {
   last: VoiceParams;
   /** Commanded gain → played gain (a stand-in cue's own gain; see `resolve`). */
   scale: number;
+  /** Commanded pitch → playback rate of a recording (a siren unit's own rate; see `sirenLoopVariation`). */
+  rate: number;
+}
+
+/**
+ * How one unit plays a recorded siren loop. Real units never run in lockstep: each one's
+ * oscillator runs a little fast or slow and it switches on somewhere in its cycle. A synth
+ * siren gets that from the director's per-unit spread (its cadence parameters are already
+ * scaled); a recording gets the same spread as a playback-rate factor (`synth.lo_hz` over the
+ * configured cadence's `lo_hz`) and a start point in the loop from the unit seed
+ * (`synth.unit`). Neutral (rate 1, offset 0) for anything else. Presentation only.
+ */
+export function sirenLoopVariation(
+  lib: AudioLibrary,
+  pack: string,
+  cue: string,
+  synth: Record<string, number>,
+): { rate: number; offset: number } {
+  const neutral = { rate: 1, offset: 0 };
+  if (lib.packs[pack]?.kind !== "Siren" || synth.unit === undefined) return neutral;
+  const name = { "siren/wail": "Wail", "siren/yelp": "Yelp", "siren/phaser": "Phaser", "siren/hilo": "HiLo" }[cue];
+  const cfg = lib.config as { sirens?: { cadence?: Record<string, { lo_hz?: number }> } };
+  const lo = name ? cfg.sirens?.cadence?.[name]?.lo_hz : undefined;
+  const r = lo && synth.lo_hz ? synth.lo_hz / lo : 1;
+  // Golden-ratio sequence over the unit seed: neighbouring ids start far apart in the loop.
+  const offset = (synth.unit * 0.6180339887) % 1;
+  return { rate: Number.isFinite(r) ? Math.min(1.1, Math.max(0.9, r)) : 1, offset };
+}
+
+/**
+ * Exact length of an Ogg Vorbis file: the end-of-stream page's granule position (samples) and
+ * the identification header's sample rate; null for anything else. Chromium's decodeAudioData
+ * ignores this end trim and returns the whole last Vorbis block, up to ~20 ms of decaying codec
+ * tail past the real end, which a looped voice played as a dropout at every wrap.
+ */
+export function oggVorbisLength(bytes: ArrayBuffer): { samples: number; rate: number } | null {
+  const u = new Uint8Array(bytes);
+  const isPage = (i: number) => u[i] === 0x4f && u[i + 1] === 0x67 && u[i + 2] === 0x67 && u[i + 3] === 0x53 && u[i + 4] === 0;
+  if (u.length < 64 || !isPage(0)) return null;
+  const dv = new DataView(bytes);
+  const p = 27 + u[26]; // first packet: after the header and its segment table
+  if (p + 16 > u.length || u[p] !== 1 || String.fromCharCode(...u.subarray(p + 1, p + 7)) !== "vorbis") return null;
+  const rate = dv.getUint32(p + 12, true);
+  // The last page (end-of-stream flag) holds the final granule position.
+  for (let i = u.length - 27; i > 0; i--) {
+    if (!isPage(i) || !(u[i + 5] & 0x04)) continue;
+    const samples = dv.getUint32(i + 10, true) * 2 ** 32 + dv.getUint32(i + 6, true);
+    return samples > 0 && rate > 0 ? { samples, rate } : null;
+  }
+  return null;
+}
+
+/** `buf` cut to the file's real length (see `oggVorbisLength`); unchanged when already right. */
+function trimDecoded(ctx: BaseAudioContext, buf: AudioBuffer, len: { samples: number; rate: number } | null): AudioBuffer {
+  if (!len) return buf;
+  const n = Math.round((len.samples * buf.sampleRate) / len.rate);
+  // Only a short codec tail is cut; anything else means the header was not what we think.
+  if (n >= buf.length || n < buf.length - 0.1 * buf.sampleRate) return buf;
+  const out = ctx.createBuffer(buf.numberOfChannels, n, buf.sampleRate);
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) out.copyToChannel(buf.getChannelData(ch).subarray(0, n), ch);
+  return out;
 }
 
 /** wp_audio slot codes (crates/wp_audio/src/types.rs `slot`): engine layers and limiter. */
@@ -207,6 +372,15 @@ export class VoicePool {
   private engines = new Map<number, EngineGroup>();
   /** Released instruments still fading out. */
   private dying: Voice[] = [];
+  /** `collect`'s clock for `reapVoice`. */
+  private collectT = 0;
+  /** Recycle a voice that has ended (`collect`, through `Map.forEach`). */
+  private readonly reapVoice = (v: Voice, k: string): void => {
+    if (v.endTime <= this.collectT) {
+      this.recycle(v);
+      this.voices.delete(k);
+    }
+  };
   private samples = new Map<string, AudioBuffer | "loading" | "failed">();
   /**
    * Looped voices playing a pack's procedural fallback only because their recording was not
@@ -332,7 +506,11 @@ export class VoicePool {
           this.samples.set(url, "loading");
           fetch(url)
             .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`))))
-            .then((b) => this.ctx.decodeAudioData(b))
+            .then((b) => {
+              // Read before decoding: decodeAudioData detaches the buffer.
+              const len = oggVorbisLength(b);
+              return this.ctx.decodeAudioData(b).then((buf) => trimDecoded(this.ctx, buf, len));
+            })
             .then((buf) => {
               this.samples.set(url, buf);
               this.decoded = true;
@@ -357,19 +535,31 @@ export class VoicePool {
     return st;
   }
 
-  private setPanner(p: PannerNode, pos: [number, number, number], t: number, smooth: boolean): void {
+  /** Move a panner (per-block value, no automation: see the file comment). */
+  private setPanner(p: PannerNode, pos: [number, number, number]): void {
     if (p.positionX) {
-      if (smooth) {
-        p.positionX.setTargetAtTime(pos[0], t, 0.02);
-        p.positionY.setTargetAtTime(pos[1], t, 0.02);
-        p.positionZ.setTargetAtTime(pos[2], t, 0.02);
-      } else {
-        p.positionX.setValueAtTime(pos[0], t);
-        p.positionY.setValueAtTime(pos[1], t);
-        p.positionZ.setValueAtTime(pos[2], t);
-      }
+      p.positionX.value = pos[0];
+      p.positionY.value = pos[1];
+      p.positionZ.value = pos[2];
     } else {
       p.setPosition(pos[0], pos[1], pos[2]);
+    }
+  }
+
+  /**
+   * Set the air-absorption low-pass. Small (per-frame distance) changes are a plain value;
+   * a big jump (camera cut, cabin muffling switching on) glides over ~one frame and then the
+   * filter is back on the cheap per-block path.
+   */
+  private setLowpass(lp: BiquadFilterNode, hz: number, t: number): void {
+    const f = lp.frequency;
+    const cur = f.value;
+    f.cancelScheduledValues(t);
+    if (cur > 0 && Math.abs(Math.log2(hz / cur)) > 0.5) {
+      f.setValueAtTime(cur, t);
+      f.linearRampToValueAtTime(hz, t + 0.02);
+    } else {
+      f.value = hz;
     }
   }
 
@@ -405,12 +595,13 @@ export class VoicePool {
     if (panner) panner.panningModel = this.router?.panning(played) ?? "equalpower";
     gain.gain.setValueAtTime(looped ? 0 : params.gain, t);
     if (looped) gain.gain.setTargetAtTime(params.gain, t, 0.02);
-    lp.frequency.setValueAtTime(Math.min(params.lowpass_hz || 18000, 18000), t);
-    if (panner) this.setPanner(panner, params.pos, t, false);
+    lp.frequency.value = Math.min(params.lowpass_hz || 18000, 18000);
+    if (panner) this.setPanner(panner, params.pos);
     (panner ?? lp).connect(dest);
 
     let src: AudioBufferSourceNode | null = null;
     let syn: SynthVoice | null = null;
+    let rate = 1;
     const source = def?.source;
     if (ext) {
       this.played.synth++;
@@ -421,9 +612,12 @@ export class VoicePool {
       src = this.ctx.createBufferSource();
       src.buffer = buf;
       src.loop = looped;
-      src.playbackRate.value = params.pitch;
+      // A recorded siren loop plays at its unit's rate from its unit's point in the loop.
+      const vary = looped ? sirenLoopVariation(this.lib, played, cue, synth) : null;
+      rate = vary?.rate ?? 1;
+      src.playbackRate.value = params.pitch * rate;
       src.connect(gain);
-      src.start(t);
+      src.start(t, vary ? vary.offset * buf.duration : 0);
     } else {
       this.played.synth++;
       const name = source && "Synth" in source ? source.Synth.synth : "noise";
@@ -433,7 +627,7 @@ export class VoicePool {
     }
     // A recorded one-shot can outlast the director's estimate: keep the voice until it ends.
     const dur = Math.max(def?.duration_s ?? 1, buf && !looped ? buf.duration / Math.max(params.pitch, 0.25) : 0);
-    this.voices.set(key, { synth: syn, src, gain, lp, panner, endTime: looped ? Infinity : t + dur + 0.5, last: params, scale });
+    this.voices.set(key, { synth: syn, src, gain, lp, panner, endTime: looped ? Infinity : t + dur + 0.5, last: params, scale, rate });
     this.created++;
   }
 
@@ -465,24 +659,33 @@ export class VoicePool {
       l.gain = params.gain;
     }
     if (changed(params.lowpass_hz, l.lowpass_hz)) {
-      v.lp.frequency.setTargetAtTime(Math.min(params.lowpass_hz || 18000, 18000), t, 0.05);
+      this.setLowpass(v.lp, Math.min(params.lowpass_hz || 18000, 18000), t);
       l.lowpass_hz = params.lowpass_hz;
     }
     if (v.panner && moved(params.pos, l.pos)) {
-      this.setPanner(v.panner, params.pos, t, true);
+      this.setPanner(v.panner, params.pos);
       l.pos = params.pos;
     }
     const pitchMoved = changed(params.pitch, l.pitch);
-    if (v.src && pitchMoved) v.src.playbackRate.setTargetAtTime(params.pitch, t, 0.02);
-    // Sirens follow their own clock and must see every phase; others only on change.
+    if (v.src && pitchMoved) v.src.playbackRate.setTargetAtTime(params.pitch * v.rate, t, 0.02);
+    // Sirens schedule their pitch curve ahead on each update (their phase moves every frame);
+    // others only on change.
     const synthChanged =
-      changed(params.freq_hz, l.freq_hz) || pitchMoved || changed(params.load, l.load) || params.phase !== l.phase;
+      changed(params.freq_hz, l.freq_hz) ||
+      pitchMoved ||
+      changed(params.load, l.load) ||
+      changed(params.timbre ?? 0, l.timbre ?? 0) ||
+      params.phase !== l.phase;
     // The modelled engine and clocked synths (impacts, horns) read every frame.
     if (v.synth && (synthChanged || params.engine || (v.synth as ClockedSynth).everyFrame)) v.synth.update(params, t);
     if (synthChanged) {
       l.freq_hz = params.freq_hz;
-      l.pitch = params.pitch;
+      // Only once applied: a siren's phase changes every frame, and taking the pitch here on
+      // every phase change kept a recording's playback rate from ever following a slow pitch
+      // drift (Doppler of a receding siren stuck ~5 % sharp).
+      if (pitchMoved) l.pitch = params.pitch;
       l.load = params.load;
+      l.timbre = params.timbre;
       l.phase = params.phase;
     }
     l.doppler = params.doppler;
@@ -523,7 +726,7 @@ export class VoicePool {
       panner.panningModel = "equalpower";
       panner.distanceModel = "linear";
       panner.rolloffFactor = 0;
-      this.setPanner(panner, params.pos, t, false);
+      this.setPanner(panner, params.pos);
       syn.output.connect(gain).connect(lp).connect(panner).connect(this.mixer.input("Engine"));
       g = {
         synth: syn,
@@ -535,6 +738,7 @@ export class VoicePool {
         // Gain starts at 0 and is ramped in by the first flush.
         last: { ...params, gain: 0, pos: [...params.pos] as [number, number, number] },
         scale: 1,
+        rate: 1,
         members: new Map(),
         pending: params,
         mix,
@@ -643,7 +847,6 @@ export class VoicePool {
       this.stripsReused++;
       s.gain.gain.cancelScheduledValues(t);
       s.lp.frequency.cancelScheduledValues(t);
-      if (s.panner?.positionX) for (const p of [s.panner.positionX, s.panner.positionY, s.panner.positionZ]) p.cancelScheduledValues(t);
       return s;
     }
     const gain = this.ctx.createGain();
@@ -675,17 +878,18 @@ export class VoicePool {
     if (this.decoded) this.upgrade();
     for (const g of this.engines.values()) if (g.dirty) this.flushEngine(g);
     const t = this.ctx.currentTime;
-    for (const [k, v] of this.voices) {
-      if (v.endTime <= t) {
-        this.recycle(v);
-        this.voices.delete(k);
-      }
+    // Per frame: no [key, voice] entry arrays, no filtered copy of `dying` (allocation pass
+    // 2026-10-20). Same order and effect as the for-of / filter it replaces.
+    this.collectT = t;
+    this.voices.forEach(this.reapVoice);
+    const dying = this.dying;
+    let keep = 0;
+    for (let i = 0; i < dying.length; i++) {
+      const v = dying[i];
+      if (v.endTime > t) dying[keep++] = v;
+      else (v.panner ?? v.lp).disconnect();
     }
-    this.dying = this.dying.filter((v) => {
-      if (v.endTime > t) return true;
-      (v.panner ?? v.lp).disconnect();
-      return false;
-    });
+    dying.length = keep;
     this.engineHost?.flush();
   }
 
@@ -705,6 +909,30 @@ export class VoicePool {
   }
 
   /**
+   * Radio alert tone (owner playtest row 144: a short distinct cue before a tier 1 line):
+   * square-ish beeps at `freqs`, `each_s` apiece, through the radio EQ. Returns the tone's
+   * length, s.
+   */
+  playRadioTone(freqs: number[], each_s: number, gain: number): number {
+    const t0 = this.ctx.currentTime + 0.01;
+    freqs.forEach((f, i) => {
+      const osc = this.ctx.createOscillator();
+      osc.type = "square";
+      osc.frequency.value = f;
+      const g = this.ctx.createGain();
+      const t = t0 + i * each_s;
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(gain, t + 0.008);
+      g.gain.setValueAtTime(gain, t + each_s - 0.02);
+      g.gain.linearRampToValueAtTime(0, t + each_s - 0.005);
+      osc.connect(g).connect(this.mixer.radioIn);
+      osc.start(t);
+      osc.stop(t + each_s);
+    });
+    return freqs.length * each_s;
+  }
+
+  /**
    * Play a cue outside the director (scanner squelch / static, city ambience), non-spatial at
    * the listener. Returns a stop function.
    */
@@ -718,20 +946,22 @@ export class VoicePool {
 
 }
 
-/** Point the Web Audio listener at the camera (sim world space). */
-export function setListener(ctx: AudioContext, pos: number[], fwd: number[], up: number[]): void {
+/**
+ * Point the Web Audio listener at the camera (sim world space). Plain values, no automation:
+ * automated listener params put every panner on the per-sample path (see the file comment).
+ */
+export function setListener(ctx: BaseAudioContext, pos: number[], fwd: number[], up: number[]): void {
   const l = ctx.listener;
-  const t = ctx.currentTime;
   if (l.positionX) {
-    l.positionX.setTargetAtTime(pos[0], t, 0.01);
-    l.positionY.setTargetAtTime(pos[1], t, 0.01);
-    l.positionZ.setTargetAtTime(pos[2], t, 0.01);
-    l.forwardX.setTargetAtTime(fwd[0], t, 0.01);
-    l.forwardY.setTargetAtTime(fwd[1], t, 0.01);
-    l.forwardZ.setTargetAtTime(fwd[2], t, 0.01);
-    l.upX.setTargetAtTime(up[0], t, 0.01);
-    l.upY.setTargetAtTime(up[1], t, 0.01);
-    l.upZ.setTargetAtTime(up[2], t, 0.01);
+    l.positionX.value = pos[0];
+    l.positionY.value = pos[1];
+    l.positionZ.value = pos[2];
+    l.forwardX.value = fwd[0];
+    l.forwardY.value = fwd[1];
+    l.forwardZ.value = fwd[2];
+    l.upX.value = up[0];
+    l.upY.value = up[1];
+    l.upZ.value = up[2];
   } else {
     l.setPosition(pos[0], pos[1], pos[2]);
     l.setOrientation(fwd[0], fwd[1], fwd[2], up[0], up[1], up[2]);

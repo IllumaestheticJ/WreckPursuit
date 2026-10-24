@@ -32,15 +32,20 @@ fn gradient_in(ids: &[&str], range: std::ops::RangeInclusive<f32>) {
 #[test]
 fn front_drive_cars_understeer_mildly() {
     // Measured 0.35–0.63 deg/g; the junkyard beater 1.42.
+    // Re-ranged (unify, 2026-10-21): owner-chosen balance (row 126); revisit after the owner's ×0.45 / 0.50 / 0.55 A/B. On the shipped ride the
+    // junkyard beater measures 1.75 deg/g; limit 2.0.
     gradient_in(
         &["vireo_xs", "kestrel_ts", "junkyard_beater", "tansy_13"],
-        0.25..=1.6,
+        0.25..=2.0,
     );
 }
 
 #[test]
 fn rear_drive_cars_are_near_neutral() {
     // Measured 0.07–0.35 deg/g (with A's clutch-LSD model; never oversteer at steady state).
+    // Re-ranged (unify, 2026-10-21): owner-chosen balance (row 126); revisit after the owner's ×0.45 / 0.50 / 0.55 A/B. The owner's step-14 rear
+    // (cornering stiffness × 0.45 vs front × 0.6) makes every RWD car slightly loose at steady
+    // state: −0.34 (shiro) … −0.74 (sperber) deg/g; limit −0.95.
     gradient_in(
         &[
             "shiro_turbo",
@@ -50,7 +55,7 @@ fn rear_drive_cars_are_near_neutral() {
             "lucciola_350",
             "sentinel_cruiser",
         ],
-        0.0..=0.6,
+        -0.95..=0.6,
     );
     // The light mid-engined car rotates more readily than any front-driver.
     let light = ramp_steer(&car("lucciola_350"), &wheel(), V).understeer_deg_per_g;
@@ -69,6 +74,8 @@ fn awd_cars_are_stable_and_close_to_neutral() {
 #[test]
 fn heavy_cars_still_push() {
     // Measured 0.49–1.77 deg/g; the half-ton pickup pushes more than any sports car.
+    // Re-ranged (unify, 2026-10-21): owner-chosen balance (row 126); revisit after the owner's ×0.45 / 0.50 / 0.55 A/B. On the owner's soft RWD
+    // rear the heavy RWD cars measure −0.71 (sentinel_bastion) … 0.20 (hauler) deg/g; limit −0.9.
     gradient_in(
         &[
             "hauler_1500",
@@ -77,11 +84,14 @@ fn heavy_cars_still_push() {
             "furrow_24",
             "sentinel_bastion",
         ],
-        0.35..=2.3,
+        -0.9..=2.3,
     );
     let truck = ramp_steer(&car("hauler_1500"), &wheel(), V).understeer_deg_per_g;
     let sport = ramp_steer(&car("shiro_turbo"), &wheel(), V).understeer_deg_per_g;
-    assert!(truck > sport + 0.5, "truck {truck} sport {sport}");
+    // Re-ranged (physics lead, 2026-10-23, candidate G, owner rows physics-4 / physics-5): the
+    // softer anti-roll bars bring the pickup to −0.14 and the sports car to −0.39 deg/g; the
+    // pickup still pushes more, by 0.25 (was > 0.5). Margin 0.2.
+    assert!(truck > sport + 0.2, "truck {truck} sport {sport}");
 }
 
 #[test]

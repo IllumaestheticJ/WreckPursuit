@@ -9,18 +9,19 @@
 //!   to the ground beyond — the greybox draws exactly these triangles and `wp_sim` collides
 //!   with exactly these triangles;
 //! - [`deck_rails`]: guard-rail lines along bridge decks;
-//! - [`collision_terrain`]: the terrain physics collides with (the drawn terrain off the roads);
 //! - [`median_barriers`]: concrete barrier lines between divided-highway carriageways;
+//! - [`deck_slabs`]: bridge-deck pieces that hide what is under them (line of sight);
+//! - [`edge_barriers`]: concrete barrier lines along the outer edges of highways;
 //! - [`MapGround`]: a wheel ground probe over roads and terrain without a physics engine.
 
 use wp_vehicle::{GroundHit, WheelCaster};
 
 use crate::geom::{self, V2, V3};
 use crate::map::{CityMap, SegKind};
-use crate::terrain::Heightfield;
 use std::collections::BTreeMap;
 
 use crate::network::{Lane, LaneKind, RoadNetwork, RoadSurface};
+use crate::terrain::Heightfield;
 
 mod nodes;
 pub use nodes::{node_patches, NodePatch, NodePatchKind};
@@ -91,10 +92,19 @@ pub const LOT_MAX_DROP_M: f32 = 1.0;
 /// deck), m.
 pub const LOT_MAX_RISE_M: f32 = 0.08;
 
+/// Whether `net` has hills: terrain that is not one flat height. Main's grid city carries a
+/// flat heightfield only so its highway viaduct is a real bridge; for lots and sidewalks it is
+/// still a flat city.
+pub fn has_relief(net: &RoadNetwork) -> bool {
+    net.terrain
+        .as_ref()
+        .is_some_and(|t| t.z.iter().any(|z| *z != t.z[0]))
+}
+
 /// Width of the level lot behind every sidewalk of `net`, m ([`LOT_W_M`], or [`FLAT_LOT_W_M`]
-/// without terrain relief, [`RoadNetwork::relief`]).
+/// on flat ground, [`has_relief`]).
 pub fn lot_width_m(net: &RoadNetwork) -> f32 {
-    if net.relief().is_some() {
+    if has_relief(net) {
         LOT_W_M
     } else {
         FLAT_LOT_W_M
@@ -376,19 +386,19 @@ pub fn sidewalk_mesh(map: &CityMap) -> SidewalkMesh {
     // Whether the ground under `p` holds a lot at height `p.z` (no terrain: always): not far
     // below it (a deck) nor poking up through it (an uncarved slope).
     let supported = |p: V3| {
-        net.relief().is_none_or(|t| {
+        net.terrain.as_ref().is_none_or(|t| {
             let drop = p[2] - t.height_at(geom::xy(p));
             (-LOT_MAX_RISE_M..=LOT_MAX_DROP_M).contains(&drop)
         })
     };
     let geo = WalkGeometry {
         lot_w,
-        max_pull_back: if net.relief().is_some() {
+        max_pull_back: if has_relief(net) {
             MAX_WEDGE_PULL_BACK_M
         } else {
             MAX_PULL_BACK_M + lot_w
         },
-        wedges: net.relief().is_some(),
+        wedges: has_relief(net),
     };
     let patches = node_patches(map);
     let paved = PavedIndex::new(&road_mesh_with(map, &patches));
@@ -1712,9 +1722,8 @@ pub fn is_elevated(s: &RoadSurface, k: usize, ground: &dyn Fn(V2) -> f32, gap: f
 }
 
 /// Guard-rail lines `(a, b)` (at road height) along both edges of every bridge-deck stretch:
-/// surface segments whose whole cross-section is more than 1.5 m above the terrain. A side
-/// with a sidewalk has none here (its rail is at the sidewalk's back edge). Empty without
-/// terrain.
+/// surface segments whose whole cross-section is more than 1.5 m above the terrain. Empty
+/// without terrain.
 pub fn deck_rails(net: &RoadNetwork) -> Vec<(V3, V3)> {
     let Some(t) = &net.terrain else {
         return Vec::new();
@@ -1725,11 +1734,37 @@ pub fn deck_rails(net: &RoadNetwork) -> Vec<(V3, V3)> {
         let (l, r) = surface_edges(s);
         for k in 0..s.centre.len() - 1 {
             if is_elevated(s, k, &ground, 1.5) && is_elevated(s, k + 1, &ground, 1.5) {
-                for (e, walk) in [(&l, s.sidewalk[0]), (&r, s.sidewalk[1])] {
-                    // A sidewalk side has its rail at the sidewalk's back edge instead
-                    // (`SidewalkMesh::bare_backs`), not on the kerb line.
-                    if !walk {
-                        out.extend(rail_piece(net, si, e[k], e[k + 1]));
+                for e in [&l, &r] {
+                    let (a, b) = (e[k], e[k + 1]);
+                    match (
+                        inside_other_paving(net, si, a),
+                        inside_other_paving(net, si, b),
+                    ) {
+                        (false, false) => out.push((a, b)),
+                        (true, true) => {}
+                        // A ramp edge leaving the carriageway it diverges from: the rail starts
+                        // where the edge leaves that paving (a whole segment from inside cut
+                        // across the taper path; lead/main-sync).
+                        (inside_a, _) => {
+                            let at = |t: f32| {
+                                [
+                                    a[0] + (b[0] - a[0]) * t,
+                                    a[1] + (b[1] - a[1]) * t,
+                                    a[2] + (b[2] - a[2]) * t,
+                                ]
+                            };
+                            let (mut lo, mut hi) = (0.0f32, 1.0f32);
+                            for _ in 0..12 {
+                                let mid = 0.5 * (lo + hi);
+                                if inside_other_paving(net, si, at(mid)) == inside_a {
+                                    lo = mid;
+                                } else {
+                                    hi = mid;
+                                }
+                            }
+                            let c = at(hi);
+                            out.push(if inside_a { (c, b) } else { (a, c) });
+                        }
                     }
                 }
             }
@@ -1738,53 +1773,18 @@ pub fn deck_rails(net: &RoadNetwork) -> Vec<(V3, V3)> {
     out
 }
 
-/// The part of the edge segment `a → b` of surface `si` that needs a deck rail: none when it
-/// lies on another surface's paving (a ramp edge on the carriageway it leaves), clipped to
-/// where it leaves that paving when only one end does (not across the carriageway's lanes).
-pub fn rail_piece(net: &RoadNetwork, si: usize, a: V3, b: V3) -> Option<(V3, V3)> {
-    match (
-        inside_other_paving(net, si, a),
-        inside_other_paving(net, si, b),
-    ) {
-        (false, false) => Some((a, b)),
-        (true, true) => None,
-        (true, false) => Some((paving_exit(net, si, a, b), b)),
-        (false, true) => Some((a, paving_exit(net, si, b, a))),
-    }
-}
-
-/// Where the segment `inside → outside` leaves the paving of the surfaces other than `si`
-/// (bisected to ~5 cm).
-fn paving_exit(net: &RoadNetwork, si: usize, inside: V3, outside: V3) -> V3 {
-    let lerp = |t: f32| {
-        [
-            inside[0] + (outside[0] - inside[0]) * t,
-            inside[1] + (outside[1] - inside[1]) * t,
-            inside[2] + (outside[2] - inside[2]) * t,
-        ]
-    };
-    let (mut lo, mut hi) = (0.0f32, 1.0f32);
-    for _ in 0..8 {
-        let mid = 0.5 * (lo + hi);
-        if inside_other_paving(net, si, lerp(mid)) {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    lerp(hi)
-}
-
 /// Vertex spacing of the terrain the greybox mesh draws ([`drawn_terrain`]), m.
 pub const TERRAIN_RENDER_M: f32 = 10.0;
 
 /// The fine-grid vertices of `t` along at-grade roads, junctions and bends (paved width +
-/// sidewalk + half a cell): the ground roads and sidewalks are laid on. Bridge decks are not
-/// at grade, so the ground under them is left out.
+/// sidewalk + lot + skirt + half a cell): the ground the sidewalks, lots and skirts are laid
+/// on. Bridge decks and tunnels are not at grade, so the ground under a deck and above a
+/// tunnel is left out.
 fn road_band(map: &CityMap, t: &Heightfield) -> Vec<bool> {
     let net = &map.net;
     let mut keep = vec![false; t.z.len()];
     let margin = t.cell_m * 0.5;
+    let beside = SIDEWALK_W_M + lot_width_m(net) + SKIRT_W_M;
     let mut mark = |a: V2, b: V2, r: f32| {
         let lo = [a[0].min(b[0]) - r, a[1].min(b[1]) - r];
         let hi = [a[0].max(b[0]) + r, a[1].max(b[1]) + r];
@@ -1805,33 +1805,29 @@ fn road_band(map: &CityMap, t: &Heightfield) -> Vec<bool> {
             }
         }
     };
-    let ground = |q: V2| t.height_at(q);
+    // Within 1.5 m of the fine ground: not a deck above it, not a tunnel under it.
+    let at_grade = |p: V3| (p[2] - t.height_at(geom::xy(p))).abs() <= 1.5;
     for s in &net.surfaces {
-        let side = if s.highway { 0.3 } else { SIDEWALK_W_M };
+        let side = if s.highway { 0.3 } else { beside };
         let r = s.left_m.max(s.right_m) + side + margin;
         for k in 0..s.centre.len() - 1 {
-            if is_elevated(s, k, &ground, 1.5) && is_elevated(s, k + 1, &ground, 1.5) {
-                continue;
+            if at_grade(s.centre[k]) || at_grade(s.centre[k + 1]) {
+                mark(geom::xy(s.centre[k]), geom::xy(s.centre[k + 1]), r);
             }
-            mark(geom::xy(s.centre[k]), geom::xy(s.centre[k + 1]), r);
         }
     }
     for ix in &net.intersections {
         let c = net.nodes[ix.node as usize].pos;
-        if c[2] - ground(geom::xy(c)) <= 1.5 {
-            mark(
-                geom::xy(c),
-                geom::xy(c),
-                ix.radius_m + SIDEWALK_W_M + margin,
-            );
+        if at_grade(c) {
+            mark(geom::xy(c), geom::xy(c), ix.radius_m + beside + margin);
         }
     }
     for s in map.segs.iter() {
         if let SegKind::Connector { node, .. } = s.kind {
             if net.nodes[node as usize].intersection.is_none() {
-                let r = s.width * 0.5 + SIDEWALK_W_M + margin;
+                let r = s.width * 0.5 + beside + margin;
                 for w in s.pts.windows(2) {
-                    if w[0][2] - ground(geom::xy(w[0])) <= 1.5 {
+                    if at_grade(w[0]) || at_grade(w[1]) {
                         mark(geom::xy(w[0]), geom::xy(w[1]), r);
                     }
                 }
@@ -1850,7 +1846,7 @@ pub fn render_spacing(t: &Heightfield) -> f32 {
 
 /// The terrain the greybox draws (`None` without terrain): `net.terrain` on a
 /// [`TERRAIN_RENDER_M`] grid ([`Heightfield::coarse_under`]), following the fine heights
-/// except where it must stay under the ground roads and sidewalks are laid on.
+/// except where it must stay under the ground roads, sidewalks and lots are laid on.
 pub fn drawn_terrain(map: &CityMap) -> Option<Heightfield> {
     let t = map.net.terrain.as_ref()?;
     Some(t.coarse_under(render_spacing(t), &road_band(map, t)))
@@ -1858,12 +1854,13 @@ pub fn drawn_terrain(map: &CityMap) -> Option<Heightfield> {
 
 /// The terrain physics collides with, on the fine grid of `net.terrain` (`None` without
 /// terrain): the surface the greybox draws ([`drawn_terrain`]), except in the road band
-/// (at-grade roads, junctions and bends: paved width + sidewalk + half a cell), which keeps
-/// the fine heights so the ground under sidewalks stays at road level. Drawn and solid ground
-/// agree everywhere else, so there is no hillside the player can hit but not see; the fine
-/// grid samples the coarse triangles exactly (same diagonal), so the two surfaces are
-/// identical off the roads. A flat field (the procedural grid) is returned as it is: there
-/// is no hidden ground to remove, only the drawn mesh's 5 cm offset.
+/// (at-grade roads, junctions and bends: paved width + sidewalk + lot + skirt + half a cell),
+/// which keeps the fine heights the sidewalks, lots and skirts are laid on. Drawn and solid
+/// ground agree everywhere else, so there is no hillside the player can hit but not see; the
+/// fine grid samples the coarse triangles exactly (same diagonal), so the two surfaces are
+/// identical off the roads. A flat field (e.g. a grid city's ground under a viaduct) is
+/// returned as it is: there is no hidden ground to remove, only the drawn mesh's 5 cm offset,
+/// and callers may tell a flat city by its terrain being uniform.
 pub fn collision_terrain(map: &CityMap) -> Option<Heightfield> {
     let t = map.net.terrain.as_ref()?;
     if t.z.iter().all(|z| *z == t.z[0]) {
@@ -1923,6 +1920,322 @@ pub fn median_barriers(net: &RoadNetwork) -> Vec<Vec<V3>> {
         .filter(|s| s.median_barrier && s.centre.len() >= 2)
         .map(|s| surface_edges(s).0)
         .collect()
+}
+
+/// Half width of a concrete barrier (Jersey base), m: [`edge_barriers`] lines run this far
+/// outside the paved edge, so the barrier's inner face is on the edge.
+pub const BARRIER_HALF_WIDTH_M: f32 = 0.25;
+
+/// An [`edge_barriers`] line ends this far outside a junction's paved radius, m.
+pub const JUNCTION_BARRIER_GAP_M: f32 = 2.0;
+
+/// An [`edge_barriers`] line stops this far along the edge before and after any other paving
+/// meeting it (a ramp's taper and gore, a junction), m: a car merging off a ramp drifts
+/// across the taper for up to ~60 m and must not meet the barrier's end there (row 162).
+pub const GORE_BARRIER_GAP_M: f32 = 40.0;
+
+/// No [`edge_barriers`] line runs closer than this to a median barrier's centre line, m: the
+/// median already walls that edge.
+pub const MEDIAN_CLEAR_M: f32 = 3.0;
+
+/// Concrete barrier lines (at road height) along the outer edges of highways: the right edge
+/// of every divided-highway carriageway and both edges of ramps, so a car cannot leave the
+/// highway for the verge. Left out where another road's paving meets the edge (ramp tapers,
+/// gores: the rest-stop ramps too), at junctions (a ramp terminal's paving and turning paths:
+/// [`JUNCTION_BARRIER_GAP_M`] past its paved radius), on bridge decks (they have guard rails, see
+/// [`deck_rails`]) and inside covered spans (the Hollins Tunnel: its walls; the barrier stops
+/// at the portals, so the exit stays open), and never beside a median barrier
+/// ([`MEDIAN_CLEAR_M`]). Empty without terrain.
+pub fn edge_barriers(map: &CityMap) -> Vec<Vec<V3>> {
+    let net = &*map.net;
+    let Some(t) = &net.terrain else {
+        return Vec::new();
+    };
+    let ground = |q: V2| t.height_at(q);
+    let covers: Vec<crate::covered::CoverShape> = net
+        .covered
+        .iter()
+        .map(crate::covered::CoverShape::new)
+        .collect();
+    // Junction paving (a ramp's terminal on a street): the barrier ends before it, so turning
+    // paths stay clear (row 162). Freeway merges (radius 0) stay open through the paving test.
+    let radii = junction_paved_radii(net);
+    let junctions: Vec<(V3, f32)> = net
+        .intersections
+        .iter()
+        .zip(&radii)
+        .filter(|(_, r)| **r > 0.0)
+        .map(|(ix, r)| (net.nodes[ix.node as usize].pos, r + JUNCTION_BARRIER_GAP_M))
+        .collect();
+    // And off every node patch's paving (a freeway merge's taper connectors: no road surface
+    // there, so `inside_other_paving` does not see it).
+    let patches: Vec<(V2, V2, TriMesh)> = node_patches(map)
+        .into_iter()
+        .filter(|p| !p.mesh.indices.is_empty())
+        .map(|p| {
+            let (mut lo, mut hi) = ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]);
+            for q in &p.mesh.positions {
+                lo = [lo[0].min(q[0]), lo[1].min(q[1])];
+                hi = [hi[0].max(q[0]), hi[1].max(q[1])];
+            }
+            (lo, hi, p.mesh)
+        })
+        .collect();
+    let on_patch = |p: V3| {
+        let q = geom::xy(p);
+        patches.iter().any(|(lo, hi, m)| {
+            q[0] >= lo[0] - 0.5
+                && q[0] <= hi[0] + 0.5
+                && q[1] >= lo[1] - 0.5
+                && q[1] <= hi[1] + 0.5
+                && m.indices.iter().any(|t| {
+                    let [a, b, c] = t.map(|i| m.positions[i as usize]);
+                    (a[2] - p[2]).abs() < 1.0
+                        && geom::point_in_polygon(q, &[geom::xy(a), geom::xy(b), geom::xy(c)])
+                })
+        })
+    };
+    let at_junction = |p: V3| {
+        on_patch(p)
+            || junctions.iter().any(|(c, r)| {
+                geom::dist(geom::xy(p), geom::xy(*c)) < *r && (p[2] - c[2]).abs() < 3.0
+            })
+    };
+    // Median barriers, in 32 m cells: an edge never gets a second barrier beside one. Both
+    // carriageways of a divided highway border the median, but only one of them carries it
+    // (`median_barrier`); the other's median-side edge is no outer edge (a barrier there ran
+    // 0.25 m beside the median and stuck out of its face: a scraping car caught it).
+    let medians = median_barriers(net);
+    const MCELL: f32 = 32.0;
+    let mcell = |q: V2| ((q[0] / MCELL).floor() as i32, (q[1] / MCELL).floor() as i32);
+    let mut msegs: Vec<(V2, V2, f32)> = Vec::new();
+    let mut mcells: BTreeMap<(i32, i32), Vec<usize>> = BTreeMap::new();
+    for line in &medians {
+        for w in line.windows(2) {
+            let (a, b) = (geom::xy(w[0]), geom::xy(w[1]));
+            let r = MEDIAN_CLEAR_M;
+            let (lo, hi) = (
+                mcell([a[0].min(b[0]) - r, a[1].min(b[1]) - r]),
+                mcell([a[0].max(b[0]) + r, a[1].max(b[1]) + r]),
+            );
+            for x in lo.0..=hi.0 {
+                for y in lo.1..=hi.1 {
+                    mcells.entry((x, y)).or_default().push(msegs.len());
+                }
+            }
+            msegs.push((a, b, 0.5 * (w[0][2] + w[1][2])));
+        }
+    }
+    let beside_median = |p: V3| {
+        let q = geom::xy(p);
+        mcells.get(&mcell(q)).is_some_and(|v| {
+            v.iter().any(|i| {
+                let (a, b, z) = msegs[*i];
+                geom::point_segment_distance(q, a, b) < MEDIAN_CLEAR_M && (p[2] - z).abs() < 3.0
+            })
+        })
+    };
+    let mut out = Vec::new();
+    for (si, s) in net.surfaces.iter().enumerate() {
+        if !s.highway || s.centre.len() < 2 {
+            continue;
+        }
+        let (l, r) = surface_edges(s);
+        // A carriageway's left edge carries the median barrier.
+        let sides: &[(f32, &Vec<V3>)] = if s.median_barrier {
+            &[(1.0, &r)]
+        } else {
+            &[(-1.0, &l), (1.0, &r)]
+        };
+        for (side, edge) in sides {
+            let line = geom::offset_polyline(edge, side * BARRIER_HALF_WIDTH_M);
+            // Openings for other paving (ramp tapers, gores, junctions), widened by
+            // GORE_BARRIER_GAP_M along the edge each way: a merging car still drifting across
+            // the taper meets no blunt barrier end (row 162).
+            let open: Vec<bool> = (0..edge.len())
+                .map(|k| {
+                    let p = edge[k];
+                    let q = [line[k][0], line[k][1], p[2]];
+                    inside_other_paving(net, si, p)
+                        || inside_other_paving(net, si, q)
+                        || at_junction(q)
+                })
+                .collect();
+            let ecum = geom::cumulative(edge);
+            let opened: Vec<f32> = (0..edge.len())
+                .filter(|k| open[*k])
+                .map(|k| ecum[k])
+                .collect();
+            let keep: Vec<bool> = (0..edge.len())
+                .map(|k| {
+                    let p = edge[k];
+                    !is_elevated(s, k, &ground, 1.5)
+                        && !beside_median([line[k][0], line[k][1], p[2]])
+                        && !covers.iter().any(|c| c.contains([p[0], p[1], p[2] + 1.0]))
+                        && !opened
+                            .iter()
+                            .any(|o| (ecum[k] - o).abs() <= GORE_BARRIER_GAP_M)
+                })
+                .collect();
+            let mut run: Vec<V3> = Vec::new();
+            for k in 0..edge.len() {
+                if keep[k] {
+                    run.push([line[k][0], line[k][1], edge[k][2]]);
+                } else {
+                    if run.len() >= 2 {
+                        out.push(std::mem::take(&mut run));
+                    }
+                    run.clear();
+                }
+            }
+            if run.len() >= 2 {
+                out.push(run);
+            }
+        }
+    }
+    out
+}
+
+/// One ramp → carriageway merge: the connector that joins them and the line a car drives
+/// through it (see [`ramp_merges`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RampMerge {
+    /// The merge connector's segment id ([`CityMap::segs`]).
+    pub connector: u32,
+    /// Source road of the ramp and of the carriageway.
+    pub roads: [u32; 2],
+    /// Lane centreline from `before_m` up the ramp lane, through the connector, to `after_m`
+    /// along the carriageway lane it joins, m.
+    pub path: Vec<V3>,
+}
+
+/// Every place a ramp lane (a highway road of one or two lanes: interchange and rest-stop
+/// ramps) joins a carriageway's lane (a highway road of three or more), with the driving line
+/// through it (row 162: ramp merges are flush and clear). In segment order.
+pub fn ramp_merges(map: &CityMap, before_m: f32, after_m: f32) -> Vec<RampMerge> {
+    let net = &map.net;
+    let highway = |road: u32| net.surfaces.iter().any(|s| s.road == road && s.highway);
+    let lanes = |road: u32| {
+        net.lanes
+            .iter()
+            .filter(|l| l.road == road && l.kind.drivable())
+            .count()
+    };
+    // A ramp has one or two lanes, a carriageway (piece) three or more.
+    let ramp = |road: u32| highway(road) && lanes(road) <= 2;
+    let carriageway = |road: u32| highway(road) && lanes(road) >= 3;
+    let mut out = Vec::new();
+    for (ci, c) in map.segs.iter().enumerate() {
+        let SegKind::Connector { from, to, .. } = c.kind else {
+            continue;
+        };
+        let (rf, rt) = (net.lanes[from as usize].road, net.lanes[to as usize].road);
+        if !ramp(rf) || !carriageway(rt) {
+            continue;
+        }
+        let (a, b) = (&map.segs[from as usize], &map.segs[to as usize]);
+        let mut path: Vec<V3> = a
+            .pts
+            .iter()
+            .zip(&a.cum)
+            .filter(|(_, s)| **s >= a.length - before_m)
+            .map(|(p, _)| *p)
+            .collect();
+        path.extend(c.pts.iter().copied());
+        path.extend(
+            b.pts
+                .iter()
+                .zip(&b.cum)
+                .filter(|(_, s)| **s <= after_m)
+                .map(|(p, _)| *p),
+        );
+        path.dedup_by(|x, y| geom::dist(geom::xy(*x), geom::xy(*y)) < 0.05);
+        out.push(RampMerge {
+            connector: ci as u32,
+            roads: [rf, rt],
+            path,
+        });
+    }
+    out
+}
+
+/// Clearance under a deck piece before it counts as cover for line of sight, m (a car fits).
+pub const DECK_COVER_CLEARANCE_M: f32 = 3.0;
+
+/// One piece of bridge deck between two surface centreline points: the paved strip from
+/// `left_m` left to `right_m` right of the centreline `a`→`b`, treated as a thin plane (bank
+/// ignored). Used by [`CityMap::line_of_sight`] so overpasses hide the road below them from a
+/// helicopter.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DeckSlab {
+    /// Centreline start (road height), m.
+    pub a: V3,
+    /// Centreline end, m.
+    pub b: V3,
+    /// Paved width left of the centreline, m.
+    pub left_m: f32,
+    /// Paved width right of the centreline, m.
+    pub right_m: f32,
+}
+
+impl DeckSlab {
+    /// Whether the 3D segment `p`→`q` passes through the slab. The slab is the plane through
+    /// the centreline that is level across the road; along the segment both the slab's height
+    /// under it and its own height are linear in the segment parameter, so there is at most one
+    /// crossing, found in closed form.
+    pub fn blocks(&self, p: V3, q: V3) -> bool {
+        let e = geom::sub(geom::xy(self.b), geom::xy(self.a));
+        let e2 = geom::dot(e, e);
+        if e2 < 1e-6 {
+            return false;
+        }
+        let (pp, d) = (geom::xy(p), geom::sub(geom::xy(q), geom::xy(p)));
+        // Along-slab parameter u(t) = u0 + du·t; slab height z0 + dz·u(t); segment p.z + sz·t.
+        let u0 = geom::dot(geom::sub(pp, geom::xy(self.a)), e) / e2;
+        let du = geom::dot(d, e) / e2;
+        let dz = self.b[2] - self.a[2];
+        let den = (q[2] - p[2]) - dz * du;
+        if den.abs() < 1e-6 {
+            return false; // parallel to the deck plane
+        }
+        let t = (self.a[2] + dz * u0 - p[2]) / den;
+        if !(0.0..=1.0).contains(&t) {
+            return false;
+        }
+        let u = u0 + du * t;
+        if !(0.0..=1.0).contains(&u) {
+            return false;
+        }
+        let at = geom::add(pp, geom::scale(d, t));
+        let rel = geom::sub(at, geom::xy(self.a));
+        // Signed offset, + right of the travel direction.
+        let lat = geom::dot(rel, geom::right_of(e)) / e2.sqrt();
+        lat >= -self.left_m && lat <= self.right_m
+    }
+}
+
+/// Bridge-deck pieces with at least [`DECK_COVER_CLEARANCE_M`] under their whole
+/// cross-section at both ends. Empty without terrain.
+pub fn deck_slabs(net: &RoadNetwork) -> Vec<DeckSlab> {
+    let Some(t) = &net.terrain else {
+        return Vec::new();
+    };
+    let ground = |q: V2| t.height_at(q);
+    let gap = DECK_COVER_CLEARANCE_M;
+    let mut out = Vec::new();
+    for s in &net.surfaces {
+        for k in 0..s.centre.len().saturating_sub(1) {
+            if is_elevated(s, k, &ground, gap) && is_elevated(s, k + 1, &ground, gap) {
+                out.push(DeckSlab {
+                    a: s.centre[k],
+                    b: s.centre[k + 1],
+                    left_m: s.left_m,
+                    right_m: s.right_m,
+                });
+            }
+        }
+    }
+    out
 }
 
 /// Wheel probes against the city's roads and terrain (no physics engine): the drivable
@@ -2211,16 +2524,25 @@ mod tests {
             let walk_m = walks.flush();
             let (road, walk) = (PavedIndex::new(&road_m), PavedIndex::new(&walk_m));
             // Known exceptions, counted and capped: corners filled in cells and junctions whose
-            // ribbon ends overlap. Freeway merges and diverges (radius-0 junctions) always
-            // overlap (the ramp ribbon lies on the carriageway) and are not counted.
-            let is_merge = |node: u32| {
-                map.net.nodes[node as usize]
-                    .intersection
+            // ribbon ends overlap. Main's divided highways overlap by design: at freeway merges
+            // / diverges (radius-0 junctions) every road's paving runs to the node, and the two
+            // carriageways' paving overlaps along the median where they end at a junction.
+            let freeway = |node: u32| {
+                let nd = &map.net.nodes[node as usize];
+                let c = geom::xy(nd.pos);
+                nd.intersection
                     .is_some_and(|ix| map.net.intersections[ix as usize].radius_m <= 0.0)
+                    || map.net.surfaces.iter().any(|s| {
+                        s.median_barrier
+                            && s.centre.len() >= 2
+                            && [s.centre[0], s.centre[s.centre.len() - 1]]
+                                .iter()
+                                .any(|e| geom::dist(geom::xy(*e), c) < 40.0)
+                    })
             };
             let overlapping: Vec<u32> = patches
                 .iter()
-                .filter(|p| p.overlapping_ends && !is_merge(p.node))
+                .filter(|p| p.overlapping_ends && !freeway(p.node))
                 .map(|p| p.node)
                 .collect();
             println!(
@@ -2426,6 +2748,48 @@ mod tests {
             looking_at_road * 100 >= total * 98,
             "{looking_at_road} of {total} kerb faces face the road"
         );
+    }
+
+    /// A level 10 m wide deck 8 m up, running +Y from (0, 0) to (0, 40), 4 m left / 6 m right.
+    fn slab() -> DeckSlab {
+        DeckSlab {
+            a: [0.0, 0.0, 8.0],
+            b: [0.0, 40.0, 8.0],
+            left_m: 4.0,
+            right_m: 6.0,
+        }
+    }
+
+    #[test]
+    fn deck_slab_blocks_only_rays_through_it() {
+        let d = slab();
+        let heli = [30.0, 20.0, 120.0];
+        // Under the deck (right of the centreline is +X here), and on top of it.
+        assert!(d.blocks(heli, [2.0, 20.0, 1.0]));
+        assert!(!d.blocks(heli, [2.0, 20.0, 9.0]));
+        // Beside the deck at ground level, past either edge or end.
+        assert!(!d.blocks([10.0, 20.0, 120.0], [10.0, 20.0, 1.0]));
+        assert!(!d.blocks([-6.0, 20.0, 120.0], [-6.0, 20.0, 1.0]));
+        assert!(!d.blocks([0.0, 50.0, 120.0], [0.0, 50.0, 1.0]));
+        // Left edge counts left_m, right edge right_m.
+        assert!(d.blocks([-3.5, 20.0, 120.0], [-3.5, 20.0, 1.0]));
+        assert!(d.blocks([5.5, 20.0, 120.0], [5.5, 20.0, 1.0]));
+        // Horizontal rays under or over it never cross the plane; order does not matter.
+        assert!(!d.blocks([-20.0, 20.0, 1.3], [20.0, 20.0, 1.3]));
+        assert!(d.blocks([2.0, 20.0, 1.0], heli));
+    }
+
+    #[test]
+    fn sloped_slab_follows_its_ramp() {
+        // Rises from 2 m to 10 m: a ray ending 5 m up blocks near the high end only.
+        let d = DeckSlab {
+            a: [0.0, 0.0, 2.0],
+            b: [0.0, 40.0, 10.0],
+            left_m: 4.0,
+            right_m: 4.0,
+        };
+        assert!(d.blocks([0.0, 36.0, 100.0], [0.0, 36.0, 5.0]));
+        assert!(!d.blocks([0.0, 4.0, 100.0], [0.0, 4.0, 5.0]));
     }
 }
 

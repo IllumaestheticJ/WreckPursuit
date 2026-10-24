@@ -133,6 +133,279 @@ const steamPuff = new PuffArgs().look(0.95, 0.96, 0.97, 0.14, 0.75, 1.0, 0.45, 1
 const sparkArgs = new SparkArgs();
 const bitArgs = new BitArgs();
 
+/** Per-car scratch of `vehicles` (KF_* offsets): chassis position, up, forward, right, angular
+ * velocity, then the wheel-contact count and the sum of the contact points. */
+const KF_POS = 0;
+const KF_UP = 3;
+const KF_FWD = 6;
+const KF_RIGHT = 9;
+const KF_W = 12;
+const KF_N = 15;
+const KF_M = 16;
+const carK = new Float64Array(19);
+
+/** Wheel data the kernels read (`VehicleInfo.wheels[i]`). */
+type WheelInfo = VehicleView["info"]["wheels"][number];
+
+/** A wheel record packed for `wheelFx` (WI_* offsets): position x / y / z, the static
+ * compression `wheelCentreZ` subtracts, radius, width. Car-info objects of different models
+ * have different shapes (optional fields, integer arrays); read through them the optimised
+ * kernel was thrown away ("wrong map") each time a new model showed up. */
+const WI_X = 0;
+const WI_Y = 1;
+const WI_Z = 2;
+const WI_STATIC = 3;
+const WI_RADIUS = 4;
+const WI_WIDTH = 5;
+const packedWheels = new WeakMap<WheelInfo, Float64Array>();
+function packWheel(wi: WheelInfo): Float64Array {
+  let w = packedWheels.get(wi);
+  if (w) return w;
+  w = new Float64Array(6);
+  w[WI_X] = wi.position_m[0];
+  w[WI_Y] = wi.position_m[1];
+  w[WI_Z] = wi.position_m[2];
+  w[WI_STATIC] = wi.static_compression_m ?? wi.travel_m * 0.5;
+  w[WI_RADIUS] = wi.radius_m;
+  w[WI_WIDTH] = wi.width_m;
+  packedWheels.set(wi, w);
+  return w;
+}
+
+/** One car's frame for `wheelFx` (into `K`), its velocity and paint (into `c`). */
+function carFrame(cur: Float32Array, o: number, q: THREE.Quaternion, pos: THREE.Vector3, paint: THREE.Color, c: CarFx, K: Float64Array): void {
+  c.vx = cur[o + S.linVel];
+  c.vy = cur[o + S.linVel + 1];
+  c.vz = cur[o + S.linVel + 2];
+  K[KF_W] = cur[o + S.angVel];
+  K[KF_W + 1] = cur[o + S.angVel + 1];
+  K[KF_W + 2] = cur[o + S.angVel + 2];
+  const up = tmpUp.set(0, 0, 1).applyQuaternion(q);
+  const fwd = tmpFwd.set(0, 1, 0).applyQuaternion(q);
+  const right = tmpRight.set(1, 0, 0).applyQuaternion(q);
+  K[KF_POS] = pos.x;
+  K[KF_POS + 1] = pos.y;
+  K[KF_POS + 2] = pos.z;
+  K[KF_UP] = up.x;
+  K[KF_UP + 1] = up.y;
+  K[KF_UP + 2] = up.z;
+  K[KF_FWD] = fwd.x;
+  K[KF_FWD + 1] = fwd.y;
+  K[KF_FWD + 2] = fwd.z;
+  K[KF_RIGHT] = right.x;
+  K[KF_RIGHT + 1] = right.y;
+  K[KF_RIGHT + 2] = right.z;
+  K[KF_N] = 0;
+  K[KF_M] = 0;
+  K[KF_M + 1] = 0;
+  K[KF_M + 2] = 0;
+  c.paintR = paint.r;
+  c.paintG = paint.g;
+  c.paintB = paint.b;
+}
+
+/**
+ * One wheel (state at `wb`): contact patch, its slip, the skid-mark arguments (`sk`) and the
+ * tyre-smoke accumulator. Returns -1 when the wheel is off the ground (its track is broken),
+ * else the number of tyre puffs to emit (all with the arguments left in `tp`).
+ */
+function wheelFx(cur: Float32Array, wb: number, W: Float64Array, c: CarFx, i: number, K: Float64Array, sk: SkidArgs, tp: PuffArgs, time: number, tyreSmoke: number, dt: number): number {
+  const t = i * TRACK;
+  const touching = cur[wb + SW.contact] > 0.5 && cur[wb + SW.detached] < 0.5;
+  if (!touching) {
+    c.tracks[t] = 0;
+    return -1;
+  }
+  const px = K[KF_POS];
+  const py = K[KF_POS + 1];
+  const pz = K[KF_POS + 2];
+  const ux = K[KF_UP];
+  const uy = K[KF_UP + 1];
+  const uz = K[KF_UP + 2];
+  const fx = K[KF_FWD];
+  const fy = K[KF_FWD + 1];
+  const fz = K[KF_FWD + 2];
+  const rx_ = K[KF_RIGHT];
+  const ry_ = K[KF_RIGHT + 1];
+  const rz_ = K[KF_RIGHT + 2];
+  const wx = K[KF_W];
+  const wy = K[KF_W + 1];
+  const wz = K[KF_W + 2];
+  // wheelCentreZ(wi, compression) - radius, from the packed wheel record.
+  const lz = W[WI_Z] + cur[wb + SW.compression] - W[WI_STATIC] - W[WI_RADIUS];
+  const lx = W[WI_X];
+  const ly = W[WI_Y];
+  const cx = px + rx_ * lx + fx * ly + ux * lz;
+  const cy = py + ry_ * lx + fy * ly + uy * lz;
+  const cz = pz + rz_ * lx + fz * ly + uz * lz;
+  K[KF_N] += 1;
+  K[KF_M] += cx;
+  K[KF_M + 1] += cy;
+  K[KF_M + 2] += cz;
+  // Contact patch velocity: v + ω × r.
+  const rx = cx - px;
+  const ry = cy - py;
+  const rz = cz - pz;
+  const pvx = c.vx + wy * rz - wz * ry;
+  const pvy = c.vy + wz * rx - wx * rz;
+  const pvz = c.vz + wx * ry - wy * rx;
+  // Wheel heading: chassis forward turned by the steer angle about the chassis up.
+  const st = cur[wb + SW.steer];
+  const cs = Math.cos(st);
+  const sn = Math.sin(st);
+  const hx = fx * cs - rx_ * sn;
+  const hy = fy * cs - ry_ * sn;
+  const hz = fz * cs - rz_ * sn;
+  const sx = rx_ * cs + fx * sn;
+  const sy = ry_ * cs + fy * sn;
+  const sz = rz_ * cs + fz * sn;
+  const vLong = pvx * hx + pvy * hy + pvz * hz;
+  const vLat = pvx * sx + pvy * sy + pvz * sz;
+  // Slip speed of the tread against the road (sign-agnostic: burnouts and lock-ups).
+  const dLong = Math.abs(cur[wb + SW.omega]) * W[WI_RADIUS] - Math.abs(vLong);
+  const slip = Math.sqrt(dLong * dLong + vLat * vLat);
+  const loaded = cur[wb + SW.fz] > 300;
+  const strength = loaded && slip > SKID_SLIP_MPS ? Math.min(Math.max((slip - SKID_SLIP_MPS) / 8, 0.25), 1) : 0;
+  sk.cx = cx + ux * 0.015;
+  sk.cy = cy + uy * 0.015;
+  sk.cz = cz + uz * 0.015;
+  sk.sx = sx;
+  sk.sy = sy;
+  sk.sz = sz;
+  sk.halfW = W[WI_WIDTH] * 0.5;
+  sk.strength = strength;
+  sk.time = time;
+  let puffs = 0;
+  if (loaded && slip > TYRE_SMOKE_SLIP_MPS && tyreSmoke > 0) {
+    c.tyreAcc[i] += Math.min((slip - TYRE_SMOKE_SLIP_MPS) * 1.2, 14) * tyreSmoke * dt;
+    while (c.tyreAcc[i] >= 1) {
+      c.tyreAcc[i] -= 1;
+      puffs++;
+    }
+    tp.x = cx + ux * 0.25;
+    tp.y = cy + uy * 0.25;
+    tp.z = cz + uz * 0.25;
+    tp.vx = c.vx * 0.25;
+    tp.vy = c.vy * 0.25;
+    tp.vz = 0.2;
+  } else {
+    c.tyreAcc[i] = 0;
+  }
+  return puffs;
+}
+
+/** Local ground plane from this frame's wheel contacts (≥ 3 touching, car upright). */
+function carPlane(c: CarFx, K: Float64Array): void {
+  const n = K[KF_N];
+  const uz = K[KF_UP + 2];
+  if (n >= 3 && uz > 0.6) {
+    const mx = K[KF_M] / n;
+    const my = K[KF_M + 1] / n;
+    const mz = K[KF_M + 2] / n;
+    const ux = K[KF_UP];
+    const uy = K[KF_UP + 1];
+    c.plane.ga = mz + (ux * mx + uy * my) / uz;
+    c.plane.gb = -ux / uz;
+    c.plane.gc = -uy / uz;
+    c.planeOk = true;
+  }
+}
+
+/** Engine smoke of a damaged engine: number of puffs this frame (their look and velocity left
+ * in `ep`; the caller sets the origin). */
+function engineSmoke(c: CarFx, rate: number, dt: number, ep: PuffArgs): number {
+  if (!(c.engine < ENGINE_SMOKE_HEALTH)) {
+    c.smokeAcc = 0;
+    return 0;
+  }
+  const sev = Math.min((ENGINE_SMOKE_HEALTH - c.engine) / ENGINE_SMOKE_HEALTH, 1);
+  c.smokeAcc += (3 + 14 * sev) * rate * dt;
+  const grey = 0.5 - 0.43 * sev;
+  let n = 0;
+  while (c.smokeAcc >= 1) {
+    c.smokeAcc -= 1;
+    n++;
+  }
+  ep.vx = c.vx * 0.6;
+  ep.vy = c.vy * 0.6;
+  ep.vz = c.vz * 0.6 + 0.6;
+  ep.r = grey;
+  ep.g = grey;
+  ep.b = grey * 1.04;
+  ep.s0 = 0.18;
+  ep.s1 = 0.9 + 0.9 * sev;
+  ep.life = 1.6 + 1.2 * sev;
+  ep.alpha = 0.5 + 0.35 * sev;
+  ep.rise = 1.2;
+  return n;
+}
+
+/** Radiator steam: number of puffs this frame (velocity left in `sp`). */
+function radiatorSteam(c: CarFx, rate: number, dt: number, sp: PuffArgs): number {
+  if (!(c.radiator < RADIATOR_STEAM_HEALTH)) {
+    c.steamAcc = 0;
+    return 0;
+  }
+  const sev = Math.min((RADIATOR_STEAM_HEALTH - c.radiator) / RADIATOR_STEAM_HEALTH, 1);
+  c.steamAcc += (2 + 10 * sev) * rate * dt;
+  let n = 0;
+  while (c.steamAcc >= 1) {
+    c.steamAcc -= 1;
+    n++;
+  }
+  sp.vx = c.vx * 0.6;
+  sp.vy = c.vy * 0.6;
+  sp.vz = c.vz * 0.6 + 0.8;
+  return n;
+}
+
+let kernelsWarmed = false;
+/**
+ * Run the `vehicles` kernels through every branch with fractional values, once, so V8 has
+ * complete type feedback and optimises them here instead of ~10 s into the chase (where one
+ * deoptimisation on a new branch or object shape sent them back for the rest of the window).
+ * Uses the real argument objects (`skidArgs`, the puff arguments: every field the kernels write
+ * is written again before each real use; the puff looks are not touched) and the first car's
+ * own pose objects (read only; the paint is a fractional stand-in), so the shapes the optimised code checks are the live ones; the
+ * car state is a throwaway `CarFx`. Its fractional writes change field representations, which
+ * leaves older objects of those classes on deprecated shapes: the live cars are migrated
+ * after, so the first real call does not deoptimise on them.
+ */
+function warmVehicleKernels(view: VehicleView, cars: Map<number, CarFx>): void {
+  kernelsWarmed = true;
+  const cur = new Float32Array(STATE_STRIDE);
+  const K = new Float64Array(carK.length);
+  const c = new CarFx();
+  const q = view.root.quaternion;
+  const pos = view.root.position;
+  const paint = new THREE.Color(0.31, 0.42, 0.53);
+  const W = new Float64Array([0.81, 1.37, 0.33, 0.071, 0.329, 0.215]);
+  // Enough calls that V8 tiers them up here (a few ms, once).
+  for (let n = 0; n < 20000; n++) {
+    for (let k = 0; k < cur.length; k++) cur[k] = 0.37 + 0.013 * k + 0.001 * (n % 97);
+    const wb = S.wheelBase + (n % 4) * S.wheelStride;
+    cur[wb + SW.contact] = n % 5 === 0 ? 0 : 1;
+    cur[wb + SW.detached] = 0;
+    cur[wb + SW.fz] = (n >> 1) % 3 === 0 ? 120.5 : 3200.5;
+    // No slip, a partial skid (fractional strength: a field that only ever saw 0 / 1 stays an
+    // integer field and deoptimises on the first real skid) and a full skid with smoke.
+    cur[wb + SW.omega] = n % 3 === 0 ? 3.7 : n % 3 === 1 ? 24.1 : 95.3;
+    c.engine = n % 2 === 0 ? 0.31 : 0.93;
+    c.radiator = n % 3 === 0 ? 0.42 : 0.97;
+    carFrame(cur, 0, q, pos, paint, c, K);
+    for (let i = 0; i < 4; i++) wheelFx(cur, S.wheelBase + i * S.wheelStride, W, c, i, K, skidArgs, tyrePuff, 1.25 + (n % 89) * 0.1, 0.35, 0.25);
+    carPlane(c, K);
+    engineSmoke(c, 0.45, 0.25, enginePuff);
+    radiatorSteam(c, 0.45, 0.25, steamPuff);
+  }
+  // Touch every live car so V8 moves it to the current shape (a load migrates a deprecated one).
+  let sink = 0;
+  for (const car of cars.values()) sink += car.frame + car.vx + car.plane.ga + car.engine;
+  warmSink = sink;
+}
+/** Keeps the migration loads above from being dropped. */
+export let warmSink = 0;
+
 /** Counters for automation and the perf doc. */
 export interface FxStats {
   quality: FxLevel;
@@ -269,160 +542,50 @@ export class CrashFx {
   private vehicles(cur: Float32Array, views: Map<number, VehicleView>, dt: number): void {
     const p = this.preset;
     const rng = this.rng;
+    const K = carK;
+    // The float work is in the small kernels below (carFrame, wheelFx, carPlane, engineSmoke,
+    // radiatorSteam), warmed once with the first car's wheel data so V8 optimises them before
+    // the chase: run from this loop alone they stayed in a tier where every float operation
+    // allocates (~50–70 KB a frame at 3–4 fps, allocation pass 2026-10-20).
     for (let o = 0; o + STATE_STRIDE <= cur.length; o += STATE_STRIDE) {
       const id = cur[o + S.entity];
       const view = views.get(id);
       if (!view) continue;
+      const info = view.info;
+      if (!kernelsWarmed) warmVehicleKernels(view, this.cars);
       const c = this.car(id);
       c.frame = this.frameNo;
-      c.vx = cur[o + S.linVel];
-      c.vy = cur[o + S.linVel + 1];
-      c.vz = cur[o + S.linVel + 2];
-      const wx = cur[o + S.angVel];
-      const wy = cur[o + S.angVel + 1];
-      const wz = cur[o + S.angVel + 2];
-      const q = view.root.quaternion;
-      const pos = view.root.position;
-      const up = tmpUp.set(0, 0, 1).applyQuaternion(q);
-      const fwd = tmpFwd.set(0, 1, 0).applyQuaternion(q);
-      const right = tmpRight.set(1, 0, 0).applyQuaternion(q);
-      const paint = view.panels.paint.color;
-      c.paintR = paint.r;
-      c.paintG = paint.g;
-      c.paintB = paint.b;
-      const info = view.info;
+      carFrame(cur, o, view.root.quaternion, view.root.position, view.panels.paint.color, c, K);
 
       // Wheels: contact patches → ground plane, skid marks, tyre smoke.
-      let nContact = 0;
-      let mx = 0;
-      let my = 0;
-      let mz = 0;
       for (let i = 0; i < 4 && i < info.wheels.length; i++) {
-        const wb = o + S.wheelBase + i * S.wheelStride;
-        const wi = info.wheels[i];
-        const t = i * TRACK;
-        const touching = cur[wb + SW.contact] > 0.5 && cur[wb + SW.detached] < 0.5;
-        if (!touching) {
-          c.tracks[t] = 0;
-          continue;
-        }
-        const lz = wi.position_m[2] + (cur[wb + SW.compression] - wi.travel_m * 0.5) - wi.radius_m;
-        const lx = wi.position_m[0];
-        const ly = wi.position_m[1];
-        const cx = pos.x + right.x * lx + fwd.x * ly + up.x * lz;
-        const cy = pos.y + right.y * lx + fwd.y * ly + up.y * lz;
-        const cz = pos.z + right.z * lx + fwd.z * ly + up.z * lz;
-        nContact++;
-        mx += cx;
-        my += cy;
-        mz += cz;
-        // Contact patch velocity: v + ω × r.
-        const rx = cx - pos.x;
-        const ry = cy - pos.y;
-        const rz = cz - pos.z;
-        const pvx = c.vx + wy * rz - wz * ry;
-        const pvy = c.vy + wz * rx - wx * rz;
-        const pvz = c.vz + wx * ry - wy * rx;
-        // Wheel heading: chassis forward turned by the steer angle about the chassis up.
-        const st = cur[wb + SW.steer];
-        const cs = Math.cos(st);
-        const sn = Math.sin(st);
-        const hx = fwd.x * cs - right.x * sn;
-        const hy = fwd.y * cs - right.y * sn;
-        const hz = fwd.z * cs - right.z * sn;
-        const sx = right.x * cs + fwd.x * sn;
-        const sy = right.y * cs + fwd.y * sn;
-        const sz = right.z * cs + fwd.z * sn;
-        const vLong = pvx * hx + pvy * hy + pvz * hz;
-        const vLat = pvx * sx + pvy * sy + pvz * sz;
-        // Slip speed of the tread against the road (sign-agnostic: burnouts and lock-ups).
-        const dLong = Math.abs(cur[wb + SW.omega]) * wi.radius_m - Math.abs(vLong);
-        const slip = Math.sqrt(dLong * dLong + vLat * vLat);
-        const loaded = cur[wb + SW.fz] > 300;
-        const strength = loaded && slip > SKID_SLIP_MPS ? Math.min(Math.max((slip - SKID_SLIP_MPS) / 8, 0.25), 1) : 0;
-        const sk = skidArgs;
-        sk.cx = cx + up.x * 0.015;
-        sk.cy = cy + up.y * 0.015;
-        sk.cz = cz + up.z * 0.015;
-        sk.sx = sx;
-        sk.sy = sy;
-        sk.sz = sz;
-        sk.halfW = wi.width_m * 0.5;
-        sk.strength = strength;
-        sk.time = this.time;
-        this.skids.track(c.tracks, t, sk);
-        if (loaded && slip > TYRE_SMOKE_SLIP_MPS && p.tyreSmoke > 0) {
-          c.tyreAcc[i] += Math.min((slip - TYRE_SMOKE_SLIP_MPS) * 1.2, 14) * p.tyreSmoke * dt;
-          while (c.tyreAcc[i] >= 1) {
-            c.tyreAcc[i] -= 1;
-            const tp = tyrePuff;
-            tp.x = cx + up.x * 0.25;
-            tp.y = cy + up.y * 0.25;
-            tp.z = cz + up.z * 0.25;
-            tp.vx = c.vx * 0.25;
-            tp.vy = c.vy * 0.25;
-            tp.vz = 0.2;
-            this.smoke.puff(rng, tp);
-          }
-        } else {
-          c.tyreAcc[i] = 0;
-        }
+        const puffs = wheelFx(cur, o + S.wheelBase + i * S.wheelStride, packWheel(info.wheels[i]), c, i, K, skidArgs, tyrePuff, this.time, p.tyreSmoke, dt);
+        if (puffs < 0) continue;
+        this.skids.track(c.tracks, i * TRACK, skidArgs);
+        for (let k = 0; k < puffs; k++) this.smoke.puff(rng, tyrePuff);
       }
-      if (nContact >= 3 && up.z > 0.6) {
-        mx /= nContact;
-        my /= nContact;
-        mz /= nContact;
-        c.plane.ga = mz + (up.x * mx + up.y * my) / up.z;
-        c.plane.gb = -up.x / up.z;
-        c.plane.gc = -up.y / up.z;
-        c.planeOk = true;
-      }
+      carPlane(c, K);
 
       // Damaged engine (grey → black) and radiator (white steam), from the hood.
-      const w = info.body_size_m[0];
-      const l = info.body_size_m[1];
-      const h = info.body_size_m[2];
-      if (c.engine < ENGINE_SMOKE_HEALTH) {
-        const sev = Math.min((ENGINE_SMOKE_HEALTH - c.engine) / ENGINE_SMOKE_HEALTH, 1);
-        c.smokeAcc += (3 + 14 * sev) * p.rate * dt;
-        const grey = 0.5 - 0.43 * sev;
-        while (c.smokeAcc >= 1) {
-          c.smokeAcc -= 1;
-          this.site(view, 0, l * 0.3, h * 0.78, tmpSite);
-          const ep = enginePuff;
-          ep.x = tmpSite.x;
-          ep.y = tmpSite.y;
-          ep.z = tmpSite.z;
-          ep.vx = c.vx * 0.6;
-          ep.vy = c.vy * 0.6;
-          ep.vz = c.vz * 0.6 + 0.6;
-          ep.r = grey;
-          ep.g = grey;
-          ep.b = grey * 1.04;
-          ep.s0 = 0.18;
-          ep.s1 = 0.9 + 0.9 * sev;
-          ep.life = 1.6 + 1.2 * sev;
-          ep.alpha = 0.5 + 0.35 * sev;
-          ep.rise = 1.2;
-          this.smoke.puff(rng, ep);
-        }
-      } else c.smokeAcc = 0;
-      if (c.radiator < RADIATOR_STEAM_HEALTH) {
-        const sev = Math.min((RADIATOR_STEAM_HEALTH - c.radiator) / RADIATOR_STEAM_HEALTH, 1);
-        c.steamAcc += (2 + 10 * sev) * p.rate * dt;
-        while (c.steamAcc >= 1) {
-          c.steamAcc -= 1;
-          this.site(view, rng.signed() * w * 0.2, l * 0.42, h * 0.6, tmpSite);
-          const sp = steamPuff;
-          sp.x = tmpSite.x;
-          sp.y = tmpSite.y;
-          sp.z = tmpSite.z;
-          sp.vx = c.vx * 0.6;
-          sp.vy = c.vy * 0.6;
-          sp.vz = c.vz * 0.6 + 0.8;
-          this.smoke.puff(rng, sp);
-        }
-      } else c.steamAcc = 0;
+      const bs = info.body_size_m;
+      const smoke = engineSmoke(c, p.rate, dt, enginePuff);
+      for (let k = 0; k < smoke; k++) {
+        this.site(view, 0, bs[1] * 0.3, bs[2] * 0.78, tmpSite);
+        const ep = enginePuff;
+        ep.x = tmpSite.x;
+        ep.y = tmpSite.y;
+        ep.z = tmpSite.z;
+        this.smoke.puff(rng, ep);
+      }
+      const steam = radiatorSteam(c, p.rate, dt, steamPuff);
+      for (let k = 0; k < steam; k++) {
+        this.site(view, rng.signed() * bs[0] * 0.2, bs[1] * 0.42, bs[2] * 0.6, tmpSite);
+        const sp = steamPuff;
+        sp.x = tmpSite.x;
+        sp.y = tmpSite.y;
+        sp.z = tmpSite.z;
+        this.smoke.puff(rng, sp);
+      }
     }
   }
 

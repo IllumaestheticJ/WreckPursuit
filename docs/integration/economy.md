@@ -6,6 +6,9 @@
 - **Contract version built against:** 0.3.0
 
 Design write-up, tuning levers and measured numbers: `crates/wp_economy/README.md`.
+Career progression (rep tiers, unlocks, betting wallet): `docs/integration/career-progression.md`.
+
+- **Mod visuals:** `wp_economy::visuals` (what a build looks like, `ModDef::visuals`) — see `docs/integration/mod-visuals.md`.
 
 ## Exposes
 
@@ -114,7 +117,7 @@ capture), `CarImpounded/CarSeized/CarDestroyed` (despawn / do not spawn that car
 | Call | Notes |
 |---|---|
 | `price_table(class, car_value)` / `price_table_for(&OwnedCar)` | contract `PriceTable` to pass to `DamageSim::repair_estimate` |
-| `record_damage(&mut acct, &DamageReport)` | end of session: health, total_loss, handling, estimate, lattice blob, `wanted_during_session`, `towed` (towing is a penalty) |
+| `record_damage(&mut acct, &DamageReport)` | end of session: health, total_loss, handling, estimate, lattice blob, `wanted_during_session` (informational; insurance only cares about captures), `towed` (towing is a penalty) |
 | `quote_repair(&acct, car, &RepairOption, &ShopContext, mode) -> RepairQuote` | `RepairAll`, `RepairSelected(items)`, `DriveDamaged`, `Scrap`; district + crooked/legit labour; insurance. `ShopContext.district: DistrictId` (round 8); `district_from_key(&str)` parses names and the old keys (`default` → Residential, `Docks` → Port, `Hills` → Suburb) |
 | `repair(...) -> RepairOrder` | the damage system must apply the order to the stored lattice and send a fresh `DamageReport` (`towed: false`) |
 | `repair::reference_estimate(&PriceTable, scale, &[(RepairItem, severity)])` | formula stand-in for `wp_damage` |

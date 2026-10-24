@@ -41,6 +41,13 @@ pub mod schedule {
     pub const BAND_MARGIN: f32 = 0.05;
     /// Above this the box upshifts whatever else holds it (limiter protection).
     pub const FORCED_UP: f32 = 0.985;
+    /// Body slip past which the box counts the car as sliding and holds its gear, degrees
+    /// (lead, 2026-10-21: no kickdown at a held drift's entry, no upshift from a spinning
+    /// rear's revs mid-drift).
+    pub const SLIDE_HOLD_DEG: f32 = 10.0;
+    /// Driven-wheel slip ratio, × the tyre's peak, past which the box counts the car as
+    /// sliding (wheelspin).
+    pub const SLIDE_HOLD_SPIN: f32 = 1.5;
     /// Kickdown picks the lowest gear whose engine speed stays below this, fraction of redline.
     pub const KICKDOWN_CEILING: f32 = 0.85;
     /// Kickdown: pedal at least this far down…
@@ -80,6 +87,12 @@ pub struct ShiftInputs {
     pub max_gear: i8,
     /// Lateral tire usage 0..1 (`Σ|Fy| / Σ μ·Fz` over wheels in contact).
     pub lateral_usage: f32,
+    /// The car is sliding (|body slip| past [`schedule::SLIDE_HOLD_DEG`] or the driven wheels
+    /// spinning past the tyre's peak): the box holds its gear (see [`Gearbox::auto_shift`]).
+    pub sliding: bool,
+    /// Driven-wheel speed implied by the road (rolling speed, no wheelspin), rad/s: what the
+    /// box shifts on while sliding.
+    pub road_axle_omega: f32,
 }
 
 /// Gearbox state. `gear`: -1 reverse, 0 neutral, 1.. forward.
@@ -316,6 +329,25 @@ impl Gearbox {
         let cornering = inp.lateral_usage >= CORNER_HOLD_USAGE;
         let braking = inp.brake > 0.1;
 
+        // Sliding (a held drift, a power-on slide, wheelspin): hold the gear like a driver
+        // would. No kickdown, no shift from the spinning wheels' revs; shift only on road
+        // speed — up when the road speed alone reaches the limiter, down when it would lug
+        // the engine.
+        if inp.sliding {
+            let road_at = |gear: i8| {
+                (inp.road_axle_omega * Self::ratio_of(def, gear) * def.final_drive).abs()
+                    * crate::engine::RPM_PER_RADPS
+                    / red
+            };
+            let road = road_at(self.gear);
+            // Never up a gear under the brakes (it cuts the engine braking mid-stop).
+            if road >= FORCED_UP && self.gear < n_max && repeat_ok && inp.brake <= 0.1 {
+                self.shift(self.gear + 1, t);
+            } else if self.gear > 1 && road < DOWN_LIGHT && repeat_ok {
+                self.shift(self.gear - 1, t);
+            }
+            return;
+        }
         // Limiter protection beats everything.
         if now >= FORCED_UP && self.gear < n_max && repeat_ok {
             self.shift(self.gear + 1, t);
@@ -386,15 +418,31 @@ pub fn launch_rpm(idle_rpm: f32, redline_rpm: f32, throttle: f32) -> f32 {
     idle_rpm + throttle.clamp(0.0, 1.0) * 0.45 * (redline_rpm - idle_rpm)
 }
 
-/// Automatic clutch / launch control. Returns the new engagement 0..=1:
-/// - rolling (gearbox input speed implied by *ground* speed above 1.2 × idle and 90% of the
-///   launch rpm): engage fully at 10/s;
-/// - driver on the throttle below that: centrifugal-style engagement
-///   `((rpm − idle) / (launch − idle))² · torque_ratio`, where `torque_ratio` = 1.2 × peak
-///   engine torque / clutch capacity, so clutch torque reaches engine torque near
-///   [`launch_rpm`] and the engine settles there (TCS trims clutch torque during this phase,
-///   see `Vehicle`);
-/// - off the throttle at crawl speed: open (no stall when stopping).
+/// Gearbox input speed, × idle, above which a moving car's automatic clutch stays (or
+/// becomes) fully engaged: the anti-stall line. Below it the clutch may slip / open so the
+/// engine does not drop under idle.
+pub const AUTO_CLUTCH_HOLD_IDLE_FRAC: f32 = 1.2;
+/// Lowest forward gear that never launch-slips while rolling (owner row 117): 3rd and up
+/// engage fully as soon as the ground turns the gearbox input above
+/// [`AUTO_CLUTCH_HOLD_IDLE_FRAC`] × idle.
+pub const AUTO_CLUTCH_TALL_GEAR: i8 = 3;
+
+/// Automatic clutch / launch control. Returns the new engagement 0..=1. `input_rpm` is the
+/// gearbox input speed implied by the ground (signed; wheelspin does not count), `gear` the
+/// selected gear.
+/// - **Engaged and moving** (engagement ≈ 1, input above [`AUTO_CLUTCH_HOLD_IDLE_FRAC`] ×
+///   idle): stays fully engaged in any gear, so the revs follow road speed and a tall gear bogs
+///   instead of slipping (owner row 117: 3rd gear held a constant rpm while the car accelerated,
+///   a "CVT" feel, because the clutch dropped back into launch slip after every shift).
+/// - **Tall gear rolling** (3rd and up, input above that line): engages fully at 10/s.
+/// - **Launch rolling** (input above 1.2 × idle and 90% of the launch rpm): engages fully at
+///   10/s.
+/// - **Pulling away** (driver on the throttle below that, clutch not yet engaged):
+///   centrifugal-style engagement `((rpm − idle) / (launch − idle))² · torque_ratio`, where
+///   `torque_ratio` = 1.2 × peak engine torque / clutch capacity, so clutch torque reaches
+///   engine torque near [`launch_rpm`] and the engine settles there (TCS trims clutch torque
+///   during this phase, see `Vehicle`). Only from (near) standstill or after the clutch opened.
+/// - Off the throttle at crawl speed: open (no stall when stopping).
 #[allow(clippy::too_many_arguments)]
 pub fn auto_clutch_update(
     engagement: f32,
@@ -404,11 +452,15 @@ pub fn auto_clutch_update(
     redline_rpm: f32,
     throttle: f32,
     torque_ratio: f32,
+    gear: i8,
     dt: f32,
 ) -> f32 {
     let launch = launch_rpm(idle_rpm, redline_rpm, throttle);
-    let rolling = input_rpm >= (idle_rpm * 1.2).max(launch * 0.9);
-    if rolling {
+    let above_idle = input_rpm >= idle_rpm * AUTO_CLUTCH_HOLD_IDLE_FRAC;
+    let held = engagement >= 0.999 && above_idle;
+    let tall = gear >= AUTO_CLUTCH_TALL_GEAR && above_idle;
+    let rolling = above_idle && input_rpm >= launch * 0.9;
+    if held || tall || rolling {
         (engagement + 10.0 * dt).min(1.0)
     } else if throttle > 0.02 {
         let x = ((engine_rpm - idle_rpm) / (launch - idle_rpm).max(200.0)).clamp(0.0, 1.0);
@@ -490,6 +542,8 @@ mod tests {
             speed: 10.0,
             max_gear: 6,
             lateral_usage: 0.0,
+            sliding: false,
+            road_axle_omega: 0.0,
         }
     }
 
@@ -564,6 +618,38 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn sliding_holds_the_gear_and_shifts_on_road_speed() {
+        // Lead 2026-10-21: in a held drift the box neither kicks down at full throttle nor
+        // upshifts from the spinning rear's revs.
+        let d = dt();
+        let slide = |axle: f32, road: f32, throttle: f32| ShiftInputs {
+            sliding: true,
+            road_axle_omega: road,
+            ..inputs(axle, throttle)
+        };
+        // Cruising in 2nd, the pedal stabbed at the drift's entry: no kickdown.
+        let road = axle_at(&d, 2, 0.4);
+        let mut g = Gearbox::new();
+        g.set(2);
+        hold(&mut g, &d, &inputs(road, 0.15), 1.5);
+        g.auto_shift(&d, &slide(road, road, 1.0), 0.01);
+        assert!(!g.shifting(), "kickdown while sliding");
+        // Mid-drift the rears spin to the limiter: no upshift while the road speed is low.
+        let spin = axle_at(&d, 2, 1.0);
+        hold(&mut g, &d, &slide(spin, road, 1.0), 2.0);
+        assert_eq!(g.gear, 2, "upshifted on wheelspin");
+        // The road speed itself at the limiter: up a gear.
+        let fast = axle_at(&d, 2, 0.99);
+        hold(&mut g, &d, &slide(fast, fast, 1.0), 1.0);
+        assert_eq!(g.gear, 3);
+        // Not sliding: the normal schedule upshifts on the same revs.
+        let mut n = Gearbox::new();
+        n.set(2);
+        hold(&mut n, &d, &inputs(spin, 1.0), 2.0);
+        assert!(n.gear > 2);
     }
 
     #[test]
@@ -708,15 +794,32 @@ mod tests {
         let dt = 0.01;
         // Standing start: engagement follows engine rpm toward the launch rpm.
         assert_eq!(
-            auto_clutch_update(0.0, 0.0, 800.0, 800.0, 6500.0, 1.0, 0.7, dt),
+            auto_clutch_update(0.0, 0.0, 800.0, 800.0, 6500.0, 1.0, 0.7, 1, dt),
             0.0
         );
-        let mid = auto_clutch_update(0.0, 0.0, 2500.0, 800.0, 6500.0, 1.0, 0.7, dt);
+        let mid = auto_clutch_update(0.0, 0.0, 2500.0, 800.0, 6500.0, 1.0, 0.7, 1, dt);
         assert!(mid > 0.0 && mid < 1.0);
         // Rolling: engages fully; crawling off throttle: open.
-        assert!(auto_clutch_update(0.5, 4000.0, 4000.0, 800.0, 6500.0, 1.0, 0.7, dt) > 0.5);
+        assert!(auto_clutch_update(0.5, 4000.0, 4000.0, 800.0, 6500.0, 1.0, 0.7, 1, dt) > 0.5);
         assert_eq!(
-            auto_clutch_update(1.0, 500.0, 900.0, 800.0, 6500.0, 0.0, 0.7, dt),
+            auto_clutch_update(1.0, 500.0, 900.0, 800.0, 6500.0, 0.0, 0.7, 1, dt),
+            0.0
+        );
+        // Row 117: engaged and moving above the anti-stall line stays engaged at full
+        // throttle in any gear (2000 rpm < 90% of the 3365 rpm launch rpm).
+        assert_eq!(
+            auto_clutch_update(1.0, 2000.0, 2000.0, 800.0, 6500.0, 1.0, 0.7, 2, dt),
+            1.0
+        );
+        // 3rd and up engage at 10/s once rolling above it, even from an open clutch…
+        let tall = auto_clutch_update(0.0, 1200.0, 3000.0, 800.0, 6500.0, 1.0, 0.7, 3, dt);
+        assert!((tall - 10.0 * dt).abs() < 1e-6, "{tall}");
+        // …while 1st / 2nd from an open clutch still launch-slip up to the launch rpm.
+        let launch = auto_clutch_update(0.0, 1200.0, 2000.0, 800.0, 6500.0, 1.0, 0.7, 2, dt);
+        assert!(launch < 1.0);
+        // Below the anti-stall line an engaged clutch lets go off the throttle.
+        assert_eq!(
+            auto_clutch_update(1.0, 900.0, 900.0, 800.0, 6500.0, 0.0, 0.7, 3, dt),
             0.0
         );
     }

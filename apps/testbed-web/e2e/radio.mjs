@@ -5,7 +5,8 @@
 // sign chip — straight from the police events while the scanner hears nothing (tier "None"),
 // and through the audio scanner (RadioSay) once it does, where the line is also spoken with
 // speechSynthesis when the browser has it; the strip never shows more than 3 lines; the game
-// menu has the "Police radio voice" switch; no page errors.
+// menu has the "Police radio voice" switch; lines carry their priority tier (row 144) and the
+// "Radio: Important only / All" setting reaches the scanner; no page errors.
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -123,6 +124,25 @@ const sw = await page.evaluate(async () => {
   return { off, on: audio.speech().voice, menu: window.__wp.menu?.settings?.radioVoice };
 });
 check(sw.off === false && sw.on === true && sw.menu !== undefined, `radio voice switch works (${JSON.stringify(sw)})`);
+
+// 4. Priority tiers (row 144): every strip line carries its tier (1 actionable … 5 routine),
+// the heard lines carry one from the scanner, and "Radio: Important only" reaches the scanner.
+const t = await page.evaluate(() => ({
+  strip: [...document.querySelectorAll("#radio-strip .radio-line")].map((l) => Number(l.dataset.tier ?? -1)),
+  log: window.__wpAudio.radioLog().map((l) => l.tier),
+}));
+check(
+  t.strip.length > 0 && t.strip.every((n) => n >= 1 && n <= 5) && t.log.every((n) => n >= 1 && n <= 5),
+  `strip and scanner lines carry a tier (strip ${JSON.stringify(t.strip)}, scanner ${JSON.stringify(t.log)})`,
+);
+const imp = await page.evaluate(() => {
+  const audio = window.__wpAudio;
+  audio.setRadioImportantOnly(true);
+  const on = audio.radioImportantOnly();
+  audio.setRadioImportantOnly(false);
+  return { on, off: audio.radioImportantOnly(), menu: window.__wp.menu?.settings?.radioFilter };
+});
+check(imp.on === true && imp.off === false && imp.menu === "all", `radio filter switch works, default All (${JSON.stringify(imp)})`);
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 5).join(" | ") : ""}`);
 await browser.close();

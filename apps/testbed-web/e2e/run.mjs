@@ -14,7 +14,8 @@
 // has exactly one drawn instance, near parked cars use the full mesh, a knocked parked car's drawn
 // pose follows the sim within 0.2 m), crash effects (e2e/crash_fx.mjs: sparks, glass, debris,
 // smoke, skid marks, no steady-state allocation), instant crash replays (e2e/crash_replay.mjs),
-// and (optionally) perf at 1/8/24 cars.
+// street racers (e2e/street.mjs) and traffic colliders (e2e/traffic_bodies.mjs), and
+// (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -313,6 +314,29 @@ for (const [hour, label] of [
   const help = await page.evaluate(() => document.querySelector(".help")?.textContent ?? "");
   check(hidden && help.includes("traffic signals"), "9 hides the signals layer; F1 help lists it");
 }
+// `?city=<id>` opens free drive in that city with its greybox (it used to only pick the selector
+// entry, so the link opened on the flat world). Separate page: the main one keeps its session.
+{
+  const p2 = await context.newPage();
+  p2.on("pageerror", (e) => errors.push(String(e)));
+  await p2.goto(`${URL}?city=procedural_12x12`);
+  await p2.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 60000 });
+  const meshes = await p2
+    .waitForFunction(
+      () => {
+        let n = 0;
+        window.__wp.scene.cities.get("procedural_12x12")?.traverse((o) => o.isMesh && n++);
+        return n;
+      },
+      null,
+      { timeout: 30000 },
+    )
+    .then((h) => h.jsonValue())
+    .catch(() => 0);
+  const id = await p2.evaluate(() => window.__wp.sim.cityId());
+  check(id === "procedural_12x12" && meshes > 0, `?city=procedural_12x12 opens free drive in ${id || "(flat world)"}, ${meshes} greybox meshes`);
+  await p2.close();
+}
 // The default city is Port Vesper v2: its greybox loads and the car sits on the terrain.
 await page.waitForFunction(() => (window.__wp.scene.cities.get("vesper_v2")?.children.length ?? 0) > 0, null, {
   timeout: 30000,
@@ -479,7 +503,7 @@ await shot("night_run_greybox_toggle.png");
     const r = el?.getBoundingClientRect();
     return { ...s.minimap, err: window.__mapParkError ?? null, city: s.city, district: s.district, visible: !!r && r.width > 100 && !el.hidden, total: window.__wp.sim.mapDynamic(window.__wp.app.player)[1] };
   });
-  await shot("map_minimap_night_run.png");
+  await shot("map_minimap_city_chase.png");
   check(
     parked && mini.visible && mini.player && mini.units >= 1 && mini.city === "vesper_v2",
     `minimap${parked ? "" : ` (park near police failed: ${mini.err})`}: player + ${mini.units} police dot(s) of ${mini.total} units (${mini.blinking} blinking), radius ${mini.radiusM.toFixed(0)} m, district ${mini.district ?? "?"}`,
@@ -551,7 +575,8 @@ await shot("night_run_greybox_toggle.png");
 // sim's prop list (each parked car drawn exactly once; every prop within 150 m of the camera
 // drawn; parked cars within 150 m use the full traffic mesh), and a parked car knocked by the
 // player is drawn where the sim has it (instance matrix read back vs prop_pose, every frame,
-// < 0.2 m) while it moves.
+// < 0.2 m) while it moves. Owner playtest 2026-10-21 "parked cars don't take damage": the
+// 43 km/h knock dents it, and the dent is drawn (its own panel mesh, skinned from its lattice).
 {
   await page.evaluate(() => window.__wp.startNightRun("debug_sedan", "Arcade"));
   await page
@@ -585,14 +610,21 @@ await shot("night_run_greybox_toggle.png");
     const c0 = performance.now();
     for (let i = 0; i < 200; i++) wp.sim.propsMoved();
     const movedCallMs = (performance.now() - c0) / 200;
-    return { target, frames, maxErr, maxMove, undrawn, stats: wp.props.stats(wp.rig.camera, 150), model: wp.props.model, movedCallMs };
+    const w0 = performance.now();
+    for (let i = 0; i < 200; i++) wp.sim.parkedWrecks();
+    const wrecksCallMs = (performance.now() - w0) / 200;
+    const wreck = wp.props.wreck(target);
+    const wrecks = wp.sim.parkedWrecks();
+    let health = 1;
+    for (let o = 0; o < wrecks.length; o += 12) if (wrecks[o] === target) health = wrecks[o + 2];
+    return { target, frames, maxErr, maxMove, undrawn, stats: wp.props.stats(wp.rig.camera, 150), model: wp.props.model, movedCallMs, wreck, health, wrecksCallMs };
   });
   await shot("props_knock.png");
   const st = knock.stats;
   check(
-    st.parked > 1000 && st.drawnFull + st.drawnProxy + st.drawnBox === st.parked && st.inRange > 0 && st.drawnInRange === st.inRange &&
+    st.parked > 1000 && st.drawnFull + st.drawnProxy + st.drawnBox + st.wrecksDrawn === st.parked && st.inRange > 0 && st.drawnInRange === st.inRange &&
       (st.fullInRange === st.parkedInRange || st.fullInRange === st.maxFull || (st.parkedInRange > st.fullInRange && st.fullInRange === st.drawnFull)),
-    `props: ${st.parked} parked cars (${knock.model ?? "box stand-in"}) in ${st.chunks} chunks + ${st.cones} cones; drawn ${st.drawnFull} full + ${st.drawnProxy} proxy + ${st.drawnBox} box; ` +
+    `props: ${st.parked} parked cars (${knock.model ?? "box stand-in"}) in ${st.chunks} chunks + ${st.cones} cones; drawn ${st.drawnFull} full + ${st.drawnProxy} proxy + ${st.drawnBox} box + ${st.wrecksDrawn} dented; ` +
       `${st.drawnInRange}/${st.inRange} props within 150 m drawn, ${st.fullInRange}/${st.parkedInRange} parked cars there with the full mesh ` +
       `(${st.fullInFullRange}/${st.inFullRange} within ${250} m); ${st.repicks} re-picks, ${st.repickWrites} + ${st.movedWrites} matrix writes; ` +
       `update ${st.updateMeanMs.toFixed(3)} ms mean / ${st.updateMaxMs.toFixed(2)} ms worst, props_moved() ${knock.movedCallMs.toFixed(3)} ms`,
@@ -601,6 +633,12 @@ await shot("night_run_greybox_toggle.png");
     knock.maxMove > 0.3 && knock.maxErr < 0.2 && knock.undrawn === 0,
     `props: knocked parked car #${knock.target} moved ${knock.maxMove.toFixed(2)} m; drawn vs sim pose ≤ ${knock.maxErr.toFixed(3)} m over ${knock.frames} frames` +
       (knock.undrawn ? `; ${knock.undrawn} frames undrawn` : ""),
+  );
+  check(
+    knock.wreck !== null && knock.wreck.drawn && knock.wreck.maxDisp > 0.005 && knock.health < 1,
+    `props: the knocked parked car is dented (health ${knock.health.toFixed(3)}) and drawn dented: ` +
+      (knock.wreck ? `own panel mesh ${knock.wreck.drawn ? "on" : "not loaded"}, largest drawn vertex offset ${knock.wreck.maxDisp.toFixed(3)} m` : "never promoted") +
+      `; ${st.wrecks} dented parked car(s), ${st.wreckReskins} re-skins, parked_wrecks() ${knock.wrecksCallMs.toFixed(3)} ms`,
   );
 }
 // Pursuit banner + capture → repair bill, driven by a stubbed police_status() (a real capture
@@ -714,6 +752,84 @@ await shot("night_run_greybox_toggle.png");
     !after.open && !after.panel && !after.bill && after.health === 1 && after.cash === before.cashAfter - before.cost &&
       after.ledger.includes("ImpoundRetrieved"),
     `"Repair & continue": health ${after.health}, cash $${before.cashAfter} → $${after.cash} (paid $${before.cost}), panel closed`,
+  );
+}
+// Helicopter (P9): at wanted level 3 a helicopter tracks the racer; at night (the chase is at
+// 23:00) it is drawn as an airframe with a spotlight on the car. The real launch takes 120 s at
+// night, so the e2e puts one up with the debug hook once the pursuit is on.
+{
+  await page.evaluate(() => window.__wp.startNightRun("debug_sedan", "Arcade"));
+  const parked = await page
+    .waitForFunction(
+      () => {
+        const wp = window.__wp;
+        try {
+          wp.sim.debugParkNearPolice(wp.app.player, 14);
+          wp.sim.debugSetHeat(wp.app.player, 60);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      null,
+      { timeout: 120000, polling: 100 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  const launched = await page
+    .waitForFunction(
+      () => {
+        const wp = window.__wp;
+        try {
+          wp.sim.debugLaunchHelicopter(wp.app.player, 120);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      null,
+      { timeout: 120000, polling: 100 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  // Drive off so the stop doesn't turn into a capture; the helicopter follows.
+  await page.keyboard.down("KeyW");
+  const tracking = await page
+    .waitForFunction(() => {
+      const h = window.__wp.sim.policeHelicopters();
+      return h.length >= 8 && (h[7] & 1) === 1 && window.__wp.scene.spotlightsLit > 0;
+    }, null, { timeout: 120000, polling: 100 })
+    .then(() => true)
+    .catch(() => false);
+  await page.waitForTimeout(800);
+  await page.keyboard.up("KeyW");
+  const heli = await page.evaluate(() => {
+    const wp = window.__wp;
+    const h = wp.sim.policeHelicopters();
+    const s = wp.sim.states();
+    const player = [s[1], s[2], s[3]];
+    return {
+      n: h.length / 8,
+      visual: (h[7] & 1) === 1,
+      alt: h[2] - player[2],
+      aimOff: Math.hypot(h[3] - player[0], h[4] - player[1]),
+      shown: wp.scene.helicoptersShown,
+      lit: wp.scene.spotlightsLit,
+      player,
+      heli: [h[0], h[1], h[2]],
+    };
+  });
+  await shot("helicopter_spotlight_chase.png");
+  if (shots) {
+    // Side-on view: the beam from the helicopter down to the car.
+    const p = heli.player;
+    await page.evaluate(([p, h]) => window.__wp.lookFrom([p[0] - 70, p[1] - 70, p[2] + 45], [(p[0] + h[0]) / 2, (p[1] + h[1]) / 2, (p[2] + h[2]) / 2]), [p, heli.heli]);
+    await page.waitForTimeout(400);
+    await shot("helicopter_spotlight_beam.png");
+  }
+  check(
+    parked && launched && tracking && heli.n === 1 && heli.visual && heli.shown >= 1 && heli.lit === 1 && heli.alt > 60 && heli.aimOff < 30,
+    `helicopter: launched ${launched}, ${heli.n} tracking with visual ${heli.visual}, ${heli.alt.toFixed(0)} m above the car, spotlight ${heli.aimOff.toFixed(1)} m off it, ${heli.lit} lit`,
   );
 }
 // Career (machine G): garage → buy a beater → night run with the career car → busted → garage
@@ -830,6 +946,52 @@ await page.evaluate(() => {
   document.getElementById("sc-chase").click();
 });
 await page.waitForTimeout(1500);
+// Garages (lead): every repair shop has a marker; stopping inside one holds the car and opens the
+// garage panel with the shop's quote (a pristine car: nothing to repair); "Leave" lets it go.
+{
+  await page.evaluate(() => window.__wp.startFreeDrive("debug_sedan", "Arcade", true));
+  await page.waitForTimeout(500);
+  const placed = await page.evaluate(() => {
+    const wp = window.__wp;
+    const garages = wp.sim.garages();
+    let markers = 0;
+    wp.scene.world.traverse((o) => (markers += o.name.startsWith("garage:") ? 1 : 0));
+    const g = garages[0];
+    if (g) wp.sim.debugPlace(wp.app.player, g.pos[0], g.pos[1], g.heading_rad, 0);
+    return { count: garages.length, markers, name: g?.name ?? "" };
+  });
+  const opened = await page
+    .waitForFunction(() => !!window.__wp.garageView.offer && !!document.querySelector('#ui-garage-visit [data-testid="garage-visit"]'), null, { timeout: 30000, polling: 100 })
+    .then(() => true)
+    .catch(() => false);
+  const visit = await page.evaluate(() => {
+    const wp = window.__wp;
+    return {
+      shop: wp.garageView.offer?.site.name ?? null,
+      text: document.querySelector('#ui-garage-visit [data-testid="garage-visit"]')?.textContent ?? "",
+      held: !wp.sim.setInput(wp.app.player, { ...wp.app.input, throttle: 1 }),
+    };
+  });
+  await shot("garage_visit.png");
+  await page.click("#ui-garage-visit button:not(.wp-btn--primary)").catch(() => {});
+  await page.waitForTimeout(300);
+  const left = await page.evaluate(() => {
+    const wp = window.__wp;
+    return {
+      offer: wp.sim.garageVisit(),
+      panel: !!document.querySelector('#ui-garage-visit [data-testid="garage-visit"]'),
+      live: wp.sim.setInput(wp.app.player, { ...wp.app.input, throttle: 0.5 }),
+    };
+  });
+  check(
+    placed.count > 0 && placed.markers === placed.count && opened && visit.shop === placed.name && visit.held && /Nothing to repair/.test(visit.text),
+    `garage: ${placed.count} shops / ${placed.markers} markers; stopping in ${placed.name} opens the panel (${visit.shop}), input ${visit.held ? "held" : "live"}`,
+  );
+  check(!left.offer && !left.panel && left.live, `garage "Leave": panel closed, input ${left.live ? "live" : "held"}`);
+  // Back to the night run: the selector check below restarts the current mode.
+  await page.evaluate(() => window.__wp.startNightRun("debug_sedan", "Arcade"));
+}
+// The selector keeps the old flat grid: the chase restarts there.
 await page.evaluate(() => {
   const sel = document.getElementById("city-map");
   sel.value = "procedural_12x12";
@@ -844,6 +1006,68 @@ await page.evaluate(() => {
   document.getElementById("city").checked = false;
   window.__wp.startFreeDrive("debug_sedan", "Arcade", false);
 });
+
+// 4b. Mods you can see (render/mod_parts.ts): the shop installs a build, the sim drives the
+// modified car, every visible part is fitted on the panel mesh, and front parts leave with the
+// front bumper in a crash while the trunk wing stays.
+{
+  await page.evaluate(() => window.__wp.startFreeDrive("kestrel_ts", "Arcade", false, undefined, []));
+  await page.click("#mods-btn");
+  for (const id of ["aero_splitter", "aero_wing_2", "wheels_forged", "tires_wide", "brakes_kit_1"]) {
+    await page.click(`#mod-shop button[data-mod="${id}"]`);
+    await page.waitForTimeout(150);
+  }
+  const shop = await page.evaluate(() => ({
+    mods: window.__wp.sim.scenario().entities[0].mods ?? [],
+    status: document.querySelector(".mod-shop-status").textContent,
+  }));
+  // The GT wing needs the splitter: clicked in that order the whole build is legal.
+  check(shop.mods.length === 5 && !shop.status, `mod shop installs a build (${shop.mods.join(", ")})`);
+  await page.waitForFunction(() => window.__wp.app.views.get(window.__wp.app.player)?.fitted, null, { timeout: 20000 });
+  const fit = await page.evaluate(() => {
+    const v = window.__wp.app.views.get(window.__wp.app.player);
+    return { drawn: v.fitted.drawn, width: v.info.wheels[0].width_m, base: v.build.wheels[0].base_width_m };
+  });
+  check(
+    ["BrakeKit", "FrontSplitter", "RearWing", "Rims"].every((k) => fit.drawn.includes(k)) && Math.abs(fit.width - fit.base - 0.02) < 1e-4,
+    `build drawn on the car (${fit.drawn.join(", ")}) and the sim drives +2 cm tires (${fit.base.toFixed(3)} → ${fit.width.toFixed(3)} m)`,
+  );
+  await shot("mods_build.png");
+  // Remove everything again (and leave the viewer's saved build empty for the next checks).
+  await page.click('#mod-shop .mod-shop-head button[title="remove every mod"]');
+  await page.click('#mod-shop .mod-shop-head button[title="close"]');
+  const stock = await page.evaluate(() => (window.__wp.sim.scenario().entities[0].mods ?? []).length);
+  check(stock === 0, "mod shop: back to stock");
+
+  // Crash: a 40 km/h barrier hit dents the front parts with the bumper; the wing stays put.
+  await page.evaluate(async () => {
+    const wp = window.__wp;
+    const sc = JSON.parse(wp.sim.scenarioFromRon(await (await fetch("scenarios/crash/barrier_frontal.ron")).text()));
+    sc.panels = true;
+    sc.entities[0].car = "kestrel_ts";
+    sc.entities[0].mods = ["aero_splitter", "aero_wing_1", "prot_bumper_front"];
+    sc.entities[0].driver = { cruise: { target_mps: 11 } };
+    wp.runScenarioJson(JSON.stringify(sc));
+  });
+  await page.waitForFunction(() => window.__wp.sim.worldInfo()[0] > 240 * 6.8, null, { timeout: 120000 });
+  await page.waitForTimeout(300);
+  // Largest vertex displacement from rest per mod piece (Infinity: it left with its region).
+  const moved = await page.evaluate(() => {
+    const v = window.__wp.app.views.get(window.__wp.app.player);
+    const out = {};
+    for (const name of v.panels.partNames()) {
+      if (!name.startsWith("mod_")) continue;
+      const m = v.panels.partMotion(name);
+      out[name] = m.hidden ? Infinity : m.disp;
+    }
+    return out;
+  });
+  check(
+    moved.mod_splitter > 0.05 && moved.mod_bull_bar > 0.05 && moved.mod_wing_street < 0.02,
+    `crash: splitter / bull bar follow the crushed front (${moved.mod_splitter?.toFixed(2)} / ${moved.mod_bull_bar?.toFixed(2)} m), wing stays (${moved.mod_wing_street?.toFixed(3)} m)`,
+  );
+  await shot("mods_crash.png");
+}
 
 // 5. Perf.
 if (process.env.BENCH) {
@@ -949,5 +1173,16 @@ check(tc.status === 0, `touch controls checks (e2e/touch.mjs)${tc.status === 0 ?
 const mn = spawnSync("node", [join(here, "menu.mjs")], { cwd: root, encoding: "utf8", env: { ...process.env, MENU_SHOTS: shots ?? "" } });
 process.stdout.write(mn.stdout);
 check(mn.status === 0, `game menu + layout checks (e2e/menu.mjs)${mn.status === 0 ? "" : ": " + (mn.stderr || "").trim().split("\n").pop()}`);
+// 13. Street racers (e2e/street.mjs, its own server and browser; lead, rows 149–154): the
+// roster by day / night, honk to challenge, no challenge while wanted, the A→B picker with
+// waypoints, side-by-side start, a race to the finish (day keyboard + mouse, night gamepad),
+// the night run's racers, touch. Then no physical traffic car without a collider
+// (e2e/traffic_bodies.mjs, row 149).
+const st = spawnSync("node", [join(here, "street.mjs")], { cwd: root, encoding: "utf8", env: { ...process.env, SHOTS: shots ? join(shots, "street") : "" } });
+process.stdout.write(st.stdout);
+check(st.status === 0, `street racer checks (e2e/street.mjs)${st.status === 0 ? "" : ": " + (st.stderr || "").trim().split("\n").pop()}`);
+const tb = spawnSync("node", [join(here, "traffic_bodies.mjs")], { cwd: root, encoding: "utf8", env: process.env });
+process.stdout.write(tb.stdout);
+check(tb.status === 0, `traffic bodies (e2e/traffic_bodies.mjs)${tb.status === 0 ? "" : ": " + (tb.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);

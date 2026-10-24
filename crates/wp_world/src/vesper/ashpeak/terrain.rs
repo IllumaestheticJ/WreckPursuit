@@ -12,7 +12,7 @@
 //!   slope instead of on bridges or in trenches.
 //! - **Silver River gorge** along the range's northern foot, east of its head near Route 7,
 //!   down to the sea.
-//! - **Harlan Flats**: low rolling farmland west of Port Vesper, cut by the Sable River
+//! - **Harnell Flats**: low rolling farmland west of Port Vesper, cut by the Sable River
 //!   valley, which heads up into the range as a mountain valley between the Grizzly saddle
 //!   and the summit.
 //! - **Foothills** north-west of the range; the **Ashpeak City basin** rises gently north of
@@ -228,7 +228,7 @@ impl Ground {
             let carved = valley(z, d, bed, 18.0, 1.4);
             z += (carved - z) * head;
         }
-        // Sable River: through Harlan Flats down to the sea, heading up into the range as a
+        // Sable River: through Harnell Flats down to the sea, heading up into the range as a
         // mountain valley that fades out below the crest.
         if x < plan::FARMS_EAST_X + 400.0 && y < 3050.0 {
             let sx = sable_x(y);
@@ -553,7 +553,7 @@ mod tests {
     fn farmland_and_basin_stay_low_and_gentle() {
         let f = natural(1);
         let z = |p: V2| f(p, 20.0);
-        // Harlan Flats: low rolling farmland, the Sable River below its banks.
+        // Harnell Flats: low rolling farmland, the Sable River below its banks.
         for x in [-4400.0, -3700.0, -3100.0, -2000.0] {
             for y in [-900.0, -300.0, 400.0, 1100.0, 1700.0] {
                 let h = z([x, y]);

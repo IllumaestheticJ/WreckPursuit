@@ -264,6 +264,31 @@ impl Economy {
         Ok(())
     }
 
+    /// Set a car's free tune (no money, no ledger line). The car must be in the garage, like
+    /// mod work; every slider must be `1..=5`.
+    pub fn set_tune(
+        &self,
+        acct: &mut PlayerAccount,
+        car: CarUid,
+        tune: crate::CarTune,
+    ) -> Result<(), EconomyError> {
+        if !tune.is_valid() {
+            return Err(EconomyError::InvalidInput(format!(
+                "tune steps must be 1..={}: {tune:?}",
+                crate::tune::TUNE_STEPS
+            )));
+        }
+        let c = acct.car_mut(car).ok_or(EconomyError::UnknownCar(car))?;
+        if c.location != CarLocation::Garage {
+            return Err(EconomyError::CarUnavailable {
+                car,
+                reason: "in the pound".into(),
+            });
+        }
+        c.tune = tune;
+        Ok(())
+    }
+
     /// Install a mod (pays the price; a replaced same-line mod is refunded at resale value).
     pub fn install_mod(
         &self,
@@ -297,6 +322,7 @@ impl Economy {
             let c = tx.car_mut(car)?;
             c.mods.push(mod_id.to_string());
             c.mods.sort();
+            self.sync_parts_with_mods(c);
             Ok(())
         })
     }
@@ -329,6 +355,7 @@ impl Economy {
         let refund = money(self.market.mod_resale_frac * m.price as f32);
         let c = tx.car_mut(car)?;
         c.mods.retain(|x| x != mod_id);
+        self.sync_parts_with_mods(c);
         tx.credit(
             refund,
             EventReason::ModRemoved {
@@ -361,6 +388,46 @@ impl Economy {
             metrics,
             applied,
         })
+    }
+
+    /// What `mods` look like on a car: the parts to draw, wheel geometry and ride height
+    /// ([`crate::visuals`]). Validates the set like [`Economy::preview`]; every mod counts
+    /// (a part is on the car whether or not the damage mode lets it work).
+    pub fn build_visuals(
+        &self,
+        vehicle: &VehicleDef,
+        lattice: &LatticeDef,
+        mods: &[String],
+    ) -> Result<crate::visuals::BuildVisuals, EconomyError> {
+        let set = self.catalog.validate_set(vehicle.class, mods)?;
+        let applied = apply_mods(vehicle, lattice, &set, None)?;
+        Ok(crate::visuals::build_visuals(vehicle, &applied, &set))
+    }
+
+    /// Preview owned car `car` as it drives: [`Economy::preview`] of its mods, with the torque
+    /// its worn engine parts cost ([`Economy::wear_torque_factor`]). This is what a session of
+    /// the car should load.
+    pub fn car_preview(
+        &self,
+        vehicle: &VehicleDef,
+        lattice: &LatticeDef,
+        car: &OwnedCar,
+        mode: Option<DamageMode>,
+    ) -> Result<Preview, EconomyError> {
+        let mut p = self.preview(vehicle, lattice, &car.mods, mode)?;
+        let f = self.wear_torque_factor(car);
+        if f < 1.0 {
+            for pt in &mut p.applied.vehicle.engine.torque_curve_nm {
+                pt.1 *= f;
+            }
+            p.metrics = self.performance(&p.applied.vehicle);
+            p.class_index = class_index(&p.metrics, &self.market.class_index);
+            p.bracket = bracket(p.class_index, &self.market.class_index).to_string();
+            p.mass_kg = p.metrics.mass_kg;
+            p.est_0_100_s = p.metrics.est_0_100_s;
+            p.est_top_speed_mps = p.metrics.est_top_speed_mps;
+        }
+        Ok(p)
     }
 
     /// Buy (or replace) insurance on a car. The first day's premium is charged now.
@@ -442,5 +509,7 @@ fn new_car(spec: &CarSpec, condition: Condition, paid: Money) -> OwnedCar {
         insurance: None,
         purchase_price: Some(paid),
         tires: Default::default(),
+        tune: Default::default(),
+        parts: None,
     }
 }

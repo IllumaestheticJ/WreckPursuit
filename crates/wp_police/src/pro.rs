@@ -143,8 +143,8 @@ impl Default for ProParams {
             default_limits: CarLimits {
                 lat_g: 0.83,
                 brake_g: 0.98,
-                accel_mps2: 4.35,
-                top_speed_mps: 72.4,
+                accel_mps2: 4.75,
+                top_speed_mps: 80.0,
             },
             lat_usage: 0.95,
             brake_usage: 0.92,
@@ -174,7 +174,7 @@ impl Default for ProParams {
             confidence_min: 0.8,
             confidence_regain_per_s: 0.02,
             run_wide_m: 1.2,
-            turn_around_mps: 4.0,
+            turn_around_mps: 5.5,
             stuck_s: 1.5,
             reverse_s: 2.5,
             reverse_min_s: 1.5,
@@ -204,6 +204,8 @@ impl RoomQuery for FixedRoom {
     }
 }
 
+/// Off the lane by `d`, the in-lane steering target is at least this many `d` ahead.
+const REJOIN_LOOK_PER_M: f32 = 2.0;
 /// Below this speed nothing counts as a slide (no countersteer, no lift), m/s.
 const SLIDE_MIN_MPS: f32 = 5.0;
 
@@ -525,7 +527,7 @@ pub struct DriveCtx {
     pub damage_grip: f32,
     /// Engine power left, 0..1.
     pub power_scale: f32,
-    /// Speed the tactic asks for (pursuit cap, limit factor, obstacle cap), m/s.
+    /// Speed the tactic asks for (racer speed margin, limit factor, obstacle cap), m/s.
     pub target_mps: f32,
     /// Corner-planning cap from the assignment, g (patrol drives gently); `None` = the limit.
     pub cornering_cap_g: Option<f32>,
@@ -561,6 +563,9 @@ pub struct ProOutput {
     pub confidence: f32,
     /// Reversing out of a stuck position.
     pub reversing: bool,
+    /// Turning round: facing away from where the line goes (speed capped at
+    /// [`ProParams::turn_around_mps`]).
+    pub turning_round: bool,
 }
 
 /// The line and speed profile over the current window.
@@ -915,10 +920,21 @@ impl ProDriver {
         // pointing the wrong way starts sideways and would hold it at full lock.)
         let lane = ctx.pass_offset_m.unwrap_or(ctx.lane_offset_m);
         let to_line = sub(lane_point(track, s + 8.0, lane), ctx.pos);
-        let turning_round = len(to_line) > 1.0 && dot(normalize(to_line), ctx.heading) < 0.3;
+        // ... and pointing away from the road where it is: approaching a right-angle corner
+        // the point 8 m on is already round it (> 70 deg off the nose), which capped every
+        // chaser at `turn_around_mps` at the apex (keep-up bench: chasers at 3-10 m/s out of
+        // corners while the racer drove away).
+        let road_here = normalize(sub(
+            track.point_at(s + 2.0),
+            track.point_at((s - 2.0).max(0.0)),
+        ));
+        let turning_round = len(to_line) > 1.0
+            && dot(normalize(to_line), ctx.heading) < 0.3
+            && dot(road_here, ctx.heading) < 0.3;
         if turning_round {
             v_ref = v_ref.min(p.turn_around_mps);
         }
+        out.turning_round = turning_round;
         out.planned_mps = v_ref;
         let ahead = lead + 4.0;
         let v_ahead = self.win.sample(&self.win.v, ahead);
@@ -942,7 +958,11 @@ impl ProDriver {
             let g = DriveGains::TRAFFIC;
             let look = (g.lookahead_base_m + g.lookahead_per_mps * fwd_speed.abs())
                 .clamp(g.lookahead_min_m, g.lookahead_max_m);
-            lane_point(track, s + look, lane)
+            // Well off the lane (out of a U-turn that swung wide onto the far kerb): aim at
+            // least twice that far ahead, or the short low-speed look-ahead pulls full lock and
+            // the car loops across the road (wp_sim police_passby, Vesper: 4 s lost).
+            let off_lane = len(sub(lane_point(track, s, lane), ctx.pos));
+            lane_point(track, s + look.max(REJOIN_LOOK_PER_M * off_lane), lane)
         };
         let to = sub(target, ctx.pos);
         let mut steer = self

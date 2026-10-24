@@ -7,7 +7,7 @@
 //!   under Talon Ridge, comes out high over the Silver River on the **Silver Gorge Bridge**
 //!   and runs up the east side of Ashpeak City past the Midtown and Northgate interchanges.
 //! - **Route 12** (2 lanes each way, 60 mph, grade cap 7 %) leaves Lantern Way's outer
-//!   terminal, crosses the Sable River valley past the Harlan Road interchange and climbs the
+//!   terminal, crosses the Sable River valley past the Harnell Road interchange and climbs the
 //!   **Grizzly Grade** in long sweepers to the **Grizzly Tunnel** under the Grizzly
 //!   saddle, then sweeps down to the basin and up the west side of Ashpeak City past Ashpeak
 //!   West.
