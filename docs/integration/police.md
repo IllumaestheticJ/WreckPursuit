@@ -1076,5 +1076,25 @@ Re-aimed on the corrected graph (reasons in each file): `escape_break_contact` s
 `live_police_chase…` seed 1 (a busted racer stays in its lane; seeds 1-8 failed 4 of 8 on
 main and 3 of 8 with the fix).
 
-Known gaps: a busted racer is left mid-lane and blocks the racers behind it; units queue
-behind traffic jams (correctly) at the soak's 4x density.
+Moved police exposed three bugs elsewhere, fixed here (outside this workstream's crates):
+- **A busted AI racer blocked the race for good** (`wp_race`, `wp_opponent`). It stopped where
+  it was caught; on a one-lane street (pass room ±0.35 m) with its cruiser beside it, nobody
+  could pass and Hollins sprint / Lantern checkpoint never finished. `LiveRace` now tows
+  busted AI cars `IMPOUND_AFTER_S` (6 s) after the capture (`StepOut::impound`; the wasm race
+  session and the `race_picker` loop despawn them), and busted racers pull over to the kerb
+  clear of junctions first instead of braking where they are.
+- **Browser races paid the wrong stake** (`wp_wasm`, `wp_economy`): the card advertised
+  `wp_race`'s stake but the session charged and paid the economy's unscaled table (buy-in 147
+  vs 553, purse 1377 vs 5031). New `Economy::{enter_race,settle_race,race_payout}_scaled`
+  apply `wp_race::bridge`'s R5 scales. Hidden on main because the test only checked the
+  purse when the player won.
+- simcli: new `police_tools: false` scenario switch (the AI captain lays no spikes or
+  roadblocks of its own).
+
+More re-aims (reasons in each file): `police_sideswipe_patrol_night` (racer starts at
+x = -44, steers at 12.8 s); `tunnel_escape_founders_cut` + `_control` get `police_tools:
+false` (the captain now finds a spike site on the first straight; these are about tunnel
+line of sight).
+
+Known gaps: units queue behind traffic jams (correctly) at the soak's 4x density;
+`wp_opponent`'s own test harness has no tow, so `live_police_chase…` keeps its seed.

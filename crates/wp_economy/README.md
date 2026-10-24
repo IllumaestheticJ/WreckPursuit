@@ -17,6 +17,8 @@ let (mut acct, events) = econ.open_account(player);
 let (car, ev) = econ.buy_car(&mut acct, &CarSpec::from(&vehicle_def), Condition::Used)?;
 let (fee, ev) = econ.enter_race(&mut acct, &setup, car)?;
 let (pay, ev) = econ.settle_race(&mut acct, &setup, car, &result)?;
+// A lobby with its own stake table (wp_race, R5) uses the *_scaled variants with
+// wp_race::bridge::EconomyRace's purse_scale / entry_scale.
 econ.record_damage(&mut acct, &damage_report)?;    // end of session
 let quote = econ.quote_repair(&acct, car, &RepairOption::RepairAll, &shop, mode)?;
 let (order, ev) = econ.repair(&mut acct, car, &RepairOption::RepairAll, &shop, mode)?;
