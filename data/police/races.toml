@@ -171,21 +171,28 @@ at = 0.85
 length_m = 4.0
 offset_m = 2.5
 
-# ---- Ashpeak County (PR #50, ported on lead/ashpeak-port). Round 12 gives every picker race
-# its own table; these eight are first proposals by the port (presence = the stake table's
-# default for the race's legality, so the field draws the same patrols it did on ws/ashpeak),
-# for the police workstream (E) to tune. County roads are worked by the Ashpeak County
-# Sheriff's Office units (county livery; same AI).
+# ---- Ashpeak County (PR #50, ported on lead/ashpeak-port). County roads are worked by the
+# Ashpeak County Sheriff's Office units (county livery; same AI). Each table below has its
+# style and its race_picker measurement (police on at the table's own presence, seeds 1-8;
+# docs/integration/police.md, "Ashpeak race profiles"). One lesson runs through them: on the
+# county's one-lane hairpins, gravel and tower grid, anything that stops the AI field ahead
+# of it (a route block's gap, junction blocks, a unit pulling onto the road, a patrol head-on)
+# gets the whole field arrested in a queue, so these profiles start their chases from
+# staked-out units that know the field on sight and keep the dynamic stops off.
 
-# Midnight touge up Crowfoot Pass's hairpins. Style: mountain tail. Deputies follow the field
-# up, never past it: no rams, PITs, box-ins, rolling or junction blocks on the one-lane
-# hairpins, and pursuers close only to the racer's own speed (speed_margin 0), so nobody is
-# planted across the road ahead of the field. Fresh units wait at the saddle and take over
-# there. No helicopter: on the pass it called units in head-on at intercept speed, where they
-# wedged on the hairpin walls and pinned the field behind them (row 168).
+# Midnight touge up Crowfoot Pass's hairpins. Style: mountain tail. The deputies leave the
+# climb alone and set the net at the saddle: almost no patrols on the pass (presence 0.1) and
+# two units staked out just below the top that know the field on sight. A chase that starts
+# there follows the racers, never passes them: no rams, PITs, box-ins, rolling or junction
+# blocks on the one-lane hairpins, pursuers close only to the racer's own speed
+# (speed_margin 0), and no helicopter (it called units in head-on at intercept speed, where
+# they wedged on the hairpin walls and pinned the field behind them, row 168).
+# Measured (race_picker, police on, seeds 1-8): finishers 4,1,3,4,4,4,3,4 of 4, 1-4 pursuits
+# a race, every capture at the saddle (gate 17). With the old profile (presence 1.0, the
+# helicopter and box-ins on) patrols on the pass caught the whole field on every seed.
 [crowfoot_ascent]
 name = "Mountain tail"
-summary = "Deputies tail you up the hairpins and never pass; the net is at the saddle, where fresh units wait."
+summary = "The pass is quiet, but deputies wait below the saddle: they know you on sight, follow you over the top and never pass on the hairpins."
 presence = 0.1
 backup_scale = 0.5
 tool_lifetime_s = 300.0
@@ -237,13 +244,16 @@ at = 0.9
 trigger_m = 60.0
 
 # Dusk run over Harnell Flats' gravel section roads. Style: open country. Thin patrols out on
-# the farm roads (presence 0.5, row 168), so the county works the run from fixed points: a
-# deputy parked at the crossroads a third of the way in and one on the approach to Harnell
-# Crossing, both of whom know the field on sight, and the helicopter spots for them. No
-# spikes on gravel; the section roads' crossings may be blocked once a chase is on.
+# the farm roads (presence 0.5, row 168), so the county works the run from one fixed point: a
+# deputy parked on the approach to Harnell Crossing who knows the field on sight, with the
+# helicopter spotting for the chase and the crossings blocked once it is on. No spikes, PITs
+# or rams on gravel. Earlier in the run (a deputy at 0.35) the chase lasted 2 km and caught
+# the whole field together at 3.3-3.5 km on 4 of 8 seeds.
+# Measured (race_picker, police on, seeds 1-8): 4-5 pursuits every race, finishers 4 of 4 on
+# 7 seeds (3 on seed 6, the fourth out of time). The old profile drew no pursuit at all.
 [harnell_dirt_run]
 name = "Open country"
-summary = "Thin patrols on the section roads: deputies parked at the crossroads and outside Harnell Crossing, the helicopter spotting for them."
+summary = "Thin patrols on the section roads, but a deputy waits outside Harnell Crossing and the helicopter spots for him."
 presence = 0.5
 backup_scale = 0.5
 tool_lifetime_s = 300.0
@@ -264,14 +274,16 @@ at = 0.85
 trigger_m = 80.0
 
 # Illegal daytime checkpoint run through Ashpeak City's downtown. Style: downtown crackdown,
-# the county's answer to Port Vesper's Lantern lockdown: maximum presence in daylight, a
-# roadblock across the route halfway with one lane open, the side streets off the back half
-# sealed so the field has to run the gauntlet to the Spire, and units staked out at the
-# checkpoints that know the field on sight. As on the Lantern run, the police may take the
-# whole field (owner brief for illegal daytime).
+# the county's answer to Port Vesper's Lantern lockdown: maximum presence in daylight, the
+# side streets off the back half sealed so the field has to run the avenue to the Spire, and
+# units staked out at the checkpoints that know the field on sight. As on the Lantern run the
+# police may take the whole field (owner brief for illegal daytime). No roadblock across the
+# route: the AI field cannot thread its gap and was arrested queued at it on every seed.
+# Measured (race_picker, police on, seeds 1-8): 4-5 pursuits every race; the whole field
+# finishes on half the seeds (2, 3, 5, 6) and is taken on the other half.
 [ashpeak_downtown_checkpoint]
 name = "Downtown crackdown"
-summary = "Maximum presence downtown in daylight: a roadblock across the route with one lane open, the side streets sealed, units waiting at the checkpoints."
+summary = "Maximum presence downtown in daylight: the side streets sealed, units waiting at the checkpoints. Make the Spire or lose everything."
 presence = 2.0
 backup_scale = 1.0
 tool_lifetime_s = 300.0
@@ -368,15 +380,18 @@ rams = false
 at = 0.9
 trigger_m = 60.0
 
-# Two night laps of the downtown block grid. Style: block grid. The deputies don't chase into
-# the towers' grid at speed: no rams, PITs or box-ins between the buildings (a car rammed into
-# a lane there stands across it for the rest of the field, row 168), and pursuers close only
-# to the racer's speed. They work the grid instead: interceptors cut across to park across
-# the junction ahead, and the helicopter keeps the field in sight between the towers.
-# Thinner patrols than the stake default (presence 0.6).
+# Two night laps of the downtown block grid. Style: block grid. The towers' grid swallows a
+# chase: no rams, PITs, box-ins, rolling or junction blocks between the buildings (a racer
+# stopped there by a unit is arrested, and the rest of the field queues behind it, row 168),
+# pursuers close only to the racer's speed, and thin patrols (presence 0.15). The pursuits
+# come from a unit staked out on the back of the lap that knows the field on sight, so every
+# lap draws a chase the field can shake in the grid. Thinning the patrols alone (1.0 -> 0.4)
+# and every tactic mix tried still lost the whole field on most seeds.
+# Measured (race_picker, police on, seeds 1-8): 6-9 pursuits every race, all six finish on
+# 7 seeds (5 of 6 on seed 4, one captured).
 [ashpeak_metro_circuit]
 name = "Block grid"
-summary = "No ramming between the towers: units cut across the grid to block the junctions ahead while the helicopter keeps you in sight."
+summary = "A deputy watches the back of the lap and the chase is on every time round; nobody rams between the towers, so lose them in the grid."
 presence = 0.15
 backup_scale = 0.5
 tool_lifetime_s = 300.0

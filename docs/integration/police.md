@@ -1801,3 +1801,41 @@ Proposed follow-ups: a cornering-limited intercept speed on hairpins (wp_police)
 - Founders Cut pair re-seeded 60 → 58. Seeds 50–70: escape story on 11 of 21 (was 16), control captured on 20, both on 11. Units no longer stall next to the stopped racer in the lay-by (D's report), so he is caught more often.
 - `pick_harlan_dirt_run.ron` regenerated (`WP_RACE_WRITE_SCENARIOS=1`, wp_wasm): presence 0.5.
 - **Queue cap (lead/round13 lantern_checkpoint):** racer 4 sat behind busted racer 3, parked in the lane, from about 70 s to 300 s with units nearby. The queue exemption kept it Running, so the race never ended. A racer now waits behind another racer for at most `QUEUE_MAX_WAIT_S` (15 s) without moving; after that the normal stop and pinned rules apply. lantern_checkpoint ends at 66 s and passes. (`race_picker::ashpeak_metro_circuit` fails on lead/round13 7538c828 too, with police off: 1 of 6 finish. Not police.)
+
+### Ashpeak race profiles (2026-10-24)
+
+Owner request: real police profiles for the eight Ashpeak County races. Before this, five were
+first proposals from the Ashpeak port and three had a row-168 tune.
+
+**How it was measured.** `race_picker` with police on at each table's own presence:
+`WP_RACE_SEED=n WP_RACE_PRESENCE=<table presence>` on the race's test, release build. The
+Ashpeak summaries now print pursuits. Seeds 1–4 were used to design, seeds 5–8 were held out,
+and every final number covers seeds 1–8.
+
+**What the sweeps showed.** On the county's one-lane hairpins, gravel and tower grid, anything
+that stops the AI field ahead of it gets the whole field arrested in a queue:
+- a route block's gap (downtown: all four arrested at it on every seed);
+- junction blocks (metro);
+- a staked-out unit pulling onto a one-lane gravel road (Harnell);
+- a patrol head-on on the pass (Crowfoot).
+
+Lowering presence alone (metro 1.0 → 0.4) and every tactic mix tried did not move it. What
+works is starting the chases from staked-out units that know the field on sight
+(`recognise_on_sight`), with thin patrols and the dynamic stops off.
+
+| race | style | finishers per seed, seeds 1–8 | pursuits/race | before |
+|---|---|---|---|---|
+| crowfoot_ascent | Mountain tail: presence 0.1, two units below the saddle that know the field, chase follows and never passes (no rams/PIT/box-in/rolling/junction, speed_margin 0, no helicopter) | 4,1,3,4,4,4,3,4 / 4 (captures only at the saddle) | 1–4 | 0 on every seed |
+| harnell_dirt_run | Open country: presence 0.5, one deputy on the Harnell Crossing approach (0.85) that knows the field, helicopter spotting, crossings blocked; no spikes, PIT or rams on gravel | 4 on 7 seeds, 3 on seed 6 (out of time) / 4 | 4–5 | 4 each, but 0 pursuits |
+| ashpeak_downtown_checkpoint | Downtown crackdown (Lantern-style): presence 2.0, back-half side streets sealed, units at the checkpoints that know the field; no route block | whole field on seeds 2, 3, 5, 6, taken on the others | 4–5 | 0,4,2,0 on seeds 1–4 |
+| ashpeak_metro_circuit | Block grid: presence 0.15, a unit on the back of the lap that knows the field (a chase every lap), nothing that stops a racer between the towers, speed_margin 0 | 6 on 7 seeds, 5 on seed 4 / 6 | 6–9 | 1,5,0,0 on seeds 1–4 |
+
+The other four keep their tables: crowfoot_descent, route7_tunnel_sprint, grizzly_grade_sprint
+and waterfront_drag. Seeds 1–8: descent 3–4 of 4, Route 7 4–5 of 5, Grizzly 4 of 4,
+Waterfront 2 of 2, with pursuits in every race.
+
+Tried and dropped:
+- Crowfoot at presence 0.5 and 0.3: 0–1 finishers; the patrols on the pass still caught the
+  field at gates 3–12.
+- A route block across downtown with a 3.5 m gap: 0 of 4 on every seed.
+- Harnell's deputy at 0.35: 12 of 32 finishers; the 2 km chase caught the field at 3.3–3.5 km.
