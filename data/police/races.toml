@@ -105,7 +105,7 @@ trigger_m = 120.0
 # lap's high-speed pursuit with full daytime strength (presence 2.0, the illegal-daytime Max).
 # The "Heavier police on Loop 9 daytime" work replaces it with its own daytime profile.
 [loop9_day]
-name = "Highway interceptors"
+name = "Daylight interceptors"
 summary = "Pure high-speed pursuit: interceptors join from the shoulder and run the field down. No roadblocks, no spikes."
 presence = 2.0
 backup_scale = 1.0
@@ -146,7 +146,7 @@ trigger_m = 120.0
 # wp_race::catalog, 2026-10-24). Highways only, so the Loop 9 brief: pure high-speed pursuit,
 # interceptors joining from the shoulder along the lap.
 [loop9_ashpeak_highway]
-name = "Highway interceptors"
+name = "Freeway interceptors"
 summary = "Pure high-speed pursuit: interceptors join from the shoulder and run the field down. No roadblocks, no spikes."
 presence = 1.0
 backup_scale = 1.0

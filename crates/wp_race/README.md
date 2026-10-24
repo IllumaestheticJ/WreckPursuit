@@ -215,8 +215,9 @@ only the Loop 9 races.
 
 The highway run is one lap of Loop 9's east side, Route 7 (Talon Tunnel, Silver Gorge), the
 Crosstown Expressway, Route 12 over the Grizzly Grade and back onto Loop 9 at Lantern Way:
-highway lanes all the way (the polygon's points sit on the lanes the ramps feed, because the
-planner does not change lanes).
+highway lanes all the way. Loop 9 day runs the same lap from a grid on the south side, so
+its meet spot is not the night race's. (The highway polygon's points sit on the lanes the ramps feed, because the
+planner does not change lanes.)
 
 **Retired races** (`catalog::retired_races()`): `hollins_sprint`, `lantern_checkpoint`,
 `grid_highway_sprint`, the Ashpeak County races (`crowfoot_ascent`, `crowfoot_descent`,

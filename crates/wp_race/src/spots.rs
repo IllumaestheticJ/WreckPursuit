@@ -146,17 +146,17 @@ mod tests {
     }
 
     #[test]
-    fn grid_city_has_its_race_spots_at_the_pole() {
-        let world = World::procedural(
-            &wp_world::procgen::ProcGenConfig::default(),
+    fn port_vesper_has_its_race_spots_at_the_pole() {
+        let world = World::vesper(
+            &wp_world::vesper::VesperConfig::default(),
             wp_world::WorldConfig::default(),
         );
         let spots = race_spots(&world);
         assert_eq!(
             spots.iter().map(|s| s.race_id).collect::<Vec<_>>(),
-            vec!["grid_highway_sprint", "grid_arterial_sprint"]
+            vec!["loop9_circuit", "loop9_day"]
         );
-        let def = catalog::race("grid_highway_sprint").unwrap();
+        let def = catalog::race("loop9_circuit").unwrap();
         let race = catalog::plan_course(&world, &def).unwrap();
         assert_eq!(spots[0].pos, catalog::venue_pos(&race));
         assert!((spots[0].length_m - def.length_hint_m).abs() < 0.02 * def.length_hint_m);

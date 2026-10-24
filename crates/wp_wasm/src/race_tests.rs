@@ -80,9 +80,9 @@ fn race_scenarios_name_the_race_and_put_the_player_last() {
             assert!((3..=5).contains(&c.drivers.len()), "{}", c.id);
         }
     }
-    // Illegal daytime pays more than a night street race of similar length.
+    // Illegal daytime pays more than a night street race of the same length.
     let by = |id: &str| cards.iter().find(|c| c.id == id).unwrap();
-    assert!(by("lantern_checkpoint").purse > by("hollins_sprint").purse);
+    assert!(by("loop9_day").purse > by("loop9_circuit").purse);
 }
 
 #[test]
