@@ -46,6 +46,7 @@ pub mod data;
 pub mod drift_lab;
 pub mod garage;
 pub mod garage_visit;
+pub mod gps;
 pub mod lod;
 pub mod lots;
 pub mod map;
@@ -58,6 +59,7 @@ pub mod race_spots;
 pub mod reset;
 pub mod roam;
 pub mod run;
+pub mod safehouse;
 pub mod scenario;
 pub mod session;
 pub mod signals;
@@ -73,9 +75,9 @@ mod collide_tests;
 #[cfg(test)]
 mod crash_replay_tests;
 #[cfg(test)]
-mod police_audio_trace;
-#[cfg(test)]
 mod lots_tests;
+#[cfg(test)]
+mod police_audio_trace;
 #[cfg(test)]
 mod race_spots_tests;
 #[cfg(test)]
@@ -287,7 +289,10 @@ pub fn scenario_from_ron(text: &str) -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn scenario_with_speed(scenario_json: &str, target_mps: f32) -> Result<String, JsValue> {
     let sc: simcli::Scenario = serde_json::from_str(scenario_json).map_err(err)?;
-    Ok(json(&scenario::with_cruise_speed(sc, pack::finite(target_mps))))
+    Ok(json(&scenario::with_cruise_speed(
+        sc,
+        pack::finite(target_mps),
+    )))
 }
 
 /// Advance by `dt_seconds` of frame time: runs the whole fixed ticks it covers (at most 60)
@@ -1323,6 +1328,77 @@ pub fn garage_repair() -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn garage_buy_tip(tier: &str) -> Result<String, JsValue> {
     with(|s| s.garage_buy_tip(tier).map(|r| json(&r)))
+}
+
+/// The session city's safehouses and the police hide rule as JSON
+/// ([`safehouse::Safehouses`]: `sites` with name / pos / radius, `dwell_s`, `clear_radius_m`);
+/// `null` off-city or without police. Fetch once per session (feature F39).
+#[wasm_bindgen]
+pub fn safehouses_json() -> Result<String, JsValue> {
+    get(|s| {
+        if !s.has_city() || !s.sim().systems().police {
+            return "null".to_string();
+        }
+        let cfg = &s.sim().police().config().heat.safehouse;
+        json(&safehouse::safehouses(
+            s.sim().world(),
+            cfg.dwell_s,
+            cfg.clear_radius_m,
+        ))
+    })
+}
+
+/// Seconds `entity` has hidden in a safehouse so far (0 when not hiding); the escape comes at
+/// `safehouses_json().dwell_s` (feature F39 HUD).
+#[wasm_bindgen]
+pub fn safehouse_progress(entity: u32) -> Result<f32, JsValue> {
+    get(|s| safehouse::hide_progress_s(s.sim().police(), EntityId(entity)))
+}
+
+/// GPS route (feature F40) from `entity`'s car to `(x, y)`: [`gps::GpsRoute`] JSON (`length_m`,
+/// `polyline`, `finish`), or `null` when there is no route (off-city, no road near).
+#[wasm_bindgen]
+pub fn gps_route(entity: u32, x: f32, y: f32) -> Result<String, JsValue> {
+    get(|s| {
+        if !s.has_city() {
+            return "null".to_string();
+        }
+        let Some(st) = s
+            .vehicle(EntityId(entity))
+            .map(|v| wp_contracts::VehicleSim::state(&v.vehicle))
+        else {
+            return "null".to_string();
+        };
+        let dir = reset::travel_dir(st.rot, st.lin_vel);
+        let to = [pack::finite(x), pack::finite(y)];
+        json(&gps::route(s.sim().world(), st.pos, dir, to))
+    })
+}
+
+/// The tow-or-limp offer after a wreck nobody is chasing (feature F17) as JSON
+/// ([`garage_visit::WreckOffer`]: `tick`, `tow_fee`, `cash`, `career`), or `null`. While it is
+/// open the car is held. `limping` says the player chose to limp to a shop.
+#[wasm_bindgen]
+pub fn wreck_offer_json() -> Result<String, JsValue> {
+    get(|s| {
+        json(&serde_json::json!({
+            "offer": s.wreck_offer(),
+            "limping": s.limping(),
+        }))
+    })
+}
+
+/// "Tow" after a wreck (feature F17): the towing charge, the run is over (the end-of-run panel
+/// follows, as for an automatic tow).
+#[wasm_bindgen]
+pub fn wreck_tow() -> Result<(), JsValue> {
+    with(|s| s.wreck_tow())
+}
+
+/// "Limp" after a wreck (feature F17): drive the wreck to a shop yourself; no towing charge.
+#[wasm_bindgen]
+pub fn wreck_limp() -> Result<(), JsValue> {
+    with(|s| s.wreck_limp())
 }
 
 /// "Leave" the open garage visit without repairing (no-op without one).

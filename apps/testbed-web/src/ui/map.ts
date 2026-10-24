@@ -31,6 +31,29 @@ export class MapOverlay {
     // Bottom-right corner (playtest row 67): clear of the developer panel (bottom-left), the race
     // HUD (top-left), the pursuit banner (centre) and the damage silhouette (top-right).
     this.hud = mountMapHud(parent, { onOpenChange, minimapPlacement: { right: "8px", bottom: "8px", left: "auto", top: "auto" } });
+    // F40: tap a shop, safehouse or race meet on the full map for a GPS route there (tap the
+    // same one again to clear it).
+    this.hud.setPoiHandler((poi) => this.routeTo(poi));
+  }
+
+  /** The player the last frame was drawn for (GPS routes start at their car). */
+  private player = 0;
+  /** The GPS goal (F40) and the drive left, or null. */
+  gps: { name: string; x: number; y: number; length_m: number } | null = null;
+
+  /** Set (or, for the current goal, clear) a GPS route to `poi`. */
+  routeTo(poi: MapPoi): void {
+    if (this.gps && this.gps.name === poi.name) return this.clearGps();
+    const r = sim.gpsRoute(this.player, poi.pos[0], poi.pos[1]);
+    if (!r) return this.clearGps();
+    this.gps = { name: poi.name, x: r.finish[0], y: r.finish[1], length_m: r.length_m };
+    this.hud.setGps(r.polyline);
+  }
+
+  /** Drop the GPS route. */
+  clearGps(): void {
+    this.gps = null;
+    this.hud.setGps(null);
   }
 
   /** New session: fetch the static map when the city changed, and put this session's shops
@@ -39,6 +62,7 @@ export class MapOverlay {
    * from `race_spots()` instead of the city's `RaceStartGrid` POIs (many are scenario route
    * ends with no race, and some race meets had no icon). */
   reset(): void {
+    this.clearGps();
     this.lastFrame = -Infinity;
     this.lastRadar = null;
     const id = sim.worldInfo()[W.city] > 0.5 ? sim.cityId() : "";
@@ -67,6 +91,9 @@ export class MapOverlay {
     this.lastFrame = nowMs;
     // Decoded once for both (the map HUD takes a decoded frame).
     const f = decodeMapDynamic(sim.mapDynamic(player));
+    this.player = player;
+    // Arrived (within 25 m of the goal): the GPS route goes away.
+    if (this.gps && f.player && Math.hypot(f.player.x - this.gps.x, f.player.y - this.gps.y) < 25) this.clearGps();
     if (this.hud.isOpen || minimap) this.hud.frame(f, nowMs);
     // The corner minimap already shows all of it: then the chase HUD only keeps its "on you"
     // note (lead, 2026-10-23).

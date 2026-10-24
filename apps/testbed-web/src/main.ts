@@ -67,6 +67,8 @@ import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileN
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
 import { RaceView, type RaceFrame } from "./ui/race";
 import { GarageVisitView } from "./ui/garageVisit";
+import { SafehouseView } from "./ui/safehouse";
+import { WreckView } from "./ui/wreck";
 import { TougeView, type TougeChoice, type Wager } from "./ui/touge";
 import { RaceMarker, parseCourse } from "./race_marker";
 import { RaceSpotsView } from "./race_spots";
@@ -554,6 +556,14 @@ async function main(): Promise<void> {
     enter: (offer) => openGarage(null, offer.site),
     tip: (tier) => sim.garageBuyTip(tier),
   });
+  // Safehouses (F39): a marker at each, and the hide timer while the player is in one.
+  const safehouses = new SafehouseView(scene.world, overlay);
+  // Tow or limp after a wreck nobody is chasing (F17).
+  const wreckEl = document.createElement("div");
+  wreckEl.id = "ui-wreck";
+  wreckEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  overlay.appendChild(wreckEl);
+  const wreck = new WreckView(wreckEl, { tow: () => sim.wreckTow(), limp: () => sim.wreckLimp() });
   // The city's regulars remember their results between visits (wp_race::roster records).
   const ROSTER_KEY = "wp.roster.v1";
   try {
@@ -710,6 +720,8 @@ async function main(): Promise<void> {
     const garageSites = sim.garages();
     scene.setGarages(garageSites);
     garageView.sites = garageSites;
+    safehouses.reset();
+    wreck.reset();
     const city = sim.worldInfo()[W.city] > 0.5;
     const cityId = city ? sim.cityId() : "";
     void scene.setCity(cityId || null);
@@ -1638,7 +1650,7 @@ async function main(): Promise<void> {
   };
   /** Something else owns the screen or the Esc key right now. */
   // Photo mode takes Esc (and gamepad Start) to leave itself, so no pause menu meanwhile.
-  const canOpenMenu = () => !garageView.offer && !photo.active && !menu?.isOpen && !map.isOpen && !controls.isOpen && !garage.open && !workshop.active && !runEnd.open && !raceView.cards && !isReplay();
+  const canOpenMenu = () => !garageView.offer && !wreck.state.offer && !photo.active && !menu?.isOpen && !map.isOpen && !controls.isOpen && !garage.open && !workshop.active && !runEnd.open && !raceView.cards && !isReplay();
   let menuPausedBefore = false;
   let menuShown = false;
   menu = mountGameMenu(overlay, {
@@ -1962,6 +1974,8 @@ async function main(): Promise<void> {
         runEnd.update(sim.runResult(), now);
         const pp = app.views.get(app.player)?.root.position;
         garageView.update(sim.garageVisit(), now, pp ? [pp.x, pp.y, pp.z] : null);
+        safehouses.frame(app.player, pp && !map.isOpen ? [pp.x, pp.y, pp.z] : null);
+        wreck.update(sim.wreckState());
       }
       // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
       if (!replay && sim.careerRunActive()) {

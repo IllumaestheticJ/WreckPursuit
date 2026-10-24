@@ -123,6 +123,10 @@ pub struct Session {
     visit_seq: u32,
     /// Tick of the last informant tip bought at a garage (cooldown).
     last_tip_tick: Option<u64>,
+    /// The player's car is a wreck that can still move: tow or limp (feature F17).
+    stranded: Option<crate::garage_visit::WreckOffer>,
+    /// The player chose to limp a wreck to a shop (no tow offered again this run).
+    limping: bool,
     playback: Option<Playback>,
     mode: DamageMode,
     live_end_hash: Option<u64>,
@@ -280,6 +284,8 @@ impl Session {
             garage_armed: false,
             visit_seq: 0,
             last_tip_tick: None,
+            stranded: None,
+            limping: false,
             script_end: if scripted { sc.ticks() } else { 0 },
             mode: sc.mode,
             sc,
@@ -1174,6 +1180,7 @@ impl Session {
             r.player() == id
                 && (r.is_over()
                     || self.visit.is_some()
+                    || self.stranded.is_some()
                     || self
                         .street
                         .as_ref()
@@ -1367,6 +1374,58 @@ impl Session {
         })
     }
 
+    /// The open tow-or-limp offer after a wreck (feature F17), if any.
+    pub fn wreck_offer(&self) -> Option<&crate::garage_visit::WreckOffer> {
+        self.stranded.as_ref()
+    }
+
+    /// The player is limping a wreck to a shop (feature F17).
+    pub fn limping(&self) -> bool {
+        self.limping
+    }
+
+    /// "Tow" after a wreck (feature F17): settle the wreck as a tow (the towing charge, the
+    /// run is over, as without the offer).
+    pub fn wreck_tow(&mut self) -> Result<(), String> {
+        self.live_check()?;
+        if self.stranded.take().is_none() {
+            return Err("no wreck to tow".into());
+        }
+        let tick = self.sim.tick();
+        let Some(run) = &mut self.run else {
+            return Err("no economy run in this session".into());
+        };
+        let player = run.player();
+        let damage = self
+            .sim
+            .vehicles()
+            .iter()
+            .find(|v| v.id == player)
+            .map(|v| {
+                (
+                    &v.damage as &dyn wp_contracts::DamageSim,
+                    self.sim.mode_table(),
+                )
+            });
+        run.settle(tick, crate::run::RunOutcome::TotalLoss, damage)
+            .map(|_| ())
+    }
+
+    /// "Limp" after a wreck (feature F17): no tow and no settlement now; the car is released to
+    /// drive (as far as its damage lets it) to a shop, where the repair is billed without the
+    /// towing charge.
+    pub fn wreck_limp(&mut self) -> Result<(), String> {
+        self.live_check()?;
+        if self.stranded.take().is_none() {
+            return Err("no wreck to limp".into());
+        }
+        self.limping = true;
+        if let Some(idx) = self.run.as_ref().and_then(|r| self.index(r.player())) {
+            self.release_player(idx);
+        }
+        Ok(())
+    }
+
     /// Release the player's car after a hold: neutral input, headlights kept.
     fn release_player(&mut self, idx: usize) {
         let keep = self.last_input[idx];
@@ -1395,6 +1454,7 @@ impl Session {
         let idx = self.idx(player)?;
         self.log_op(idx, OpKind::Repair)?;
         self.visit = None;
+        self.limping = false;
         self.release_player(idx);
         Ok(report)
     }
@@ -1932,6 +1992,32 @@ impl Session {
             return;
         };
         let player = run.player();
+        // Feature F17: a wreck nobody is chasing that can still move offers tow or limp
+        // instead of the automatic tow. A wreck that cannot move is towed as before.
+        if outcome == crate::run::RunOutcome::TotalLoss && !self.limping {
+            let moves = self
+                .sim
+                .vehicles()
+                .iter()
+                .find(|v| v.id == player)
+                .is_some_and(|v| {
+                    let h = wp_contracts::DamageSim::handling_effects(&v.damage);
+                    !h.engine_dead && !h.wheel_lost.contains(&true)
+                });
+            if moves {
+                self.stranded = Some(crate::garage_visit::WreckOffer {
+                    tick,
+                    tow_fee: run.towing_fee(),
+                    cash: run.account().cash,
+                    career: self.career,
+                });
+                return;
+            }
+        }
+        if outcome == crate::run::RunOutcome::TotalLoss && self.limping {
+            // Already limping on a wreck: nothing new to settle until the shop.
+            return;
+        }
         let damage = self
             .sim
             .vehicles()
@@ -2137,6 +2223,8 @@ impl Session {
             garage_armed: false,
             visit_seq: 0,
             last_tip_tick: None,
+            stranded: None,
+            limping: false,
             sc: self.sc.clone(),
             scripted: self.scripted,
             script_end: self.script_end,

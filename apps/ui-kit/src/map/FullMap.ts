@@ -9,7 +9,7 @@ import type { MapFrame, MapStatic, MapZone } from "./data";
 import { isWanted, racersToDraw } from "./data";
 import { districtLabels, type DistrictLabel } from "./districts";
 import { drawHeliTether, drawPoi, drawPlayer, drawRacer, drawRoads, drawSearch, drawSight, drawTool, drawUnit, heliFollows, makeCanvas, readPalette, ROAD_MIN_PX, type MapPalette } from "./draw";
-import { drawFlag, drawMarker, drawRoute, type MapExtras } from "./extras";
+import { drawFlag, drawMarker, drawRoute, GPS_COLOUR, type MapExtras } from "./extras";
 import { clampCentre, fitBounds, fullMatrix, glyphRotation, pan, worldToFull, zoomAt, type FullView } from "./projection";
 
 /** District tints by kind (low alpha fills). */
@@ -49,6 +49,8 @@ export class FullMapRenderer {
   stats: FullMapStats = { units: 0, racers: 0, player: false, districts: 0, pois: 0, pxPerM: 0, markers: 0, route: false };
   /** Host overlay (street racers, a race route); null = none. */
   extras: MapExtras | null = null;
+  /** GPS route `[x, y]` world points (F40); null = none. */
+  gps: [number, number][] | null = null;
   /** Crosshair at the screen centre (gamepad picking). */
   crosshair = false;
 
@@ -193,6 +195,7 @@ export class FullMapRenderer {
     for (const t of f.tools) drawTool(ctx, t, m, k, pal);
     const ex = this.extras;
     let markers = 0;
+    if (this.gps && this.gps.length > 1) drawRoute(ctx, this.gps.map(([x, y]) => worldToFull(v, x, y)), 3.5 * dpr, GPS_COLOUR);
     if (ex?.route && ex.route.length > 1) drawRoute(ctx, ex.route.map(([x, y]) => worldToFull(v, x, y)), 3.5 * dpr);
     let units = 0;
     const us = 7 * dpr;

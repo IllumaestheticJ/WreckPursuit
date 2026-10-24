@@ -60,11 +60,11 @@ pub use capture::{CaptureContext, CaptureOutcome, CarFate, CopAction, ImpoundSta
 pub use data::{CareerRules, DataSources, Economy};
 pub use error::{DataError, EconomyError};
 pub use estimate::PerfMetrics;
-pub use garage::{CarSpec, Condition, Preview};
+pub use garage::{CarSpec, Condition, Preview, SALVAGE_PREMIUM_FACTOR, SALVAGE_VALUE_FACTOR};
 pub use ledger::{
-    account_id_of, player_of, AccountStore, CarLocation, CarUid, DamageSnapshot, EconResult,
-    EconomyEvent, EventReason, InMemoryStore, Money, OwnedCar, PlayerAccount, StoreError,
-    TireState, ViolationCounts,
+    account_id_of, player_of, AccountStore, CarHistory, CarLocation, CarUid, DamageSnapshot,
+    EconResult, EconomyEvent, EventReason, InMemoryStore, Money, OwnedCar, PlayerAccount,
+    StoreError, TireState, ViolationCounts,
 };
 pub use lots::{
     Listing, ListingGrade, ListingWear, LotDef, LotKind, LotTables, RareVariant, TireTables,

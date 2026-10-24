@@ -279,6 +279,7 @@ impl PlayerRun {
                     tune: Default::default(),
                     parts: None,
                     tires: Default::default(),
+                    history: Default::default(),
                 });
                 uid
             }
@@ -639,6 +640,15 @@ impl PlayerRun {
         self.acct = work;
         self.ledger.extend(events);
         Ok(report)
+    }
+
+    /// The flat towing charge for the run's car (`prices.toml [class.<class>] towing`): what a
+    /// tow after a wreck costs (feature F17).
+    pub fn towing_fee(&self) -> wp_economy::Money {
+        self.acct
+            .car(self.car)
+            .and_then(|c| self.econ.prices.class.get(&c.class))
+            .map_or(0, |c| c.towing)
     }
 
     /// Informant tiers on offer (`stakes.toml [informant.*]`), cheapest first: `(tier, cost,

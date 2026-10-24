@@ -125,6 +125,39 @@ for (const g of garages) {
   check(!left.visit && !left.paused, `Esc left ${g.name} (no pause menu)`);
 }
 
+// 1b. Informant tips (F4): a wanted car at a crooked shop buys one (key 2 = the second tier);
+// the heat drops by at most one wanted level.
+{
+  const crooked = garages.find((g) => g.kind === "Crooked");
+  if (crooked) {
+    const player = await page.evaluate(() => window.__wp.app.player);
+    await page.evaluate(([p, g]) => {
+      const wp = window.__wp;
+      wp.sim.debugPlace(p, g.pos[0] + 400, g.pos[1] + 400, 0, 0);
+    }, [player, crooked]);
+    await page.waitForTimeout(400);
+    await page.evaluate(([p, g]) => {
+      const wp = window.__wp;
+      wp.sim.debugSetHeat(p, 35);
+      wp.sim.debugPlace(p, g.pos[0], g.pos[1], g.heading_rad, 0);
+    }, [player, crooked]);
+    const offer = await page
+      .waitForFunction(() => window.__wp.sim.garageVisit(), null, { timeout: 20000, polling: 100 })
+      .then((h) => h.jsonValue())
+      .catch(() => null);
+    const tiers = offer?.tips?.map((t) => t.tier) ?? [];
+    await page.waitForTimeout(300);
+    await page.keyboard.press("Digit2");
+    await page.waitForTimeout(500);
+    const after = await page.evaluate(() => ({ text: document.querySelector('[data-testid="garage-tipped"]')?.textContent ?? "", tips: window.__wp.sim.garageVisit()?.tips?.length ?? -1 }));
+    check(tiers.length >= 2 && /Heat 3\d → 10/.test(after.text) && after.tips === 0, `informant tip at ${crooked.name}: ${tiers.join("/")} → "${after.text}"`);
+    if (shots) await shot("tip.png");
+    await page.keyboard.press("Escape");
+    await page.evaluate((p) => window.__wp.sim.debugSetHeat(p, 0), player);
+    await page.waitForTimeout(300);
+  }
+}
+
 // 2. The map: shops with their kind, race meets from race_spots(), legend rows.
 const map = await page.evaluate(() => {
   const wp = window.__wp;
@@ -145,6 +178,48 @@ check(["Police helipad", "Rest stop"].every((r) => legend.includes(r)) && legend
 if (shots) await shot("fullmap.png");
 await page.keyboard.press("KeyM");
 await page.waitForTimeout(300);
+
+// 2b. Safehouses (F39): a marker at each; inside one while wanted, the hide timer shows.
+{
+  const n = await page.evaluate(() => {
+    let k = 0;
+    window.__wp.scene.world.traverse((o) => (k += o.name.startsWith("safehouse:") ? 1 : 0));
+    return { markers: k, listed: JSON.parse(window.__wp.sim.safehousesJson())?.sites.length ?? 0 };
+  });
+  check(n.listed > 0 && n.markers === n.listed, `safehouses: ${n.listed} listed, ${n.markers} markers`);
+  const site = await page.evaluate(() => JSON.parse(window.__wp.sim.safehousesJson()).sites[0]);
+  const player = await page.evaluate(() => window.__wp.app.player);
+  await page.evaluate(([p, s]) => {
+    const wp = window.__wp;
+    wp.sim.debugSetHeat(p, 15);
+    wp.sim.debugPlace(p, s.pos[0], s.pos[1], 0, 0);
+  }, [player, site]);
+  const hud = await page
+    .waitForFunction(() => /hiding|safehouse/i.test(document.querySelector('[data-testid="safehouse-hud"]')?.textContent ?? ""), null, { timeout: 20000, polling: 200 })
+    .then(() => page.evaluate(() => document.querySelector('[data-testid="safehouse-hud"]').textContent))
+    .catch(() => "");
+  check(/hiding/i.test(hud), `safehouse HUD while wanted inside ${site.name}: "${hud}"`);
+  if (shots) await shot("safehouse.png");
+  await page.evaluate((p) => window.__wp.sim.debugSetHeat(p, 0), player);
+}
+
+// 2c. GPS (F40): a click on a garage icon on the full map sets a route there; a second clears it.
+{
+  await page.keyboard.press("KeyM");
+  await page.waitForTimeout(600);
+  const g = garages[garages.length - 1];
+  const at = await page.evaluate((g) => window.__wp.map.hud.clientAt(g.pos[0], g.pos[1]), g);
+  if (at) await page.mouse.click(at[0], at[1]);
+  await page.waitForTimeout(500);
+  const gps = await page.evaluate(() => ({ gps: window.__wp.map.gps, tip: document.querySelector('[data-testid="map-tip"]')?.textContent ?? "" }));
+  check(!!gps.gps && gps.gps.name === g.name && gps.gps.length_m > 0 && gps.tip.includes(g.name), `GPS: clicking ${g.name} on the map routes there (${Math.round(gps.gps?.length_m ?? 0)} m; tip "${gps.tip.slice(0, 60)}")`);
+  if (shots) await shot("gps.png");
+  if (at) await page.mouse.click(at[0], at[1]);
+  await page.waitForTimeout(300);
+  check(!(await page.evaluate(() => window.__wp.map.gps)), "GPS: a second click clears it");
+  await page.keyboard.press("KeyM");
+  await page.waitForTimeout(300);
+}
 
 // 3. Career: a new career with the floor car, a free drive on the city.
 const career = await page.evaluate(async () => {

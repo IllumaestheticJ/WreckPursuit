@@ -515,6 +515,7 @@ impl Economy {
                 );
             }
             let items: Vec<RepairItem> = quote.lines.iter().map(|l| l.item).collect();
+            let rebuilt_wreck = tx.car_mut(car)?.damage.total_loss;
             let c = tx.car_mut(car)?;
             self.rebuild_repaired(c, &items);
             let before = c.damage.outstanding.total;
@@ -535,6 +536,10 @@ impl Economy {
                 c.damage.outstanding.total = remaining;
                 c.damage.health += (1.0 - c.damage.health) * repaired_frac;
             }
+            // A total loss rebuilt to the road gets a salvage title (feature F19).
+            if full_reset && rebuilt_wreck {
+                tx.car_mut(car)?.history.salvage = true;
+            }
             Ok(RepairOrder {
                 car,
                 items,
@@ -551,6 +556,8 @@ impl Economy {
             let some = Some(report.car);
             let class = {
                 let c = tx.car_mut(report.car)?;
+                // A fresh total loss counts as a wreck in the car's history (feature F19).
+                let new_wreck = report.total_loss && !c.damage.total_loss;
                 let before = std::mem::take(&mut c.damage.outstanding.lines);
                 // A capture flag survives as long as there is unrepaired damage; being wanted
                 // without being caught does not affect insurance.
@@ -566,6 +573,9 @@ impl Economy {
                 };
                 self.strip_empty_slot_lines(c);
                 self.wear_from_damage(c, &before);
+                if new_wreck {
+                    c.history.wrecks += 1;
+                }
                 c.class
             };
             tx.note(

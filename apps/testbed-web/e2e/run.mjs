@@ -877,7 +877,7 @@ await shot("night_run_greybox_toggle.png");
     return { active: wp.sim.careerRunActive(), car: wp.sim.scenario().entities[0].car, open: wp.garage.open };
   });
   check(
-    opened && fresh.cash > 0 && bought.cars.length === 1 && bought.cash === fresh.cash - fresh.floor_car[1] &&
+    opened && fresh.cash > 0 && bought.cars.length === 1 && bought.cash === fresh.cash - bought.dealer.find((d) => d.def_id === "junkyard_beater").price_worn &&
       run.active && run.car === "junkyard_beater" && !run.open,
     `career: garage opens, beater bought ($${fresh.cash} → $${bought.cash}), night run runs the career car (${run.car})`,
   );

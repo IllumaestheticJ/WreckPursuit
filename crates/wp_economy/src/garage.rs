@@ -103,14 +103,20 @@ impl Economy {
     }
 
     /// Current value: pristine value minus outstanding repairs, never below
-    /// `damaged_value_floor × pristine` (and a total loss is worth its salvage).
+    /// `damaged_value_floor × pristine` (and a total loss is worth its salvage). A car with a
+    /// salvage title is worth [`SALVAGE_VALUE_FACTOR`] of that (feature F19).
     pub fn current_value(&self, car: &OwnedCar) -> Money {
         let pristine = self.car_value(car);
         if car.damage.total_loss {
             return self.scrap_value(car);
         }
         let floor = money(pristine as f32 * self.market.damaged_value_floor);
-        (pristine - money(car.damage.outstanding.total)).max(floor)
+        let value = (pristine - money(car.damage.outstanding.total)).max(floor);
+        if car.history.salvage {
+            money(value as f32 * SALVAGE_VALUE_FACTOR)
+        } else {
+            value
+        }
     }
 
     /// Dealer price for a car spec in a condition, clamped into the class band.
@@ -447,7 +453,12 @@ impl Economy {
                 reason: "in the pound".into(),
             });
         }
-        let premium = money(t.premium_per_day_frac * self.car_value(c) as f32).max(1);
+        let salvage = if c.history.salvage {
+            SALVAGE_PREMIUM_FACTOR
+        } else {
+            1.0
+        };
+        let premium = money(t.premium_per_day_frac * self.car_value(c) as f32 * salvage).max(1);
         let policy = InsurancePolicy {
             tier: tier.to_string(),
             premium_per_day: premium,
@@ -494,6 +505,13 @@ impl Economy {
     }
 }
 
+/// What a car with a salvage title (rebuilt from a total loss) is worth against the same car
+/// with a clean title (feature F19).
+pub const SALVAGE_VALUE_FACTOR: f32 = 0.7;
+
+/// Insurance premium factor for a car with a salvage title (feature F19).
+pub const SALVAGE_PREMIUM_FACTOR: f32 = 1.25;
+
 fn new_car(spec: &CarSpec, condition: Condition, paid: Money) -> OwnedCar {
     OwnedCar {
         uid: CarUid(0),
@@ -511,5 +529,6 @@ fn new_car(spec: &CarSpec, condition: Condition, paid: Money) -> OwnedCar {
         tune: Default::default(),
         parts: None,
         tires: Default::default(),
+        history: Default::default(),
     }
 }

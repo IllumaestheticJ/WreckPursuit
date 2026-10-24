@@ -114,6 +114,12 @@ function CarCard({ car, selected, onSelect }: { car: CarView; selected: boolean;
         )}
         {car.repair_lines.length > 0 && !car.total_loss && <Badge tone="warn">{car.repair_lines.length} repairs</Badge>}
         {car.insurance && <Badge tone="info">{car.insurance}</Badge>}
+        {car.salvage && (
+          <Badge tone="warn" title="rebuilt from a total loss: worth 30 % less, insurance 25 % dearer">
+            salvage title
+          </Badge>
+        )}
+        {!!car.wrecks && <Badge tone="dim">wrecked {car.wrecks}×</Badge>}
         {car.mods.length > 0 && <Badge>{car.mods.length} mods</Badge>}
         {car.tune && !isStockTune(car.tune) && <Badge title={tuneSummary(car.tune)}>tuned</Badge>}
         <span class="wp-dim wp-mono" style={{ marginLeft: "auto" }}>

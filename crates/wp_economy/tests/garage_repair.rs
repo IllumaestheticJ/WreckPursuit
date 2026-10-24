@@ -495,3 +495,42 @@ fn class_index_brackets_debug_cars_apart() {
     assert!(c.class_index > s.class_index + 100);
     assert_ne!(s.bracket, c.bracket);
 }
+
+/// Feature F19: a total loss counts as a wreck once; rebuilt to the road it carries a salvage
+/// title, worth `SALVAGE_VALUE_FACTOR` of a clean car and dearer to insure.
+#[test]
+fn a_rebuilt_wreck_has_a_salvage_title() {
+    let e = econ();
+    let mode = DamageMode::Simulation;
+    let shop = ShopContext::legit_default();
+    let (mut a, car) = account_with_sedan(&e, 500_000);
+    let clean_value = e.current_value(a.car(car).unwrap());
+    let mut r = damaged_report(&e, &a, car, mode);
+    r.total_loss = true;
+    e.record_damage(&mut a, &r).unwrap();
+    // The same wreck reported again is not a second wreck.
+    e.record_damage(&mut a, &r).unwrap();
+    let h = a.car(car).unwrap().history;
+    assert_eq!(h.wrecks, 1);
+    assert!(!h.salvage, "not rebuilt yet");
+    e.repair(&mut a, car, &RepairOption::RepairAll, &shop, mode)
+        .unwrap();
+    let c = a.car(car).unwrap();
+    assert!(c.history.salvage);
+    assert!(c.damage.is_pristine());
+    let v = e.current_value(c);
+    assert_eq!(
+        v,
+        (clean_value as f32 * wp_economy::SALVAGE_VALUE_FACTOR).round() as i64
+    );
+    // Insurance costs more than for a clean car of the same value.
+    let (mut clean, clean_car) = account_with_sedan(&e, 500_000);
+    e.buy_insurance(&mut clean, clean_car, "basic").ok();
+    e.buy_insurance(&mut a, car, "basic").ok();
+    if let (Some(p0), Some(p1)) = (
+        clean.car(clean_car).unwrap().insurance.as_ref(),
+        a.car(car).unwrap().insurance.as_ref(),
+    ) {
+        assert!(p1.premium_per_day > p0.premium_per_day);
+    }
+}

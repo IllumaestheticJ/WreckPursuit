@@ -1514,6 +1514,7 @@ impl<S: NetSim> ServerInstance<S> {
                     tune: Default::default(),
                     parts: None,
                     tires: Default::default(),
+                    history: Default::default(),
                 });
                 uid
             }

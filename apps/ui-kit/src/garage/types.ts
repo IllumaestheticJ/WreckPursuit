@@ -101,6 +101,10 @@ export interface CarView {
   stats: StatsView | null;
   /** Some outstanding damage dates from a police capture: insurance will not pay for it. */
   damage_before_capture: boolean;
+  /** Times the car was a total loss (F19). Missing with an older wasm package. */
+  wrecks?: number;
+  /** Rebuilt from a total loss: a salvage title (lower value, dearer insurance). */
+  salvage?: boolean;
   /** Tyres: a repair never fixes them; replace them here. */
   tires: TireView;
 }

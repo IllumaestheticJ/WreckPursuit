@@ -563,6 +563,17 @@ export const sim = {
   garageRepair: (): GarageRepairReport => JSON.parse(wasm.garage_repair()),
   /** "Leave" the open visit without repairing. */
   garageLeave: (): void => wasm.garage_leave(),
+  /** Tow-or-limp offer after a wreck (F17) and whether the player is limping. */
+  wreckState: (): { offer: { tick: number; tow_fee: number; cash: number; career: boolean } | null; limping: boolean } => JSON.parse(wasm.wreck_offer_json()),
+  wreckTow: (): void => wasm.wreck_tow(),
+  wreckLimp: (): void => wasm.wreck_limp(),
+  /** GPS route (F40) from `entity`'s car to (x, y), or null when there is none. */
+  gpsRoute: (entity: number, x: number, y: number): { length_m: number; polyline: [number, number][]; finish: [number, number] } | null =>
+    JSON.parse(wasm.gps_route(entity, x, y)),
+  /** The city's safehouses and the hide rule (`safehouse::Safehouses` JSON or "null"). */
+  safehousesJson: (): string => wasm.safehouses_json(),
+  /** Seconds `entity` has hidden in a safehouse so far (0 when not hiding). */
+  safehouseProgress: (entity: number): number => wasm.safehouse_progress(entity),
   /** Buy informant tip `tier` in the open visit (crooked shop, wanted car); throws if refused. */
   garageBuyTip: (tier: string): TipReport => JSON.parse(wasm.garage_buy_tip(tier)),
   /** Touge passes with their challenger and boss (`wp_wasm::touge::TougeCard[]`). */

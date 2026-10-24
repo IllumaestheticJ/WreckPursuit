@@ -11,7 +11,7 @@
  * // host keys: M / Tab → map.toggle()
  * ```
  */
-import { decodeMapDynamic, EMPTY_FRAME, type MapFrame, type MapStatic, type MapUnit } from "./data";
+import { decodeMapDynamic, EMPTY_FRAME, type MapFrame, type MapPoi, type MapStatic, type MapUnit } from "./data";
 import { CITY_NAMES, districtName, zoneAt } from "./districts";
 import { drawPlayer, drawPoi, drawRacer, drawTool, drawUnit, readPalette, ROAD_COLOR, DECK_CASING } from "./draw";
 import { drawMarker, type MapExtras, type MapLegendExtra } from "./extras";
@@ -82,6 +82,10 @@ export class MapHud {
   private lastCaptionMs = -Infinity;
   private drag: { x: number; y: number; id: number; x0: number; y0: number } | null = null;
   private onPick: ((x: number, y: number) => void) | null = null;
+  /** Host handler for a tapped POI (F40: set a GPS route there); null = none. */
+  private onPoi: ((poi: MapPoi) => void) | null = null;
+  /** POI tooltip over the full map (hover or tap). */
+  private readonly tip: HTMLElement;
   private readonly hostLegend: HTMLElement;
   /** Host panel slot over the full map (top-left; e.g. a challenge card). Empty = hidden. */
   readonly panel: HTMLElement;
@@ -127,6 +131,12 @@ export class MapHud {
 
     this.mini = new MinimapRenderer(mc, { signals: opts.signals });
     this.full = new FullMapRenderer(fc);
+    this.tip = document.createElement("div");
+    this.tip.className = "wp-panel wp-map-tip";
+    this.tip.dataset.testid = "map-tip";
+    this.tip.style.cssText = "position:absolute;pointer-events:none;padding:0.3em 0.6em;max-width:22em;font-size:0.85em;z-index:5";
+    this.tip.hidden = true;
+    this.fullEl.appendChild(this.tip);
     this.panel = document.createElement("aside");
     this.panel.className = "wp-panel wp-map-host";
     this.panel.hidden = true;
@@ -191,6 +201,7 @@ export class MapHud {
   close(): void {
     if (!this.openFlag) return;
     this.openFlag = false;
+    this.tip.hidden = true;
     this.fullEl.hidden = true;
     window.removeEventListener("keydown", this.onKey, true);
     this.opts.onOpenChange?.(false);
@@ -208,6 +219,51 @@ export class MapHud {
     this.mini.extras = extras;
     this.full.extras = extras;
     if (this.openFlag) this.full.draw(this.frameData, performance.now());
+  }
+
+  /** GPS route on both maps (F40), `[x, y]` world points; null clears it. */
+  setGps(route: [number, number][] | null): void {
+    this.mini.gps = route;
+    this.full.gps = route;
+    if (this.openFlag) this.full.draw(this.frameData, performance.now());
+  }
+
+  /** A tap on a POI of the full map calls `fn` (when no picker is armed); null = none. */
+  setPoiHandler(fn: ((poi: MapPoi) => void) | null): void {
+    this.onPoi = fn;
+  }
+
+  /** The POI drawn under a CSS client position on the full map (within 14 px), or null. */
+  poiAt(clientX: number, clientY: number): MapPoi | null {
+    if (!this.openFlag || !this.map) return null;
+    let best: { poi: MapPoi; d: number } | null = null;
+    for (const poi of this.map.pois) {
+      if (poi.kind === "RaceStartGrid") continue;
+      const c = this.clientAt(poi.pos[0], poi.pos[1]);
+      if (!c) continue;
+      const d = Math.hypot(c[0] - clientX, c[1] - clientY);
+      if (d <= 14 && (!best || d < best.d)) best = { poi, d };
+    }
+    return best?.poi ?? null;
+  }
+
+  /** Show (or hide with null) the tooltip for `poi` at a client position. */
+  private showTip(poi: MapPoi | null, clientX = 0, clientY = 0): void {
+    if (!poi) {
+      this.tip.hidden = true;
+      return;
+    }
+    const r = this.fullEl.getBoundingClientRect();
+    this.tip.replaceChildren();
+    const b = document.createElement("b");
+    b.textContent = poi.name;
+    const p = document.createElement("div");
+    p.className = "wp-dim";
+    p.textContent = poiBlurb(poi) + (this.onPoi ? " Click: set GPS route." : "");
+    this.tip.append(b, p);
+    this.tip.style.left = `${Math.min(clientX - r.left + 14, r.width - 260)}px`;
+    this.tip.style.top = `${Math.min(clientY - r.top + 14, r.height - 90)}px`;
+    this.tip.hidden = false;
   }
 
   /** Arm a picker: a tap / click on the full map (not a drag) calls `onPick` with the world
@@ -372,6 +428,7 @@ export class MapHud {
       c.setPointerCapture?.(e.pointerId);
     });
     c.addEventListener("pointermove", (e) => {
+      if (!this.drag) this.showTip(this.poiAt(e.clientX, e.clientY), e.clientX, e.clientY);
       if (!this.drag || this.drag.id !== e.pointerId) return;
       this.full.panBy(e.clientX - this.drag.x, e.clientY - this.drag.y);
       this.drag = { ...this.drag, x: e.clientX, y: e.clientY };
@@ -379,8 +436,15 @@ export class MapHud {
     c.addEventListener("pointerup", (e) => {
       const d = this.drag;
       this.drag = null;
-      if (!d || d.id !== e.pointerId || !this.onPick) return;
+      if (!d || d.id !== e.pointerId) return;
       if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > TAP_PX) return;
+      if (!this.onPick) {
+        // F40: a tap on a POI shows what it is and hands it to the host (GPS route).
+        const poi = this.poiAt(e.clientX, e.clientY);
+        this.showTip(poi, e.clientX, e.clientY);
+        if (poi) this.onPoi?.(poi);
+        return;
+      }
       const w = this.worldAt(e.clientX, e.clientY);
       if (w) this.onPick(w[0], w[1]);
     });
@@ -489,4 +553,26 @@ export class MapHud {
 /** Mount the map HUD into `parent` (which must be positioned). */
 export function mountMapHud(parent: HTMLElement, opts: MapHudOptions = {}): MapHud {
   return new MapHud(parent, opts);
+}
+
+/** What a POI is for, in a line (the map tooltip, F40). */
+export function poiBlurb(poi: MapPoi): string {
+  switch (poi.kind) {
+    case "Garage":
+      return poi.shop === "Crooked"
+        ? "Crooked garage: no questions asked, dearer labour, informants. Stop inside to visit."
+        : "Garage: repairs (and the career garage at this shop). Stop inside to visit.";
+    case "Safehouse":
+      return "Safehouse: while wanted, wait inside with no police near to lose them.";
+    case "RaceSpot":
+      return "Race meet: stop inside and honk to start the race.";
+    case "PoliceStation":
+      return "Police station.";
+    case "Helipad":
+      return "Police helipad: the helicopter takes off here.";
+    case "RestStop":
+      return "Highway rest stop.";
+    default:
+      return "Race start.";
+  }
 }

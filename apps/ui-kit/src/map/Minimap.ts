@@ -8,7 +8,7 @@
 import type { MapFrame, MapStatic } from "./data";
 import { isWanted, racersToDraw } from "./data";
 import { buildRoadCache, drawHeliTether, drawPoi, drawPlayer, drawRacer, drawSearch, drawSight, drawTool, drawUnit, heliFollows, readPalette, type MapPalette, type RoadCache } from "./draw";
-import { drawFlag, drawMarker, drawRoute, type MapExtras } from "./extras";
+import { drawFlag, drawMarker, drawRoute, GPS_COLOUR, type MapExtras } from "./extras";
 import { angleDelta, clampToCircle, compose, glyphRotation, minimapMatrix, radiusForSpeed, smooth, worldToMinimap, type MinimapView } from "./projection";
 
 /** Minimap options. */
@@ -57,6 +57,8 @@ export class MinimapRenderer {
   options: MinimapOptions;
   /** Host overlay (street racers, a race route); null = none. */
   extras: MapExtras | null = null;
+  /** GPS route `[x, y]` world points (F40); null = none. */
+  gps: [number, number][] | null = null;
 
   constructor(
     readonly canvas: HTMLCanvasElement,
@@ -152,6 +154,9 @@ export class MinimapRenderer {
         if ((sx - R) ** 2 + (sy - R) ** 2 > (inner - s) ** 2) continue;
         drawPoi(ctx, poi.kind, sx, sy, s, pal, poi.shop);
       }
+    }
+    if (p && this.gps && this.gps.length > 1) {
+      drawRoute(ctx, this.gps.map(([x, y]) => worldToMinimap(view, x, y)), 3 * dpr, GPS_COLOUR);
     }
     if (p && ex?.route && ex.route.length > 1) {
       drawRoute(ctx, ex.route.map(([x, y]) => worldToMinimap(view, x, y)), 3 * dpr);

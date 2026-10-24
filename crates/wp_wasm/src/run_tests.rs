@@ -691,3 +691,68 @@ fn a_crooked_shop_sells_an_informant_tip() {
         .iter()
         .any(|o| matches!(o.op, OpKind::SetHeat { .. })));
 }
+
+/// Feature F17: a wreck nobody is chasing that can still move offers tow or limp. Limping
+/// releases the car without a towing charge; a shop then repairs it. (A wreck that cannot move
+/// is towed as before.)
+#[test]
+fn a_wreck_that_moves_offers_tow_or_limp() {
+    let sc =
+        crate::scenario::free_drive_in("debug_sedan", DamageMode::Simulation, procedural_city());
+    let mut s = Session::new(sc, false).unwrap();
+    s.run_ticks(1);
+    let mut offered = false;
+    for speed in [28.0, 34.0, 40.0] {
+        crash(&mut s, speed);
+        s.run_ticks(240);
+        if s.wreck_offer().is_some() || s.run().unwrap().is_over() {
+            offered = s.wreck_offer().is_some();
+            break;
+        }
+        drive_away(&mut s);
+    }
+    if !offered {
+        // Engine dead or a wheel off: towed automatically, as before F17.
+        let r = s.run().unwrap().report().expect("settled");
+        assert!(r.run_over && r.towing > 0, "{r:?}");
+        return;
+    }
+    let offer = s.wreck_offer().unwrap().clone();
+    assert!(offer.tow_fee > 0);
+    assert!(s.held(PLAYER));
+    let cash0 = s.run().unwrap().account().cash;
+    s.wreck_limp().unwrap();
+    assert!(s.limping());
+    assert!(!s.held(PLAYER));
+    assert!(!s.run().unwrap().is_over());
+    assert_eq!(s.run().unwrap().account().cash, cash0, "no towing charge");
+    s.run_ticks(240);
+    assert!(s.wreck_offer().is_none(), "no second offer while limping");
+    // A shop takes it from here.
+    drive_away(&mut s);
+    teleport_into(&mut s, 0, 0.0, 2);
+    let v = s.garage_visit().expect("a visit").clone();
+    assert!(v.quote.is_some() || v.note.is_some(), "{v:?}");
+}
+
+/// Feature F17: "Tow" settles the wreck with the towing charge and ends the run.
+#[test]
+fn towing_a_wreck_ends_the_run_with_the_towing_charge() {
+    let sc =
+        crate::scenario::free_drive_in("debug_sedan", DamageMode::Simulation, procedural_city());
+    let mut s = Session::new(sc, false).unwrap();
+    s.run_ticks(1);
+    for speed in [28.0, 34.0, 40.0] {
+        crash(&mut s, speed);
+        s.run_ticks(240);
+        if s.wreck_offer().is_some() || s.run().unwrap().is_over() {
+            break;
+        }
+        drive_away(&mut s);
+    }
+    if s.wreck_offer().is_some() {
+        s.wreck_tow().unwrap();
+    }
+    let r = s.run().unwrap().report().expect("settled");
+    assert!(r.run_over && r.towing > 0, "{r:?}");
+}

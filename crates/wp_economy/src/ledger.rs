@@ -149,6 +149,25 @@ pub struct OwnedCar {
     /// with new tyres.
     #[serde(default)]
     pub tires: TireState,
+    /// Crash history (feature F19): wrecks and a salvage title. Old saves load with none.
+    #[serde(default, skip_serializing_if = "CarHistory::is_clean")]
+    pub history: CarHistory,
+}
+
+/// A car's crash history (feature F19).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CarHistory {
+    /// Times the car was recorded as a total loss.
+    pub wrecks: u32,
+    /// Rebuilt from a total loss: a salvage title (lower resale, dearer insurance).
+    pub salvage: bool,
+}
+
+impl CarHistory {
+    /// No wrecks and a clean title.
+    pub fn is_clean(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// Condition of a car's four tyres (FL, FR, RL, RR).

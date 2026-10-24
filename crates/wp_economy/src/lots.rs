@@ -459,6 +459,11 @@ impl Economy {
             tune: Default::default(),
             parts: None,
             tires: listing.tires,
+            // A junkyard car comes with a salvage title (feature F19).
+            history: crate::ledger::CarHistory {
+                wrecks: 0,
+                salvage: listing.grade == ListingGrade::Junk,
+            },
         };
         transact(acct, |tx| {
             tx.spend(

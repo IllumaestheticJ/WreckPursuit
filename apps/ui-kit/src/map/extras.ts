@@ -7,6 +7,8 @@
 
 /** Route line colour (gold: not police red / blue, not the scanner green, not a level colour). */
 export const ROUTE_COLOUR = "#ffd23f";
+/** The GPS route the player set from the full map (feature F40): cyan, not the race yellow. */
+export const GPS_COLOUR = "#4fd8ff";
 
 /** A host marker (world position, CSS colour, optional short label drawn inside). */
 export interface MapMarker {
@@ -70,7 +72,7 @@ function inkOn(colour: string): string {
 }
 
 /** A route polyline in screen px (a dark casing under a gold line). */
-export function drawRoute(ctx: Ctx, pts: [number, number][], width: number): void {
+export function drawRoute(ctx: Ctx, pts: [number, number][], width: number, colour: string = ROUTE_COLOUR): void {
   if (pts.length < 2) return;
   ctx.save();
   ctx.lineJoin = "round";
@@ -81,7 +83,7 @@ export function drawRoute(ctx: Ctx, pts: [number, number][], width: number): voi
   ctx.strokeStyle = "rgba(0,0,0,0.75)";
   ctx.lineWidth = width + Math.max(2, width * 0.8);
   ctx.stroke();
-  ctx.strokeStyle = ROUTE_COLOUR;
+  ctx.strokeStyle = colour;
   ctx.lineWidth = width;
   ctx.stroke();
   ctx.restore();

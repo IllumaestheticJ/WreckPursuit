@@ -187,6 +187,10 @@ pub struct CarView {
     pub stats: Option<StatsView>,
     /// Some outstanding damage dates from a police capture (insurance will not pay for it).
     pub damage_before_capture: bool,
+    /// Times the car was a total loss (feature F19).
+    pub wrecks: u32,
+    /// Rebuilt from a total loss: a salvage title (lower value, dearer insurance).
+    pub salvage: bool,
     /// Tyres (FL, FR, RL, RR). Repairs never fix them: replace them on their own.
     pub tires: TireView,
 }
@@ -926,6 +930,8 @@ impl Career {
             impound: self.econ.impound_status(acct, c.uid).ok(),
             stats: self.stats_for(&c.def_id, &c.mods).ok(),
             damage_before_capture: c.damage.sustained_before_capture,
+            wrecks: c.history.wrecks,
+            salvage: c.history.salvage,
             tires: self.tire_view(c),
         }
     }
@@ -1149,6 +1155,7 @@ impl Career {
             tune: Default::default(),
             parts: None,
             tires: l.tires,
+            history: Default::default(),
         };
         let estimate = model.repair_estimate(mode_table, &self.econ.price_table_for(&car));
         let (_, gross) = self.econ.price_lines(

@@ -203,6 +203,20 @@ pub struct GarageOffer {
     pub tip_note: Option<String>,
 }
 
+/// After a wreck nobody is chasing, with the car still able to move: tow it (the towing charge,
+/// the run is over) or limp it to a shop (no towing charge; feature F17). `wreck_offer_json`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct WreckOffer {
+    /// Tick of the wreck.
+    pub tick: u64,
+    /// What a tow costs.
+    pub tow_fee: i64,
+    /// Cash on the account.
+    pub cash: i64,
+    /// A career run (the tow ends it at the career garage).
+    pub career: bool,
+}
+
 /// Ticks between informant tips (5 minutes of sim time): a tip is a nudge, not a heat reset.
 pub const TIP_COOLDOWN_TICKS: u64 = 240 * 300;
 
