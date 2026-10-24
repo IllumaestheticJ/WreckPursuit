@@ -312,6 +312,8 @@ export class SceneView {
         verge: 1,
         lot: 1,
         lot_skirt: 1,
+        // Car parks lie 2 cm over the sidewalk and lot they cover.
+        car_park: 2,
         asphalt: 1,
         highway_concrete: 1,
         gravel_road: 1,

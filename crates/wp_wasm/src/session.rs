@@ -1212,6 +1212,12 @@ impl Session {
         self.street.as_mut().expect("street racers")
     }
 
+    /// Street racers, mutable, beside the sim they read (tests).
+    #[cfg(test)]
+    pub(crate) fn street_and_sim_for_tests(&mut self) -> (&mut StreetRacers, &Sim) {
+        (self.street.as_mut().expect("street racers"), &self.sim)
+    }
+
     /// Tests: put scenario entity `id` at `xy` facing `yaw`, at rest, as a logged `ResetAt`
     /// op (unlike `debug_sim_mut`, recordings and crash replays keep the move).
     #[cfg(test)]
