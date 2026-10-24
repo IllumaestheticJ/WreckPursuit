@@ -444,10 +444,40 @@ pub fn race_pace_in(
                         if opts.trace == Some(k) {
                             let d = ai.field().debug_of(k);
                             eprintln!(
-                                "    WALL t={:.2} s={:.1} n={:.2} ncmd={:.2} imp={:.0} rel={:.1} tgt={:.1} lim={:?}",
+                                "    WALL t={:.2} s={:.1} n={:.2} ncmd={:.2} imp={:.0} rel={:.1} tgt={:.1} lim={:?} bounds {:?} pass {:?}",
                                 (sim.tick().saturating_sub(green)) as f32 * PHYSICS_DT,
-                                d.s, d.n, d.n_cmd, impulse_ns, rel_speed, d.v_target, d.limit
+                                d.s, d.n, d.n_cmd, impulse_ns, rel_speed, d.v_target, d.limit,
+                                ai.field().corridor().bounds(d.s), ai.field().corridor().pass_bounds(d.s)
                             );
+                            if let Some(st) = sim
+                                .vehicles()
+                                .iter()
+                                .find(|x| x.id == racers[k])
+                                .map(|x| x.vehicle.state())
+                            {
+                                for pr in sim.world().static_props() {
+                                    let (dx, dy) = (pr.pos[0] - st.pos[0], pr.pos[1] - st.pos[1]);
+                                    if dx * dx + dy * dy < 15.0 * 15.0 {
+                                        eprintln!(
+                                            "      prop {:?} at ({:.1},{:.1},{:.1}) half {:?}",
+                                            pr.kind,
+                                            pr.pos[0],
+                                            pr.pos[1],
+                                            pr.pos[2],
+                                            pr.half_extents
+                                        );
+                                    }
+                                }
+                                eprintln!(
+                                    "      pos ({:.1},{:.1},{:.2}) ground {:.2}",
+                                    st.pos[0],
+                                    st.pos[1],
+                                    st.pos[2],
+                                    sim.world()
+                                        .map()
+                                        .ground_height([st.pos[0], st.pos[1]], Some(st.pos[2]))
+                                );
+                            }
                         }
                     }
                 }
@@ -795,7 +825,7 @@ fn lab_overrides_from_env() {
         grip_lab::set_override(Some(merged(&grip_lab::GripBalance::shipped(), &j)));
     }
     if let Ok(j) = std::env::var("WP_PACE_RIDE") {
-        ride_lab::set_override(Some(merged(&ride_lab::RideTune::owner(), &j)));
+        ride_lab::set_override(Some(merged(&ride_lab::RideTune::shipped(), &j)));
     }
 }
 

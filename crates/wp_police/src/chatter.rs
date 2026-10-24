@@ -663,7 +663,16 @@ impl PoliceSystem {
                         .find(|r| r.id == tool)
                         .map(|r| r.site)
                 } else {
-                    self.spikes.iter().find(|s| s.id == tool).map(|s| s.site)
+                    self.spikes
+                        .iter()
+                        .find(|s| s.id == tool)
+                        .map(|s| s.site)
+                        .or_else(|| {
+                            self.spike_runs
+                                .iter()
+                                .find(|r| r.strip.id == tool)
+                                .map(|r| r.strip.site)
+                        })
                 };
                 let Some(site) = site else {
                     continue;
@@ -940,10 +949,19 @@ impl PoliceSystem {
                 PoliceEvent::RoadblockPlaced { tool, racer, .. } => {
                     tools.push((true, *tool, *racer))
                 }
+                // Announced at the decision already (row 165: laid later, with its car).
+                PoliceEvent::SpikesPlaced { tool, .. } if self.spikes_announced.contains(tool) => {}
                 PoliceEvent::SpikesPlaced { tool, racer, .. } => tools.push((false, *tool, *racer)),
                 _ => {}
             }
         }
+        for (tool, racer) in std::mem::take(&mut self.spikes_decided) {
+            self.spikes_announced.insert(tool);
+            tools.push((false, tool, racer));
+        }
+        let (laid, runs) = (&self.spikes, &self.spike_runs);
+        self.spikes_announced
+            .retain(|t| laid.iter().any(|s| s.id == *t) || runs.iter().any(|r| r.strip.id == *t));
         self.chatter_tools(&tools);
         self.chatter_impacts(events);
         // Physical units: a contact between a unit lining up a PIT and its target.

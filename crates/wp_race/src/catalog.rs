@@ -915,20 +915,25 @@ pub fn plan_course(world: &World, def: &RaceDef) -> Option<CityRace> {
         CourseSpec::Circuit { polygon } => world.plan_circuit(polygon)?,
     };
     let mut course = course_from_route(&route, CORRIDOR_MARGIN_M);
-    // A street race uses every lane: a checkpoint is passed anywhere inside the legal corridor
-    // (half-width + the rules' 2 m margin), not only across the planned lane's carriageway.
-    // Without this an AI overtaking in the outer lane of Loop 9 misses a gate and is never
-    // credited with the lap. Gates reach `GATE_SLACK_M` past that so a wide line still counts.
-    let span = (2.0 * (course.corridor_half_width_m + GATE_CORRIDOR_MARGIN_M + GATE_SLACK_M))
-        .max(MIN_GATE_WIDTH_M);
-    for g in &mut course.gates {
-        g.width_m = g.width_m.max(span);
-    }
+    widen_street_gates(&mut course);
     // A race's own grid (Ashpeak's single-file touge grids) wins over the street layout;
     // round12's fit then closes it up or lines it up where the road is narrower.
     course.grid_layout = def.grid.or_else(|| street_grid_layout(world, &course, def));
     fit_grid(world, &mut course, def);
     Some(CityRace { route, course })
+}
+
+/// Street-race gates: a checkpoint is passed anywhere inside the legal corridor (half-width +
+/// the rules' 2 m margin), not only across the planned lane's carriageway. Without this an AI
+/// overtaking in the outer lane of Loop 9 misses a gate and is never credited with the lap.
+/// Gates reach [`GATE_SLACK_M`] past that so a wide line still counts, and are at least
+/// [`MIN_GATE_WIDTH_M`] wide.
+pub fn widen_street_gates(course: &mut Course) {
+    let span = (2.0 * (course.corridor_half_width_m + GATE_CORRIDOR_MARGIN_M + GATE_SLACK_M))
+        .max(MIN_GATE_WIDTH_M);
+    for g in &mut course.gates {
+        g.width_m = g.width_m.max(span);
+    }
 }
 
 /// Clearance kept between a grid car's side and the edge of the drivable lanes, m.

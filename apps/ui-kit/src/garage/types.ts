@@ -269,6 +269,12 @@ export interface CareerApi {
   exportSave(): void;
   importSave(text: string): CareerView;
   startRun(kind: RunKind): void;
+  /** Open the street-race picker as a career run (buy-in, purse, bets and rep on the career;
+   * back to the garage after). Optional: hosts without races hide the button (row 167). */
+  races?(): void;
+  /** Open the touge picker as a career run (locked battles and wagers show the rep tier they
+   * need; back to the garage after). Optional like `races`. */
+  touge?(): void;
   /** Open the 3D garage workshop on car `uid` (optional: hosts without one hide the button). */
   workshop?(uid: number): void;
   close(): void;
