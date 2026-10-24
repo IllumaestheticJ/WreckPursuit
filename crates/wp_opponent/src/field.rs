@@ -652,6 +652,9 @@ const CIV_DRIFT_DEADBAND: f32 = 0.025;
 
 /// How far along the corridor a relocated racer is looked for, either way, m.
 const RELOCATE_WINDOW_M: f32 = 1500.0;
+/// On its first look at a point-to-point course, a car this close to the centreline near the
+/// start is taken to be at the start (not at an end that comes back past it), m.
+const START_SNAP_M: f32 = 8.0;
 
 /// A finished racer whose corridor ends at the finish line rolls on this far past it before
 /// pulling over, m, at most this fast, m/s.
@@ -1285,6 +1288,20 @@ impl Field {
                 let first = r.progress.is_nan();
                 let hint = if first { None } else { Some(r.hint) };
                 let cp = corridor.project(pos, hint, 40);
+                // First look on a point-to-point course: a car beside its start is at the start,
+                // even where the course ends right there too (a street racer's Loop 9 lap from
+                // a rest stop back into it: projected onto the end, it had finished before it
+                // moved).
+                let cp = if first && !corridor.closed {
+                    let at_start = corridor.project(pos, Some(0), 40);
+                    if at_start.n.abs() <= START_SNAP_M {
+                        at_start
+                    } else {
+                        cp
+                    }
+                } else {
+                    cp
+                };
                 let t = corridor.samples[cp.index].tangent;
                 let prev_s = r.s;
                 r.pos = pos;
@@ -4565,6 +4582,56 @@ mod tests {
         // Clear of it: pull over.
         let (_, tac) = at(&mut f, 398.0 + FINISH_CLEAR_M + 2.0, 4.0);
         assert_eq!(tac, Tactic::Park);
+    }
+
+    #[test]
+    fn a_car_at_the_start_of_a_course_that_ends_beside_it_has_not_finished() {
+        // A 100 m square driven clockwise from (0, 0) up +y, back along y = -1 to (0, -1): the
+        // end is 1 m from the start (a street racer's Loop 9 lap from a rest stop back into
+        // it). The car stands between the two, nearer the end.
+        let mut pts: Vec<[f32; 2]> = Vec::new();
+        pts.extend((0..=50).map(|i| [0.0, 2.0 * i as f32]));
+        pts.extend((1..=50).map(|i| [2.0 * i as f32, 100.0]));
+        pts.extend((1..=50).map(|i| [100.0, 100.0 - 2.0 * i as f32]));
+        pts.extend((1..=50).map(|i| [100.0 - 2.0 * i as f32, -1.0]));
+        let samples: Vec<CorridorSample> = (0..pts.len())
+            .map(|i| {
+                let (a, b) = if i + 1 < pts.len() {
+                    (pts[i], pts[i + 1])
+                } else {
+                    (pts[i - 1], pts[i])
+                };
+                CorridorSample {
+                    pos: [pts[i][0], pts[i][1], 0.0],
+                    tangent: geom::normalize(geom::sub(b, a)),
+                    left_m: 5.0,
+                    left_pass_m: 5.0,
+                    right_m: 5.0,
+                    junction: false,
+                    surface: wp_contracts::SurfaceType::Asphalt,
+                }
+            })
+            .collect();
+        let corridor = Corridor {
+            length_m: (samples.len() - 1) as f32 * CORRIDOR_STEP_M,
+            samples,
+            closed: false,
+            opposing: OpposingLanes::Never,
+            junction_lanes: Vec::new(),
+        };
+        let spec = RacerSpec {
+            entity: EntityId(1),
+            profile: DriverProfile::default(),
+            capability: cap(),
+        };
+        let mut f = Field::new(corridor, &[spec], RaceConfig::default());
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        let mut car = obs(1, -0.8, 0.0, HandlingEffects::NEUTRAL);
+        car.state.speed_mps = 0.0;
+        car.state.lin_vel = [0.0; 3];
+        f.tick(&world, &[car], &[], &NoPolice);
+        assert_eq!(f.racers[0].status, RacerStatus::Racing);
+        assert!(f.racers[0].progress < 5.0, "{}", f.racers[0].progress);
     }
 
     #[test]
