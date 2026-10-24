@@ -613,7 +613,8 @@ const FLIGHT_LINE_CURVATURE_SWEEPS: u32 = 30;
 /// only when the junction is clear.
 pub const RED_LIGHT_RISK: f32 = 0.35;
 /// Share of its own pace here an out-of-race car (busted, retired, fled) keeps while it rolls
-/// on to a place to stop (clear of bends and junctions), at least 6 m/s.
+/// on to a place to stop (clear of bends and junctions) with a racing car right behind it, at
+/// least 6 m/s (otherwise it rolls at 6 m/s).
 const OUT_OF_RACE_ROLL: f32 = 0.6;
 /// Only drivers below this risk pull over for a unit on their tail (wanted below their flee
 /// level); the rest race on and shove the police out of the way.
@@ -2985,7 +2986,11 @@ fn decide_racer(
                 // the pace here, not a crawl. On a road of bends and hairpins (Hollins) that
                 // spot can be a minute away, and the field stuck behind a car at walking pace
                 // was caught by the police one by one. Pulling over for a unit: 6 m/s.
-                let roll = if out_of_race {
+                // Only while it holds up a car still racing, right behind it.
+                let holding_up = rel.iter().any(|x| {
+                    matches!(x.o.who, Who::Racer(_)) && !x.o.parked && x.ds < 0.0 && x.gap < 30.0
+                });
+                let roll = if out_of_race && holding_up {
                     (OUT_OF_RACE_ROLL * v_line(r.s)).max(6.0)
                 } else {
                     6.0
