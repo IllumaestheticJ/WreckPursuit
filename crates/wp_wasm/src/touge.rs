@@ -173,7 +173,7 @@ impl TougeRun {
         })
     }
 
-    /// The battle (setup, wall line, decision).
+    /// The battle (setup, road corridor, decision).
     pub fn battle(&self) -> &TougeBattle {
         &self.battle
     }
@@ -183,8 +183,8 @@ impl TougeRun {
         self.battle.outcome().is_some()
     }
 
-    /// Before judging a stepped tick: check both cars against the wall line. A car out this
-    /// tick is declared a total loss; returns the `TotalLoss` event to judge (and to buffer).
+    /// Before judging a stepped tick: check whether either car went off the mountain. A car
+    /// out this tick is declared a total loss; returns the `TotalLoss` event to judge (and to buffer).
     pub fn check_walls(&mut self, sim: &mut Sim) -> Vec<SimEvent> {
         let positions: Vec<(EntityId, [f32; 3])> = sim
             .vehicles()
@@ -206,7 +206,7 @@ impl TougeRun {
     }
 
     /// After judging: keep the NPC's damage the tick its race ends, and decide from the judge
-    /// when nobody went through a wall.
+    /// when nobody went off the mountain.
     pub fn after_judge(
         &mut self,
         sim: &Sim,
@@ -389,8 +389,8 @@ pub struct TougeCard {
     pub length_m: f32,
     /// Summit above base, m.
     pub climb_m: f32,
-    /// K-rail stretches (destructible outboard wall over a drop).
-    pub krail_stretches: usize,
+    /// Open drops (no guard rail on the downhill side).
+    pub drop_stretches: usize,
     /// The pass's challenger.
     pub challenger: RacerCard,
     /// The pass's boss.
@@ -429,7 +429,7 @@ pub fn touge_cards() -> Vec<TougeCard> {
                 blurb: m.blurb,
                 length_m: m.length_hint_m,
                 climb_m: spec.climb_m,
-                krail_stretches: spec.krail.len(),
+                drop_stretches: spec.drops.len(),
                 challenger: card(c),
                 boss: card(b),
             }
