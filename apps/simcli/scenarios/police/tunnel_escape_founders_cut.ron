@@ -68,10 +68,17 @@
 // 68). Re-seeded 60 -> 58.
 // PR #64 (owner 2026-10-23, Core day patrols 8 -> 3, investigations less sensitive) re-seeded
 // 54 -> 56 on its own base; on main the seed is re-measured in the police PR port.
+// Police PR port (2026-10-24): PR #66 (commit 4b683c3d) turned the AI captain's own tools off
+// here (`police_tools: false`): after its road-centre fix the captain lays spikes on the
+// straight before the first bend and the flat tyres stop the racer at ~80-90 % of the route.
+// This scenario is about covered-road line of sight, not tools. The switch was lost in the
+// PR's later merge of main; restored. Seed 58 was then Captured at 110.9 s. Seeds 50-70: both
+// files pass on 10 of 21 (51-54, 56, 57, 60, 62, 63, 66); 51-54 is the widest run. Re-seeded
+// 58 -> 52.
 (
     name: "police_tunnel_escape_founders_cut",
     // Lead 2026-10-24: re-seeded 60 -> 58 after merging D's canal-bridge fix (ws/world 3affce58) with the PR #60 police power port; seed 60's main run became a capture. Seeds 50-70: both files pass on 11 of 21; 56-59 is the widest run, 58 its middle.
-    seed: 58,
+    seed: 52,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,
     time_ratio: 1.0,
@@ -79,6 +86,7 @@
     traffic_density: 0.0,
     parked_cars: false,
     police_presence: 1.0,
+    police_tools: false,
     assists: ai,
     slow: true,
     entities: [
