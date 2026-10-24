@@ -597,8 +597,10 @@ pub fn race_pace_in(
                 Tactic::Reverse => 10,
                 _ => match d.limit {
                     SpeedLimit::Obstacle(w) if w >= 1_000_000 => 3,
+                    // Racers read as `100 + grid index` (`Field::debug_of`), not as their
+                    // entity ids.
                     SpeedLimit::Obstacle(w) => {
-                        if racers.iter().any(|r| r.0 == w) {
+                        if (100..100 + k_n as u32).contains(&w) {
                             2
                         } else {
                             4
