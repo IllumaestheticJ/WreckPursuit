@@ -1721,32 +1721,35 @@ wanting to move / units still stuck at the end), both with the `stuck` module: m
 Tests: `unit::tests::junction_corners_become_drivable_arcs`, `gentle_bends_and_u_turns_stay`,
 `wp_world/tests/city_v2.rs::road_network_centrelines_offset_into_the_right_lane`.
 
-Re-aimed on the corrected graph (reasons in each file): `escape_break_contact` seed 604
-(over seeds 600-611 main escapes on 4, this on 3); `response_day_core`
-`call_to_unit_100m_max_s` 15 -> 20 s (main itself 19.0 s on seeds 306-307; here 19.4 s on
-300-307, mean unchanged; **review with the police balance**); `wp_opponent`
-`live_police_chase…` seed 1 (a busted racer stays in its lane; seeds 1-8 failed 4 of 8 on
-main and 3 of 8 with the fix).
+Measured before merging main's world v7 map; not re-measured since.
 
-Moved police exposed three bugs elsewhere, fixed here (outside this workstream's crates):
+Moved police exposed a bug elsewhere, fixed here (outside this workstream's crates):
 - **A busted AI racer blocked the race for good** (`wp_race`, `wp_opponent`). It stopped where
   it was caught; on a one-lane street (pass room ±0.35 m) with its cruiser beside it, nobody
   could pass and Hollins sprint / Lantern checkpoint never finished. `LiveRace` now tows
   busted AI cars `IMPOUND_AFTER_S` (6 s) after the capture (`StepOut::impound`; the wasm race
-  session and the `race_picker` loop despawn them), and busted racers pull over to the kerb
-  clear of junctions first instead of braking where they are.
-- **Browser races paid the wrong stake** (`wp_wasm`, `wp_economy`): the card advertised
-  `wp_race`'s stake but the session charged and paid the economy's unscaled table (buy-in 147
-  vs 553, purse 1377 vs 5031). New `Economy::{enter_race,settle_race,race_payout}_scaled`
-  apply `wp_race::bridge`'s R5 scales. Hidden on main because the test only checked the
-  purse when the player won.
+  session and the `race_picker` loop despawn them; a towed car is never course-reset), and
+  busted racers pull over to the kerb clear of junctions first instead of braking where
+  they are.
 - simcli: new `police_tools: false` scenario switch (the AI captain lays no spikes or
-  roadblocks of its own).
+  roadblocks of its own; exact-spot `spikes_at` / `roadblock_at` orders still work).
 
-More re-aims (reasons in each file): `police_sideswipe_patrol_night` (racer starts at
-x = -44, steers at 12.8 s); `tunnel_escape_founders_cut` + `_control` get `police_tools:
-false` (the captain now finds a spike site on the first straight; these are about tunnel
-line of sight).
+Re-aimed on the corrected graph (reasons and numbers in each file):
+- `police_sideswipe_patrol_night`: racer starts at (-164.9, -190) (unit 2 patrols ~270 m
+  further south); contact 8.70 s as before.
+- `police_tunnel_escape_founders_cut` + `_control`: `police_tools: false` (the captain now
+  finds spike sites on the route; these scenarios are about covered-road line of sight).
+- `day_core_speeder`: seed 106 (one run of 103-107 started at 20.9 s; elsewhere as quick
+  as main or quicker).
+- `response_day_core`: worst call 15 -> 20 s and mean 10 -> 11 s. **Review with the police
+  balance:** 48-run means are level (7.3/8.1/5.4/9.5 s vs main 6.8/7.3/6.0/8.3 s), but 4 of
+  68 calls take over 25 s (main 0 of 71). Main's Core patrols mostly drove to the highway:
+  patrol destinations are drawn per node, and 260 of main's 308 Core nodes were highway
+  sample points (here 32 of 80). Length-weighted destinations would remove the sampling
+  bias either way.
+- `wp_race` `hollins_descent`: `check_with_police` (its stakeout pursuits now catch two of
+  four; captures count, like `hollins_sprint`).
+- `wp_opponent` `live_police_chase…`: seed 1 (its own harness has no tow).
 
 Known gaps: units queue behind traffic jams (correctly) at the soak's 4x density;
-`wp_opponent`'s own test harness has no tow, so `live_police_chase…` keeps its seed.
+`opponent_pace` `lantern_checkpoint_s50` fails identically on main (not this branch's).
