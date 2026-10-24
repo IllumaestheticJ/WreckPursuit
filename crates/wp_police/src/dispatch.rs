@@ -337,6 +337,9 @@ fn call_text(inc: &Incident) -> &'static str {
     }
 }
 
+/// A response spawn candidate: (score, position, heading, one-way road, segment).
+type SpawnCand = (f32, [f32; 2], [f32; 2], bool, crate::graph::SegmentId);
+
 impl PoliceSystem {
     // -----------------------------------------------------------------------------------------
     // Event handlers
@@ -2013,12 +2016,29 @@ impl PoliceSystem {
     }
 
     fn spawn_pool_unit(&mut self, world: &dyn WorldQuery, d: District) -> Option<usize> {
-        let cands: Vec<usize> = (0..self.graph.segments.len())
-            .filter(|&s| {
-                self.graph.segments[s].district == d
-                    && self.graph.segments[s].class != RoadClass::Highway
-            })
-            .collect();
+        // A race with a patrol corridor (Loop 9): on the course's own roads, this district's
+        // part of it first, else anywhere along it. Otherwise off the highways.
+        let on_course = self.race_corridor().map(|c| {
+            let mine: Vec<usize> = c
+                .segments
+                .iter()
+                .map(|s| s.0 as usize)
+                .filter(|&s| self.graph.segments[s].district == d)
+                .collect();
+            if mine.is_empty() {
+                c.segments.iter().map(|s| s.0 as usize).collect()
+            } else {
+                mine
+            }
+        });
+        let cands: Vec<usize> = on_course.unwrap_or_else(|| {
+            (0..self.graph.segments.len())
+                .filter(|&s| {
+                    self.graph.segments[s].district == d
+                        && self.graph.segments[s].class != RoadClass::Highway
+                })
+                .collect()
+        });
         if cands.is_empty() {
             return None;
         }
@@ -2032,8 +2052,10 @@ impl PoliceSystem {
             let mut dir = normalize(sub(b, a));
             let dest = self.random_node_in(Some(d))?;
             // Face the way the first patrol route goes: a physical car turning around from
-            // standstill runs over the kerb and into parked cars.
-            if self.route_from(centre, dir, dest, None).1 {
+            // standstill runs over the kerb and into parked cars. On a race's course roads
+            // (a highway carriageway) a one-way road is only ever driven its own way.
+            let keep_way = s.oneway && self.race_corridor().is_some();
+            if !keep_way && self.route_from(centre, dir, dest, None).1 {
                 dir = scale(dir, -1.0);
             }
             // In the right-hand lane, not on the centreline.
@@ -2119,6 +2141,7 @@ impl PoliceSystem {
     // -----------------------------------------------------------------------------------------
 
     fn maintain_pool(&mut self, world: &dyn WorldQuery) {
+        self.retire_off_corridor(world);
         for d in District::ALL {
             let target = self.cfg.presence.patrols.get(d).get(self.phase);
             let alive = self.pool_count(d);
@@ -2133,6 +2156,27 @@ impl PoliceSystem {
                     self.despawn(i);
                 }
             }
+        }
+    }
+
+    /// With a race patrol corridor: retire one idle pool unit off the course that nobody can
+    /// see (the pool refills it on the course).
+    fn retire_off_corridor(&mut self, world: &dyn WorldQuery) {
+        let Some(c) = self.race_corridor() else {
+            return;
+        };
+        let off = (0..self.units.len()).find(|&i| {
+            let u = &self.units[i];
+            matches!(u.role, UnitRole::Pool(_))
+                && u.available()
+                && !self
+                    .graph
+                    .nearest_on_road(u.body.pos)
+                    .is_some_and(|r| c.has_segment(r.segment))
+                && self.may_vanish(world, i)
+        });
+        if let Some(i) = off {
+            self.despawn(i);
         }
     }
 
@@ -2685,7 +2729,7 @@ impl PoliceSystem {
         let meets = self.racer_meets(target, rv);
         let factor = self.cfg.pursuit.respond_speed_factor;
         let max_m = rs.spawn_max_m + crate::graph::len(rv) * rs.spawn_lead_s;
-        let mut cands: Vec<(f32, [f32; 2], [f32; 2], bool)> = Vec::new();
+        let mut cands: Vec<SpawnCand> = Vec::new();
         for (k, seg) in self.graph.segments.iter().enumerate() {
             let sid = crate::graph::SegmentId(k as u32);
             let a = self.graph.node(seg.a).pos;
@@ -2765,7 +2809,7 @@ impl PoliceSystem {
                         1000.0 + d_road * (1.0 - 0.4 * ahead.max(0.0))
                     }
                 };
-                cands.push((score, pos, dir, seg.oneway));
+                cands.push((score, pos, dir, seg.oneway, sid));
             }
         }
         // Best first; ties by position (deterministic).
@@ -2776,14 +2820,21 @@ impl PoliceSystem {
         });
         // Row 140: never on the far carriageway of the racer's divided road.
         let corridor = self.racer_corridor(racer);
-        cands
-            .into_iter()
-            .find(|(_, pos, dir, oneway)| {
-                !(*oneway && Self::on_far_carriageway(&corridor, *pos, *dir))
-                    && !self.spawn_in_view(world, *pos)
-                    && self.spot_clear(*pos)
-            })
-            .map(|(_, pos, dir, _)| (pos, dir))
+        let fits = |(_, pos, dir, oneway, _): &SpawnCand| {
+            !(*oneway && Self::on_far_carriageway(&corridor, *pos, *dir))
+                && !self.spawn_in_view(world, *pos)
+                && self.spot_clear(*pos)
+        };
+        // A race with a patrol corridor: on the course's roads when any spot there fits.
+        let on_course = self.race_corridor().and_then(|c| {
+            cands
+                .iter()
+                .filter(|x| c.has_segment(x.4))
+                .find(|x| fits(x))
+        });
+        on_course
+            .or_else(|| cands.iter().find(|x| fits(x)))
+            .map(|(_, pos, dir, _, _)| (*pos, *dir))
     }
 
     /// `racer`'s corridor (row 140): its predicted road [`CORRIDOR_AHEAD_M`] ahead and the
@@ -3434,13 +3485,37 @@ impl PoliceSystem {
     ) -> Option<([f32; 2], [f32; 2])> {
         let min_d = self.cfg.presence.reinforcement.spawn_min_distance_m;
         let corridor = self.racer_corridor(racer);
+        // A race with a patrol corridor: its nodes first, anywhere if none fits.
+        let course_nodes = self.race_corridor().map(|c| c.nodes.clone());
+        for nodes in [course_nodes, None] {
+            if let Some(p) = self.reinforcement_node(world, target, min_d, &corridor, nodes) {
+                return Some(p);
+            }
+        }
+        None
+    }
+
+    /// [`Self::reinforcement_spawn_point`] among `nodes` (`None`: every node).
+    fn reinforcement_node(
+        &self,
+        world: &dyn WorldQuery,
+        target: [f32; 2],
+        min_d: f32,
+        corridor: &Corridor,
+        nodes: Option<Vec<NodeId>>,
+    ) -> Option<([f32; 2], [f32; 2])> {
         let mut best: Option<(f32, usize)> = None;
-        for (i, n) in self.graph.nodes.iter().enumerate() {
+        let all: Vec<usize> = match nodes {
+            Some(ns) => ns.iter().map(|n| n.0 as usize).collect(),
+            None => (0..self.graph.nodes.len()).collect(),
+        };
+        for i in all {
+            let n = &self.graph.nodes[i];
             let d = dist(n.pos, target);
             if d < min_d
                 || best.is_some_and(|b| d >= b.0)
                 || self.sees(world, n.pos, target)
-                || self.node_far_side(&corridor, NodeId(i as u32))
+                || self.node_far_side(corridor, NodeId(i as u32))
                 || self.spawn_in_view(world, n.pos)
                 || !self.spot_clear(n.pos)
             {

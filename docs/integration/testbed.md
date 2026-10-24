@@ -1136,8 +1136,8 @@ met), bet on it; several driver levels, the map icon colour shows the level.
   its car's measured `CarCapability`, signals on, opposing lanes for overtaking, no civilian DQ).
   First within 18 m of B wins, by any path (shortcuts are fair). The race is also
   decided by a player wreck or capture (loss), by the racer retiring, fleeing or being busted (win),
-  or by the time limit (route / 8 m/s + 60 s: whoever is further along wins). A win posts 2 × stake
-  (even money). Racers keep a W/L record against the player and can be challenged again 20 s later.
+  or by the time limit (route / 8 m/s + 60 s: whoever is further along wins). A win posts the
+  stake times the challenge's odds (2026-10-24, see "street racer odds" below; was 2 × stake). Racers keep a W/L record against the player and can be challenged again 20 s later.
 - **Replays**: racer inputs are logged (`log_input`) and their moves recorded as `ResetAt` /
   `Ghost` ops, like picker races, so browser playback and crash-replay windows of a street race
   verify with 0 drift (`street_race_replays_without_drift_and_its_crash_window_too`). simcli's
@@ -1170,7 +1170,7 @@ sim per 60 Hz frame with the 7 racers; the street AI (fields, route planning, gu
 of that, the rest is vehicle + lattice physics of 7 more cars (~0.22 ms/car, inside the
 0.15 + 0.25 ms/car budget). `set_street_racers(false)` before a session turns them off.
 `e2e/street.mjs` (headless Chromium; `SHOTS=dir`): roster, minimap, honk → picker → route →
-stake paid → countdown → win at B pays even money → result banner → city map; 15 checks.
+stake paid → countdown → win at B pays the challenge's odds → result banner → city map; 15 checks.
 
 **Requests** (not done here):
 
@@ -1185,6 +1185,31 @@ stake paid → countdown → win at B pays even money → result banner → city
 - SR-3 (opponent, N): a cruise mode in `Field` (posted speed limits, lane keeping instead of the
   racing line). Roaming now relies on a capped capability, so racers cut corners within their
   own carriageway.
+
+## Street racer odds (owner request 2026-10-24: "street racers should scale in reward and difficulty depending on driver level / car they bring")
+
+`crates/wp_wasm/src/street_odds.rs`; wired in `street.rs`. Police behaviour is unchanged.
+
+- **Difficulty.** The level car pools now climb and no longer overlap (class index,
+  `wp_economy::Economy::class_index`): Street `ironside_440` / `kestrel_ts` / `shiro_turbo`
+  (330–460), Pro `lindwurm_4t` / `arashi_t4` / `talus_20t` / `hakone_gt` / `sperber_32` (465–500),
+  Elite `rampart_50` / `lucciola_350` / `kagero_hx` (569–674), Legend `merlo_20t` / `fulmine_v10` /
+  `ostwind_6t` / `ombra_v12` (682–858). Before, Pro/Elite/Legend shared ~500–620 cars
+  (`hakone_gt` was in both Elite and Legend) and Pro had the slowest car of all (`ironside_440`).
+  The level driver profiles are unchanged (skill 0.45 → 0.97). `car_pools_climb_with_the_level`
+  checks the order.
+- **Reward.** Each `Level` has a driver `rating` (Street 1000, Pro 1070, Elite 1140, Legend 1210;
+  the player is 1000). A challenge's racer strength = level rating + 1 point per class-index point
+  their car has over yours (capped ±250). Your win chance is the Elo expectation; a win pays
+  `1 / (p · 1.10)` × stake (stake included), rounded down to 0.05, within 1.2×–8×. Equal cars pay
+  ~1.8× (Street) … ~3.9× (Legend); out-gunning them pays as little as 1.2×, being out-gunned up to
+  8×. Rep = level `win_rep` × (odds / equal-car odds), within 0.5–2×.
+- Odds are priced from the live car definitions (mods included) when the honk opens the challenge
+  and locked at accept. `Offer.odds` (`Matchup`: both class indices + bracket letters, win chance,
+  `odds_milli`, `win_rep`), `RaceView.payout`, `RaceResult.net` = payout − stake. The challenge
+  card shows "Their car A 619 vs yours B 494 · win chance ~33% · pays ×2.75 · +130 rep" and the
+  win line uses the odds.
+- Bet ranges per level are unchanged.
 
 ## Lead helper note (2026-10-22) — shader re-resolve every frame (perf_check)
 `perf_check` "no shader program re-resolve in steady frames" failed with 24 material version

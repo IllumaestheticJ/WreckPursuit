@@ -1,7 +1,7 @@
 //! Betting on picker races (`data/events/betting.toml`): the player backs themselves at odds.
 //! In the browser the stakes go through the one career wallet (`wp_economy` `place_bet`, venue
 //! `City`), the same wallet that takes the roaming street racers' head-to-head stakes (venue
-//! `Street`, even money, `wp_wasm::street`).
+//! `Street`, odds from the racer's level and car, `wp_wasm::street_odds`).
 //!
 //! A [`Market`] prices one race from its entrants' form ratings ([`crate::roster`]):
 //!

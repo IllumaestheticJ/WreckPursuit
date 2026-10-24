@@ -7,7 +7,7 @@
 //! |---|---|
 //! | [`muscle`] | `ironside_440` (70s big-block coupe), `rampart_50` (2010s muscle coupe), `bulwark_400` / `brigand_400` (70s four-door sedans, ironside family) |
 //! | [`hatch`] | `vireo_xs` (90s FF hot hatch), `lindwurm_4t` (2010s AWD hot hatch), `stoat_16v` / `marten_20` (early-90s FF hot hatches, vireo family) |
-//! | [`tuner`] | `kestrel_ts` (rally sedan), `arashi_t4` / `talus_20t` (90s AWD rally saloons, kestrel family), `shiro_turbo` (FR drift coupe), `hakone_gt` (90s GT), `sperber_32` (sport sedan), `debug_coupe` (sport coupe) |
+//! | [`tuner`] | `kestrel_ts` (rally sedan), `arashi_t4` (mid-90s AWD rally saloon, kestrel family), `talus_20t` (late-90s AWD rally saloon, own body + kit), `shiro_turbo` (FR drift coupe), `hakone_gt` (90s GT), `sperber_32` (sport sedan), `debug_coupe` (sport coupe) |
 //! | [`exotic`] | `lucciola_350` (90s mid-engine wedge), `fulmine_v10` (2010s mid-engine supercar) |
 //! | [`supercar`] | `halberd_40`, `ombra_v12`, `kagero_hx` (mid-engine), `ostwind_6t` (rear-engine) |
 //! | [`race`] | `morrigan_55` (GT endurance), `nyx_proto` (sports prototype), `merlo_20t` (touring car) |
