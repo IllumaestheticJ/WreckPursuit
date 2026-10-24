@@ -1442,6 +1442,8 @@ impl PoliceSystem {
                         lane_offset_m: 0.0,
                     };
                 }
+                // Row 165: a spike car driving in to its post keeps its route.
+                Assignment::SpikeAt { .. } if self.spike_car_en_route(self.units[i].id) => {}
                 Assignment::RoadblockAt { .. }
                 | Assignment::SpikeAt { .. }
                 | Assignment::OutOfService => {

@@ -1252,3 +1252,69 @@ detour broke the race). Letting a finisher go round anything standing (worse).
 The times are shorter because the course is 60 m shorter. City sprint, Grid highway, Lantern and
 Loop 9 over seeds 1–8 are identical. Goldens: all 115 unchanged (the race scenario file only holds
 the grid), so there is nothing to bless. Gate clean.
+
+## Candidate G (2026-10-23/24, lead staging on `lead/opponent-pace`)
+
+The owner's new handling (G: yaw inertia ×1.35, softer ride, lateral grip −0–6 %; frozen by
+the physics lead). The retune is in `wp_opponent` / `wp_race` only. This branch also merges
+`lead/round12` 81fa22c0 (D's world v7, E's row 157 heat halving) and `lead/pr-ports` dd8b69c8
+(row 165: spike strips only with their car).
+
+### AI changes for G (`wp_opponent::field`)
+- Steering-lag compensation (`STEER_LAG_S` 0.25 s). Look-ahead stretched 0.3 s over 25 m/s,
+  plus 0.6 s over 35 m/s (split variant: of three look-ahead variants over 32 seeds, it
+  traded fewest walls for time).
+- Edge margins: 0.5 m to the lane edge while driving (`EDGE_MARGIN_M`, was 0.25 m), 0.25 m when
+  parking or yielding (`PARK_EDGE_MARGIN_M`), and 0.25 m while passing (`PASS_EDGE_MARGIN_M`).
+  Without these, the softer car ran wide into the Hollins kerbs (walls 2 → 124 at s50).
+- Civilian drift dead band (0.025 × |v_s|) in `overlaps`: a civilian holding its lane beside
+  me does not hold me up.
+- Finisher roll-on past a course that ends at the line (`FINISH_CLEAR_M` 15 m at 5 m/s), then
+  park. `wp_race` catalogue: Hollins `finish_back_m` 60, so there is no run-off into the
+  rejoin loops.
+- Stranded AI racer put back after 20 s (`RaceJudge::set_stranded_reset`; AI only, never the
+  player) via `Field::relocate`.
+- Pull-over (lead, row 165): a car pulling over (yielding, out of the race) that has not
+  reached the kerb after 8 s stops short of it once clear of junctions and tight bends; after
+  30 s it stops wherever it is. A first cut that stopped it after 8 s anywhere left a racer
+  captured mid-hairpin blocking the whole field on Hollins (`hollins_hill_sprint`).
+- First look at a point-to-point course: a car within 8 m of the start is placed at the start.
+  A street racer's Loop 9 lap from a rest stop back into it had otherwise been projected onto
+  its end and finished before it moved (`wp_wasm`
+  `night_loop_race_meets_at_a_rest_stop`; it passed on the base only because the projection
+  tie went the other way).
+- `wp_race::catalog::widen_street_gates`: gates span the corridor plus margins, so a racer
+  passing wide still clears its gate (`race_vesper`).
+
+### 16 seeds: pre-G (round12 cae4f20f) vs G retuned
+
+| race | skill | pre-G finishers / mean / walls | G finishers / mean / walls |
+|---|---|---|---|
+| Hollins | 0.5 | 64/64, 64.7 s, 2 | 64/64, 64.7 s, 41 |
+| Hollins | 0.75 | 61.3 s, 32 | 61.8 s, 0 |
+| Hollins | 0.95 | 61.2 s, 16 | 59.8 s, 0 |
+| Lantern | 0.5 | 64/64, 75.1 s, 0 | 59/64, 72.7 s, 11 |
+| Lantern | 0.75 | 64/64, 74.2 s | 64/64, 77.2 s |
+| Lantern | 0.95 | 63/64, 74.9 s, 6 | 62/64, 72.0 s, 0 |
+| Loop 9 | 0.5 | 96/96, 240.7 s, 5 | 96/96, 235.7 s, 21 |
+| Loop 9 | 0.95 | 96/96, 228.9 s, 21 | 95/96, 233.2 s, 5 |
+
+The grid races are +0.5 % / +1.8 %, and the city is unchanged. The Loop 9 s95 DNF is world
+geometry (the off-ramp ridge, fixed by D in 9f156be3). On the merged tip, the Loop 9 gate
+(seeds 1–8) gives 48/48 at 247.5 s for s50 and 47/48 at 233.5 s for s95.
+
+### Known gap: Lantern s50 pack queueing
+Lantern s50 loses about 8 s per car queueing behind racers and civilians. This comes from G
+itself (the pass-margin fix recovers part of it). D sees the same pattern on Loop 9 s50 with
+the deck-floor fix (ws/world 3affce58: 42/48 on seed 4, cars following one obstacle at a time
+on the three-lane carriageways). Next: pass planning for packs on top of main once world v7 is
+in. Target: Lantern s50 ≥ 63/64 with no new walls, then weaving v2.
+
+### Re-locks (rule: best ratio ≤ today + 0.05, never under 0.97; times −15 %..+15 %)
+- `pace_lantern_checkpoint_s50` / `_s95`: times and best ratio re-locked for G (values and
+  reasons in the RONs).
+- `pace_hollins_*`: re-locked for the finish move (`finish_back_m`).
+- `pace_loop9_*`: widened to ±40 % (traffic chaos; the seeds 1–8 mean-time gate is the
+  regression check).
+- `sprint_off_route.ron` keyframes 11.2 / 12.6.
+- Goldens: one [bless] commit on the final tip (reasons in its message).

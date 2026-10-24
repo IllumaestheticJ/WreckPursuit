@@ -88,7 +88,10 @@ fn heavy_cars_still_push() {
     );
     let truck = ramp_steer(&car("hauler_1500"), &wheel(), V).understeer_deg_per_g;
     let sport = ramp_steer(&car("shiro_turbo"), &wheel(), V).understeer_deg_per_g;
-    assert!(truck > sport + 0.5, "truck {truck} sport {sport}");
+    // Re-ranged (physics lead, 2026-10-23, candidate G, owner rows physics-4 / physics-5): the
+    // softer anti-roll bars bring the pickup to −0.14 and the sports car to −0.39 deg/g; the
+    // pickup still pushes more, by 0.25 (was > 0.5). Margin 0.2.
+    assert!(truck > sport + 0.2, "truck {truck} sport {sport}");
 }
 
 #[test]

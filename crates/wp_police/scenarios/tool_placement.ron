@@ -1,5 +1,11 @@
 // High wanted level: the AI captain places spikes and roadblocks ahead of the predicted path.
 // Never on a segment with less than 120 m approach sight distance.
+// Spike hits (row 165, 2026-10-23): this racer turns at random at every junction, and a strip
+// is laid only once its car stands beside it (a car that may not appear in view drives in, ~10 s),
+// so by then the racer has almost always left the predicted road: spike hits here are ~0 (main
+// before row 165: strips lay at once, unmanned if need be). No spike-hit expectation on purpose;
+// spikes are measured with a road-keeping racer (wp_police tests/system.rs
+// ai_spikes_hit_a_racer_that_keeps_its_road) and every strip being manned in tests/spikes_manned.rs.
 (
     name: "police_tool_placement",
     seed: 300,

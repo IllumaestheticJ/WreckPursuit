@@ -4,6 +4,9 @@
 // 250 m gate: leaving the route is never a DQ, so wp_race must let it finish behind the pole.
 // The steering keyframes are open loop and tuned to the round-12 handling (lead/main-sync:
 // main's ±0.06 steer overshot with round 12's steering and the cutter never came back).
+// Re-timed for candidate G (2026-10-23: more yaw inertia, the cutter swung 10 m left of the
+// 250 m gate): straighten at 11.2 s, wheel centred at 12.6 s; it crosses the finish within
+// a metre of the route (11.15-11.25 s / 12.6-12.8 s also pass).
 // crates/wp_race/tests/simcli_races.rs judges this run.
 (
     name: "race_sprint_off_route",
@@ -26,8 +29,8 @@
                 (t_s: 3.2, input: (throttle: 1.0)),
                 (t_s: 6.0, input: (throttle: 1.0, steer: 0.03)),
                 (t_s: 8.0, input: (throttle: 1.0, steer: -0.03)),
-                (t_s: 11.3, input: (throttle: 1.0, steer: 0.03)),
-                (t_s: 12.8, input: (throttle: 1.0)),
+                (t_s: 11.2, input: (throttle: 1.0, steer: 0.03)),
+                (t_s: 12.6, input: (throttle: 1.0)),
             ],
         ),
     ],

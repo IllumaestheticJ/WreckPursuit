@@ -62,8 +62,10 @@ fn ride_frequency_and_damping_are_car_like() {
     for id in REFERENCE {
         let o = heave_kick(&car(id), 0.3);
         // Re-ranged (unify, 2026-10-21): the owner-chosen firm ride (springs × 1.5) puts
-        // hakone_gt's heave at 2.30 Hz; limit 2.4.
-        assert!((1.2..=2.4).contains(&o.natural_hz), "{id}: {o:?}");
+        // hakone_gt's heave at 2.30 Hz; limit 2.4. Re-ranged (physics lead, 2026-10-23,
+        // candidate G: springs × 1.04): kestrel_ts heaves at 1.11 Hz, the soft-classic end of
+        // real cars (~1.1, see above); lower limit 1.05 (was 1.2).
+        assert!((1.05..=2.4).contains(&o.natural_hz), "{id}: {o:?}");
         assert!((0.2..=0.6).contains(&o.damping_ratio), "{id}: {o:?}");
     }
 }
