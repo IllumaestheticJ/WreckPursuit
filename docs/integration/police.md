@@ -1801,3 +1801,20 @@ Proposed follow-ups: a cornering-limited intercept speed on hairpins (wp_police)
 - Founders Cut pair re-seeded 60 → 58. Seeds 50–70: escape story on 11 of 21 (was 16), control captured on 20, both on 11. Units no longer stall next to the stopped racer in the lay-by (D's report), so he is caught more often.
 - `pick_harlan_dirt_run.ron` regenerated (`WP_RACE_WRITE_SCENARIOS=1`, wp_wasm): presence 0.5.
 - **Queue cap (lead/round13 lantern_checkpoint):** racer 4 sat behind busted racer 3, parked in the lane, from about 70 s to 300 s with units nearby. The queue exemption kept it Running, so the race never ended. A racer now waits behind another racer for at most `QUEUE_MAX_WAIT_S` (15 s) without moving; after that the normal stop and pinned rules apply. lantern_checkpoint ends at 66 s and passes. (`race_picker::ashpeak_metro_circuit` fails on lead/round13 7538c828 too, with police off: 1 of 6 finish. Not police.)
+
+## Loop 9: daytime dragnet and patrols on the highway (owner request, 2026-10-24)
+
+Owner: "loop 9 daytime should have much heavier police presence, with helicopters, road blocks, etc" and "stop spawning cops off the highway on loop 9 races - not useful to anybody". The earlier rule that police never change per race is overridden for these Loop 9 changes only; the general police AI and radio are unchanged outside races that opt in.
+
+New `RaceProfile` fields (`data/police/races.toml`, all optional, old tables unchanged):
+- `patrol_corridor_m`: while the race runs, pool units appear only on roads of the course's own class within this distance of the course, and on a divided road only on the carriageway running the racing direction (`PatrolCorridor`, built in `start_race`). Their patrol destinations are corridor nodes, so they cruise the course. Responders and reinforcements try corridor spots first and fall back to the normal search. Idle pool units already out off the course retire out of sight (`retire_off_corridor`) and the pool refills them on it. Without the field, patrols are city-wide and never on highways, as before.
+- `helicopters` (count at any time of day), `max_ground_units`, and `[x.unlocks]` (roadblock / spikes / helicopter / pit / boxin / rolling_block level, 1..=5). A tactic switched off in `[x.tactics]` still wins.
+
+Tables:
+- `loop9_circuit` (night): `patrol_corridor_m = 60`. Nothing else changes.
+- `loop9_day` (new, "Daylight dragnet"; its RaceDef comes from the "Trim street races to Loop 9" branch): presence 2.5, backup ×2, cap 36 ground units, two helicopters from L1, captain roadblocks from L2 and spikes from L3, PIT from L1; two route roadblocks with a 3.5 m gap, a 4 m spike strip over the outer half of the road at 55 %, up to three ramp blocks, six shoulder stakeouts, and patrols on the loop.
+- `loop9_ashpeak_highway` (new, "Freeway interceptors"; RaceDef from the same branch): the Loop 9 night style (no tools, PIT and rams, rolling blocks), two stakeouts, patrols on the course.
+
+Tests: `race::tests::loop9_day_is_the_heaviest_police_in_the_picker`, `switched_off_tactic_beats_an_unlock_override`, `every_loop9_race_keeps_its_patrols_on_the_highway`, `loop9_patrols_appear_and_patrol_on_the_course_carriageway` (divided highway with a parallel street and ramps: every patrol is on the eastbound carriageway, facing the racing direction, patrolling to corridor nodes).
+
+Known gaps: there is no `race_picker` run of `loop9_day` yet (its RaceDef is on another branch). Once both are on main, the field's finish rate under the dragnet wants a seed sweep. Tools.toml still caps highway roadblocks from the captain at L3 (`highway_max_level`), so at L4+ the captain only lays spikes on the loop. The scripted route blocks are not affected.
