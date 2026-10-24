@@ -74,7 +74,10 @@ gap to the player — pace is car capability × how much of it the driver dares 
   the corridor has them; a car stuck in a traffic deadlock stays put for minutes). A sim
   vehicle (a police unit, another player) still counts as standing while it shuffles within
   2.5 m of where it stopped below 1 m/s, and a parked one is squeezed past at a crawl with
-  0.2 m clearance (normal clearance by 15 m/s), 0.15 m nearer the road edge. Perception
+  0.2 m clearance (normal clearance by 15 m/s), 0.15 m nearer the road edge; a police unit
+  standing still counts at once, without the parked timer. An out-of-race car (busted,
+  retired, fled) rolling on to a place to stop keeps 60 % of the pace there (≥ 6 m/s) while a
+  racing car is right behind it, else 6 m/s. Perception
   covers the whole road, opposing lanes included. **Junction awareness**: my swept strip
   through the box (my lane band × box length + my car) against each civilian's straight
   course through it; a civilian blocks only if its window in the strip overlaps mine (from
@@ -183,11 +186,11 @@ the procedural grid's highway diverge ramps (a world geometry snag, reported in
 | `brake_error_s` (σ) | 0.15 → 0 s (consistency 0.12→0 + skill 0.03→0) | consistency, skill |
 | `line_noise_m` (σ) | 0.6 → 0.05 m | consistency |
 | `pressure_sensitivity` | 1.5 → 0.2 | consistency |
-| `headway_s` | 0.75 → 0.35 s | aggression |
-| `overtake_margin_m` | 1.2 → 0.6 m extra beside the car passed | aggression |
-| `side_by_side_s` | 1.2 → 4.0 s into a braking zone | aggression |
+| `headway_s` | 0.9 → 0.45 s | aggression |
+| `overtake_margin_m` | 1.6 → 0.9 m extra beside the car passed | aggression |
+| `side_by_side_s` | 0.5 → 3.0 s into a braking zone | aggression |
 | `defends` | aggression ≥ 0.3 | aggression |
-| `overtake_patience_s` | 1.2 → 0.3 s | aggression |
+| `overtake_patience_s` | 2.5 → 0.6 s | aggression |
 | `civilian_margin_m` | 0.6 → 0.35 m (at speed; 0.3 m creeping) | risk |
 | `civilian_headway_s` | 1.0 → 0.5 s | risk |
 | `flee_wanted_level` | 1 → 4 | risk |

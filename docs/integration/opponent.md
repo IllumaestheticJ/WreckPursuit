@@ -380,59 +380,61 @@ per replan (estimated, not measured; replans every `FLIGHT_REPLAN_S` = 6 s).
 
 Owner report: "AI cars are still massive pussies around traffic and the player car"; then
 "make it so AI racers aren't afraid to ram / get aggressive with police" and "aren't afraid
-to [hit] traffic cars as well (but will still try to avoid it)". All in `wp_opponent`; no
-contract change; Arcade and Simulation identical (no `DamageMode` branching).
+to [hit] traffic cars as well (but will still try to avoid it)". All in `wp_opponent`, on top
+of main's traffic-passing rework (lane splitting, box-in escape). No contract change; Arcade
+and Simulation identical (no `DamageMode` branching).
 
-What made them timid (before):
-- **Player / any sliding sim vehicle**: body slip > ~11° flagged a car unstable, and every
-  racer then gave it 1.5 m more lateral room and 1.6× the time gap: a drifting player was a
-  car-and-a-half wide to the AI.
-- **Side constraints**: 0.6 m to any car alongside (+ the civilian margin, up to 1.6 m, beside
-  traffic); arriving fast added up to 1.0 m of lateral margin (0.15 m per m/s of closing).
-- **Following / passing**: time gaps 0.45–0.9 s to racers and the player, 0.9–1.6 s plus a
-  4.5 m minimum gap to civilians; 0.9–1.6 m extra beside a racer being passed; 0.6–2.5 s
-  patience before a pass; 0.5–3 s side by side into a braking zone.
-- **Police**: a wanted racer below its flee level pulled over for any unit within 30 m for 2 s,
-  and police cars got the same margins as anyone.
+What made them timid:
+- **The player / any sliding sim vehicle**: body slip > ~11° flagged a car unstable, and
+  every racer then gave it 1.5 m more lateral room and 1.6× the time gap.
+- **Side constraints**: 0.6 m to any car alongside, plus the civilian margin beside traffic.
+- **Traffic**: civilian margin 0.6–1.0 m, headway 0.9–1.6 s plus a 4.5 m minimum gap,
+  closing-speed extra margin up to 0.5 m (1.0 m for vehicles).
+- **Police**: a wanted racer below its flee level pulled over for any unit within 30 m for 2 s;
+  police cars got the same margins as anyone.
 
 Changes:
-- `DriverProfile::params`: headway 0.6 → 0.25 s, overtake margin 0.9 → 0.35 m, side-by-side
-  1.2 → 4 s, patience 1.2 → 0.3 s (aggression 0 → 1); civilian margin 0.6 → 0.35 m, civilian
-  headway 1.0 → 0.5 s (risk 0 → 1). Junction crossing gap 0.8 × civilian headway (0.4–0.8 s).
-- Side gap to racers / the player / police `SIDE_GAP_M` 0.5 → 0.2 m with aggression; beside
-  civilians the civilian margin + 0.2 m. Closing-speed extra margin 0.08 m per m/s, ≤ 0.4 m
-  (≤ 0.3 m civilians). Civilian minimum gap 4.5 → 3.5 m. Pass margin beside non-racers 0.15 m.
-- Sim vehicles (player, police, physical traffic) count as unstable only past ~19° of slip;
-  unstable cars get 0.8 m and 1.25× the gap.
-- **Bold**: held up by traffic for `overtake_patience_s` + 1.5 s with no clean pass → 0.1 m to
-  any non-racer (lateral margin and side gap): it squeezes past and accepts a rub. It still
+- `DriverProfile::params`: civilian margin 0.6 → 0.35 m, civilian headway 1.0 → 0.5 s
+  (`traffic_risk` 0 → 1). Junction crossing gap 0.8 × civilian headway. Racer-vs-racer
+  numbers (headway, overtake margin, side-by-side, patience) are main's: tightening those
+  sent cars through the touge walls and moved every seed-picked race result.
+- Side gap to racers / the player `SIDE_GAP_M` 0.5 → 0.2 m with aggression; beside civilians
+  the civilian margin + 0.2 m. Closing-speed extra margin 0.08 m per m/s, ≤ 0.3 m civilians /
+  0.4 m vehicles. Civilian minimum gap 4.5 → 3.5 m. Pass margin beside non-racers 0.15 m.
+- Sim vehicles (player, police) count as unstable only past ~19° of slip; unstable cars get
+  0.8 m and 1.25× the gap.
+- **Bold**: held up by traffic for `overtake_patience_s` + 1.5 s with no clean pass → 0.1 m
+  to any non-racer (lateral margin and side gap): it squeezes past and accepts a rub. It still
   plans round traffic and never aims at it.
-- **Police**: units are recognised from `PoliceQuery::police_positions()`. A racer that is not
-  wanted keeps the old careful room around them (0.6 m side gap, 0.3 m pass margin, closing
-  margin up to 1 m): a touch is assaulting an officer and starts a pursuit (with the tighter
-  traffic margins a racer sideswiped a patrol on Hollins and fled). A wanted or fleeing racer gives police cars no room: zero lateral
-  margin, no side constraint, aggression ≥ 0.4 leans into a unit alongside (0.3 m overlap),
-  and a unit in its path is rammed at `RAM_CLOSING_MPS` (4–10 m/s with aggression) above the
-  unit's speed instead of stopped behind. Only drivers with risk < `POLICE_YIELD_RISK` (0.35)
-  still pull over; the rest race on.
+- **Police**: units are recognised from `PoliceQuery::police_positions()`.
+  - A racer that is not wanted keeps the careful room (0.6 m side gap, 0.3 m pass margin,
+    closing margin up to 1 m): a touch is assault and starts a pursuit.
+  - A wanted or fleeing racer gives them none: no lateral margin, no side constraint
+    (aggression ≥ 0.4 leans into a unit alongside, 0.3 m overlap), and it never stops behind
+    one: a unit moving faster than `RAM_MIN_MPS` (3 m/s) is rammed at `RAM_CLOSING_MPS`
+    (4–10 m/s with aggression) above its speed; a standing one is squeezed past, or pushed at
+    `RAM_PUSH_MPS` (3 m/s). (Standing still next to a unit is a capture; hitting a standing
+    one at speed pinned the racer and got it caught 24 m into a flight.)
+  - Only drivers with risk < `POLICE_YIELD_RISK` (0.35) still pull over.
+  - A police unit standing still is squeezed past at once (`parked_non_racer`, 0.2 m at a
+    crawl), not only after main's 8 s parked timer: at a Lantern capture scene a unit beside
+    the captured car shuffled now and then and boxed the next racer in for the race.
+- **Out-of-race cars** (busted, retired, fled) looking for a place to stop roll on at 60 % of
+  the pace there (≥ 6 m/s) while a racing car is right behind them, else 6 m/s as before:
+  on Hollins (bends all the way) a busted car crawled for a minute at 6 m/s with the field
+  behind it, and the police caught them one by one.
 
-Tried and dropped (measured on the 24-seed open-road sweep, see below): letting risk ≥ 0.3
-drivers use the opposing lanes (−4 % progress: aborted passes for oncoming traffic), creeping
-round any standing non-racer, not just parked ones (−9 %: racers nosed in beside cars queuing
-at lights and blocked the queue), and a quicker crawler rule (2 s / 80 %, noise).
-
-Measured: `sweep_open_roads_progress` (now `WP_SWEEP_SEEDS=24`, 4 racers, 25 % traffic,
-90 s): total progress 86.8 → 90.2 km, longest wait 36 → 39 s, zero DQs, zero racer contacts
-≥ 400 N·s in all 24 seeds before and after.
-
-Other checks:
-- Pace lock-in: every scenario in range except Lantern, now much faster (s95 107–163 →
-  73–78 s, s50 87–93 → 74–77 s: racers no longer sit behind civilians turning across the
-  lane); both Lantern files re-locked with the usual rule. Loop 9, Hollins, grid, city in range.
-- `race_picker` Hollins, `WP_RACE_SEED` 1–5: 17 of 20 finish (15 of 20 before).
-- `wp_wasm` `race_crash_replays_with_the_judge_and_no_crash_on_the_grid`: the player now
-  rear-ends a racer that tucked in ahead, not always the parked one; the test accepts any AI
-  racer as the other car.
-- `short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`: the AI-driven player
-  seat can now win the grid sprint; its purse matches the advertised stake through main's
-  stake adjustment (bb2208ed). No change needed here.
+Measured (merged with main 2026-10-24):
+- Open-road sweep, 24 seeds (`WP_SWEEP_SEEDS=24`, 4 racers, 25 % traffic, 90 s, no police):
+  total progress 93.1 → 94.3 km (+1.3 %), longest wait 35 → 34 s, zero DQs and zero racer
+  contacts ≥ 400 N·s before and after.
+- With police the police decide the result (as documented above for main); the default seeds
+  of the picker police tests pass. `wanted_ai_racer_flees_police_through_the_city` moved to
+  seed 4: the flee sweep passes 5 of 8 seeds before and after (main 1, 3, 4, 5, 7; this branch
+  1, 4, 5, 6, 7); on seed 3 a live patrol now catches racer 1 24 m into its flight.
+- Pace lock-in: city sprint s50 `ai_sedan_2` 12.03 s and Lantern s95 `ai_tito` / `player`
+  49.5 / 50.6 s ran under their old minimums; those three rows re-locked (other cars unchanged).
+- `race_crash_replays_with_the_judge_and_no_crash_on_the_grid`: the player now rear-ends a
+  racer that tucked in ahead, not always the parked one; the test accepts any AI racer.
+- Purse: the player seat can now win the grid sprint; main's stake adjustment (bb2208ed) pays
+  the advertised purse, no change needed here.
