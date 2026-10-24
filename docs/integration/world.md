@@ -1570,6 +1570,15 @@ triangles):
 - `data/city/ashpeak.greybox.*`: 25.99 MB glb.
 - `race/pick_harnell_dirt_run.ron`.
 - [bless] ced8ac31: the 8 ashpeak goldens only.
+- 151523cc: `harnell_dirt_run` length hint 3978 → 4295 m. The county's own random stream moves
+  its farm section roads (686 nodes, 682 before). All four cars finish in 292-297 s (window
+  190-380 s), with no contacts.
+
+**Gate (release, `--no-fail-fast`; debug would not fit on this container's disk):**
+- fmt, clippy and wasm are clean.
+- The only failures:
+  - simcli: Founders Cut and the six Port Vesper goldens above (round12's);
+  - `pace_scenarios`: Lantern s50 (G's).
 
 **On lead/round12 7abc46aa, not caused here (vesper_v2's road.bin is byte-identical to
 round12's):**
