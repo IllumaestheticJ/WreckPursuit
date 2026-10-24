@@ -836,6 +836,8 @@ fn a_worn_piston_set_costs_the_car_torque_and_the_engine_stand_round_trips() {
 #[test]
 fn a_car_with_a_torn_off_panel_can_be_quoted_and_repaired() {
     let (mut c, uid) = career_with("kestrel_ts", 40_000, DamageMode::Arcade);
+    // Insured while undamaged: a damaged car cannot be insured.
+    c.insure(uid, "basic").unwrap();
     drive_and_crash(&mut c, 35.0);
     let mut snap = c
         .lattice(uid)
@@ -847,7 +849,6 @@ fn a_car_with_a_torn_off_panel_can_be_quoted_and_repaired() {
     c.profile_mut()
         .lattices
         .insert(uid.0, serde_json::to_string(&snap).unwrap());
-    c.insure(uid, "basic").unwrap();
     c.quote(uid, &ShopRequest::parse("").unwrap()).unwrap();
     c.repair(uid, &ShopRequest::parse("").unwrap()).unwrap();
     assert!(c.profile().account.car(uid).unwrap().damage.is_pristine());
