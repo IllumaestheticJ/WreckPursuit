@@ -1559,6 +1559,14 @@ pub fn props_static() -> Result<Vec<f32>, JsValue> {
     })
 }
 
+/// Parked-car model of every prop, one float each in `props_static()` order: the index into
+/// `session_car_models().parked_models` (cars audit F27: a mix of models, each in a box of
+/// its own size), `-1` for cones and K-rails. Fetch once per session.
+#[wasm_bindgen]
+pub fn prop_models() -> Result<Vec<f32>, JsValue> {
+    get(|s| props::model_list(s.sim()))
+}
+
 /// Props whose pose changed since the last call, 8 floats each:
 /// `[prop index, x, y, z, qx, qy, qz, qw]`. Usually empty: only knocked (or nearby, woken)
 /// props move. Call once per frame after `step()`.

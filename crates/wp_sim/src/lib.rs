@@ -22,9 +22,9 @@ mod weather_link;
 
 pub use contacts::CONTACT_EVENT_MIN_IMPULSE_NS;
 pub use parked::{
-    prop_of_entity, ChassisMap, ParkedStats, ParkedWreck, MAX_PARKED_WRECKS,
-    PARKED_CAR_HALF_EXTENTS, PARKED_CAR_MASS_KG, PARKED_ENTITY_BASE, PROMOTE_CLOSING_MPS,
-    PROMOTE_IMPULSE_NS,
+    parked_model_index, prop_of_entity, sized_prop, ChassisMap, ParkedStats, ParkedWreck,
+    MAX_PARKED_WRECKS, PARKED_CAR_HALF_EXTENTS, PARKED_CAR_MASS_KG, PARKED_ENTITY_BASE,
+    PROMOTE_CLOSING_MPS, PROMOTE_IMPULSE_NS,
 };
 pub use physics::{
     city_ground_colliders, city_sidewalk_colliders, parked_slab_collider, CityColliders,
@@ -415,6 +415,8 @@ impl Sim {
                     self.insert_prop(prop, None);
                     continue;
                 }
+                // Sized to its model (`set_parked_models`) before it is seated.
+                let (prop, _) = &self.parked_prop_for(prop);
                 if let Some(pose) = self.seat_parked_car(prop) {
                     self.insert_prop(prop, Some(pose));
                     let t = pose.translation;
@@ -428,7 +430,8 @@ impl Sim {
             self.world.set_parked_cars(kept);
         } else {
             for prop in &props {
-                self.insert_prop(prop, None);
+                let (prop, _) = self.parked_prop_for(prop);
+                self.insert_prop(&prop, None);
             }
         }
         self.rebuild_police();
@@ -449,6 +452,7 @@ impl Sim {
             half_extents: parked::PARKED_CAR_HALF_EXTENTS,
             mass_kg: parked::PARKED_CAR_MASS_KG,
         };
+        let (prop, _) = self.parked_prop_for(&prop);
         let seated = if self.has_terrain() {
             self.seat_parked_car(&prop)
         } else {
@@ -513,6 +517,9 @@ impl Sim {
             .physics
             .colliders
             .insert_with_parent(col, body, &mut self.physics.bodies);
+        // Model of a parked car (the prop's box was already sized to it, `parked_prop_for`).
+        let (_, model) = self.parked_prop_for(prop);
+        self.parked.prop_models.push(model);
         self.props
             .add(body, ch, prop.pos, prop.kind, prop.half_extents);
         if hilly {

@@ -190,15 +190,54 @@ pub struct ParkedStats {
     pub lattice_ticks: u64,
 }
 
-/// Every promoted parked car and the model new ones use.
+/// Every promoted parked car and the models new ones use.
 #[derive(Clone, Default)]
 pub(crate) struct ParkedDamage {
     /// Promoted cars, ascending prop index.
     pub wrecks: Vec<ParkedWreck>,
-    /// Car model whose lattice parked cars use (`None` = parked cars never dent).
-    pub car: Option<LoadedCar>,
+    /// Car models parked cars are drawn as and dent with (empty = parked cars never dent).
+    pub cars: Vec<LoadedCar>,
+    /// The models size each parked car's box ([`crate::Sim::set_parked_models`], before
+    /// `set_world`); false: the fixed [`PARKED_CAR_HALF_EXTENTS`] box for every model.
+    pub sized: bool,
+    /// Model index (into `cars`) of every prop, `u16::MAX` for non-car props, by prop index.
+    pub prop_models: Vec<u16>,
     /// Counters.
     pub stats: ParkedStats,
+}
+
+/// Model of the `prop`-th prop among `n` parked-car models: a pure function of the prop index
+/// (SplitMix64), so the same city always parks the same cars and renderers can rely on it.
+pub fn parked_model_index(prop: usize, n: usize) -> usize {
+    if n <= 1 {
+        return 0;
+    }
+    let mut z = (prop as u64).wrapping_add(0x9e37_79b9_7f4a_7c15) ^ 0x5041_524b_4544_u64;
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^= z >> 31;
+    (z % n as u64) as usize
+}
+
+/// A parked-car prop resized to a car model: box = the model's `body_size_m`, mass = its
+/// `mass_kg`, still standing on the same ground (box centre raised or lowered by the change in
+/// half height).
+pub fn sized_prop(
+    prop: &wp_world::props::StaticProp,
+    car: &LoadedCar,
+) -> wp_world::props::StaticProp {
+    let [w, l, h] = car.def.body_size_m;
+    let half = [0.5 * w, 0.5 * l, 0.5 * h];
+    wp_world::props::StaticProp {
+        pos: [
+            prop.pos[0],
+            prop.pos[1],
+            prop.pos[2] - prop.half_extents[2] + half[2],
+        ],
+        half_extents: half,
+        mass_kg: car.def.mass_kg,
+        ..*prop
+    }
 }
 
 /// A parked prop that may need damage this tick: its prop index and pre-step body info.
@@ -317,11 +356,61 @@ impl crate::Sim {
         ))
     }
 
-    /// Car model whose lattice dents parked cars (simcli: the traffic car, `debug_sedan`; the
-    /// testbed draws parked cars with the same model). Without one, parked cars are shoved but
-    /// never dent. Set after [`crate::Sim::set_world`], before the first tick.
+    /// Car model whose lattice dents parked cars (the testbed draws parked cars with the same
+    /// model), every parked car keeping the fixed [`PARKED_CAR_HALF_EXTENTS`] box. Without a
+    /// model, parked cars are shoved but never dent. Set after [`crate::Sim::set_world`],
+    /// before the first tick. See [`crate::Sim::set_parked_models`] for a mix of models.
     pub fn set_parked_car(&mut self, car: LoadedCar) {
-        self.parked.car = Some(car);
+        self.parked.cars = vec![car];
+        self.parked.sized = false;
+        for m in &mut self.parked.prop_models {
+            if *m != u16::MAX {
+                *m = 0;
+            }
+        }
+    }
+
+    /// Park a mix of car models (cars audit F27): each parked car of the city gets model
+    /// [`parked_model_index`]`(prop index, cars.len())`, a box of that model's `body_size_m` and
+    /// its mass, and dents with its lattice. Call **before** [`crate::Sim::set_world`] (the boxes
+    /// are made there) and before the first tick. An empty list = parked cars never dent.
+    pub fn set_parked_models(&mut self, cars: Vec<LoadedCar>) {
+        self.parked.sized = !cars.is_empty();
+        self.parked.cars = cars;
+    }
+
+    /// The parked-car models ([`crate::Sim::set_parked_models`] or `set_parked_car`).
+    pub fn parked_models(&self) -> &[LoadedCar] {
+        &self.parked.cars
+    }
+
+    /// Model index (into [`crate::Sim::parked_models`]) of prop `i`; `None` for cones, K-rails
+    /// and when no parked-car model is set.
+    pub fn prop_model(&self, i: usize) -> Option<usize> {
+        if self.parked.cars.is_empty() {
+            return None;
+        }
+        self.parked
+            .prop_models
+            .get(i)
+            .filter(|m| **m != u16::MAX)
+            .map(|m| *m as usize)
+    }
+
+    /// The model prop `i` gets when it is created now: resized prop (when the models size the
+    /// boxes) and its model index.
+    pub(crate) fn parked_prop_for(
+        &self,
+        prop: &wp_world::props::StaticProp,
+    ) -> (wp_world::props::StaticProp, u16) {
+        if prop.kind != wp_world::props::PropKind::ParkedCar {
+            return (*prop, u16::MAX);
+        }
+        let k = parked_model_index(self.props.len(), self.parked.cars.len());
+        match self.parked.cars.get(k) {
+            Some(car) if self.parked.sized => (sized_prop(prop, car), k as u16),
+            _ => (*prop, k as u16),
+        }
     }
 
     /// Promoted (damageable) parked cars, ascending prop index.
@@ -353,7 +442,7 @@ impl crate::Sim {
     /// ones that can be hit; fixed ones have no mover near) and of every wreck whose lattice
     /// is still moving. Ascending prop index.
     pub(crate) fn parked_candidates(&self) -> Vec<Candidate> {
-        if self.parked.car.is_none() {
+        if self.parked.cars.is_empty() {
             return Vec::new();
         }
         let mut out = Vec::new();
@@ -410,7 +499,7 @@ impl crate::Sim {
         vehicles: &[crate::contacts::BodyInfo],
         dt: f32,
     ) {
-        if self.parked.car.is_none() {
+        if self.parked.cars.is_empty() {
             return;
         }
         let mut contacts = Vec::new();
@@ -455,7 +544,8 @@ impl crate::Sim {
                         continue;
                     }
                     let half = self.props.half_extents[c.prop];
-                    let Some(car) = self.parked.car.as_ref() else {
+                    let model = self.prop_model(c.prop).unwrap_or(0);
+                    let Some(car) = self.parked.cars.get(model) else {
                         return;
                     };
                     let mut damage = DamageModel::new(&car.lattice, &car.materials);
@@ -588,6 +678,42 @@ mod tests {
         }
         sim.set_parked_car(car());
         sim
+    }
+
+    #[test]
+    fn a_parked_mix_sizes_each_box_to_its_model() {
+        // Cars audit F27: models set before the cars are created size each box (body_size_m,
+        // mass) by `parked_model_index`; the old single model keeps the fixed box.
+        let models: Vec<LoadedCar> = ["tansy_13", "satchel_20", "debug_sedan"]
+            .iter()
+            .map(|id| wp_contracts::load_car(data(&format!("cars/{id}.json"))).unwrap())
+            .collect();
+        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mut sim = Sim::new(SimConfig {
+            seed: 5,
+            mode,
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 1.0,
+        });
+        sim.set_parked_models(models.clone());
+        let mut seen = [false; 3];
+        for k in 0..12 {
+            let i = sim.add_parked_car([0.0, 20.0 + 7.0 * k as f32, 0.0], 0.0);
+            let m = sim.prop_model(i).unwrap();
+            assert_eq!(m, parked_model_index(i, 3));
+            seen[m] = true;
+            let [w, l, h] = models[m].def.body_size_m;
+            let half = sim.prop_half_extents(i).unwrap();
+            assert_eq!(half, [0.5 * w, 0.5 * l, 0.5 * h], "prop {i}");
+            // Standing on the ground: box centre at half its height.
+            let (pos, _) = sim.prop_pose(i).unwrap();
+            assert!((pos[2] - 0.5 * h).abs() < 0.03, "prop {i}: z {}", pos[2]);
+        }
+        assert!(seen.iter().all(|s| *s), "12 cars use all three models: {seen:?}");
+        // The single-model path keeps the fixed box.
+        let fixed = row("arcade", 2);
+        assert_eq!(fixed.prop_half_extents(0), Some(PARKED_CAR_HALF_EXTENTS));
+        assert_eq!(fixed.prop_model(1), Some(0));
     }
 
     /// Sedan rolling at `speed` m/s from `start` along heading `yaw`, braking after 1 s.

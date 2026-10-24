@@ -65,6 +65,15 @@ pub fn static_list(sim: &Sim) -> Vec<f32> {
     out
 }
 
+/// Parked-car model of every prop, in [`static_list`] order: the index into
+/// `SessionModels::parked_models` (`Sim::prop_model`), `-1` for cones, K-rails and sessions
+/// without a parked-car model. The renderer draws each parked car as its model.
+pub fn model_list(sim: &Sim) -> Vec<f32> {
+    (0..sim.prop_count())
+        .map(|i| sim.prop_model(i).map_or(-1.0, |m| m as f32))
+        .collect()
+}
+
 /// Floats per record in [`wreck_list`].
 pub const WRECK_STRIDE: usize = 12;
 

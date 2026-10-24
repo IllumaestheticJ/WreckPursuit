@@ -248,8 +248,11 @@ pub struct SessionModels {
     /// `CAR_MIX_POLICE`; otherwise empty — one model, [`SessionModels::police`]).
     pub police_models: Vec<String>,
     /// Model parked cars are drawn as and dent with (`Sim::set_parked_car`), when the session
-    /// has parked cars (city kerbs or the scenario's `parked`).
+    /// has parked cars (city kerbs or the scenario's `parked`): the first of `parked_models`.
     pub parked: Option<String>,
+    /// Parked-car models in `prop_models()` index order (`Sim::parked_models`): simcli's
+    /// `PARKED_MIX` on a city with parked cars, else just [`SessionModels::parked`].
+    pub parked_models: Vec<String>,
 }
 
 /// [`SessionModels`] of a scenario (`has_city`: the session loaded a city).
@@ -278,8 +281,17 @@ pub fn session_car_models(sc: &simcli::Scenario, has_city: bool) -> SessionModel
             .cloned()
             .unwrap_or_else(|| simcli::run::POLICE_CAR.to_string())
     });
-    let parked = ((has_city && sc.parked_cars) || !sc.parked.is_empty())
-        .then(|| simcli::run::PARKED_CAR.to_string());
+    let parked_models: Vec<String> = if has_city && sc.parked_cars {
+        simcli::run::PARKED_MIX
+            .iter()
+            .map(|c| c.to_string())
+            .collect()
+    } else if !sc.parked.is_empty() {
+        vec![simcli::run::PARKED_CAR.to_string()]
+    } else {
+        Vec::new()
+    };
+    let parked = parked_models.first().cloned();
     let mut cars: Vec<String> = Vec::new();
     for id in sc
         .entities
@@ -288,7 +300,7 @@ pub fn session_car_models(sc: &simcli::Scenario, has_city: bool) -> SessionModel
         .chain(traffic_models.iter())
         .chain(police.iter())
         .chain(police_models.iter())
-        .chain(parked.iter())
+        .chain(parked_models.iter())
     {
         if !cars.contains(id) {
             cars.push(id.clone());
@@ -301,6 +313,7 @@ pub fn session_car_models(sc: &simcli::Scenario, has_city: bool) -> SessionModel
         traffic_models,
         police_models,
         parked,
+        parked_models,
     }
 }
 
@@ -425,8 +438,10 @@ mod tests {
         assert_eq!(m.police_models, police);
         assert_eq!(m.traffic.as_deref(), Some(traffic[0]));
         assert_eq!(m.police.as_deref(), Some(police[0]));
+        let parked: Vec<&str> = simcli::run::PARKED_MIX.to_vec();
+        assert_eq!(m.parked_models, parked);
         let mut want: Vec<&str> = vec!["debug_sedan"];
-        for id in traffic.iter().chain(police.iter()) {
+        for id in traffic.iter().chain(police.iter()).chain(parked.iter()) {
             if !want.contains(id) {
                 want.push(id);
             }
@@ -436,14 +451,17 @@ mod tests {
         let mut single = sc.clone();
         single.car_mix = false;
         let m = session_car_models(&single, true);
-        assert_eq!(
-            m.cars,
-            vec![
-                "debug_sedan",
-                simcli::run::TRAFFIC_CAR,
-                simcli::run::POLICE_CAR
-            ]
-        );
+        let mut want: Vec<&str> = vec![
+            "debug_sedan",
+            simcli::run::TRAFFIC_CAR,
+            simcli::run::POLICE_CAR,
+        ];
+        for id in simcli::run::PARKED_MIX {
+            if !want.contains(id) {
+                want.push(id);
+            }
+        }
+        assert_eq!(m.cars, want);
         assert_eq!(m.traffic.as_deref(), Some(simcli::run::TRAFFIC_CAR));
         assert_eq!(m.police.as_deref(), Some(simcli::run::POLICE_CAR));
         assert!(m.police_models.is_empty());

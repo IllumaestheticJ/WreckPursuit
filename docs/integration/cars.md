@@ -83,6 +83,33 @@ tracked text file): no true hits left.
 Wolfhound drivetrain lines and the cruiser's engine corrected, maker-house table extended;
 `tools/tuning-dash/presets/mode_hits_to_total_loss.yaml` lists every car.
 
+### Owner-approved features (2026-10-23)
+
+**F26 — car thumbnails + turntable.** `cargo run -p car-assets --bin gen-thumbs` renders every
+car's panel mesh (software rasteriser in `tools/assets/src/thumb.rs`: flat shading, z-buffer,
+2 × 2 supersampling, ground shadow, transparent background) to `data/cars/thumbs/<car>.png`
+(320 × 180, three-quarter front) and `<car>.turn.png` (12 frames of 160 × 90 round the car).
+`car-assets` test `every_car_has_up_to_date_thumbnails` fails when a mesh moved (≤ 0.2 % of
+pixels may differ by > 12 per channel: float noise across platforms). Re-run after
+`gen-car-mesh`. ui-kit `CarThumb` (`src/ui/CarThumb.tsx`, URLs from `src/data/thumbs.ts`)
+shows the still and plays the strip on hover / focus (`prefers-reduced-motion`: still only):
+dealer table and car cards (`CareerGarage`), lot visits, market, garage detail, race lobby;
+the testbed's car-picker stat panel shows the still. ~2.6 MB of PNGs for 39 cars.
+
+**F27 — multi-model parked cars.** `Sim::set_parked_models(cars)` (before `set_world`):
+each parked car gets model `wp_sim::parked_model_index(prop index, n)` (SplitMix64, pure
+function), a box of that model's `body_size_m` (standing on the same ground) and its
+`mass_kg`, and dents with its lattice; `Sim::prop_model(i)`, `Sim::parked_models()`.
+`set_parked_car` (after `set_world`) keeps the old single model in the fixed box. simcli:
+city sessions with `parked_cars` use `PARKED_MIX` (tansy_13, debug_sedan, junkyard_beater,
+vireo_xs, kestrel_ts, stoat_16v, marten_20, furrow_24, satchel_20, tumbril_20: civilian cars
+≤ 4.9 m, the parking table spaces 4.5 m cars ≥ 0.8 m apart); scenario-only `parked` cars keep
+`PARKED_CAR`. wasm: `prop_models()` (per prop, index into `session_car_models().parked_models`,
+−1 for cones / K-rails). Testbed `render/props.ts`: one proxy and one full mid-LOD instance
+set per model, chunks per (model, cell), the nearest `maxFull` cars over all models get full
+meshes. **Goldens moved:** every city scenario with parked cars (box sizes, masses and lattices
+of the parked cars change; collisions with them, parked-damage counters) — not re-blessed.
+
 ### Not done / requests
 
 | To | Item |

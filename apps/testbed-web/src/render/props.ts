@@ -139,7 +139,23 @@ function farCarGeometry(): THREE.BufferGeometry {
 const UNIT_FIT: Fit = { centre: new THREE.Vector3(0, 0, 0), size: new THREE.Vector3(1, 1, 1) };
 
 /** One chunk of parked cars: proxy and box instance sets over the same cars. */
+/** One parked-car model's instanced tiers (proxy and full mid-LOD mesh). */
+interface ParkedModel {
+  /** Car id (null: a box-sized stand-in for older wasm builds without models). */
+  id: string | null;
+  proxyGeo: ReturnType<typeof proxyGeoms>;
+  proxyFit: Fit;
+  /** Full mid-LOD instances, once the mesh has loaded. */
+  full: { car: InstancedCar; fit: Fit } | null;
+  /** Full-mesh slot → prop, for this model. */
+  fullProps: number[];
+  /** Parked cars of this model. */
+  count: number;
+}
+
 interface Chunk {
+  /** Model index (`PropView.models`) every prop of the chunk is drawn as. */
+  model: number;
   props: number[];
   proxy: InstancedCar;
   box: THREE.InstancedMesh;
@@ -241,22 +257,20 @@ export class PropView {
   /** Per prop: chunk index (parked cars) and slot inside it, or cone instance. */
   private chunkOf = new Int32Array(0);
   private slot = new Int32Array(0);
-  /** Per parked car: full-mesh slot, or -1. */
+  /** Per parked car: full-mesh slot (in its model's full set), or -1. */
   private fullSlot = new Int32Array(0);
-  /** Full-mesh slot → prop. */
-  private fullProps: number[] = [];
+  /** Per prop: model index into `models` (parked cars only; cars audit F27, a mix of models). */
+  private modelOf = new Int16Array(0);
+  /** Parked-car models in `session_car_models().parked_models` order. */
+  private models: ParkedModel[] = [];
   private chunks: Chunk[] = [];
   private parkedCount = 0;
   private coneCount = 0;
   private krailCount = 0;
-  private proxyFit: Fit | null = null;
-  private full: { car: InstancedCar; fit: Fit } | null = null;
   private cones: THREE.InstancedMesh | null = null;
   private krails: THREE.InstancedMesh | null = null;
   private farGeo: THREE.BufferGeometry | null = null;
-  private proxyGeo: ReturnType<typeof proxyGeoms> | null = null;
   private mats: FleetMaterials | null = null;
-  private trafficModel: string | null = null;
   private generation = 0;
   private readonly cam = new THREE.Vector3(Infinity, Infinity, Infinity);
   private readonly lastPick = new THREE.Vector3(Infinity, Infinity, Infinity);
@@ -310,12 +324,17 @@ export class PropView {
     this.chunkOf = new Int32Array(n).fill(-1);
     this.slot = new Int32Array(n);
     this.fullSlot = new Int32Array(n).fill(-1);
+    this.modelOf = new Int16Array(n);
+    // Per-prop parked-car model (`prop_models()`, -1 for cones / K-rails); older wasm builds
+    // have one model for every parked car.
+    const ids: (string | null)[] = models.parked_models?.length ? models.parked_models : [models.parked ?? models.traffic ?? null];
+    const propModels = sim.propModels();
     this.pickDist = new Float32Array(n);
     this.pickWant = new Uint8Array(n);
     this.wrecked = new Uint8Array(n);
     this.entityBase = n > 0 ? sim.parkedEntityBase() : 0;
     const byCell = new Map<string, number[]>();
-    let firstCar = -1;
+    const firstOf = new Map<number, number>();
     for (let i = 0, o = 0; i < n; i++, o += PROP_STRIDE) {
       this.kind[i] = list[o + P.kind];
       this.pose.set(list.subarray(o + P.pos, o + P.pos + 7), i * 7);
@@ -329,33 +348,37 @@ export class PropView {
         continue;
       }
       this.parkedCount++;
-      if (firstCar < 0) firstCar = i;
-      const key = `${Math.floor(this.pose[i * 7] / CHUNK_M)},${Math.floor(this.pose[i * 7 + 1] / CHUNK_M)}`;
+      const m = Math.min(Math.max(Math.round(propModels[i] ?? 0), 0), ids.length - 1);
+      this.modelOf[i] = m;
+      if (!firstOf.has(m)) firstOf.set(m, i);
+      const key = `${m}:${Math.floor(this.pose[i * 7] / CHUNK_M)},${Math.floor(this.pose[i * 7 + 1] / CHUNK_M)}`;
       let cell = byCell.get(key);
       if (!cell) byCell.set(key, (cell = []));
       cell.push(i);
     }
     if (this.parkedCount > 0) {
-      const h = this.half.subarray(firstCar * 3, firstCar * 3 + 3);
-      // Parked cars are drawn as the model they dent with (`models.parked`); older wasm
-      // builds only name the traffic model.
-      const parkedModel = models.parked ?? models.traffic;
-      this.trafficModel = parkedModel;
-      const info = parkedModel ? sim.carModelInfo(parkedModel) : boxCarInfo([h[0], h[1], h[2]]);
-      this.proxyGeo = proxyGeoms(info);
-      this.proxyFit = fitOf([this.proxyGeo.paint, this.proxyGeo.detail]);
+      // Each parked car is drawn as the model it dents with (`parked_models`).
       this.farGeo = farCarGeometry();
-      for (const props of byCell.values()) this.addChunk(props, mats);
-      if (parkedModel) {
-        const carId = parkedModel;
+      this.models = ids.map((id, m) => {
+        const first = firstOf.get(m) ?? 0;
+        const h = this.half.subarray(first * 3, first * 3 + 3);
+        const info = id ? sim.carModelInfo(id) : boxCarInfo([h[0], h[1], h[2]]);
+        const proxyGeo = proxyGeoms(info);
+        return { id, proxyGeo, proxyFit: fitOf([proxyGeo.paint, proxyGeo.detail]), full: null, fullProps: [], count: 0 };
+      });
+      for (let i = 0; i < n; i++) if (this.kind[i] === PROP_KIND.parkedCar) this.models[this.modelOf[i]].count++;
+      for (const props of byCell.values()) this.addChunk(props, mats, this.modelOf[props[0]]);
+      this.models.forEach((md, m) => {
+        if (!md.id || md.count === 0) return;
+        const info = sim.carModelInfo(md.id);
         // The mid LOD (render/panels.ts loadCarMidMesh), as the fleet's near cars.
-        const now = carMidMeshNow(carId);
-        if (now) this.setFullMesh(now, info);
+        const now = carMidMeshNow(md.id);
+        if (now) this.setFullMesh(m, now, info);
         else if (now === undefined) {
           const gen = this.generation;
-          void loadCarMidMesh(carId).then((mesh) => mesh && gen === this.generation && this.setFullMesh(mesh, info));
+          void loadCarMidMesh(md.id).then((mesh) => mesh && gen === this.generation && this.setFullMesh(m, mesh, info));
         }
-      }
+      });
     }
     if (this.coneCount > 0) {
       const geo = new THREE.ConeGeometry(1, 1, 8, 1);
@@ -378,14 +401,14 @@ export class PropView {
     this.lastPick.set(Infinity, Infinity, Infinity);
   }
 
-  private addChunk(props: number[], mats: FleetMaterials): void {
+  private addChunk(props: number[], mats: FleetMaterials, model: number): void {
     const c = this.chunks.length;
     // Instances share one geometry set per tier (the same vertex buffers); each chunk's meshes
     // only own their instances. Each mesh still gets its own geometry *object* (`geometryView`):
     // Three keys its vertex-array state by geometry + program, so meshes drawing one geometry
     // object with different instance matrices re-bound every attribute and allocated a new
     // attribute cache on each draw (~15 KB a frame, allocation pass 2026-10-20).
-    const pg = this.proxyGeo!;
+    const pg = this.models[model].proxyGeo;
     const views = { paint: geometryView(pg.paint), detail: geometryView(pg.detail), tail: geometryView(pg.tail), head: geometryView(pg.head), indL: geometryView(pg.indL), indR: geometryView(pg.indR) };
     const proxy = new InstancedCar(views, props.length, mats, null);
     const box = new THREE.InstancedMesh(geometryView(this.farGeo!), mats.paint, props.length);
@@ -404,7 +427,7 @@ export class PropView {
       this.slot[i] = k;
       box.setColorAt(k, this.paint.setHex(styledPaint(parkedPaint(i))));
     });
-    const chunk: Chunk = { props, proxy, box, sphere, near: false, dirty: true };
+    const chunk: Chunk = { model, props, proxy, box, sphere, near: false, dirty: true };
     this.chunks.push(chunk);
     this.showTier(chunk, false);
   }
@@ -415,12 +438,13 @@ export class PropView {
     ch.box.visible = !near;
   }
 
-  private setFullMesh(mesh: Parameters<typeof fullGeoms>[0], info: CarModelInfo): void {
-    if (this.full || !this.mats) return;
+  private setFullMesh(model: number, mesh: Parameters<typeof fullGeoms>[0], info: CarModelInfo): void {
+    const md = this.models[model];
+    if (!md || md.full || !this.mats) return;
     const g = fullGeoms(mesh, info);
-    this.full = { car: new InstancedCar(g, Math.min(this.maxFull, this.parkedCount), this.mats, null), fit: fitOf([g.paint, g.detail]) };
-    this.full.car.count = 0;
-    this.group.add(...this.full.car.meshes);
+    md.full = { car: new InstancedCar(g, Math.min(this.maxFull, md.count), this.mats, null), fit: fitOf([g.paint, g.detail]) };
+    md.full.car.count = 0;
+    this.group.add(...md.full.car.meshes);
     this.lastPick.set(Infinity, Infinity, Infinity); // pick on the next frame
   }
 
@@ -461,25 +485,27 @@ export class PropView {
       return;
     }
     const ch = this.chunks[this.chunkOf[i]];
-    if (!ch || !this.proxyFit) return;
+    const md = this.models[this.modelOf[i]];
+    if (!ch || !md) return;
+    const full = md.full;
     const k = this.slot[i];
     const fs = this.fullSlot[i];
     this.paint.setHex(parkedPaint(i));
     if (this.wrecked[i]) {
       // Drawn by its own dented panel mesh.
-      if (fs >= 0 && this.full) {
-        this.full.car.put(fs, ZERO, this.paint, this.tail, null, false);
-        this.full.car.end();
+      if (fs >= 0 && full) {
+        full.car.put(fs, ZERO, this.paint, this.tail, null, false);
+        full.car.end();
       }
       ch.proxy.put(k, ZERO, this.paint, this.tail, null, false);
       ch.box.setMatrixAt(k, ZERO);
-    } else if (fs >= 0 && this.full) {
-      this.full.car.put(fs, this.carMatrix(i, this.full.fit), this.paint, this.tail, null, false);
-      this.full.car.end();
+    } else if (fs >= 0 && full) {
+      full.car.put(fs, this.carMatrix(i, full.fit), this.paint, this.tail, null, false);
+      full.car.end();
       ch.proxy.put(k, ZERO, this.paint, this.tail, null, false);
       ch.box.setMatrixAt(k, ZERO);
     } else {
-      ch.proxy.put(k, this.carMatrix(i, this.proxyFit), this.paint, this.tail, null, false);
+      ch.proxy.put(k, this.carMatrix(i, md.proxyFit), this.paint, this.tail, null, false);
       ch.box.setMatrixAt(k, this.carMatrix(i, UNIT_FIT));
     }
     // A knocked car may leave its chunk's sphere: grow it (culling must never drop it).
@@ -523,7 +549,7 @@ export class PropView {
       if (near !== ch.near) this.showTier(ch, near);
       if (!near) ch.box.visible = d <= this.drawM;
     }
-    if (this.full && this.cam.distanceTo(this.lastPick) > REPICK_M) this.repick();
+    if (this.models.some((md) => md.full) && this.cam.distanceTo(this.lastPick) > REPICK_M) this.repick();
     this.flush();
     const ms = performance.now() - t0;
     this.updates++;
@@ -624,8 +650,7 @@ export class PropView {
 
   /** Re-pick the nearest parked cars for the full mesh; rewrite only the ones that change drawer. */
   private repick(): void {
-    const full = this.full;
-    if (!full) return;
+    if (!this.models.some((md) => md.full)) return;
     this.lastPick.copy(this.cam);
     this.repicks++;
     // Candidates within the full-mesh distance, nearest first (scratch arrays, no garbage).
@@ -637,32 +662,40 @@ export class PropView {
     if (near.length > this.maxFull) near.length = this.maxFull;
     const want = this.pickWant;
     for (const i of near) want[i] = 1;
-    // Release full slots no longer wanted (swap-remove keeps the slots dense).
-    for (let s = this.fullProps.length - 1; s >= 0; s--) {
-      const i = this.fullProps[s];
-      if (want[i]) continue;
-      const last = this.fullProps.pop()!;
-      this.fullSlot[i] = -1;
-      if (last !== i) {
-        this.fullProps[s] = last;
-        this.fullSlot[last] = s;
-        this.writeInstance(last);
+    // Release full slots no longer wanted (swap-remove keeps each model's slots dense).
+    for (const md of this.models) {
+      const fp = md.fullProps;
+      for (let s = fp.length - 1; s >= 0; s--) {
+        const i = fp[s];
+        if (want[i]) continue;
+        const last = fp.pop()!;
+        this.fullSlot[i] = -1;
+        if (last !== i) {
+          fp[s] = last;
+          this.fullSlot[last] = s;
+          this.writeInstance(last);
+          this.repickWrites++;
+        }
+        this.writeInstance(i); // back to its chunk
         this.repickWrites++;
       }
-      this.writeInstance(i); // back to its chunk
-      this.repickWrites++;
     }
     for (const i of near) {
       want[i] = 0;
       if (this.fullSlot[i] >= 0) continue;
-      this.fullSlot[i] = this.fullProps.length;
-      this.fullProps.push(i);
-      full.car.count = this.fullProps.length;
+      const md = this.models[this.modelOf[i]];
+      if (!md?.full) continue; // its mesh has not loaded yet: stays on the proxy
+      this.fullSlot[i] = md.fullProps.length;
+      md.fullProps.push(i);
+      md.full.car.count = md.fullProps.length;
       this.writeInstance(i);
       this.repickWrites++;
     }
-    full.car.count = this.fullProps.length;
-    full.car.end();
+    for (const md of this.models) {
+      if (!md.full) continue;
+      md.full.car.count = md.fullProps.length;
+      md.full.car.end();
+    }
   }
 
   private distTo(i: number): number {
@@ -684,10 +717,11 @@ export class PropView {
     if (i < 0 || i >= this.n) return null;
     if (this.kind[i] === PROP_KIND.cone) return this.cones ? { mesh: this.cones, slot: this.slot[i], fit: null } : null;
     if (this.kind[i] === PROP_KIND.krail) return this.krails ? { mesh: this.krails, slot: this.slot[i], fit: null } : null;
-    if (this.fullSlot[i] >= 0 && this.full) return { mesh: this.full.car.paint, slot: this.fullSlot[i], fit: this.full.fit };
+    const md = this.models[this.modelOf[i]];
+    if (this.fullSlot[i] >= 0 && md?.full) return { mesh: md.full.car.paint, slot: this.fullSlot[i], fit: md.full.fit };
     const ch = this.chunks[this.chunkOf[i]];
-    if (!ch) return null;
-    return ch.near ? { mesh: ch.proxy.paint, slot: this.slot[i], fit: this.proxyFit } : { mesh: ch.box, slot: this.slot[i], fit: UNIT_FIT };
+    if (!ch || !md) return null;
+    return ch.near ? { mesh: ch.proxy.paint, slot: this.slot[i], fit: md.proxyFit } : { mesh: ch.box, slot: this.slot[i], fit: UNIT_FIT };
   }
 
   /**
@@ -749,7 +783,7 @@ export class PropView {
       cones: this.coneCount,
       chunks: this.chunks.length,
       // A dented car keeps its full slot until the next re-pick, but its own mesh draws it.
-      drawnFull: this.fullProps.reduce((n, i) => n + (this.wrecked[i] ? 0 : 1), 0),
+      drawnFull: this.models.reduce((sum, md) => sum + md.fullProps.reduce((n, i) => n + (this.wrecked[i] ? 0 : 1), 0), 0),
       drawnProxy,
       drawnBox,
       drawnCones: this.cones?.count ?? 0,
@@ -771,9 +805,20 @@ export class PropView {
     };
   }
 
-  /** The traffic model parked cars are drawn as (null: a box-sized stand-in). */
+  /** The first model parked cars are drawn as (null: a box-sized stand-in). */
   get model(): string | null {
-    return this.trafficModel;
+    return this.models[0]?.id ?? null;
+  }
+
+  /** Every parked-car model of the session, in `prop_models()` order (automation). */
+  get parkedModels(): (string | null)[] {
+    return this.models.map((md) => md.id);
+  }
+
+  /** Model id prop `i` is drawn as (null: not a parked car or a box stand-in). */
+  modelOfProp(i: number): string | null {
+    if (i < 0 || i >= this.n || this.kind[i] !== PROP_KIND.parkedCar) return null;
+    return this.models[this.modelOf[i]]?.id ?? null;
   }
 
   /** The dented parked car of prop `i` (automation): its entity, whether its panel mesh draws
@@ -800,13 +845,14 @@ export class PropView {
         mesh.geometry.dispose();
       }
     this.chunks = [];
-    if (this.proxyGeo) for (const g of [this.proxyGeo.paint, this.proxyGeo.detail, this.proxyGeo.tail, this.proxyGeo.head, this.proxyGeo.indL, this.proxyGeo.indR]) g.dispose();
-    this.proxyGeo = null;
+    for (const md of this.models) {
+      const pg = md.proxyGeo;
+      for (const g of [pg.paint, pg.detail, pg.tail, pg.head, pg.indL, pg.indR]) g.dispose();
+      md.full?.car.dispose();
+    }
+    this.models = [];
     this.farGeo?.dispose();
     this.farGeo = null;
-    this.proxyFit = null;
-    this.full?.car.dispose();
-    this.full = null;
     if (this.cones) {
       this.cones.removeFromParent();
       this.cones.geometry.dispose();
@@ -821,8 +867,7 @@ export class PropView {
     this.parkedCount = 0;
     this.coneCount = 0;
     this.krailCount = 0;
-    this.fullProps = [];
-    this.trafficModel = null;
+
     this.repicks = 0;
     this.movedWrites = 0;
     this.repickWrites = 0;

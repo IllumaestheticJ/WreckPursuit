@@ -54,6 +54,8 @@ export interface SessionModels {
   police_models?: string[];
   /** Model parked cars are drawn as and dent with (null / absent: none parked). */
   parked?: string | null;
+  /** Parked-car models in `propModels()` index order (absent on older wasm builds: `parked`). */
+  parked_models?: string[];
 }
 
 /** car_model_info(car_id) JSON. */
@@ -436,6 +438,9 @@ export const sim = {
   policeDraw: (): Float32Array => wasm.police_draw(),
   /** Every city prop once per session (layout.ts PROP_STRIDE / P): kind, box-centre pose, half extents. */
   propsStatic: (): Float32Array => wasm.props_static(),
+  /** Parked-car model of every prop in propsStatic() order (index into `parked_models`, -1 for
+   * cones / K-rails); empty with an older wasm. */
+  propModels: (): Float32Array => (wasm as { prop_models?: () => Float32Array }).prop_models?.() ?? new Float32Array(0),
   /** Props whose pose changed since the last call (layout.ts PROP_MOVED_STRIDE / PM). Once per frame. */
   propsMoved: (): Float32Array => wasm.props_moved(),
   /** The sim's pose of one prop `[x, y, z, qx, qy, qz, qw]` (automation). */

@@ -187,6 +187,28 @@ pub const TRAFFIC_CAR: &str = "tansy_13";
 /// (`wp_wasm::lod::SessionModels::parked`).
 pub const PARKED_CAR: &str = "debug_sedan";
 
+/// Models of a city's kerbside and driveway parked cars (cars audit F27): civilian cars up to
+/// 4.9 m long (the parking table spaces 4.5 m cars at least 0.8 m apart). Each parked car gets
+/// `wp_sim::parked_model_index(prop index, len)`, a box of that model's size and mass, and its
+/// lattice (`Sim::set_parked_models`).
+pub const PARKED_MIX: &[&str] = &[
+    "tansy_13",
+    "debug_sedan",
+    "junkyard_beater",
+    "vireo_xs",
+    "kestrel_ts",
+    "stoat_16v",
+    "marten_20",
+    "furrow_24",
+    "satchel_20",
+    "tumbril_20",
+];
+
+/// Load the parked-car models ([`PARKED_MIX`]).
+pub fn parked_mix(data: &dyn DataSource) -> Result<Vec<wp_contracts::LoadedCar>, RunError> {
+    PARKED_MIX.iter().map(|id| load_car(data, id)).collect()
+}
+
 /// `car_mix` police fleet: `(car, min level, max level, measured limits)`. Limits are
 /// `[skidpad g, 100-0 m, 0-100 s, vmax km/h]` from `data/cars/VALIDATION.md` (sim-measured,
 /// `tools/specsheet/collect_results.py`); `None` = `pursuit.toml`'s defaults (the cruiser's).
@@ -409,6 +431,10 @@ pub fn build_sim(
             // starting heat) are installed after it. Police cars are real vehicles (lead run 5);
             // `police_cars: false` keeps heat and wanted levels with no patrols.
             world.set_covered_los(sc.covered_los);
+            // The parked-car mix sizes each parked car's box, so it goes in before the world.
+            if sc.parked_cars {
+                sim.set_parked_models(parked_mix(data)?);
+            }
             sim.set_world(world);
             if sc.police_cars {
                 sim.set_police(police_for_city(sc, sim.world(), &ids));
@@ -434,11 +460,12 @@ pub fn build_sim(
         }
         None => false,
     };
-    // Parked cars dent with the traffic car's lattice (the testbed draws them with its mesh).
+    // Scenario-placed parked cars join the city's mix; without one they are all PARKED_CAR in
+    // the fixed parked box (the testbed draws them with its mesh).
     for p in &sc.parked {
         sim.add_parked_car(p.pos, p.yaw);
     }
-    if sim.prop_count() > 0 {
+    if sim.prop_count() > 0 && sim.parked_models().is_empty() {
         sim.set_parked_car(load_car(data, PARKED_CAR)?);
     }
     // Weather after the city (the wetness grid covers its road network).
