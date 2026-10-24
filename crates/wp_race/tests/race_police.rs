@@ -350,9 +350,9 @@ fn city_sprint_pulls_in_police() {
         .signals
         .iter()
         .any(|s| matches!(s, RaceSignal::PatrolAttracted { .. })));
-    // (Entrants start at 6.0 heat, see the scenario header.)
+    // (Entrants start at 8.25 heat, see the scenario header.)
     assert!(
-        r.heat_after_report.iter().all(|h| *h > 6.0),
+        r.heat_after_report.iter().all(|h| *h > 8.25),
         "{:?}",
         r.heat_after_report
     );

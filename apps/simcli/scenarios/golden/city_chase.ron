@@ -7,6 +7,10 @@
 // start within 20 s. Re-aimed 2026-10-23 (was a start on the x = 275 street behind a patrol
 // that no longer exists, heat 15): starts from x = -270 to x = -210 pursue within 20 s with
 // heat 25 (none with 15: the heat decays below L1 first); x = -240 is the middle of that band.
+// Re-aimed for the police PR port (2026-10-24: PR #66 put road network centrelines on the
+// road centre, so the graph and the patrol's start moved): the night's only patrol now
+// starts at (276.8, 131) heading north. The racer starts 130 m behind it on that street
+// (276.8, 0) heading north; starts from y = -120 to y = 120 all pursue within 20 s.
 // If police spawning changes, re-aim with `examples/probe_police.rs`.
 (
     name: "golden_city_chase",
@@ -23,8 +27,8 @@
         (
             id: "racer",
             car: "debug_coupe",
-            pos: (-240.0, 273.2, 0.0),
-            yaw: -1.5708,
+            pos: (276.8, 0.0, 0.0),
+            yaw: 0.0,
             speed_mps: 16.5,
             police_heat: 25.0,
             driver: cruise(target_mps: 16.5),

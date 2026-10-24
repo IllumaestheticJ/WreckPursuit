@@ -146,7 +146,10 @@ fn phase_change_adjusts_presence() {
     h.run(1.0, &[]);
     assert_eq!(h.police.pool_count(District::Core), 3);
     // No racers to hide from: surplus units retire one per think step.
-    h.run(20.0, &[]);
+    // A unit retires only out of the racer's sight: with PR #64's 3 Core units (was 8) on
+    // main's sight rules all three were in view of the racer until 20-30 s (retired by 30 s,
+    // still dusk: 18:24).
+    h.run(30.0, &[]);
     assert_eq!(h.police.phase(), wp_contracts::DayPhase::Dusk);
     assert_eq!(h.police.pool_count(District::Core), 2);
 }
