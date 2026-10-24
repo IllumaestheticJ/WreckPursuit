@@ -184,7 +184,13 @@ async function main(): Promise<void> {
   const map = new MapOverlay(overlay);
   // Street racers (wp_wasm::street; src/ui/street.ts): their dots, the route and the challenge
   // picker live in the city map above; the hint, race panel, countdown and result here.
-  const street = new StreetUi(overlay, map.hud, () => !!touch?.visible);
+  const street = new StreetUi(
+    overlay,
+    map.hud,
+    () => !!touch?.visible,
+    // Row 169: with the career box ticked, bets must land in the career.
+    () => ($("career") as HTMLInputElement).checked,
+  );
   const layout = new HudLayout();
   // Game menu (built below, once everything it drives exists) and its current settings.
   let menu: ReturnType<typeof mountGameMenu> | null = null;
