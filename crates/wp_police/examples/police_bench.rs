@@ -20,6 +20,8 @@ fn main() {
         total_loss_at_s: None,
         hit_unit_at_s: None,
         hit_kmh: 30.0,
+        tap_at_s: None,
+        hide_at_s: None,
     };
     let sc = PoliceScenario {
         name: "bench".into(),
@@ -33,6 +35,7 @@ fn main() {
         stop_after_first_pursuit: false,
         racers: vec![racer(80.0), racer(60.0), racer(40.0), racer(0.0)],
         expect: vec![],
+        listeners: vec![],
     };
     // Baseline: same scenario cost minus police is dominated by police (scripted racers are
     // cheap); report total time per frame as an upper bound for police.

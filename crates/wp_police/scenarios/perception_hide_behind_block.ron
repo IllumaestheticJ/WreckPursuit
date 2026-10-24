@@ -1,0 +1,17 @@
+// Perception: a wanted racer (L1), once the police have lost it (from 20 s in), pulls off the
+// road between the buildings of a block, out of sight of the road it left, and parks. Searching units drive the roads around its last known position. Before 2026-10-23
+// a single 0.1 s glimpse from 380 m through a gap re-acquired it and restarted the escape timer;
+// now a unit has to keep it in sight long enough to identify it (>= 0.25 s close, ~2 s at
+// 250 m) from within the identify range.
+(
+    name: "police_perception_hide_behind_block",
+    seed: 940,
+    time_of_day_h: 12.0,
+    duration_s: 150.0,
+    runs: 4,
+    racers: [(district: Core, speed_factor: 2.0, initial_heat: 15.0, violations: false, hide_at_s: Some(20.0))],
+    expect: [
+        (metric: "hid", min: 1, max: 4),
+        (metric: "escapes", min: 1, max: 4),
+    ],
+)

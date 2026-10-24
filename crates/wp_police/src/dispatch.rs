@@ -15,7 +15,6 @@ use crate::events::{
 };
 use crate::graph::{
     add, dist, dot, len, lerp2, normalize, perp_left, scale, sub, xy, District, NodeId, PoiKind,
-    RoadClass,
 };
 use crate::heat::{PursuitStatus, WantedLevel};
 use crate::time::SimTime;
@@ -153,6 +152,9 @@ const STATIC_EPISODE_S: f32 = 1.0;
 
 /// Spots tried per pool spawn before giving up until the next think step.
 const SPAWN_TRIES: usize = 8;
+
+/// Height of a traffic camera above the road, m.
+const CAMERA_POLE_M: f32 = 4.0;
 
 /// Ambushing reinforcements wait at least this far (in the racer's travel time) ahead of it, s.
 const AMBUSH_MIN_LEAD_S: f32 = 6.0;
@@ -322,13 +324,16 @@ impl PoliceSystem {
     pub(crate) fn clock_speeders(&mut self, world: &dyn WorldQuery, tdt: f32) {
         let radar = self.cfg.heat.heat.radar.clone();
         let speeding = crate::heat::violation_index(&ViolationKind::Speeding { over_mps: 0.0 });
-        let mut clocked: Vec<(EntityId, f32, [f32; 2])> = Vec::new();
+        let mut clocked: Vec<(EntityId, f32, [f32; 2], UnitId)> = Vec::new();
         let ids: Vec<EntityId> = self.racers.keys().copied().collect();
         for id in ids {
             let r = &self.racers[&id];
-            let watched = r.level == WantedLevel::None
-                && !self.held.contains(&id)
-                && self.obs.get(&id).is_some_and(|o| o.witness.is_some());
+            let radar_unit = if r.level == WantedLevel::None && !self.held.contains(&id) {
+                self.radar_unit(world, id)
+            } else {
+                None
+            };
+            let watched = radar_unit.is_some();
             // The higher of the world's limit (lane under the car; at a junction that can be
             // the slower cross street) and the police road graph's nearest road. Off the lanes
             // (over the kerb, on parking) the world has none: the road's, within half a street.
@@ -352,15 +357,97 @@ impl PoliceSystem {
             let due =
                 r.last_violation[speeding].is_none_or(|t| self.now.since(t) >= radar.repeat_s);
             if *held >= radar.hold_s && due {
-                if let Some((o, _)) = over {
-                    clocked.push((id, o, xy(r.pos)));
+                if let (Some((o, _)), Some(u)) = (over, radar_unit) {
+                    clocked.push((id, o, xy(r.pos), u));
                 }
             }
         }
-        for (racer, over_mps, at) in clocked {
+        for (racer, over_mps, at, unit) in clocked {
             self.stats.radar_clocks += 1;
-            self.on_violation(world, racer, &ViolationKind::Speeding { over_mps }, at);
+            self.violation_seen_by(
+                world,
+                racer,
+                &ViolationKind::Speeding { over_mps },
+                at,
+                Some(unit),
+            );
         }
+    }
+
+    /// The closest unit whose radar has `racer` in its beam (2026-10-23): an in-service ground
+    /// unit on patrol or idle (not busy with a call, a pursuit or a tool), with line of sight,
+    /// within `radar.range_m`, and within `radar.beam_deg` of straight ahead or straight behind
+    /// it.
+    fn radar_unit(&self, world: &dyn WorldQuery, racer: EntityId) -> Option<UnitId> {
+        let radar = &self.cfg.heat.heat.radar;
+        let range = radar.range_m.get(self.phase);
+        let cos_beam = wp_math::sin_cos(radar.beam_deg.to_radians()).1;
+        let r = self.racers.get(&racer)?;
+        let (rp, rz) = (xy(r.pos), r.pos[2]);
+        let mut best: Option<(f32, UnitId)> = None;
+        for u in &self.units {
+            if u.kind != UnitKind::Car
+                || u.wrecked
+                || u.player.is_some()
+                || self.booking(u.id)
+                || !matches!(u.assignment, Assignment::Patrol { .. } | Assignment::Idle)
+            {
+                continue;
+            }
+            let d = dist(u.body.pos, rp);
+            if d > range || d < 1.0 || best.is_some_and(|b| d >= b.0) {
+                continue;
+            }
+            let along = dot(u.body.heading, sub(rp, u.body.pos)) / d;
+            if along.abs() < cos_beam {
+                continue;
+            }
+            if self.sees_at(world, u.body.pos, u.body.alt_m, rp, rz) {
+                best = Some((d, u.id));
+            }
+        }
+        best.map(|b| b.1)
+    }
+
+    /// Whether a player racer is within `presence.npc_scope_m` of `p` (always, when the sim
+    /// has not said who the players are).
+    pub(crate) fn player_near(&self, p: [f32; 2]) -> bool {
+        let Some(players) = self.player_racers.as_ref() else {
+            return true;
+        };
+        let scope = self.cfg.presence.npc_scope_m;
+        self.racers
+            .values()
+            .filter(|r| players.contains(&r.entity))
+            .any(|r| dist(xy(r.pos), p) <= scope)
+    }
+
+    /// Whether a violation no unit saw is worth a call (2026-10-23): speeding well over the
+    /// limit, a collision with the racer moving, any red light, wrong way or reckless driving.
+    fn call_worthy(&self, kind: &ViolationKind, racer_speed: f32) -> bool {
+        let rs = &self.cfg.presence.response;
+        match kind {
+            ViolationKind::Speeding { over_mps } => *over_mps >= rs.call_min_over_mps,
+            ViolationKind::Collision => racer_speed >= rs.call_min_collision_mps,
+            ViolationKind::RedLight | ViolationKind::WrongWay | ViolationKind::Reckless => true,
+        }
+    }
+
+    /// Whether someone could have called a violation at `at` in: a civilian vehicle within
+    /// `response.call_witness_m`. A world that reports no traffic to the police (headless
+    /// runs) always has a caller.
+    fn civilian_caller_near(&self, at: [f32; 2]) -> bool {
+        if !self.ext_obstacles_set {
+            return true;
+        }
+        let r = self.cfg.presence.response.call_witness_m;
+        self.ext_obstacles.iter().any(|o| {
+            let police = o
+                .entity
+                .is_some_and(|e| self.units.iter().any(|u| u.entity == Some(e)));
+            let racer = o.entity.is_some_and(|e| self.racers.contains_key(&e));
+            !police && !racer && dist(o.pos, at) <= r
+        })
     }
 
     /// A traffic violation by `racer` at world position `at` (from `SimEvent::TrafficViolation`).
@@ -371,19 +458,47 @@ impl PoliceSystem {
         kind: &ViolationKind,
         at: [f32; 2],
     ) {
+        self.violation_seen_by(world, racer, kind, at, None);
+    }
+
+    /// [`Self::on_violation`], with `by` = the unit whose radar clocked it (it witnessed it).
+    pub(crate) fn violation_seen_by(
+        &mut self,
+        world: &dyn WorldQuery,
+        racer: EntityId,
+        kind: &ViolationKind,
+        at: [f32; 2],
+        by: Option<UnitId>,
+    ) {
         let now = self.now;
         let obs = self.obs.get(&racer).copied().unwrap_or_default();
-        let p = {
+        let (p, rz, speed, rv) = {
             let r = &self.racers[&racer];
-            xy(r.pos)
+            (
+                xy(r.pos),
+                r.pos[2],
+                (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt(),
+                [r.vel[0], r.vel[1]],
+            )
         };
-        let camera = self.camera_sees(world, p);
-        let witnessed = obs.witnessed || camera;
+        // `wp_world` reports any box overlap with a civilian: a racer hit while (nearly)
+        // standing is not the offender (contract request CR-police-1 in police.md).
+        if matches!(kind, ViolationKind::Collision)
+            && speed < self.cfg.heat.heat.collision.min_racer_speed_mps
+        {
+            return;
+        }
+        let witness = by.or(obs.witness);
+        let unit_saw = witness.is_some();
+        // A traffic camera's flag counts in full and becomes a call, but it is not a unit's
+        // sight: it never refreshes what units know or keeps a pursuit going.
+        let camera = !unit_saw && self.camera_sees(world, p, rz);
+        let witnessed = unit_saw || camera;
         let cfg = self.cfg.heat.clone();
         let rec = self.racers.get_mut(&racer).expect("racer exists");
         let before = rec.level;
         let added = rec.add_violation(kind, witnessed, now, &cfg);
-        if witnessed {
+        if unit_saw {
             rec.last_seen = Some(now);
             rec.last_known = Some(p);
         }
@@ -408,7 +523,12 @@ impl PoliceSystem {
         // Row 80: the unit that saw it acts on it. A violation it witnessed that makes the
         // racer wanted starts the pursuit at once, day or night (recognition_time_s is only
         // for a wanted car a unit runs into later).
-        if let Some(unit) = obs.witness {
+        // 2026-10-23: only a witness close enough to know the car acts at once; one farther
+        // out has to identify it first (awareness, `update_observations`).
+        let close = witness.and_then(|w| self.unit_index(w)).is_some_and(|i| {
+            dist(self.units[i].body.pos, p) <= cfg.heat.awareness.witness_pursuit_m
+        });
+        if let (Some(unit), true) = (witness, close) {
             if after > WantedLevel::None && !self.racers[&racer].pursued() {
                 self.stats.witnessed_pursuits += 1;
                 let desc = self.racer_desc(racer);
@@ -425,7 +545,12 @@ impl PoliceSystem {
                 return;
             }
         }
-        if !obs.witnessed && !self.racers[&racer].pursued() && !self.graph.nodes.is_empty() {
+        if !unit_saw
+            && !self.racers[&racer].pursued()
+            && !self.graph.nodes.is_empty()
+            && self.call_worthy(kind, speed)
+            && (camera || self.civilian_caller_near(at))
+        {
             // No unit saw it: a civilian calls it in, or a traffic camera flags it, at the
             // violation's position, so a unit is sent to look (a camera alone never sends
             // anyone otherwise, and a racer that stays put would never be found). One open
@@ -438,6 +563,11 @@ impl PoliceSystem {
             {
                 inc.pos = at;
                 inc.district = district;
+                let id = inc.id;
+                self.call_vel.insert(id, rv);
+                self.call_last.insert(id, now);
+                // A new report renews the call (the racer is still driving dangerously).
+                self.call_redispatches.remove(&id);
             } else if self.incidents.iter().any(|i| {
                 matches!(i.kind, IncidentKind::Report { .. }) && dist(i.pos, at) < CALL_MERGE_M
             }) {
@@ -445,6 +575,8 @@ impl PoliceSystem {
             } else {
                 let id = IncidentId(self.next_incident);
                 self.next_incident += 1;
+                self.call_vel.insert(id, rv);
+                self.call_last.insert(id, now);
                 let rs = &self.cfg.presence.response;
                 let delay = rs.call_delay_s.get(self.phase) + rs.district_delay_s.get(district);
                 self.stats.calls.push(crate::CallRecord {
@@ -569,10 +701,13 @@ impl PoliceSystem {
         match (ua, ub, ra, rb) {
             (Some(i), _, _, true) => self.unit_racer_contact(world, i, b, hit, false),
             (_, Some(i), true, _) => self.unit_racer_contact(world, i, a, hit, false),
-            // Civilian–civilian crash (not a car hitting a wall).
+            // Civilian–civilian crash (not a car hitting a wall), near a player when the sim
+            // says who the players are (2026-10-23: no units sent across the map to a crash
+            // between AI cars nobody is around to see).
             (None, None, false, false)
                 if rel_speed >= self.cfg.presence.crash_incident_min_speed_mps
-                    && b != wp_contracts::WORLD_ENTITY =>
+                    && b != wp_contracts::WORLD_ENTITY
+                    && self.player_near(xy(point)) =>
             {
                 self.report_crash_scene(xy(point));
             }
@@ -1639,10 +1774,13 @@ impl PoliceSystem {
         ));
     }
 
-    pub(crate) fn camera_sees(&self, world: &dyn WorldQuery, p: [f32; 2]) -> bool {
-        self.graph
-            .pois_of(PoiKind::Camera)
-            .any(|c| dist(c.pos, p) <= c.radius_m && self.sees(world, c.pos, p))
+    /// Whether a traffic camera has the racer at `p` (chassis height `z`) in view. Cameras
+    /// sit on a pole `CAMERA_POLE_M` above the junction, taken at the racer's height (they are
+    /// within 60 m of it): a fixed 1.3 m eye ran underground on Port Vesper's raised terrain.
+    pub(crate) fn camera_sees(&self, world: &dyn WorldQuery, p: [f32; 2], z: f32) -> bool {
+        self.graph.pois_of(PoiKind::Camera).any(|c| {
+            dist(c.pos, p) <= c.radius_m && self.sees_at(world, c.pos, z + CAMERA_POLE_M, p, z)
+        })
     }
 
     // -----------------------------------------------------------------------------------------
@@ -1652,14 +1790,14 @@ impl PoliceSystem {
     pub(crate) fn think(&mut self, world: &dyn WorldQuery, tdt: f32) {
         if self.graph.nodes.is_empty() {
             // No road network: rules only.
-            self.update_observations(world);
+            self.update_observations(world, tdt);
             self.update_racer_rules(tdt);
             return;
         }
         if !self.warmed_up {
             self.warm_up(world);
         }
-        self.update_observations(world);
+        self.update_observations(world, tdt);
         self.watch_spawns(world);
         self.helo_reports();
         self.clock_speeders(world, tdt);
@@ -1971,18 +2109,13 @@ impl PoliceSystem {
     }
 
     fn spawn_pool_unit(&mut self, world: &dyn WorldQuery, d: District) -> Option<usize> {
-        let cands: Vec<usize> = (0..self.graph.segments.len())
-            .filter(|&s| {
-                self.graph.segments[s].district == d
-                    && self.graph.segments[s].class != RoadClass::Highway
-            })
-            .collect();
-        if cands.is_empty() {
-            return None;
-        }
         // A few tries for a spot clear of other vehicles; none clear = try again next think.
         for _ in 0..SPAWN_TRIES {
-            let s = self.graph.segments[cands[self.rng.below(cands.len() as u32) as usize]];
+            // Spots by road length, highways included (2026-10-23): a district's winding
+            // roads (many short segments) no longer draw most of its patrols.
+            let u = self.rng.next_f32();
+            let (sid, _) = self.graph.spot_by_length(u, |s| s.district == d)?;
+            let s = *self.graph.segment(sid);
             let t = self.rng.range_f32(0.2, 0.8);
             let a = self.graph.node(s.a).pos;
             let b = self.graph.node(s.b).pos;
@@ -1990,8 +2123,9 @@ impl PoliceSystem {
             let mut dir = normalize(sub(b, a));
             let dest = self.random_node_in(Some(d))?;
             // Face the way the first patrol route goes: a physical car turning around from
-            // standstill runs over the kerb and into parked cars.
-            if self.route_from(centre, dir, dest, None).1 {
+            // standstill runs over the kerb and into parked cars. A one-way road (a highway
+            // carriageway) is only ever faced its own way.
+            if !s.oneway && self.route_from(centre, dir, dest, None).1 {
                 dir = scale(dir, -1.0);
             }
             // In the right-hand lane, not on the centreline.
@@ -2062,9 +2196,33 @@ impl PoliceSystem {
             .count() as u32
     }
 
+    /// Pool (patrol) units wanted in district `d` now: the `patrols` table scaled by the
+    /// district's road length over `patrol_reference_km` (at least 1 where the table has
+    /// any and the district has road), all districts together at most `max_patrols`
+    /// (scaled down proportionally, at least 1 each).
+    pub fn patrol_target(&self, d: District) -> u32 {
+        let pr = &self.cfg.presence;
+        let raw = |d: District| -> u32 {
+            let n = pr.patrols.get(d).get(self.phase);
+            let km = self.district_km.get(d);
+            if n == 0 || km <= 0.0 {
+                return 0;
+            }
+            let r = (n as f32 * km / pr.patrol_reference_km.get(d).max(0.1)).round() as u32;
+            r.max(1)
+        };
+        let want = raw(d);
+        let total: u32 = District::ALL.iter().map(|x| raw(*x)).sum();
+        let cap = pr.max_patrols.get(self.phase);
+        if total <= cap || want == 0 {
+            return want;
+        }
+        ((want as f32 * cap as f32 / total as f32).floor() as u32).max(1)
+    }
+
     fn warm_up(&mut self, world: &dyn WorldQuery) {
         for d in District::ALL {
-            let target = self.cfg.presence.patrols.get(d).get(self.phase);
+            let target = self.patrol_target(d);
             for _ in 0..target {
                 self.spawn_pool_unit(world, d);
             }
@@ -2078,7 +2236,7 @@ impl PoliceSystem {
 
     fn maintain_pool(&mut self, world: &dyn WorldQuery) {
         for d in District::ALL {
-            let target = self.cfg.presence.patrols.get(d).get(self.phase);
+            let target = self.patrol_target(d);
             let alive = self.pool_count(d);
             if alive < target && self.ground_units_alive() < self.cfg.presence.max_ground_units {
                 self.spawn_pool_unit(world, d);
@@ -2154,12 +2312,20 @@ impl PoliceSystem {
         let now = self.now;
         // Reports about racers already in pursuit are moot; stale reports expire.
         let racers = &self.racers;
+        let ttl = self.cfg.presence.response.call_ttl_s;
+        let call_last = &self.call_last;
         self.incidents.retain(|inc| match inc.kind {
             IncidentKind::Report { racer } => {
-                !racers.get(&racer).is_some_and(|r| r.pursued()) && now.since(inc.created) < 180.0
+                let last = call_last.get(&inc.id).copied().unwrap_or(inc.created);
+                !racers.get(&racer).is_some_and(|r| r.pursued()) && now.since(last) < ttl
             }
             IncidentKind::Crash => inc.scene_until.is_none_or(|t| now < t),
         });
+        let open: std::collections::BTreeSet<IncidentId> =
+            self.incidents.iter().map(|i| i.id).collect();
+        self.call_vel.retain(|k, _| open.contains(k));
+        self.call_last.retain(|k, _| open.contains(k));
+        self.call_redispatches.retain(|k, _| open.contains(k));
         // Release units whose incident disappeared.
         for i in 0..self.units.len() {
             if let Assignment::Respond { incident } = self.units[i].assignment {
@@ -2188,7 +2354,23 @@ impl PoliceSystem {
                 self.incidents[k].unit = None;
                 self.assign(i, Assignment::Idle);
                 self.stats.redispatches += 1;
+                // At most `max_redispatches` times (2026-10-23): then the call is dropped
+                // (one scrape no longer had units chasing a law-abiding driver for minutes).
+                *self.call_redispatches.entry(inc.id).or_insert(0) += 1;
             }
+        }
+        // Calls out of redispatches go now.
+        let dropped: Vec<IncidentId> = self
+            .call_redispatches
+            .iter()
+            .filter(|(_, n)| **n > self.cfg.presence.response.max_redispatches)
+            .map(|(k, _)| *k)
+            .collect();
+        self.incidents.retain(|i| !dropped.contains(&i.id));
+        for k in &dropped {
+            self.call_redispatches.remove(k);
+            self.call_vel.remove(k);
+            self.call_last.remove(k);
         }
         for k in 0..self.incidents.len() {
             let inc = self.incidents[k];
@@ -2331,10 +2513,7 @@ impl PoliceSystem {
     /// level, never above `max_ground_units`; none at all where the patrol table has no unit
     /// for this phase (a city without police, e.g. simcli `police_cars: false`).
     pub(crate) fn unit_cap(&self) -> u32 {
-        let patrols: u32 = District::ALL
-            .iter()
-            .map(|d| self.cfg.presence.patrols.get(*d).get(self.phase))
-            .sum();
+        let patrols: u32 = District::ALL.iter().map(|d| self.patrol_target(*d)).sum();
         if patrols == 0 {
             return 0;
         }
@@ -2628,8 +2807,22 @@ impl PoliceSystem {
         let rec = self.racers.get(&racer)?;
         // Lost (row 84): around the last known position and the way it was heading, not
         // where the hidden racer really is.
-        let (target, rv) = match (rec.status, rec.last_known) {
-            (PursuitStatus::Searching, Some(lk)) => (lk, rec.last_known_vel),
+        // Not pursued (2026-10-23): where the call put it, at the velocity it was reported
+        // at; in a pursuit the racer is in sight and `last_known` is current.
+        let call = self
+            .incidents
+            .iter()
+            .find(|i| i.kind == IncidentKind::Report { racer })
+            .map(|i| {
+                (
+                    i.pos,
+                    self.call_vel.get(&i.id).copied().unwrap_or([0.0, 0.0]),
+                )
+            });
+        let (target, rv) = match (rec.status, rec.last_known, call) {
+            (PursuitStatus::Searching, Some(lk), _) => (lk, rec.last_known_vel),
+            (PursuitStatus::Pursuit, Some(lk), _) => (lk, rec.last_known_vel),
+            (_, _, Some(c)) => c,
             _ => (xy(rec.pos), [rec.vel[0], rec.vel[1]]),
         };
         let moving = crate::graph::len(rv) > 3.0;
@@ -2935,6 +3128,41 @@ impl PoliceSystem {
         }
     }
 
+    /// Stand down the farthest AI interceptors on `racer` above `want` (2026-10-23: the
+    /// search extras sent while it was lost, once it is found again; a lost racer must be
+    /// identified to be found, so searches come and go more often than before).
+    fn release_surplus_units(&mut self, racer: EntityId, want: u32) {
+        let Some(p) = self.search_centre(racer) else {
+            return;
+        };
+        let mut on: Vec<(f32, usize)> = self
+            .units
+            .iter()
+            .enumerate()
+            .filter(|(_, u)| {
+                u.kind == UnitKind::Car
+                    && !u.wrecked
+                    && matches!(u.assignment, Assignment::Pursue { target } | Assignment::Intercept { target, .. } if target == racer)
+            })
+            .map(|(i, u)| (dist(u.body.pos, p), i))
+            .collect();
+        if on.len() <= want as usize {
+            return;
+        }
+        on.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        let mut excess = on.len() - want as usize;
+        for (_, i) in on {
+            if excess == 0 {
+                break;
+            }
+            let u = &self.units[i];
+            if u.player.is_none() && matches!(u.assignment, Assignment::Intercept { .. }) {
+                self.assign(i, Assignment::Idle);
+                excess -= 1;
+            }
+        }
+    }
+
     pub(crate) fn units_on(&self, racer: EntityId) -> u32 {
         self.units
             .iter()
@@ -2954,6 +3182,7 @@ impl PoliceSystem {
         for racer in self.pursued_by_priority() {
             let want = self.wanted_units(racer);
             self.release_far_units(racer);
+            self.release_surplus_units(racer, want);
             let mut have = self.units_near(racer);
             if have < want {
                 have += self.call_backup(racer, want - have);

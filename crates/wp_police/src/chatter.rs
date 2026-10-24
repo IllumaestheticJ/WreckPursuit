@@ -1270,8 +1270,9 @@ impl PoliceSystem {
                 if status == PursuitStatus::Pursuit {
                     c.searching_since = None;
                 }
-                // Into a tunnel.
-                if tunnel.is_some() && tunnel != c.tunnel {
+                // Into a tunnel, as seen by a unit (a hidden racer's real position is not
+                // police knowledge, 2026-10-23).
+                if seen && tunnel.is_some() && tunnel != c.tunnel {
                     calls.push((
                         Callout::Tunnel,
                         RadioCue::new(RadioTier::Investigation, c.spotter, String::new())

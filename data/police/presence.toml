@@ -4,8 +4,18 @@
 max_ground_units = 24
 # A civilian-civilian contact faster than this creates a crash-scene incident.
 crash_incident_min_speed_mps = 8.0
+# Owner (2026-10-23): police do not engage random AI cars across the map. When the sim says who
+# the players are, AI racers (street racers, roamers) are police business only while a race is on
+# or within this distance of a player; a wanted one that drives off farther is dropped (its
+# pursuit called off). Crash scenes are only opened this close to a player too (m).
+npc_scope_m = 350.0
 
-# Patrol unit count per district per phase (the dispatcher keeps this many pool units alive).
+# Patrol units per district per phase, for a district with patrol_reference_km of road
+# (highways included): a district with more or less road gets proportionally more or fewer
+# (rounded, at least 1 where the table has any), all districts together at most max_patrols.
+# So the tables are a density: Core by day 8 / 12.8 km = 0.63 units per km of road, Suburb
+# 3 / 25.8 = 0.12, Industrial 2 / 11.7 = 0.17. The reference sizes are the procedural 12x12
+# grid's; Port Vesper by day gets 8 / 6 / 2, Ashpeak's ~180 km hit max_patrols.
 [patrols.core]
 dawn = 2
 day = 8
@@ -25,6 +35,17 @@ dusk = 2
 night = 1
 
 # A crash scene keeps one unit busy this long.
+[patrol_reference_km]
+core = 12.8
+suburb = 25.8
+industrial = 11.7
+
+[max_patrols]
+dawn = 6
+day = 16
+dusk = 12
+night = 7
+
 [crash_scene_s]
 dawn = 180.0
 day = 240.0
@@ -91,6 +112,19 @@ despawn_min_m = 150.0
 # it is released and the call dispatched again (the racer turned away from it).
 redispatch_s = 6.0
 redispatch_far_m = 150.0
+# Who calls (2026-10-23, "not overly sensitive"): a violation no unit saw becomes a call only
+# when a civilian vehicle was within call_witness_m of it (or a traffic camera flagged it; worlds
+# that report no traffic to the police count as always having a caller), and only when it is
+# more than trivial: speeding at least call_min_over_mps over, a collision with the racer moving
+# at least call_min_collision_mps (red lights, wrong way and reckless driving always count).
+call_witness_m = 80.0
+call_min_over_mps = 5.5
+call_min_collision_mps = 4.0
+# A call is dropped this long after the last report about it, s (was a fixed 180 s), and is
+# dispatched again at most max_redispatches times (each one sends the unit to where the call
+# put the racer, with the velocity it was reported at, never the racer's real one).
+call_ttl_s = 60.0
+max_redispatches = 2
 
 # Call taken -> unit assigned, s.
 [response.call_delay_s]

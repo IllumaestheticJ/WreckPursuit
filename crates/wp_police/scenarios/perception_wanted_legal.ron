@@ -1,0 +1,16 @@
+// Perception (owner 2026-10-23, "too easily able to see the player to re-engage"): a racer still
+// wanted at L2 drives legally. Before: any unit within 380 m (200-degree cone) recognised it
+// within 0.5-2.5 s and chase time alone took it to L4-L5. Now a unit must identify it (fully
+// aware within 250 m by day) and chase time while driving legally adds no heat (row 157).
+(
+    name: "police_perception_wanted_legal",
+    seed: 930,
+    time_of_day_h: 12.0,
+    duration_s: 120.0,
+    runs: 4,
+    racers: [(district: Core, speed_factor: 0.95, initial_heat: 35.0, violations: false, stay_in_district: false)],
+    expect: [
+        (metric: "pursuit_start_unit_max_m", min: -1, max: 250),
+        (metric: "max_heat", min: 35, max: 35.5),
+    ],
+)

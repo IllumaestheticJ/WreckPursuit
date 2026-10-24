@@ -1655,3 +1655,127 @@ Owner (0.12.59): "cop also spawned right into my line of sight and started a cha
 
 **Other.** The police scenario `self_wreck_sim` moved from 23 to 24 self-wrecks of 240 units (9.6 % → 10.0 %, one unit, inside noise). Its bound was re-aimed from "< 10 %" to "≤ 10 %", with the reason in the scenario file.
 
+
+## 2026-10-23 (cops): realistic sight, sensitivity, allocation, row 157
+
+Owner: "make sure cops in free roam are adequately allocated, not overly sensitive to player
+interactions and dispatching; make their view distance realistic: they seem to see through walls
+/ see the player to re-engage". Audit: `scratchpad/reports/cops.md` (phase A). The occlusion test
+itself (`CityMap::line_of_sight`: buildings, terrain, decks, tunnels, fog cap) was sound. What
+felt like seeing through walls were the rules around it, so those changed.
+
+**Perception (`pursuit.rs` `update_observations`, `[heat.sight]`, `[heat.awareness]`).**
+- The cone is 160° (was 200°), plus 25 m all round (was 60 m).
+- Two ranges:
+  - **notice**: `los_range_m`, 380 m by day.
+  - **identify**: `identify_range_m`, 250 / 200 / 200 / 150 m (day / dawn / dusk / night). This
+    replaces `recognition_range_m`, `recognition_time_s` and `[heat.recognition]`.
+- Each unit has an *awareness* of each racer (0..1).
+  - It builds while the unit sees the racer: 0.25 s ≤ 40 m, 2 s at the identify range, 4 s at
+    the notice range.
+  - It builds ×1.2 slower at dawn and dusk, ×1.5 at night, and half as fast outside the central
+    120°.
+  - It drains at 0.25/s out of sight.
+- **An ongoing pursuit** stays in sight while any unit or the helicopter sees the racer within its
+  notice range.
+- **Identification** (aware within the identify range by the unit's own line of sight, or the
+  helicopter after 0.5 s) is needed to:
+  - find a lost racer again (Searching → Pursuit);
+  - recognise a wanted car (pursuit start);
+  - freeze heat decay.
+  A one-tick glimpse through a gap at 380 m used to do all three; now it does nothing.
+- **Traffic cameras** never count as sight. They only witness violations, as reports. Their
+  view is now taken from a 4 m pole at the racer's height; the fixed 1.3 m eye ran underground on
+  Port Vesper.
+- **Capture** (stopped or pinned) only counts while the racer is seen. A car hidden off the road
+  was being "captured" by a search unit driving past 15–30 m away.
+- **Radio sharing.** Units without their own sight plan intercepts on a radioed position,
+  refreshed every 1 s (`RacerRecord::radio_known`).
+- **Fix:** `intercept_point` used the racer's real current velocity. It now uses the last-seen
+  one, or the radioed one.
+
+**Sensitivity (`dispatch.rs`).**
+- **Witnesses.** A witness (line of sight ≤ `witness_range_m`, 250 m by day; not a unit busy on
+  another call or booking) gives full heat. It starts a pursuit at once only within
+  `witness_pursuit_m` (150 m); a unit farther out has to identify the car first.
+- **Radar** is a ±20° beam ahead or behind, ≤ 250 m (200 m at night), and only patrolling or idle
+  units clock.
+- **Blatant pass-by:** 30 km/h over within 60 m (was 20 km/h within 90 m).
+  `wp_sim/tests/police_passby.rs` now passes at 30/40/80 km/h over.
+- **Collisions:** a `Collision` with the racer moving < 3 m/s doesn't count (see CR-police-1).
+- **Calls.** An unseen offence is called in only when all of these hold:
+  - a civilian vehicle was within 80 m, or a camera flagged it (headless runs with no traffic
+    reported always have a caller);
+  - it is not trivial: speeding ≥ 5.5 m/s over, or a collision at ≥ 4 m/s;
+  - every red light, wrong-way run and reckless driving counts.
+- **Call life.** A call is dropped 60 s after its last report (was a fixed 180 s). It is
+  dispatched again at most 2 times per report. Responders plan on the reported position and
+  velocity, and spawn from the call's position, not the racer's real one.
+- **Radio:** the "gone into the tunnel" callout needs the racer seen. It no longer leaks a hidden
+  car's position.
+
+**Row 157 (heat too fast).**
+- `pursuit_heat_per_s` drops from 0.25 to 0.08. It only applies while the racer has had a
+  violation counted in the last 10 s (`pursuit_heat_window_s`). A pursued car driving legally
+  gains nothing.
+- Violations by a pursued racer count at 0.25 (`pursued_violation_factor`). At 20 m/s over,
+  L1 → L5 takes about 2.5 min of flat-out offending instead of about 40 s.
+- Assault and cop-disabled heat are unchanged.
+
+**Allocation (`presence.toml`).**
+- `[patrols.*]` is now a density: the counts are for `[patrol_reference_km]` of road (the 12×12
+  grid). Core by day is 8 / 12.8 km = 0.63 units per km, Suburb 0.12, Industrial 0.17.
+- Each district gets its count × its road km (highways included) / reference, at least 1. The
+  city total is capped by `max_patrols` (16 / 7 day / night).
+
+  | city | before (day) | after (day) |
+  |---|---|---|
+  | Port Vesper (47 + 29 km hwy) | 8 / 3 / 2 | 8 / 6 / 2 |
+  | Ashpeak (~240 km) | 8 / 3 / 2 | the 16 cap |
+  | small scenario grid | 8 / 3 / 2 | 7 / 1 / 1 |
+
+- Spawn spots and patrol destinations are drawn by road length, highways included
+  (`RoadGraph::spot_by_length`). It was per segment, so Vesper's winding roads (6.6 m segments)
+  drew most patrols. A one-way carriageway is only faced its own way.
+
+**AI racers (`set_player_racers`, `[npc_scope_m]`, coordinator item A).**
+- `wp_sim` names the players each tick (`police_link.rs` `drive_police_units`, minimal).
+- AI racers are police business only within 350 m of a player, or while a race profile is on.
+  A wanted one beyond that is dropped: its pursuit is called off and its units, record and calls
+  released.
+- Automatic crash scenes need a player within 350 m.
+- Roaming street racers were speeding by design. Their cruise speed (12–13.3 m/s, Loop 27 m/s) is
+  fixed, and on 20 mph streets and ramps that is over the limit (55 reports in a 30-minute night
+  drive). They now cruise at most the slowest limit on their route + 1 m/s, Loop laps over its
+  highway lanes only (`wp_wasm/src/street.rs` `legal_cruise_mps`).
+- Gap: a street challenge race does not set a race profile. A racing NPC more than 350 m ahead of
+  the player is dropped.
+
+### Contract change request CR-police-1
+`ViolationKind::Collision { rel_speed_mps: f32, at_fault: bool }` (`wp_contracts`, emitted by
+`wp_world::violations`): `wp_world` reports any box overlap, whoever hit whom. Until then
+`wp_police` takes the racer's own speed as the fault test (< 3 m/s: not the offender). Affects
+wp_world (emit), wp_police (read), wp_net (serialisation). Status: proposed.
+
+### Numbers (police scenarios, `crates/wp_police/scenarios`, before = HEAD ee742a68 with the new scenario runner)
+| scenario | before | after |
+|---|---|---|
+| `sensitivity_tap_standing` (racer stopped, civilian scrape) | heat 8, 0 calls | heat 0, 0 calls |
+| `sensitivity_tap_moving` (one unseen scrape, 03:00 Suburb, 3 runs) | call open 69 s/run, 14 responders spawned | 7 s/run, 3 |
+| `sensitivity_far_speeding` (+25 % over, radar only, 4 runs) | max heat 36 (L2) | 16.7 (L1); pursuit starter ≤ 150 m |
+| `perception_wanted_legal` (L2, legal driving, 4 runs) | starter up to 352 m away, heat 35 → 63 (L3) | ≤ 250 m, heat stays 35 |
+| `perception_hide_behind_block` (L1 hides off-road once lost, 4 runs) | 0 escapes (2 captured while hidden) | 4 escapes |
+| `escape_break_contact` (dusk, 8 runs) | 1 escape, L5 every run | 7 escapes, L1 |
+| `escape_break_contact_night` (10 runs) | 5 escapes | 10 (max re-aimed 6 → 10) |
+| `day_core_speeder` | pursuit 8.3 s, 0 escapes | 9.4 s, 0 escapes |
+| `night_core_speeder` | 0 escapes in 8 pursuits | 14 in 22 |
+| `response_day_core` worst call → unit 100 m | 8.3 s | 19.5 s (max re-aimed 15 → 25) |
+| `response_day_suburb` within 25 s | 0.33 | 0.71 (one call never reached: max re-aimed 38 → 61) |
+| `patrol_presence_day` / `_dusk` (small grid) | 8/3/2, 6/2/2 | 7/1/1, 5/1/1 (re-aimed) |
+
+Re-aimed with reasons in the files: patrol_presence_day/dusk, escape_break_contact_night,
+response_day_core, response_day_suburb. New: the five `sensitivity_*` / `perception_*` files.
+Tests: `pursuit::perception_tests` (glimpse vs identification, identify range, far and close
+witness, standing collision, callers and call expiry, mild speeding, cameras, AI racers out of
+scope, patrol scaling), `heat::tests::pursuit_heat_needs_offending_and_pursued_violations_count_less`.
+Goldens: not blessed (the coordinator does one combined bless). Every police golden will move.

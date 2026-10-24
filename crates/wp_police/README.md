@@ -25,8 +25,10 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
 
 1. **Racers** are synced (position/velocity); spike strip crossings are checked per wheel.
 2. **Events**: `TrafficViolation` adds heat (full if a unit/camera *witnessed* it, 20% otherwise
-   as a civilian *report*). If no unit saw it (only a camera, or nobody), a report incident opens
-   at the violation and the nearest free unit is sent after the report delay; `TotalLoss` of a wanted racer is a capture; `Contact` between a unit
+   as a civilian *report*; a `Collision` by a racer moving < 3 m/s doesn't count). If no unit
+   saw it, it becomes a call only if a civilian vehicle was within 80 m (or a camera flagged it)
+   and it was more than trivial (`[response] call_*`); the nearest free unit is sent after the
+   report delay; `TotalLoss` of a wanted racer is a capture; `Contact` between a unit
    and a racer marks the unit, civilian–civilian contacts above a speed create crash incidents.
 3. **Driving** (every tick): internally driven units integrate with the built-in kinematic driver.
 4. **Think** (`think_hz`, default 10 Hz): line of sight → rules (heat decay, escape, capture,
@@ -37,9 +39,24 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
 - Heat 0–100, levels L1..L5 at `level_thresholds`.
 - Decays only when unseen and not pursued, after `decay_grace_s`, at
   `decay_per_s[phase] × decay_district_scale[district]` (faster at night, Suburb, Industrial).
-- While pursued and seen: `pursuit_heat_per_s` (long chases escalate). Disabling a cop: `cop_disabled_heat`.
-- **Pursuit start**: a wanted racer kept within `recognition_range_m[phase]` with line of sight
-  for `recognition_time_s[phase]` (a glimpse at night is not enough).
+- While pursued and seen **and still offending** (a violation counted in the last
+  `pursuit_heat_window_s`, 10 s): `pursuit_heat_per_s` (0.08/s). Chase time alone, driving
+  legally, adds nothing (row 157). Violations by a pursued racer count at
+  `pursued_violation_factor` (0.25). Disabling a cop: `cop_disabled_heat`.
+- **Perception** (2026-10-23, owner: "cops see through walls / re-engage too easily";
+  `[heat.sight]`, `[heat.awareness]`): a unit sees a racer with line of sight (buildings,
+  terrain, decks, tunnels; fog caps it) inside a 160° cone (25 m all round) within the
+  phase's **notice** range (`pursuit.toml [los_range_m]`, 380 m by day). Its *awareness* of
+  the racer builds while it sees it: 0.25 s within 40 m, rising to 2 s at the **identify**
+  range (`identify_range_m`: 250 m day, 200 dawn/dusk, 150 night) and 4 s at the notice range
+  (×1.2 dawn/dusk, ×1.5 night; half as fast outside the central 120°), and drains at 0.25/s
+  out of sight. Fully aware within the identify range = **identified**. An ongoing pursuit
+  stays in sight while any unit (or the helicopter) sees the racer within its notice range;
+  a lost racer (Searching) is found again, a wanted one recognised (pursuit start) and the
+  heat decay frozen only by an identification (the helicopter identifies after 0.5 s).
+  Traffic cameras never count as sight. Units that don't see the racer themselves plan
+  intercepts on the radioed position (refreshed every 1 s), never the racer's real velocity.
+- **Pursuit start**: a wanted racer identified by a unit (above).
 - **Assaulting an officer** (`[heat.assault]`, playtest row 24): a racer hitting a police car.
   Physics contacts (`SimEvent::Contact`) between a racer and a unit's entity are summed into a
   contact episode (contacts less than `episode_s` apart). It counts when the episode's impulse
@@ -65,13 +82,20 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   `BountyRecord` is persisted by prompt 08 (`bounty_record` / `set_bounty_record`). It sets
   reinforcement priority (up to `priority_max_reduction` faster response). Night stakes: `payout_scale()`.
 
-- **Blatant speeding** (`heat.blatant`, owner playtest row 60): speeding ≥ 40 km/h over within
+- **Blatant speeding** (`heat.blatant`, owner playtest row 60): speeding ≥ 30 km/h over within
   60 m of an in-service unit with line of sight is recognised at once (L1 at least, pursuit by
-  that unit), day or night. Otherwise a night pursuit needs 40 m for 4 s, which a fast pass-by
-  never gives.
+  that unit), day or night.
+- **Witnesses and radar**: a unit with line of sight within `witness_range_m` (250 m by day)
+  witnesses a violation (full heat); it starts a pursuit at once only within
+  `awareness.witness_pursuit_m` (150 m), farther out it has to identify the car first. Radar
+  (`[heat.radar]`): only patrolling / idle units clock, within `range_m` (250 m by day) and
+  20° of straight ahead or behind.
 
 ### Presence & dispatch (`dispatch.rs`)
-- Pool units per district per phase from `presence.toml [patrols.*]`. Shortfalls are spawned
+- Pool units per district per phase from `presence.toml [patrols.*]`, scaled by the district's
+  road length (highways included) over `[patrol_reference_km]` (a density: Core by day 0.63
+  units per km), at most `max_patrols` in all; spawn spots and patrol destinations are drawn by
+  road length, not per segment (`RoadGraph::spot_by_length`). Shortfalls are spawned
   (after the session start, out of every racer's sight); surplus idle units retire once out of
   sight and ≥ `response.despawn_min_m` away.
 - **Reckless-driving calls** (round 12b, `presence.toml [response]`): a violation no unit saw
@@ -92,7 +116,8 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   pursuit); with the racer coming head-on within 70 m they pull right and stop, and nose to
   nose with it stopped (a narrow road) they back out 8 m. A unit still > `redispatch_far_m`
   (150 m) away `redispatch_s` (6 s) after taking the call is released and the call goes out
-  again. One radio line per call: "Dispatch: caller reports reckless driver, Core. Unit 6
+  again, at most `max_redispatches` (2) times per report; a call is dropped `call_ttl_s` (60 s)
+  after its last report. Responders plan on the position and velocity the call reported. One radio line per call: "Dispatch: caller reports reckless driver, Core. Unit 6
   responding." No responders in a city whose patrol table is empty for the phase.
 - **Unit cap**: responders and reinforcements only spawn while ground units <
   `max_units_by_level[highest wanted level]` (and `max_ground_units`).

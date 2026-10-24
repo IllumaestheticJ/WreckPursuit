@@ -12,8 +12,15 @@ unseen_factor = 0.2
 repeat_cooldown_s = 1.0
 # Seconds after the last sighting before heat starts to decay.
 decay_grace_s = 5.0
-# Long chases escalate: heat per second while actively pursued (seen).
-pursuit_heat_per_s = 0.25
+# Long chases escalate, but only while the racer keeps offending (row 157, "heat escalates far
+# too quickly"): heat per second while pursued and seen, and only with a violation counted in the
+# last pursuit_heat_window_s (a pursued car driving legally gains nothing from chase time).
+# Was 0.25/s for any seen pursuit time.
+pursuit_heat_per_s = 0.08
+pursuit_heat_window_s = 10.0
+# Violations by a racer already pursued count at this fraction (the chase itself is the
+# escalation; at 20 m/s over, L1 -> L5 takes ~2.5 min of flat-out driving instead of ~40 s).
+pursued_violation_factor = 0.25
 # Disabling a police unit by contact.
 cop_disabled_heat = 15.0
 
@@ -44,17 +51,59 @@ nearby_units_m = 60.0
 # far over the limit within range_m of an in-service unit that can see it (oncoming, parked or
 # driving the same way) is recognised at once: wanted >= min_level and a pursuit by that unit.
 # Row 80: 20 km/h over within 90 m (was 40 km/h within 60 m; a pass at 20-40 km/h over made the
-# racer wanted with no chase).
+# racer wanted with no chase). 2026-10-23 ("not overly sensitive"): 30 km/h over within 60 m.
 [heat.blatant]
-over_mps = 5.5
-range_m = 90.0
+over_mps = 8.3
+range_m = 60.0
 min_level = 1
 
-# Field of view of a ground unit (row 89): line of sight within the phase's range (below) in a
-# forward cone this wide, and all round this close (mirrors).
+# Field of view of a ground unit (row 89; narrowed for the 2026-10-23 "realistic view distance"
+# request): line of sight within the phase's notice range (pursuit.toml [los_range_m]) in a
+# forward cone this wide, and all round this close (mirrors). Inside `focus_fov_deg` (the
+# windscreen) awareness builds at full rate; in the rest of the cone (side windows) at
+# `peripheral_factor`.
 [heat.sight]
-fov_deg = 200.0
-all_round_m = 60.0
+fov_deg = 160.0
+all_round_m = 25.0
+focus_fov_deg = 120.0
+peripheral_factor = 0.5
+
+# Perception (owner 2026-10-23: "cops see through walls / re-engage too easily"). Each unit has
+# an awareness of each racer, 0..1. While the unit has line of sight in its cone within the notice
+# range it rises by dt / t, where t is near_s within near_m, rising linearly to identify_s at the
+# phase's identify range (identify_range_m) and to notice_s at the notice range (los_range_m),
+# x time_scale[phase]; out of sight it falls at decay_per_s (slowly: a unit that loses the car
+# round a corner for a second picks it up again at once, but separate glimpses a second or more
+# apart don't add up to an identification). A unit with awareness 1:
+#   - within identify_range_m IDENTIFIES the racer: recognises a wanted car (pursuit start),
+#     re-acquires a lost one (Searching -> Pursuit) and refreshes what police know;
+#   - within los_range_m (any awareness) a unit TRACKS a car it is already chasing: an ongoing
+#     pursuit stays in sight; a lost one (Searching) is only found again by identification.
+# A one-frame glimpse does nothing; re-acquiring takes >= 0.25 s close, ~2 s at 250 m by day.
+# The helicopter identifies after helo_s of line of sight. Units that do not see the racer
+# themselves plan on the radioed position, refreshed every radio_share_s.
+# A violation a unit witnesses starts its pursuit at once only within witness_pursuit_m;
+# farther away it counts in full and the unit has to identify the car first.
+[heat.awareness]
+near_m = 40.0
+near_s = 0.25
+identify_s = 2.0
+notice_s = 4.0
+decay_per_s = 0.25
+helo_s = 0.5
+radio_share_s = 1.0
+witness_pursuit_m = 150.0
+[heat.awareness.time_scale]
+dawn = 1.2
+day = 1.0
+dusk = 1.2
+night = 1.5
+
+# A racer-civilian contact (wp_world `Collision`, any box overlap) counts only when the racer
+# itself was moving at least this fast: a car rear-ended at a light is not the offender
+# (contract request CR-police-1 for a real relative-speed / at-fault field).
+[heat.collision]
+min_racer_speed_mps = 3.0
 
 # Radar (owner report 2026-10-21, "cops are seeing me but not triggering pursuit"): a unit that
 # can see a racer (sight, line of sight, witness range) clocks it. Over the limit where it drives
@@ -71,14 +120,14 @@ repeat_s = 5.0
 # Speeding in sight this long before it is clocked (wp_world's hold). The limit is the higher
 # of the lane's and the police road graph's (at a junction the lane can be the cross street).
 hold_s = 1.0
-
-# Recognising an already-wanted car the unit did not see offend (rows 80 / 89):
-# recognition_time_s within near_m, + far_extra_s at the edge of recognition_range_m (linear).
-# Out of sight the timer drains at decay_per_s instead of resetting.
-[heat.recognition]
-near_m = 150.0
-far_extra_s = 2.0
-decay_per_s = 0.5
+# 2026-10-23: a radar is a beam, not the whole field of view. Only patrolling / idle units
+# clock, within range_m and within beam_deg of straight ahead or straight behind the unit.
+beam_deg = 20.0
+[heat.radar.range_m]
+dawn = 220.0
+day = 250.0
+dusk = 220.0
+night = 200.0
 
 [heat.violation]
 speeding_base = 2.0
@@ -88,32 +137,22 @@ wrong_way = 4.0
 collision = 8.0
 reckless = 3.0
 
-# Owner playtest row 89, "if I can see them, they can see me": a unit with line of sight within
-# this range witnesses a violation (was 70-160 m). Headlights and street lights make a moving
-# car visible far at night too. Fog and rain shorten it further through the weather sight range
-# (wp_weather's line_of_sight cap, the same one the renderer's fog follows).
+# Owner playtest row 89 asked for symmetric sight (380 m); the owner's 2026-10-23 request
+# ("realistic view distance") supersedes it: a unit NOTICES a car out to pursuit.toml
+# [los_range_m] but must IDENTIFY it (see [heat.awareness]) within this range to recognise it,
+# re-acquire it or witness a violation. Fog and rain shorten it further through the weather
+# sight range (wp_weather's line_of_sight cap, the same one the renderer's fog follows).
 [heat.witness_range_m]
-dawn = 320.0
-day = 380.0
-dusk = 320.0
-night = 260.0
+dawn = 200.0
+day = 250.0
+dusk = 200.0
+night = 150.0
 
-# A unit with line of sight within this range recognises a wanted car and starts a pursuit (the
-# same range: what it can see it can recognise, given time; was 40-250 m).
-[heat.recognition_range_m]
-dawn = 320.0
-day = 380.0
-dusk = 320.0
-night = 260.0
-
-# ...after this many seconds of sight within heat.recognition.near_m (longer further out, see
-# [heat.recognition]). Only for a wanted car the unit did not see offend: a witnessed violation
-# that makes the racer wanted starts the pursuit at once (row 80).
-[heat.recognition_time_s]
-dawn = 0.8
-day = 0.5
-dusk = 0.8
-night = 1.0
+[heat.identify_range_m]
+dawn = 200.0
+day = 250.0
+dusk = 200.0
+night = 150.0
 
 # Heat lost per second while unseen and not pursued. Faster at night.
 [heat.decay_per_s]

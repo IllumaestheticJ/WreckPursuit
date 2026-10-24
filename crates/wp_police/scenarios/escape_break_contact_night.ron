@@ -21,6 +21,9 @@
     stop_after_first_pursuit: true,
     racers: [(district: Core, speed_factor: 2.6, cornering_g: 0.95, initial_heat: 15.0, violations: false, stay_in_district: false)],
     expect: [
-        (metric: "escapes", min: 1.0, max: 6.0),
+        // 2026-10-23 (perception model, row 157): 5 -> 10 escapes in 10. The racer offends
+        // nothing (violations off), so heat stays at L1 and no helicopter comes; a lost racer
+        // must now be identified (150 m at night) to be found again.
+        (metric: "escapes", min: 1.0, max: 10.0),
     ],
 )

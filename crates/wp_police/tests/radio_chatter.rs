@@ -226,6 +226,9 @@ fn scripted_pursuit_callouts_in_order_with_places_and_no_overlap() {
         (r.last_known.unwrap(), [r.vel[0], r.vel[1]])
     };
     h.world.blind = true;
+    // Crawling while out of sight (2026-10-23: a lost racer is found again only by a unit that
+    // identifies it within 250 m, so it must stay near where the search goes).
+    h.speed = 6.0;
     let mut lost_at = None;
     for _ in 0..40 {
         h.run(0.5);
@@ -305,7 +308,7 @@ fn scripted_pursuit_callouts_in_order_with_places_and_no_overlap() {
 
     // Sight back: "eyes on him again", placed where the racer is now.
     h.world.blind = false;
-    h.run(10.0);
+    h.run(15.0);
     let eyes = find(&h.lines, lost, "eyes on him again")
         .unwrap_or_else(|| panic!("no eyes-on call: {:#?}", h.texts()));
     assert!(
@@ -580,7 +583,9 @@ fn level_three_pursuit(seed: u64) -> Harness {
 
 #[test]
 fn tool_lines_are_spoken_within_a_second_even_over_other_traffic() {
-    for (seed, roadblock) in [(31, true), (32, false), (33, true)] {
+    // Seed 32 -> 34 (2026-10-23, perception model): on 32 the spike request now lands as the
+    // escalation line on air ends, so there is nothing left to cut.
+    for (seed, roadblock) in [(31, true), (34, false), (33, true)] {
         let mut h = level_three_pursuit(seed);
         // Roadblocks from level 3, spikes from level 4 (owner row 156).
         let heat = if roadblock { 55.0 } else { 75.0 };

@@ -25,7 +25,10 @@
         // Row 84 (search extras): 34.2 -> 37.1 s, the worst of 3 calls. Not a cap squeeze (the
         // same with 2 cap slots reserved for calls): the extra search requests draw from the
         // seeded RNG and shift every later draw; with the extras off it is 34.6 s. Mean 27.5 s.
-        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 38.0),
+        // 2026-10-23 (responders plan on the reported position, calls need a caller and expire):
+        // within 25 s 0.33 -> 0.71, mean 26.5 -> 19.3 s, but one of 7 calls never had a unit
+        // within 100 m (61 = never), as in response_night_suburb.
+        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 61.0),
         (metric: "spawns_in_view", min: 0.0, max: 0.0),
         (metric: "despawns_in_sight", min: 0.0, max: 0.0),
         (metric: "spawn_min_racer_m", min: 120.0, max: 10000.0),

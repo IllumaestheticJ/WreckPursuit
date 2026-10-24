@@ -144,6 +144,16 @@ pub struct RacerRecord {
     /// once out of sight is not police knowledge).
     #[serde(default)]
     pub last_known_vel: [f32; 2],
+    /// What units that do not see the racer themselves know: `last_known` as last put out on
+    /// the radio (refreshed every `heat.awareness.radio_share_s` while seen).
+    #[serde(default)]
+    pub radio_known: Option<[f32; 2]>,
+    /// Velocity that went out with `radio_known`, m/s.
+    #[serde(default)]
+    pub radio_known_vel: [f32; 2],
+    /// When `radio_known` was put out.
+    #[serde(default)]
+    pub radio_at: Option<SimTime>,
     /// Seconds since line of sight was lost (Searching).
     pub los_lost_s: f32,
     /// Seconds stopped near a unit.
@@ -177,6 +187,9 @@ impl RacerRecord {
             last_seen: None,
             last_known: None,
             last_known_vel: [0.0, 0.0],
+            radio_known: None,
+            radio_known_vel: [0.0, 0.0],
+            radio_at: None,
             los_lost_s: 0.0,
             stopped_s: 0.0,
             pin_anchor: None,
@@ -185,6 +198,15 @@ impl RacerRecord {
             last_violation: [None; 5],
             bounty: BountyRecord::default(),
             pursuit_started: None,
+        }
+    }
+
+    /// Where units without their own sight of the racer think it is: the radioed position
+    /// and velocity, else the last known ones.
+    pub fn radioed(&self) -> Option<([f32; 2], [f32; 2])> {
+        match self.radio_known {
+            Some(p) => Some((p, self.radio_known_vel)),
+            None => self.last_known.map(|p| (p, self.last_known_vel)),
         }
     }
 
@@ -210,7 +232,10 @@ impl RacerRecord {
             return 0.0;
         }
         self.last_violation[i] = Some(now);
-        let factor = if seen { 1.0 } else { cfg.heat.unseen_factor };
+        let mut factor = if seen { 1.0 } else { cfg.heat.unseen_factor };
+        if self.pursued() {
+            factor *= cfg.heat.pursued_violation_factor;
+        }
         let h = violation_heat(kind, cfg) * factor;
         self.add_heat(h, cfg);
         h
@@ -254,14 +279,30 @@ impl RacerRecord {
             self.last_seen = Some(inp.now);
             self.last_known = Some([self.pos[0], self.pos[1]]);
             self.last_known_vel = [self.vel[0], self.vel[1]];
+            if self
+                .radio_at
+                .is_none_or(|t| inp.now.since(t) >= cfg.heat.awareness.radio_share_s)
+            {
+                self.radio_known = self.last_known;
+                self.radio_known_vel = self.last_known_vel;
+                self.radio_at = Some(inp.now);
+            }
         }
         // Bounty integrates heat while wanted.
         if self.level > WantedLevel::None {
             self.bounty.heat_seconds += self.heat / 100.0 * dt;
         }
-        // Heat: escalate while seen in pursuit, decay while unseen and not pursued.
+        // Heat: escalate while seen in pursuit and still offending (row 157: chase time alone
+        // adds nothing), decay while unseen and not pursued.
+        let offending = self
+            .last_violation
+            .iter()
+            .flatten()
+            .any(|t| inp.now.since(*t) <= cfg.heat.pursuit_heat_window_s);
         if self.pursued() && inp.seen {
-            self.add_heat(cfg.heat.pursuit_heat_per_s * dt, cfg);
+            if offending {
+                self.add_heat(cfg.heat.pursuit_heat_per_s * dt, cfg);
+            }
         } else if !self.pursued() {
             let since_seen = self
                 .last_seen
@@ -287,8 +328,12 @@ impl RacerRecord {
                     outcome = Some(RuleOutcome::Escaped);
                 }
             }
-            // Capture: stopped with a unit close by.
-            if inp.speed_mps < cfg.capture.stop_speed_mps
+            // Capture: stopped with a unit close by, and only while police see the racer
+            // (2026-10-23: a car hidden off the road was "captured" by a search unit driving
+            // past 15-30 m away without ever seeing it). Out of sight the timers hold.
+            if !inp.seen {
+                // Nothing to arrest that nobody can see.
+            } else if inp.speed_mps < cfg.capture.stop_speed_mps
                 && inp.nearest_unit_m <= cfg.capture.unit_radius_m
             {
                 self.stopped_s += dt;
@@ -298,10 +343,11 @@ impl RacerRecord {
             } else {
                 self.stopped_s = 0.0;
             }
-            // Pinned: boxed in and rocking back and forth, never getting away.
+            // Pinned: boxed in and rocking back and forth, never getting away (in sight).
             let p = [self.pos[0], self.pos[1]];
             let close = inp.nearest_chaser_m <= cfg.capture.pinned_unit_radius_m;
             match self.pin_anchor {
+                _ if !inp.seen => {}
                 Some(a)
                     if close
                         && (p[0] - a[0]) * (p[0] - a[0]) + (p[1] - a[1]) * (p[1] - a[1])
@@ -408,6 +454,37 @@ mod tests {
         }
         let f = fired_at.expect("escape must fire");
         assert!((f - need).abs() < 0.2, "fired at {f}, need {need}");
+    }
+
+    /// Row 157: chase time alone (driving legally, in sight) adds no heat; with a violation
+    /// in the last `pursuit_heat_window_s` it adds `pursuit_heat_per_s`; and violations by a
+    /// pursued racer count at `pursued_violation_factor`.
+    #[test]
+    fn pursuit_heat_needs_offending_and_pursued_violations_count_less() {
+        let c = cfg();
+        let mut r = RacerRecord::new(EntityId(1));
+        r.add_heat(35.0, &c);
+        r.start_pursuit(SimTime::ZERO);
+        let dt = 0.1;
+        let mut t = 0.0f32;
+        for _ in 0..600 {
+            t += dt;
+            r.update(&inputs(true, 50.0, 13.0, t), dt, &c);
+        }
+        assert!((r.heat - 35.0).abs() < 1e-3, "legal 60 s: {}", r.heat);
+        let full = violation_heat(&ViolationKind::RedLight, &c);
+        let added = r.add_violation(&ViolationKind::RedLight, true, SimTime::from_secs(t), &c);
+        assert!((added - full * c.heat.pursued_violation_factor).abs() < 1e-4);
+        let before = r.heat;
+        for _ in 0..50 {
+            t += dt;
+            r.update(&inputs(true, 50.0, 13.0, t), dt, &c);
+        }
+        let gained = r.heat - before;
+        assert!(
+            (gained - 5.0 * c.heat.pursuit_heat_per_s).abs() < 0.02,
+            "offending 5 s: {gained}"
+        );
     }
 
     #[test]

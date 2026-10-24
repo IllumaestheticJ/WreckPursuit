@@ -90,6 +90,16 @@ pub struct RacerScript {
     /// Racer speed for `hit_unit_at_s`, km/h.
     #[serde(default = "d_hit_kmh")]
     pub hit_kmh: f32,
+    /// Report one `Collision` with a civilian (a scrape) at this time, s (2026-10-23
+    /// sensitivity scenarios).
+    #[serde(default)]
+    pub tap_at_s: Option<f32>,
+    /// From this time, the first moment the police have lost the racer (Searching), pull off
+    /// the road and park out of sight of it: the nearest spot 20-120 m from the racer, at least 18 m from every road centreline, outside every building and
+    /// hidden from where the racer left the road by a building (between the buildings of a
+    /// block), s.
+    #[serde(default)]
+    pub hide_at_s: Option<f32>,
 }
 
 /// Expected metric range.
@@ -268,6 +278,12 @@ struct ScriptedRacer {
     to_safehouse: bool,
     /// When the scripted sideswipe happened.
     hit_at: Option<f32>,
+    /// Hidden off the road (see [`RacerScript::hide_at_s`]).
+    hidden: bool,
+    /// Scripted tap reported.
+    tapped: bool,
+    /// Pursuit status at the previous tick (re-acquire count).
+    status: Option<crate::heat::PursuitStatus>,
 }
 
 /// Per-run raw numbers.
@@ -328,6 +344,16 @@ struct RunNumbers {
     despawns: u32,
     /// Closest late spawn to a racer, m.
     spawn_min_racer_m: f32,
+    /// Distance from the racer of the unit that started each pursuit, m.
+    start_unit_m: Vec<f32>,
+    /// Searching -> Pursuit transitions (a lost racer found again).
+    reacquires: u32,
+    /// Seconds with a reckless-driving call open.
+    call_open_s: f32,
+    /// Highest heat of any racer.
+    max_heat: f32,
+    /// Racers that found a hiding spot (`hide_at_s`).
+    hid: u32,
     hash: u64,
 }
 
@@ -434,6 +460,9 @@ fn run_once(
             total_lost: false,
             to_safehouse: false,
             hit_at: None,
+            hidden: false,
+            tapped: false,
+            status: None,
         });
     }
     let listeners: Vec<EntityId> = sc
@@ -513,6 +542,33 @@ fn run_once(
                     }
                 }
             }
+            if let Some(ts) = r.script.tap_at_s {
+                if t >= ts && !r.tapped {
+                    r.tapped = true;
+                    events.push(SimEvent::TrafficViolation {
+                        vehicle: r.entity,
+                        kind: ViolationKind::Collision,
+                        pos: [r.body.body.pos[0], r.body.body.pos[1], 0.0],
+                    });
+                }
+            }
+            if let Some(ts) = r.script.hide_at_s {
+                // Once the police have lost it (Searching): nobody sees where it goes.
+                let lost = r.status == Some(crate::heat::PursuitStatus::Searching);
+                if t >= ts && lost && !r.hidden {
+                    r.hidden = true;
+                    if let Some(spot) = hiding_spot(&graph, world.map.as_deref(), r.body.body.pos) {
+                        r.body.body.pos = spot;
+                        nums.hid += 1;
+                    }
+                    r.body.body.speed = 0.0;
+                    r.body.cmd.track = Track::default();
+                }
+            }
+            if r.hidden {
+                // Parked off the road: no driving at all.
+                continue;
+            }
             let stopped = r.total_lost || r.script.stop_at_s.is_some_and(|s| t >= s);
             if tick % think_every == 0 {
                 let limit = graph
@@ -577,6 +633,45 @@ fn run_once(
             .collect();
         out.clear();
         police.step(&world, &views, &events, PHYSICS_DT, &mut out);
+        for e in &out {
+            if let Some(PoliceEvent::PursuitStarted {
+                racer,
+                unit: Some(unit),
+            }) = PoliceEvent::from_sim_event(e)
+            {
+                let rp = racers
+                    .iter()
+                    .find(|r| r.entity == racer)
+                    .map(|r| r.body.body.pos);
+                let up = police
+                    .units
+                    .iter()
+                    .find(|u| u.id == unit)
+                    .map(|u| u.body.pos);
+                if let (Some(rp), Some(up)) = (rp, up) {
+                    nums.start_unit_m.push(dist(rp, up));
+                }
+            }
+        }
+        for r in racers.iter_mut() {
+            let st = police.racer(r.entity).map(|rec| rec.status);
+            if r.status == Some(crate::heat::PursuitStatus::Searching)
+                && st == Some(crate::heat::PursuitStatus::Pursuit)
+            {
+                nums.reacquires += 1;
+            }
+            r.status = st;
+            if let Some(rec) = police.racer(r.entity) {
+                nums.max_heat = nums.max_heat.max(rec.heat);
+            }
+        }
+        if police
+            .incidents()
+            .iter()
+            .any(|i| matches!(i.kind, crate::dispatch::IncidentKind::Report { .. }))
+        {
+            nums.call_open_s += PHYSICS_DT;
+        }
         for e in &out {
             if let Some(PoliceEvent::UnitDespawned { unit }) = PoliceEvent::from_sim_event(e) {
                 if let Some(p) = before.get(&unit) {
@@ -732,6 +827,53 @@ fn run_once(
     }
     nums.hash = h.finish();
     nums
+}
+
+/// Where a racer at `p` hides (see [`RacerScript::hide_at_s`]): the first spot 20-120 m away,
+/// 32 directions per ring, at least 18 m from every road centreline, outside every building
+/// and out of sight of `p`.
+fn hiding_spot(graph: &RoadGraph, map: Option<&CityMap>, p: [f32; 2]) -> Option<[f32; 2]> {
+    for r in [20.0f32, 30.0, 40.0, 50.0, 60.0, 75.0, 90.0, 105.0, 120.0] {
+        for k in 0..32 {
+            let (sn, cs) = wp_math::sin_cos(k as f32 * std::f32::consts::TAU / 32.0);
+            let q = [p[0] + cs * r, p[1] + sn * r];
+            let off_road = graph.nearest_on_road(q).is_none_or(|rp| rp.dist_m >= 18.0);
+            let ok = map.is_some_and(|m| {
+                !m.net
+                    .buildings
+                    .iter()
+                    .any(|b| point_in_polygon(q, &b.footprint))
+                    && !m.line_of_sight(
+                        [p[0], p[1], crate::EYE_HEIGHT_M],
+                        [q[0], q[1], crate::EYE_HEIGHT_M],
+                    )
+            });
+            if off_road && ok {
+                return Some(q);
+            }
+        }
+    }
+    None
+}
+
+/// Even-odd point-in-polygon test.
+fn point_in_polygon(p: [f32; 2], poly: &[[f32; 2]]) -> bool {
+    let n = poly.len();
+    if n < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut j = n - 1;
+    for i in 0..n {
+        let (a, b) = (poly[i], poly[j]);
+        if (a[1] > p[1]) != (b[1] > p[1])
+            && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]
+        {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
 }
 
 fn mean(v: &[f32]) -> Option<f32> {
@@ -914,6 +1056,26 @@ pub fn run_scenario_with_hook(
         runs.iter()
             .map(|r| r.spawn_min_racer_m)
             .fold(9999.0, f32::min),
+    );
+    // 2026-10-23 perception / sensitivity metrics.
+    let starts_m: Vec<f32> = runs.iter().flat_map(|r| r.start_unit_m.clone()).collect();
+    m.insert(
+        "pursuit_start_unit_m".to_string(),
+        mean(&starts_m).unwrap_or(-1.0),
+    );
+    m.insert(
+        "pursuit_start_unit_max_m".to_string(),
+        starts_m.iter().copied().fold(-1.0, f32::max),
+    );
+    m.insert("reacquires".to_string(), sum(&|r| r.reacquires));
+    m.insert("hid".to_string(), sum(&|r| r.hid));
+    m.insert(
+        "call_open_s".to_string(),
+        runs.iter().map(|r| r.call_open_s).sum::<f32>() / runs.len() as f32,
+    );
+    m.insert(
+        "max_heat".to_string(),
+        runs.iter().map(|r| r.max_heat).fold(0.0, f32::max),
     );
     let last = runs.last().expect("at least one run");
     m.insert("patrols_core".to_string(), last.pool[0] as f32);

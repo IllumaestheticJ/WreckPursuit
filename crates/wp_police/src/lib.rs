@@ -76,7 +76,7 @@ pub use time::SimTime;
 pub use tools::{HeloView, RadarBlip, RadioLine, Roadblock, SpikeStrip, StaticCollider};
 pub use unit::{Assignment, DriveCommand, RamKind, SteerGeometry, Tactic, Unit, UnitRole};
 
-use graph::xy;
+use graph::{dist, xy};
 use tools::Puncture;
 use unit::UnitBody;
 
@@ -86,7 +86,31 @@ pub const EYE_HEIGHT_M: f32 = 1.3;
 /// Eye (or sightline target) height for a vehicle whose chassis is at height `z`, m:
 /// [`EYE_HEIGHT_M`] on flat ground, following the car up on terrain.
 pub(crate) fn eye_height_at(z: f32) -> f32 {
-    EYE_HEIGHT_M + (z - 1.0).max(0.0)
+    // Below z = 0 (a sunken road) the eye follows the car down too: a fixed 1.3 m eye would
+    // look out over the cutting's walls.
+    if z < 0.0 {
+        EYE_HEIGHT_M + z
+    } else {
+        EYE_HEIGHT_M + (z - 1.0).max(0.0)
+    }
+}
+
+/// Road length per district (highways included), km.
+fn district_km(graph: &RoadGraph) -> config::DistrictTable<f32> {
+    let mut t = config::DistrictTable {
+        core: 0.0,
+        suburb: 0.0,
+        industrial: 0.0,
+    };
+    for s in &graph.segments {
+        let km = s.length_m / 1000.0;
+        match s.district {
+            District::Core => t.core += km,
+            District::Suburb => t.suburb += km,
+            District::Industrial => t.industrial += km,
+        }
+    }
+    t
 }
 
 /// What the police system sees of a racer each tick.
@@ -439,13 +463,21 @@ pub(crate) struct CaptainState {
 /// Per-think observation of a racer.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(crate) struct RacerObs {
-    /// Any unit / helicopter / camera has line of sight.
+    /// Police have the racer in sight in the sense the rules use (2026-10-23 perception
+    /// model): in an ongoing pursuit, a unit (or the helicopter) with line of sight within
+    /// its notice range; otherwise (lost, or not chased yet) a unit or the helicopter
+    /// identifying it. Traffic cameras never count.
     pub(crate) seen: bool,
+    /// A unit (or the helicopter) has the racer in line of sight in its cone within its notice
+    /// range (`los_range_m`).
+    pub(crate) tracked: bool,
+    /// A ground unit is fully aware of it within `identify_range_m`, or the helicopter is.
+    pub(crate) identified: bool,
     /// A ground unit or camera within witness range has line of sight.
     pub(crate) witnessed: bool,
-    /// Closest ground unit with line of sight within recognition range.
+    /// Closest ground unit that identifies the racer (awareness 1 within the identify range).
     pub(crate) spotter: Option<UnitId>,
-    /// Its distance, m (recognition takes longer further out).
+    /// Its distance, m.
     pub(crate) spotter_m: f32,
     /// Closest ground unit with line of sight within witness range (it starts the pursuit when
     /// a violation it sees makes the racer wanted, row 80).
@@ -472,7 +504,19 @@ pub struct PoliceSystem {
     pub(crate) warmed_up: bool,
     pub(crate) racers: BTreeMap<EntityId, RacerRecord>,
     pub(crate) obs: BTreeMap<EntityId, RacerObs>,
-    pub(crate) recognition_s: BTreeMap<EntityId, f32>,
+    /// Each unit's awareness of each racer, 0..=1 (only non-zero entries are kept).
+    pub(crate) awareness: BTreeMap<(UnitId, EntityId), f32>,
+    /// Road length per district (highways included), km: scales the patrol tables.
+    pub(crate) district_km: config::DistrictTable<f32>,
+    /// Per open call: the racer's velocity when it was last reported (responders plan on
+    /// this, never on the racer's real velocity).
+    pub(crate) call_vel: BTreeMap<IncidentId, [f32; 2]>,
+    /// Per open call: when it was last reported (it is dropped `call_ttl_s` after).
+    pub(crate) call_last: BTreeMap<IncidentId, SimTime>,
+    /// Per open call: how often it has been dispatched again.
+    pub(crate) call_redispatches: BTreeMap<IncidentId, u32>,
+    /// Player racers ([`PoliceSystem::set_player_racers`]); `None` = every racer is one.
+    pub(crate) player_racers: Option<BTreeSet<EntityId>>,
     /// Seconds each racer has been speeding in a unit's sight (radar hold).
     pub(crate) radar_over: BTreeMap<EntityId, f32>,
     /// When each racer last had a unit sent to wait ahead of it (see
@@ -650,6 +694,7 @@ impl PoliceSystem {
     /// Police on a road network.
     pub fn with_city(cfg: PoliceConfig, graph: RoadGraph, setup: PoliceSetup) -> Self {
         let room = pro::RoadRoom::new(&graph, &cfg.pursuit.pro);
+        let km = district_km(&graph);
         Self {
             room,
             cfg,
@@ -666,7 +711,12 @@ impl PoliceSystem {
             first_backup: BTreeMap::new(),
             arresting: BTreeMap::new(),
             obs: BTreeMap::new(),
-            recognition_s: BTreeMap::new(),
+            awareness: BTreeMap::new(),
+            district_km: km,
+            call_vel: BTreeMap::new(),
+            call_last: BTreeMap::new(),
+            call_redispatches: BTreeMap::new(),
+            player_racers: None,
             radar_over: BTreeMap::new(),
             trails: BTreeMap::new(),
             prev_pos: BTreeMap::new(),
@@ -730,7 +780,8 @@ impl PoliceSystem {
         self.tick += 1;
         self.now = self.now.plus(dt);
         self.phase = world.time_of_day().phase();
-        self.sync_racers(racers);
+        let racers = self.scope_racers(racers);
+        self.sync_racers(&racers);
         self.process_events(world, events);
         self.rebuild_obstacles();
         self.drive_units(world, dt);
@@ -745,6 +796,72 @@ impl PoliceSystem {
         self.flush_radio();
         for e in self.pending.drain(..) {
             out.push(SimEvent::Police(e));
+        }
+    }
+
+    /// Which vehicles are players (2026-10-23, owner: "police should not engage random AI cars
+    /// across the map"). With a set, AI racers (every racer not in it) are police business
+    /// only while a race is on or within `presence.npc_scope_m` of a player: farther away
+    /// they are dropped (a pursuit of one is called off, its record, calls and units
+    /// released) and their violations, contacts with units and crashes are ignored. `None`
+    /// (the default, headless runs): every racer counts.
+    pub fn set_player_racers(&mut self, players: Option<&[EntityId]>) {
+        self.player_racers = players.map(|p| p.iter().copied().collect());
+    }
+
+    /// The racer views police act on this tick (see [`PoliceSystem::set_player_racers`]);
+    /// drops AI racers that left the scope.
+    fn scope_racers(&mut self, racers: &[RacerView]) -> Vec<RacerView> {
+        let Some(players) = self.player_racers.as_ref() else {
+            return racers.to_vec();
+        };
+        let near: Vec<[f32; 2]> = racers
+            .iter()
+            .filter(|r| players.contains(&r.entity))
+            .map(|r| xy(r.pos))
+            .collect();
+        let racing = self.race.is_some();
+        let scope = self.cfg.presence.npc_scope_m;
+        let kept: Vec<RacerView> = racers
+            .iter()
+            .filter(|r| {
+                players.contains(&r.entity)
+                    || racing
+                    || near.iter().any(|p| dist(*p, xy(r.pos)) <= scope)
+            })
+            .copied()
+            .collect();
+        let gone: Vec<EntityId> = self
+            .racers
+            .keys()
+            .filter(|e| !players.contains(e) && !kept.iter().any(|r| r.entity == **e))
+            .copied()
+            .collect();
+        for e in gone {
+            self.drop_racer(e);
+        }
+        kept
+    }
+
+    /// Forget an AI racer that left the police's scope: call off its pursuit (releasing the
+    /// units on it) and drop its record, calls and what units knew of it.
+    fn drop_racer(&mut self, racer: EntityId) {
+        if self.racers.get(&racer).is_some_and(|r| r.pursued()) {
+            self.end_pursuit(racer, PursuitOutcome::CalledOff);
+        }
+        self.racers.remove(&racer);
+        self.obs.remove(&racer);
+        self.trails.remove(&racer);
+        self.awareness.retain(|k, _| k.1 != racer);
+        self.radar_over.remove(&racer);
+        self.prev_pos.remove(&racer);
+        self.prev_vel.remove(&racer);
+        self.incidents
+            .retain(|i| i.kind != dispatch::IncidentKind::Report { racer });
+        for i in 0..self.units.len() {
+            if self.units[i].assignment.target() == Some(racer) && self.units[i].player.is_none() {
+                self.assign(i, Assignment::Idle);
+            }
         }
     }
 
@@ -2418,9 +2535,10 @@ mod tests {
             pos: [0.0; 3],
             vel: [0.0; 3],
         };
+        // (A red light: a collision by a standing racer no longer counts, 2026-10-23.)
         let ev = vec![SimEvent::TrafficViolation {
             vehicle: EntityId(1),
-            kind: wp_contracts::ViolationKind::Collision,
+            kind: wp_contracts::ViolationKind::RedLight,
             pos: [0.0; 3],
         }];
         let mut out = Vec::new();

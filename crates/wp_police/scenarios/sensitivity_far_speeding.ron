@@ -1,0 +1,16 @@
+// Sensitivity: mild speeding (1.25x the limit, ~12 km/h over in town) with patrols around. Only
+// police radar can clock it (no world reports). Before 2026-10-23 any unit within 380 m in a
+// 200-degree cone clocked it and the clocking unit started a pursuit from wherever it was. Now
+// radar is a 20-degree beam ahead/behind out to 250 m, and only a witness within 150 m starts a
+// pursuit at once; farther units have to identify the car first (250 m by day).
+(
+    name: "police_sensitivity_far_speeding",
+    seed: 920,
+    time_of_day_h: 12.0,
+    duration_s: 120.0,
+    runs: 4,
+    racers: [(district: Core, speed_factor: 1.25, violations: false, stay_in_district: false)],
+    expect: [
+        (metric: "pursuit_start_unit_max_m", min: -1, max: 250),
+    ],
+)

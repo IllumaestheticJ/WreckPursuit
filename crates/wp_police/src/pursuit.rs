@@ -178,20 +178,78 @@ impl PoliceSystem {
     // Observation & rules
     // -----------------------------------------------------------------------------------------
 
-    pub(crate) fn update_observations(&mut self, world: &dyn WorldQuery) {
+    /// Seconds of line of sight a ground unit needs to become fully aware of a racer `d` m
+    /// away ([`crate::config::AwarenessConfig`]), before the phase's time scale.
+    fn awareness_time_s(&self, d: f32) -> f32 {
+        let a = &self.cfg.heat.heat.awareness;
+        let identify = self.cfg.heat.heat.identify_range_m.get(self.phase);
+        let notice = self.cfg.pursuit.los_range_m.get(self.phase).max(identify);
+        let t = if d <= a.near_m {
+            a.near_s
+        } else if d <= identify {
+            let k = (d - a.near_m) / (identify - a.near_m).max(1.0);
+            a.near_s + (a.identify_s - a.near_s) * k
+        } else {
+            let k = ((d - identify) / (notice - identify).max(1.0)).min(1.0);
+            a.identify_s + (a.notice_s - a.identify_s) * k
+        };
+        t * a.time_scale.get(self.phase)
+    }
+
+    /// Raise or drain unit `unit`'s awareness of `racer` by one think step of `tdt` s
+    /// (`rate`: awareness per second while in sight; `None`: out of sight). Returns the new
+    /// awareness.
+    fn step_awareness(
+        &mut self,
+        unit: UnitId,
+        racer: EntityId,
+        rate: Option<f32>,
+        tdt: f32,
+    ) -> f32 {
+        let decay = self.cfg.heat.heat.awareness.decay_per_s;
+        let key = (unit, racer);
+        let old = self.awareness.get(&key).copied().unwrap_or(0.0);
+        let new = match rate {
+            Some(r) => (old + r * tdt).min(1.0),
+            None => (old - decay * tdt).max(0.0),
+        };
+        if new > 0.0 {
+            self.awareness.insert(key, new);
+        } else {
+            self.awareness.remove(&key);
+        }
+        new
+    }
+
+    /// Whether unit `unit` is fully aware of `racer` (sees it itself, not over the radio).
+    pub(crate) fn unit_aware(&self, unit: UnitId, racer: EntityId) -> bool {
+        self.awareness
+            .get(&(unit, racer))
+            .is_some_and(|a| *a >= 1.0)
+    }
+
+    pub(crate) fn update_observations(&mut self, world: &dyn WorldQuery, tdt: f32) {
         let los_range = self.cfg.pursuit.los_range_m.get(self.phase);
         let witness = self.cfg.heat.heat.witness_range_m.get(self.phase);
-        let recognise = self.cfg.heat.heat.recognition_range_m.get(self.phase);
+        let identify = self.cfg.heat.heat.identify_range_m.get(self.phase);
         let helo_range = self.cfg.tools.helicopter.los_range_m.get(self.phase);
+        let helo_rate = 1.0
+            / (self.cfg.heat.heat.awareness.helo_s
+                * self.cfg.heat.heat.awareness.time_scale.get(self.phase))
+            .max(1e-3);
         let sight = self.cfg.heat.heat.sight.clone();
         let ids: Vec<EntityId> = self.racers.keys().copied().collect();
         for s in self.helo_sight.values_mut() {
             s.los = false;
         }
+        // Units gone since the last think lose what they knew.
+        let live: std::collections::BTreeSet<UnitId> = self.units.iter().map(|u| u.id).collect();
+        self.awareness.retain(|k, _| live.contains(&k.0));
         let mut helo_los: Vec<UnitId> = Vec::new();
         for id in ids {
             let p = xy(self.racers[&id].pos);
             let pz = self.racers[&id].pos[2];
+            let in_pursuit = self.racers[&id].status == PursuitStatus::Pursuit;
             let mut o = RacerObs {
                 nearest_unit_m: f32::INFINITY,
                 nearest_chaser_m: f32::INFINITY,
@@ -199,8 +257,11 @@ impl PoliceSystem {
             };
             let mut best_spot = f32::INFINITY;
             let mut best_witness = f32::INFINITY;
-            for u in &self.units {
+            for k in 0..self.units.len() {
+                let u = &self.units[k];
+                let uid = u.id;
                 if u.wrecked {
+                    self.awareness.remove(&(uid, id));
                     continue;
                 }
                 let d = dist(u.body.pos, p);
@@ -215,29 +276,54 @@ impl PoliceSystem {
                             o.nearest_chaser_m = o.nearest_chaser_m.min(d);
                         }
                         if u.assignment == Assignment::OutOfService {
+                            self.awareness.remove(&(uid, id));
                             continue;
                         }
-                        if d <= los_range
+                        // Busy elsewhere (booking, answering another call): not watching.
+                        let busy = booking || self.responding_elsewhere(k, id);
+                        let in_sight = d <= los_range
                             && in_view(u.body.heading, u.body.pos, p, d, &sight)
-                            && self.sees_at(world, u.body.pos, u.body.alt_m, p, pz)
-                        {
-                            // Recognition (pursuit start) and witnessing (full violation heat)
-                            // have their own ranges inside line-of-sight range.
-                            o.seen = true;
-                            if d <= witness && d < best_witness {
-                                o.witnessed = true;
-                                best_witness = d;
-                                o.witness = Some(u.id);
-                            }
-                            if d <= recognise && d < best_spot {
+                            && self.sees_at(world, u.body.pos, u.body.alt_m, p, pz);
+                        let rate = in_sight.then(|| {
+                            let focus = in_view(
+                                u.body.heading,
+                                u.body.pos,
+                                p,
+                                d,
+                                &crate::config::SightConfig {
+                                    fov_deg: sight.focus_fov_deg,
+                                    ..sight.clone()
+                                },
+                            );
+                            let f = if focus { 1.0 } else { sight.peripheral_factor };
+                            f / self.awareness_time_s(d).max(1e-3)
+                        });
+                        let aware = self.step_awareness(uid, id, rate, tdt) >= 1.0;
+                        // Witnessing a violation is an event: line of sight within the witness
+                        // range is enough (no build-up), but a busy unit isn't looking.
+                        if in_sight && !busy && d <= witness && d < best_witness {
+                            o.witnessed = true;
+                            best_witness = d;
+                            o.witness = Some(uid);
+                        }
+                        // A unit already chasing keeps the car in sight as long as it can
+                        // see it within the notice range (it knows what it is looking at);
+                        // only finding a LOST car again needs an identification.
+                        if in_sight {
+                            o.tracked = true;
+                        }
+                        if in_sight && aware && d <= identify {
+                            o.identified = true;
+                            if d < best_spot {
                                 best_spot = d;
-                                o.spotter = Some(u.id);
+                                o.spotter = Some(uid);
                                 o.spotter_m = d;
                             }
                         }
                     }
                     UnitKind::Helicopter => {
-                        if matches!(u.assignment, Assignment::HeloTrack { target } if target == id)
+                        let tracking = matches!(u.assignment, Assignment::HeloTrack { target } if target == id);
+                        let los = tracking
                             && d <= helo_range
                             // Looking down from altitude: only tall buildings, high ground,
                             // covered roads (tunnels) and bridge decks (underpasses) block.
@@ -247,18 +333,23 @@ impl PoliceSystem {
                             && world.line_of_sight(
                                 [u.body.pos[0], u.body.pos[1], u.body.alt_m],
                                 [p[0], p[1], crate::eye_height_at(pz)],
-                            )
+                            );
+                        if los {
+                            helo_los.push(uid);
+                        }
+                        if los {
+                            o.tracked = true;
+                        }
+                        if self.step_awareness(uid, id, los.then_some(helo_rate), tdt) >= 1.0 && los
                         {
-                            o.seen = true;
-                            helo_los.push(u.id);
+                            o.identified = true;
                         }
                     }
                 }
             }
-            if self.camera_sees(world, p) {
-                o.seen = true;
-                o.witnessed = true;
-            }
+            // Traffic cameras only report violations (`on_violation`); they never keep a
+            // pursuit going or tell units where the racer is (2026-10-23).
+            o.seen = if in_pursuit { o.tracked } else { o.identified };
             for &h in &helo_los {
                 self.helo_sight
                     .entry(h)
@@ -287,13 +378,24 @@ impl PoliceSystem {
         }
     }
 
+    /// Whether unit `i` is answering a call that is not about `racer` (it isn't watching for
+    /// other offences on the way).
+    fn responding_elsewhere(&self, i: usize, racer: EntityId) -> bool {
+        let Assignment::Respond { incident } = self.units[i].assignment else {
+            return false;
+        };
+        self.incidents.iter().any(|inc| {
+            inc.id == incident && inc.kind != crate::dispatch::IncidentKind::Report { racer }
+        })
+    }
+
     pub(crate) fn update_racer_rules(&mut self, tdt: f32) {
         let ids: Vec<EntityId> = self.racers.keys().copied().collect();
         let cfg = self.cfg.heat.clone();
         for id in ids {
             if self.held.contains(&id) {
                 // Driver dropped out: everything stays as it was (see `set_racer_held`).
-                self.recognition_s.remove(&id);
+                self.awareness.retain(|k, _| k.1 != id);
                 continue;
             }
             let o = self.obs.get(&id).copied().unwrap_or(RacerObs {
@@ -338,22 +440,10 @@ impl PoliceSystem {
                 Some(RuleOutcome::Captured) => self.end_pursuit(id, PursuitOutcome::Captured),
                 None => {}
             }
-            // A unit that keeps a wanted racer in recognition range long enough starts a pursuit
-            // (longer further out; out of sight the timer drains instead of resetting, row 80).
-            let rc = &self.cfg.heat.heat.recognition;
-            let acc = self.recognition_s.entry(id).or_insert(0.0);
-            *acc = if o.spotter.is_some() {
-                *acc + tdt
-            } else {
-                (*acc - rc.decay_per_s * tdt).max(0.0)
-            };
-            let range = self.cfg.heat.heat.recognition_range_m.get(self.phase);
-            let far = ((o.spotter_m - rc.near_m) / (range - rc.near_m).max(1.0)).clamp(0.0, 1.0);
-            let needed =
-                self.cfg.heat.heat.recognition_time_s.get(self.phase) + rc.far_extra_s * far;
-            let recognised = o.spotter.is_some() && *acc >= needed;
+            // A unit that identifies a wanted racer (fully aware of it within the identify
+            // range, see `update_observations`) starts a pursuit.
             let rec = &self.racers[&id];
-            if !rec.pursued() && rec.level > WantedLevel::None && recognised {
+            if !rec.pursued() && rec.level > WantedLevel::None {
                 if let Some(spotter) = o.spotter {
                     self.start_pursuit(id, spotter);
                 }
@@ -371,6 +461,8 @@ impl PoliceSystem {
             rec.last_known = Some(p);
         }
         self.trails.insert(racer, Track::new(vec![p]));
+        // The unit that starts it has identified the car (witnessed, rammed, blown past).
+        self.awareness.insert((unit, racer), 1.0);
         self.stats.pursuits.push(PursuitRecord {
             racer,
             start: now,
@@ -765,13 +857,16 @@ impl PoliceSystem {
     }
 
     pub(crate) fn random_node_in(&mut self, d: Option<crate::graph::District>) -> Option<NodeId> {
-        let cands: Vec<u32> = (0..self.graph.nodes.len() as u32)
-            .filter(|&n| d.is_none_or(|d| self.graph.nodes[n as usize].district == d))
-            .collect();
-        if cands.is_empty() {
-            return None;
-        }
-        Some(NodeId(cands[self.rng.below(cands.len() as u32) as usize]))
+        // By road length (2026-10-23), like patrol spawn spots: an end of a segment drawn by
+        // length. Patrol routes spread over the district's roads, not its curve vertices.
+        let u = self.rng.next_f32();
+        let pick_b = self.rng.below(2) == 1;
+        let (sid, _) = self
+            .graph
+            .spot_by_length(u, |s| d.is_none_or(|d| s.district == d))?;
+        let seg = self.graph.segment(sid);
+        // A one-way segment's far end is always reachable from it.
+        Some(if pick_b || seg.oneway { seg.b } else { seg.a })
     }
 
     fn limit_at(&self, p: [f32; 2]) -> f32 {
@@ -806,10 +901,16 @@ impl PoliceSystem {
 
     /// Predicted intercept: the node on the racer's predicted path, 10–20 s out, that the unit
     /// can reach in time (or the far end of the horizon).
+    /// A unit that sees the racer itself plans on what it sees (`last_known`); the others on
+    /// the radioed position, never the racer's real velocity (2026-10-23).
     fn intercept_point(&self, i: usize, racer: EntityId) -> Option<(NodeId, [f32; 2])> {
         let rec = self.racers.get(&racer)?;
-        let p = rec.last_known?;
-        self.meet_point(i, p, [rec.vel[0], rec.vel[1]])
+        let (p, v) = if self.unit_aware(self.units[i].id, racer) {
+            (rec.last_known?, rec.last_known_vel)
+        } else {
+            rec.radioed()?
+        };
+        self.meet_point(i, p, v)
     }
 
     /// Where a unit answering a reckless-driving call meets the racer reported at `p` moving
@@ -1174,15 +1275,13 @@ impl PoliceSystem {
                         // Reckless driver: head for where the racer will be (later calls keep
                         // `inc.pos` on its latest reported position), refreshed like an
                         // intercept. Driving to where it was only ends in a stern chase.
-                        crate::dispatch::IncidentKind::Report { racer } => {
+                        crate::dispatch::IncidentKind::Report { .. } => {
                             let held_for = now.since(u.assigned);
                             let stale = held_for > 0.0 && held_for % 3.0 < tdt;
                             let goal = if !t.is_drivable() || u.track_s > t.length() - 10.0 || stale
                             {
-                                let v = self
-                                    .racers
-                                    .get(&racer)
-                                    .map_or([0.0, 0.0], |r| [r.vel[0], r.vel[1]]);
+                                // The velocity it was reported at, not the racer's real one.
+                                let v = self.call_vel.get(&inc.id).copied().unwrap_or([0.0, 0.0]);
                                 self.respond_meet_point(i, inc.pos, v)
                             } else {
                                 None
@@ -1346,10 +1445,15 @@ impl PoliceSystem {
                         && u.cmd.track.is_drivable()
                     {
                         let end = u.cmd.track.point_at(u.cmd.track.length());
-                        let rv = [rec.vel[0], rec.vel[1]];
-                        let d_racer = dist(rp, end);
+                        // What this unit knows: its own sight, else the radio.
+                        let (kp, rv) = if self.unit_aware(u.id, target) {
+                            (rec.last_known.unwrap_or(rp), rec.last_known_vel)
+                        } else {
+                            rec.radioed().unwrap_or((rp, [0.0, 0.0]))
+                        };
+                        let d_racer = dist(kp, end);
                         let coming =
-                            dot(rv, sub(end, rp)) > 0.0 && d_racer < 250.0 && d_racer > 12.0;
+                            dot(rv, sub(end, kp)) > 0.0 && d_racer < 250.0 && d_racer > 12.0;
                         if coming && dist(u.body.pos, end) < 35.0 {
                             if !matches!(u.tactic, Tactic::RollingBlock) {
                                 // Reuse RollingBlock as the "blocking" marker for views.
@@ -1370,7 +1474,8 @@ impl PoliceSystem {
                     {
                         if let Some((node, point)) = self.intercept_point(i, target) {
                             // A stopped racer: drive all the way to it, not just to the junction.
-                            let v_r = (rec.vel[0] * rec.vel[0] + rec.vel[1] * rec.vel[1]).sqrt();
+                            let kv = rec.last_known_vel;
+                            let v_r = (kv[0] * kv[0] + kv[1] * kv[1]).sqrt();
                             let fin = (v_r < STOPPED_RACER_MPS).then_some(point);
                             let u = &self.units[i];
                             let end = fin.unwrap_or(self.graph.node(node).pos);
@@ -2107,5 +2212,342 @@ mod tests {
     #[test]
     fn lateral_g_formula() {
         assert!((lateral_g(9.81, 9.81) - 1.0).abs() < 1e-5);
+    }
+}
+
+/// 2026-10-23 perception and sensitivity rules ("cops see through walls", "not overly
+/// sensitive"), on a hand-built straight road with one stationary observer unit and no AI.
+#[cfg(test)]
+mod perception_tests {
+    use super::*;
+    use crate::graph::{District, Occluder, Poi, RoadClass, RoadGraph};
+    use crate::scenario::ScenarioWorld;
+    use crate::{PoliceConfig, PoliceSetup, RacerView};
+    use wp_contracts::{PlayerId, SimEvent, TimeOfDay, ViolationKind, PHYSICS_DT};
+
+    const RACER: EntityId = EntityId(42);
+
+    /// A 2 km straight Core road along y = 0, no patrols, no spawns of any kind.
+    fn police(occluders: &[Occluder], camera: Option<[f32; 2]>) -> PoliceSystem {
+        let mut g = RoadGraph::new();
+        let ids: Vec<NodeId> = (0..=20)
+            .map(|k| g.add_node([-1000.0 + 100.0 * k as f32, 0.0], District::Core))
+            .collect();
+        for k in 0..20 {
+            g.add_segment(ids[k], ids[k + 1], 13.9, RoadClass::Arterial, false);
+        }
+        g.occluders.extend_from_slice(occluders);
+        if let Some(c) = camera {
+            g.pois.push(Poi {
+                kind: PoiKind::Camera,
+                pos: c,
+                radius_m: 60.0,
+            });
+        }
+        let mut cfg = PoliceConfig::builtin();
+        let none = crate::config::PhaseTable {
+            dawn: 0,
+            day: 0,
+            dusk: 0,
+            night: 0,
+        };
+        cfg.presence.patrols = crate::config::DistrictTable {
+            core: none,
+            suburb: none,
+            industrial: none,
+        };
+        cfg.presence.max_ground_units = 0;
+        PoliceSystem::with_city(
+            cfg,
+            g,
+            PoliceSetup {
+                seed: 1,
+                ..Default::default()
+            },
+        )
+    }
+
+    fn world() -> ScenarioWorld {
+        ScenarioWorld::clock(TimeOfDay::from_hours(12.0), 0.0)
+    }
+
+    /// Step `secs` with the racer standing at `at` (or moving at `vel`).
+    fn run(p: &mut PoliceSystem, at: [f32; 2], vel: [f32; 2], secs: f32, ev: &[SimEvent]) {
+        let w = world();
+        let view = RacerView {
+            entity: RACER,
+            pos: [at[0], at[1], 0.0],
+            vel: [vel[0], vel[1], 0.0],
+        };
+        let mut out = Vec::new();
+        for k in 0..(secs / PHYSICS_DT).round() as usize {
+            let e: &[SimEvent] = if k == 0 { ev } else { &[] };
+            p.step(&w, &[view], e, PHYSICS_DT, &mut out);
+        }
+    }
+
+    fn observer(p: &mut PoliceSystem) -> UnitId {
+        p.add_player_unit(PlayerId(1), EntityId(900), [0.0, 0.0, 0.0], [1.0, 0.0])
+    }
+
+    fn status(p: &PoliceSystem) -> PursuitStatus {
+        p.racer(RACER).map(|r| r.status).unwrap_or_default()
+    }
+
+    fn violation(kind: ViolationKind, at: [f32; 2]) -> SimEvent {
+        SimEvent::TrafficViolation {
+            vehicle: RACER,
+            kind,
+            pos: [at[0], at[1], 0.0],
+        }
+    }
+
+    /// A wall across the road between the observer (x = 0) and x = 150.
+    const WALL: Occluder = Occluder {
+        min: [60.0, -6.0],
+        max: [80.0, 6.0],
+    };
+    const HIDDEN: [f32; 2] = [150.0, 0.0];
+    const OPEN: [f32; 2] = [150.0, 40.0];
+
+    #[test]
+    fn a_wanted_car_is_identified_only_after_a_moment_in_sight() {
+        let mut p = police(&[], None);
+        observer(&mut p);
+        run(&mut p, HIDDEN, [0.0, 0.0], 0.2, &[]);
+        p.set_heat(RACER, 15.0);
+        // 150 m by day: ~1.2 s of sight. Not after 0.5 s, by 2 s.
+        run(&mut p, HIDDEN, [0.0, 0.0], 0.5, &[]);
+        assert_eq!(status(&p), PursuitStatus::Wanted);
+        run(&mut p, HIDDEN, [0.0, 0.0], 1.5, &[]);
+        assert_eq!(status(&p), PursuitStatus::Pursuit);
+    }
+
+    #[test]
+    fn a_glimpse_does_not_re_acquire_a_lost_racer_but_identification_does() {
+        let mut p = police(&[WALL], None);
+        let u = observer(&mut p);
+        run(&mut p, OPEN, [0.0, 0.0], 0.2, &[]);
+        p.set_heat(RACER, 15.0);
+        p.start_pursuit(RACER, u);
+        // Behind the wall for 6 s: lost (Searching), awareness drained.
+        run(&mut p, HIDDEN, [0.0, 0.0], 6.0, &[]);
+        assert_eq!(status(&p), PursuitStatus::Searching);
+        let lost = p.racer(RACER).unwrap().los_lost_s;
+        // A 0.1 s glimpse: still lost, the escape timer keeps running.
+        run(&mut p, OPEN, [0.0, 0.0], 0.1, &[]);
+        run(&mut p, HIDDEN, [0.0, 0.0], 0.5, &[]);
+        assert_eq!(status(&p), PursuitStatus::Searching);
+        assert!(p.racer(RACER).unwrap().los_lost_s > lost);
+        // In sight long enough to identify it: found again.
+        run(&mut p, OPEN, [0.0, 0.0], 2.0, &[]);
+        assert_eq!(status(&p), PursuitStatus::Pursuit);
+    }
+
+    #[test]
+    fn a_racer_beyond_the_identify_range_is_not_re_acquired() {
+        let mut p = police(&[WALL], None);
+        let u = observer(&mut p);
+        run(&mut p, OPEN, [0.0, 0.0], 0.2, &[]);
+        p.set_heat(RACER, 15.0);
+        p.start_pursuit(RACER, u);
+        run(&mut p, HIDDEN, [0.0, 0.0], 6.0, &[]);
+        // 320 m out in the open by day (identify range 250 m, notice range 380 m): noticed
+        // (fully aware after ~3 s), never identified; 11 s lost in all, short of the 12 s escape.
+        run(&mut p, [320.0, 0.0], [0.0, 0.0], 5.0, &[]);
+        assert_eq!(status(&p), PursuitStatus::Searching);
+    }
+
+    #[test]
+    fn a_far_witness_does_not_start_a_pursuit_at_once() {
+        let mut p = police(&[], None);
+        observer(&mut p);
+        // 200 m: within the witness range (250 m), beyond witness_pursuit_m (150 m).
+        let at = [200.0, 0.0];
+        run(&mut p, at, [0.0, 0.0], 0.15, &[]);
+        p.set_heat(RACER, 9.0);
+        run(
+            &mut p,
+            at,
+            [12.0, 0.0],
+            0.1,
+            &[violation(ViolationKind::RedLight, at)],
+        );
+        assert_eq!(
+            p.wanted_level(RACER),
+            WantedLevel::L1,
+            "witnessed: full heat"
+        );
+        assert_eq!(status(&p), PursuitStatus::Wanted);
+        // It identifies the car (~1.6 s at 200 m) and then pursues.
+        run(&mut p, at, [0.0, 0.0], 2.0, &[]);
+        assert_eq!(status(&p), PursuitStatus::Pursuit);
+    }
+
+    #[test]
+    fn a_close_witness_starts_a_pursuit_at_once() {
+        let mut p = police(&[], None);
+        observer(&mut p);
+        let at = [100.0, 0.0];
+        run(&mut p, at, [0.0, 0.0], 0.15, &[]);
+        p.set_heat(RACER, 9.0);
+        run(
+            &mut p,
+            at,
+            [12.0, 0.0],
+            0.05,
+            &[violation(ViolationKind::RedLight, at)],
+        );
+        assert_eq!(status(&p), PursuitStatus::Pursuit);
+    }
+
+    #[test]
+    fn a_standing_car_hit_by_a_civilian_is_not_the_offender() {
+        let mut p = police(&[], None);
+        run(
+            &mut p,
+            OPEN,
+            [0.0, 0.0],
+            0.2,
+            &[violation(ViolationKind::Collision, OPEN)],
+        );
+        assert_eq!(p.racer(RACER).unwrap().heat, 0.0);
+        assert!(p.incidents().is_empty());
+    }
+
+    #[test]
+    fn an_unseen_offence_is_called_in_only_by_someone_nearby_and_the_call_expires() {
+        let mut p = police(&[], None);
+        // The world reports its traffic, none of it near the racer: nobody calls.
+        p.set_obstacles(&[crate::ObstacleView::car(
+            Some(EntityId(500)),
+            [-600.0, 0.0, 0.0],
+            [0.0; 3],
+            [1.0, 0.0],
+        )]);
+        let at = [400.0, 0.0];
+        run(
+            &mut p,
+            at,
+            [12.0, 0.0],
+            0.2,
+            &[violation(ViolationKind::RedLight, at)],
+        );
+        assert!(
+            p.racer(RACER).unwrap().heat > 0.0,
+            "reported heat still counts"
+        );
+        assert!(p.incidents().is_empty());
+        // A civilian 30 m away: a call.
+        p.set_obstacles(&[crate::ObstacleView::car(
+            Some(EntityId(500)),
+            [430.0, 0.0, 0.0],
+            [0.0; 3],
+            [1.0, 0.0],
+        )]);
+        // (The same violation kind counts once per `repeat_cooldown_s`.)
+        run(&mut p, at, [12.0, 0.0], 1.2, &[]);
+        run(
+            &mut p,
+            at,
+            [12.0, 0.0],
+            1.5,
+            &[violation(ViolationKind::RedLight, at)],
+        );
+        assert_eq!(p.incidents().len(), 1);
+        // No further report: dropped `call_ttl_s` (60 s) later.
+        run(&mut p, at, [12.0, 0.0], 55.0, &[]);
+        assert_eq!(p.incidents().len(), 1);
+        run(&mut p, at, [12.0, 0.0], 8.0, &[]);
+        assert!(p.incidents().is_empty());
+    }
+
+    #[test]
+    fn mild_speeding_is_not_called_in() {
+        let mut p = police(&[], None);
+        let at = [400.0, 0.0];
+        let ev = violation(ViolationKind::Speeding { over_mps: 3.0 }, at);
+        run(&mut p, at, [17.0, 0.0], 0.2, &[ev]);
+        assert!(p.incidents().is_empty());
+    }
+
+    #[test]
+    fn a_traffic_camera_never_keeps_a_pursuit_going() {
+        let mut p = police(&[WALL], Some(HIDDEN));
+        let u = observer(&mut p);
+        run(&mut p, OPEN, [0.0, 0.0], 0.2, &[]);
+        p.set_heat(RACER, 15.0);
+        p.start_pursuit(RACER, u);
+        // Under the camera, behind the wall from the unit: lost all the same.
+        run(&mut p, HIDDEN, [0.0, 0.0], 1.0, &[]);
+        assert_eq!(status(&p), PursuitStatus::Searching);
+    }
+
+    /// Owner 2026-10-23: police leave AI racers far from every player alone.
+    #[test]
+    fn ai_racers_far_from_every_player_are_dropped() {
+        let mut p = police(&[], None);
+        let u = observer(&mut p);
+        let player = EntityId(1);
+        let near_npc = EntityId(2);
+        let w = world();
+        let views = |npc_x: f32| {
+            [
+                RacerView {
+                    entity: player,
+                    pos: [-500.0, 0.0, 0.0],
+                    vel: [0.0; 3],
+                },
+                RacerView {
+                    entity: near_npc,
+                    pos: [-300.0, 0.0, 0.0],
+                    vel: [0.0; 3],
+                },
+                RacerView {
+                    entity: RACER,
+                    pos: [npc_x, 0.0, 0.0],
+                    vel: [0.0; 3],
+                },
+            ]
+        };
+        let mut out = Vec::new();
+        p.step(&w, &views(100.0), &[], PHYSICS_DT, &mut out);
+        p.set_heat(RACER, 35.0);
+        p.start_pursuit(RACER, u);
+        assert!(p.racer(RACER).is_some_and(|r| r.pursued()));
+        // No player set: every racer counts (headless runs).
+        p.step(&w, &views(100.0), &[], PHYSICS_DT, &mut out);
+        assert!(p.racer(RACER).is_some());
+        // The sim names the player: the AI racer 600 m from it is dropped, pursuit called off,
+        // its violations ignored; the one 200 m from it stays.
+        p.set_player_racers(Some(&[player]));
+        p.step(&w, &views(100.0), &[], PHYSICS_DT, &mut out);
+        assert!(p.racer(RACER).is_none());
+        assert!(p.racer(near_npc).is_some());
+        assert!(p
+            .units()
+            .iter()
+            .all(|x| x.assignment.target() != Some(RACER)));
+        let ev = [violation(ViolationKind::RedLight, [100.0, 0.0])];
+        p.step(&w, &views(100.0), &ev, PHYSICS_DT, &mut out);
+        assert!(p.racer(RACER).is_none());
+    }
+
+    #[test]
+    fn patrols_scale_with_road_length() {
+        let p = police(&[], None);
+        let mut cfg = PoliceConfig::builtin();
+        // 2 km of Core road against the 12.8 km reference: 8 x 2 / 12.8 = 1.25 -> 1.
+        let n = (cfg.presence.patrols.core.day as f32 * 2.0 / cfg.presence.patrol_reference_km.core)
+            .round() as u32;
+        let g = (*p.graph).clone();
+        let q = PoliceSystem::with_city(cfg.clone(), g.clone(), PoliceSetup::default());
+        assert_eq!(q.patrol_target(District::Core), n.max(1));
+        assert_eq!(q.patrol_target(District::Suburb), 0, "no road, no patrol");
+        // The city-wide cap scales every district down.
+        cfg.presence.patrols.core.day = 200;
+        cfg.presence.max_patrols.day = 10;
+        let q = PoliceSystem::with_city(cfg, g, PoliceSetup::default());
+        assert_eq!(q.patrol_target(District::Core), 10);
     }
 }

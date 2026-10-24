@@ -113,15 +113,15 @@ impl Harness {
 
 #[test]
 fn presence_matches_table_for_every_phase() {
-    let cfg = PoliceConfig::builtin();
     for hour in [6.0, 12.0, 19.0, 3.0] {
         let mut h = Harness::new(hour, 1);
         h.run(2.0, &[]);
-        let phase = TimeOfDay::from_hours(hour).phase();
         for d in District::ALL {
+            assert!(h.police.patrol_target(d) >= 1, "{d:?} at {hour}h");
+            // The table scaled by the district's road length (2026-10-23).
             assert_eq!(
                 h.police.pool_count(d),
-                cfg.presence.patrols.get(d).get(phase),
+                h.police.patrol_target(d),
                 "{d:?} at {hour}h"
             );
         }
@@ -144,11 +144,14 @@ fn phase_change_adjusts_presence() {
     let mut h = Harness::new(17.9, 2);
     h.world.ratio = 60.0; // 1 sim second = 1 game minute; crosses 18:00 after 6 s.
     h.run(1.0, &[]);
-    assert_eq!(h.police.pool_count(District::Core), 8);
+    let day = h.police.patrol_target(District::Core);
+    assert_eq!(h.police.pool_count(District::Core), day);
     // No racers to hide from: surplus units retire one per think step.
     h.run(20.0, &[]);
     assert_eq!(h.police.phase(), wp_contracts::DayPhase::Dusk);
-    assert_eq!(h.police.pool_count(District::Core), 6);
+    let dusk = h.police.patrol_target(District::Core);
+    assert!(dusk < day, "dusk {dusk} < day {day}");
+    assert_eq!(h.police.pool_count(District::Core), dusk);
 }
 
 #[test]
@@ -1000,7 +1003,17 @@ fn stuck_unit_backs_out_reroutes_and_respawns_out_of_sight() {
         .police
         .units()
         .iter()
-        .filter(|u| u.kind == UnitKind::Car && dist(u.body.pos, rp) > 400.0)
+        // Away from junctions: a car held near one is queueing, not stuck.
+        .filter(|u| {
+            u.kind == UnitKind::Car
+                && dist(u.body.pos, rp) > 400.0
+                && h.police
+                    .graph()
+                    .nodes
+                    .iter()
+                    .filter(|n| n.junction)
+                    .all(|n| dist(n.pos, u.body.pos) > 45.0)
+        })
         .max_by(|a, b| dist(a.body.pos, rp).total_cmp(&dist(b.body.pos, rp)))
         .expect("a patrol far from the racer");
     let (id, pos, heading) = (unit.id, unit.body.pos, unit.body.heading);
@@ -1082,7 +1095,17 @@ fn unit_on_its_roof_is_reset_upright() {
         .police
         .units()
         .iter()
-        .filter(|u| u.kind == UnitKind::Car && dist(u.body.pos, rp) > 400.0)
+        // Away from junctions: a car held near one is queueing, not stuck.
+        .filter(|u| {
+            u.kind == UnitKind::Car
+                && dist(u.body.pos, rp) > 400.0
+                && h.police
+                    .graph()
+                    .nodes
+                    .iter()
+                    .filter(|n| n.junction)
+                    .all(|n| dist(n.pos, u.body.pos) > 45.0)
+        })
         .max_by(|a, b| dist(a.body.pos, rp).total_cmp(&dist(b.body.pos, rp)))
         .expect("a patrol far from the racer");
     let (id, pos, heading) = (unit.id, unit.body.pos, unit.body.heading);
@@ -1158,7 +1181,17 @@ fn stuck_unit_resets_in_place_within_15_m() {
         .police
         .units()
         .iter()
-        .filter(|u| u.kind == UnitKind::Car && dist(u.body.pos, rp) > 400.0)
+        // Away from junctions: a car held near one is queueing, not stuck.
+        .filter(|u| {
+            u.kind == UnitKind::Car
+                && dist(u.body.pos, rp) > 400.0
+                && h.police
+                    .graph()
+                    .nodes
+                    .iter()
+                    .filter(|n| n.junction)
+                    .all(|n| dist(n.pos, u.body.pos) > 45.0)
+        })
         .max_by(|a, b| dist(a.body.pos, rp).total_cmp(&dist(b.body.pos, rp)))
         .expect("a patrol far from the racer");
     let (id, pos, heading) = (unit.id, unit.body.pos, unit.body.heading);
@@ -1266,16 +1299,29 @@ fn pursuit_draws_backup_at_once_up_to_the_level_cap() {
         let early = units_on_racer(&h).len();
         assert!(early >= 2, "L{level}: only {early} unit(s) within 0.5 s");
         let mut most = 0;
+        // The cap while in sight; while the racer is lost, row 84's search extras come on top
+        // (2026-10-23: a lost racer must be identified again, so a 20 m/s racer is lost more).
+        let extra = PoliceConfig::builtin()
+            .presence
+            .reinforcement
+            .search_extra_units;
+        let mut over = Vec::new();
         for _ in 0..30 {
             h.police.set_heat(RACER, heat);
             h.run(1.0, &[]);
-            most = most.max(units_on_racer(&h).len());
+            let n = units_on_racer(&h).len();
+            most = most.max(n);
+            let cap = caps[level - 1]
+                + if h.racer_status() == PursuitStatus::Searching {
+                    extra[level - 1]
+                } else {
+                    0
+                };
+            if n > cap as usize {
+                over.push((n, cap, h.racer_status()));
+            }
         }
-        assert!(
-            most <= caps[level - 1] as usize,
-            "L{level}: {most} units > cap {}",
-            caps[level - 1]
-        );
+        assert!(over.is_empty(), "L{level}: over the cap: {over:?}");
         assert!(h.police.stats().backup_joins >= 1, "L{level}: no backup");
         if level >= 2 {
             assert!(most >= 3, "L{level}: at most {most} units on the racer");

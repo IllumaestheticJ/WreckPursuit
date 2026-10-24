@@ -132,20 +132,25 @@ pub struct HeatConfig {
     pub violation: ViolationWeights,
     /// Range within which a unit with line of sight witnesses a violation, m.
     pub witness_range_m: PhaseTable<f32>,
-    /// Range within which a unit with line of sight recognises a wanted car and starts a
-    /// pursuit, m. Much shorter in the dark.
-    pub recognition_range_m: PhaseTable<f32>,
-    /// Seconds of continuous recognition-range line of sight needed before a pursuit starts
-    /// (a glimpse at night is not enough).
-    pub recognition_time_s: PhaseTable<f32>,
+    /// Range within which a unit that is fully aware of a racer ([`AwarenessConfig`])
+    /// identifies it: recognises a wanted car (pursuit start), re-acquires a lost one and
+    /// refreshes its last known position, m. Shorter in the dark. Beyond it, out to
+    /// `pursuit.los_range_m`, a unit only notices and tracks.
+    pub identify_range_m: PhaseTable<f32>,
     /// Heat decay per second while unseen and not pursued.
     pub decay_per_s: PhaseTable<f32>,
     /// Multiplier on decay by the district the racer is in.
     pub decay_district_scale: DistrictTable<f32>,
     /// Seconds after the last sighting before decay starts.
     pub decay_grace_s: f32,
-    /// Heat added per second while actively pursued (long chases escalate).
+    /// Heat added per second while pursued and seen, and only while the racer has had a
+    /// violation counted in the last `pursuit_heat_window_s` (row 157: chase time alone,
+    /// driving legally, adds nothing).
     pub pursuit_heat_per_s: f32,
+    /// See `pursuit_heat_per_s`, s.
+    pub pursuit_heat_window_s: f32,
+    /// Violations by a racer already pursued count at this fraction of their heat.
+    pub pursued_violation_factor: f32,
     /// Heat added when the racer disables (total-losses) a police unit by contact.
     pub cop_disabled_heat: f32,
     /// Hitting a police car (assaulting an officer).
@@ -154,8 +159,10 @@ pub struct HeatConfig {
     pub blatant: BlatantConfig,
     /// What a ground unit can see (owner playtest row 89).
     pub sight: SightConfig,
-    /// How long recognising a wanted car takes (owner playtest rows 80 / 89).
-    pub recognition: RecognitionConfig,
+    /// How quickly a unit becomes aware of a racer it sees (2026-10-23 perception model).
+    pub awareness: AwarenessConfig,
+    /// Which racer-civilian collisions count.
+    pub collision: CollisionConfig,
     /// Units clock speeders themselves (owner report 2026-10-21, "noticed but no pursuit").
     pub radar: RadarConfig,
 }
@@ -170,6 +177,52 @@ pub struct SightConfig {
     pub fov_deg: f32,
     /// Seen in any direction this close, m.
     pub all_round_m: f32,
+    /// Width of the central part of the cone where awareness builds at full rate, degrees.
+    pub focus_fov_deg: f32,
+    /// Awareness rate in the cone outside `focus_fov_deg` (side windows), fraction.
+    pub peripheral_factor: f32,
+}
+
+/// Perception (owner 2026-10-23, "cops see through walls and re-engage too easily"): each
+/// unit's awareness of each racer, 0..=1, rises by `dt / t` while the unit has the racer in
+/// line of sight inside its cone within `pursuit.los_range_m` (t: `near_s` within `near_m`,
+/// rising linearly to `identify_s` at `heat.identify_range_m` and to `notice_s` at the notice
+/// range, times `time_scale`) and falls at `decay_per_s` out of sight. Fully aware within the
+/// identify range = identified (recognise a wanted car, find a lost one again). An ongoing
+/// pursuit needs only line of sight within the notice range.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AwarenessConfig {
+    /// Fastest identification this close, m.
+    pub near_m: f32,
+    /// Seconds of sight needed within `near_m`.
+    pub near_s: f32,
+    /// Seconds of sight needed at the identify range.
+    pub identify_s: f32,
+    /// Seconds of sight needed at the notice range.
+    pub notice_s: f32,
+    /// Awareness lost per second out of sight.
+    pub decay_per_s: f32,
+    /// Seconds of line of sight the helicopter needs.
+    pub helo_s: f32,
+    /// Units that do not see the racer themselves plan on a radioed position refreshed this
+    /// often, s.
+    pub radio_share_s: f32,
+    /// A witnessed violation that makes the racer wanted starts the witness's pursuit at once
+    /// only this close; farther away the unit has to identify the car first, m.
+    pub witness_pursuit_m: f32,
+    /// Multiplier on every time above, per phase (slower in the dark).
+    pub time_scale: PhaseTable<f32>,
+}
+
+/// Which `ViolationKind::Collision` events count (`wp_world` reports any box overlap with a
+/// civilian, whoever hit whom).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CollisionConfig {
+    /// The racer must have been moving at least this fast, m/s (a car hit while standing is
+    /// not the offender).
+    pub min_racer_speed_mps: f32,
 }
 
 /// A ground unit's radar (owner report 2026-10-21: "cops see me but no pursuit"). A unit that
@@ -191,27 +244,15 @@ pub struct RadarConfig {
     pub repeat_s: f32,
     /// Speeding in a unit's sight this long before it is clocked (`wp_world`'s hold), s.
     pub hold_s: f32,
-}
-
-/// Recognising an already-wanted car a unit did not see offend (rows 80 / 89):
-/// `recognition_time_s` within `near_m`, rising linearly by `far_extra_s` to the edge of
-/// `recognition_range_m`. Losing sight drains the timer at `decay_per_s` instead of resetting
-/// it, so a one-frame line-of-sight drop costs nothing.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RecognitionConfig {
-    /// Recognition takes `recognition_time_s` this close, m.
-    pub near_m: f32,
-    /// Extra seconds at the edge of the recognition range.
-    pub far_extra_s: f32,
-    /// Seconds of the recognition timer lost per second out of sight.
-    pub decay_per_s: f32,
+    /// Half-width of the radar beam, degrees from straight ahead or straight behind the unit.
+    pub beam_deg: f32,
+    /// Radar range per phase, m.
+    pub range_m: PhaseTable<f32>,
 }
 
 /// Speeding far over the limit right past a unit that can see it is recognised at once, day or
-/// night (owner playtest row 60, "I sped right by a cop with no chase": at night a pursuit
-/// otherwise needs the racer within `recognition_range_m` (40 m) for `recognition_time_s`
-/// (4 s), which a car passing at 150 km/h never is).
+/// night (owner playtest row 60, "I sped right by a cop with no chase": otherwise the unit has
+/// to become fully aware of the car first, which a car passing at 150 km/h may never allow).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BlatantConfig {
@@ -404,6 +445,17 @@ pub struct ResponseConfig {
     pub redispatch_s: f32,
     /// See `redispatch_s`, m.
     pub redispatch_far_m: f32,
+    /// An unseen violation becomes a call only with a civilian vehicle this close to it (or a
+    /// traffic camera), m.
+    pub call_witness_m: f32,
+    /// ... and, for speeding, only this far over the limit, m/s.
+    pub call_min_over_mps: f32,
+    /// ... and, for a collision, only with the racer moving at least this fast, m/s.
+    pub call_min_collision_mps: f32,
+    /// A call is dropped this long after its last report, s.
+    pub call_ttl_s: f32,
+    /// A call is dispatched again at most this many times.
+    pub max_redispatches: u32,
 }
 
 /// Helicopter availability.
@@ -440,8 +492,13 @@ pub struct ToolUnlocks {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PresenceFile {
-    /// Patrol unit count per district per phase.
+    /// Patrol units per district per phase for a district with `patrol_reference_km` of
+    /// road; scaled by the district's real road length (a density).
     pub patrols: DistrictTable<PhaseTable<u32>>,
+    /// Road length the `patrols` counts are for, per district, km.
+    pub patrol_reference_km: DistrictTable<f32>,
+    /// Most pool (patrol) units in the whole city per phase.
+    pub max_patrols: PhaseTable<u32>,
     /// Hard cap on simultaneously existing ground units (patrol + reinforcement + tools).
     pub max_ground_units: u32,
     /// Reinforcements.
@@ -456,6 +513,14 @@ pub struct PresenceFile {
     pub crash_scene_s: PhaseTable<f32>,
     /// Minimum closing speed of a civilian-civilian contact that creates a crash incident, m/s.
     pub crash_incident_min_speed_mps: f32,
+    /// AI racers are police business only within this distance of a player (or in a race);
+    /// automatic crash scenes too (see `PoliceSystem::set_player_racers`), m.
+    #[serde(default = "default_npc_scope_m")]
+    pub npc_scope_m: f32,
+}
+
+fn default_npc_scope_m() -> f32 {
+    350.0
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1006,6 +1071,28 @@ impl PoliceConfig {
             .any(|v| !(v.is_finite() && *v >= 0.0))
         {
             return bad("heat.assault: min_level must be 1..=5 and every value >= 0");
+        }
+        let aw = &self.heat.heat.awareness;
+        if [
+            aw.near_s,
+            aw.identify_s,
+            aw.notice_s,
+            aw.decay_per_s,
+            aw.helo_s,
+        ]
+        .iter()
+        .any(|v| !(v.is_finite() && *v > 0.0))
+            || aw.near_s > aw.identify_s
+            || aw.identify_s > aw.notice_s
+        {
+            return bad(
+                "heat.awareness: times and decay must be > 0 and near_s <= identify_s <= notice_s",
+            );
+        }
+        if !(0.0..=1.0).contains(&self.heat.heat.sight.peripheral_factor)
+            || self.heat.heat.sight.focus_fov_deg > self.heat.heat.sight.fov_deg
+        {
+            return bad("heat.sight: peripheral_factor in 0..=1 and focus_fov_deg <= fov_deg");
         }
         if !(0.0..=1.0).contains(&self.heat.heat.unseen_factor) {
             return bad("heat.unseen_factor must be in 0..=1");

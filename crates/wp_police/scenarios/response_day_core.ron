@@ -15,7 +15,10 @@
         (metric: "calls", min: 1.0, max: 10000.0),
         (metric: "call_reached_25s_frac", min: 0.875, max: 1.0),
         (metric: "call_to_unit_100m_s", min: 0.0, max: 10.0),
-        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 15.0),
+        // 2026-10-23: responders plan on the reported position and velocity, not the racer's
+        // real one: worst of 3 calls 8.3 -> 19.5 s (mean 4.2 -> 7.0 s), inside presence.toml's
+        // 10-25 s target for Core by day.
+        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 25.0),
         (metric: "spawns_in_view", min: 0.0, max: 0.0),
         (metric: "despawns_in_sight", min: 0.0, max: 0.0),
         (metric: "spawn_min_racer_m", min: 120.0, max: 10000.0),

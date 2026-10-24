@@ -1,0 +1,18 @@
+// Sensitivity (owner 2026-10-23, "not overly sensitive to player interactions"): a racer
+// stopped in the road (at a light) gets a civilian scrape reported against it (`wp_world`
+// reports any box overlap, whoever hit whom). A car hit while standing is not the offender: no
+// heat, no call, nobody sent.
+(
+    name: "police_sensitivity_tap_standing",
+    seed: 900,
+    time_of_day_h: 12.0,
+    duration_s: 90.0,
+    runs: 3,
+    racers: [(district: Core, speed_factor: 0.95, violations: false, stop_at_s: Some(8.0), tap_at_s: Some(20.0))],
+    expect: [
+        (metric: "calls", min: 0, max: 0),
+        (metric: "responder_spawns", min: 0, max: 0),
+        (metric: "max_heat", min: 0, max: 0),
+        (metric: "pursuits", min: 0, max: 0),
+    ],
+)

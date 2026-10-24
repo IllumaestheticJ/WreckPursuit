@@ -292,6 +292,41 @@ impl RoadGraph {
         &self.segments[s.0 as usize]
     }
 
+    /// A spot drawn uniformly by road length (not by segment count: curved roads come as
+    /// many short segments) among the segments `keep` accepts: `u` in `[0, 1)` picks the
+    /// segment, returned with the fraction along it. `None` if no segment is accepted.
+    pub fn spot_by_length(
+        &self,
+        u: f32,
+        keep: impl Fn(&RoadSegment) -> bool,
+    ) -> Option<(SegmentId, f32)> {
+        let total: f32 = self
+            .segments
+            .iter()
+            .filter(|s| keep(s))
+            .map(|s| s.length_m)
+            .sum();
+        if total <= 0.0 {
+            return None;
+        }
+        let target = u.clamp(0.0, 1.0) * total;
+        let mut acc = 0.0f32;
+        let mut last = None;
+        for (k, s) in self.segments.iter().enumerate() {
+            if !keep(s) {
+                continue;
+            }
+            last = Some(k);
+            let next = acc + s.length_m;
+            if target < next {
+                let f = (target - acc) / s.length_m.max(1e-6);
+                return Some((SegmentId(k as u32), f.clamp(0.0, 1.0)));
+            }
+            acc = next;
+        }
+        last.map(|k| (SegmentId(k as u32), 1.0))
+    }
+
     /// Legal outgoing `(segment, next node)` from `n`.
     pub fn outgoing(&self, n: NodeId) -> &[(SegmentId, NodeId)] {
         &self.out[n.0 as usize]
