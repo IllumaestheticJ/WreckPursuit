@@ -439,9 +439,8 @@ export class StreetUi {
     el.innerHTML =
       `<div class="wp-panel-title"><span>Challenge</span><b>Lv ${o.level}</b></div>` +
       `<h3>${esc(o.name)} <span class="st-lv" style="background:${o.colour}">Lv ${o.level} ${esc(o.level_name)}</span></h3>` +
-      `<div class="wp-dim st-row">${esc(o.car)} · your record vs them ${o.losses}–${o.wins}</div>` +
-      `<div class="st-row" data-testid="st-odds">Their car <b>${esc(o.odds.racer_bracket)} ${o.odds.racer_class}</b> vs yours <b>${esc(o.odds.player_bracket)} ${o.odds.player_class}</b> · ` +
-      `win chance ~${Math.round(o.odds.win_chance * 100)}% · pays <b>×${(o.odds.odds_milli / 1000).toFixed(2)}</b> · +${o.odds.win_rep} rep</div>` +
+      // One row for car, class and record (the card must fit a 430 px tall phone-landscape view).
+      `<div class="wp-dim st-row" data-testid="st-odds">${esc(o.car)} <b>${esc(o.odds.racer_bracket)} ${o.odds.racer_class}</b> vs your <b>${esc(o.odds.player_bracket)} ${o.odds.player_class}</b> · record ${o.losses}–${o.wins}</div>` +
       (o.rest_stop
         ? `<div class="st-row">Night meet at <b>${esc(o.rest_stop)}</b>: start side by side on the parking road.</div>` +
           (o.loop_lap ? `<div class="st-buttons"><button class="wp-btn wp-btn--ghost" id="st-lap">Loop 9 lap back here</button></div>` : "")
@@ -470,7 +469,7 @@ export class StreetUi {
           (locked
             ? // Same height as the win / lose line it replaces (touch layout, row 169).
               `<div class="st-row wp-warn" data-testid="st-career-locked" title="Start a career run (garage, or the menu with a career car) to bet career money, or untick career to bet practice cash.">Career is on: no bets in quick play</div>`
-            : `<div class="st-row">Win <b class="wp-ok" id="st-win">+${money(winNet(this.stake, o.odds.odds_milli))}</b> · lose <b class="wp-danger" id="st-lose">${money(-this.stake)}</b></div>`)
+            : `<div class="st-row">Win <b class="wp-ok" id="st-win">+${money(winNet(this.stake, o.odds.odds_milli))}</b> · lose <b class="wp-danger" id="st-lose">${money(-this.stake)}</b> <span class="wp-dim">(×${(o.odds.odds_milli / 1000).toFixed(2)}, ~${Math.round(o.odds.win_chance * 100)}% · +${o.odds.win_rep} rep)</span></div>`)
         : `<div class="st-row wp-warn">${esc(o.name)} races for at least ${money(o.bet_min)}; you have ${money(o.cash)}.</div>`) +
       (this.error ? `<div class="st-row wp-warn">${esc(this.error)}</div>` : "") +
       `<div class="st-buttons"><button class="wp-btn wp-btn--primary" id="st-go" ${ready ? "" : "disabled"}>Race <span class="wp-kbd">Enter</span></button>` +
