@@ -1526,6 +1526,57 @@ on lead/round12 353744ec and on ws/world (debug and release: 1 go-around, contac
 failure opponent-pace saw on 0e84a9f7 predates a779ad57 (the fix and the re-aimed ≥ 1
 threshold are not in that commit), so it is not a regression. The margin is thin (exactly 1).
 
+## Ashpeak greybox de-dup, option A (lead + ashpeak-port, 2026-10-24)
+
+**Goal:** `ashpeak` ships `vesper_v2`'s greybox once, plus county tiles. Port Vesper inside
+Ashpeak must look the same to a player: same buildings and props in the same places. Small
+ground differences at the 8 m grid are fine (lead). Options B (Ashpeak terrain at 5 m: 26.0 →
+35.7 MB glb, 0.68 M → 1.74 M heightfield cells) and C (composite terrain) were turned down.
+
+**Before:** roads matched about 99 %, but almost no buildings or decor did (14 of 21 k building
+triangles):
+- the county drew from Port Vesper's random stream before its buildings;
+- buildings are drawn one after another from a single stream, so the few tie-in roads the county
+  changes (Route 40 West / North, Uptown Connector, Lantern Way: half a millimetre to 1 m in
+  height) shifted every later draw;
+- the terrain grid is 8 m against 5 m.
+
+**wp_world (`vesper.rs`, region path only; `vesper_v2` byte-identical: road.bin and greybox):**
+- The region (layout, extra buildings, POIs) draws from its own stream (`REGION_RNG_SALT`).
+- `ashpeak` generates `vesper_v2` itself. `reuse_vesper_lots` keeps its buildings and decor
+  wherever nothing the county changed or added is within `REUSE_CLEAR_M` (45 m), and they don't
+  clash with the county's own items or landmark lots. The generic pass skips the unchanged
+  streets (`buildings(.., skip)`) and fills only the others, clear of what is kept.
+- `reuse_vesper_features`: Port Vesper's structures, landmarks and hideouts take `vesper_v2`'s
+  heights, which come from its 5 m terrain.
+
+**city-import `dedup`:**
+- `drawn` keys every greybox triangle and decor instance by its exact bits.
+- `TERRAIN_BOUND` lists the materials the county always owns: ground_*, seabed, rock, water,
+  lot_skirt, retaining_wall, and bridge (piers reach the ground).
+- Every other item belongs to the 64 m cell its centroid is in; `partition` gives a cell inside
+  Port Vesper to the county wherever anything differs.
+- `Partition::check` proves the split adds up, and test `ashpeak_dedup` runs it.
+- Results:
+  - 43 % of `vesper_v2`'s items are shared (ground is about half of them).
+  - 127 of 2592 cells inside Port Vesper are the county's (the N / W tie-ins).
+  - Buildings, roofs, garages, trees, fences and landmarks are 90-95 % shared; roads 91-95 %.
+- `county_cells` is computed from the two maps on every run, never stored.
+
+**Rename (owner, via ashpeak-port):** Harlan → Harnell (Harnell Flats / Road / Crossing, race
+`harnell_dirt_run`) in the same regeneration.
+
+**Regenerated:**
+- `data/city/ashpeak.greybox.*`: 25.99 MB glb.
+- `race/pick_harnell_dirt_run.ron`.
+- [bless] ced8ac31: the 8 ashpeak goldens only.
+
+**On lead/round12 7abc46aa, not caused here (vesper_v2's road.bin is byte-identical to
+round12's):**
+- `police_tunnel_escape_founders_cut` fails: Captured at 132.7 s, where the story wants Escaped.
+- Six Port Vesper goldens differ: jam_pursuit_vesper, the Founders Cut pair,
+  race_hollins_descent, race_lantern_checkpoint, world_traffic_soak_vesper. Not blessed.
+
 ## Lead / G: "collider mid-lane on Loop 9 near (-1303, 1341)" (2026-10-23)
 
 **Not reproduced; the point is on the junction paving the row 162 fix rebuilt.**
