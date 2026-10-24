@@ -193,7 +193,7 @@ pub fn ride_tune_defaults_json() -> String {
         "firm": wp_vehicle::ride_lab::RideTune::firm(),
         // The shipped ride (unify: the owner's medium weight + springs / bars × 1.5).
         "owner": wp_vehicle::ride_lab::RideTune::owner(),
-        "shipped": wp_vehicle::ride_lab::RideTune::owner(),
+        "shipped": wp_vehicle::ride_lab::RideTune::shipped(),
     }))
 }
 
@@ -259,6 +259,7 @@ pub fn car_tune_defaults_json() -> String {
         // The shipped tyres (unify: the owner's 7d6b66c9 spin model) and the step-22 set.
         "step22": wp_vehicle::car_lab::CarTune::spin_step22(),
         "shipped": wp_vehicle::car_lab::CarTune::shipped(),
+        "pre_g": wp_vehicle::car_lab::CarTune::pre_g(),
     }))
 }
 
@@ -288,6 +289,7 @@ pub fn grip_balance_defaults_json() -> String {
         // The shipped balance (unify: the owner's step-14 balance + the held-key cut) and the
         // owner's 7d6b66c9 reference.
         "shipped": wp_vehicle::grip_lab::GripBalance::shipped(),
+        "pre_g": wp_vehicle::grip_lab::GripBalance::pre_g(),
         "owner_ref": wp_vehicle::grip_lab::GripBalance::owner_reference(),
     }))
 }

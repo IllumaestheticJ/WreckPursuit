@@ -68,6 +68,9 @@ fn run_hill_sprint() -> HillRace {
     let route = hollins_route(&sim);
     let route_m = route.length_m;
     let mut course = course_from_route(&route, 3.0);
+    // Street-race gates, as the picker lays them out (lane-wide gates missed a racer passing
+    // in the opposing lane at the first checkpoint on candidate G).
+    wp_race::catalog::widen_street_gates(&mut course);
 
     let data = RaceData::embedded();
     let kind = RaceKind::Sprint;

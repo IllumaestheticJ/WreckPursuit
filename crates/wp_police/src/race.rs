@@ -185,9 +185,6 @@ impl Default for RaceTactics {
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RaceSpeed {
-    /// Absolute pursuit speed cap in every day phase, m/s (`pursuit_cap_mps`).
-    #[serde(default)]
-    pub pursuit_cap_mps: Option<f32>,
     /// PIT allowed below this racer speed per wanted level, km/h (`chase.pit_max_kmh`).
     #[serde(default)]
     pub pit_max_kmh: Option<[f32; 5]>,
@@ -343,12 +340,6 @@ impl RaceProfile {
         if let Some(m) = self.speed.speed_margin {
             chase.speed_margin = m;
         }
-        if let Some(cap) = self.speed.pursuit_cap_mps {
-            let c = &mut cfg.pursuit.pursuit_cap_mps;
-            for v in [&mut c.dawn, &mut c.day, &mut c.dusk, &mut c.night] {
-                *v = cap;
-            }
-        }
         if !t.helicopter {
             let h = &mut cfg.presence.helicopter;
             h.min_level = NEVER_LEVEL;
@@ -380,11 +371,6 @@ impl RaceProfile {
             || !self.spikes.is_empty();
         if tools && self.tool_lifetime_s <= 0.0 {
             return Err(format!("{id}: scripted tools need tool_lifetime_s > 0"));
-        }
-        if let Some(c) = self.speed.pursuit_cap_mps {
-            if c <= 0.0 {
-                return Err(format!("{id}: speed.pursuit_cap_mps must be > 0"));
-            }
         }
         for b in &self.route_blocks {
             if !frac(b.at) || b.gap_m < 0.0 {
@@ -619,8 +605,9 @@ impl PoliceSystem {
             }
         }
         for s in &profile.spikes {
-            plan.spikes
-                .push(self.place_course_spikes(course, s, owner, expires));
+            if let Some(id) = self.place_course_spikes(course, s, owner, expires) {
+                plan.spikes.push(id);
+            }
         }
         let mut stakeouts = Vec::new();
         for st in &profile.stakeouts {
@@ -1077,13 +1064,17 @@ impl PoliceSystem {
         Some(self.push_roadblock(site, hw, b.units, None, owner, expires))
     }
 
+    /// A scripted spike strip over part of the course, with its own unit parked on the
+    /// shoulder beside it (row 165: no strip without its unit). The unit is placed at race
+    /// setup through the row 158 view check; when a racer could already see its spot, neither
+    /// the unit nor the strip is placed (`None`).
     fn place_course_spikes(
         &mut self,
         course: &RaceCourse,
         sp: &SpikeSpec,
         owner: EntityId,
         expires: crate::time::SimTime,
-    ) -> ToolId {
+    ) -> Option<ToolId> {
         let total = course.length();
         let s = (sp.at * total).clamp(0.0, total);
         let dir = course.dir_at(s);
@@ -1092,6 +1083,17 @@ impl PoliceSystem {
             .graph
             .nearest_on_road(pos)
             .map_or(SegmentId(0), |r| r.segment);
+        // The unit parks on the shoulder on the strip's side of the road, facing the racers.
+        let (centre, hw) = self.road_at(course.point_at(s));
+        let side = if sp.offset_m >= 0.0 {
+            perp_left(dir)
+        } else {
+            scale(perp_left(dir), -1.0)
+        };
+        let post = add(centre, scale(side, hw + SHOULDER_CLEAR_M));
+        if self.warmed_up && self.in_racer_view_opt(None, post, true) {
+            return None;
+        }
         let site = ToolSite {
             segment: seg,
             from_node: NodeId(0),
@@ -1103,8 +1105,18 @@ impl PoliceSystem {
         };
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
+        let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, post, dir);
+        self.assign(
+            i,
+            Assignment::SpikeAt {
+                segment: seg,
+                tool: id,
+            },
+        );
         let mut strip = SpikeStrip::across(id, owner, site, sp.length_m, None, expires);
         strip.scripted = true;
+        strip.unit = Some(self.units[i].id);
+        strip.post = Some(post);
         self.pending.push(PoliceEvent::SpikesPlaced {
             tool: id,
             racer: owner,
@@ -1114,7 +1126,7 @@ impl PoliceSystem {
         });
         self.spikes.push(strip);
         self.stats.spikes += 1;
-        id
+        Some(id)
     }
 }
 
@@ -1216,10 +1228,6 @@ mod tests {
             assert_eq!(lvl, NEVER_LEVEL);
         }
         assert!(u.pit_level <= 5, "PIT stays");
-        assert!(
-            cfg.pursuit.pursuit_cap_mps.night >= 60.0,
-            "highway speed chase"
-        );
         assert!(cfg.pursuit.chase.pit_max_kmh[2] >= 180.0);
     }
 
@@ -1396,9 +1404,11 @@ mod tests {
         assert_eq!(plan.spikes.len(), 1);
         let s = &police.spike_strips()[0];
         assert!(s.scripted);
-        // PR #54 port: a scripted strip has no unit (no profile stakes one out beside it) and
-        // is exempt from "a strip only lies while its unit is beside it".
-        assert_eq!(s.unit, None);
+        // Row 165: a scripted strip has its own unit parked beside it, and stays while it does.
+        let uid = s.unit.expect("scripted strip without its unit");
+        let u = police.units().iter().find(|u| u.id == uid).unwrap();
+        assert!(matches!(u.assignment, Assignment::SpikeAt { tool, .. } if tool == s.id));
+        assert!(dist(u.body.pos, s.site.pos) <= crate::dispatch::SPIKE_UNIT_LEASH_M);
         police.remove_tools_for(None);
         assert_eq!(police.spike_strips().len(), 1);
         let s = &police.spike_strips()[0];
@@ -1411,43 +1421,6 @@ mod tests {
         assert_eq!(hit, [false; 4]);
         let hit = s.wheels_crossing([x - 5.0, -1.75], [x + 5.0, -1.75], 0.8);
         assert!(hit.iter().any(|w| *w));
-    }
-
-    /// PR #54 port: an unmanned dynamic strip (its car's spot was in view) stays while its
-    /// racer approaches and is lifted once the racer is past it.
-    #[test]
-    fn unmanned_strip_lifted_once_its_racer_passes() {
-        let mut police = system();
-        let racer = EntityId(7);
-        let world = wp_world::World::flat(wp_contracts::TimeOfDay::from_hours(14.0), 1.0);
-        let mut out = Vec::new();
-        let at = |x: f32| {
-            [RacerView {
-                entity: racer,
-                pos: [x, -1.75, 0.0],
-                vel: [25.0, 0.0, 0.0],
-            }]
-        };
-        police.step(&world, &at(100.0), &[], 1.0 / 60.0, &mut out);
-        let tool = police.place_spikes_at(racer, [400.0, -1.75], [1.0, 0.0]);
-        // Unmanned, as when its car's spot was in the racer's view.
-        let k = police.spikes.iter().position(|s| s.id == tool).unwrap();
-        let uid = police.spikes[k].unit.take().unwrap();
-        police.spikes[k].post = None;
-        let i = police.unit_index(uid).unwrap();
-        police.units[i].assignment = Assignment::Idle;
-        police.despawn(i);
-        for _ in 0..60 {
-            police.step(&world, &at(380.0), &[], 1.0 / 60.0, &mut out);
-        }
-        assert_eq!(police.spike_strips().len(), 1, "still ahead of the racer");
-        for _ in 0..60 {
-            police.step(&world, &at(440.0), &[], 1.0 / 60.0, &mut out);
-        }
-        assert!(
-            police.spike_strips().is_empty(),
-            "lifted once the racer is past"
-        );
     }
 
     #[test]

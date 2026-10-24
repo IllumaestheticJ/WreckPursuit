@@ -5,10 +5,12 @@
 //! owner's preferred combo (7d6b66c9 with the springs and bars cranked up). With no lab
 //! override set, every vehicle gets:
 //!
-//! - the owner's spin-model tyres ([`crate::car_lab::CarTune::shipped`], b0 7.5),
-//! - the owner's ride ([`crate::ride_lab::RideTune::owner`]: medium weight, springs / bars
-//!   × 1.5),
-//! - the owner's step-14 grip balance ([`crate::grip_lab::GripBalance::shipped`]).
+//! - the spin-model tyres ([`crate::car_lab::CarTune::shipped`]),
+//! - the ride ([`crate::ride_lab::RideTune::shipped`]),
+//! - the grip balance ([`crate::grip_lab::GripBalance::shipped`]),
+//!
+//! all three candidate G since 2026-10-23 (owner rows physics-4 / physics-5, picked blind;
+//! the sets before it: `CarTune::pre_g`, `RideTune::owner`, `GripBalance::pre_g`).
 //!
 //! AI racers, police and traffic get these too. The owner rule is one physics for every car.
 //! The per-car fixes now live in `data/cars`.
@@ -79,10 +81,10 @@ pub fn plain(player: Option<bool>) -> Option<crate::plain::PlainSteer> {
     }
 }
 
-/// The ride tuning (every vehicle): the lab override, else the owner's ride
-/// [`crate::ride_lab::RideTune::owner`] (`None` = the data as is, [`legacy`] only).
+/// The ride tuning (every vehicle): the lab override, else the shipped ride
+/// [`crate::ride_lab::RideTune::shipped`] (`None` = the data as is, [`legacy`] only).
 pub fn ride() -> Option<crate::ride_lab::RideTune> {
-    crate::ride_lab::active().or_else(|| (!legacy()).then(crate::ride_lab::RideTune::owner))
+    crate::ride_lab::active().or_else(|| (!legacy()).then(crate::ride_lab::RideTune::shipped))
 }
 
 /// The car / tyre tuning (every vehicle): the lab override, else the shipped
@@ -114,7 +116,7 @@ mod tests {
         // (Process-wide; the lib's other unit tests never turn legacy or plain-off on.)
         assert!(plain(Some(true)).is_some() && plain(Some(false)).is_none());
         assert!(plain(None).is_none(), "a bare rig: only a lab override");
-        assert_eq!(ride(), Some(crate::ride_lab::RideTune::owner()));
+        assert_eq!(ride(), Some(crate::ride_lab::RideTune::shipped()));
         assert_eq!(car(), Some(crate::car_lab::CarTune::shipped()));
         assert_eq!(grip(), Some(crate::grip_lab::GripBalance::shipped()));
     }

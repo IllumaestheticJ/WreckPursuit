@@ -190,9 +190,23 @@ pub struct RaceDef {
     /// Races already run at this venue in the last half hour (15 min apart). Two or more make
     /// the meet hot: the green light then calls in a patrol (`PatrolAttracted`).
     pub prior_meets: u32,
+    /// Finish window override, s (`None` = the race kind's `finish_window_s` in
+    /// `data/events/rules.toml`): how long after the winner the rest of the field may still
+    /// finish.
+    pub finish_window_s: Option<f32>,
 }
 
 impl RaceDef {
+    /// The race's rules: its kind's (`data/events/rules.toml`) with this race's overrides
+    /// ([`RaceDef::finish_window_s`]).
+    pub fn rules(&self) -> crate::rules::RaceRules {
+        let mut r = RaceData::embedded().rules.for_kind(self.kind);
+        if let Some(w) = self.finish_window_s {
+            r.kind_rules.finish_window_s = w;
+        }
+        r
+    }
+
     /// Police presence for the sim (`Scenario::police_presence`): the race's own police
     /// profile (`data/police/races.toml`), or the stake table's presence for this legality
     /// (street = normal, illegal daytime = max) for a race without one.
@@ -404,6 +418,7 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[MARA, VIC, JUNO],
             seed: 16,
             prior_meets: 0,
+            finish_window_s: None,
             grid: None,
         },
         RaceDef {
@@ -425,6 +440,7 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[VIC, MARA, DEZ, JUNO, TITO],
             seed: 9,
             prior_meets: 2,
+            finish_window_s: None,
             grid: None,
         },
         RaceDef {
@@ -449,6 +465,7 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[JUNO, DEZ, TITO],
             seed: 31,
             prior_meets: 2,
+            finish_window_s: None,
             grid: None,
         },
         RaceDef {
@@ -471,6 +488,7 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[VIC, JUNO, TITO],
             seed: 7,
             prior_meets: 0,
+            finish_window_s: None,
             grid: None,
         },
         // ---- Ashpeak County (the combined `ashpeak` map; POIs from `wp_world::ashpeak::plan`).
@@ -494,6 +512,7 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[MARA, VIC, JUNO],
             seed: 41,
             prior_meets: 0,
+            finish_window_s: None,
             grid: Some(GridLayout::SingleFile { gap_m: 8.0 }),
         },
         RaceDef {
@@ -516,12 +535,13 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[MARA, JUNO, DEZ],
             seed: 42,
             prior_meets: 0,
+            finish_window_s: None,
             grid: Some(GridLayout::SingleFile { gap_m: 8.0 }),
         },
         RaceDef {
-            id: "harlan_dirt_run",
-            name: "Harlan Flats dirt run",
-            blurb: "Dusk sprint over Harlan Flats' gravel section roads towards Harlan Crossing.",
+            id: "harnell_dirt_run",
+            name: "Harnell Flats dirt run",
+            blurb: "Dusk sprint over Harnell Flats' gravel section roads towards Harnell Crossing.",
             city: RaceCity::Ashpeak,
             kind: RaceKind::Sprint,
             terrain: Specialty::Mixed,
@@ -529,15 +549,18 @@ pub fn races() -> Vec<RaceDef> {
             time_of_day_h: 19.5,
             traffic_density: 0.2,
             // Down the west section line and east along the south gravel road, finishing short
-            // of the turn up to Harlan Crossing (the AI overshoots that corner off the gravel).
+            // of the turn up to Harnell Crossing (the AI overshoots that corner off the gravel).
             course: CourseSpec::PoiToPoint {
                 start: ap::POI_FARM_RUN,
                 finish: [-3500.0, -364.0, 0.0],
             },
-            length_hint_m: 3978.0,
+            // 3978 m before the county's own random stream (ashpeak de-dup, 2026-10-24) moved
+            // the farm section roads.
+            length_hint_m: 4295.0,
             ai: &[DEZ, TITO, VIC],
             seed: 43,
             prior_meets: 0,
+            finish_window_s: None,
             grid: None,
         },
         RaceDef {
@@ -564,6 +587,7 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[JUNO, DEZ, TITO],
             seed: 44,
             prior_meets: 2,
+            finish_window_s: None,
             grid: None,
         },
         RaceDef {
@@ -586,6 +610,7 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[VIC, MARA, DEZ, JUNO],
             seed: 45,
             prior_meets: 0,
+            finish_window_s: None,
             grid: None,
         },
         RaceDef {
@@ -608,6 +633,7 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[MARA, VIC, TITO],
             seed: 46,
             prior_meets: 0,
+            finish_window_s: None,
             grid: None,
         },
         RaceDef {
@@ -630,6 +656,7 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[VIC],
             seed: 47,
             prior_meets: 0,
+            finish_window_s: None,
             grid: None,
         },
         RaceDef {
@@ -641,7 +668,7 @@ pub fn races() -> Vec<RaceDef> {
             terrain: Specialty::Downtown,
             legality: Legality::Street,
             time_of_day_h: 23.5,
-            traffic_density: 0.3,
+            traffic_density: 0.15,
             course: CourseSpec::Circuit {
                 polygon: METRO_CIRCUIT,
             },
@@ -649,6 +676,12 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[VIC, MARA, DEZ, JUNO, TITO],
             seed: 48,
             prior_meets: 2,
+            // Two laps of the downtown grid at night take the field 300-440 s; lights,
+            // civilians and the one-lane blocks spread it over more than the circuit
+            // kind's 90 s (seeds 1-4, police off, G: 3-5 of 6 finished, the rest 2-6
+            // gates short at the flag). With 150 s and traffic 0.15 (was 0.3): see
+            // docs/integration/opponent-pace.md "Ashpeak metro circuit".
+            finish_window_s: Some(150.0),
             grid: None,
         },
         RaceDef {
@@ -670,6 +703,7 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[SOL, VIC, RAFI],
             seed: 41,
             prior_meets: 0,
+            finish_window_s: None,
             grid: None,
         },
         RaceDef {
@@ -692,6 +726,7 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[NINA, AUGUSTO, DEZ, VIC],
             seed: 52,
             prior_meets: 0,
+            finish_window_s: None,
             grid: None,
         },
         RaceDef {
@@ -713,6 +748,7 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[KAITO, MARA, BEX],
             seed: 23,
             prior_meets: 0,
+            finish_window_s: None,
             grid: None,
         },
         RaceDef {
@@ -736,6 +772,7 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[JUNO, LUPE, RAFI, TITO],
             seed: 8,
             prior_meets: 0,
+            finish_window_s: None,
             grid: None,
         },
         RaceDef {
@@ -757,6 +794,7 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[BEX, LUPE, DEZ],
             seed: 12,
             prior_meets: 0,
+            finish_window_s: None,
             grid: None,
         },
     ]
@@ -913,20 +951,25 @@ pub fn plan_course(world: &World, def: &RaceDef) -> Option<CityRace> {
         CourseSpec::Circuit { polygon } => world.plan_circuit(polygon)?,
     };
     let mut course = course_from_route(&route, CORRIDOR_MARGIN_M);
-    // A street race uses every lane: a checkpoint is passed anywhere inside the legal corridor
-    // (half-width + the rules' 2 m margin), not only across the planned lane's carriageway.
-    // Without this an AI overtaking in the outer lane of Loop 9 misses a gate and is never
-    // credited with the lap. Gates reach `GATE_SLACK_M` past that so a wide line still counts.
-    let span = (2.0 * (course.corridor_half_width_m + GATE_CORRIDOR_MARGIN_M + GATE_SLACK_M))
-        .max(MIN_GATE_WIDTH_M);
-    for g in &mut course.gates {
-        g.width_m = g.width_m.max(span);
-    }
+    widen_street_gates(&mut course);
     // A race's own grid (Ashpeak's single-file touge grids) wins over the street layout;
     // round12's fit then closes it up or lines it up where the road is narrower.
     course.grid_layout = def.grid.or_else(|| street_grid_layout(world, &course, def));
     fit_grid(world, &mut course, def);
     Some(CityRace { route, course })
+}
+
+/// Street-race gates: a checkpoint is passed anywhere inside the legal corridor (half-width +
+/// the rules' 2 m margin), not only across the planned lane's carriageway. Without this an AI
+/// overtaking in the outer lane of Loop 9 misses a gate and is never credited with the lap.
+/// Gates reach [`GATE_SLACK_M`] past that so a wide line still counts, and are at least
+/// [`MIN_GATE_WIDTH_M`] wide.
+pub fn widen_street_gates(course: &mut Course) {
+    let span = (2.0 * (course.corridor_half_width_m + GATE_CORRIDOR_MARGIN_M + GATE_SLACK_M))
+        .max(MIN_GATE_WIDTH_M);
+    for g in &mut course.gates {
+        g.width_m = g.width_m.max(span);
+    }
 }
 
 /// Clearance kept between a grid car's side and the edge of the drivable lanes, m.
@@ -1285,7 +1328,7 @@ mod tests {
         for id in [
             "crowfoot_ascent",
             "crowfoot_descent",
-            "harlan_dirt_run",
+            "harnell_dirt_run",
             "ashpeak_downtown_checkpoint",
             "route7_tunnel_sprint",
             "grizzly_grade_sprint",

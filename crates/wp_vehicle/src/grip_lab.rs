@@ -357,7 +357,20 @@ impl GripBalance {
             slide_lock_to_deg: 0.0,
             slide_lock_release_s: 0.0,
             slide_lock_release_from_deg: 0.0,
+            // Candidate G (2026-10-23, owner rows physics-4 / physics-5): cornering stiffness
+            // × 0.666 front / × 0.533 rear (was 0.6 / 0.45, [`GripBalance::pre_g`]).
+            front_stiffness: 0.666,
+            rear_stiffness: 0.533,
             ..Self::owner()
+        }
+    }
+
+    /// The shipped balance before candidate G (front × 0.6 / rear × 0.45). Lab A/B.
+    pub fn pre_g() -> Self {
+        Self {
+            front_stiffness: 0.6,
+            rear_stiffness: 0.45,
+            ..Self::shipped()
         }
     }
 

@@ -624,6 +624,13 @@ function reasonLabel(l: CareerView["ledger"][number]): string {
   return REASON[l.reason] ?? words(l.reason);
 }
 
+/** Garage "Touge battles" tooltip: what the player's tier opens (the picker shows the rest). */
+function tougeHint(view: CareerView): string {
+  const f = view.progress.features.find((x) => x.feature === "touge_races");
+  if (!f || f.unlocked) return "Touge picker: side bets, pink slips and bosses as your rep tier allows";
+  return `Touge battles open at ${words(f.needs)} (${f.needed_rep.toLocaleString("en-US")} rep); the picker shows what each needs`;
+}
+
 /** Career feature → label. */
 const FEATURE: Record<CareerFeature, string> = {
   city_races: "City street races",
@@ -806,6 +813,16 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
         <Button disabled={!view.can_start} onClick={() => api.startRun("free")}>
           Free drive
         </Button>
+        {api.races && (
+          <Button disabled={!view.can_start} onClick={() => api.races?.()} testid="career-races" title="Race picker: buy-in, purse, bets and rep go through this career">
+            Street races
+          </Button>
+        )}
+        {api.touge && (
+          <Button disabled={!view.can_start} onClick={() => api.touge?.()} testid="career-touge" title={tougeHint(view)}>
+            Touge battles
+          </Button>
+        )}
         {view.start_blocker && <span class="wp-warn">{view.start_blocker}</span>}
         <span style={{ marginLeft: "auto" }} />
         <Button size="sm" onClick={() => api.exportSave()}>

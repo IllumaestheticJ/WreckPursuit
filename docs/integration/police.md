@@ -1550,13 +1550,13 @@ Each race in the browser's picker now has its own police, configured in **`data/
 | race | style | what the police do |
 |---|---|---|
 | `lantern_checkpoint` (illegal daytime, downtown) | **Downtown lockdown** | presence 2.5 (was 2.0), backup ×1.5; two roadblocks *across the route* (each leaves a 3.5 m gap on one side), four roadblocks *off the route* sealing side streets, two stakeouts at junctions |
-| `loop9_circuit` (1 am highway lap) | **Highway interceptors** | high-speed pursuit only: no roadblocks, spikes, box-ins, rolling or junction blocks, no helicopter; pursuit cap 70 m/s, PIT up to 220 km/h; four units staked out on the shoulders join as the field passes |
+| `loop9_circuit` (1 am highway lap) | **Highway interceptors** | high-speed pursuit only: no roadblocks, spikes, box-ins, rolling or junction blocks, no helicopter; no pursuit speed cap (none anywhere since 2026-10-23), PIT up to 220 km/h; four units staked out on the shoulders join as the field passes |
 | `hollins_sprint` (night hill sprint, hairpins) | **Summit trap** (proposed) | no PITs, rams, spikes or dynamic roadblocks on the hill; the side road at the top is sealed, a unit waits just below the summit and lights the field up, box-ins at the lot |
 | `grid_highway_sprint` (night, short highway) | **Speed trap** (proposed) | two radar stakeouts recognise a racer the moment it flies past; a 4 m spike strip covers the overtaking lane left of the racing line at 85 % (the racing lane stays open); PIT, rams and rolling blocks, no roadblocks |
 
 How it works:
 - `RaceProfile::apply` rewrites the police tables for the race: a tactic switched off unlocks at
-  `NEVER_LEVEL` (6), speed overrides replace `pursuit_cap_mps` / `chase.pit_max_kmh` /
+  `NEVER_LEVEL` (6), speed overrides replace `chase.pit_max_kmh` /
   `chase.speed_margin`, reinforcements scale by `backup_scale`. Patrol counts come from the
   profile's `presence` via the race's scenario (`RaceDef::police_presence`).
 - `PoliceSystem::start_race(id, profile, course, entrants)` (called through
@@ -1697,3 +1697,107 @@ Fewer racers reach L3+, so fewer roadblocks, spikes (L4) and helicopters (L5) co
 - `tests/system.rs` assault test: the assault heat is read from config (was a literal 19 ≈ 20).
 - **Outside wp_police (minimal):** `apps/simcli/scenarios/race/city_sprint_police.ron` entrants' starting heat 3.75 → 6.0. At 3.75 nobody reached L1 and `city_sprint_pulls_in_police` saw no pursuit. A `WP_RACE_AIM_HEAT` sweep at seed 1 passes both race tests at 4.5–8.25; 6.0 is near the middle. `crates/wp_race/tests/race_police.rs` comments and the `> 3.75` check now say 6.0.
 - **[bless]** 16 goldens: hashes only, every expectation passes. Pursuits, levels and units change from the first offence on.
+
+## No pursuit speed cap; faster police cars (owner request, 2026-10-23)
+
+Owner: "cop cars get smoked even by a stock Hakone GT"; "remove the AI pursuit speed cap" (all
+damage modes — the owner rule keeps Arcade and Simulation identical outside car damage).
+
+- **Cap removed.** `pursuit_cap_mps` (32–40 m/s by phase) and `[chase] cap_scale` are gone from
+  `PursuitFile` / `ChaseConfig` and `pursuit.toml`. Every place that clamped to the cap now
+  clamps to the unit car's own top speed (`PoliceSystem::unit_top_speed_mps`: the unit's
+  measured `CarLimits`, else `[pro] default_limits`), including the built-in point-mass driver
+  of kinematic units, which has no top speed of its own. Closing on the racer is still
+  `max(racer speed × (1 + speed_margin), 10 m/s)`; units far behind, PIT and ram approaches go
+  up to the car's top speed (the old `cap + 6/7 m/s` allowances are gone). Ambush timing
+  (`dispatch.rs`) bounds the respond pace by the default car's top speed.
+- **Cars** (`tools/specsheet/roster_inputs.py`, regenerated): measured 0–100 / ¼ mile / Vmax,
+  before → after (stock `hakone_gt`: 6.00 s / 14.28 s @ 169 km/h / 282 km/h):
+  - `sentinel_cruiser` 6.2 L supercharged V8, 276 → 390 kW: 6.40 → 5.93 s, 14.69 → 13.93 s,
+    260 → 293 km/h.
+  - `sentinel_wolfhound` 3.5 TT V6 pursuit tune, 272 → 415 kW: 5.92 → 4.88 s, 14.21 → 12.95 s,
+    244 → 290 km/h.
+  - `sentinel_vigil` (was `sentinel_harrier`) 5.2 L supercharged V8, 319 → 561 kW: 5.77 → 5.46 s, 13.82 → 12.90 s,
+    275 → 323 km/h.
+  - `sentinel_warden` 7.4 L big-block V8, 155 → 217 kW: 8.82 → 6.91 s, 201 → 229 km/h.
+  - `sentinel_bastion` 6.2 L V8, 265 → 334 kW: 7.97 → 6.72 s, 215 → 227 km/h.
+- Regenerated: car JSON + spec sheets, `validation_results.json`, `ROSTER.md`, `VALIDATION.md`,
+  `data/stats/cars.json`, `wp_opponent` capability table; `[pro] default_limits` (Sentinel
+  Cruiser) 4.35 → 4.75 m/s², 72.4 → 80.0 m/s.
+- **Rolling-block deadlock fixed** (found merging main, 2026-10-23): units that had passed a
+  racer who then stopped (pulled into the Founders Cut lay-by) took `RollingBlock` and were
+  commanded to 0 m/s ahead of him for good, so nobody came within the 15 m capture radius.
+  A rolling block now needs the racer moving (≥ `ARREST_RACER_MPS`, 3 m/s, the arrest
+  threshold), and a shadowing unit past a stopped racer goes back to it by the roads
+  (`chase_route`) instead of on along its trail. On merged main with the new cars:
+  `tunnel_escape_founders_cut` Escaped 132.4 s (40 s unseen), control Captured 106.4 s (was:
+  no pursuit end in 190 s).
+- Tests: `wp_vehicle` `class_favours_powerful_rwd` uses `furrow_24` as the slow RWD (the
+  Bastion is no longer one); wolfhound diff hash and the simcli goldens re-blessed.
+- **Open (audio, E):** `wp_audio` `every_wot_upshift_dips_and_re_rises` fails for
+  `sentinel_cruiser` 4→5 at 30.28 s (0.4 dB, wants ≥ 1.2). The old car lifted before that
+  shift; the new one makes it flat out at ≈ 5900 rpm, where the converter shift (no torque
+  cut in `wp_vehicle`) drops rpm at only ≈ 3000 rpm/s and layer energy is at its ceiling.
+  Lowering `shift_rate_onset_rpm_s` to 1200 only reaches 0.9 dB.
+
+### PR #60 ported onto ws/police (2026-10-23)
+
+PR #60 (`claude/epic-dijkstra-6gc3lv`: no AI pursuit cap + police power package) is merged onto ws/police after row 157 and lead/round12 81fa22c0. The lead closes the PR as merged by this port.
+
+Bench, police-bench --seeds 8, 96 runs per arm, before → after:
+- Stock evader (debug_coupe): capture 72 → 72 %, escape 16 → 21 %, capture time 56 → 47 s, crash/min 1.34 → 1.55.
+- Evader = hakone_gt: capture 73 → 79 %, escape 16 → 9 %, crash/min 1.39 → 1.23, police–civilian hits 57 → 36.
+
+**Outside my crates (minimal, for the audio test the PR left red):**
+- `wp_audio` gets a gear-change upshift cue. `EngineInput.gear` is `Option<i8>`; the director passes `Some(VehicleState::gear)`.
+- An upshift under throttle holds the existing upshift note at full depth for `EngineMix.upshift_cue_s`. That field is serde default 0.15 s, so `audio_config.json` is unchanged.
+- It's for converter automatics without a torque cut, whose rpm falls slower than the rpm-rate cue's onset. No `wp_vehicle` change (physics frozen).
+- New unit test: `engine::tests::upshift_with_a_slow_rpm_fall_still_dips_when_the_gear_is_known`.
+- On the merged tree the PR's failing case (cruiser 4→5 at 30.3 s, 0.4 dB) no longer happens: the cruiser makes no 4→5 shift in the trace. Its weakest dip is 3→4: 1.55 dB without the cue (floor 1.2 dB), 2.26 dB with it.
+- **Push-through fix (wp_police, found by the port):** a push (row 61) that started on traffic now ends as soon as the car in front is a racer or another unit. The stronger cruiser, back on Patrol after a capture, kept shoving the held player car (wp_wasm `capture_bills_holds_the_car_and_repair_continue_restores_it`: 2.45 m/s, want < 1).
+
+### Row 168: police wipe out race fields on one-lane roads (2026-10-24)
+
+Measured with `race_picker`, police on at each profile's own presence (the harness used the pick scenario's 1.0 before), seeds 1–4, before tuning. Crowfoot ascent and the metro circuit lost the whole field on almost every seed; Grizzly Grade and the waterfront drag never drew a pursuit. Traced on crowfoot_ascent seed 1.
+
+**Fixes (wp_police).**
+1. **Queued behind another racer is not caught** (`RuleInputs::held_up_by_racer`).
+   - A stopped racer waits, not caught, when another racer is within 12 m ahead, inside its lane (±3 m), and closer than any unit in that box. Neither the stop nor the pinned rule counts while it waits.
+   - Facing is the racer's last direction of travel. A sudden reversal (backing out of the queue) doesn't flip it.
+   - Box-ins and a unit right in front still capture.
+2. **A unit in the racer's lane in front of it** (`RuleInputs::blocked_ahead_only`, `[capture] blocked_ahead_stop_time_s` = 12 s).
+   - When the only units that count stand in the racer's lane in front of it, both rules wait 12 s instead of 4 s and 6 s. This covers a pursuer, interceptor or patrol that cut in or crashed there, but not a roadblock, spike car or box-in.
+   - That gives the race AI time to back out and go round. In the trace, a cruiser wedged on a hairpin had the field behind it arrested in 4 s.
+3. **Units clear a stopped racer's lane.** A shadowing unit more than 3 m into a stopped racer's lane ahead of it drives on at least 8 m/s, back to the racer by the roads. Before, it stood there as a de-facto roadblock.
+4. **Wedged units don't arrest.** A unit stuck against a wall or the terrain and trying to free itself (`UnstickState::wedged`) is left out of the capture distances.
+- Tests: `heat::tests::racer_queued_behind_another_racer_is_not_captured_until_the_queue_clears`.
+- Tried and dropped: a speed floor for a shadowing unit ahead of a moving racer (0.8× its speed). It raised police crashes 1.25 → 1.58/min on the bench.
+
+**Bench guard rails** (`police-bench --seeds 8`, 96 runs, base lead/round12 34dbeb5f → row 168): capture 73 → 72 %, escape 21 → 21 %, crash/min 1.25 → 1.25, stuck/min 2.96 → 2.75, pop-in/min 0.02 → 0.02.
+
+**races.toml tuning**, on top of the fixes:
+- grizzly_grade_sprint: a stakeout at 0.7 that knows the field on sight. Pursuits 0 → 1–2, all finish.
+- waterfront_drag: a stakeout at 0.9. Pursuits 0 → 2, both finish.
+- harlan_dirt_run: presence 0.5, backup 0.5. The field finishes on 2 of 4 seeds (was 0–1 finishers).
+
+Finishers per seed, seeds 1–4, after:
+
+| race | finishers / field |
+|---|---|
+| downtown_checkpoint | 0, 4, 4, 0 / 4 |
+| crowfoot_descent | 4, 4, 2, 4 / 4 |
+| route7 | 4 each / 5 |
+| grizzly | 4 each / 4 |
+| waterfront | 2 each / 2 |
+| harlan | 4, 4, 0, 0 / 4 |
+| crowfoot_ascent | 0 each / 4 |
+| metro_circuit | 0 each / 6 |
+
+**Not fixed: crowfoot_ascent and metro_circuit.** Presence (down to 0.3) and tactic changes (no PIT, rams, box-ins or roadblocks on metro) barely move them. These are fair captures under the rules, caused by things outside races.toml:
+1. Units hit hairpin walls at intercept speed (29.5 m/s planned into a hairpin, 13.6 m/s at impact) and wedge there.
+2. The race AI gets stuck on a hairpin and is captured under the pinned rule, and its busted car then stays parked across the one-lane road. The field behind ends Stuck (metro: 5 of 6 Stuck after fix 1's facing guard).
+3. The race AI's back-out comes too late against a unit beside it.
+Proposed follow-ups: a cornering-limited intercept speed on hairpins (wp_police), and a busted race car that clears the lane (wp_opponent / wp_race).
+- Founders Cut pair re-seeded 60 → 58. Seeds 50–70: escape story on 11 of 21 (was 16), control captured on 20, both on 11. Units no longer stall next to the stopped racer in the lay-by (D's report), so he is caught more often.
+- `pick_harlan_dirt_run.ron` regenerated (`WP_RACE_WRITE_SCENARIOS=1`, wp_wasm): presence 0.5.
+- **Queue cap (lead/round13 lantern_checkpoint):** racer 4 sat behind busted racer 3, parked in the lane, from about 70 s to 300 s with units nearby. The queue exemption kept it Running, so the race never ended. A racer now waits behind another racer for at most `QUEUE_MAX_WAIT_S` (15 s) without moving; after that the normal stop and pinned rules apply. lantern_checkpoint ends at 66 s and passes. (`race_picker::ashpeak_metro_circuit` fails on lead/round13 7538c828 too, with police off: 1 of 6 finish. Not police.)

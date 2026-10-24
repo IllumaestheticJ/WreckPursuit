@@ -807,6 +807,7 @@ impl AudioDirector {
                     rpm: s.engine_rpm,
                     pedal: v.throttle,
                     applied: v.throttle_applied.unwrap_or(v.throttle),
+                    gear: Some(s.gear),
                 },
                 dt,
                 &mut self.rng,

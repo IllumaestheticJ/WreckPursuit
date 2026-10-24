@@ -1934,13 +1934,18 @@ pub const JUNCTION_BARRIER_GAP_M: f32 = 2.0;
 /// across the taper for up to ~60 m and must not meet the barrier's end there (row 162).
 pub const GORE_BARRIER_GAP_M: f32 = 40.0;
 
+/// No [`edge_barriers`] line runs closer than this to a median barrier's centre line, m: the
+/// median already walls that edge.
+pub const MEDIAN_CLEAR_M: f32 = 3.0;
+
 /// Concrete barrier lines (at road height) along the outer edges of highways: the right edge
 /// of every divided-highway carriageway and both edges of ramps, so a car cannot leave the
 /// highway for the verge. Left out where another road's paving meets the edge (ramp tapers,
 /// gores: the rest-stop ramps too), at junctions (a ramp terminal's paving and turning paths:
 /// [`JUNCTION_BARRIER_GAP_M`] past its paved radius), on bridge decks (they have guard rails, see
 /// [`deck_rails`]) and inside covered spans (the Hollins Tunnel: its walls; the barrier stops
-/// at the portals, so the exit stays open). Empty without terrain.
+/// at the portals, so the exit stays open), and never beside a median barrier
+/// ([`MEDIAN_CLEAR_M`]). Empty without terrain.
 pub fn edge_barriers(map: &CityMap) -> Vec<Vec<V3>> {
     let net = &*map.net;
     let Some(t) = &net.terrain else {
@@ -1996,6 +2001,40 @@ pub fn edge_barriers(map: &CityMap) -> Vec<Vec<V3>> {
                 geom::dist(geom::xy(p), geom::xy(*c)) < *r && (p[2] - c[2]).abs() < 3.0
             })
     };
+    // Median barriers, in 32 m cells: an edge never gets a second barrier beside one. Both
+    // carriageways of a divided highway border the median, but only one of them carries it
+    // (`median_barrier`); the other's median-side edge is no outer edge (a barrier there ran
+    // 0.25 m beside the median and stuck out of its face: a scraping car caught it).
+    let medians = median_barriers(net);
+    const MCELL: f32 = 32.0;
+    let mcell = |q: V2| ((q[0] / MCELL).floor() as i32, (q[1] / MCELL).floor() as i32);
+    let mut msegs: Vec<(V2, V2, f32)> = Vec::new();
+    let mut mcells: BTreeMap<(i32, i32), Vec<usize>> = BTreeMap::new();
+    for line in &medians {
+        for w in line.windows(2) {
+            let (a, b) = (geom::xy(w[0]), geom::xy(w[1]));
+            let r = MEDIAN_CLEAR_M;
+            let (lo, hi) = (
+                mcell([a[0].min(b[0]) - r, a[1].min(b[1]) - r]),
+                mcell([a[0].max(b[0]) + r, a[1].max(b[1]) + r]),
+            );
+            for x in lo.0..=hi.0 {
+                for y in lo.1..=hi.1 {
+                    mcells.entry((x, y)).or_default().push(msegs.len());
+                }
+            }
+            msegs.push((a, b, 0.5 * (w[0][2] + w[1][2])));
+        }
+    }
+    let beside_median = |p: V3| {
+        let q = geom::xy(p);
+        mcells.get(&mcell(q)).is_some_and(|v| {
+            v.iter().any(|i| {
+                let (a, b, z) = msegs[*i];
+                geom::point_segment_distance(q, a, b) < MEDIAN_CLEAR_M && (p[2] - z).abs() < 3.0
+            })
+        })
+    };
     let mut out = Vec::new();
     for (si, s) in net.surfaces.iter().enumerate() {
         if !s.highway || s.centre.len() < 2 {
@@ -2031,6 +2070,7 @@ pub fn edge_barriers(map: &CityMap) -> Vec<Vec<V3>> {
                 .map(|k| {
                     let p = edge[k];
                     !is_elevated(s, k, &ground, 1.5)
+                        && !beside_median([line[k][0], line[k][1], p[2]])
                         && !covers.iter().any(|c| c.contains([p[0], p[1], p[2] + 1.0]))
                         && !opened
                             .iter()

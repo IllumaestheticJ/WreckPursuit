@@ -139,6 +139,21 @@ impl RideTune {
         }
     }
 
+    /// The shipped ride (physics lead, 2026-10-23, owner rows physics-4 / physics-5, picked
+    /// blind twice over [`RideTune::owner`]): `held_search` candidate G's ride on the owner's
+    /// dampers. Yaw inertia × 1.35 (the car rotates more slowly: the held-drift gain), springs
+    /// × 1.04, anti-roll bars × 0.63, roll inertia × 1.34. Every vehicle (`crate::lab_scope`).
+    /// The ride before it is [`RideTune::owner`].
+    pub fn shipped() -> Self {
+        Self {
+            yaw_inertia: 1.35,
+            spring: 1.04,
+            arb: 0.63,
+            roll_inertia: 1.34,
+            ..Self::owner()
+        }
+    }
+
     /// "Firm" (owner, step 18: "when I turned springs and bars up it feels better under grip
     /// cornering … even better at 1.5 and 1.5"; grip-balance step 20): W's medium weight with
     /// springs and anti-roll bars × 1.5 and dampers × 1.5 on top of its 1.6 / 2.1 (bump 2.4,

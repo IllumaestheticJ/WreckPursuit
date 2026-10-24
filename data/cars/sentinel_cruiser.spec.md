@@ -4,11 +4,11 @@
 
 | Class | Archetype | Durability | Base price |
 |---|---|---|---|
-| PoliceCruiser | 2010s American full-size RWD police sedan, 5.7 L pushrod V8, pursuit package | 5 / 5 | 30,000 |
+| PoliceCruiser | 2010s American full-size RWD police sedan, 6.2 L supercharged pushrod V8, pursuit package | 5 / 5 | 30,000 |
 
 ## Design note
 
-The everyday patrol car: rear-drive, heavy and planted, with pursuit-rated tires, big brakes and the V8 pursuit package. It gets to pursuit speed before anything ordinary (traffic, beaters, hatches, trucks, old muscle, FF sport sedans) but not before a modern sports car or exotic — those are the interceptor's job. Boxing in, PIT manoeuvres and the push bar do the rest.
+The everyday patrol car: rear-drive, heavy and planted, with pursuit-rated tires, big brakes and a supercharged V8 pursuit package. On the straights it runs down anything ordinary and every stock sports car; only the exotics stay ahead, and those are the interceptor's job. Boxing in, PIT manoeuvres and the push bar do the rest.
 
 ## How this car breaks
 
@@ -59,37 +59,37 @@ Frontal area A = 0.84·W·H = 2.37 m²; Cd = 0.34 → **CdA = 0.857 m²** + 0.05
 
 ## Engine
 
-5.7 L OHV 16-valve V8, naturally aspirated, pursuit calibration (no cylinder deactivation). Class-typical 2010s 5.7 L pushrod police V8 (~48 kW/L, 276 kW at 5200 rpm, ~535 N·m at 4400) per fleet spec-class data and owner dynos. Pursuit tuning (round 6b): the V6 cruiser could not catch the traffic sedan to the 144 km/h pursuit cap; the V8 package is the period-correct fix.
+6.2 L OHV 16-valve V8, supercharged, pursuit calibration (no cylinder deactivation). Class-typical 2010s 6.2 L supercharged pushrod V8 (~63 kW/L, ~390 kW at 6000 rpm, ~705 N·m from 3500) per spec-class data and owner dynos. Pursuit tuning (owner, 2026-10-23: police were outrun by a stock Hakone GT): the old 5.7 L package (276 kW) is replaced so the everyday unit out-accelerates and out-runs the stock sports cars.
 
 | rpm | N·m | kW |
 |---|---|---|
-| 800 | 400 | 33.5 |
-| 1200 | 440 | 55.3 |
-| 1600 | 470 | 78.7 |
-| 2000 | 490 | 102.6 |
-| 2500 | 505 | 132.2 |
-| 3000 | 515 | 161.8 |
-| 3500 | 525 | 192.4 |
-| 4000 | 533 | 223.3 |
-| 4400 | 535 | 246.5 |
-| 4800 | 528 | 265.4 |
-| 5200 | 505 | 275.0 |
-| 5600 | 470 | 275.6 |
-| 5900 | 440 | 271.9 |
+| 800 | 430 | 36.0 |
+| 1200 | 520 | 65.3 |
+| 1600 | 590 | 98.9 |
+| 2000 | 640 | 134.0 |
+| 2500 | 675 | 176.7 |
+| 3000 | 695 | 218.3 |
+| 3500 | 705 | 258.4 |
+| 4000 | 705 | 295.3 |
+| 4500 | 695 | 327.5 |
+| 5000 | 680 | 356.0 |
+| 5500 | 660 | 380.1 |
+| 6000 | 620 | 389.6 |
+| 6200 | 595 | 386.3 |
 
-Peak **276 kW @ 5475 rpm**, **535 N·m @ 4400 rpm**. Idle 600 / redline 5800 / limiter 5900 rpm. Rotating inertia 0.24 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 10% of peak torque = 54 N·m. Power-to-weight 135 kW/t.
+Peak **390 kW @ 6000 rpm**, **705 N·m @ 3500 rpm**. Idle 600 / redline 6000 / limiter 6200 rpm. Rotating inertia 0.24 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 10% of peak torque = 70 N·m. Power-to-weight 190 kW/t.
 
 ## Drivetrain
 
-5-speed automatic with torque converter, mild rear LSD (pursuit package, V8 final drive). Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 40 N·m, power ramp 0.30, coast ramp 0.15. Torque converter: stall 2300 rpm, 2.0× at stall, couples 1:1 from 2700 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 860 N·m. Shift time 0.30 s.
+5-speed automatic with torque converter, mild rear LSD (pursuit package, V8 final drive). Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 40 N·m, power ramp 0.30, coast ramp 0.15. Torque converter: stall 2300 rpm, 2.0× at stall, couples 1:1 from 2700 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 1130 N·m. Shift time 0.30 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
-| 1 | 3.59 | 11.02 | 70 |
-| 2 | 2.19 | 6.72 | 115 |
-| 3 | 1.41 | 4.33 | 178 |
-| 4 | 1.00 | 3.07 | 251 |
-| 5 | 0.83 | 2.55 | 303 |
+| 1 | 3.59 | 11.02 | 72 |
+| 2 | 2.19 | 6.72 | 119 |
+| 3 | 1.41 | 4.33 | 184 |
+| 4 | 1.00 | 3.07 | 260 |
+| 5 | 0.83 | 2.55 | 313 |
 
 Final drive 3.07, reverse 3.16. Speeds use the driven-wheel loaded radius 0.353 m.
 
@@ -139,7 +139,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
 | sim | 6.4 s | 260 km/h | 40.2 m | 0.86 g | — |
-| estimate | 6.2 s | 267 km/h | 37.8 m | 0.91 g | 559 |
+| estimate | 5.7 s | 301 km/h | 37.8 m | 0.91 g | 601 |
 
 ## Damage lattice (`data/lattices/sentinel_cruiser.json`)
 
