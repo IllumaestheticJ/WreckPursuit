@@ -343,20 +343,20 @@ fn bets_on_yourself_settle_through_the_career_economy() {
     let (max, lock) = s.bet_status();
     assert_eq!(max, 0);
     assert!(lock.is_some());
-    assert!(s.race_place_bet("win:player", 200).is_err());
+    assert!(s.race_place_bet("win:player", 200, None).is_err());
     s.debug_run_mut().unwrap().debug_set_rep(2_000);
     let (max, lock) = s.bet_status();
     assert!(max >= 200 && lock.is_none(), "{max} {lock:?}");
     // A racer only backs themselves.
-    assert!(s.race_place_bet("win:vic", 200).is_err());
+    assert!(s.race_place_bet("win:vic", 200, None).is_err());
     let cash0 = s.run().unwrap().account().cash;
-    let t = s.race_place_bet("h2h:player>tito", 200).unwrap();
+    let t = s.race_place_bet("h2h:player>tito", 200, None).unwrap();
     assert_eq!(t.outcome, "open");
     assert!(t.odds > 1.0 && t.paid > 200);
     assert_eq!(s.run().unwrap().account().cash, cash0 - 200);
     let (report, _) = run_to_final(&mut s, 150);
     // Bets close at the green light.
-    assert!(s.race_place_bet("win:player", 200).is_err());
+    assert!(s.race_place_bet("win:player", 200, None).is_err());
     assert_eq!(report.bets.len(), 1);
     let b = &report.bets[0];
     assert_ne!(b.outcome, "open");

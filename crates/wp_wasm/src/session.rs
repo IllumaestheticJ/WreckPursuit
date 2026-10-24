@@ -582,10 +582,11 @@ impl Session {
         &mut self,
         label: &str,
         stake: i64,
+        quoted: Option<f32>,
     ) -> Result<crate::race::BetCard, String> {
         let race = self.race.as_mut().ok_or("no race in this session")?;
         let run = self.run.as_mut().ok_or("no account in this session")?;
-        race.place_bet(run, label, stake)
+        race.place_bet(run, label, stake, quoted)
     }
 
     /// `(max stake, lock reason)` for picker-race bets (venue `City`) on this session's

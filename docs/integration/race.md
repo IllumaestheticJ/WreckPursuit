@@ -284,10 +284,14 @@ BetVenue::City)`, `take_stake` = `place_bet`, `pay_out` = `settle_bet` (see
 ### Betting fixes (2026-10-24)
 - **Bet slip stake**: a range slider (`onInput`) replaces the number box, which only
   committed on blur and was reset by the picker's 10 Hz redraw after a race.
-- **Settled at the player's finish**: `RaceRun::settle` pays bets as soon as the player is
-  Finished (finishers' positions are final; cars still running count as behind), so the
-  results panel no longer shows them "open" and then flipping as the field comes home.
-  Form ratings are still recorded once the results are final.
+- **Paid at the player's own result**: `RaceRun::settle` pays the buy-in / purse settlement
+  and the bets as soon as the player's result is decided (finished, DNF or DQ), not when the
+  last car is home: finishers' positions are final and a rival still running counts as
+  finishing behind them. Form ratings are still recorded once the results are final.
+- **Odds locked at sign-up**: `race_bet(label, stake, odds)` takes the decimal odds shown on
+  the picker card and `Book::place_quoted` puts them on the ticket (held to the book's bounds
+  and step). The card was priced for the stock car, the race's book for the career car with
+  its mods, so the two could differ.
 - **Money reaches the career**: `Session::end_career` / `take_run` call
   `RaceRun::close_bets` before the account leaves (refund during the countdown; after the
   green, leaving counts as not finishing). The testbed's picker races are career runs when

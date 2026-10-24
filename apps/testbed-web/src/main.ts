@@ -508,7 +508,7 @@ async function main(): Promise<void> {
       // The countdown is running: bets on yourself are taken until green.
       if (bet) {
         try {
-          sim.raceBet(bet.label, bet.stake);
+          sim.raceBet(bet.label, bet.stake, bet.odds);
         } catch (e) {
           console.warn("bet refused", e);
         }
@@ -869,7 +869,7 @@ async function main(): Promise<void> {
     rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
     if (bet) {
       try {
-        sim.raceBet(bet.label, bet.stake);
+        sim.raceBet(bet.label, bet.stake, bet.odds);
       } catch (e) {
         console.warn("bet refused", e);
       }

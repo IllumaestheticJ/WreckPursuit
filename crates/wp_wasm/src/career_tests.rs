@@ -966,14 +966,18 @@ fn career_cash_deltas(c: &Career, seq: u64) -> Vec<i64> {
         .collect()
 }
 
-/// A bet on a career picker race is settled at the player's own finish (the results panel
-/// shows it paid, not open, while the rest of the field is still racing) and its money lands
-/// on the career account when the player goes back to the garage right away.
+/// A bet on a career picker race keeps the odds the player signed up at; it and the purse are
+/// paid at the player's own finish (the results panel shows them paid while the rest of the
+/// field is still racing), and the money lands on the career account when the player goes
+/// back to the garage right away.
 #[test]
 fn a_career_race_bet_settles_at_the_finish_and_posts_to_the_career() {
     let (mut c, mut s) = career_race_with_rep();
     let seq = s.run().unwrap().account().next_event_seq;
-    let t = s.race_place_bet("win:player", 500).unwrap();
+    // The odds the picker card showed are the ticket's odds, whatever the book prices now.
+    let t = s.race_place_bet("win:player", 500, Some(9.95)).unwrap();
+    assert!((t.odds - 9.95).abs() < 1e-3, "{}", t.odds);
+    assert_eq!(t.paid, 4_975);
     let me = player(&s);
     let rivals: Vec<EntityId> = s
         .race()
@@ -1006,6 +1010,11 @@ fn a_career_race_bet_settles_at_the_finish_and_posts_to_the_career() {
     }
     let report = report.expect("the player's result is in");
     assert!(!report.final_results, "the field is still racing");
+    let paid = report
+        .payout
+        .as_ref()
+        .expect("purse paid at the player's finish");
+    assert!(paid.purse > 0, "a win pays the purse");
     assert_eq!(report.bets.len(), 1);
     let b = &report.bets[0];
     assert_eq!(b.outcome, "won", "settled at the player's finish line");
@@ -1028,7 +1037,7 @@ fn a_career_race_bet_settles_at_the_finish_and_posts_to_the_career() {
 fn leaving_a_career_race_before_the_green_light_refunds_the_bet() {
     let (mut c, mut s) = career_race_with_rep();
     let seq = s.run().unwrap().account().next_event_seq;
-    s.race_place_bet("win:player", 500).unwrap();
+    s.race_place_bet("win:player", 500, None).unwrap();
     s.run_ticks(10);
     c.finish_run(&mut s).unwrap();
     let deltas = career_cash_deltas(&c, seq);

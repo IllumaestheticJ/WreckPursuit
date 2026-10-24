@@ -83,6 +83,8 @@ export interface RegularCard {
 export interface BetPick {
   label: string;
   stake: number;
+  /** Decimal odds on the card when it was picked: the ticket is placed at these odds. */
+  odds: number;
 }
 
 /** Picker-race betting (venue City) on the current account. */
@@ -210,7 +212,8 @@ function BetSlip(props: { card: RaceCard; status: BetStatus; pick: BetPick | nul
         value={label}
         onChange={(e) => {
           const v = (e.target as HTMLSelectElement).value;
-          props.onPick(v ? { label: v, stake } : null);
+          const o = card.odds.find((x) => x.label === v);
+          props.onPick(v && o ? { label: v, stake, odds: o.odds } : null);
         }}
       >
         <option value="">No bet</option>
@@ -234,7 +237,7 @@ function BetSlip(props: { card: RaceCard; status: BetStatus; pick: BetPick | nul
             step={step}
             value={stake}
             style={{ width: "8em" }}
-            onInput={(e) => props.onPick({ label, stake: clampStake(Number((e.target as HTMLInputElement).value), max) })}
+            onInput={(e) => props.onPick({ label, stake: clampStake(Number((e.target as HTMLInputElement).value), max), odds: pick?.odds ?? odds?.odds ?? 0 })}
           />
           → <Money value={Math.floor((stake * Math.round((odds?.odds ?? 0) * 1000)) / 1000)} />{" "}
           <span class="wp-dim" style={{ whiteSpace: "nowrap" }}>(max {money(max)})</span>
