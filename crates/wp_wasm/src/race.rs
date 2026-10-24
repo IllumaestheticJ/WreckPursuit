@@ -13,7 +13,8 @@
 //! - a hot meet calls in a patrol (`PatrolAttracted` → `wp_race::police` reports delivered to
 //!   the sim's police), and illegal races put their stake heat on every racer;
 //! - the buy-in is charged at the start and the result paid at the end through G's economy
-//!   (`Economy::enter_race` / `settle_race`, priced by kind and legality: the R5 scale), on
+//!   (`Economy::enter_race_scaled` / `settle_race_scaled` with `wp_race::bridge`'s R5 scales,
+//!   so the player pays and wins exactly what the race card advertised), on
 //!   the player's [`crate::run::PlayerRun`] account. A police capture mid-race is a DNF and
 //!   the existing end-of-run panel takes over (`handoff_run_end`).
 //!
@@ -279,6 +280,8 @@ pub struct RaceRun {
     names: BTreeMap<EntityId, (String, String)>,
     prev_events: Vec<SimEvent>,
     setup: wp_economy::RaceSetup,
+    /// `(purse, entry)` scales from the economy's prices to the advertised ones.
+    scale: (f32, f32),
     advertised: (i64, i64),
     entry: Option<(i64, Vec<LedgerLine>)>,
     payout: Option<RacePayout>,
@@ -355,13 +358,16 @@ impl RaceRun {
                 sc.mode,
             );
             let adv = advertised(econ, &data, def, player_car, length, sc.mode);
-            (setup, (adv.purse, adv.entry_fee))
+            (setup, adv)
         });
+        let scale = (adv.purse_scale, adv.entry_scale);
+        let adv = (adv.purse, adv.entry_fee);
         let mut me = Self {
             live,
             names,
             prev_events: Vec::new(),
             setup,
+            scale,
             advertised: adv,
             entry: None,
             payout: None,
@@ -369,7 +375,7 @@ impl RaceRun {
             settled: false,
         };
         if let Some(run) = run {
-            match run.enter_race(&me.setup) {
+            match run.enter_race(&me.setup, me.scale.1) {
                 Ok(e) => me.entry = Some(e),
                 Err(e) => me.economy_error = Some(format!("buy-in refused: {e}")),
             }
@@ -382,7 +388,7 @@ impl RaceRun {
     pub fn reenter(&mut self, run: &mut PlayerRun) {
         self.economy_error = None;
         self.entry = None;
-        match run.enter_race(&self.setup) {
+        match run.enter_race(&self.setup, self.scale.1) {
             Ok(e) => self.entry = Some(e),
             Err(e) => self.economy_error = Some(format!("buy-in refused: {e}")),
         }
@@ -465,6 +471,10 @@ impl RaceRun {
             let cur = sim.police().racer(*e).map_or(0.0, |r| r.heat);
             sim.police_mut().set_heat(*e, cur + h);
         }
+        // Busted AI cars are towed away (left in place they can block the field for good).
+        for e in &out.impound {
+            let _ = sim.despawn_vehicle(*e);
+        }
         emitted
     }
 
@@ -481,7 +491,7 @@ impl RaceRun {
             return;
         };
         let res = wp_race::bridge::economy_result(&r, run.wanted_level());
-        match run.settle_race(&self.setup, &res, entry) {
+        match run.settle_race(&self.setup, &res, entry, self.scale.0) {
             Ok(p) => self.payout = Some(p),
             Err(e) => self.economy_error = Some(format!("payout refused: {e}")),
         }

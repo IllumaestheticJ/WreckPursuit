@@ -336,6 +336,33 @@ fn purse_formula_and_multipliers() {
     assert!(!r.is_clean());
 }
 
+/// The scaled variants charge and pay the lobby's advertised stake (R5 scales): the buy-in
+/// and the purse (and the clean bonus on it) scale; rep does not.
+#[test]
+fn scaled_entry_and_purse_match_the_advertised_stake() {
+    let e = econ();
+    let s = sprint(VehicleClass::Compact);
+    let clean = result(1, 0, WantedLevel::None);
+    let plain = e.race_payout(&s, &clean);
+    let scaled = e.race_payout_scaled(&s, &clean, 2.5);
+    assert_eq!(scaled.purse, (plain.purse as f32 * 2.5).round() as i64);
+    assert_eq!(
+        scaled.clean_bonus,
+        (scaled.purse as f32 * 0.25).round() as i64
+    );
+    assert_eq!(scaled.rep, plain.rep);
+    assert_eq!(e.race_payout_scaled(&s, &clean, 1.0), plain);
+
+    let (mut a, car) = account_with_sedan(&e, 50_000);
+    let cash = a.cash;
+    let (fee, _) = e.enter_race_scaled(&mut a, &s, car, 0.5).unwrap();
+    assert_eq!(fee, (e.entry_fee(&s) as f32 * 0.5).round() as i64);
+    assert_eq!(a.cash, cash - fee);
+    let (pay, _) = e.settle_race_scaled(&mut a, &s, car, &clean, 2.5).unwrap();
+    assert_eq!(pay, scaled);
+    assert_eq!(a.cash, cash - fee + scaled.purse + scaled.clean_bonus);
+}
+
 #[test]
 fn debt_caps_race_entry_until_paid() {
     let e = econ();

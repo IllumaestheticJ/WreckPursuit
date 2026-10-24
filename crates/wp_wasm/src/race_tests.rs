@@ -139,6 +139,13 @@ fn short_sprint_with_ai_runs_to_results_and_pays_through_the_economy() {
     assert_eq!(finishers[0].gap_s, Some(0.0));
     // The payout came from G's economy and the account reflects it.
     let p = r.payout.as_ref().expect("payout");
+    // The buy-in charged is the advertised one (whatever the placing).
+    assert!(
+        (p.entry_fee - r.advertised_entry_fee).abs() <= 1,
+        "entry {} vs {}",
+        p.entry_fee,
+        r.advertised_entry_fee
+    );
     let me = &r.rows[r.player_row];
     assert!(me.is_player && me.name == "You");
     if me.status == "Finished" {

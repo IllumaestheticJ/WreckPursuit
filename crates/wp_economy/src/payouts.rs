@@ -163,6 +163,18 @@ impl Economy {
 
     /// What a result pays (pure; nothing is posted).
     pub fn race_payout(&self, s: &RaceSetup, r: &RaceResult) -> RaceSettlement {
+        self.race_payout_scaled(s, r, 1.0)
+    }
+
+    /// [`Economy::race_payout`] with the purse (and so the clean bonus) scaled by
+    /// `purse_scale`: the race lobby's advertised stake over this table's purse
+    /// (`wp_race::bridge::EconomyRace::purse_scale`). Rep and bounty are not scaled.
+    pub fn race_payout_scaled(
+        &self,
+        s: &RaceSetup,
+        r: &RaceResult,
+        purse_scale: f32,
+    ) -> RaceSettlement {
         let st = &self.stakes;
         let phase = &st.day_phase[&s.phase];
         if r.placement == 0 {
@@ -175,7 +187,8 @@ impl Economy {
         }
         let idx = (r.placement - 1) as usize;
         let share = st.placement_share.get(idx).copied().unwrap_or(0.0);
-        let purse = money(self.base_purse(s) as f32 * st.wanted_purse[&r.wanted] * share);
+        let purse =
+            money(self.base_purse(s) as f32 * st.wanted_purse[&r.wanted] * share * purse_scale);
         let clean = r.is_clean();
         let clean_bonus = if clean {
             money(purse as f32 * st.clean_bonus)
@@ -206,6 +219,18 @@ impl Economy {
         s: &RaceSetup,
         car: CarUid,
     ) -> EconResult<Money> {
+        self.enter_race_scaled(acct, s, car, 1.0)
+    }
+
+    /// [`Economy::enter_race`] with the buy-in scaled by `entry_scale` (the lobby's advertised
+    /// buy-in over this table's: `wp_race::bridge::EconomyRace::entry_scale`).
+    pub fn enter_race_scaled(
+        &self,
+        acct: &mut PlayerAccount,
+        s: &RaceSetup,
+        car: CarUid,
+        entry_scale: f32,
+    ) -> EconResult<Money> {
         let c = acct.try_car(car)?;
         if !c.is_usable() {
             return Err(EconomyError::CarUnavailable {
@@ -213,7 +238,7 @@ impl Economy {
                 reason: "impounded or undrivable".into(),
             });
         }
-        let fee = self.entry_fee(s);
+        let fee = money(self.entry_fee(s) as f32 * entry_scale);
         if acct.in_debt() && fee > self.stakes.debt.max_entry_fee {
             return Err(EconomyError::InDebt {
                 debt: acct.debt(),
@@ -246,8 +271,21 @@ impl Economy {
         car: CarUid,
         r: &RaceResult,
     ) -> EconResult<RaceSettlement> {
+        self.settle_race_scaled(acct, s, car, r, 1.0)
+    }
+
+    /// [`Economy::settle_race`] paying [`Economy::race_payout_scaled`] (the purse the race
+    /// lobby advertised when its stake table differs from this one).
+    pub fn settle_race_scaled(
+        &self,
+        acct: &mut PlayerAccount,
+        s: &RaceSetup,
+        car: CarUid,
+        r: &RaceResult,
+        purse_scale: f32,
+    ) -> EconResult<RaceSettlement> {
         acct.try_car(car)?;
-        let pay = self.race_payout(s, r);
+        let pay = self.race_payout_scaled(s, r, purse_scale);
         transact(acct, |tx| {
             let some = Some(car);
             if pay.purse > 0 {

@@ -542,33 +542,36 @@ impl PlayerRun {
         self.session.wanted_level(self.player)
     }
 
-    /// Pay a race's buy-in (G's `Economy::enter_race`) from the account. Returns the fee and
-    /// its ledger lines; an error (nothing charged) when the car is unavailable or the player
-    /// is in debt.
+    /// Pay a race's buy-in (G's `Economy::enter_race_scaled`, `entry_scale` = the lobby's
+    /// advertised buy-in over the economy's) from the account. Returns the fee and its ledger
+    /// lines; an error (nothing charged) when the car is unavailable or the player is in debt.
     pub fn enter_race(
         &mut self,
         setup: &wp_economy::RaceSetup,
+        entry_scale: f32,
     ) -> Result<(i64, Vec<LedgerLine>), String> {
         let (fee, ev) = self
             .econ
-            .enter_race(&mut self.acct, setup, self.car)
+            .enter_race_scaled(&mut self.acct, setup, self.car, entry_scale)
             .map_err(|e| e.to_string())?;
         let lines = ev.iter().map(LedgerLine::of).collect();
         self.ledger.extend(ev);
         Ok((fee, lines))
     }
 
-    /// Pay out a race result (G's `Economy::settle_race`: purse share, clean bonus, rep,
-    /// bounty while wanted). `entry` = what [`PlayerRun::enter_race`] charged, for the report.
+    /// Pay out a race result (G's `Economy::settle_race_scaled`: purse share times
+    /// `purse_scale`, clean bonus, rep, bounty while wanted). `entry` = what
+    /// [`PlayerRun::enter_race`] charged, for the report.
     pub fn settle_race(
         &mut self,
         setup: &wp_economy::RaceSetup,
         result: &wp_economy::RaceResult,
         entry: (i64, Vec<LedgerLine>),
+        purse_scale: f32,
     ) -> Result<RacePayout, String> {
         let (pay, ev) = self
             .econ
-            .settle_race(&mut self.acct, setup, self.car, result)
+            .settle_race_scaled(&mut self.acct, setup, self.car, result, purse_scale)
             .map_err(|e| e.to_string())?;
         let mut ledger = entry.1;
         ledger.extend(ev.iter().map(LedgerLine::of));
