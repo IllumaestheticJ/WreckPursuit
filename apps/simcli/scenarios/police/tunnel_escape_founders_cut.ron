@@ -62,9 +62,13 @@
 // PR #60 port (2026-10-23: no AI pursuit cap, stronger police cars, rolling-block deadlock fix):
 // seed 63 was Captured at 141.8 s. Seeds 50-70 at heat 95: escape story on 16 of 21, control
 // on 20, both on 15 (50-52, 56-62, 64-66, 68-70). Re-seeded 63 -> 60, the middle of 56-62.
+// Row 168 (2026-10-24: a unit in a stopped racer's lane drives on, units wedged against a wall
+// or in the racer's lane ahead don't make the arrest): seed 60 was Captured at 132.7 s. Seeds
+// 50-70: escape story on 11 of 21, control on 20, both on 11 (50, 52, 54, 56-59, 61, 63, 65,
+// 68). Re-seeded 60 -> 58.
 (
     name: "police_tunnel_escape_founders_cut",
-    seed: 60,
+    seed: 58,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,
     time_ratio: 1.0,

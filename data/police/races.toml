@@ -227,11 +227,13 @@ trigger_m = 60.0
 
 # Dusk run over Harlan Flats' gravel section roads. Proposed style: open country. Few units
 # out on the farm roads, so the helicopter does the spotting; no spikes on gravel.
+# Row 168 tuning (2026-10-24, race_picker with police on, seeds 1-4): presence 1.0 -> 0.5,
+# backup 0.75 -> 0.5. The field was captured on 3 of 4 seeds; now it finishes on 2.
 [harlan_dirt_run]
 name = "Open country"
 summary = "Thin patrols on the section roads; the helicopter spots and calls in units ahead."
-presence = 1.0
-backup_scale = 0.75
+presence = 0.5
+backup_scale = 0.5
 tool_lifetime_s = 300.0
 recognise_on_sight = false
 
@@ -286,13 +288,15 @@ trigger_m = 80.0
 
 # Night sprint over Route 12's Grizzly Grade. Proposed style: pass patrol. The highway patrol
 # works the grade: PITs on the climb, a roadblock allowed over the saddle.
+# Row 168 tuning: no pursuit on any of seeds 1-4 (no patrol on the pass). A unit staked out
+# past the saddle that knows the field on sight: 1-2 pursuits a race, all four still finish.
 [grizzly_grade_sprint]
 name = "Pass patrol"
 summary = "Units work the climb with PITs; past the saddle the captain may block the road."
 presence = 1.0
 backup_scale = 1.0
 tool_lifetime_s = 300.0
-recognise_on_sight = false
+recognise_on_sight = true
 
 [grizzly_grade_sprint.tactics]
 roadblocks = true
@@ -304,8 +308,14 @@ junction_block = false
 pit = true
 rams = false
 
+[[grizzly_grade_sprint.stakeouts]]
+at = 0.7
+trigger_m = 100.0
+
 # Quarter-mile drag on the waterfront. Proposed style: late response. Too short for a chase:
 # units only arrive at the end, no tools.
+# Row 168 tuning: no pursuit on any of seeds 1-4. A unit staked out near the end of the strip
+# (the summary's late response): 2 pursuits a race, both racers still finish.
 [waterfront_drag]
 name = "Late response"
 summary = "Too short to chase: the nearest unit rolls in at the end of the strip."
@@ -323,6 +333,10 @@ rolling_block = false
 junction_block = true
 pit = false
 rams = false
+
+[[waterfront_drag.stakeouts]]
+at = 0.9
+trigger_m = 60.0
 
 # Two night laps of the downtown block grid. Proposed style: block grid. Units cut through the
 # grid to block junctions ahead on the second lap; no spikes between the towers.

@@ -154,6 +154,12 @@ pinned_time_s = 6.0
 # police held up behind other cars 20 m away, is captured, not waited for forever; Hollins
 # hairpin, lead/opponent-pace).
 pinned_unit_radius_m = 30.0
+# Row 168: when the only units that close (stop rule) or chasing it that close (pinned rule)
+# stand in the racer's lane in front of it, a pursuer, interceptor or patrol that cut in or
+# crashed there (not a roadblock, spike car or box-in), both rules wait this long: the
+# racer stopped because the car is in its way, and gets time to back out and go round.
+# A cruiser wedged on a one-lane hairpin had the race field behind it arrested in 4 s.
+blocked_ahead_stop_time_s = 12.0
 
 [safehouse]
 dwell_s = 10.0
