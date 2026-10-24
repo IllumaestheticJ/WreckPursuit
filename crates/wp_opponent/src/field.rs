@@ -747,6 +747,19 @@ const JUNCTION_GAP_S: f32 = 1.5;
 pub const TAG_CLOSING_MPS: f32 = 15.0;
 /// With [`RaceConfig::ram_traffic`]: lateral clearance kept to non-racers, m (a rub).
 const RAM_MARGIN_M: f32 = 0.1;
+/// With [`RaceConfig::ram_traffic`]: the full tag holds up to this speed; above it the
+/// closing speed allowed falls as 1/v.
+const TAG_FULL_UNTIL_MPS: f32 = 25.0;
+/// With [`RaceConfig::ram_traffic`]: above this speed a non-racer alongside bounds my line
+/// again (leaning on a car at highway speed puts both into the barrier).
+const RAM_LEAN_MAX_MPS: f32 = 30.0;
+
+/// Closing speed allowed into a non-racer at my speed `v`, m/s: [`TAG_CLOSING_MPS`] up to
+/// [`TAG_FULL_UNTIL_MPS`], then falling as 1/v (6 m/s at 60 m/s: grid highway s95, a full
+/// tag at 55-60 m/s threw the racers into the barrier, 4 wall hits and 2 rejoins each).
+fn tag_closing(v: f32) -> f32 {
+    TAG_CLOSING_MPS * TAG_FULL_UNTIL_MPS / v.max(TAG_FULL_UNTIL_MPS)
+}
 
 /// Extra clearance of the whole-road line from the far edge of the opposing lanes, m.
 const WIDE_EDGE_EXTRA_M: f32 = 0.6;
@@ -2894,7 +2907,7 @@ fn decide_racer(
             }
             // Unafraid of traffic: lean on a non-racer beside me rather than give it room —
             // only one coming at me head on still bounds my line.
-            if fair_game(&x.o) && x.o.facing >= -0.3 {
+            if fair_game(&x.o) && x.o.facing >= -0.3 && v < RAM_LEAN_MAX_MPS {
                 continue;
             }
             // A car in line right behind me is not beside me: it bounds neither side (grid
@@ -3240,7 +3253,7 @@ fn decide_racer(
                 if !overlaps(band, o, RAM_MARGIN_M, 0.0) {
                     continue;
                 }
-                let v_hit = o.v_s.max(0.0) + TAG_CLOSING_MPS;
+                let v_hit = o.v_s.max(0.0) + tag_closing(v);
                 let cap = (v_hit * v_hit + 2.0 * a_brk * x.gap.max(0.0)).sqrt();
                 if v > cap {
                     let a_req = (v * v - v_hit * v_hit) / (2.0 * x.gap.max(0.5));

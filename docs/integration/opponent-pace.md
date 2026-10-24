@@ -1376,4 +1376,26 @@ still far too slow and cautious around other traffic and player vehicles. Make i
 - Full sim, open roads, 25 % traffic, 4 racers, 60 s: 4768 m vs 2672 m careful (+78 %), zero
   racer–racer hard contacts.
 - Cross-crate touch: `crates/wp_wasm/src/street.rs` `roam_config` (one field).
-- Tuning knob: `TAG_CLOSING_MPS` (lower = softer tags; `f32::INFINITY` = never brakes for traffic).
+- Tag taper: full 15 m/s closing up to 25 m/s, then 1/v (6 m/s at 60 m/s); leaning on
+  traffic alongside only below 30 m/s. Without the taper, grid highway s95 got *slower*
+  (vic 41.8 -> 57.4 s, 4 walls, 2 rejoins: tagged traffic at 55-60 m/s threw racers into the
+  barrier); with it, 0 walls and faster than before.
+- Tuning knobs: `TAG_CLOSING_MPS`, `TAG_FULL_UNTIL_MPS`, `RAM_LEAN_MAX_MPS`.
+
+Pace scenarios (`opponent_pace`, race time s, careful -> unafraid):
+
+| scenario | before | after |
+|---|---|---|
+| lantern_checkpoint s50 (juno/dez/tito/player) | 61.0 / 62.9 / 71.9 / 96.0 | 41.1 / 45.3 / 48.1 / 61.8 |
+| lantern_checkpoint s95 | 47.8 / 49.0 / 50.2 / 51.5 | 44.8 / 46.1 / 47.4 / 48.7 |
+| grid_highway s50 (vic/juno/tito/player) | 48.8 / 48.8 / 48.1 / 48.1 | 43.1 / 41.5 / 43.0 / 43.9 |
+| grid_highway s95 | 41.8 / 44.8 / 47.6 / 44.8 | 38.5 / 37.7 / 40.4 / 38.2 |
+| loop9 s95 (vic/mara/dez/juno/tito/player) | 205 / 260 / 218 / 206 / 226 / 264 | 201 / 190 / 203 / 202 / 230 / 229 |
+| loop9 s50 | 213 / 204 / 214 / 218 / 219 / 255 | 222 / 207 / 231 / 225 / 229 / 226 |
+| city_sprint, hollins | (no traffic in the way) | unchanged within 0.1 s |
+
+- Loop 9 s50 is level within run-to-run noise (±5–10 s; changing the tag curve or the
+  opposing-lane rule moved it by that much either way); tito on Loop 9 s95 logged 25 wall
+  touches (rubbing the barrier while leaning on traffic, 6 rejoins) and still finished.
+- Re-locked `[bless]` by the RON rule: grid_highway_sprint_s95 and lantern_checkpoint_s50
+  (faster than their old minimums). Everything else stays in its range.

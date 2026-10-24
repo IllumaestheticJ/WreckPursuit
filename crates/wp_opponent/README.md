@@ -67,10 +67,12 @@ gap to the player — pace is car capability × how much of it the driver dares 
   racing, anything that is not an AI racer — civilians, physical traffic, players, police — is
   fair game (racers out of the race are left be):
   - no following distance: braking only so as not to hit it more than `TAG_CLOSING_MPS`
-    (15 m/s) faster than it is going, and full shove once in contact (no creeping round it);
+    (15 m/s) faster than it is going — up to 25 m/s, falling as 1/v above (6 m/s at
+    60 m/s: full tags at highway speed threw skill-95 racers into the barrier) — and full
+    shove once in contact (no creeping round it);
   - no junction yielding, no stopping for reds (any personality);
-  - no side clearance: a non-racer alongside does not bound my line (I lean on it) — only one
-    coming at me head on does; never backs out from beside one, never waits for one on a rejoin;
+  - no side clearance below 30 m/s (`RAM_LEAN_MAX_MPS`): a non-racer alongside does not bound
+    my line (I lean on it) — only one coming at me head on does; never backs out from beside one, never waits for one on a rejoin;
   - no patience: a pass round it is looked for at once, the opposing lanes always allowed;
     clearance beside it 0.1 m (`RAM_MARGIN_M`), no extra pass margin.
   - Unchanged: racer–racer racecraft, head-on aborts (oncoming traffic in a passing lane),
