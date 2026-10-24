@@ -66,6 +66,7 @@ import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileN
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
 import { RaceView, racesForMap, type BetPick, type RaceFrame } from "./ui/race";
 import { GarageVisitView } from "./ui/garageVisit";
+import { PlaceVisitView } from "./ui/placeVisit";
 import { TougeView, type TougeChoice, type Wager } from "./ui/touge";
 import { RaceMarker, parseCourse } from "./race_marker";
 import { RaceSpotsView } from "./race_spots";
@@ -544,6 +545,22 @@ async function main(): Promise<void> {
     repair: () => sim.garageRepair(),
     leave: () => sim.garageLeave(),
   });
+  // Career places (row: safehouses and garages do something): stop inside a garage or safehouse
+  // ring on a career run → the workshop, the garage, or end the night there.
+  const placeEl = document.createElement("div");
+  placeEl.id = "ui-place-visit";
+  placeEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  overlay.appendChild(placeEl);
+  const activeCareerCar = () => sim.careerView().cars.find((c) => c.active)?.uid ?? null;
+  const placeView = new PlaceVisitView(placeEl, {
+    workshop: () => {
+      const uid = activeCareerCar();
+      openGarage();
+      if (uid !== null) openWorkshop(uid);
+    },
+    garage: (v) => openGarage(v.kind === "Safehouse" ? `Safe at ${v.name} for the night. Your career is saved.` : `Pulled into ${v.name}.`),
+    leave: () => sim.placeLeave(),
+  });
   // The city's regulars remember their results between visits (wp_race::roster records).
   const ROSTER_KEY = "wp.roster.v1";
   try {
@@ -680,6 +697,7 @@ async function main(): Promise<void> {
     map.reset();
     runEnd.reset();
     garageView.reset();
+    placeView.reset();
     weather.reset();
     // Every model the session can show (player, traffic, police) starts loading now, so cars
     // that appear later never wait for their mesh (playtest row 25).
@@ -699,7 +717,7 @@ async function main(): Promise<void> {
     // Every session: the tune panel's saved debug overrides (none = the shipped handling) and
     // raw keys; the test pad (?drift=w) also gets its course and the reference assists.
     driftLabW.setActive(sc.name === DRIFT_LAB_W);
-    scene.setGarages(sim.garages());
+    scene.setGarages(sim.garages(), sim.safehouses());
     const city = sim.worldInfo()[W.city] > 0.5;
     const cityId = city ? sim.cityId() : "";
     void scene.setCity(cityId || null);
@@ -1935,6 +1953,7 @@ async function main(): Promise<void> {
       if (!replay) {
         runEnd.update(sim.runResult(), now);
         garageView.update(sim.garageVisit(), now);
+        placeView.update(sim.careerRunActive() ? sim.place() : null, now);
       }
       // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
       if (!replay && sim.careerRunActive()) {
@@ -2287,6 +2306,7 @@ async function main(): Promise<void> {
     ui,
     runEnd,
     garageView,
+    placeView,
     street,
     restartRun,
     /** Mod shop (src/ui/modShop.ts). */

@@ -30,7 +30,7 @@
 //! | drift lab B (lead) | `drift_tuning_json()`, `drift_tuning_defaults_json()`, `drift_tuning_set(json)`, `drift_readout(entity)` — see [`drift_lab`] |
 //! | mods | `mod_catalog_json(car)`, `build_visuals_json(car, mods)`, `entity_visuals_json(entity)` — see [`mod_visuals`]; install with `EntitySpec::mods` in the scenario |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)`, `debug_place(entity, x, y, yaw, speed)` — see [`run`] |
-//! | garages (lead) | `garages_json()`, `garage_visit_json()`, `garage_repair()`, `garage_leave()` — see [`garage_visit`] |
+//! | garages (lead) | `garages_json()`, `garage_visit_json()`, `garage_repair()`, `garage_leave()`; career places `safehouses_json()`, `place_json()`, `place_leave()` — see [`garage_visit`] |
 //! | audio (13) | `audio_library()`, `audio_frame(listener, events_json, focus)`, `audio_set_siren`, `audio_set_scanner_tier`, `audio_radio`, `audio_reset()` — see [`audio`] |
 
 #![warn(missing_docs)]
@@ -1317,6 +1317,27 @@ pub fn garage_repair() -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn garage_leave() -> Result<(), JsValue> {
     get(|s| s.garage_leave())
+}
+
+/// The city's safehouses as JSON ([`garage_visit::SafehouseSite`] array: name, position,
+/// radius). Career runs only; `[]` otherwise.
+#[wasm_bindgen]
+pub fn safehouses_json() -> Result<String, JsValue> {
+    get(|s| json(&s.safehouses()))
+}
+
+/// Career places as JSON ([`garage_visit::PlaceStatus`]): the open garage / safehouse visit
+/// (the car stopped inside one with no pursuit on and is held until the testbed ends the run
+/// into the garage or calls `place_leave()`), and the safehouse dwell while chased.
+#[wasm_bindgen]
+pub fn place_json() -> Result<String, JsValue> {
+    get(|s| json(&s.place()))
+}
+
+/// "Back on the road" from the open career place visit (no-op without one).
+#[wasm_bindgen]
+pub fn place_leave() -> Result<(), JsValue> {
+    get(|s| s.place_leave())
 }
 
 /// Bet on yourself in the current race while the countdown runs: `label` from the picker's
