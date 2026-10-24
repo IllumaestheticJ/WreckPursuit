@@ -642,6 +642,48 @@ await page.keyboard.press("KeyM");
   await tctx.close();
 }
 
+// Row 169: street bets follow the career. Main menu → Free drive with the career box ticked
+// (and a career car) is a career run: the bet slip says "Career cash". Career box off: quick
+// play, and the slip says the bet is practice cash. (Settlement on the career account:
+// wp_wasm street_bets_settle_on_the_career.)
+for (const careerBox of [true, false]) {
+  const label = careerBox ? "career on" : "career off";
+  const cp = await context.newPage();
+  watch(cp);
+  await cp.goto(`${URL}?city=${CITY}&menu=1`);
+  await cp.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 120000 });
+  await cp.evaluate((on) => {
+    const wp = window.__wp;
+    wp.careerApi.newCareer("Arcade");
+    wp.careerApi.buy("junkyard_beater", "Worn");
+    document.getElementById("career").checked = on;
+  }, careerBox);
+  await cp.click("#gm-play-free");
+  await cp.waitForFunction(() => window.__wp.sim.streetStatus() !== null, null, { timeout: 60000 }).catch(() => {});
+  await wait(cp, 1500);
+  const st0 = await status(cp);
+  const active = await cp.evaluate(() => window.__wp.sim.careerRunActive());
+  check(active === careerBox && st0?.career === careerBox, `${label}: menu Free drive is ${careerBox ? "a career run" : "quick play"} (career run ${active}, street career ${st0?.career})`);
+  const target = st0?.roster.find((r) => r.mode !== "OffDuty");
+  const hornKey = await cp.evaluate(() => window.__wp.bindings().keys.horn[0]);
+  if (target) {
+    await cp.keyboard.down(hornKey);
+    for (let i = 0; i < 40; i++) {
+      await placeBehind(cp, target.entity);
+      await wait(cp, 250);
+      if ((await status(cp))?.offer) break;
+    }
+    await cp.keyboard.up(hornKey);
+  }
+  await cp.waitForSelector('[data-testid="st-wallet"]', { timeout: 20000 }).catch(() => {});
+  const wallet = await cp.evaluate(() => {
+    const el = document.querySelector('[data-testid="st-wallet"]');
+    return el ? { career: el.getAttribute("data-career"), text: el.textContent } : null;
+  });
+  check(wallet?.career === (careerBox ? "1" : "0"), `${label}: the bet slip says ${careerBox ? "career cash" : "quick play"} ("${wallet?.text ?? "no offer"}")`);
+  await cp.close();
+}
+
 check(errors.length === 0, `no page errors ${errors.slice(0, 3).join(" | ")}`);
 await browser.close();
 process.exit(failures ? 1 : 0);
