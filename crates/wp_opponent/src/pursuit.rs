@@ -32,6 +32,12 @@ pub trait PoliceQuery {
     fn in_pursuit(&self, _racer: EntityId) -> bool {
         false
     }
+
+    /// Sim entities of the police cars on the road (racers dodge them and may ram them).
+    /// Default: none known.
+    fn police_entities(&self) -> Vec<EntityId> {
+        Vec::new()
+    }
 }
 
 /// Live read-only view of the sim's police system (`Sim::police()`).
@@ -61,6 +67,15 @@ impl PoliceQuery for SimPolice<'_> {
         self.0
             .racer(racer)
             .is_some_and(|r| matches!(r.status, PursuitStatus::Pursuit | PursuitStatus::Searching))
+    }
+
+    fn police_entities(&self) -> Vec<EntityId> {
+        self.0
+            .units()
+            .iter()
+            .filter(|u| u.kind == UnitKind::Car && !u.wrecked)
+            .filter_map(|u| u.entity)
+            .collect()
     }
 }
 

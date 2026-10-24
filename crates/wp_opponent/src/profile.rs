@@ -19,7 +19,8 @@ pub struct DriverProfile {
     pub aggression: f32,
     /// Repeatability: braking-point and line noise, mistakes under pressure.
     pub consistency: f32,
-    /// Appetite for risk: traffic gaps accepted, staying in a race with police around.
+    /// Appetite for risk: traffic gaps accepted, staying in a race with police around,
+    /// ramming police cars (with aggression).
     pub risk: f32,
     /// Situational awareness: how far ahead/behind other cars and civilians are noticed.
     pub awareness: f32,
@@ -56,6 +57,7 @@ impl DriverProfile {
         let p = self.clamped();
         let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
         let traffic_risk = p.risk.max(0.7 * (1.0 - p.skill));
+        let police_nerve = 0.5 * (p.aggression + p.risk);
         DriverParams {
             usage: Usage {
                 lateral: lerp(0.60, 0.95, p.skill),
@@ -79,6 +81,8 @@ impl DriverProfile {
             flee_wanted_level: 1 + (3.0 * p.risk + 0.5) as u8,
             perception_ahead_m: lerp(60.0, 130.0, p.awareness),
             mirror_range_m: lerp(12.0, 45.0, p.awareness),
+            rams_police: police_nerve >= RAM_POLICE_NERVE,
+            ram_closing_mps: lerp(4.0, 9.0, police_nerve),
         }
     }
 }
@@ -127,7 +131,19 @@ pub struct DriverParams {
     pub perception_ahead_m: f32,
     /// Range behind in which cars are noticed (mirrors), m (awareness).
     pub mirror_range_m: f32,
+    /// Goes for police cars ahead while wanted (`Tactic::Ram`): mean of aggression and risk
+    /// at least [`RAM_POLICE_NERVE`]. Everyone else still dodges them without queueing.
+    #[serde(default)]
+    pub rams_police: bool,
+    /// Closing speed a ram is driven in at, m/s: 4 (timid) .. 9 (reckless) by the mean of
+    /// aggression and risk.
+    #[serde(default)]
+    pub ram_closing_mps: f32,
 }
+
+/// Mean of aggression and risk from which a driver rams police cars (the default mid-pack
+/// profile, 0.45, does; a careful one does not).
+pub const RAM_POLICE_NERVE: f32 = 0.4;
 
 #[cfg(test)]
 mod tests {
@@ -152,6 +168,26 @@ mod tests {
         assert!(hi.headway_s < lo.headway_s);
         assert!(hi.overtake_margin_m < lo.overtake_margin_m);
         assert!(!lo.defends && hi.defends);
+    }
+
+    #[test]
+    fn aggressive_risk_takers_ram_police_careful_drivers_do_not() {
+        let careful = DriverProfile {
+            aggression: 0.2,
+            risk: 0.2,
+            ..Default::default()
+        }
+        .params();
+        let reckless = DriverProfile {
+            aggression: 0.9,
+            risk: 0.9,
+            ..Default::default()
+        }
+        .params();
+        assert!(!careful.rams_police);
+        assert!(reckless.rams_police);
+        assert!(DriverProfile::default().params().rams_police);
+        assert!(reckless.ram_closing_mps > careful.ram_closing_mps);
     }
 
     #[test]

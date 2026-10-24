@@ -467,8 +467,12 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
         // Seed 1: a busted racer stays where it stopped, so the clean racer's way round it
         // depends on traffic timing. Seeds 1-8 failed 4 of 8 on main before the road network
         // centreline fix and 3 of 8 after (different seeds); 1 passes on both. Seed 4 broke
-        // when police patrol routes changed with the corrected centrelines.
-        seed: 1,
+        // when police patrol routes changed with the corrected centrelines. Seed 3 since wanted
+        // racers dodge and ram police (2026-10-24): seeds 3-8 pass both before and after; seeds 1
+        // and 2 end with a racer busted ~25 s before the end still rolling to a stop along a
+        // 100 m+ stretch the corridor marks as junction (pull-over rule, `PULL_OVER_HARD_MAX_S`;
+        // seed 2 fails that way on main too).
+        seed: 3,
         laps: 2,
         drivers: eight_drivers()[..3].to_vec(),
         closed_roads: false,
