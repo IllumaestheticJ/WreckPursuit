@@ -48,7 +48,7 @@ fn input(s: &VehicleState) -> VehicleAudioInput<'_> {
 }
 
 #[test]
-fn spike_hit_pops_loudly_per_wheel_and_the_scanner_calls_it() {
+fn spike_hit_pops_loudly_per_wheel_without_a_second_radio_line() {
     let mut d = director();
     let s = moving(60.0);
     let v = [input(&s)];
@@ -89,10 +89,9 @@ fn spike_hit_pops_loudly_per_wheel_and_the_scanner_calls_it() {
         assert_eq!(*prio, Priority::Critical, "never culled");
         assert!(*gain > 0.5, "loud at 12 m: {gain}");
     }
-    assert!(
-        radio.iter().any(|t| t.to_lowercase().contains("spike")),
-        "scanner line: {radio:?}"
-    );
+    // wp_police's paced radio calls the hit; the audio director no longer adds its own line
+    // (2026-10-23: the same hit was heard twice).
+    assert!(radio.is_empty(), "no extra scanner line: {radio:?}");
 }
 
 #[test]

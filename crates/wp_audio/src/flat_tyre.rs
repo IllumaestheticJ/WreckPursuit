@@ -44,7 +44,9 @@ pub struct FlatTyreConfig {
     pub min_speed_mps: f32,
     /// Blow-out pop gain (per punctured wheel).
     pub pop_gain: f32,
-    /// Speak a scanner line when spikes hit.
+    /// Speak the audio director's own scanner line when spikes hit. Off by default since
+    /// 2026-10-23: `wp_police` already calls the hit ("Unit 4, spikes hit!") through its paced
+    /// radio, and only for the player's chase; this one doubled it, for any car.
     pub radio_line: bool,
 }
 
@@ -58,7 +60,7 @@ impl Default for FlatTyreConfig {
             full_speed_mps: 20.0,
             min_speed_mps: 0.8,
             pop_gain: 1.6,
-            radio_line: true,
+            radio_line: false,
         }
     }
 }

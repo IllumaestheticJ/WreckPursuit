@@ -21,6 +21,9 @@ use wp_contracts::PHYSICS_DT;
 
 use crate::types::{AudioCommand, Bus};
 
+/// A released police tier 3 (impact) line not spoken within this long is dropped, s.
+pub const IMPACT_STALE_S: f32 = 3.0;
+
 /// Priority of a radio line.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
@@ -254,10 +257,15 @@ impl Scanner {
 
     /// Advance to `tick`, pushing radio and duck commands.
     pub fn update(&mut self, cfg: &ScannerConfig, tick: u64, out: &mut Vec<AudioCommand>) {
-        // Stale lines go.
+        // Stale lines go. A shouted tier 3 line ("I'm hit!") is only news for a moment: it goes
+        // after IMPACT_STALE_S instead of `stale_after_s` (2026-10-23).
         let stale = ticks(cfg.stale_after_s);
+        let impact_stale = ticks(IMPACT_STALE_S).min(stale);
         let before = self.queue.len();
-        self.queue.retain(|q| tick <= q.release_tick + stale);
+        self.queue.retain(|q| {
+            let limit = if q.line.tier == 3 { impact_stale } else { stale };
+            tick <= q.release_tick + limit
+        });
         self.dropped += (before - self.queue.len()) as u32;
 
         // Best released line: highest priority, then earliest release, then sequence.
@@ -372,6 +380,30 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn a_late_impact_line_is_dropped_but_a_late_call_is_not() {
+        let c = cfg();
+        let mut s = Scanner::default();
+        s.set_tier(ScannerTier::Elite);
+        let mut out = Vec::new();
+        // A long line holds the scanner, then an impact line and a call wait behind it.
+        let long = "one two three four five six seven eight nine ten eleven twelve thirteen";
+        s.push(&c, line(long, RadioPriority::Urgent, 0));
+        s.update(&c, ticks(3.0), &mut out);
+        let mut hit = line("Unit 7, I'm hit!", RadioPriority::Pursuit, 0);
+        hit.tier = 3;
+        s.push(&c, hit);
+        s.push(&c, line("Dispatch: caller reports.", RadioPriority::Routine, 0));
+        let mut t = ticks(3.0);
+        while t < ticks(20.0) {
+            s.update(&c, t, &mut out);
+            t += 4;
+        }
+        let said = says(&out);
+        assert!(said.iter().any(|x| x.starts_with("Dispatch")), "{said:?}");
+        assert!(!said.iter().any(|x| x.contains("hit")), "{said:?}");
     }
 
     #[test]
