@@ -983,7 +983,11 @@ impl Field {
                 PursuitOutcome::Captured | PursuitOutcome::CapturedTotalLoss => {
                     if r.status != RacerStatus::Busted {
                         r.status = RacerStatus::Busted;
-                        r.tactic = Tactic::Park;
+                        // Pull over to the kerb clear of junctions, then stay there (a busted
+                        // car stopped mid-lane, its cruiser beside it, blocks the whole field).
+                        r.tactic = Tactic::Yield;
+                        r.tactic_ticks = 0;
+                        r.pass_target = None;
                         self.events.push(OpponentEvent::Busted {
                             entity: r.entity,
                             time_s,
@@ -999,7 +1003,7 @@ impl Field {
                             time_s,
                         });
                     }
-                    if r.tactic == Tactic::Yield {
+                    if r.tactic == Tactic::Yield && r.status != RacerStatus::Busted {
                         r.tactic = Tactic::Rejoin;
                         r.tactic_ticks = 0;
                         r.yield_s = 0.0;
@@ -1736,7 +1740,9 @@ fn decide_racer(
         let (lim_lo, lim_hi) = limits(r.s);
         let (pass_lo, pass_hi) = pass_limits(r.s);
         r.tactic_ticks += 1;
-        let parked = matches!(r.status, RacerStatus::Retired | RacerStatus::Busted)
+        // A busted racer pulls over first (Yield) and then holds there.
+        let parked = r.status == RacerStatus::Retired
+            || (r.status == RacerStatus::Busted && r.tactic != Tactic::Yield)
             || r.tactic == Tactic::Park;
         if parked {
             r.tactic = Tactic::Park;

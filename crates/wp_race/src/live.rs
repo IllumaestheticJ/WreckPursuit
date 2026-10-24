@@ -11,13 +11,16 @@
 //! let events = sim.drain_events();
 //! let out = race.post_step(sim.tick(), &samples, &events, &police_entities);
 //! // out.signals → SimEvent::Race for the HUD / economy; out.reports → wp_police
-//! // (`police::deliver`); out.add_heat → the stake's heat for illegal racers.
+//! // (`police::deliver`); out.add_heat → the stake's heat for illegal racers;
+//! // out.impound → busted AI cars to remove (`sim.despawn_vehicle`).
 //! ```
 //!
 //! The player starts last on the grid and is held on the handbrake until green (unless
 //! `autopilot` hands the player's car to the AI as well, for tests and e2e). Police captures
 //! (`PursuitEnded { Captured* }`) become judge DNFs; `wp_opponent`'s flee/retire decisions
-//! become `Dnf(Fled)` / `Dnf(Retired)` through [`crate::entrants`].
+//! become `Dnf(Fled)` / `Dnf(Retired)` through [`crate::entrants`]. A busted AI car is towed
+//! [`IMPOUND_AFTER_S`] after its capture (`StepOut::impound`): left where the police stopped
+//! it, on a one-lane street it blocks the rest of the field and traffic for good.
 
 use std::collections::BTreeMap;
 
@@ -43,6 +46,9 @@ const HISTORY_EVERY_TICKS: u64 = 60;
 /// Prior meets at the venue are this far apart, s (see `RaceDef::prior_meets`).
 const PRIOR_MEET_SPACING_S: u64 = 900;
 
+/// A busted AI car is towed away (`StepOut::impound`) this long after its capture, s.
+pub const IMPOUND_AFTER_S: f32 = 6.0;
+
 /// One car in the race.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LiveEntrant {
@@ -65,6 +71,9 @@ pub struct StepOut {
     pub reports: Vec<SimEvent>,
     /// Heat to add per racer (the stake's heat for illegal races, at the green light).
     pub add_heat: Vec<(EntityId, f32)>,
+    /// Busted AI cars to tow away now: the caller removes them (`Sim::despawn_vehicle`).
+    /// Each is reported once; the race no longer drives them.
+    pub impound: Vec<EntityId>,
 }
 
 /// One racer's live standing (HUD).
@@ -113,6 +122,10 @@ pub struct LiveRace {
     next_gate: BTreeMap<EntityId, u32>,
     final_results: Option<Vec<RacerResult>>,
     last_tick: u64,
+    /// Busted AI cars waiting for the tow: capture tick per car.
+    tow_due: BTreeMap<EntityId, u64>,
+    /// Busted AI cars already towed (no longer in the sim).
+    impounded: Vec<EntityId>,
 }
 
 /// The grid for `def` on `race`: slot per judge entry, AI field first (pole), the player last.
@@ -226,6 +239,8 @@ impl LiveRace {
             next_gate,
             final_results: None,
             last_tick: tick,
+            tow_due: BTreeMap::new(),
+            impounded: Vec::new(),
         }
     }
 
@@ -288,6 +303,7 @@ impl LiveRace {
         let mut out = self
             .ai
             .tick(&self.judge, tick, world, vehicles, events, police);
+        out.retain(|(e, _)| !self.impounded.contains(e));
         if !self.autopilot && self.in_countdown(tick) {
             out.push((
                 self.player,
@@ -344,6 +360,10 @@ impl LiveRace {
             if let SimEvent::Police(PoliceEvent::PursuitEnded { racer, outcome, .. }) = e {
                 if outcome.is_capture() {
                     self.judge.dnf(*racer, DnfReason::Captured, tick);
+                    let ai_car = *racer != self.player || self.autopilot;
+                    if ai_car && self.order.contains(racer) && !self.impounded.contains(racer) {
+                        self.tow_due.entry(*racer).or_insert(tick);
+                    }
                 }
             }
         }
@@ -351,6 +371,18 @@ impl LiveRace {
         self.ai.report_to(&mut self.judge, tick);
 
         let mut out = StepOut::default();
+        let tow_ticks = (IMPOUND_AFTER_S / PHYSICS_DT) as u64;
+        let towed: Vec<EntityId> = self
+            .tow_due
+            .iter()
+            .filter(|(_, at)| tick >= **at + tow_ticks)
+            .map(|(e, _)| *e)
+            .collect();
+        for e in towed {
+            self.tow_due.remove(&e);
+            self.impounded.push(e);
+            out.impound.push(e);
+        }
         for sig in self.judge.drain_signals() {
             match &sig {
                 RaceSignal::Green { .. } => self.on_green(samples, &mut out),
