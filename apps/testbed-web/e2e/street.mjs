@@ -12,7 +12,7 @@
 // challenge (row 150); Race (Enter / pad Menu) pays it, puts both cars side by side at rest
 // (row 150) and counts down with the
 // race panel up and the route on the minimap; the street UI hides in photo mode, under the
-// game menu and during a crash replay; reaching B wins even money and shows the result. Roaming
+// game menu and during a crash replay; reaching B pays the stake times the challenge's odds and shows the result. Roaming
 // racers are fleet-drawn past ~40 m and get their hero view near the camera; the opponent keeps
 // its view while racing. (Draw calls / triangles: e2e/perf_check.mjs, night run incl. racers.) Then the late-night night run
 // has its racers, and on touch (?touch=1) the 📯 button challenges and the picker takes taps.
@@ -470,7 +470,8 @@ async function race(label, pad) {
   const res = (await status(page))?.result;
   check(res?.won === true, `${label}: race finished, won (${res?.reason})`);
   const cash2 = await page.evaluate(() => window.__wp.sim.runAccount().cash);
-  check(cash2 === cash0 + r.stake, `${label}: even money ${cash0} → ${cash2}`);
+  // The win pays the stake times the race's odds (racer level and car vs yours): RaceView.payout.
+  check(res?.net === r.payout - r.stake && cash2 === cash0 - r.stake + r.payout, `${label}: paid ${r.payout} at the challenge's odds ${cash0} → ${cash2}`);
   await page.waitForSelector("#street-result:not(.hidden)", { timeout: 20000 }).catch(() => {});
   check(await visible(page, "#street-result"), `${label}: result banner visible`);
   await shot(page, `street_${label}_6_result.png`);

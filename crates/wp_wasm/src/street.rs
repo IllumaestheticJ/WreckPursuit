@@ -35,8 +35,10 @@
 //!   police until it finishes, is wrecked or is actually captured). First within
 //!   [`FINISH_RADIUS_M`] of B wins, by any path (shortcuts are fair); a wreck or a capture
 //!   decides it early; at the time limit the one further along the route wins. A win pays back
-//!   twice the stake (even money, `settle_bet`, `bet:payout:street:…`) and the level's
-//!   `win_rep` (`award_rep`, so street wins climb the career's rep tiers).
+//!   the stake times the challenge's odds (`settle_bet`, `bet:payout:street:…`) and rep
+//!   (`award_rep`, so street wins climb the career's rep tiers), both scaled by the racer's
+//!   level and their car against the player's ([`crate::street_odds`]; fixed when the
+//!   challenge opens).
 //! - **Police.** Street racers are `VehicleKind::AiRacer` for the whole session (the kind is
 //!   not a replay op, so it cannot change mid-session): the police treat them as racers, as
 //!   they treat a picker race's AI. Roaming ones keep to the law, so they draw no heat; a
@@ -67,6 +69,7 @@ use wp_world::{geom, World};
 
 use crate::data::mem_data;
 use crate::run::PlayerRun;
+use crate::street_odds::{self, Matchup};
 
 /// Tests: wall-clock time spent in the street AI (`before_step` + `after_step`), for the perf
 /// test. Never read by the sim.
@@ -206,19 +209,27 @@ pub struct Level {
     pub bet_min: i64,
     /// Largest bet the racer takes, $.
     pub bet_max: i64,
-    /// Rep for beating a racer of this level (`wp_economy` `award_rep`: the career tier
-    /// ladder sees street wins; a picker-race win is ~100-200). A loss costs no rep.
+    /// Rep for beating a racer of this level in a car like the player's (`wp_economy`
+    /// `award_rep`: the career tier ladder sees street wins; a picker-race win is ~100-200),
+    /// scaled by the car gap ([`crate::street_odds`]). A loss costs no rep.
     pub win_rep: i64,
+    /// Driver rating (Elo-like, the player is 1000): with the car gap it sets the odds a win
+    /// pays ([`crate::street_odds`]).
+    pub rating: f32,
 }
 
 /// The four levels, in order (owner, 2026-10-22: the slowest level, Rookie, was dropped; the
 /// others keep their numbers 2..=5, so `level` in every JSON is still the table's `level`).
+///
+/// The car pools climb with the level and do not overlap (class index, `wp_economy`, at
+/// 2026-10-24: Street 330-460, Pro 465-500, Elite 569-674, Legend 682-858), so a higher-level
+/// racer brings a faster car as well as a better driver (owner request 2026-10-24).
 pub const LEVELS: [Level; 4] = [
     Level {
         level: 2,
         name: "Street",
         colour: "#2f81f7",
-        cars: &["kestrel_ts", "shiro_turbo"],
+        cars: &["ironside_440", "kestrel_ts", "shiro_turbo"],
         skill: 0.45,
         aggression: 0.4,
         consistency: 0.55,
@@ -227,12 +238,19 @@ pub const LEVELS: [Level; 4] = [
         bet_min: 250,
         bet_max: 1_200,
         win_rep: 40,
+        rating: 1000.0,
     },
     Level {
         level: 3,
         name: "Pro",
         colour: "#a371f7",
-        cars: &["lindwurm_4t", "sperber_32", "ironside_440"],
+        cars: &[
+            "lindwurm_4t",
+            "arashi_t4",
+            "talus_20t",
+            "hakone_gt",
+            "sperber_32",
+        ],
         skill: 0.65,
         aggression: 0.55,
         consistency: 0.7,
@@ -241,12 +259,13 @@ pub const LEVELS: [Level; 4] = [
         bet_min: 500,
         bet_max: 2_500,
         win_rep: 70,
+        rating: 1070.0,
     },
     Level {
         level: 4,
         name: "Elite",
         colour: "#f0883e",
-        cars: &["rampart_50", "hakone_gt"],
+        cars: &["rampart_50", "lucciola_350", "kagero_hx"],
         skill: 0.82,
         aggression: 0.7,
         consistency: 0.85,
@@ -255,12 +274,13 @@ pub const LEVELS: [Level; 4] = [
         bet_min: 1_000,
         bet_max: 5_000,
         win_rep: 110,
+        rating: 1140.0,
     },
     Level {
         level: 5,
         name: "Legend",
         colour: "#f85149",
-        cars: &["lucciola_350", "hakone_gt"],
+        cars: &["merlo_20t", "fulmine_v10", "ostwind_6t", "ombra_v12"],
         skill: 0.97,
         aggression: 0.8,
         consistency: 0.95,
@@ -269,6 +289,7 @@ pub const LEVELS: [Level; 4] = [
         bet_min: 2_000,
         bet_max: 10_000,
         win_rep: 160,
+        rating: 1210.0,
     },
 ];
 
@@ -528,6 +549,8 @@ pub struct Offer {
     pub cash: i64,
     /// The player can afford the minimum stake.
     pub affordable: bool,
+    /// The two cars, the player's chance, and what a win pays (odds and rep).
+    pub odds: Matchup,
     /// Start (A): where the player is now (the rest stop's parking road at a rest-stop meet).
     pub start: [f32; 2],
     /// The Loop 9 rest stop this meet is at (owner row 153).
@@ -578,6 +601,8 @@ pub struct RaceView {
     pub colour: &'static str,
     /// Stake, $.
     pub stake: i64,
+    /// What a win pays back, $ (stake included).
+    pub payout: i64,
     /// Seconds to the green light (0 once racing).
     pub countdown_s: f32,
     /// Seconds since the green light.
@@ -621,9 +646,9 @@ pub struct RaceResult {
     pub colour: &'static str,
     /// Stake, $.
     pub stake: i64,
-    /// Cash change from the race (+stake on a win, -stake on a loss), $.
+    /// Cash change from the race (payout less stake on a win, -stake on a loss), $.
     pub net: i64,
-    /// Rep earned (the level's `win_rep` on a win, 0 on a loss).
+    /// Rep earned (the challenge's `Matchup::win_rep` on a win, 0 on a loss).
     pub rep: i64,
     /// Cash after, $.
     pub cash_after: i64,
@@ -651,6 +676,8 @@ struct Race {
     stake: i64,
     /// The stake's betting ticket (career economy, venue Street).
     ticket: BetTicket,
+    /// Odds and rep, locked at accept.
+    odds: Matchup,
     go_tick: u64,
     limit_tick: u64,
     /// Player's progress along the route, m.
@@ -667,6 +694,8 @@ pub struct StreetRacers {
     seq: u32,
     /// Tick the open offer was made.
     offer_tick: u64,
+    /// The open offer's odds, priced when it opened.
+    offer_odds: Option<Matchup>,
     /// Last tick's sim events (contacts and police events for the fields).
     events: Vec<SimEvent>,
     /// Loaded cars per car id.
@@ -683,6 +712,21 @@ pub struct StreetRacers {
 /// row 150).
 fn pursued(sim: &Sim, player: EntityId) -> bool {
     sim.police().is_wanted_or_pursued(player)
+}
+
+/// Price a challenge against `racer` (level `l`): its car's class index against the player's
+/// car's, both from the live definitions in the sim (mods included). A missing player car
+/// counts as the racer's equal.
+fn price(sim: &Sim, l: &Level, racer: EntityId, player: EntityId) -> Matchup {
+    let class_of = |id: EntityId| {
+        sim.vehicles()
+            .iter()
+            .find(|v| v.id == id)
+            .map(|v| street_odds::class_index(v.vehicle.def()))
+    };
+    let r = class_of(racer).unwrap_or(0);
+    let p = class_of(player).unwrap_or(r);
+    street_odds::matchup(l, r, p)
 }
 
 /// For each waypoint, the index of the nearest point of the route centreline (searched in
@@ -878,6 +922,7 @@ impl StreetRacers {
             result: None,
             seq: 0,
             offer_tick: 0,
+            offer_odds: None,
             events: Vec::new(),
             cars: BTreeMap::new(),
             ring: None,
@@ -970,6 +1015,10 @@ impl StreetRacers {
                 geom::dir_of_yaw(p.heading_rad),
             ),
         });
+        let odds = self.offer_odds.unwrap_or_else(|| match player {
+            Some(p) => price(sim, l, r.entity, p),
+            None => price(sim, l, r.entity, r.entity),
+        });
         Some(Offer {
             entity: r.entity.0,
             name: r.name.clone(),
@@ -983,6 +1032,7 @@ impl StreetRacers {
             bet_max: l.bet_max.min(cash),
             cash,
             affordable: cash >= l.bet_min,
+            odds,
             start,
             rest_stop: meet.map(|p| p.name.clone()),
             loop_lap,
@@ -1007,6 +1057,7 @@ impl StreetRacers {
             level_name: l.name,
             colour: l.colour,
             stake: race.stake,
+            payout: race.odds.payout(race.stake),
             countdown_s: race.go_tick.saturating_sub(tick) as f32 / 240.0,
             elapsed_s: tick.saturating_sub(race.go_tick) as f32 / 240.0,
             time_left_s: race.limit_tick.saturating_sub(tick) as f32 / 240.0,
@@ -1257,6 +1308,10 @@ impl StreetRacers {
             }
             None => (pos, yaw),
         };
+        // Odds as the card showed them (priced when the challenge opened).
+        let odds = self
+            .offer_odds
+            .unwrap_or_else(|| price(sim, &l, entity, player));
         // The one betting wallet (career economy, venue Street): open from the start, the
         // level's range was checked above and cash covers it.
         let ticket = run.place_bet(
@@ -1274,6 +1329,7 @@ impl StreetRacers {
         // Full physics for the whole race, however far ahead it gets.
         self.pending_light.push((r.entity, false));
         self.offer = None;
+        self.offer_odds = None;
         let gates = snap_gates(&route.polyline, via);
         self.race = Some(Race {
             racer: k,
@@ -1287,6 +1343,7 @@ impl StreetRacers {
             length_m: route.length_m,
             stake,
             ticket,
+            odds,
             go_tick,
             limit_tick,
             player_s: 0.0,
@@ -1333,6 +1390,7 @@ impl StreetRacers {
 
     /// Decline (or withdraw) the open offer: the racer drives off.
     pub fn decline(&mut self, tick: u64) {
+        self.offer_odds = None;
         if let Some(k) = self.offer.take() {
             let r = &mut self.racers[k];
             r.mode = RacerMode::Roam;
@@ -1371,6 +1429,7 @@ impl StreetRacers {
                 r.field = None;
                 self.offer = Some(k);
                 self.offer_tick = tick;
+                self.offer_odds = Some(price(sim, level(r.level), r.entity, player));
                 out.challenged = true;
             }
         }
@@ -1751,6 +1810,7 @@ impl StreetRacers {
         };
         let stake = race.stake;
         let ticket = race.ticket.clone();
+        let odds = race.odds;
         let margin_m = if won {
             race.length_m - racer_s
         } else {
@@ -1763,11 +1823,14 @@ impl StreetRacers {
         self.pending_light.push((r.entity, true));
         let l = level(r.level);
         let mut rep = 0;
+        let mut net = -stake;
         if won {
             r.losses += 1;
-            // Even money: the stake back plus the racer's.
-            run.settle_bet(&ticket, 2 * stake);
-            rep = l.win_rep;
+            // The stake back times the odds (level and car gap, `street_odds`).
+            let paid = odds.payout(stake);
+            run.settle_bet(&ticket, paid);
+            net = paid - stake;
+            rep = odds.win_rep;
             run.award_rep(rep, &format!("street:vs {} ({})", r.name, l.name));
         } else {
             r.wins += 1;
@@ -1786,7 +1849,7 @@ impl StreetRacers {
             level_name: l.name,
             colour: l.colour,
             stake,
-            net: if won { stake } else { -stake },
+            net,
             rep,
             cash_after: run.account().cash,
             time_s: elapsed,
