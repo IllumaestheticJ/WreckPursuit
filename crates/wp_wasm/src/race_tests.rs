@@ -151,6 +151,13 @@ fn short_sprint_with_ai_runs_to_results_and_pays_through_the_economy() {
     assert_eq!(finishers[0].gap_s, Some(0.0));
     // The payout came from G's economy and the account reflects it.
     let p = r.payout.as_ref().expect("payout");
+    // The buy-in charged is the advertised one (whatever the placing).
+    assert!(
+        (p.entry_fee - r.advertised_entry_fee).abs() <= 1,
+        "entry {} vs {}",
+        p.entry_fee,
+        r.advertised_entry_fee
+    );
     let me = &r.rows[r.player_row];
     assert!(me.is_player && me.name == "You");
     if me.status == "Finished" {
@@ -343,20 +350,20 @@ fn bets_on_yourself_settle_through_the_career_economy() {
     let (max, lock) = s.bet_status();
     assert_eq!(max, 0);
     assert!(lock.is_some());
-    assert!(s.race_place_bet("win:player", 200).is_err());
+    assert!(s.race_place_bet("win:player", 200, None).is_err());
     s.debug_run_mut().unwrap().debug_set_rep(2_000);
     let (max, lock) = s.bet_status();
     assert!(max >= 200 && lock.is_none(), "{max} {lock:?}");
     // A racer only backs themselves.
-    assert!(s.race_place_bet("win:vic", 200).is_err());
+    assert!(s.race_place_bet("win:vic", 200, None).is_err());
     let cash0 = s.run().unwrap().account().cash;
-    let t = s.race_place_bet("h2h:player>tito", 200).unwrap();
+    let t = s.race_place_bet("h2h:player>tito", 200, None).unwrap();
     assert_eq!(t.outcome, "open");
     assert!(t.odds > 1.0 && t.paid > 200);
     assert_eq!(s.run().unwrap().account().cash, cash0 - 200);
     let (report, _) = run_to_final(&mut s, 150);
     // Bets close at the green light.
-    assert!(s.race_place_bet("win:player", 200).is_err());
+    assert!(s.race_place_bet("win:player", 200, None).is_err());
     assert_eq!(report.bets.len(), 1);
     let b = &report.bets[0];
     assert_ne!(b.outcome, "open");

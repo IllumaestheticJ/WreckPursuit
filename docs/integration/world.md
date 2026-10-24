@@ -2123,6 +2123,18 @@ a car in its lane head-on still triggers it.
   scenarios pass.
 - **Perf:** `surface_at` 0.61 µs/query (0.49 before, same run), markings 0.17 µs (0.13).
 
+## Road network centrelines follow the road centre (playtest row 170)
+`RoadNetworkIndex` built each edge's centreline from the node centres plus the interior
+points of the road's first lane. On curved roads (74 % of Port Vesper's edges) that is a
+lane's offset off centre, and users that offset into a lane from it (police units, 1.75 m)
+ended up one lane too far right one way and on the centre line the other way. Edges now use
+the interior points of the road surface's own centreline (`RoadSurface::centre`, oriented
+a -> b), so straight roads stay node-to-node, simplified to the points that shape the
+road (Douglas-Peucker, 0.2 m): every interior point is a node in users' graphs (police patrol
+destinations). Test:
+`tests/city_v2.rs::road_network_centrelines_offset_into_the_right_lane` (1918 samples: 937 in
+the wrong lane before, 4 at junction edges after). Police side: `docs/integration/police.md`.
+
 ## Rest stop car parks (owner request 2026-10-24: "the parking stations should have more of a parking lot — the AI racers are parked in the middle of the street")
 **Before.** At night the loop street racers ended each lap at a Loop 9 rest stop's POI (the
 middle of its one-lane parking road) and stood there on the handbrake for 40–90 s, in the travel
