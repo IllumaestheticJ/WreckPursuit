@@ -748,6 +748,8 @@ export interface StreetStatus {
   offer: StreetOffer | null;
   race: StreetRace | null;
   result: StreetResult | null;
+  /** A career run: bets and wins settle on the career. Otherwise quick-play cash (row 169). */
+  career: boolean;
 }
 
 /** `street_preview()` (`wp_wasm::street::Preview`). */

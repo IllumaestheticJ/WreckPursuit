@@ -1183,6 +1183,9 @@ pub fn street_status_json() -> Result<String, JsValue> {
             "offer": st.offer(s.sim(), s.run()),
             "race": st.race(s.sim()),
             "result": st.result(),
+            // Bets settle on the career's account in a career run; otherwise on quick-play
+            // cash that never reaches the career (row 169: the UI says which).
+            "career": s.is_career(),
         }))
     })
 }
