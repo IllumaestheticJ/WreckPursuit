@@ -220,6 +220,28 @@ Owner: "street race bets don't go to career". Base `origin/main` `431232c5`.
   quick-play race flows untick the box first (the touch check keeps it ticked: it only
   declines).
 
+## Round 5: PRs #57, #69, #56 onto main ("merge all", 2026-10-24)
+
+Base `origin/main` `6904b5e1` (row 169 is on main as #71). One merge commit per PR, in this
+order:
+
+| PR | Branch | Conflicts | Notes |
+|---|---|---|---|
+| #57 car lots (dealerships, used lots, junkyards, daily stock, lot visits, tyres outside Repair All) | `claude/hopeful-allen-r8847b` | none | `Sim::set_tire_condition` rides the existing `HandlingEffects` path (no `wp_vehicle` change, physics freeze kept) and is `None` unless the career sets it: default physics and goldens unchanged. |
+| #69 street-race waypoints cover the whole road, hold + clear the start, AI must pass gates | `claude/dreamy-lovelace-9mv06d` | `street_tests.rs` | both tests kept (row 169's career settlement + the betting hold). |
+| #56 street challenges unless in an active pursuit | `claude/magical-knuth-30tmj3` (based on old round12) | `street.rs` doc + tests | doc combines main's gates / hold with the PR's pursuit rule; tests both kept. Only the PR's own edits came in (`pursued` → `blocks_challenges(PursuitStatus::Pursuit)` in street, race spots and the status JSON); its old round12 base added nothing. |
+
+Owner rule check (#56): row 150 said no challenge while wanted or chased; the PR allows it while
+wanted with no unit on the player or cooling down, and still refuses during an active pursuit.
+The lead judged that compatible; kept as the PR has it.
+
+Nothing dropped.
+
+Gate: fmt / clippy `-D warnings` clean; `cargo test --workspace` 1703 passed; `simcli goldens`
+all unchanged; wasm + testbed `tsc` OK, ui-kit `tsc` OK and vitest 116/116; e2e street 114/114
+(first run: the two touch-horn checks timed out under load, re-run clean), race 31/31, menu
+47/47, touge 18/18, run.mjs 343 pass (FAIL only its software-GL perf chase / rain budgets).
+
 ## Contract change requests
 
 | # | Change | Why | Who is affected | Status |
