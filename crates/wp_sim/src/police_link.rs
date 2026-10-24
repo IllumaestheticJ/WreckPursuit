@@ -322,9 +322,25 @@ impl Sim {
             .collect()
     }
 
+    /// The police radio is the players' (owner, 2026-10-23: no chatter about AI cars on the
+    /// other side of the map): `wp_police` hears from the player cars which lines concern them.
+    /// With a player cop seat (or no player car) every line is kept. Presentation only.
+    fn set_radio_listeners(&mut self) {
+        let cop_seat = self.vehicles.iter().any(|v| v.player_police.is_some());
+        let players: Vec<EntityId> = self
+            .vehicles
+            .iter()
+            .filter(|v| v.kind == VehicleKind::Player)
+            .map(|v| v.id)
+            .collect();
+        let listeners = (!cop_seat && !players.is_empty()).then_some(players.as_slice());
+        self.police.set_listeners(listeners);
+    }
+
     /// After the police step: despawn retired units, spawn cars for new ground units, and
     /// report every police car's physical state back.
     pub(crate) fn reconcile_police_units(&mut self) {
+        self.set_radio_listeners();
         let live: Vec<UnitId> = self.police.units().iter().map(|u| u.id).collect();
         // Player cop seats whose unit vanished (a new police system was installed): register
         // them again rather than despawning a player's car.
