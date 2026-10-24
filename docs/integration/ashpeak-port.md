@@ -241,3 +241,43 @@ per spot; frustum-culled). Every desktop gate that is machine-independent passes
    offer card instead; say so and I'll switch.
 3. The 8 police profiles are proposals; route to E (police) for tuning?
 4. Names flagged but kept (Harnell, Crowfoot): rename?
+
+## Follow-up 2 (2026-10-24): greybox parts, Port Vesper ships once (`lead/ashpeak-port` @ `dc88c231`)
+
+Base: round 12 `8d8fa908` + D's option A on `ws/world` (`928a06bf` → `73004143`: Ashpeak keeps
+`vesper_v2`'s buildings / decor, `city_import::dedup` partition, Harlan → Harnell rename).
+
+- **city-import `parts`** (`tools/city-import/src/parts.rs`): `vesper_v2` = `vesper_v2.shared`
+  (everything `ashpeak` draws bit-identically, `Partition::county_owns` false) +
+  `vesper_v2.own` (terrain-bound materials + the county's 64 m cells); `ashpeak` =
+  `vesper_v2.shared` + `ashpeak.county0..3` (county-owned items, halved along the longer side
+  at the median item until each `.glb` ≤ 9 MB). Manifests `<id>.greybox.parts.json`.
+  `gen-city --preset vesper_v2 | ashpeak` rewrites every part. The monolithic `vesper_v2` /
+  `ashpeak` `.b64.txt` are gone; the monolithic `.glb` stay for the native viewer and the
+  shot tools.
+- **testbed `scene.ts`**: `loadGreybox` reads a parts manifest (each part `.glb`, else `.b64.txt`)
+  into one group (CityTiles / style traverse it as before); `preview_build.sh` copies the
+  manifests.
+- **Test** `tools/city-import/tests/greybox_parts.rs`: shared + own = `vesper_v2` and shared +
+  county = `ashpeak`, item for item (exact bits); every part under the preview split; shipped
+  parts / manifests current; no stray tiles.
+
+| Part | glb | b64 |
+|---|---|---|
+| `vesper_v2.shared` | 4.73 MB | 6.30 MB |
+| `vesper_v2.own` | 5.75 MB | 7.66 MB |
+| `ashpeak.county0`–`3` | 5.20 / 5.35 / 5.37 / 5.40 MB | 6.9–7.2 MB each |
+
+Saving: the preview ships ~42 MB of base64 for both maps instead of ~48.5 MB, and no file needs
+the 14 MB split any more. A first Ashpeak load is still ~26 MB glb: only 4.7 MB of Port Vesper is
+shared, because its ground (8 m cells on Ashpeak against 5 m) belongs to the county; it saves
+those 4.7 MB when `vesper_v2.shared` is already cached from a Port Vesper session.
+
+Draw calls (desktop chase, `frame_profile`): Port Vesper 437 / 351 k triangles, Ashpeak 421 /
+321 k (city 150 calls, monolithic 149). Gate on `696ce124` + D's hint fix: clippy
+`--workspace --all-targets` 0, wasm32 0, `npm run wasm` + `tsc` 0, ui-kit vitest 0, e2e `menu`
+47 / 47, `race` 31 / 31, `street` 105 / 105, `race_spots` (ashpeak) 16 / 16, **`run.mjs` 310 / 310**
+(PERF=0); `cargo test --workspace` green after merging D's `73004143` (the Harnell hint, 3978 →
+4295 m: the county's own RNG stream lays the farm roads differently); goldens all match after
+`[bless]` `8e0bc0b2` (Ashpeak downtown / metro: blessed separately on round 12 and ws/world,
+both PASS their expectations on the combined tip).
