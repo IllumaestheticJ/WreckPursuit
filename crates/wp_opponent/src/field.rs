@@ -612,6 +612,9 @@ const FLIGHT_LINE_CURVATURE_SWEEPS: u32 = 30;
 /// Drivers below this risk stop for red lights on open roads; the others go through a red
 /// only when the junction is clear.
 pub const RED_LIGHT_RISK: f32 = 0.35;
+/// Share of its own pace here an out-of-race car (busted, retired, fled) keeps while it rolls
+/// on to a place to stop (clear of bends and junctions), at least 6 m/s.
+const OUT_OF_RACE_ROLL: f32 = 0.6;
 /// Only drivers below this risk pull over for a unit on their tail (wanted below their flee
 /// level); the rest race on and shove the police out of the way.
 pub const POLICE_YIELD_RISK: f32 = 0.35;
@@ -2978,7 +2981,16 @@ fn decide_racer(
                 cap_to(&mut v_target, 7.0 + 10.0 * aligned, SpeedLimit::Mode)
             }
             Tactic::Yield | Tactic::Park if pulling_over => {
-                cap_to(&mut v_target, 6.0, SpeedLimit::Mode)
+                // Out of the race and looking for a place to stop: roll on at a fair share of
+                // the pace here, not a crawl. On a road of bends and hairpins (Hollins) that
+                // spot can be a minute away, and the field stuck behind a car at walking pace
+                // was caught by the police one by one. Pulling over for a unit: 6 m/s.
+                let roll = if out_of_race {
+                    (OUT_OF_RACE_ROLL * v_line(r.s)).max(6.0)
+                } else {
+                    6.0
+                };
+                cap_to(&mut v_target, roll, SpeedLimit::Mode)
             }
             Tactic::Park | Tactic::Yield => cap_to(
                 &mut v_target,
