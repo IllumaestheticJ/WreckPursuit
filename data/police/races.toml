@@ -377,10 +377,10 @@ trigger_m = 60.0
 [ashpeak_metro_circuit]
 name = "Block grid"
 summary = "No ramming between the towers: units cut across the grid to block the junctions ahead while the helicopter keeps you in sight."
-presence = 0.4
+presence = 0.15
 backup_scale = 0.5
 tool_lifetime_s = 300.0
-recognise_on_sight = false
+recognise_on_sight = true
 
 [ashpeak_metro_circuit.tactics]
 roadblocks = false
@@ -394,6 +394,10 @@ rams = false
 
 [ashpeak_metro_circuit.speed]
 speed_margin = 0.0
+
+[[ashpeak_metro_circuit.stakeouts]]
+at = 0.75
+trigger_m = 60.0
 
 # --- The five city races from PR #47 (lead/career-port). Light profiles: stakeouts that join
 # the chase plus each course's tactic style, and no scripted roadblocks or spikes on the
