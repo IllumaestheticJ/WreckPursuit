@@ -1,4 +1,4 @@
-// wp_race picker race "Harlan Flats dirt run" (harlan_dirt_run): Dusk sprint over Harlan Flats' gravel section roads towards Harlan Crossing.
+// wp_race picker race "Harnell Flats dirt run" (harnell_dirt_run): Dusk sprint over Harnell Flats' gravel section roads towards Harnell Crossing.
 // Generated from wp_race::catalog by wp_wasm's race_scenario_files_match_the_picker
 // (WP_RACE_WRITE_SCENARIOS=1); the browser's race_start builds the same scenario with
 // the player's car. Entity "player" sits on the last grid slot, the AI field ahead.
@@ -6,7 +6,7 @@
 // for 10 s; crates/wp_race/tests/race_picker.rs races it to the finish with wp_opponent
 // AI in every seat and checks the expectation ranges.
 (
-    name: "race_harlan_dirt_run",
+    name: "race_harnell_dirt_run",
     seed: 43,
     city: preset(
         name: "ashpeak",
