@@ -1177,11 +1177,11 @@ pub fn street_status_json() -> Result<String, JsValue> {
             "levels": street::LEVELS,
             "roster": st.roster(),
             "hint": player.and_then(|p| st.challengeable(s.sim(), p)),
-            // Wanted or chased: no challenges (owner row 150); `blocked` = the racer a honk
-            // would challenge without the police.
-            "pursued": player.is_some_and(|p| s.sim().police().is_wanted_or_pursued(p)),
+            // Chased (pursuit or search): no challenges (owner row 150; a wanted level alone
+            // is fine); `blocked` = the racer a honk would challenge without the police.
+            "pursued": player.is_some_and(|p| street::pursued(s.sim(), p)),
             "blocked": player
-                .filter(|p| s.sim().police().is_wanted_or_pursued(*p))
+                .filter(|p| street::pursued(s.sim(), *p))
                 .and_then(|p| st.in_reach(s.sim(), p)),
             "offer": st.offer(s.sim(), s.run()),
             "race": st.race(s.sim()),

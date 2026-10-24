@@ -2160,3 +2160,10 @@ road facing its way → plans its next lap), `..::honk_beside_a_racer_parked_in_
 material), `apps/testbed-web/src/{scene.ts,render/palette.ts,render/weather.ts}` (polygon
 offset, colour, wet surface), greyboxes regenerated (`vesper_v2*`, `ashpeak*`).
 
+
+**Challenge while wanted (owner, 2026-10-24, same PR).** Street challenges and race meet spot
+honks are blocked only while the player is chased, meaning a pursuit or a search
+(`wp_wasm::street::pursued` = `RacerRecord::pursued()`). Before this change, any wanted level
+also blocked them. Being wanted with no unit on the player now still allows a challenge, and
+an open offer only lapses once a pursuit starts. Police behaviour is unchanged. Test:
+`street_tests::wanted_can_challenge_but_not_while_chased`.

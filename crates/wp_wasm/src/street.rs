@@ -28,7 +28,8 @@
 //!   optionally waypoints the route must run through in order (up to [`MAX_WAYPOINTS`], owner
 //!   row 151; gates the player passes within [`GATE_RADIUS_M`] before B counts), and a stake
 //!   inside the level's range (capped by their cash), then accepts. Not while the player is
-//!   wanted or chased (owner row 150): a honk does nothing and an open offer lapses.
+//!   chased (owner row 150; a pursuit or search, a wanted level alone is fine): a honk does
+//!   nothing and an open offer lapses.
 //! - **Race.** Accepting pays the stake (a betting ticket on the one career wallet:
 //!   `wp_economy` `place_bet`, venue `Street`, open from the start and capped only by cash and
 //!   the level's range; ledger note `bet:stake:street:…`), resets both cars side by side at the
@@ -725,10 +726,11 @@ pub struct StreetRacers {
     pending_light: Vec<(EntityId, bool)>,
 }
 
-/// The player is wanted or in a pursuit (search included): no street challenges then (owner
-/// row 150).
-fn pursued(sim: &Sim, player: EntityId) -> bool {
-    sim.police().is_wanted_or_pursued(player)
+/// The player is in an active pursuit (search included): no street challenges then (owner
+/// row 150). A wanted level alone with no unit on the player does not block a challenge
+/// (owner, 2026-10-24); the police are not changed by it. Race meet spots use the same gate.
+pub(crate) fn pursued(sim: &Sim, player: EntityId) -> bool {
+    sim.police().racer(player).is_some_and(|r| r.pursued())
 }
 
 /// For each waypoint, the index of the nearest point of the route centreline (searched in
