@@ -878,11 +878,11 @@ fn four_racers_lap_loop9_at_night_in_port_vesper() {
     assert!(city_top < 15.0, "city racers keep to city pace: {city_top}");
 }
 
-/// Row 150: no challenge while the player is wanted (a honk does nothing, an open offer lapses,
-/// accepting is refused); accepting resets both cars side by side at the start, at rest, facing
-/// along the route, as logged moves (the recording replays them).
+/// Row 150: no challenge while the player is chased (pursuit or search: no hint, a honk does
+/// nothing, an open offer lapses), but a wanted level with no pursuit is fine (owner,
+/// 2026-10-24): the hint shows, a honk opens the challenge and the offer stays open.
 #[test]
-fn no_challenge_while_wanted_and_both_cars_start_side_by_side() {
+fn wanted_can_challenge_but_not_while_chased() {
     let mut s = city_session();
     s.run_ticks(240 * 2);
     s.debug_sim_mut()
@@ -890,11 +890,30 @@ fn no_challenge_while_wanted_and_both_cars_start_side_by_side() {
         .police_mut()
         .set_heat(PLAYER, 40.0);
     s.run_ticks(2);
-    assert!(s.sim().police().is_wanted_or_pursued(PLAYER));
+    assert!(s.sim().police().wanted_level(PLAYER).number() > 0);
+    assert!(!street::pursued(s.sim(), PLAYER), "wanted, not chased");
     park_behind(&mut s, 0);
     assert!(
+        s.street().unwrap().challengeable(s.sim(), PLAYER).is_some(),
+        "a wanted level alone still shows the hint"
+    );
+    challenge(&mut s, 0);
+    // Chased: the open offer lapses, no hint, a honk opens nothing.
+    s.debug_sim_mut()
+        .unwrap()
+        .police_mut()
+        .begin_pursuit(PLAYER)
+        .expect("a unit takes the pursuit");
+    s.run_ticks(2);
+    assert!(street::pursued(s.sim(), PLAYER));
+    assert!(
+        s.street().unwrap().offer(s.sim(), s.run()).is_none(),
+        "the offer lapsed"
+    );
+    park_behind(&mut s, 1);
+    assert!(
         s.street().unwrap().challengeable(s.sim(), PLAYER).is_none(),
-        "no hint while wanted"
+        "no hint while chased"
     );
     assert!(s.street().unwrap().in_reach(s.sim(), PLAYER).is_some());
     s.set_input(PLAYER, horn(true)).unwrap();
@@ -903,30 +922,16 @@ fn no_challenge_while_wanted_and_both_cars_start_side_by_side() {
     s.run_ticks(2);
     assert!(
         s.street().unwrap().offer(s.sim(), s.run()).is_none(),
-        "a honk opens no challenge while wanted"
+        "a honk opens no challenge while chased"
     );
-    // Clean again: the challenge opens; wanted again: it lapses.
-    s.debug_sim_mut()
-        .unwrap()
-        .police_mut()
-        .set_heat(PLAYER, 0.0);
-    s.run_ticks(2);
-    assert!(!s.sim().police().is_wanted_or_pursued(PLAYER));
-    let racer = challenge(&mut s, 0);
-    s.debug_sim_mut()
-        .unwrap()
-        .police_mut()
-        .set_heat(PLAYER, 40.0);
-    s.run_ticks(2);
-    assert!(
-        s.street().unwrap().offer(s.sim(), s.run()).is_none(),
-        "the offer lapsed"
-    );
-    s.debug_sim_mut()
-        .unwrap()
-        .police_mut()
-        .set_heat(PLAYER, 0.0);
-    s.run_ticks(240 * 21);
+}
+
+/// Row 150: accepting resets both cars side by side at the start, at rest, facing along the
+/// route, as logged moves (the recording replays them).
+#[test]
+fn both_cars_start_side_by_side() {
+    let mut s = city_session();
+    s.run_ticks(240 * 2);
     // Rolling a little and turned off the lane's heading before the accept.
     challenge(&mut s, 1);
     let fin = finish_for(&s);
@@ -985,7 +990,6 @@ fn no_challenge_while_wanted_and_both_cars_start_side_by_side() {
         along.abs() < 1.5,
         "beside, not ahead or behind ({along:.2} m)"
     );
-    let _ = racer;
 }
 
 /// Row 151: a route through waypoints runs through them in order; the gates sit on the route

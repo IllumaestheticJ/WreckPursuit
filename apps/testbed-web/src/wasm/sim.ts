@@ -537,7 +537,7 @@ export const sim = {
   /** Gates + route of the race (race_marker.ts parseCourse). */
   raceCourse: (): Float32Array => wasm.race_course(),
   /** Bet on yourself during the countdown (`odds[].label` from the picker). Throws if refused. */
-  raceBet: (label: string, stake: number): BetCard => JSON.parse(wasm.race_bet(label, stake)),
+  raceBet: (label: string, stake: number, odds = 0): BetCard => JSON.parse(wasm.race_bet(label, stake, odds)),
   /** Picker-race betting (venue City) on the current account: max stake and why it is locked (null = open). */
   raceBetStatus: (): { max: number; lock: string | null } => JSON.parse(wasm.race_bet_status()),
   /** The city's regulars with their records, strongest first. */
@@ -550,6 +550,12 @@ export const sim = {
   raceResult: (): RaceReport | null => JSON.parse(wasm.race_result_json()),
   /** The city's repair shops (`wp_wasm::garage_visit::GarageSite`); fetch once per session. */
   garages: (): GarageSite[] => JSON.parse(wasm.garages_json()),
+  /** The city's safehouses (career runs only); fetch once per session. */
+  safehouses: (): SafehouseSite[] => JSON.parse(wasm.safehouses_json()),
+  /** Career places: the open garage / safehouse visit and the safehouse dwell while chased. */
+  place: (): PlaceStatus => JSON.parse(wasm.place_json()),
+  /** "Back on the road" from the open career place visit. */
+  placeLeave: (): void => wasm.place_leave(),
   /** The open garage visit (the car stopped inside a garage), or null. */
   garageVisit: (): GarageOffer | null => JSON.parse(wasm.garage_visit_json()),
   /** "Repair" in the open visit: pays the shop, repairs the car, releases the brakes. Throws if refused. */
@@ -790,6 +796,8 @@ import type { TougeCard, TougeChoice, TougeReport, Wager, WagerMenu } from "../u
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
 import type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
+export type { PlaceStatus, PlaceVisit, SafehouseSite } from "../ui/placeVisit";
+import type { PlaceStatus, SafehouseSite } from "../ui/placeVisit";
 
 /** `simcli::car_stats::CarStatsTable` (data/stats/cars.json): bars are 0–1 on fixed scales. */
 export interface CarStatsTable {

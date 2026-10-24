@@ -8,7 +8,7 @@
 // honking (the rebindable horn: Q / pad L3) right behind a racer opens the map as the finish picker;
 // picking B on the map (mouse click / pad crosshair + A) previews a raceable route; the bet
 // slider / pad LB-RB sets the stake; by day extra waypoints are added, re-ordered and removed on the
-// map (row 151: numbered flags, the route through them, gates in the world); a wanted player cannot
+// map (row 151: numbered flags, the route through them, gates in the world); a chased player cannot
 // challenge (row 150); Race (Enter / pad Menu) pays it, puts both cars side by side at rest
 // (row 150) and counts down with the
 // race panel up and the route on the minimap; the street UI hides in photo mode, under the
@@ -493,20 +493,29 @@ async function race(label, pad) {
   await frames(page, 3);
   check(!(await page.evaluate(() => document.getElementById("street-ui").classList.contains("hidden"))), `${label}: street UI back after the replay`);
   if (!pad) {
-    // Last: wanted, a honk challenges nobody and the hint says to lose the police (row 150).
+    // Last: wanted. A wanted level alone still allows a challenge; only an active pursuit or
+    // search blocks it, with a hint to lose the police (row 150, owner 2026-10-24).
     await page.evaluate(() => window.__wp.sim.debugSetHeat(window.__wp.app.player, 40));
     await page.keyboard.down(hornKey);
     let blocked = null;
+    let offered = null;
     for (let i = 0; i < 12; i++) {
       await placeBehind(page, st.roster[1].entity);
       await wait(page, 250);
-      blocked = (await status(page))?.blocked ?? blocked;
+      const s = await status(page);
+      blocked = s?.blocked ?? blocked;
+      offered = s?.offer ?? offered;
+      if (offered) break;
     }
     await page.keyboard.up(hornKey);
     const ws = await status(page);
     const hint = await page.evaluate(() => document.querySelector("#street-hint")?.textContent ?? "");
-    check(ws.pursued && !ws.offer && !!blocked, `${label}: wanted, a honk opens no challenge (blocked: ${blocked?.name})`);
-    check(/Lose the police/.test(hint), `${label}: hint says to lose the police first ("${hint.trim()}")`);
+    if (ws.pursued) {
+      check(!ws.offer && !!blocked, `${label}: wanted and chased, a honk opens no challenge (blocked: ${blocked?.name})`);
+      check(/Lose the police/.test(hint), `${label}: hint says to lose the police first ("${hint.trim()}")`);
+    } else {
+      check(!!offered && !blocked, `${label}: wanted but not chased, a honk still challenges (offer: ${offered?.entity}, blocked: ${blocked?.name})`);
+    }
     // (The pursuit outlives the heat; the session ends here.)
   }
 }

@@ -392,6 +392,10 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     let (walk_colliders, sidewalk_triangles) = sidewalk_mesh_colliders(&walks);
     out.sidewalk_triangles = sidewalk_triangles;
     added.extend(walk_colliders);
+    // Car parks (rest stop lots): their pads over the sidewalks and the dropped kerbs, paved
+    // like the roads.
+    let lots = wp_world::car_park::pad_mesh(&map.car_parks);
+    added.extend(mesh_tile_colliders(&lots, InteractionGroups::all()));
 
     // Buildings: extruded footprints as convex hulls (footprints are convex lots), pitched
     // roofs included (a gable or hip house is still convex). A city on flat ground (the

@@ -281,6 +281,23 @@ let settled = book.settle(&mut wallet, &placings);
 BetVenue::City)`, `take_stake` = `place_bet`, `pay_out` = `settle_bet` (see
 `wp_wasm::race::RunWallet`).
 
+### Betting fixes (2026-10-24)
+- **Bet slip stake**: a range slider (`onInput`) replaces the number box, which only
+  committed on blur and was reset by the picker's 10 Hz redraw after a race.
+- **Paid at the player's own result**: `RaceRun::settle` pays the buy-in / purse settlement
+  and the bets as soon as the player's result is decided (finished, DNF or DQ), not when the
+  last car is home: finishers' positions are final and a rival still running counts as
+  finishing behind them. Form ratings are still recorded once the results are final.
+- **Odds locked at sign-up**: `race_bet(label, stake, odds)` takes the decimal odds shown on
+  the picker card and `Book::place_quoted` puts them on the ticket (held to the book's bounds
+  and step). The card was priced for the stock car, the race's book for the career car with
+  its mods, so the two could differ.
+- **Money reaches the career**: `Session::end_career` / `take_run` call
+  `RaceRun::close_bets` before the account leaves (refund during the countdown; after the
+  green, leaving counts as not finishing). The testbed's picker races are career runs when
+  the career box is ticked and the career car can go out (`racesUseCareer` in `main.ts`),
+  like night runs and touge battles, instead of quick play on the practice account.
+
 ### Needs
 | From | What | Why | Workaround now |
 |---|---|---|---|
@@ -692,8 +709,9 @@ Vesper and on the new combined map (Port Vesper + Ashpeak County, city id `ashpe
   spots are planned lazily (first `race_spots()` call or first press).
   **Ported to round 12 (`lead/ashpeak-port`):** the session owns one horn edge per tick for
   round 12's single challenge system: a roaming street racer within honking range takes the
-  honk (`StreetStep::challenged`), else the spot; no spot while wanted / chased, with a street
-  offer or street race open, or with the run over (owner row 150, as street challenges).
+  honk (`StreetStep::challenged`), else the spot; no spot while chased (pursuit or search; a
+  wanted level alone is fine since 2026-10-24, `street::pursued`), with a street offer or
+  street race open, or with the run over (owner row 150, as street challenges).
   `HonkTrigger` was replaced by `spots::honk_spot`. The race's money is the picker's existing
   stake (buy-in / purse from `race_list`, shown in the spot prompt); no second bet. See
   `docs/integration/ashpeak-port.md`.

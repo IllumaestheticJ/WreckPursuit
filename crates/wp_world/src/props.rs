@@ -229,7 +229,10 @@ pub fn parked_cars_with(map: &CityMap, table: &ParkingTable, seed: u64) -> Vec<S
                     break;
                 }
                 let (p, tan) = seg.point_at(s);
-                if parking_allowed(map, table, p) && clear_of_decor(map, geom::xy(p), tan) {
+                if parking_allowed(map, table, p)
+                    && clear_of_decor(map, geom::xy(p), tan)
+                    && !at_car_park_mouths(map, i, geom::xy(p))
+                {
                     out.push(StaticProp {
                         kind: PropKind::ParkedCar,
                         pos: [p[0], p[1], p[2] + 0.75],
@@ -247,6 +250,48 @@ pub fn parked_cars_with(map: &CityMap, table: &ParkingTable, seed: u64) -> Vec<S
                 table.car_length_m
                     * rng.range_f32(table.gap_car_lengths[0], table.gap_car_lengths[1])
             };
+        }
+    }
+    out
+}
+
+/// A kerbside car on parking lane `lane` at `q` would stand in front of a car park's bays
+/// (across its dropped kerb, give or take a car length).
+fn at_car_park_mouths(map: &CityMap, lane: usize, q: V2) -> bool {
+    map.car_parks.iter().any(|c| {
+        if c.parking_lane as usize != lane {
+            return false;
+        }
+        let (u, _) = c.frame(q);
+        u > c.ramp_m.0 - 3.0 && u < c.ramp_m.1 + 3.0
+    })
+}
+
+/// Share of car park bays with a parked car in them.
+pub const CAR_PARK_OCCUPANCY: f32 = 0.35;
+
+/// Parked cars in the car parks' bays ([`crate::car_park`]): about [`CAR_PARK_OCCUPANCY`] of
+/// the bays, never more than half of a lot (the night's racers park in the rest), nose-in.
+/// Deterministic for a seed (a stream of its own, so the kerbside cars do not move). Nose-in
+/// in neighbouring bays they stand closer than kerbside cars ever do; `World::new` adds them
+/// after the kerbside and driveway cars.
+pub fn car_park_cars(map: &CityMap, seed: u64) -> Vec<StaticProp> {
+    let mut rng = Rng::new(seed ^ 0xCA2B_A7E5);
+    let mut out = Vec::new();
+    for park in map.car_parks.iter() {
+        let cap = park.bays.len() / 2;
+        let mut n = 0;
+        for b in &park.bays {
+            if n < cap && rng.chance(CAR_PARK_OCCUPANCY) {
+                n += 1;
+                out.push(StaticProp {
+                    kind: PropKind::ParkedCar,
+                    pos: [b.pos[0], b.pos[1], b.pos[2] + 0.75],
+                    yaw: b.heading_rad,
+                    half_extents: [0.95, 2.25, 0.75],
+                    mass_kg: 1400.0,
+                });
+            }
         }
     }
     out
