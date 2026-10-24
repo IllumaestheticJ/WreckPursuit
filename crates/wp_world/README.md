@@ -494,8 +494,10 @@ a `wp_vehicle::Vehicle` with `AssistProfile::ai()` stepped every physics tick, d
 pursuit (look-ahead 5–25 m) for steering and a PID on the IDM-commanded speed profile.
 Promotion copies pose and speed; demotion (beyond 100 m) projects the vehicle back onto its
 path. A physical agent that leaves the road (> 6 m or facing away) or is wrecked
-(`apply_agent_damage` with a dead engine / lost wheel) is disabled (stopped, hazards) and is
-removed once out of sight. The sim loop gets `LodChange::{Promoted, Demoted, Despawned}`.
+(`apply_agent_damage` with a dead engine / lost wheel) or takes a hard hit
+(`report_agent_impact` with a one-tick velocity change of at least `HARD_IMPACT_DV_MPS` = 5 m/s,
+from the sim's contact impulses; the same in both damage modes) is disabled (stopped on the
+handbrake, hazards on, never drives on) and is removed once out of sight. The sim loop gets `LodChange::{Promoted, Demoted, Despawned}`.
 With the cap full, a kinematic car within 40 m of a player takes the place of the physical
 car farthest from any player (playtest row 149: kinematic cars have no collider, the player
 drove through them), and a kinematic car turning around or reversing within 20 m of a player

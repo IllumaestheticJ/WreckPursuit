@@ -144,6 +144,12 @@ pub const BESIDE_CLEAR_M: f32 = 0.5;
 /// this long (the unit is milling about a scene rather than coming through), s.
 pub const SIREN_JUNCTION_HOLD_MAX_S: f32 = 8.0;
 
+/// A physical traffic car whose velocity changes by at least this much in one physics tick
+/// from collision impulses has had a hard impact: the driver stops, puts the hazards on and
+/// stays put (disabled, like a dead engine), m/s. 18 km/h: a parking-lot nudge or a
+/// scrape along the side drives on; a rear-ender, a T-bone or a wall at town speed does not.
+pub const HARD_IMPACT_DV_MPS: f32 = 5.0;
+
 /// A wreck further than this from its lane's centre line is off the road (sidewalk, lot) and
 /// not an obstacle in the lane, m.
 pub const OFF_LANE_WRECK_M: f32 = 3.5;
@@ -1110,6 +1116,22 @@ impl Traffic {
             if eff.engine_dead || eff.wheel_lost.iter().any(|w| *w) {
                 a.disabled = true;
             }
+        }
+    }
+
+    /// Report a collision that changed physical agent `agent`'s velocity by `dv_mps` this
+    /// tick; at or above [`HARD_IMPACT_DV_MPS`] the car is disabled (stops with hazard lights
+    /// and stays stopped). Returns whether this report disabled it.
+    pub fn report_impact(&mut self, agent: AgentId, dv_mps: f32) -> bool {
+        if dv_mps < HARD_IMPACT_DV_MPS {
+            return false;
+        }
+        match self.agents.iter_mut().find(|a| a.id == agent) {
+            Some(a) if a.physical.is_some() && !a.disabled => {
+                a.disabled = true;
+                true
+            }
+            _ => false,
         }
     }
 

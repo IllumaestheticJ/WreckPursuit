@@ -467,6 +467,13 @@ impl World {
         self.traffic.set_entity(agent, entity);
     }
 
+    /// Report a collision that changed physical agent `agent`'s velocity by `dv_mps` this
+    /// tick: a hard one ([`traffic::HARD_IMPACT_DV_MPS`]) disables the car, which stops with
+    /// hazard lights on and stays stopped. Returns whether this report disabled it.
+    pub fn report_agent_impact(&mut self, agent: AgentId, dv_mps: f32) -> bool {
+        self.traffic.report_impact(agent, dv_mps)
+    }
+
     /// Push damage effects to a physical agent (a dead engine / lost wheel disables it).
     pub fn apply_agent_damage(&mut self, agent: AgentId, effects: &HandlingEffects) {
         self.traffic.apply_damage(agent, effects);
