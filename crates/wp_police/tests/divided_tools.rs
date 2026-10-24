@@ -170,8 +170,7 @@ fn spikes_stay_on_the_racers_carriageway(name: &str, world: &World) -> usize {
         let median = [0.5 * (far[0] + site.pos[0]), 0.5 * (far[1] + site.pos[1])];
         let side = right_of(median, flow, site.pos).signum();
         let ours = |p: [f32; 2]| right_of(median, flow, p) * side > 0.0;
-        // The car: spawned, or waiting for the next think (PR #54 port); none when its spot
-        // was in the racer's view (the strip is unmanned, rows 131 / 158).
+        // The car: spawned, or waiting for the next think (its post is out of the racer's view).
         let car = match strip.unit {
             Some(u) => {
                 let u = police.units().iter().find(|x| x.id == u).unwrap();
@@ -269,10 +268,13 @@ fn spike_car_and_strip_stay_on_the_racers_carriageway_on_divided_highways() {
         &wp_world::vesper::VesperConfig::default(),
         wp_world::WorldConfig::default(),
     );
+    // Spike cars appear only where the racer cannot see their post (owner, 2026-10-24): the
+    // grid's highways are long flat straights in plain view, so its strips may all be skipped.
+    let mut n = 0;
     for (name, world) in [("grid", &grid), ("vesper", &vesper)] {
-        let n = spikes_stay_on_the_racers_carriageway(name, world);
-        assert!(n >= 1, "{name}: no strip landed on a divided highway");
+        n += spikes_stay_on_the_racers_carriageway(name, world);
     }
+    assert!(n >= 1, "no strip landed on a divided highway");
 }
 
 /// The flows of every one-way road within 8 m of `p` (two where carriageways converge).
