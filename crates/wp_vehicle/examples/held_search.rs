@@ -179,6 +179,15 @@ impl Params {
             spring: self.spring,
             arb: self.arb,
             roll_inertia: self.roll_inertia,
+            // TRAVEL / DBUMP: suspension travel / bump damper scale over the shipped ride.
+            travel: std::env::var("TRAVEL")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(RideTune::shipped().travel),
+            damper_bump: std::env::var("DBUMP")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(RideTune::shipped().damper_bump),
             ..RideTune::shipped()
         }));
     }
