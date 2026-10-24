@@ -680,6 +680,9 @@ const PASS_EDGE_MARGIN_M: f32 = 0.25;
 
 /// Lateral step between the pass positions tried beside a car (about a lane), m.
 const PASS_LANE_STEP_M: f32 = 3.5;
+/// A careful driver (traffic risk under 0.5) goes round a non-racer crawling ahead on the
+/// opposing lanes once held up this long behind it, s.
+const CRAWLER_PATIENCE_S: f32 = 2.0;
 
 /// Road width (my lanes plus any usable for passing) from which a car that is itself passing
 /// may be passed (three wide), m.
@@ -2031,8 +2034,9 @@ fn decide_racer(
             RacerStatus::Finished { .. } | RacerStatus::Disqualified
         ) || (!corridor.closed && finish_m.is_some_and(|f| r.progress >= f));
         // A non-racer crawling along ahead (under 70 % of my own pace here, or 6 m/s: a car
-        // that just turned round, a slow climber) that has held me up for 4 s: even a careful
-        // driver goes round it on the opposing lanes when the pass checks find them clear.
+        // that just turned round, a slow climber) that has held me up for
+        // `CRAWLER_PATIENCE_S`: even a careful driver goes round it on the opposing lanes when
+        // the pass checks find them clear.
         let crawl_mps = (0.7 * corridor.interp(&profile.v, r.s + 30.0)).max(6.0);
         // A racer out of the race (fled, busted, retired, rolling on to a place to stop) is
         // gone round as soon as it holds me up at all (Hollins, police seed 6: the field crawled
@@ -2046,7 +2050,9 @@ fn decide_racer(
                 && if o.out_of_race {
                     r.blocked_s > 1.5 && o.v_s < 0.9 * corridor.interp(&profile.v, o.s)
                 } else {
-                    r.blocked_s > 4.0 && o.v_s < crawl_mps
+                    // 2 s (was 4): Lantern under G, 16 seeds — s95 61 → 64/64 finishers, walls
+                    // 11 → 0; s50 unchanged (64/64, 80.1 s); Loop 9 s50 unchanged.
+                    r.blocked_s > CRAWLER_PATIENCE_S && o.v_s < crawl_mps
                 }
         });
         // A non-racer standing in my way (a civilian at a light, a stalled car) that has held me

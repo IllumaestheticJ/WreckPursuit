@@ -527,6 +527,19 @@ pub fn race_pace_in(
                     .unwrap()
                     .vehicle
                     .state();
+                let k = f[0] as usize;
+                if tick == green + (f[1] * 240.0) as u64 {
+                    let d = ai.field().debug_of(k);
+                    let c = ai.field().corridor();
+                    eprintln!(
+                        "DUMP racer {k} s {:.1} n {:.2} bounds {:?} pass_bounds {:?} opposing {:?}",
+                        d.s,
+                        d.n,
+                        c.bounds(d.s),
+                        c.pass_bounds(d.s),
+                        c.opposing
+                    );
+                }
                 f = vec![st.pos[0], st.pos[1], f[1]];
             }
             if f.len() == 3 && tick == green + (f[2] * 240.0) as u64 {
@@ -597,8 +610,10 @@ pub fn race_pace_in(
                 Tactic::Reverse => 10,
                 _ => match d.limit {
                     SpeedLimit::Obstacle(w) if w >= 1_000_000 => 3,
+                    // Racers read as `100 + grid index` (`Field::debug_of`), not as their
+                    // entity ids.
                     SpeedLimit::Obstacle(w) => {
-                        if racers.iter().any(|r| r.0 == w) {
+                        if (100..100 + k_n as u32).contains(&w) {
                             2
                         } else {
                             4
