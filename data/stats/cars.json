@@ -215,56 +215,56 @@
     },
     "sentinel_bastion": {
       "display_name": "Sentinel Bastion",
-      "zero_to_100_s": 7.96,
-      "top_speed_kmh": 213.7,
-      "cornering_g": 0.705,
+      "zero_to_100_s": 6.68,
+      "top_speed_kmh": 220.1,
+      "cornering_g": 0.706,
       "bars": {
-        "acceleration": 0.643,
-        "top_speed": 0.434,
+        "acceleration": 0.746,
+        "top_speed": 0.471,
         "cornering": 0.311
       }
     },
     "sentinel_cruiser": {
       "display_name": "Sentinel Cruiser",
-      "zero_to_100_s": 6.39,
-      "top_speed_kmh": 253.2,
-      "cornering_g": 0.839,
+      "zero_to_100_s": 5.89,
+      "top_speed_kmh": 285.2,
+      "cornering_g": 0.838,
       "bars": {
-        "acceleration": 0.769,
-        "top_speed": 0.666,
-        "cornering": 0.577
+        "acceleration": 0.809,
+        "top_speed": 0.854,
+        "cornering": 0.576
       }
     },
     "sentinel_vigil": {
       "display_name": "Sentinel Vigil",
-      "zero_to_100_s": 5.74,
-      "top_speed_kmh": 267.3,
+      "zero_to_100_s": 5.39,
+      "top_speed_kmh": 313.8,
       "cornering_g": 0.868,
       "bars": {
-        "acceleration": 0.821,
-        "top_speed": 0.749,
+        "acceleration": 0.849,
+        "top_speed": 1.0,
         "cornering": 0.636
       }
     },
     "sentinel_warden": {
       "display_name": "Sentinel Warden",
-      "zero_to_100_s": 8.83,
-      "top_speed_kmh": 194.9,
-      "cornering_g": 0.806,
+      "zero_to_100_s": 6.9,
+      "top_speed_kmh": 221.4,
+      "cornering_g": 0.807,
       "bars": {
-        "acceleration": 0.574,
-        "top_speed": 0.323,
+        "acceleration": 0.728,
+        "top_speed": 0.479,
         "cornering": 0.513
       }
     },
     "sentinel_wolfhound": {
       "display_name": "Sentinel Wolfhound",
-      "zero_to_100_s": 5.94,
-      "top_speed_kmh": 244.1,
+      "zero_to_100_s": 4.86,
+      "top_speed_kmh": 280.2,
       "cornering_g": 0.843,
       "bars": {
-        "acceleration": 0.805,
-        "top_speed": 0.612,
+        "acceleration": 0.891,
+        "top_speed": 0.825,
         "cornering": 0.586
       }
     },

@@ -4224,7 +4224,7 @@ impl PoliceSystem {
         let to_post = self.graph.distances_to(run.post);
         let corridor = self.racer_corridor(run.strip.racer);
         let p = &self.cfg.pursuit;
-        let cap = p.pursuit_cap_mps.get(self.phase);
+        let cap = p.pro.default_limits.top_speed_mps;
         let mut cands: Vec<(f32, [f32; 2], [f32; 2], f32)> = Vec::new();
         for (k, seg) in self.graph.segments.iter().enumerate() {
             let sid = crate::graph::SegmentId(k as u32);
