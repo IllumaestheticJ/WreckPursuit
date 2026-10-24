@@ -32,6 +32,15 @@
 | Fulmine V10 | `fulmine_v10` | Exotic | AWD 30/70 | 1634 | 449 | 275 | 3.5 | 336 | 0.98 | 820 | 3 | 125,000 | sport |
 | Sentinel Warden | `sentinel_warden` | PoliceCruiser | RWD | 1873 | 217 | 116 | 7.0 | 234 | 0.91 | 515 | 4 | 26,000 | police_pursuit |
 | Sentinel Vigil | `sentinel_vigil` | PoliceInterceptor | RWD | 1813 | 561 | 309 | 5.4 | 341 | 0.95 | 639 | 4 | 52,000 | sport |
+| Halberd 40 | `halberd_40` | Exotic | RWD | 1488 | 513 | 345 | 3.7 | 354 | 1.15 | 834 | 3 | 125,000 | semi_slick |
+| Ombra V12 | `ombra_v12` | Exotic | AWD 25/75 | 1692 | 517 | 305 | 3.4 | 349 | 0.98 | 845 | 3 | 124,000 | sport |
+| Ostwind 6T | `ostwind_6t` | Exotic | AWD 30/70 | 1690 | 470 | 278 | 3.8 | 342 | 0.97 | 791 | 4 | 110,000 | sport |
+| Kagero HX | `kagero_hx` | Exotic | AWD 35/65 | 1833 | 418 | 228 | 3.9 | 330 | 0.97 | 773 | 3 | 100,000 | sport |
+| Morrigan 5.5 | `morrigan_55` | Exotic | RWD | 1288 | 425 | 330 | 3.9 | 300 | 1.21 | 797 | 3 | 120,000 | semi_slick |
+| Nyx Proto | `nyx_proto` | Exotic | RWD | 977 | 419 | 429 | 3.6 | 317 | 1.25 | 852 | 3 | 125,000 | semi_slick |
+| Merlo 2.0T | `merlo_20t` | Exotic | FWD | 1238 | 252 | 203 | 4.6 | 248 | 1.18 | 706 | 4 | 100,000 | semi_slick |
+| Mesquite PR | `mesquite_pr` | Truck | RWD | 2758 | 317 | 115 | 8.0 | 211 | 0.71 | 439 | 5 | 32,000 | all_terrain |
+| Erg Hamada | `erg_hamada` | Truck | AWD 50/50 | 2113 | 308 | 146 | 6.0 | 203 | 0.78 | 523 | 5 | 32,000 | all_terrain |
 | Debug Coupe | `debug_coupe` | Sport | RWD | 1500 | 303 | 202 | 4.9 | 299 | 1.01 | 668 | 3 | 52,000 | sport |
 | Debug Sedan | `debug_sedan` | Compact | FWD | 1400 | 151 | 108 | 7.2 | 241 | 0.87 | 501 | 3 | 18,000 | street |
 

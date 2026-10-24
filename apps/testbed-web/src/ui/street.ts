@@ -61,6 +61,14 @@ function bound(action: "horn" | "map"): { key: string; pad: string } {
   return { key: b.keys[action].map(keyName)[0] ?? "", pad: b.pad[action].map(padName)[0] ?? "" };
 }
 
+/** Which wallet a street bet uses (row 169): the career's in a career run, else quick-play
+ * cash that does not count for the career. */
+function walletNote(career: boolean): string {
+  return career
+    ? `<span class="wp-ok" data-testid="st-wallet" data-career="1" title="The bet and any win go into your career.">career cash</span>`
+    : `<span class="wp-warn" data-testid="st-wallet" data-career="0" title="Practice cash: start from the garage (or with the career box ticked) to bet career money.">quick play: not your career</span>`;
+}
+
 /** The street racer UI (one per testbed). */
 export class StreetUi {
   private readonly root: HTMLElement;
@@ -103,6 +111,9 @@ export class StreetUi {
     private readonly map: MapHud,
     /** Touch controls are showing (hint names the 📯 button). */
     private readonly touch: () => boolean = () => false,
+    /** The career box is ticked: a bet must land in the career, so a quick-play session
+     * refuses bets (row 169). */
+    private readonly careerTicked: () => boolean = () => false,
   ) {
     const style = document.createElement("style");
     style.textContent = STYLE;
@@ -325,11 +336,17 @@ export class StreetUi {
     this.replan();
   }
 
+  /** Row 169: with the career box ticked every bet must land in the career, so a quick-play
+   * session (not a career run) takes no bets. */
+  private careerLocked(st: StreetStatus | null): boolean {
+    return !!st && !st.career && this.careerTicked();
+  }
+
   /** Accept the open challenge with the picked route and stake (Race button, Enter, pad Menu). */
   accept(): void {
     const o = this.status?.offer;
     const p = this.preview;
-    if (!o || !p?.ok) return;
+    if (!o || !p?.ok || this.careerLocked(this.status)) return;
     try {
       sim.streetAccept(p.finish[0], p.finish[1], this.stake, this.via);
       this.status = sim.streetStatus();
@@ -411,11 +428,12 @@ export class StreetUi {
     const canBet = o.affordable && o.bet_max >= o.bet_min;
     this.stake = Math.max(o.bet_min, Math.min(o.bet_max, this.stake));
     const step = this.stakeStep(o.bet_min);
-    const key = `offer|${o.entity}|${p?.finish.join(",")}|${p?.ok}|${this.error}|${this.stake}|${o.cash}|${canBet}|${this.via.flat().join(",")}|${this.moveB}`;
+    const key = `offer|${o.entity}|${p?.finish.join(",")}|${p?.ok}|${this.error}|${this.stake}|${o.cash}|${canBet}|${this.via.flat().join(",")}|${this.moveB}|${st.career}|${this.careerTicked()}`;
     if (key === this.cardKey) return;
     this.cardKey = key;
     el.hidden = false;
-    const ready = !!p?.ok && canBet;
+    const locked = this.careerLocked(st);
+    const ready = !!p?.ok && canBet && !locked;
     el.innerHTML =
       `<div class="wp-panel-title"><span>Challenge</span><b>Lv ${o.level}</b></div>` +
       `<h3>${esc(o.name)} <span class="st-lv" style="background:${o.colour}">Lv ${o.level} ${esc(o.level_name)}</span></h3>` +
@@ -443,9 +461,12 @@ export class StreetUi {
         ? `<div class="st-row">Route <b>${km(p.length_m)}</b>${p.ok ? "" : ` <span class="wp-warn">${esc(p.reason ?? "")}</span>`}</div>`
         : `<div class="st-row wp-dim">No finish picked yet.</div>`) +
       (canBet
-        ? `<div class="st-row">2. Bet <b id="st-stake">${money(this.stake)}</b> <span class="wp-dim">(${money(o.bet_min)}–${money(o.bet_max)}, cash ${money(o.cash)}; pad LB / RB)</span>` +
+        ? `<div class="st-row">2. Bet <b id="st-stake">${money(this.stake)}</b> <span class="wp-dim">(${money(o.bet_min)}–${money(o.bet_max)}, cash ${money(o.cash)}; pad LB / RB)</span> ${walletNote(st.career)}` +
           `<input id="st-range" class="wp-slider" type="range" min="${o.bet_min}" max="${o.bet_max}" step="${step}" value="${this.stake}" /></div>` +
-          `<div class="st-row">Win <b class="wp-ok" id="st-win">+${money(this.stake)}</b> · lose <b class="wp-danger" id="st-lose">${money(-this.stake)}</b></div>`
+          (locked
+            ? // Same height as the win / lose line it replaces (touch layout, row 169).
+              `<div class="st-row wp-warn" data-testid="st-career-locked" title="Start a career run (garage, or the menu with a career car) to bet career money, or untick career to bet practice cash.">Career is on: no bets in quick play</div>`
+            : `<div class="st-row">Win <b class="wp-ok" id="st-win">+${money(this.stake)}</b> · lose <b class="wp-danger" id="st-lose">${money(-this.stake)}</b></div>`)
         : `<div class="st-row wp-warn">${esc(o.name)} races for at least ${money(o.bet_min)}; you have ${money(o.cash)}.</div>`) +
       (this.error ? `<div class="st-row wp-warn">${esc(this.error)}</div>` : "") +
       `<div class="st-buttons"><button class="wp-btn wp-btn--primary" id="st-go" ${ready ? "" : "disabled"}>Race <span class="wp-kbd">Enter</span></button>` +
@@ -538,7 +559,7 @@ export class StreetUi {
       this.resultEl.innerHTML =
         `<b style="color:${res.won ? "#2ecc40" : "#ff4136"}">${res.won ? "YOU WON" : "YOU LOST"} ${res.won ? "+" : ""}${money(res.net)}${res.rep ? ` · +${res.rep} rep` : ""}</b>` +
         `<span>vs ${esc(res.name)} (Lv ${res.level} ${esc(res.level_name)}) · ${esc(res.reason)}` +
-        `${res.margin_m > 1 ? ` · by ${km(res.margin_m)}` : ""} · cash ${money(res.cash_after)}</span>`;
+        `${res.margin_m > 1 ? ` · by ${km(res.margin_m)}` : ""} · ${st.career ? "career" : "quick-play"} cash ${money(res.cash_after)}</span>`;
     }
     this.resultEl.classList.toggle("hidden", now > this.resultUntil);
   }

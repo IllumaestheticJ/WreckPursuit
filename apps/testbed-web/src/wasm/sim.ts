@@ -612,6 +612,14 @@ export const sim = {
   careerRelease: (uid: number): CareerView => JSON.parse(wasm.career_release(uid)),
   careerInsure: (uid: number, tier: string): CareerView => JSON.parse(wasm.career_insure(uid, tier)),
   careerNextNight: (): CareerView => JSON.parse(wasm.career_next_night()),
+  // ----- car lots (crates/wp_wasm/src/lots.rs) ----------------------------------------------
+  careerLot: (lotId: string): LotStockView => JSON.parse(wasm.career_lot_json(lotId)),
+  careerBuyListing: (lotId: string, slot: number): CareerView => JSON.parse(wasm.career_buy_listing(lotId, slot)),
+  careerReplaceTires: (uid: number, wheels: boolean[]): CareerView => JSON.parse(wasm.career_replace_tires(uid, JSON.stringify(wheels))),
+  /** Load the lot itself (ends a career run first). Returns entity ids like `init`. */
+  careerVisitLot: (lotId: string): number[] => Array.from(wasm.career_visit_lot(lotId)),
+  /** The lot being visited, or null when the session is not a lot visit. */
+  lotVisit: (): LotVisit | null => JSON.parse(wasm.lot_visit_json()),
   /** Put a police helicopter on a pursued racer now, offsetM away at altitude. Returns its unit id. */
   debugLaunchHelicopter: (entity: number, offsetM: number): number => wasm.debug_launch_helicopter(entity, offsetM),
   /** Debug / e2e: put `entity` on the ground at [x, y], facing `yaw`, at `speedMps` (not recorded in replays). */
@@ -653,7 +661,18 @@ export const sim = {
     JSON.parse(wasm.career_mechanic_install(uid, slot, part, grade ?? "", sellOld)),
 };
 
-import type { CarTune, CareerView, MechanicResult, ModTreeView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";
+import type {
+  CarTune,
+  CareerView,
+  LotStockView,
+  LotVisit,
+  MechanicResult,
+  ModTreeView,
+  RepairQuote,
+  RunClose,
+  ShopRequest,
+  WorkshopScreen,
+} from "../../../ui-kit/src/garage/types";
 
 /** A street-racer level (`wp_wasm::street::Level`). */
 export interface StreetLevel {
@@ -748,6 +767,8 @@ export interface StreetStatus {
   offer: StreetOffer | null;
   race: StreetRace | null;
   result: StreetResult | null;
+  /** A career run: bets and wins settle on the career. Otherwise quick-play cash (row 169). */
+  career: boolean;
 }
 
 /** `street_preview()` (`wp_wasm::street::Preview`). */

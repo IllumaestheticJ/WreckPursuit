@@ -47,6 +47,7 @@ pub mod drift_lab;
 pub mod garage;
 pub mod garage_visit;
 pub mod lod;
+pub mod lots;
 pub mod map;
 pub mod mod_visuals;
 pub mod pack;
@@ -71,6 +72,8 @@ mod career_tests;
 mod collide_tests;
 #[cfg(test)]
 mod crash_replay_tests;
+#[cfg(test)]
+mod lots_tests;
 #[cfg(test)]
 mod police_audio_trace;
 #[cfg(test)]
@@ -1183,6 +1186,9 @@ pub fn street_status_json() -> Result<String, JsValue> {
             "offer": st.offer(s.sim(), s.run()),
             "race": st.race(s.sim()),
             "result": st.result(),
+            // Bets settle on the career's account in a career run; otherwise on quick-play
+            // cash that never reaches the career (row 169: the UI says which).
+            "career": s.is_career(),
         }))
     })
 }

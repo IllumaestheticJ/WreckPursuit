@@ -138,6 +138,9 @@ pub struct SimVehicle {
     player_steering: Option<bool>,
     /// Ticks the ghost was extended because the car still overlapped another car.
     ghost_overstay: u32,
+    /// Tyre condition set by the career ([`Sim::set_tire_condition`]): per-wheel grip
+    /// multiplier and deflation, applied on top of damage every tick.
+    tire_condition: Option<([f32; 4], [f32; 4])>,
     /// Dormant ([`Sim::set_dormant`]): a fixed body, no vehicle or damage-motion step.
     dormant: bool,
     /// May drive in light mode far from every player ([`Sim::set_light_when_far`]).
@@ -383,6 +386,7 @@ impl Sim {
             chassis_skips_sidewalks: false,
             ghost_ticks: 0,
             ghost_overstay: 0,
+            tire_condition: None,
             player_steering: None,
             dormant: false,
             light_when_far: false,
@@ -882,6 +886,20 @@ impl Sim {
             .iter_mut()
             .find(|v| v.id == id)
             .ok_or(SimError::UnknownEntity(id))
+    }
+
+    /// Set a vehicle's tyre condition (career tyres, `wp_economy::lots`): per-wheel grip
+    /// multiplier (1 = new tyres, FL, FR, RL, RR) and deflation 0..=1 (1 = flat), applied on
+    /// top of damage every tick. Like mods, not recorded in replays: set it before the first
+    /// tick of a session.
+    pub fn set_tire_condition(
+        &mut self,
+        id: EntityId,
+        grip: [f32; 4],
+        deflation: [f32; 4],
+    ) -> Result<(), SimError> {
+        self.slot_mut(id)?.tire_condition = Some((grip, deflation));
+        Ok(())
     }
 
     /// Set the input a vehicle uses from the next tick on.
@@ -1407,6 +1425,13 @@ impl Sim {
                 let spikes = self.police.tire_puncture(slot.id);
                 for (t, s) in effects.tire_puncture.iter_mut().zip(spikes) {
                     *t = t.max(s);
+                }
+                // Career tyres: worn tread grips less, a flat stays flat.
+                if let Some((grip, deflation)) = slot.tire_condition {
+                    for w in 0..4 {
+                        effects.grip_scale[w] *= grip[w];
+                        effects.tire_puncture[w] = effects.tire_puncture[w].max(deflation[w]);
+                    }
                 }
                 slot.vehicle.apply_damage_effects(&effects);
             }

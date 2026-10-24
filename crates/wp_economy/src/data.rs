@@ -559,6 +559,8 @@ pub struct DataSources {
     pub consequences: String,
     /// `data/economy/market.toml`.
     pub market: String,
+    /// `data/economy/lots.toml` (dealerships, used lots, junkyards, tyres).
+    pub lots: String,
     /// `data/economy/parts.toml` (workshop slots).
     pub parts: String,
     /// `data/economy/career.toml` (rep tiers, unlocks, betting limits).
@@ -626,6 +628,7 @@ impl DataSources {
             stakes: data_file!("economy/stakes.toml").to_string(),
             consequences: data_file!("economy/consequences.toml").to_string(),
             market: data_file!("economy/market.toml").to_string(),
+            lots: data_file!("economy/lots.toml").to_string(),
             parts: data_file!("economy/parts.toml").to_string(),
             career: data_file!("economy/career.toml").to_string(),
             mods: MOD_PACKS
@@ -673,6 +676,7 @@ impl DataSources {
             stakes: read("economy/stakes.toml")?,
             consequences: read("economy/consequences.toml")?,
             market: read("economy/market.toml")?,
+            lots: read("economy/lots.toml")?,
             parts: read("economy/parts.toml")?,
             career: read("economy/career.toml")?,
             mods,
@@ -695,6 +699,8 @@ pub struct Economy {
     pub consequences: ConsequenceTables,
     /// `market.toml`.
     pub market: MarketTables,
+    /// `lots.toml`.
+    pub lots: crate::lots::LotTables,
     /// All mods.
     pub catalog: ModCatalog,
     /// Workshop slots (`parts.toml`).
@@ -766,6 +772,7 @@ impl Economy {
             stakes: parse_toml("economy/stakes.toml", &src.stakes)?,
             consequences: parse_toml("economy/consequences.toml", &src.consequences)?,
             market: parse_toml("economy/market.toml", &src.market)?,
+            lots: parse_toml("economy/lots.toml", &src.lots)?,
             catalog: ModCatalog::from_packs(packs)?,
             parts: PartsTable::parse(&src.parts)?,
             progression: parse_toml("economy/career.toml", &src.career)?,
@@ -812,6 +819,7 @@ impl Economy {
         if k.ledger_keep == 0 {
             return Err(invalid("consequences.career.ledger_keep", "must be > 0"));
         }
+        self.validate_lots()?;
         let p = &self.prices;
         require_positive("prices.labour_hours_per_item", p.labour_hours_per_item)?;
         require_frac("prices.repair_parts_fraction", p.repair_parts_fraction)?;

@@ -1,0 +1,15 @@
+{
+  "id": "ombra_v12",
+  "engine": {
+    "cylinders": 12,
+    "layout": "V",
+    "firing": "Even",
+    "induction_exhaust_balance": 0.5,
+    "turbo": false,
+    "supercharger": false,
+    "gain": 1.2
+  },
+  "engine_pack": "engine_proc_v8",
+  "world_pack": "world_rec",
+  "horn_cue": "horn/standard"
+}

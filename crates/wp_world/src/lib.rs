@@ -34,6 +34,7 @@ pub mod manoeuvre;
 pub mod map;
 pub mod markings;
 pub mod network;
+pub mod obstacles;
 pub mod procgen;
 pub mod progression;
 pub mod props;
@@ -114,6 +115,8 @@ pub struct World {
     closed: Vec<bool>,
     cones: Vec<StaticProp>,
     parked: Vec<StaticProp>,
+    /// Solid street and yard furniture (trees, hedges, fences, ...), for police feelers.
+    obstacles: std::sync::Arc<obstacles::ObstacleIndex>,
     /// Display name per source road (`Lane::road` index; empty when the city has none).
     /// Presentation only (police radio callouts): never read by the simulation or hashed.
     road_names: Vec<String>,
@@ -180,6 +183,7 @@ impl World {
             Vec::new()
         };
         let n_lanes = map.n_lanes();
+        let obstacles = std::sync::Arc::new(obstacles::ObstacleIndex::new(&map.net));
         Self {
             clock: WorldClock::new(cfg.start_time, cfg.time_ratio),
             map,
@@ -192,6 +196,7 @@ impl World {
             closed: vec![false; n_lanes],
             cones: Vec::new(),
             parked,
+            obstacles,
             road_names: Vec::new(),
             tick: 0,
         }
@@ -465,6 +470,13 @@ impl World {
     /// Push damage effects to a physical agent (a dead engine / lost wheel disables it).
     pub fn apply_agent_damage(&mut self, agent: AgentId, effects: &HandlingEffects) {
         self.traffic.apply_damage(agent, effects);
+    }
+
+    /// Solid street and yard furniture (tree trunks, hedges, fences, barriers, bales,
+    /// billboards, crane masts) with the sim's collider footprints, for area queries
+    /// ([`obstacles::ObstacleIndex::near`]). Empty on cities without terrain relief.
+    pub fn obstacles(&self) -> &obstacles::ObstacleIndex {
+        &self.obstacles
     }
 
     /// Static colliders: parked cars and route-closure cones.
