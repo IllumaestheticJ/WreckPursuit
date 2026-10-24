@@ -1526,6 +1526,28 @@ on lead/round12 353744ec and on ws/world (debug and release: 1 go-around, contac
 failure opponent-pace saw on 0e84a9f7 predates a779ad57 (the fix and the re-aimed ≥ 1
 threshold are not in that commit), so it is not a regression. The margin is thin (exactly 1).
 
+## Police can see solid verge furniture (lead / E, 2026-10-24)
+
+**Why:** police units hit verge street trees (Crowfoot, row 168 follow-up), because trees were
+not in anything the police query.
+
+**What's new:** `wp_world::obstacles`.
+- `SolidDecor::of(&Decor)` gives the sim's collider footprint as 2D:
+  - tree trunks (street, yard, pine): circles of `TRUNK_R_M` (0.22 m), solid to `TRUNK_SOLID_H_M`
+    (2.5 m);
+  - hedges, fences, jersey barriers, site fences, hay bales, billboards, crane masts: oriented
+    boxes.
+  - Also gives `distance_to(p)` and `outline()`.
+- `ObstacleIndex`: a 16 m grid; `near(p, r)` returns the items within `r` of `p`, in ascending
+  index order.
+- `World::obstacles()`, built in `World::new`.
+- Empty on cities without relief, like the sim.
+- There are no lamp posts or hydrants in the world yet (no DecorKind).
+
+**Kept in step with the sim:** `wp_sim::physics::decor_collider` uses `TRUNK_SOLID_H_M`, so both
+read the same constants. No simulation change and no golden moves. Police integration (feelers,
+U-turn room) is E's.
+
 ## Ashpeak greybox de-dup, option A (lead + ashpeak-port, 2026-10-24)
 
 **Goal:** `ashpeak` ships `vesper_v2`'s greybox once, plus county tiles. Port Vesper inside
