@@ -351,6 +351,16 @@ pub struct RunMetrics {
     pub evader_plans: u32,
     /// Times the evader reversed out of a stop.
     pub evader_reversals: u32,
+    /// Police tracking error (pro driver: car to its own planned line), by speed band
+    /// < 10, 10-20, >= 20 m/s: mean gap, m.
+    #[serde(default)]
+    pub tracking_mean_m: [f32; 3],
+    /// ... share of driving steps more than 1 m off the line.
+    #[serde(default)]
+    pub tracking_over_1m: [f32; 3],
+    /// ... steps measured.
+    #[serde(default)]
+    pub tracking_n: [u32; 3],
     /// Clean start (cell level 0, row 157): when the evader first had heat, s.
     pub first_offence_s: Option<f32>,
     /// ... and when it first reached wanted level 1..=5, s after that first offence.
@@ -554,6 +564,9 @@ pub fn run_one(
         evader_health: 1.0,
         evader_plans: 0,
         evader_reversals: 0,
+        tracking_mean_m: [0.0; 3],
+        tracking_over_1m: [0.0; 3],
+        tracking_n: [0; 3],
         first_offence_s: None,
         level_reached_s: [None; 5],
     };
@@ -965,6 +978,15 @@ pub fn run_one(
         })
         .count() as u32;
     m.self_wrecks = st.self_wrecks - base.self_wrecks;
+    for b in 0..3 {
+        let (t, t0) = (st.tracking_err[b], base.tracking_err[b]);
+        let n = t.n - t0.n;
+        m.tracking_n[b] = n;
+        if n > 0 {
+            m.tracking_mean_m[b] = (t.sum_m - t0.sum_m) / n as f32;
+            m.tracking_over_1m[b] = (t.over_1m - t0.over_1m) as f32 / n as f32;
+        }
+    }
     m.contact_wrecks = st.contact_wrecks - base.contact_wrecks;
     m.units_engaged = st.units_engaged - base.units_engaged;
     m.calls = (st.calls.len() - base.calls.len()) as u32;

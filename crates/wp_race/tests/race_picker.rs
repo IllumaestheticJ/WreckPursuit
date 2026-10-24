@@ -434,6 +434,29 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         "{id}: stakeouts sprung {stakeouts_sprung}, roadblocks {}, spikes {} ({} hits)",
         stats.roadblocks, stats.spikes, stats.spike_hits
     );
+    // Police tracking error (car to its own planned line) and wall hits, by speed band.
+    let te = &stats.tracking_err;
+    let walls = |lo: f32, hi: f32| {
+        stats
+            .static_hits
+            .iter()
+            .filter(|h| {
+                h.kind == wp_police::stuck::StuckCause::Wall
+                    && (lo..hi).contains(&h.speed_mps.abs())
+            })
+            .count()
+    };
+    eprintln!(
+        "{id}: police tracking mean/over-1m <10 {:.2}/{:.1}% 10-20 {:.2}/{:.1}% 20+ {:.2}/{:.1}%, wall hits <8 {} >=8 {}",
+        te[0].mean_m(),
+        100.0 * te[0].over_1m as f32 / te[0].n.max(1) as f32,
+        te[1].mean_m(),
+        100.0 * te[1].over_1m as f32 / te[1].n.max(1) as f32,
+        te[2].mean_m(),
+        100.0 * te[2].over_1m as f32 / te[2].n.max(1) as f32,
+        walls(0.0, 8.0),
+        walls(8.0, f32::INFINITY)
+    );
     Raced {
         plan,
         stakeouts_sprung,

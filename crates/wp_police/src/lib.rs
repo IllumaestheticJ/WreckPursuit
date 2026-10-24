@@ -279,6 +279,30 @@ pub struct StaticHit {
     pub turning: bool,
 }
 
+/// Accumulated tracking error in one speed band ([`PoliceStats::tracking_err`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct TrackingErr {
+    /// Sum of the per-step gaps, m.
+    pub sum_m: f32,
+    /// Steps measured.
+    pub n: u32,
+    /// Largest gap, m.
+    pub max_m: f32,
+    /// Steps with a gap over 1 m (wider than a lane allows next to a verge).
+    pub over_1m: u32,
+}
+
+impl TrackingErr {
+    /// Mean gap, m (0 with no samples).
+    pub fn mean_m(&self) -> f32 {
+        if self.n == 0 {
+            0.0
+        } else {
+            self.sum_m / self.n as f32
+        }
+    }
+}
+
 /// Counters for tests, tuning and the README perf/behaviour tables.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PoliceStats {
@@ -390,6 +414,11 @@ pub struct PoliceStats {
     /// entry per contact episode (owner playtest row 66).
     #[serde(default)]
     pub static_hits: Vec<StaticHit>,
+    /// Tracking error of pro-driven units: the lateral gap between the car and its own planned
+    /// line, by speed band (< 10, 10-20, >= 20 m/s). Deterministic per seed, unlike wall hits
+    /// (lead, track-following follow-up to row 168).
+    #[serde(default)]
+    pub tracking_err: [TrackingErr; 3],
     /// Push-throughs: a siren unit blocked by a civilian or parked car shoving it aside at low
     /// speed (owner playtest row 61).
     #[serde(default)]
@@ -2157,10 +2186,33 @@ impl PoliceSystem {
             pro::ProDriver::new(params, limits, geometry, v)
         });
         let out = driver.drive(&ctx, &u.cmd.track, room, dt);
+        // Tracking error: the car to its planned line (the window's first points).
+        let (_, _, pts, _) = driver.line();
+        let gap = pts
+            .windows(2)
+            .take(12)
+            .map(|w| graph::dist(graph::closest_on_segment(w[0], w[1], ctx.pos).1, ctx.pos))
+            .fold(f32::INFINITY, f32::min);
+        let band = if v < 10.0 {
+            0
+        } else if v < 20.0 {
+            1
+        } else {
+            2
+        };
         u.pro_dbg = (out.planned_mps, out.reversing);
         u.turning_round = out.turning_round;
         let input = out.input;
         let steer = (input.steer - u.effects.steer_pull).clamp(-1.0, 1.0);
+        if gap.is_finite() && !out.reversing && !out.turning_round {
+            let t = &mut self.stats.tracking_err[band];
+            t.sum_m += gap;
+            t.n += 1;
+            t.max_m = t.max_m.max(gap);
+            if gap > 1.0 {
+                t.over_1m += 1;
+            }
+        }
         (steer, input.throttle, input.brake)
     }
 
