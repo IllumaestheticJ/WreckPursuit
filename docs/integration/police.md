@@ -1801,3 +1801,165 @@ Proposed follow-ups: a cornering-limited intercept speed on hairpins (wp_police)
 - Founders Cut pair re-seeded 60 → 58. Seeds 50–70: escape story on 11 of 21 (was 16), control captured on 20, both on 11. Units no longer stall next to the stopped racer in the lay-by (D's report), so he is caught more often.
 - `pick_harlan_dirt_run.ron` regenerated (`WP_RACE_WRITE_SCENARIOS=1`, wp_wasm): presence 0.5.
 - **Queue cap (lead/round13 lantern_checkpoint):** racer 4 sat behind busted racer 3, parked in the lane, from about 70 s to 300 s with units nearby. The queue exemption kept it Running, so the race never ended. A racer now waits behind another racer for at most `QUEUE_MAX_WAIT_S` (15 s) without moving; after that the normal stop and pinned rules apply. lantern_checkpoint ends at 66 s and passes. (`race_picker::ashpeak_metro_circuit` fails on lead/round13 7538c828 too, with police off: 1 of 6 finish. Not police.)
+## Owner tuning 2026-10-23: far fewer cops, far less suspicious
+
+Owner: "cops are far too common and spawn too much at night time — the night spawn rate should be the daytime rate, and the new night time rate should be 1/4 what it is now. The suspicion/investigation rate needs to also be FAR less sensitive."
+
+**Patrols (`data/police/presence.toml [patrols]`).** Core / Suburb / Industrial:
+
+| phase | before | after |
+|---|---|---|
+| dawn | 2 / 1 / 1 | 2 / 1 / 0 |
+| day | 8 / 3 / 2 | 3 / 1 / 1 (the old night) |
+| dusk | 6 / 2 / 2 | 2 / 1 / 0 |
+| night | 3 / 1 / 1 | 1 / 0 / 0 (a quarter of the old night's 5, rounded) |
+
+The city total per phase must stay ≥ 1: `PoliceSystem::unit_cap` reads a zero total as "no police in this city" and allows no units at all.
+
+**Investigations (`data/police/heat.toml`).**
+- `heat.unseen_factor` 0.2 → 0.1: an offence nobody saw adds half the heat it did.
+- New `heat.call_min_heat = 1.5` (`HeatConfig::call_min_heat`, checked in `PoliceSystem::on_violation`): an unseen offence only becomes a call (a unit sent to look) once the racer's heat reaches 1.5. Unseen heat decays all the time, so that takes a cluster of offences (a crash plus a red light), not a bit of unseen speeding. Before, every unseen offence was a call.
+- Radar (`heat.radar`): over by max(4.5 m/s, 25 %) held 2 s, was max(2.24 m/s, 10 %) held 1 s. This is no longer wp_world's own speeding margin.
+- Blatant speeding (`heat.blatant`) is unchanged: row 80's 20 km/h over within 90 m is an owner rule (`wp_sim/tests/police_passby.rs`).
+
+**Tests and scenarios re-aimed.**
+- `patrol_presence_*` take the new counts. `tests/system.rs::phase_change_adjusts_presence`: Core 3 → 2.
+- Mechanism tests that need several units near the racer (`pursued_at` in `tests/system.rs`, the `radio_chatter` harness) use `dense_patrols`, the old table. The two call tests set `call_min_heat = 0`.
+- `escape_break_contact_night`: 7 escapes in 10, max 6 → 9.
+- With fewer pool units, more calls go to spawned responders and some are not met within the 60 s run (61 = never). `response_day_core` max 15 → 25 s (presence.toml's target). `response_day_suburb` mean 28 → 40 s, max 38 → 61. `response_night_core` 25 s reached 0.85 → 0.6, mean 17 → 30 s, max 40 → 61.
+- **Outside wp_police (test only):** `crates/wp_sim/tests/police_passby.rs` builds its police with the old dense table so it still finds a cop on a straight.
+## AI units that get nowhere despawn out of sight (owner request, 2026-10-23)
+
+Owner: AI police that are not making meaningful progress and not in view of any racer should
+despawn.
+
+- New `progress.rs`: `ProgressWatch` per unit (`Unit::progress`), updated at think rate by
+  `dispatch::maintain_progress` (right after `maintain_stuck`). Goal per assignment: `Pursue` →
+  racer, `Respond` → reported racer / crash, `Intercept` → point (ambush wait point included),
+  `Patrol` → destination node. Distance = remaining length of the unit's planned track (roads bend
+  away from a destination: straight-line distance despawned moving patrols in `traffic_soak`);
+  straight line for `Pursue` (local steering track) and once within 40 m. Progress = 25 m closer than the best since the job / patrol leg
+  began, or within 40 m of the goal; `Idle` (no goal) = 40 m driven. 30 s without progress →
+  despawn when `may_vanish` (out of every racer's sight, ≥ `despawn_min_m`); in sight it keeps
+  going and is re-checked every think step.
+- The call is handed back (`ResponseOutcome::NoProgress`) and dispatched again; pool patrols are
+  refilled by `maintain_pool`. `PoliceStats::no_progress_despawns` counts them.
+- Exempt: player units, `UnitRole::Tool`, helicopters, wrecked / out-of-service units, parked
+  roadblock / spike assignments. Applies to headless and physical units alike, both damage modes.
+  `set_unstick_recovery(false)` disables the despawn (measurements).
+- Constants in `progress.rs` (`NO_PROGRESS_S`, `GAIN_M`, `ARRIVED_M`, `MOVE_M`), like `stuck.rs`.
+- Tests: `progress::tests::*` (closing in vs. holding distance, arrival / new job / new patrol leg
+  reset, idle shuffling vs. driving).
+- Outside my crate: none.
+
+## Stuck patrol cars (playtest row 170)
+Patrol cars in the Vesper traffic soak froze for good: nose to nose with traffic, in parked
+cars, tangled after a turn. Two route-geometry causes (round 12's `stuck` module recovers
+cars once stuck; these stop them getting there):
+- **Road network centrelines were a lane, not the road centre** (`wp_world::roads`, D's
+  crate; see `docs/integration/world.md`). Units add a 1.75 m lane offset to that line, so
+  one way they drove in the parking lane and the other way on the centre line, head-on with
+  oncoming traffic. Centrelines are also simplified (0.2 m): each interior point is a graph
+  node and a patrol destination.
+- **Routes turn on the spot at junction centres.** A physical car swings wide by its turning
+  radius: into the oncoming lane turning right, into the parking lane turning left.
+  `unit::round_junction_corners` replaces 25-150° corners with 10 m arcs (`TURN_RADIUS_M`;
+  the inside lane path stays ~8 m). Applied in `Unit::set_command` for physically driven
+  units without lights only: the pro driver smooths its own line, internal units follow the
+  track exactly.
+
+Measured on the Vesper traffic soak, seeds 5-12 (police-seconds still for > 5 s while
+wanting to move / units still stuck at the end), both with the `stuck` module: main 1793 /
+48, with these fixes 1129 / 28.
+
+Tests: `unit::tests::junction_corners_become_drivable_arcs`, `gentle_bends_and_u_turns_stay`,
+`wp_world/tests/city_v2.rs::road_network_centrelines_offset_into_the_right_lane`.
+
+Measured before merging main's world v7 map; not re-measured since.
+
+Moved police exposed a bug elsewhere, fixed here (outside this workstream's crates):
+- **A busted AI racer blocked the race for good** (`wp_race`, `wp_opponent`). It stopped where
+  it was caught; on a one-lane street (pass room ±0.35 m) with its cruiser beside it, nobody
+  could pass and Hollins sprint / Lantern checkpoint never finished. `LiveRace` now tows
+  busted AI cars `IMPOUND_AFTER_S` (6 s) after the capture (`StepOut::impound`; the wasm race
+  session and the `race_picker` loop despawn them; a towed car is never course-reset), and
+  busted racers pull over to the kerb clear of junctions first instead of braking where
+  they are.
+- simcli: new `police_tools: false` scenario switch (the AI captain lays no spikes or
+  roadblocks of its own; exact-spot `spikes_at` / `roadblock_at` orders still work).
+
+Re-aimed on the corrected graph (reasons and numbers in each file):
+- `police_sideswipe_patrol_night`: racer starts at (-164.9, -190) (unit 2 patrols ~270 m
+  further south); contact 8.70 s as before.
+- `police_tunnel_escape_founders_cut` + `_control`: `police_tools: false` (the captain now
+  finds spike sites on the route; these scenarios are about covered-road line of sight).
+- `day_core_speeder`: seed 106 (one run of 103-107 started at 20.9 s; elsewhere as quick
+  as main or quicker).
+- `response_day_core`: worst call 15 -> 20 s and mean 10 -> 11 s. **Review with the police
+  balance:** 48-run means are level (7.3/8.1/5.4/9.5 s vs main 6.8/7.3/6.0/8.3 s), but 4 of
+  68 calls take over 25 s (main 0 of 71). Main's Core patrols mostly drove to the highway:
+  patrol destinations are drawn per node, and 260 of main's 308 Core nodes were highway
+  sample points (here 32 of 80). Length-weighted destinations would remove the sampling
+  bias either way.
+- `wp_race` `hollins_descent`: `check_with_police` (its stakeout pursuits now catch two of
+  four; captures count, like `hollins_sprint`).
+- `wp_opponent` `live_police_chase…`: seed 1 (its own harness has no tow).
+
+Known gaps: units queue behind traffic jams (correctly) at the soak's 4x density;
+`opponent_pace` `lantern_checkpoint_s50` fails identically on main (not this branch's).
+
+## Police PR port: #64, #68, #66 on main 6904b5e1 (owner "merge all", 2026-10-24)
+
+The three open police PRs were merged in the lead's order onto one branch off main, with the
+gate at the end and one golden bless.
+1. **#64**: far fewer cops (day = old night, night = a quarter) and far less sensitive investigations.
+2. **#68**: AI units getting nowhere despawn out of sight.
+3. **#66**: road-centre centrelines, junction arcs, busted AI racers towed.
+
+**Conflicts.**
+- **#68** predates main's in-place resets (row 78). `maintain_resets` and `maintain_progress` both run, resets first.
+- **#66 + #64.**
+  - simcli `police_config` takes both `dense_patrols` and `police_tools`.
+  - `response_day_core`: #66's mean bound (11 s) with #64's worst-call bound (25 s).
+  - #66's playtest row 169 is renumbered **170**, because main's 169 is the street-bets row.
+
+**Dropped: #66's commit 1420c934** ("wp_sim, wp_damage: no eigen solve in dynamic mass properties").
+- It came in with the PR branch but is not part of its routing or tow change. It changes damage physics, which is not police's to change.
+- On main plus the three PRs it fails two wp_wasm tests, both green on main and with it reverted:
+  - `street_tests::a_racer_never_gives_up_after_a_spin_or_a_crash`: the racer loses on the time limit.
+  - `drawn_colliders::every_hard_static_contact_is_near_something_drawn`: two hard terrain contacts at (-542, 240) in the night run.
+- It also moves every crash and damage golden.
+- Reverted in the port; left for its owner to land separately.
+
+**Re-aims** (reasons and numbers in each file):
+- `wp_police` `system::phase_change_adjusts_presence`: run 30 s, not 20. With 3 Core units a surplus unit retires only once it is out of the racer's sight.
+- `wp_race` `city_sprint_police.ron`: starting heat 6.0 → 8.25 (the band where both runs pass is 7.5–9.0).
+- `golden_city_chase`: the night's only patrol now starts at (276.8, 131) heading north. The racer starts 130 m behind it.
+- `police_sideswipe_patrol_night`: `dense_patrols` like its day twin. #66's aim, unit 2, no longer exists at night.
+- `response_day_suburb`: floor 0.33 → 0.25 (2 of 7 calls met within 25 s).
+- `response_night_suburb`: mean bound 30 → 33 s (measured 31.8 s).
+- Founders Cut tunnel pair:
+  - #66's `police_tools: false` is restored. It was lost in the PR's later merge of main; without it a captain's spike strip stops the racer at 90 % of the route.
+  - Re-seeded 58 → 52 (both files pass on 10 of seeds 50–70; 51–54 is the widest run).
+
+**Lane-open give-way: not in this port.** It was measured on the merged base with `race_picker` (police on, profile presence, seeds 1–8):
+
+| | crowfoot_ascent | ashpeak_metro_circuit |
+|---|---:|---:|
+| main + PRs | 32 / 32 finish | 7 / 48 |
+| + give-way + crowfoot tail-only | 24 / 32 | 7 / 48 |
+
+The PRs' fewer cops and towed busted cars already bring Crowfoot home. The give-way (units on one-lane roads stand still for a pursued racer they are not after) costs 8 Crowfoot finishers and gains nothing on metro, so it is held back.
+
+On round-13 main (431232c5) the same change took metro from 1 to 13 finishers and Crowfoot from 0 to 3. Its police bench guard rails held on the merged base (`police-bench --seeds 8`, 96 runs):
+
+| | capture | escape | crash / min |
+|---|---:|---:|---:|
+| main + PRs | 69 % | 24 % | 0.69 |
+| + give-way | 72 % | 23 % | 0.74 |
+
+The patch is kept for a follow-up on this base.
+
+**Kept: the police tracking-error metric** (`PoliceStats::tracking_err`; police-bench JSON; race_picker). This was the lead's ask. It measures, per unit, the lateral gap between the car and its own planned line, by speed band. It is deterministic, measurement only, with no behaviour change.
+
+**Goldens.** Re-blessed once, at the end of the port (see the bless commit for the list).

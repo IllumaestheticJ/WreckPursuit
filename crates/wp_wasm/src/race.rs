@@ -911,6 +911,10 @@ impl RaceRun {
             let cur = sim.police().racer(*e).map_or(0.0, |r| r.heat);
             sim.police_mut().set_heat(*e, cur + h);
         }
+        // Busted AI cars are towed away (left in place they can block the field for good).
+        for e in &out.impound {
+            let _ = sim.despawn_vehicle(*e);
+        }
         emitted
     }
 

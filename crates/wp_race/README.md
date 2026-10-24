@@ -261,7 +261,8 @@ cargo run --release -p wp_race --example judge_bench
   to the Knob Observatory Lot; at least three finish, nobody is wrecked; deterministic.
 - `tests/race_picker.rs` — every race of the browser's picker (`catalog`), raced to the finish
   from `apps/simcli/scenarios/race/pick_<id>.ron` with AI in every seat and the browser's glue
-  (`live::LiveRace`, meet report, stake heat); expectation ranges per race (winner time,
+  (`live::LiveRace`, meet report, stake heat, the tow of busted AI cars 6 s after capture via
+  `StepOut::impound`); expectation ranges per race (winner time,
   finishers, no wrecks, patrol + heat for the illegal daytime run); deterministic.
 - `src/roster.rs`, `src/betting.rs` unit tests — roster data, Elo updates (upsets, DNFs, form,
   save round-trip), deterministic `pow10`, meet fields (tiers, locals), off-screen results;

@@ -12,6 +12,8 @@
 // Row 158 (2026-10-23): no session-start patrol in view of this already-wanted racer, and no
 // spawn on any road it can reach within 3 s: 5 escapes in 10 (2 on the same seeds just before),
 // so max 6. Row 157 (slower heat) re-aims it again.
+// 2026-10-23 (owner: far fewer cops, night a quarter of the old night patrols): 7 escapes in
+// 10 with one Core patrol at night, so max 9 (at least one run still not an escape).
 (
     name: "police_escape_break_contact_night",
     seed: 600,
@@ -21,6 +23,6 @@
     stop_after_first_pursuit: true,
     racers: [(district: Core, speed_factor: 2.6, cornering_g: 0.95, initial_heat: 15.0, violations: false, stay_in_district: false)],
     expect: [
-        (metric: "escapes", min: 1.0, max: 6.0),
+        (metric: "escapes", min: 1.0, max: 9.0),
     ],
 )

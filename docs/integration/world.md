@@ -2157,3 +2157,15 @@ area out for race start".
   Loop 9's six lanes routes along the near carriageway), `route_via_waypoints_passes_them_in_order`
   (now: within the road); `street.rs` `a_gate_spans_the_whole_road`, `gates_count_in_order_and_cap_progress`; `street_tests.rs`
   `betting_holds_both_cars_and_the_start_is_cleared`; replay round trip carries the new op.
+
+## Road network centrelines follow the road centre (playtest row 170)
+`RoadNetworkIndex` built each edge's centreline from the node centres plus the interior
+points of the road's first lane. On curved roads (74 % of Port Vesper's edges) that is a
+lane's offset off centre, and users that offset into a lane from it (police units, 1.75 m)
+ended up one lane too far right one way and on the centre line the other way. Edges now use
+the interior points of the road surface's own centreline (`RoadSurface::centre`, oriented
+a -> b), so straight roads stay node-to-node, simplified to the points that shape the
+road (Douglas-Peucker, 0.2 m): every interior point is a node in users' graphs (police patrol
+destinations). Test:
+`tests/city_v2.rs::road_network_centrelines_offset_into_the_right_lane` (1918 samples: 937 in
+the wrong lane before, 4 at junction edges after). Police side: `docs/integration/police.md`.

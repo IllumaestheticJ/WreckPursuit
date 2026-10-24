@@ -86,7 +86,7 @@ impl Harness {
             .max()
             .unwrap_or(0);
         let mut police = PoliceSystem::with_city(
-            PoliceConfig::builtin(),
+            PoliceConfig::builtin_dense_patrols(),
             graph,
             PoliceSetup {
                 seed,

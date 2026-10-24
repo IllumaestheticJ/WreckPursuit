@@ -31,6 +31,8 @@
         // Re-aimed 2026-10-23 (wp_police row 158): the racer is wanted from the start, so no
         // session-start patrol may be placed in its view (it was recognised at 0.30 s by one
         // placed in plain sight). Measured 7.00 s (fog twin: 11.70 s).
-        pursuit_started_before(t_s: 9.0),
+        // Re-aimed 2026-10-23 (owner: Core day patrols 8 -> 3): measured 10.70 s (fog twin
+        // unchanged at 11.70 s, still later).
+        pursuit_started_before(t_s: 12.0),
     ],
 )

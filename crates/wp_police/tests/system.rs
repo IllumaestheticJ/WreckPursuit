@@ -144,11 +144,14 @@ fn phase_change_adjusts_presence() {
     let mut h = Harness::new(17.9, 2);
     h.world.ratio = 60.0; // 1 sim second = 1 game minute; crosses 18:00 after 6 s.
     h.run(1.0, &[]);
-    assert_eq!(h.police.pool_count(District::Core), 8);
+    assert_eq!(h.police.pool_count(District::Core), 3);
     // No racers to hide from: surplus units retire one per think step.
-    h.run(20.0, &[]);
+    // A unit retires only out of the racer's sight: with PR #64's 3 Core units (was 8) on
+    // main's sight rules all three were in view of the racer until 20-30 s (retired by 30 s,
+    // still dusk: 18:24).
+    h.run(30.0, &[]);
     assert_eq!(h.police.phase(), wp_contracts::DayPhase::Dusk);
-    assert_eq!(h.police.pool_count(District::Core), 6);
+    assert_eq!(h.police.pool_count(District::Core), 2);
 }
 
 #[test]
@@ -881,6 +884,8 @@ fn reckless_call_with_no_unit_close_spawns_a_hidden_responder() {
         suburb: 0.0,
         industrial: 0.0,
     };
+    // Every reported violation becomes a call (the shipped heat floor needs a crash spree).
+    cfg.heat.heat.call_min_heat = 0.0;
     let rs = cfg.presence.response.clone();
     let mut h = Harness::with_config(23.0, 11, DamageMode::Arcade, cfg);
     h.run(0.5, &[]);
@@ -953,6 +958,7 @@ fn unit_cap_holds_responders_back() {
         industrial: 0.0,
     };
     cfg.presence.response.max_units_by_level = [0; 6];
+    cfg.heat.heat.call_min_heat = 0.0;
     let mut h = Harness::with_config(23.0, 11, DamageMode::Arcade, cfg);
     h.run(0.5, &[]);
     // Pursuit tools (a spike-strip unit) may deploy once the chase starts (since round 12c
@@ -1243,7 +1249,8 @@ fn units_on_racer(h: &Harness) -> Vec<wp_police::UnitId> {
 
 /// Start a pursuit of the harness racer at `heat` (driving at 20 m/s).
 fn pursued_at(hour: f32, seed: u64, heat: f32) -> Harness {
-    let mut h = Harness::new(hour, seed);
+    let cfg = PoliceConfig::builtin_dense_patrols();
+    let mut h = Harness::with_config(hour, seed, DamageMode::Arcade, cfg);
     h.speed = 20.0;
     h.run(1.0, &[]);
     h.police.set_heat(RACER, heat);
