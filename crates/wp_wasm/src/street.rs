@@ -1925,6 +1925,8 @@ fn roam_config(seed: u64) -> RaceConfig {
         seed,
         allow_abandon: false,
         civilian_contact_dq: false,
+        // Out of a race, roamers still drive round traffic.
+        ram_traffic: false,
         cooldown_speed_mps: 6.0,
         corridor: CorridorOptions {
             opposing: OpposingLanes::Never,
