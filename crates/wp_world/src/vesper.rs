@@ -6039,19 +6039,58 @@ mod tests {
         let (net, _) = city();
         let lines = crate::surface::edge_barriers(&crate::CityMap::new(net.clone()));
         let walled: f32 = lines.iter().map(|l| geom::cumulative(l)[l.len() - 1]).sum();
+        // Outer edges: the right edge of every highway surface, the left one too unless a
+        // median barrier walls it (a divided highway's median carries one barrier, owned by one
+        // carriageway).
+        let medians = crate::surface::median_barriers(net);
+        let near_median = |q: V2| {
+            medians.iter().any(|m| {
+                m.windows(2).any(|w| {
+                    geom::point_segment_distance(q, geom::xy(w[0]), geom::xy(w[1]))
+                        < crate::surface::MEDIAN_CLEAR_M
+                })
+            })
+        };
         let mut edges = 0.0;
         for s in net.surfaces.iter().filter(|s| s.highway) {
             let len = geom::cumulative(&s.centre)[s.centre.len() - 1];
-            edges += if s.median_barrier { len } else { 2.0 * len };
+            edges += len;
+            if !s.median_barrier {
+                let (l, _) = crate::surface::surface_edges(s);
+                let lc = geom::cumulative(&l);
+                let line = geom::offset_polyline(&l, -crate::surface::BARRIER_HALF_WIDTH_M);
+                for k in 0..l.len() - 1 {
+                    if !near_median(geom::xy(line[k])) {
+                        edges += lc[k + 1] - lc[k];
+                    }
+                }
+            }
         }
-        // Measured 61 %: open at ramp tapers, gores and junctions (and 40 m either side of
-        // them), on decks and in the Hollins Tunnel.
+        // Measured 61 % before the median-side duplicates were dropped; open at ramp tapers,
+        // gores and junctions (and 40 m either side of them), on decks and in the Hollins
+        // Tunnel.
         assert!(walled > 0.55 * edges, "walled {walled} of {edges} m");
         // Never on any paving (ramp joins stay open), never in a covered span (the Hollins
-        // Tunnel's walls; the barrier stops at its portals).
+        // Tunnel's walls; the barrier stops at its portals), never beside a median barrier
+        // (one ran 0.25 m beside Loop 9's north median and stuck out of its face).
         let covers: Vec<CoverShape> = net.covered.iter().map(CoverShape::new).collect();
+        let medians = crate::surface::median_barriers(net);
         for l in &lines {
             for p in l {
+                for m in &medians {
+                    for w in m.windows(2) {
+                        let d = geom::point_segment_distance(
+                            geom::xy(*p),
+                            geom::xy(w[0]),
+                            geom::xy(w[1]),
+                        );
+                        assert!(
+                            d >= crate::surface::MEDIAN_CLEAR_M - 0.01
+                                || (p[2] - w[0][2]).abs() > 3.0,
+                            "edge barrier {d:.2} m from a median barrier at {p:?}"
+                        );
+                    }
+                }
                 assert!(
                     !crate::surface::inside_other_paving(net, usize::MAX, *p),
                     "barrier on paving at {p:?}"
