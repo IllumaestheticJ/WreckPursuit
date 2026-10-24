@@ -26,6 +26,7 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `drift_lab.rs` | scripted slide drivers for Drift Lab B / C (`kick_catch`, `drift_run`); tables via `--example drift_lab_c` |
 | `twitch_lab.rs` | keyboard twitch measurement (row 102): closed-loop key-tapping driver through lane changes, slalom, sweeper, kerb hit; tables via `--example drift_twitch` |
 | `assists.rs` | pedal filters (none with TCS Off), TCS Off / Half / Full (throttle cut + brake-based traction control; Half = integral slip hold at 3.6× peak), ESC (lagged ~1°/g reference) |
+| `vehicle.rs` → `hill_hold_active` | hill hold (feature F45): with the automatic clutch on and open, no throttle / brake / handbrake and under 1 m/s, the service brakes hold the car at 40 % pedal (released by the throttle or a push past 1 m/s; not on torque-converter automatics, which creep by design); both damage modes. `tests/hill_hold.rs` (4–25 % grades, uphill launch). Residual: the tyre model creeps ~0.8 mm/s per % of grade at rest |
 | `presets.rs` | one-click `AssistPreset` Rookie (TCS Full, ABS Full) / Street (TCS Half, ABS Full) / Sim (TCS Off, ABS Half) (GDD §6): damage mode + `AssistProfile` per input device; `matching` detects a customised setup |
 | `aero.rs` | drag, axle lift/downforce |
 | `ffb.rs` | rack torque (aligning torque + caster trail), road rumble, damper |

@@ -60,6 +60,38 @@ const AUTO_CLUTCH_OPEN_FRAC: f32 = crate::drivetrain::AUTO_CLUTCH_HOLD_IDLE_FRAC
 pub const STALL_FRAC: f32 = 0.5;
 /// Manual clutch: pressing the pedal at least this far re-cranks a stalled engine.
 pub const RECRANK_PEDAL: f32 = 0.9;
+/// Hill hold (feature F45): below this speed, m/s, with no throttle, brake or handbrake and the
+/// automatic clutch open, the service brakes hold the car (see [`hill_hold_active`]; not on
+/// torque-converter automatics, which creep at idle by design).
+pub const HILL_HOLD_SPEED_MPS: f32 = 1.0;
+/// Brake pedal the hill hold applies (enough for a 25 % grade on every roster car).
+pub const HILL_HOLD_PEDAL: f32 = 0.4;
+/// Throttle, brake or handbrake input above this counts as the driver's (ends the hill hold).
+const HILL_HOLD_INPUT: f32 = 0.02;
+/// The automatic clutch counts as open below this engagement.
+const HILL_HOLD_CLUTCH_OPEN: f32 = 0.05;
+
+/// Hill hold (feature F45, playtester B9: the Vesper spawn car rolled downhill with no input):
+/// true when the automatic clutch is on and open (`clutch` below
+/// [`HILL_HOLD_CLUTCH_OPEN`]), the driver presses nothing (throttle, brake and handbrake all at
+/// most [`HILL_HOLD_INPUT`]) and the car is slower than [`HILL_HOLD_SPEED_MPS`]. Stateless, so
+/// it lets go the moment the throttle is touched or the car is pushed (a hit) faster than
+/// that. A driver assist: identical in every damage mode.
+pub fn hill_hold_active(
+    auto_clutch: bool,
+    throttle: f32,
+    brake: f32,
+    handbrake: f32,
+    clutch: f32,
+    speed_mps: f32,
+) -> bool {
+    auto_clutch
+        && clutch < HILL_HOLD_CLUTCH_OPEN
+        && throttle <= HILL_HOLD_INPUT
+        && brake <= HILL_HOLD_INPUT
+        && handbrake <= HILL_HOLD_INPUT
+        && speed_mps < HILL_HOLD_SPEED_MPS
+}
 /// The tyre sweep starts this far above the top of the travel, m (see `probe_wheel`).
 const PROBE_LIFT_M: f32 = 0.3;
 /// Fraction of the tyre's half width used by the sweep (the shoulder is rounded).
@@ -1022,6 +1054,12 @@ impl Vehicle {
         std::array::from_fn(|i| self.wheels[i].fz)
     }
 
+    /// Strut compression speeds (FL, FR, RL, RR), m/s (+ = compressing), from the last step.
+    /// For the damage model's landing / kerb loads (`wp_damage::inertial`).
+    pub fn wheel_compression_speeds(&self) -> [f32; 4] {
+        std::array::from_fn(|i| self.wheels[i].vcomp)
+    }
+
     /// Peak slip angle of wheel `i`'s tire, rad.
     pub fn tire_peak_slip(&self, i: usize) -> f32 {
         self.corners[i].tire.peak_slip_angle_rad
@@ -1818,6 +1856,25 @@ impl Vehicle {
         }
         brake[2] += handbrake * self.def.brakes.handbrake_rear_nm;
         brake[3] += handbrake * self.def.brakes.handbrake_rear_nm;
+        // Hill hold (F45): at a standstill with no input and the automatic clutch open, the
+        // service brakes hold the car (released by the throttle or a push past 1 m/s).
+        // Not with a torque converter: an automatic creeps at idle by design (its converter
+        // never reads as an open clutch here).
+        if self.converter.is_none()
+            && hill_hold_active(
+                assists.auto_clutch,
+                thr_in,
+                brk_in,
+                handbrake,
+                self.clutch,
+                ch.lin_vel.length(),
+            )
+        {
+            let hold = service_torques(&self.brake_def(), HILL_HOLD_PEDAL);
+            for ((b, h), s) in brake.iter_mut().zip(hold).zip(eff.brake_scale) {
+                *b = b.max(h * s.max(0.0));
+            }
+        }
         // Brake-based traction control (part of TCS) on driven axles whose diff can slip.
         let dir = if self.gearbox.gear < 0 { -1.0 } else { 1.0 };
         let mut tc_axles = [BtcAxle {
