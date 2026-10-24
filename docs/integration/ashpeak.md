@@ -36,9 +36,9 @@ None.
 ## Goldens
 Eight new race goldens in `apps/simcli/golden/` (`race_ashpeak_downtown_checkpoint`,
 `race_ashpeak_metro_circuit`, `race_crowfoot_ascent`, `race_crowfoot_descent`,
-`race_grizzly_grade_sprint`, `race_harlan_dirt_run`, `race_route7_tunnel_sprint`,
+`race_grizzly_grade_sprint`, `race_harnell_dirt_run`, `race_route7_tunnel_sprint`,
 `race_waterfront_drag`). No existing golden changed.
 
 ## Known gaps
-- Harlan Flats farmland uses `DistrictId::Suburb` (no farm district in the contract).
+- Harnell Flats farmland uses `DistrictId::Suburb` (no farm district in the contract).
 - The greybox (`data/city/ashpeak.greybox.glb`) is about 25 MB.

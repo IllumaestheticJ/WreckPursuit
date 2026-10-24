@@ -3,12 +3,16 @@
 //! City data tools (workstream 05, native only — never reachable from `wp_wasm`):
 //! - [`osm`]: OpenStreetMap `.osm.pbf` → `wp_world` road network.
 //! - [`glb`]: greybox mesh (`.greybox.glb`) for the testbed and art blockouts.
+//! - [`dedup`]: which parts of the `ashpeak` greybox the shared `vesper_v2` greybox draws.
+//! - [`parts`]: the `vesper_v2` / `ashpeak` greyboxes as parts (Port Vesper ships once).
 //! - binaries `city-import` (OSM) and `gen-city` (procedural fallback).
 
 #![warn(missing_docs)]
 
+pub mod dedup;
 pub mod glb;
 pub mod osm;
+pub mod parts;
 
 use std::path::Path;
 
@@ -98,10 +102,11 @@ mod tests {
             fresh == shipped,
             "vesper_v2.greybox.glb is stale: run `just city-v2`"
         );
-        let b64 = std::fs::read_to_string(dir.join("vesper_v2.greybox.b64.txt")).unwrap();
+        // The browser reads the parts (`parts`, tests/greybox_parts.rs), not a monolithic
+        // .b64.txt.
         assert!(
-            b64 == base64(&shipped),
-            "vesper_v2.greybox.b64.txt does not match the .glb"
+            !dir.join("vesper_v2.greybox.b64.txt").exists(),
+            "vesper_v2.greybox.b64.txt is shipped again: the parts replace it (`just city-v2`)"
         );
         assert!(
             // 7.5 MB before the residential lots (rows 94–95: houses with pitched roofs,
@@ -140,10 +145,9 @@ mod tests {
             fresh == shipped,
             "ashpeak.greybox.glb is stale: run `just city-ashpeak`"
         );
-        let b64 = std::fs::read_to_string(dir.join("ashpeak.greybox.b64.txt")).unwrap();
         assert!(
-            b64 == base64(&shipped),
-            "ashpeak.greybox.b64.txt does not match the .glb"
+            !dir.join("ashpeak.greybox.b64.txt").exists(),
+            "ashpeak.greybox.b64.txt is shipped again: the parts replace it (`just city-ashpeak`)"
         );
         // About four times Port Vesper's area on a 16 m drawn ground (24.9 MB at first).
         assert!(

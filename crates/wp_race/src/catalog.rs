@@ -519,9 +519,9 @@ pub fn races() -> Vec<RaceDef> {
             grid: Some(GridLayout::SingleFile { gap_m: 8.0 }),
         },
         RaceDef {
-            id: "harlan_dirt_run",
-            name: "Harlan Flats dirt run",
-            blurb: "Dusk sprint over Harlan Flats' gravel section roads towards Harlan Crossing.",
+            id: "harnell_dirt_run",
+            name: "Harnell Flats dirt run",
+            blurb: "Dusk sprint over Harnell Flats' gravel section roads towards Harnell Crossing.",
             city: RaceCity::Ashpeak,
             kind: RaceKind::Sprint,
             terrain: Specialty::Mixed,
@@ -529,12 +529,14 @@ pub fn races() -> Vec<RaceDef> {
             time_of_day_h: 19.5,
             traffic_density: 0.2,
             // Down the west section line and east along the south gravel road, finishing short
-            // of the turn up to Harlan Crossing (the AI overshoots that corner off the gravel).
+            // of the turn up to Harnell Crossing (the AI overshoots that corner off the gravel).
             course: CourseSpec::PoiToPoint {
                 start: ap::POI_FARM_RUN,
                 finish: [-3500.0, -364.0, 0.0],
             },
-            length_hint_m: 3978.0,
+            // 3978 m before the county's own random stream (ashpeak de-dup, 2026-10-24) moved
+            // the farm section roads.
+            length_hint_m: 4295.0,
             ai: &[DEZ, TITO, VIC],
             seed: 43,
             prior_meets: 0,
@@ -1290,7 +1292,7 @@ mod tests {
         for id in [
             "crowfoot_ascent",
             "crowfoot_descent",
-            "harlan_dirt_run",
+            "harnell_dirt_run",
             "ashpeak_downtown_checkpoint",
             "route7_tunnel_sprint",
             "grizzly_grade_sprint",

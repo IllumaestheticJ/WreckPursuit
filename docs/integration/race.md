@@ -709,8 +709,8 @@ Vesper and on the new combined map (Port Vesper + Ashpeak County, city id `ashpe
   <length>" ("Stop here to start" above 3 m/s); hidden during races, replays and crash replays.
   Each frame `main.ts` polls `raceSpotHonked()` and calls `startRace(id, car, mode)`.
 - **New races** (`RaceCity::Ashpeak`): `crowfoot_ascent` (touge uphill, Crowfoot Ascent →
-  Crowfoot Summit), `crowfoot_descent` (Summit → Crowfoot North Foot), `harlan_dirt_run` (Harlan
-  Farm Run → Harlan Crossing), `ashpeak_downtown_checkpoint` (illegal daytime, Ashpeak Downtown →
+  Crowfoot Summit), `crowfoot_descent` (Summit → Crowfoot North Foot), `harnell_dirt_run` (Harnell
+  Farm Run → Harnell Crossing), `ashpeak_downtown_checkpoint` (illegal daytime, Ashpeak Downtown →
   Meridian Spire), `route7_tunnel_sprint` (Route 7 South → North through the Talon Tunnel),
   `grizzly_grade_sprint` (Grizzly Grade → Route 12 north foot), `waterfront_drag` (new
   `CourseSpec::PoiAhead`, 402 m from Ashpeak Waterfront, one AI), `ashpeak_metro_circuit` (2 laps
@@ -732,7 +732,7 @@ lane changes, so several finishes had to be put on the lane the start lane actua
 |---|---|---|---|
 | `crowfoot_ascent` | Crowfoot Ascent → Crowfoot Summit, single-file grid | 3543 m | 4/4, ~165 s |
 | `crowfoot_descent` | Summit → beside North Foot on the northbound carriageway, single-file grid (a two-wide grid put a car into roadside geometry: total loss) | 2892 m | 3/4, ~100 s |
-| `harlan_dirt_run` | Harlan Farm Run → the south gravel road short of Harlan Crossing (the AI overshot the turn up to the village) | 3978 m | 4/4, ~256 s (gravel-aware profile, below) |
+| `harnell_dirt_run` | Harnell Farm Run → the south gravel road short of Harnell Crossing (the AI overshot the turn up to the village) | 3978 m | 4/4, ~256 s (gravel-aware profile, below) |
 | `ashpeak_downtown_checkpoint` | `Points` from Southgate Blvd's inner eastbound lane beside the Ashpeak Downtown grid (its kerb lane only feeds the Crowfoot Interchange) → Foundry St at the Grand Promenade | 1254 m | 4/4, ~42 s |
 | `route7_tunnel_sprint` | Route 7 South → northbound past Northgate (the Route 7 North grid faces south) | 3461 m | 5/5, ~64 s |
 | `grizzly_grade_sprint` | Grizzly Grade → Route 12 northbound at the pass's north foot | 2193 m | 4/4, ~58 s |
@@ -740,18 +740,18 @@ lane changes, so several finishes had to be put on the lane the start lane actua
 | `ashpeak_metro_circuit` | Corwin Ave ↓, Southgate →, Juniper ↑, Union ← (one-block jink near Southgate, lane graph) × 2 laps | 4182 m/lap | 3/6, ~326 s |
 
 `RaceDef::grid` (new) overrides the grid layout; `None` everywhere except the two touge races.
-Known gaps: the Harlan run does not reach Harlan Crossing itself, the downtown run finishes a
+Known gaps: the Harnell run does not reach Harnell Crossing itself, the downtown run finishes a
 block east of the Spire, and the metro circuit has a jink; all three come from lane
 connectivity in the districts (no lane changes), not from the race code.
 
 
 **Gravel after the visuals merge (ws/ashpeak 438ec68).** Unpaved lanes lost their paint, and with
 it the near-asphalt grip of the painted centre and edge strips the AI had been running on. The
-AI's speed profile planned every course at its asphalt grip, so on Harlan's gravel the whole
+AI's speed profile planned every course at its asphalt grip, so on Harnell's gravel the whole
 field ran 8–22 m wide at the bends. A car outside the gate corridor as it passed a gate never
 got that gate (they are taken in order) and stalled the race ("never finished": two cars held
 at gate 3, two at gate 17). Fix in `wp_opponent`: each `CorridorSample` carries the `surface`
 under it, `CarCapability::surface_grip` gives the car's tyre ratio for gravel / dirt / grass
 (1.0 on every paved surface, so paved courses keep the same profile bit for bit), and
 `SpeedProfile::build` scales cornering, braking and traction-limited drive per sample. After
-the fix the largest lateral offset logged on Harlan is 1.4 m and all four cars finish.
+the fix the largest lateral offset logged on Harnell is 1.4 m and all four cars finish.
