@@ -2,7 +2,7 @@
 //! stored lattice, buy / sell / mod flows, the impound lot, heat carry-over, and the full
 //! loop run → captured → garage → repair → new run with the repaired car.
 
-use wp_contracts::{DamageMode, DamageSim, EntityId, VehicleInput};
+use wp_contracts::{DamageMode, DamageSim, EntityId, VehicleInput, VehicleSim};
 use wp_damage::barrier::{run_barrier, ImpactKind};
 use wp_damage::DamageModel;
 use wp_economy::{CarLocation, CarUid, Condition, Economy, RepairOption, RunEnd, ShopKind};
@@ -836,6 +836,8 @@ fn a_worn_piston_set_costs_the_car_torque_and_the_engine_stand_round_trips() {
 #[test]
 fn a_car_with_a_torn_off_panel_can_be_quoted_and_repaired() {
     let (mut c, uid) = career_with("kestrel_ts", 40_000, DamageMode::Arcade);
+    // Insured while undamaged: a damaged car cannot be insured.
+    c.insure(uid, "basic").unwrap();
     drive_and_crash(&mut c, 35.0);
     let mut snap = c
         .lattice(uid)
@@ -847,7 +849,6 @@ fn a_car_with_a_torn_off_panel_can_be_quoted_and_repaired() {
     c.profile_mut()
         .lattices
         .insert(uid.0, serde_json::to_string(&snap).unwrap());
-    c.insure(uid, "basic").unwrap();
     c.quote(uid, &ShopRequest::parse("").unwrap()).unwrap();
     c.repair(uid, &ShopRequest::parse("").unwrap()).unwrap();
     assert!(c.profile().account.car(uid).unwrap().damage.is_pristine());
@@ -1045,4 +1046,70 @@ fn leaving_a_career_race_before_the_green_light_refunds_the_bet() {
         deltas.contains(&-500) && deltas.contains(&500),
         "{deltas:?}"
     );
+}
+
+/// Put the player at `xy` at rest, then let the car settle for a second.
+fn park_at(s: &mut Session, xy: [f32; 2]) {
+    let id = player(s);
+    s.debug_place(id, xy, 0.0, 0.0, None).unwrap();
+    for _ in 0..240 {
+        let _ = s.set_input(
+            id,
+            VehicleInput {
+                brake: 0.5,
+                ..Default::default()
+            },
+        );
+        s.run_ticks(1);
+        if s.place().visit.is_some() {
+            return;
+        }
+    }
+}
+
+#[test]
+fn stopping_in_a_garage_or_safehouse_on_a_career_run_opens_the_place() {
+    let (mut c, _) = career_with("kestrel_ts", 50_000, DamageMode::Arcade);
+    let mut sc = night_run_in("ignored", DamageMode::Arcade, procedural_city());
+    sc.entities[0].speed_mps = 0.0;
+    let mut s = c.start_run(sc).unwrap();
+    assert!(!s.garages().is_empty(), "career runs show the garages");
+    assert!(
+        !s.safehouses().is_empty(),
+        "career runs show the safehouses"
+    );
+    s.run_ticks(10);
+    assert!(s.place().visit.is_none());
+    let st = s.vehicle(player(&s)).unwrap().vehicle.state();
+    let start = [st.pos[0], st.pos[1]];
+
+    let garage = s.garages()[0].clone();
+    park_at(&mut s, [garage.pos[0], garage.pos[1]]);
+    let v = s.place().visit.expect("a garage visit opens");
+    assert_eq!(v.kind, crate::garage_visit::PlaceKind::Garage);
+    assert_eq!(v.name, garage.name);
+    assert!(
+        s.garage_visit().is_none(),
+        "no demo repair panel in a career run"
+    );
+
+    // Leaving gives the car back; it must drive out before the next visit.
+    s.place_leave();
+    s.run_ticks(240);
+    assert!(
+        s.place().visit.is_none(),
+        "no new visit before leaving the ring"
+    );
+    // Out of the ring (the start spot) re-arms it.
+    let id = player(&s);
+    s.debug_place(id, start, 0.0, 0.0, None).unwrap();
+    s.run_ticks(10);
+
+    let home = s.safehouses()[0].clone();
+    park_at(&mut s, [home.pos[0], home.pos[1]]);
+    let v = s.place().visit.expect("a safehouse visit opens");
+    assert_eq!(v.kind, crate::garage_visit::PlaceKind::Safehouse);
+    assert_eq!(v.name, home.name);
+    let close = c.finish_run(&mut s).unwrap();
+    assert_eq!(close.end, RunEnd::Free);
 }

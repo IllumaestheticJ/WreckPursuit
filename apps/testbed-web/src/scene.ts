@@ -8,7 +8,7 @@ import { tagFeature } from "./perf";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { setCarEnvironment } from "./render/panels";
-import type { Barrier, GarageSite, SimEvent } from "./wasm/sim";
+import type { Barrier, GarageSite, SafehouseSite, SimEvent } from "./wasm/sim";
 import { D, DRAW_STRIDE, INTENT_STRIDE, POLICE_DRAW_FLAG, TL, TOOL_KIND, TOOL_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
@@ -32,6 +32,8 @@ const CONTACT_LIFETIME_S = 1.5;
 const MAX_CONTACT_MARKERS = 64;
 /** Garage marker colours: legit (blue) and crooked (amber) shops. */
 const GARAGE_COLOUR = { Legit: 0x3399ff, Crooked: 0xffaa22 } as const;
+/** Safehouse ring and beam colour (career runs). */
+const SAFEHOUSE_COLOUR = 0x33dd88;
 /** Height of a garage's light beam, m (visible over the greybox blocks). */
 const GARAGE_BEAM_M = 40;
 const CONTACT_DOT = new THREE.SphereGeometry(0.08, 8, 6);
@@ -513,8 +515,9 @@ export class SceneView {
   }
 
   /** Repair shop markers (`garages_json()`): a ring on the ground at the shop's radius and a
-   * light beam, blue for legit shops, amber for crooked ones. Stop inside the ring to repair. */
-  setGarages(list: GarageSite[]): void {
+   * light beam, blue for legit shops, amber for crooked ones. Stop inside the ring to repair.
+   * Safehouses (`safehouses_json()`, career runs) get the same marker in green. */
+  setGarages(list: GarageSite[], safehouses: SafehouseSite[] = []): void {
     for (const old of this.garages.children) {
       old.traverse((o) => {
         if (o instanceof THREE.Mesh) {
@@ -524,8 +527,12 @@ export class SceneView {
       });
     }
     this.garages.clear();
-    for (const g of list) {
-      const colour = GARAGE_COLOUR[g.kind] ?? GARAGE_COLOUR.Legit;
+    const places = [
+      ...list.map((g) => ({ name: `garage:${g.name}`, pos: g.pos, radius_m: g.radius_m, colour: GARAGE_COLOUR[g.kind] ?? GARAGE_COLOUR.Legit })),
+      ...safehouses.map((h) => ({ name: `safehouse:${h.name}`, pos: h.pos, radius_m: h.radius_m, colour: SAFEHOUSE_COLOUR })),
+    ];
+    for (const g of places) {
+      const colour = g.colour;
       const holder = new THREE.Group();
       holder.position.set(...g.pos);
       const ring = new THREE.Mesh(
@@ -542,7 +549,7 @@ export class SceneView {
       beam.rotation.x = Math.PI / 2;
       beam.position.z = GARAGE_BEAM_M / 2;
       holder.add(ring, beam);
-      holder.name = `garage:${g.name}`;
+      holder.name = g.name;
       this.garages.add(holder);
     }
   }
