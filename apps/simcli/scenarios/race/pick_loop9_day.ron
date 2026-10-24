@@ -17,7 +17,7 @@
     mode: Arcade,
     assists: ai,
     traffic_density: 0.5,
-    police_presence: 2.0,
+    police_presence: 2.5,
     panels: true,
     entities: [
         (
