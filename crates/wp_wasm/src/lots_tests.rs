@@ -228,12 +228,12 @@ fn visiting_a_lot_parks_todays_stock_in_its_spaces() {
 fn rep_tier_class_locks_apply_at_the_lots_too() {
     let mut c = rich(DamageMode::Arcade);
     let (lot, l) = find(&mut c, LotKind::Dealership, |l| {
-        l.class == wp_contracts::VehicleClass::Exotic
+        l.class == wp_contracts::VehicleClass::Sport
     });
     c.profile_mut().account.rep = 0;
     let view = c.lot_view(&lot).unwrap();
     let shown = view.cars.iter().find(|x| x.slot == l.slot).unwrap();
-    assert!(shown.locked, "an Exotic needs a higher rep tier");
+    assert!(shown.locked, "a Sport car needs a higher rep tier");
     let cash = c.profile().account.cash;
     assert!(c.buy_listing(&lot, l.slot).is_err());
     assert_eq!(
