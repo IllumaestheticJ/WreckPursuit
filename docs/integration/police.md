@@ -1755,3 +1755,49 @@ Bench, police-bench --seeds 8, 96 runs per arm, before → after:
 - New unit test: `engine::tests::upshift_with_a_slow_rpm_fall_still_dips_when_the_gear_is_known`.
 - On the merged tree the PR's failing case (cruiser 4→5 at 30.3 s, 0.4 dB) no longer happens: the cruiser makes no 4→5 shift in the trace. Its weakest dip is 3→4: 1.55 dB without the cue (floor 1.2 dB), 2.26 dB with it.
 - **Push-through fix (wp_police, found by the port):** a push (row 61) that started on traffic now ends as soon as the car in front is a racer or another unit. The stronger cruiser, back on Patrol after a capture, kept shoving the held player car (wp_wasm `capture_bills_holds_the_car_and_repair_continue_restores_it`: 2.45 m/s, want < 1).
+
+### Row 168: police wipe out race fields on one-lane roads (2026-10-24)
+
+Measured with `race_picker`, police on at each profile's own presence (the harness used the pick scenario's 1.0 before), seeds 1–4, before tuning. Crowfoot ascent and the metro circuit lost the whole field on almost every seed; Grizzly Grade and the waterfront drag never drew a pursuit. Traced on crowfoot_ascent seed 1.
+
+**Fixes (wp_police).**
+1. **Queued behind another racer is not caught** (`RuleInputs::held_up_by_racer`).
+   - A stopped racer waits, not caught, when another racer is within 12 m ahead, inside its lane (±3 m), and closer than any unit in that box. Neither the stop nor the pinned rule counts while it waits.
+   - Facing is the racer's last direction of travel. A sudden reversal (backing out of the queue) doesn't flip it.
+   - Box-ins and a unit right in front still capture.
+2. **A unit in the racer's lane in front of it** (`RuleInputs::blocked_ahead_only`, `[capture] blocked_ahead_stop_time_s` = 12 s).
+   - When the only units that count stand in the racer's lane in front of it, both rules wait 12 s instead of 4 s and 6 s. This covers a pursuer, interceptor or patrol that cut in or crashed there, but not a roadblock, spike car or box-in.
+   - That gives the race AI time to back out and go round. In the trace, a cruiser wedged on a hairpin had the field behind it arrested in 4 s.
+3. **Units clear a stopped racer's lane.** A shadowing unit more than 3 m into a stopped racer's lane ahead of it drives on at least 8 m/s, back to the racer by the roads. Before, it stood there as a de-facto roadblock.
+4. **Wedged units don't arrest.** A unit stuck against a wall or the terrain and trying to free itself (`UnstickState::wedged`) is left out of the capture distances.
+- Tests: `heat::tests::racer_queued_behind_another_racer_is_not_captured_until_the_queue_clears`.
+- Tried and dropped: a speed floor for a shadowing unit ahead of a moving racer (0.8× its speed). It raised police crashes 1.25 → 1.58/min on the bench.
+
+**Bench guard rails** (`police-bench --seeds 8`, 96 runs, base lead/round12 34dbeb5f → row 168): capture 73 → 72 %, escape 21 → 21 %, crash/min 1.25 → 1.25, stuck/min 2.96 → 2.75, pop-in/min 0.02 → 0.02.
+
+**races.toml tuning**, on top of the fixes:
+- grizzly_grade_sprint: a stakeout at 0.7 that knows the field on sight. Pursuits 0 → 1–2, all finish.
+- waterfront_drag: a stakeout at 0.9. Pursuits 0 → 2, both finish.
+- harlan_dirt_run: presence 0.5, backup 0.5. The field finishes on 2 of 4 seeds (was 0–1 finishers).
+
+Finishers per seed, seeds 1–4, after:
+
+| race | finishers / field |
+|---|---|
+| downtown_checkpoint | 0, 4, 4, 0 / 4 |
+| crowfoot_descent | 4, 4, 2, 4 / 4 |
+| route7 | 4 each / 5 |
+| grizzly | 4 each / 4 |
+| waterfront | 2 each / 2 |
+| harlan | 4, 4, 0, 0 / 4 |
+| crowfoot_ascent | 0 each / 4 |
+| metro_circuit | 0 each / 6 |
+
+**Not fixed: crowfoot_ascent and metro_circuit.** Presence (down to 0.3) and tactic changes (no PIT, rams, box-ins or roadblocks on metro) barely move them. These are fair captures under the rules, caused by things outside races.toml:
+1. Units hit hairpin walls at intercept speed (29.5 m/s planned into a hairpin, 13.6 m/s at impact) and wedge there.
+2. The race AI gets stuck on a hairpin and is captured under the pinned rule, and its busted car then stays parked across the one-lane road. The field behind ends Stuck (metro: 5 of 6 Stuck after fix 1's facing guard).
+3. The race AI's back-out comes too late against a unit beside it.
+Proposed follow-ups: a cornering-limited intercept speed on hairpins (wp_police), and a busted race car that clears the lane (wp_opponent / wp_race).
+- Founders Cut pair re-seeded 60 → 58. Seeds 50–70: escape story on 11 of 21 (was 16), control captured on 20, both on 11. Units no longer stall next to the stopped racer in the lay-by (D's report), so he is caught more often.
+- `pick_harlan_dirt_run.ron` regenerated (`WP_RACE_WRITE_SCENARIOS=1`, wp_wasm): presence 0.5.
+- **Queue cap (lead/round13 lantern_checkpoint):** racer 4 sat behind busted racer 3, parked in the lane, from about 70 s to 300 s with units nearby. The queue exemption kept it Running, so the race never ended. A racer now waits behind another racer for at most `QUEUE_MAX_WAIT_S` (15 s) without moving; after that the normal stop and pinned rules apply. lantern_checkpoint ends at 66 s and passes. (`race_picker::ashpeak_metro_circuit` fails on lead/round13 7538c828 too, with police off: 1 of 6 finish. Not police.)
