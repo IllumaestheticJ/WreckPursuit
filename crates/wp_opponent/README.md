@@ -113,9 +113,13 @@ gap to the player — pace is car capability × how much of it the driver dares 
     35 m of the next 160 m of the route (units ahead only — a chaser behind is beaten by
     driving on; at most every 6 s) or the route is about to end while still wanted.
   - wanted (any level) or fleeing → police cars get **no room**: no lateral margin and no side
-    constraint (aggression ≥ 0.4 leans into a unit alongside, 0.3 m of overlap), and a unit in
-    the racer's path is rammed at `RAM_CLOSING_MPS` (4 .. 10 m/s with aggression) above its
-    speed instead of stopped behind. Units are recognised from `police_positions()`.
+    constraint (aggression ≥ 0.4 leans into a unit alongside, 0.3 m of overlap), and the racer
+    never stops behind one: a moving unit in its path (> `RAM_MIN_MPS`, 3 m/s) is rammed at
+    `RAM_CLOSING_MPS` (4 .. 10 m/s with aggression) above its speed; a standing one is squeezed
+    past with no room, or pushed aside at `RAM_PUSH_MPS` (3 m/s) — standing still next to a
+    unit is a capture, and hitting one at speed pins the racer against it. Racers that are not
+    wanted keep the careful room (a touch is assault). Units are recognised from
+    `police_positions()`.
   - wanted but below the flee level → keeps racing; drivers with risk < `POLICE_YIELD_RISK`
     (0.35) pull over: if a chasing unit stays within
     `YIELD_RADIUS_M` (30 m) for `YIELD_AFTER_S` (2 s) → `Tactic::Yield`: rolls on at ≤ 6 m/s
@@ -179,8 +183,8 @@ the procedural grid's highway diverge ramps (a world geometry snag, reported in
 | `brake_error_s` (σ) | 0.15 → 0 s (consistency 0.12→0 + skill 0.03→0) | consistency, skill |
 | `line_noise_m` (σ) | 0.6 → 0.05 m | consistency |
 | `pressure_sensitivity` | 1.5 → 0.2 | consistency |
-| `headway_s` | 0.6 → 0.25 s | aggression |
-| `overtake_margin_m` | 0.9 → 0.35 m extra beside the car passed | aggression |
+| `headway_s` | 0.75 → 0.35 s | aggression |
+| `overtake_margin_m` | 1.2 → 0.6 m extra beside the car passed | aggression |
 | `side_by_side_s` | 1.2 → 4.0 s into a braking zone | aggression |
 | `defends` | aggression ≥ 0.3 | aggression |
 | `overtake_patience_s` | 1.2 → 0.3 s | aggression |

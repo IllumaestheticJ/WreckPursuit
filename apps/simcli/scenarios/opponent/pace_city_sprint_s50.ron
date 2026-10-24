@@ -12,6 +12,8 @@
 // round-12 tip (today's grids, residential grid city, police give-way; reasons in
 // docs/integration/opponent-pace.md). Re-locked 2026-10-21 on ws/police 3bccc796 + ws/harness +
 // lead/round12 (one-version handling); reasons in docs/integration/opponent-pace.md. Re-measure and widen only with a reason.
+// Re-locked 2026-10-23 (bolder racers, docs/integration/opponent.md): ai_sedan_2 12.03 s,
+// just under the old 12.1 s minimum; the other cars unchanged.
 (
     name: "opponent_pace_city_sprint_s50",
     // Slowest city runs in the test pass (round 8): skipped by debug `cargo test`, run by the
@@ -45,6 +47,6 @@
         metric(name: "race_time_s", entity: "ai_coupe", min: 8.1, max: 11.4),
         metric(name: "race_time_s", entity: "ai_sedan", min: 9.7, max: 13.6),
         metric(name: "race_time_s", entity: "ai_coupe_2", min: 8.9, max: 12.6),
-        metric(name: "race_time_s", entity: "ai_sedan_2", min: 12.1, max: 17.1),
+        metric(name: "race_time_s", entity: "ai_sedan_2", min: 10.2, max: 14.4),
     ],
 )

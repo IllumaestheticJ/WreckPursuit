@@ -20,6 +20,8 @@
 // Re-locked 2026-10-22 when the pace harness moved to the browser setup (the player seat stays
 // a player car, AI-driven, so traffic spawns round it): best ratio 2.248 -> 1.311, field
 // faster: downtown traffic now spawns round the player car instead of all over the city (about 12 civilians within 300 m of each racer before), so the field meets less of it.
+// Re-locked 2026-10-23 (bolder racers, docs/integration/opponent.md): ai_tito 49.5 s and
+// player 50.6 s, faster than the old 52.7 / 53.7 s minimums; the other cars unchanged.
 (
     name: "opponent_pace_lantern_checkpoint_s95",
     seed: 31,
@@ -87,7 +89,7 @@
         metric(name: "best_ratio", min: 0.97, max: 1.36),
         metric(name: "race_time_s", entity: "ai_juno", min: 41.1, max: 55.6),
         metric(name: "race_time_s", entity: "ai_dez", min: 40.2, max: 54.3),
-        metric(name: "race_time_s", entity: "ai_tito", min: 52.7, max: 71.3),
-        metric(name: "race_time_s", entity: "player", min: 53.7, max: 72.7),
+        metric(name: "race_time_s", entity: "ai_tito", min: 42.1, max: 56.9),
+        metric(name: "race_time_s", entity: "player", min: 43.0, max: 58.1),
     ],
 )
