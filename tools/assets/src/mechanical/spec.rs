@@ -799,6 +799,162 @@ pub fn table(id: &str) -> Option<CarSpec> {
                 exhaust(Tips::SideRight, 0.045, 0.038, false),
             )
         },
+        // Wave 3 (2026-10-23): supercars, race cars, rally raid / pre-runner.
+        "halberd_40" => CarSpec {
+            cover: Cover::Tint,
+            engine_detail: true,
+            tinted_springs: true,
+            ..base(
+                wheel(R::Monoblock, 10, 20.0, 5, 112.0, M::Trim),
+                brake(0.39, 0.038, true, Ceramic, Mono8, 165.0),
+                brake(0.38, 0.034, true, Ceramic, Fixed4, 205.0),
+                Engine::FlatPlaneV8,
+                Mount::Mid,
+                Susp::Coilover,
+                Susp::Coilover,
+                exhaust(Tips::QuadHigh, 0.05, 0.036, true),
+            )
+        },
+        "ombra_v12" => CarSpec {
+            cover: Cover::Tint,
+            engine_detail: true,
+            tinted_springs: true,
+            awd: true,
+            ..base(
+                wheel(R::SplitSpoke, 5, 21.0, 5, 112.0, M::Trim),
+                brake(0.40, 0.038, true, Ceramic, Fixed6, 165.0),
+                brake(0.38, 0.034, true, Ceramic, Fixed4, 205.0),
+                Engine::V12,
+                Mount::Mid,
+                Susp::Coilover,
+                Susp::Coilover,
+                exhaust(Tips::CentreQuad, 0.045, 0.036, true),
+            )
+        },
+        "ostwind_6t" => CarSpec {
+            cover: Cover::Black,
+            awd: true,
+            ..base(
+                wheel(R::MultiSpoke, 10, 21.0, 5, 130.0, M::Metal),
+                brake(0.42, 0.040, true, Ceramic, Fixed6, 165.0),
+                brake(0.41, 0.034, true, Ceramic, Fixed4, 205.0),
+                Engine::Flat,
+                Mount::Rear,
+                Susp::Sla,
+                Susp::Multilink,
+                exhaust(Tips::Dual, 0.045, 0.034, true),
+            )
+        },
+        "kagero_hx" => CarSpec {
+            cover: Cover::Silver,
+            engine_detail: true,
+            awd: true,
+            ..base(
+                wheel(R::Turbine, 15, 20.0, 5, 120.0, M::Metal),
+                brake(0.39, 0.038, true, Ceramic, Fixed6, 165.0),
+                brake(0.36, 0.032, true, Ceramic, Fixed4, 205.0),
+                Engine::TwinTurboV6,
+                Mount::Mid,
+                Susp::Coilover,
+                Susp::Coilover,
+                exhaust(Tips::Quad, 0.04, 0.032, true),
+            )
+        },
+        "morrigan_55" => CarSpec {
+            cover: Cover::Dull,
+            engine_detail: true,
+            tinted_springs: true,
+            ..base(
+                {
+                    let mut w = wheel(R::Monoblock, 10, 18.0, 1, 0.0, M::Trim);
+                    w.cap = CapKind::CentreLock;
+                    w
+                },
+                brake(0.38, 0.035, true, Slotted, Mono8, 165.0),
+                brake(0.355, 0.032, true, Slotted, Fixed4, 205.0),
+                Engine::SmallBlockV8 { old: false },
+                Mount::Longitudinal,
+                Susp::Coilover,
+                Susp::Coilover,
+                exhaust(Tips::SidePipes, 0.05, 0.04, true),
+            )
+        },
+        "nyx_proto" => CarSpec {
+            cover: Cover::Dull,
+            engine_detail: true,
+            tinted_springs: true,
+            ..base(
+                {
+                    let mut w = wheel(R::Monoblock, 9, 18.0, 1, 0.0, M::Trim);
+                    w.cap = CapKind::CentreLock;
+                    w
+                },
+                brake(0.38, 0.036, true, Ceramic, Fixed6, 165.0),
+                brake(0.355, 0.032, true, Ceramic, Fixed4, 205.0),
+                Engine::FlatPlaneV8,
+                Mount::Mid,
+                Susp::Coilover,
+                Susp::Coilover,
+                exhaust(Tips::Centre, 0.06, 0.045, false),
+            )
+        },
+        "merlo_20t" => CarSpec {
+            cover: Cover::Dull,
+            engine_detail: true,
+            tinted_springs: true,
+            ..base(
+                {
+                    let mut w = wheel(R::Monoblock, 6, 18.0, 5, 112.0, M::Trim);
+                    w.concave = 0.02;
+                    w
+                },
+                brake(0.38, 0.034, true, Slotted, Fixed6, 165.0),
+                brake(0.278, 0.022, true, Plain, Floating1, 205.0),
+                i4(true, true),
+                Mount::Transverse,
+                Susp::Coilover,
+                Susp::Coilover,
+                exhaust(Tips::SideRight, 0.05, 0.038, false),
+            )
+        },
+        "mesquite_pr" => CarSpec {
+            frame_rails: true,
+            tinted_springs: true,
+            ..base(
+                {
+                    let mut w = wheel(R::Truck, 6, 17.0, 6, 139.7, M::Metal);
+                    w.face_depth = 0.04;
+                    w
+                },
+                brake(0.345, 0.030, true, Plain, Floating2, 165.0),
+                brake(0.336, 0.022, true, Plain, Floating1, 205.0),
+                Engine::SmallBlockV8 { old: false },
+                Mount::Longitudinal,
+                Susp::Coilover,
+                leaf(3, false),
+                exhaust(Tips::SideRight, 0.05, 0.04, false),
+            )
+        },
+        "erg_hamada" => CarSpec {
+            frame_rails: true,
+            tinted_springs: true,
+            awd: true,
+            cover: Cover::Dull,
+            ..base(
+                {
+                    let mut w = wheel(R::Steel, 6, 17.0, 6, 139.7, M::Trim);
+                    w.face_depth = 0.045;
+                    w
+                },
+                brake(0.362, 0.034, true, Slotted, Fixed6, 165.0),
+                brake(0.34, 0.030, true, Slotted, Fixed4, 205.0),
+                Engine::DohcV8,
+                Mount::Longitudinal,
+                Susp::Coilover,
+                Susp::Coilover,
+                exhaust(Tips::BareSide, 0.055, 0.042, false),
+            )
+        },
         _ => return None,
     };
     Some(s)

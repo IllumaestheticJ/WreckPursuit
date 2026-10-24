@@ -161,7 +161,9 @@ fn kickdown_on_full_throttle() {
 fn street_cars_shift_at_believable_stock_speeds() {
     // Owner playtest row 97 (2026-10-20): stock shifts were "a little too fast"; mods make
     // them faster (`drivetrain.shift_time_scale`, ×0.28 fully modded). Stock street cars with
-    // a clutch gearbox take 0.35-0.55 s, a dual-clutch (lindwurm_4t 0.18 s, fulmine_v10 0.15 s) 0.12-0.25 s;
+    // a clutch gearbox take 0.35-0.55 s, a dual-clutch (lindwurm_4t 0.18 s, fulmine_v10 0.15 s,
+    // the wave-3 supercars 0.18 s), automated manual (ombra_v12, 0.22 s) or race sequential
+    // (morrigan_55, nyx_proto, merlo_20t, 0.15 s) 0.12-0.25 s;
     // torque-converter cars, trucks and the beater are exempt. The lead's debug cars keep
     // their old values.
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/cars");
@@ -182,7 +184,18 @@ fn street_cars_shift_at_believable_stock_speeds() {
         if !street || d.torque_converter.is_some() || c.def.id.starts_with("debug_") {
             continue;
         }
-        let dual_clutch = matches!(c.def.id.as_str(), "lindwurm_4t" | "fulmine_v10");
+        let dual_clutch = matches!(
+            c.def.id.as_str(),
+            "lindwurm_4t"
+                | "fulmine_v10"
+                | "halberd_40"
+                | "ombra_v12"
+                | "ostwind_6t"
+                | "kagero_hx"
+                | "morrigan_55"
+                | "nyx_proto"
+                | "merlo_20t"
+        );
         let band = if dual_clutch {
             0.12..=0.25
         } else {
