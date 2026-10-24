@@ -1,0 +1,15 @@
+{
+  "id": "tumbril_20",
+  "engine": {
+    "cylinders": 4,
+    "layout": "Inline",
+    "firing": "Even",
+    "induction_exhaust_balance": 0.45,
+    "turbo": false,
+    "supercharger": false,
+    "gain": 0.9
+  },
+  "engine_pack": "engine_rec_i4",
+  "world_pack": "world_rec",
+  "horn_cue": "horn/standard"
+}

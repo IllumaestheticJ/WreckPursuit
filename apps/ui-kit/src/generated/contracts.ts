@@ -5,6 +5,24 @@
  */
 
 /**
+ * Anti-lock brake level (reference Off / Half / Full). `Half` lets a wheel slip further
+ * and lock briefly before releasing, `Full` keeps it near the tyre's peak.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "AbsLevel".
+ */
+export type AbsLevel = "Off" | "Half" | "Full";
+/**
+ * Traction control level (owner rows 104/105, reference Off / Half / Full).
+ * `Off` = the throttle the driver presses: no cut, no brake-TC, no pedal filter.
+ * `Half` lets the driven wheels spin a few times further past the tyre's peak than `Full`
+ * (visible wheelspin and smoke on a floored launch); `Full` keeps them near the peak.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "TcsLevel".
+ */
+export type TcsLevel = "Off" | "Half" | "Full";
+/**
  * Messages from a client to the authoritative server.
  *
  * This interface was referenced by `WpContractsBundle`'s JSON-Schema
@@ -169,12 +187,12 @@ export type RaceCommand =
  */
 export type RaceEventId = number;
 /**
- * Damage mode. Both modes run the same code path with different [`crate::ModeTable`]s.
+ * Damage mode. Every mode runs the same code path with a different [`crate::ModeTable`].
  *
  * This interface was referenced by `WpContractsBundle`'s JSON-Schema
  * via the `definition` "DamageMode".
  */
-export type DamageMode = "Arcade" | "Simulation";
+export type DamageMode = "Arcade" | "Simulation" | "Extreme";
 /**
  * Coarse phase of the day; police and traffic tables are keyed by this.
  *
@@ -1134,7 +1152,8 @@ export type DnfReason =
   | "CargoDestroyed"
   | "Outrun"
   | "Disconnected"
-  | "Fled";
+  | "Fled"
+  | "Stuck";
 /**
  * Why a racer was disqualified (ranked below every finisher and every DNF).
  *
@@ -1352,10 +1371,7 @@ export interface WpContractsBundle {
  * via the `definition` "AssistProfile".
  */
 export interface AssistProfile {
-  /**
-   * Anti-lock brakes.
-   */
-  abs: boolean;
+  abs: AbsLevel;
   /**
    * Automatic clutch (launch, stall prevention, shifts).
    */
@@ -1380,10 +1396,7 @@ export interface AssistProfile {
    * Speed-sensitive steering lock/rate reduction strength, 0 (off) ..= 1 (full).
    */
   steer_speed_sensitivity: number;
-  /**
-   * Traction control (throttle cut on driven-wheel slip).
-   */
-  tcs: boolean;
+  tcs: TcsLevel;
   /**
    * Throttle input smoothing strength, 0 (raw) ..= 1 (heavy ramp).
    */
@@ -2054,7 +2067,7 @@ export interface MaterialDef {
   young_mpa: number;
 }
 /**
- * Scalars that turn the single damage code path into Arcade or Simulation behaviour.
+ * Scalars that turn the single damage code path into Arcade, Simulation or Extreme behaviour.
  *
  * This interface was referenced by `WpContractsBundle`'s JSON-Schema
  * via the `definition` "ModeTable".
@@ -2093,6 +2106,13 @@ export interface ModeTable {
    * Multiplier on plastic flow (how much permanent set a given over-yield strain produces).
    */
   plasticity_scale: number;
+  /**
+   * Multiplier on the contact impulses that reach the damage model of *racer* cars (the
+   * player's racer and AI racers). Traffic and police (AI or player-driven) always take
+   * 1.0. Arcade uses 0.25, which leaves racers about 20 % of the damage (the lattice takes
+   * the first part of a hit elastically); omitted = 1.0.
+   */
+  racer_damage_scale?: number;
   /**
    * Multiplier on repair bills.
    */

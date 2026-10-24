@@ -29,7 +29,7 @@ wp_contracts ◄── every crate
 wp_math ◄── wp_vehicle, wp_damage, wp_world, wp_police, wp_sim
 wp_sim ──► wp_vehicle, wp_damage, wp_world, wp_police, wp_economy, wp_weather, rapier3d
 wp_wasm ──► wp_sim, simcli (lib: scenario format v2)   (must stay wasm32-clean)
-apps/simcli ──► wp_sim, wp_net, wp_weather (scenario `weather:` field)
+apps/simcli ──► wp_sim, wp_net, wp_weather (scenario `weather:` field), wp_economy (entity `mods`: apply_mods, wasm-clean)
 wp_economy ──► wp_police (WantedLevel, until v0.2.0); rusqlite only behind feature `native` (server)
 apps/server ──► wp_net[native] (tokio, tungstenite — never reachable from wp_wasm)
 ```
@@ -70,6 +70,19 @@ events ──► wp_economy (billing, payouts) · wp_net (snapshots @ 60 Hz) · 
 - **One scenario format:** simcli v2 (`apps/simcli/SCENARIOS.md`), owned by 10. Other workstreams
   ask 10 for new fields instead of inventing a dialect. Replays: simcli `replay.bin` v1.
 - Goldens and perf baselines only change in a commit tagged `[bless]` (CI guard).
+
+## Perf budgets
+- **PC is the target platform; no phone support is planned; performance work is still welcome
+  everywhere** (owner, 2026-10-22: "this will be a PC game" / "optimize regardless, but there is
+  no intention for phone support currently"; playtest row 145).
+- Native sim budgets: `CLAUDE.md` (vehicle, lattice, traffic, police per frame), gated by
+  `just bench` (`docs/PERF.md`).
+- Browser render budgets (`apps/testbed-web/e2e/perf_check.mjs`, run by `just web-e2e`):
+  the **desktop** chase and rainy-night chase (1280×720) are gates: draw calls < 600, triangles
+  ≤ 400 k, frame / allocation / wasm-call / crash-effects limits. The **phone / touch** run
+  (740×360) is **informational**: its numbers are printed against the old phone budget (draw
+  calls < 300, triangles ≤ 400 k, …) as `INFO within / OVER`, never a failure. Page errors and
+  the structural checks (one point light, city tiles culled, no shader churn) gate every run.
 
 ## How to run everything
 

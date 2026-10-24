@@ -581,6 +581,11 @@ pub fn driveway_cars(map: &CityMap, seed: u64) -> Vec<StaticProp> {
         let p = geom::add([d.pos[0], d.pos[1]], geom::scale(dir, v));
         let z = driveway_top(d);
         let nose_in = rng.chance(0.7);
+        // Not into a lot fence / hedge / trunk beside the driveway (checked after the draws so
+        // the other driveways keep their cars).
+        if !crate::props::clear_of_decor(map, p, dir) {
+            continue;
+        }
         out.push(StaticProp {
             kind: PropKind::ParkedCar,
             pos: [p[0], p[1], z + 0.75],
@@ -608,12 +613,19 @@ pub fn blocks_driveway(net: &RoadNetwork, p: V3) -> bool {
     })
 }
 
-/// Ground footprint of a solid piece of decor (hedge, fence, tree trunk), grown by `margin`;
+/// Ground footprint of a solid piece of decor (hedge, fence, tree trunk, crane mast, barrier,
+/// bale, billboard), grown by `margin`;
 /// `None` for flush decor (driveways).
 pub fn solid_footprint(d: &Decor, margin: f32) -> Option<[V2; 4]> {
     let (hw, hl) = match d.kind {
-        DecorKind::Hedge | DecorKind::Fence => (d.size[0] * 0.5, d.size[1] * 0.5),
-        DecorKind::StreetTree | DecorKind::YardTree => (TRUNK_R_M, TRUNK_R_M),
+        DecorKind::Hedge
+        | DecorKind::Fence
+        | DecorKind::Crane
+        | DecorKind::JerseyBarrier
+        | DecorKind::SiteFence
+        | DecorKind::HayBale
+        | DecorKind::Billboard => (d.size[0] * 0.5, d.size[1] * 0.5),
+        DecorKind::StreetTree | DecorKind::YardTree | DecorKind::PineTree => (TRUNK_R_M, TRUNK_R_M),
         DecorKind::Driveway => return None,
     };
     let f = geom::dir_of_yaw(d.yaw);

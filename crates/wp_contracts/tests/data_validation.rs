@@ -81,10 +81,16 @@ fn mode_tables_validate_against_schema_and_loader() {
     }
     let arcade = load_mode_table(repo().join("data/modes/arcade.toml")).unwrap();
     let sim = load_mode_table(repo().join("data/modes/sim.toml")).unwrap();
+    let extreme = load_mode_table(repo().join("data/modes/extreme.toml")).unwrap();
     assert_eq!(arcade.mode, DamageMode::Arcade);
     assert_eq!(sim.mode, DamageMode::Simulation);
-    assert!(arcade.impulse_to_lattice_scale < sim.impulse_to_lattice_scale);
-    assert!(arcade.total_loss_health < sim.total_loss_health);
+    assert_eq!(extreme.mode, DamageMode::Extreme);
+    assert!(sim.impulse_to_lattice_scale < extreme.impulse_to_lattice_scale);
+    assert!(sim.total_loss_health < extreme.total_loss_health);
+    // Arcade = Simulation with racers taking a fraction of the damage.
+    assert!(arcade.racer_damage_scale < 1.0);
+    assert_eq!(sim.racer_damage_scale, 1.0);
+    assert_eq!(extreme.racer_damage_scale, 1.0);
 }
 
 #[test]

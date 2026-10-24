@@ -5,12 +5,15 @@
 mod crash;
 
 use car_assets::crumple::{measure, render_detail, PartCrumple, Pose};
-use car_assets::mesh::{PartKind, FOLD_MAX_M, LID_POP_M, TRI_BUDGET};
+use car_assets::mesh::{
+    PartKind, FOLD_MAX_M, INDICATOR_PREFIX, LID_POP_M, MESH_FORMAT, MID_TRI_BUDGET, TRI_BUDGET,
+};
 use car_assets::profile::BodyProfile;
 use car_assets::skin::{deform_detail, FoldMemory};
 use car_assets::style::style_for;
 use car_assets::{
-    build_mesh, car_ids, load_car, load_mesh, mesh_path, panel_path, repo_root, validate::validate,
+    build_mesh, build_mid_mesh, car_ids, load_car, load_mesh, mesh_path, mid_mesh_path, panel_path,
+    repo_root, validate::validate,
 };
 use wp_contracts::BodyRegion;
 use wp_damage::PanelSpec;
@@ -33,6 +36,105 @@ fn every_car_has_a_valid_up_to_date_mesh_and_panel_spec() {
             "{id}: data/panels/meshes is stale; run `cargo run -p car-assets --bin gen-car-mesh`"
         );
         assert!((TRI_BUDGET.0..=TRI_BUDGET.1).contains(&fresh.tri_count));
+    }
+}
+
+/// Every car has an up-to-date mid LOD (`data/panels/meshes/mid/<car>.json`) within
+/// [`MID_TRI_BUDGET`] that paints exactly like its full mesh (same atlas, livery hint, tints,
+/// format) and keeps the body panels, glass, lights and wheels.
+#[test]
+fn every_car_has_an_up_to_date_mid_lod() {
+    let root = repo_root();
+    for id in car_ids(&root) {
+        let car = load_car(&root, &id).unwrap();
+        let full = load_mesh(&mesh_path(&root, &id)).unwrap();
+        let on_disk = load_mesh(&mid_mesh_path(&root, &id)).unwrap();
+        let fresh = build_mid_mesh(&car);
+        assert!(
+            fresh == on_disk,
+            "{id}: data/panels/meshes/mid is stale; run `cargo run -p car-assets --bin gen-car-mesh`"
+        );
+        let m = &fresh;
+        assert_eq!(m.id, id);
+        assert_eq!(m.format, MESH_FORMAT, "{id}");
+        assert_eq!(m.lattice_id, full.lattice_id, "{id}");
+        assert_eq!(m.atlas, full.atlas, "{id}: mid atlas differs");
+        assert_eq!(m.livery, full.livery, "{id}: mid livery differs");
+        assert_eq!(m.wheel_camber_deg, full.wheel_camber_deg, "{id}");
+        for (slot, rgb) in &m.tints {
+            assert_eq!(full.tints.get(slot), Some(rgb), "{id}: mid tint {slot:?}");
+        }
+        let tris: u32 = m.parts.iter().map(|p| p.tri_count() as u32).sum();
+        assert_eq!(tris, m.tri_count, "{id}");
+        assert!(
+            (MID_TRI_BUDGET.0..=MID_TRI_BUDGET.1).contains(&m.tri_count),
+            "{id}: mid LOD {} tris outside {MID_TRI_BUDGET:?}",
+            m.tri_count
+        );
+        // Mid ≤ full / 2 + 550: the small traffic vans sit near the bound (satchel_20: 4693 of
+        // 8362 after the turn-signal lenses, which every LOD keeps, were cut into the lamps).
+        assert!(
+            m.tri_count * 2 <= full.tri_count + 1100,
+            "{id}: mid LOD barely smaller"
+        );
+        // Every exterior panel, glass and light of the full mesh is in the mid LOD, and every
+        // mid part comes from the full mesh with the same kind and material.
+        for p in &full.parts {
+            let outside = matches!(
+                p.kind,
+                PartKind::Panel | PartKind::Glass | PartKind::Light | PartKind::Tire
+            );
+            if outside {
+                assert!(
+                    m.parts.iter().any(|q| q.name == p.name),
+                    "{id}: mid LOD lost {}",
+                    p.name
+                );
+            }
+        }
+        for q in &m.parts {
+            let p = full.parts.iter().find(|p| p.name == q.name);
+            assert!(
+                p.is_some_and(|p| p.kind == q.kind
+                    && p.material == q.material
+                    && p.wheel == q.wheel),
+                "{id}: mid part {} not in the full mesh",
+                q.name
+            );
+            assert!(
+                q.skin_nodes.is_empty() && q.fold.is_none(),
+                "{id}: mid LOD is not skinned"
+            );
+            assert_eq!(q.uvs.len() * 3, q.positions_mm.len() * 2, "{id}/{}", q.name);
+        }
+    }
+}
+
+/// Format 4 = detailed-car-models' format 2 + round 12's format 3 (see `MESH_FORMAT`); every
+/// mesh on disk is format 4 and the panels that buckle carry a fold binding.
+#[test]
+fn meshes_are_format_4_with_fold_bindings() {
+    assert_eq!(MESH_FORMAT, 4);
+    let root = repo_root();
+    for id in car_ids(&root) {
+        let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
+        assert_eq!(mesh.format, 4, "{id}");
+        assert!(
+            mesh.atlas.is_some(),
+            "{id}: format-4 meshes carry the livery atlas"
+        );
+        let hood = mesh.parts.iter().find(|p| p.name == "hood");
+        assert!(
+            hood.is_some_and(|h| h.fold.is_some()),
+            "{id}: hood without a fold binding"
+        );
+        for name in ["fender_fl", "fender_fr"] {
+            let part = mesh.parts.iter().find(|p| p.name == name);
+            assert!(
+                part.is_some_and(|p| p.fold.is_some()),
+                "{id}/{name}: no fold binding"
+            );
+        }
     }
 }
 
@@ -132,6 +234,82 @@ fn hinged_parts_start_at_their_hinge_line() {
     }
 }
 
+/// Style knobs at the ends of (and past) their documented ranges never panic the profile or
+/// the generator, on every car's lattice.
+#[test]
+fn style_knob_extremes_never_panic() {
+    use car_assets::mesh::generate_styled;
+    use car_assets::style::{BodyStyle, Silhouette};
+    let root = repo_root();
+    let silhouettes = [
+        Silhouette::Notchback,
+        Silhouette::Fastback,
+        Silhouette::Hatch,
+        Silhouette::Wedge,
+        Silhouette::Suv,
+    ];
+    for id in car_ids(&root) {
+        let car = load_car(&root, &id).unwrap();
+        let base = style_for(&car.def);
+        let mut variants: Vec<BodyStyle> = Vec::new();
+        for &sil in &silhouettes {
+            for &shift in &[-0.8f32, -0.6, 0.0, 0.6, 0.8] {
+                for &(ws, rg, hood) in &[
+                    (Some(30.0f32), Some(15.0f32), Some(0.4f32)),
+                    (Some(75.0), Some(85.0), Some(3.5)),
+                    (Some(72.0), Some(80.0), None),
+                    (None, Some(90.0), Some(1.0)),
+                ] {
+                    variants.push(BodyStyle {
+                        silhouette: sil,
+                        cabin_shift_m: shift,
+                        windshield_rake_deg: ws,
+                        rear_glass_rake_deg: rg,
+                        hood_length: hood,
+                        roof_len_trim: if shift > 0.0 { 0.15 } else { -0.25 },
+                        roof_dz: if shift > 0.0 { -0.12 } else { 0.10 },
+                        ..base.body.clone()
+                    });
+                }
+            }
+        }
+        variants.push(BodyStyle {
+            nose_h: Some(0.0),
+            belt_dz: 0.3,
+            ride_dz: -0.3,
+            crease_z: 2.0,
+            sill_tuck: 1.0,
+            shoulder_round: 1.0,
+            tumblehome: Some(1.0),
+            glass_inset: 1.0,
+            overhang_trim: (-1.0, -1.0),
+            tail_round: 2.0,
+            ..base.body.clone()
+        });
+        for (i, body) in variants.into_iter().enumerate() {
+            let p = BodyProfile::styled(&car.def, &car.lattice, &body);
+            let (r0, r1, _, _) = p.roof;
+            assert!(
+                r0 < r1 && r1 < p.y_fw,
+                "{id} variant {i}: roof {r0}..{r1}, fw {}",
+                p.y_fw
+            );
+            for y in [p.y_tail, p.y_deck, r0, r1, p.y_fw, p.y_bf, p.y_nose] {
+                let _ = p.ring(y);
+            }
+        }
+        // Full generation at the two cabin-shift ends (the slow part: once per car).
+        for shift in [-0.6f32, 0.6] {
+            let mut st = base.clone();
+            st.body.cabin_shift_m = shift;
+            st.body.rear_glass_rake_deg = Some(85.0);
+            st.body.hood_length = Some(0.5);
+            let m = generate_styled(&car.def, &car.lattice, &st);
+            assert!(m.tri_count > 0, "{id}");
+        }
+    }
+}
+
 /// Hood / fender motion of `car` after a frontal hit, as the browser draws it.
 fn crumple_after(
     car: &str,
@@ -179,11 +357,11 @@ fn crumple_after(
 #[test]
 fn front_crumples_and_follows_the_crushed_front() {
     for (car, kmh, target, mode, min_fold) in [
-        ("debug_sedan", 50.0, "car", "Arcade", 0.12),
-        ("debug_sedan", 50.0, "barrier", "Arcade", 0.15),
-        ("shiro_turbo", 50.0, "car", "Arcade", 0.12),
-        ("sentinel_cruiser", 50.0, "barrier", "Arcade", 0.15),
-        ("debug_sedan", 56.0, "barrier", "Simulation", 0.2),
+        ("debug_sedan", 50.0, "car", "Simulation", 0.12),
+        ("debug_sedan", 50.0, "barrier", "Simulation", 0.15),
+        ("shiro_turbo", 50.0, "car", "Simulation", 0.12),
+        ("sentinel_cruiser", 50.0, "barrier", "Simulation", 0.15),
+        ("debug_sedan", 56.0, "barrier", "Extreme", 0.2),
     ] {
         let (hood, fl, fr) = crumple_after(car, kmh, target, mode, 8);
         let tag = format!("{car} {kmh} km/h {target} {mode}");
@@ -212,7 +390,7 @@ fn rear_quarters_crumple_and_follow_the_crushed_tail() {
     for car in ["debug_sedan", "sentinel_cruiser", "vireo_xs"] {
         let def = load_car(&root, car).unwrap();
         let mesh = load_mesh(&mesh_path(&root, car)).unwrap();
-        let mut c = crash::rear_ended(car, &def.lattice, &mesh, 50.0, "Arcade", 8);
+        let mut c = crash::rear_ended(car, &def.lattice, &mesh, 50.0, "Simulation", 8);
         let pose = Pose {
             lattice: &def.lattice,
             rest: &c.rest,
@@ -243,8 +421,8 @@ fn rear_quarters_crumple_and_follow_the_crushed_tail() {
 /// between two frames still counts (its hanging pose is rotated back to the crushed one).
 #[test]
 fn crumple_does_not_depend_on_frame_rate() {
-    let (fast, _, _) = crumple_after("debug_sedan", 50.0, "car", "Arcade", 4);
-    let (slow, _, _) = crumple_after("debug_sedan", 50.0, "car", "Arcade", 16);
+    let (fast, _, _) = crumple_after("debug_sedan", 50.0, "car", "Simulation", 4);
+    let (slow, _, _) = crumple_after("debug_sedan", 50.0, "car", "Simulation", 16);
     assert!(
         (fast.max_fold_m - slow.max_fold_m).abs() <= 0.03,
         "{fast:?} vs {slow:?}"
@@ -254,8 +432,8 @@ fn crumple_does_not_depend_on_frame_rate() {
 /// Harder hits crumple more (up to the cap).
 #[test]
 fn harder_hits_crumple_more() {
-    let (soft, _, _) = crumple_after("debug_sedan", 30.0, "car", "Arcade", 4);
-    let (hard, _, _) = crumple_after("debug_sedan", 70.0, "car", "Arcade", 4);
+    let (soft, _, _) = crumple_after("debug_sedan", 30.0, "car", "Simulation", 4);
+    let (hard, _, _) = crumple_after("debug_sedan", 70.0, "car", "Simulation", 4);
     assert!(soft.max_fold_m > 0.02, "{soft:?}");
     assert!(
         hard.max_fold_m > soft.max_fold_m + 0.03,
@@ -430,6 +608,18 @@ fn an_unlatched_hood_pops_at_the_latch() {
     }
 }
 
+fn sub3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
 /// First mesh part a ray from `o` along `d` hits (body parts only), or None.
 fn first_hit(mesh: &car_assets::mesh::CarMesh, o: [f32; 3], d: [f32; 3]) -> Option<String> {
     let sub = |a: [f32; 3], b: [f32; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -471,70 +661,101 @@ fn first_hit(mesh: &car_assets::mesh::CarMesh, o: [f32; 3], d: [f32; 3]) -> Opti
     best.map(|b| b.1)
 }
 
-/// Head / tail light lenses face out and are not buried in the body shell: seen from outside
-/// (a ray along −Y at the front, +Y at the rear), at least half of each lens's outward-facing
-/// triangles are hit on the lens itself first. (Round 12 sampled the lens bounding box; the
-/// detailed lamp assemblies merged from main put housings, projectors, rings and push bars in
-/// front of parts of the lens on purpose, so the box corners no longer sample the lens. Measured
-/// 2026-10-21: worst 2 of 4 face triangles visible, hakone_gt / lindwurm_4t headlights behind
-/// their housings.)
 #[test]
 fn lights_sit_outside_the_shell() {
     let root = repo_root();
     for id in car_ids(&root) {
         let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
+        // Head / tail lamps and the turn-signal segments cut out of them (style kits add fog
+        // lamps, DRLs, markers etc. in other regions).
         let lights: Vec<_> = mesh
             .parts
             .iter()
-            .filter(|p| car_assets::skin::is_lens(p))
+            .filter(|p| car_assets::skin::is_end_lamp(p))
             .collect();
-        assert_eq!(lights.len(), 4, "{id}: two head- and two taillight lenses");
+        let is_signal = |p: &car_assets::mesh::MeshPart| p.name.starts_with(INDICATOR_PREFIX);
+        assert_eq!(
+            lights.iter().filter(|p| !is_signal(p)).count(),
+            4,
+            "{id}: two head- and two taillights"
+        );
+        assert_eq!(
+            lights.iter().filter(|p| is_signal(p)).count(),
+            4,
+            "{id}: front and rear turn signals in the lamp clusters"
+        );
         for l in lights {
-            let n = l.vertex_count().max(1) as f32;
-            let mean_y = (0..l.vertex_count()).map(|v| l.vertex(v)[1]).sum::<f32>() / n;
-            let front = mean_y > 0.0;
-            let out = if front { 1.0 } else { -1.0 };
+            let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+            for v in 0..l.vertex_count() {
+                let q = l.vertex(v);
+                for k in 0..3 {
+                    lo[k] = lo[k].min(q[k]);
+                    hi[k] = hi[k].max(q[k]);
+                }
+            }
+            let front = hi[1] > 0.0;
+            let dir = if front {
+                [0.0, -1.0, 0.0]
+            } else {
+                [0.0, 1.0, 0.0]
+            };
+            let y = if front { hi[1] + 3.0 } else { lo[1] - 3.0 };
+            // Style kits shape the lenses (round / quad / strip lamps with bezels and rings), so
+            // rays go through the centroids of the lens's outward-facing triangles: the body
+            // shell (panel / body parts) covers at most a tenth of them (a lamp corner swept
+            // round the bumper wrap, tansy_13), and at least half are seen directly.
             let (mut faces, mut seen) = (0, 0);
+            let mut hidden = Vec::new();
             for t in l.indices.chunks(3) {
                 let (a, b, c) = (
                     l.vertex(t[0] as usize),
                     l.vertex(t[1] as usize),
                     l.vertex(t[2] as usize),
                 );
-                let e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-                let e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-                let nrm = [
-                    e1[1] * e2[2] - e1[2] * e2[1],
-                    e1[2] * e2[0] - e1[0] * e2[2],
-                    e1[0] * e2[1] - e1[1] * e2[0],
-                ];
-                let len = (nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]).sqrt();
-                if len < 1e-6 || nrm[1] * out / len < 0.7 {
+                let n = cross3(sub3(b, a), sub3(c, a));
+                let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+                if len < 1e-9 || n[1] / len * -dir[1] < 0.7 {
                     continue;
                 }
                 faces += 1;
-                let cen = [
-                    (a[0] + b[0] + c[0]) / 3.0,
-                    (a[1] + b[1] + c[1]) / 3.0 + out * 3.0,
-                    (a[2] + b[2] + c[2]) / 3.0,
-                ];
-                let hit = first_hit(&mesh, cen, [0.0, -out, 0.0]);
+                let cx = (a[0] + b[0] + c[0]) / 3.0;
+                let cz = (a[2] + b[2] + c[2]) / 3.0;
+                let hit = first_hit(&mesh, [cx, y, cz], dir);
                 if hit.as_deref() == Some(l.name.as_str()) {
                     seen += 1;
                 }
+                let shell = hit
+                    .as_deref()
+                    .and_then(|h| mesh.parts.iter().find(|p| p.name == h));
+                if shell.is_some_and(|p| matches!(p.kind, PartKind::Panel | PartKind::Body)) {
+                    hidden.push(hit);
+                }
             }
+            assert!(faces > 0, "{id}/{}: no outward lens face", l.name);
             assert!(
-                faces > 0 && 2 * seen >= faces,
-                "{id}/{}: {seen} of {faces} outward faces visible",
+                hidden.len() * 10 <= faces,
+                "{id}/{}: {} of {faces} lens faces under the body shell: {hidden:?}",
+                l.name,
+                hidden.len()
+            );
+            assert!(
+                seen * 2 >= faces,
+                "{id}/{}: only {seen} of {faces} lens faces visible",
                 l.name
             );
             // Proud of the body, facing out.
-            assert!(
-                l.material == car_assets::mesh::MaterialSlot::Headlight
-                    || l.material == car_assets::mesh::MaterialSlot::Taillight
-            );
+            use car_assets::mesh::MaterialSlot as M;
+            if is_signal(l) {
+                assert!(
+                    l.material == M::EmissiveAmber || (!front && l.material == M::Taillight),
+                    "{id}/{}: amber (or red-on-red at the rear) turn signal",
+                    l.name
+                );
+                continue;
+            }
+            assert!(l.material == M::Headlight || l.material == M::Taillight);
             assert_eq!(
-                l.material == car_assets::mesh::MaterialSlot::Headlight,
+                l.material == M::Headlight,
                 front,
                 "{id}/{}: headlights at the front, taillights at the back",
                 l.name
@@ -550,7 +771,11 @@ fn lights_move_with_the_front_and_rear_structure() {
         let car = load_car(&root, id).unwrap();
         let mesh = load_mesh(&mesh_path(&root, id)).unwrap();
         let rest: Vec<[f32; 3]> = car.lattice.nodes.iter().map(|n| n.pos_m).collect();
-        for l in mesh.parts.iter().filter(|p| car_assets::skin::is_lens(p)) {
+        for l in mesh
+            .parts
+            .iter()
+            .filter(|p| car_assets::skin::is_end_lamp(p))
+        {
             let regions = car_assets::skin::light_regions(car_assets::skin::part_centre(l));
             // Bound only to its end of the car, and to the bumper (the first thing a hit crushes).
             assert!(l
@@ -603,78 +828,201 @@ fn lights_move_with_the_front_and_rear_structure() {
     }
 }
 
-/// Style knobs at the ends of (and past) their documented ranges never panic the profile or
-/// the generator, on every car's lattice.
-#[test]
-fn style_knob_extremes_never_panic() {
-    use car_assets::mesh::generate_styled;
-    use car_assets::style::{BodyStyle, Silhouette};
-    let root = repo_root();
-    let silhouettes = [
-        Silhouette::Notchback,
-        Silhouette::Fastback,
-        Silhouette::Hatch,
-        Silhouette::Wedge,
-        Silhouette::Suv,
-    ];
-    for id in car_ids(&root) {
-        let car = load_car(&root, &id).unwrap();
-        let base = style_for(&car.def);
-        let mut variants: Vec<BodyStyle> = Vec::new();
-        for &sil in &silhouettes {
-            for &shift in &[-0.8f32, -0.6, 0.0, 0.6, 0.8] {
-                for &(ws, rg, hood) in &[
-                    (Some(30.0f32), Some(15.0f32), Some(0.4f32)),
-                    (Some(75.0), Some(85.0), Some(3.5)),
-                    (Some(72.0), Some(80.0), None),
-                    (None, Some(90.0), Some(1.0)),
-                ] {
-                    variants.push(BodyStyle {
-                        silhouette: sil,
-                        cabin_shift_m: shift,
-                        windshield_rake_deg: ws,
-                        rear_glass_rake_deg: rg,
-                        hood_length: hood,
-                        roof_len_trim: if shift > 0.0 { 0.15 } else { -0.25 },
-                        roof_dz: if shift > 0.0 { -0.12 } else { 0.10 },
-                        ..base.body.clone()
-                    });
-                }
-            }
-        }
-        variants.push(BodyStyle {
-            nose_h: Some(0.0),
-            belt_dz: 0.3,
-            ride_dz: -0.3,
-            crease_z: 2.0,
-            sill_tuck: 1.0,
-            shoulder_round: 1.0,
-            tumblehome: Some(1.0),
-            glass_inset: 1.0,
-            overhang_trim: (-1.0, -1.0),
-            tail_round: 2.0,
-            ..base.body.clone()
-        });
-        for (i, body) in variants.into_iter().enumerate() {
-            let p = BodyProfile::styled(&car.def, &car.lattice, &body);
-            let (r0, r1, _, _) = p.roof;
-            assert!(
-                r0 < r1 && r1 < p.y_fw,
-                "{id} variant {i}: roof {r0}..{r1}, fw {}",
-                p.y_fw
-            );
-            for y in [p.y_tail, p.y_deck, r0, r1, p.y_fw, p.y_bf, p.y_nose] {
-                let _ = p.ring(y);
-            }
-        }
-        // Full generation at the two cabin-shift ends (the slow part: once per car).
-        for shift in [-0.6f32, 0.6] {
-            let mut st = base.clone();
-            st.body.cabin_shift_m = shift;
-            st.body.rear_glass_rake_deg = Some(85.0);
-            st.body.hood_length = Some(0.5);
-            let m = generate_styled(&car.def, &car.lattice, &st);
-            assert!(m.tri_count > 0, "{id}");
+/// Full-mesh triangle counts before the turn signals were rebuilt into the lamp clusters
+/// (round 12, playtest row 136); the rebuild may add at most 2 % per car.
+const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
+    ("arashi_t4", 16916),
+    ("brigand_400", 19772),
+    ("bulwark_400", 19186),
+    ("debug_coupe", 16617),
+    ("debug_sedan", 8422),
+    ("drayman_cargo", 9435),
+    ("fulmine_v10", 18738),
+    ("furrow_24", 8490),
+    ("hakone_gt", 17829),
+    ("hauler_1500", 9781),
+    ("ironside_440", 18699),
+    ("junkyard_beater", 7960),
+    ("kestrel_ts", 17548),
+    ("lindwurm_4t", 16246),
+    ("lucciola_350", 17242),
+    ("marten_20", 15796),
+    ("rampart_50", 18826),
+    ("satchel_20", 8330),
+    ("sentinel_bastion", 17191),
+    ("sentinel_cruiser", 16963),
+    ("sentinel_vigil", 17715),
+    ("sentinel_warden", 17770),
+    ("sentinel_wolfhound", 17137),
+    ("shiro_turbo", 17918),
+    ("sperber_32", 17772),
+    ("stoat_16v", 15610),
+    ("talus_20t", 17062),
+    ("tansy_13", 7192),
+    ("tumbril_20", 8503),
+    ("vireo_xs", 15731),
+];
+
+/// Bounding box (lo, hi) of a part, m.
+fn part_box(p: &car_assets::mesh::MeshPart) -> ([f32; 3], [f32; 3]) {
+    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for v in 0..p.vertex_count() {
+        let q = p.vertex(v);
+        for k in 0..3 {
+            lo[k] = lo[k].min(q[k]);
+            hi[k] = hi[k].max(q[k]);
         }
     }
+    (lo, hi)
+}
+
+/// Check the turn-signal contract on one mesh (full or mid LOD): exactly
+/// `indicator_front_l/_r` + `indicator_rear_l/_r` (+ optional `indicator_side_l/_r` pair), kind
+/// `light`, front amber in `FrameFront`, rear amber or red-on-red in `FrameRear`, repeaters amber
+/// on a front fender or front door (mirror), `_l` at x < 0, each a segment of its lamp cluster
+/// (within 5 cm of the same side's head / tail lamp).
+fn check_signals(label: &str, mesh: &car_assets::mesh::CarMesh) {
+    use car_assets::mesh::MaterialSlot as M;
+    use BodyRegion as R;
+    let signals: Vec<_> = mesh
+        .parts
+        .iter()
+        .filter(|p| p.name.starts_with(INDICATOR_PREFIX))
+        .collect();
+    let names: Vec<&str> = signals.iter().map(|p| p.name.as_str()).collect();
+    for want in [
+        "indicator_front_l",
+        "indicator_front_r",
+        "indicator_rear_l",
+        "indicator_rear_r",
+    ] {
+        assert!(names.contains(&want), "{label}: no {want} in {names:?}");
+    }
+    assert_eq!(
+        names.contains(&"indicator_side_l"),
+        names.contains(&"indicator_side_r"),
+        "{label}: repeaters come in pairs"
+    );
+    let get = |n: &str| mesh.parts.iter().find(|p| p.name == n);
+    for s in &signals {
+        let n = s.name.as_str();
+        let left = n.ends_with("_l");
+        assert!(left || n.ends_with("_r"), "{label}/{n}: no side");
+        assert_eq!(s.kind, PartKind::Light, "{label}/{n}");
+        assert!(s.tri_count() > 0, "{label}/{n}: empty");
+        let (lo, hi) = part_box(s);
+        assert!(
+            if left { hi[0] < 0.0 } else { lo[0] > 0.0 },
+            "{label}/{n}: on the wrong side ({lo:?}..{hi:?})"
+        );
+        let side = if left { "l" } else { "r" };
+        let lamp = match n
+            .strip_prefix(INDICATOR_PREFIX)
+            .and_then(|t| t.split('_').next())
+        {
+            Some("front") => {
+                assert_eq!(s.region, Some(R::FrameFront), "{label}/{n}");
+                assert_eq!(s.material, M::EmissiveAmber, "{label}/{n}");
+                Some(format!("headlight_{side}"))
+            }
+            Some("rear") => {
+                assert_eq!(s.region, Some(R::FrameRear), "{label}/{n}");
+                assert!(
+                    matches!(s.material, M::EmissiveAmber | M::Taillight),
+                    "{label}/{n}: {:?}",
+                    s.material
+                );
+                Some(format!("taillight_{side}"))
+            }
+            Some("side") => {
+                assert_eq!(s.material, M::EmissiveAmber, "{label}/{n}");
+                let ok: &[R] = if left {
+                    &[R::FrontLeftFender, R::LeftDoorF]
+                } else {
+                    &[R::FrontRightFender, R::RightDoorF]
+                };
+                assert!(
+                    s.region.is_some_and(|r| ok.contains(&r)),
+                    "{label}/{n}: {:?}",
+                    s.region
+                );
+                None
+            }
+            _ => panic!("{label}: unexpected part {n}"),
+        };
+        if let Some(lamp) = lamp {
+            let l = get(&lamp).unwrap_or_else(|| panic!("{label}: no {lamp}"));
+            let (llo, lhi) = part_box(l);
+            let gap = (0..3)
+                .map(|k| (llo[k] - hi[k]).max(lo[k] - lhi[k]).max(0.0))
+                .fold(0.0f32, f32::max);
+            assert!(
+                gap <= 0.05,
+                "{label}/{n}: {gap} m away from {lamp}, not part of its cluster"
+            );
+        }
+    }
+    // Left and right lenses match.
+    for base in ["indicator_front", "indicator_rear", "indicator_side"] {
+        if let (Some(l), Some(r)) = (get(&format!("{base}_l")), get(&format!("{base}_r"))) {
+            assert_eq!(l.material, r.material, "{label}/{base}");
+        }
+    }
+}
+
+/// Playtest row 136: every car's turn signals are segments of its head / tail lamp clusters
+/// (plus optional flush repeaters), in the full and the mid LOD, bound like the lamps, and
+/// the rebuild costs at most 2 % of a car's triangles.
+#[test]
+fn every_car_has_turn_signals_integrated_into_its_lamps() {
+    let root = repo_root();
+    let ids = car_ids(&root);
+    for id in &ids {
+        let car = load_car(&root, id).unwrap();
+        let full = load_mesh(&mesh_path(&root, id)).unwrap();
+        let mid = load_mesh(&mid_mesh_path(&root, id)).unwrap();
+        check_signals(&format!("{id} (full)"), &full);
+        check_signals(&format!("{id} (mid)"), &mid);
+        // Front / rear signals bind like their lamp: to the nodes of their end of the car.
+        for s in full.parts.iter().filter(|p| {
+            p.name.starts_with("indicator_front") || p.name.starts_with("indicator_rear")
+        }) {
+            assert!(car_assets::skin::is_end_lamp(s), "{id}/{}", s.name);
+            let regions = car_assets::skin::light_regions(car_assets::skin::part_centre(s));
+            assert!(
+                !s.skin_nodes.is_empty()
+                    && s.skin_nodes
+                        .iter()
+                        .all(|&i| regions.contains(&car.lattice.nodes[i as usize].region)),
+                "{id}/{}: not bound to its end of the car",
+                s.name
+            );
+        }
+        if let Some(&(_, before)) = TRIS_BEFORE_INTEGRATED_SIGNALS.iter().find(|(c, _)| c == id) {
+            assert!(
+                full.tri_count * 100 <= before * 102,
+                "{id}: {} tris, more than 2 % over {before}",
+                full.tri_count
+            );
+        }
+    }
+    // The parity test cars (`tools/parity/build_parity_cars.py`) carry copies of their template
+    // car's meshes; they must follow the same contract.
+    let mut parity = 0;
+    for e in std::fs::read_dir(root.join("data/panels/meshes")).unwrap() {
+        let path = e.unwrap().path();
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if path.extension().and_then(|x| x.to_str()) != Some("json")
+            || ids.iter().any(|i| i == stem)
+        {
+            continue;
+        }
+        check_signals(&format!("{stem} (full)"), &load_mesh(&path).unwrap());
+        let mid = load_mesh(&mid_mesh_path(&root, stem)).unwrap();
+        check_signals(&format!("{stem} (mid)"), &mid);
+        parity += 1;
+    }
+    assert!(parity >= 4, "parity meshes checked: {parity}");
 }

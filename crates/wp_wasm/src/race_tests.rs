@@ -74,7 +74,11 @@ fn race_scenarios_name_the_race_and_put_the_player_last() {
             c.purse,
             c.entry_fee
         );
-        assert!((3..=5).contains(&c.drivers.len()));
+        if c.kind == "drag" {
+            assert_eq!(c.drivers.len(), 1, "{}: drags are one on one", c.id);
+        } else {
+            assert!((3..=5).contains(&c.drivers.len()), "{}", c.id);
+        }
     }
     // Illegal daytime pays more than a night street race of similar length.
     let by = |id: &str| cards.iter().find(|c| c.id == id).unwrap();
@@ -91,11 +95,17 @@ fn player_is_held_on_the_grid_until_green() {
         throttle: 1.0,
         ..Default::default()
     };
-    // Countdown: input refused, nobody moves.
+    let idle_rpm = s.vehicle(PLAYER).unwrap().vehicle.state().engine_rpm;
+    // Countdown: input refused (only the throttle gets through, clutch down), nobody moves.
     for _ in 0..240 * 2 {
         assert!(!s.set_input(PLAYER, full).unwrap());
         s.run_ticks(1);
     }
+    let revving = s.vehicle(PLAYER).unwrap().vehicle.state().engine_rpm;
+    assert!(
+        revving > idle_rpm + 2000.0,
+        "revs on the line: {idle_rpm} -> {revving} rpm"
+    );
     let moved = |a: [f32; 3], b: [f32; 3]| (a[0] - b[0]).hypot(a[1] - b[1]);
     assert!(moved(start, pos(&s, PLAYER)) < 0.5);
     assert!(moved(ai_start, pos(&s, ai)) < 0.5);
@@ -131,9 +141,11 @@ fn short_sprint_with_ai_runs_to_results_and_pays_through_the_economy() {
         events.last(),
         Some(RaceEvent::RaceFinished { .. })
     ));
-    // A 750 m sprint: at least three finish within a sensible time.
+    // A 750 m sprint: at least two finish within a sensible time. The grid sprint's speed
+    // trap (`data/police/races.toml`) takes racers out (seed 7: one captured, one fled), as
+    // in `wp_race`'s `race_picker::grid_highway_sprint`.
     let finishers: Vec<_> = r.rows.iter().filter(|x| x.status == "Finished").collect();
-    assert!(finishers.len() >= 3, "{:?}", r.rows);
+    assert!(finishers.len() >= 2, "{:?}", r.rows);
     let win = finishers[0].time_s.unwrap();
     assert!((15.0..60.0).contains(&win), "winner {win} s");
     assert_eq!(finishers[0].gap_s, Some(0.0));
@@ -168,11 +180,28 @@ fn short_sprint_with_ai_runs_to_results_and_pays_through_the_economy() {
         reasons.contains(&"RaceEntryFee") && reasons.contains(&"RaceRep"),
         "{reasons:?}"
     );
-    let cash = s.run().unwrap().account().cash;
+    // The race's own ledger lines charge the buy-in and pay purse + clean bonus (stake
+    // adjustments included). Other run events can land in between (a pursuit escaped
+    // mid-race pays its bonus), so the account is checked through the race's lines.
+    let race_cash: i64 = p.ledger.iter().map(|l| l.cash_delta).sum();
     assert_eq!(
-        cash,
-        cash0_before_entry - p.entry_fee + p.purse + p.clean_bonus
+        race_cash,
+        -p.entry_fee + p.purse + p.clean_bonus,
+        "{:?}",
+        p.ledger
     );
+    let cash = s.run().unwrap().account().cash;
+    let first = p.ledger.first().map_or(0, |l| l.seq);
+    let others: i64 = s
+        .run()
+        .unwrap()
+        .ledger()
+        .iter()
+        .map(crate::run::LedgerLine::of)
+        .filter(|l| l.seq > first && !p.ledger.iter().any(|r| r.seq == l.seq))
+        .map(|l| l.cash_delta)
+        .sum();
+    assert_eq!(cash, cash0_before_entry + race_cash + others);
     assert_eq!(p.cash_after, cash);
     assert!(!r.handoff_run_end);
 }
@@ -312,4 +341,60 @@ fn map_shows_every_racer_during_a_race() {
             .count(),
         1
     );
+}
+
+#[test]
+fn bets_on_yourself_settle_through_the_career_economy() {
+    let mut s = sprint(true);
+    // A fresh account has no street rep: betting is locked.
+    let (max, lock) = s.bet_status();
+    assert_eq!(max, 0);
+    assert!(lock.is_some());
+    assert!(s.race_place_bet("win:player", 200).is_err());
+    s.debug_run_mut().unwrap().debug_set_rep(2_000);
+    let (max, lock) = s.bet_status();
+    assert!(max >= 200 && lock.is_none(), "{max} {lock:?}");
+    // A racer only backs themselves.
+    assert!(s.race_place_bet("win:vic", 200).is_err());
+    let cash0 = s.run().unwrap().account().cash;
+    let t = s.race_place_bet("h2h:player>tito", 200).unwrap();
+    assert_eq!(t.outcome, "open");
+    assert!(t.odds > 1.0 && t.paid > 200);
+    assert_eq!(s.run().unwrap().account().cash, cash0 - 200);
+    let (report, _) = run_to_final(&mut s, 150);
+    // Bets close at the green light.
+    assert!(s.race_place_bet("win:player", 200).is_err());
+    assert_eq!(report.bets.len(), 1);
+    let b = &report.bets[0];
+    assert_ne!(b.outcome, "open");
+    match b.outcome {
+        "won" => assert_eq!(b.paid, t.paid),
+        "lost" => assert_eq!(b.paid, 0),
+        _ => assert_eq!(b.paid, 200),
+    }
+    // Every racer's form rating moved, and the regulars' records remember the race.
+    assert_eq!(report.rating_changes.len(), 4);
+    assert!(crate::race::with_roster(|st| st.races) >= 1);
+    let saved = crate::race::roster_state_text();
+    crate::race::roster_state_load(&saved).unwrap();
+    assert_eq!(crate::race::roster_state_text(), saved);
+}
+
+#[test]
+fn picker_cards_carry_form_and_odds() {
+    let car = simcli::data::load_car(crate::data::mem_data(), CAR).unwrap();
+    for c in race_cards(Some(&car), DamageMode::Arcade) {
+        assert!(c
+            .drivers
+            .iter()
+            .all(|d| d.rating > 0 && !d.nickname.is_empty()));
+        // win, head-to-head per rival, podium in fields of four or more
+        let want = 1 + c.drivers.len() + usize::from(c.drivers.len() + 1 >= 4);
+        assert_eq!(c.odds.len(), want, "{}", c.id);
+        assert!(c
+            .odds
+            .iter()
+            .all(|o| o.odds >= 1.05 && o.label.contains("player")));
+    }
+    assert_eq!(crate::race::regular_cards().len(), 12);
 }

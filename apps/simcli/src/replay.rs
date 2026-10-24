@@ -18,7 +18,9 @@
 //!                u8 flags (1 gear_up, 2 gear_down, 4 horn, 8 headlights, 16 siren), u8 tool_use
 //! ops (v2+)    u32 count, then per op: u64 tick, u16 entity index, u8 kind, payload:
 //!                0 reset: –
-//!                1 assists: u8 flags (1 abs, 2 tcs, 4 esc, 8 auto_gears, 16 auto_clutch),
+//!                1 assists: u8 flags (1 abs, 2 tcs, 4 esc, 8 auto_gears, 16 auto_clutch,
+//!                  32 abs is Half, 64 tcs is Half; abs / tcs set without their Half bit =
+//!                  Full, so files from before the levels read as Full / Off),
 //!                  f32 steer_speed_sensitivity, countersteer_help, throttle_filter, brake_filter
 //!                2 mode: u8 (0 Arcade, 1 Simulation)
 //!                3 repair: –
@@ -33,7 +35,7 @@
 //! The testbed (prompt 04) records the same format: setup scenario + the inputs and ops it
 //! applied. Version 1 files (no ops section) still decode.
 
-use wp_contracts::{AssistProfile, DamageMode, VehicleInput, PHYSICS_DT};
+use wp_contracts::{AbsLevel, AssistProfile, DamageMode, TcsLevel, VehicleInput, PHYSICS_DT};
 
 use crate::data::DataSource;
 use crate::run::{run, RunOptions, Selection};
@@ -84,6 +86,18 @@ pub enum OpKind {
     Ghost {
         /// Ghost window, physics ticks.
         ticks: u16,
+    },
+    /// `Sim::set_dormant` (a car out of play sleeps as a fixed body; it wakes by itself when
+    /// a car comes near or touches it, or on a reset; SR-3).
+    Dormant {
+        /// Sleep (`true`) or wake.
+        on: bool,
+    },
+    /// `Sim::set_light_when_far` (an AI car far from every player drives a light kinematic
+    /// model; off for a street racer racing the player).
+    LightWhenFar {
+        /// Allowed (`true`) or not.
+        on: bool,
     },
 }
 
@@ -139,7 +153,8 @@ pub struct Replay {
     pub inputs: Vec<InputEvent>,
     /// Ops, ascending by tick (empty for runner recordings and v1 files).
     pub ops: Vec<OpEvent>,
-    /// State hash after every tick.
+    /// State hash after every tick; 0 = not recorded (live testbed sessions hash every 4th
+    /// tick and the last; verifiers skip 0).
     pub tick_hashes: Vec<u64>,
     /// Periodic checkpoints.
     pub checkpoints: Vec<Checkpoint>,
@@ -198,11 +213,13 @@ impl Replay {
                 OpKind::Assists(p) => {
                     w.push(1);
                     w.push(
-                        p.abs as u8
-                            | (p.tcs as u8) << 1
+                        p.abs.is_on() as u8
+                            | (p.tcs.is_on() as u8) << 1
                             | (p.esc as u8) << 2
                             | (p.auto_gears as u8) << 3
-                            | (p.auto_clutch as u8) << 4,
+                            | (p.auto_clutch as u8) << 4
+                            | ((p.abs == AbsLevel::Half) as u8) << 5
+                            | ((p.tcs == TcsLevel::Half) as u8) << 6,
                     );
                     for f in [
                         p.steer_speed_sensitivity,
@@ -218,6 +235,7 @@ impl Replay {
                     w.push(match m {
                         DamageMode::Arcade => 0,
                         DamageMode::Simulation => 1,
+                        DamageMode::Extreme => 2,
                     });
                 }
                 OpKind::Repair => w.push(3),
@@ -236,6 +254,14 @@ impl Replay {
                 OpKind::Ghost { ticks } => {
                     w.push(5);
                     w.extend_from_slice(&ticks.to_le_bytes());
+                }
+                OpKind::Dormant { on } => {
+                    w.push(6);
+                    w.push(on as u8);
+                }
+                OpKind::LightWhenFar { on } => {
+                    w.push(7);
+                    w.push(on as u8);
                 }
             }
         }
@@ -316,8 +342,16 @@ impl Replay {
                     1 => {
                         let flags = r.take(1)?[0];
                         OpKind::Assists(AssistProfile {
-                            abs: flags & 1 != 0,
-                            tcs: flags & 2 != 0,
+                            abs: match (flags & 1 != 0, flags & 32 != 0) {
+                                (false, _) => AbsLevel::Off,
+                                (true, true) => AbsLevel::Half,
+                                (true, false) => AbsLevel::Full,
+                            },
+                            tcs: match (flags & 2 != 0, flags & 64 != 0) {
+                                (false, _) => TcsLevel::Off,
+                                (true, true) => TcsLevel::Half,
+                                (true, false) => TcsLevel::Full,
+                            },
                             esc: flags & 4 != 0,
                             auto_gears: flags & 8 != 0,
                             auto_clutch: flags & 16 != 0,
@@ -330,6 +364,7 @@ impl Replay {
                     2 => OpKind::Mode(match r.take(1)?[0] {
                         0 => DamageMode::Arcade,
                         1 => DamageMode::Simulation,
+                        2 => DamageMode::Extreme,
                         m => return Err(RunError::Replay(format!("bad mode {m}"))),
                     }),
                     3 => OpKind::Repair,
@@ -341,6 +376,12 @@ impl Replay {
                     },
                     5 => OpKind::Ghost {
                         ticks: u16::from_le_bytes(r.take(2)?.try_into().expect("2 bytes")),
+                    },
+                    6 => OpKind::Dormant {
+                        on: r.take(1)?[0] != 0,
+                    },
+                    7 => OpKind::LightWhenFar {
+                        on: r.take(1)?[0] != 0,
                     },
                     k => return Err(RunError::Replay(format!("bad op kind {k}"))),
                 };
@@ -514,11 +555,12 @@ pub fn compare(sc: &Scenario, golden: &Replay, now: &Replay) -> ReplayReport {
             .map(|e| e.id.clone())
             .unwrap_or_else(|| format!("#{i}"))
     };
+    // 0 in the recording = not recorded (a live testbed session hashes every 4th tick).
     let first = golden
         .tick_hashes
         .iter()
         .zip(&now.tick_hashes)
-        .position(|(a, b)| a != b);
+        .position(|(a, b)| *a != 0 && a != b);
     let mut report = ReplayReport {
         name: sc.name.clone(),
         matched: first.is_none() && notes.iter().all(|n| n.starts_with("contract")),
@@ -657,6 +699,15 @@ mod tests {
                     op: OpKind::Assists(AssistProfile::gamepad_default()),
                 },
                 OpEvent {
+                    tick: 1,
+                    entity: 0,
+                    op: OpKind::Assists(AssistProfile {
+                        abs: AbsLevel::Half,
+                        tcs: TcsLevel::Half,
+                        ..AssistProfile::wheel_default()
+                    }),
+                },
+                OpEvent {
                     tick: 2,
                     entity: 0,
                     op: OpKind::Mode(DamageMode::Simulation),
@@ -681,6 +732,16 @@ mod tests {
                     entity: 0,
                     op: OpKind::Ghost { ticks: 240 },
                 },
+                OpEvent {
+                    tick: 3,
+                    entity: 0,
+                    op: OpKind::Dormant { on: true },
+                },
+                OpEvent {
+                    tick: 3,
+                    entity: 0,
+                    op: OpKind::LightWhenFar { on: false },
+                },
             ],
             tick_hashes: vec![1, 3],
             checkpoints: vec![Checkpoint {
@@ -699,6 +760,23 @@ mod tests {
     fn encode_decode_round_trip() {
         let r = sample();
         assert_eq!(Replay::decode(&r.encode()).unwrap(), r);
+    }
+
+    #[test]
+    fn legacy_assist_flags_read_as_full_or_off() {
+        // A pre-level file: abs + tcs bits only (no Half bits) → Full / Full; none → Off.
+        let mut r = sample();
+        r.ops = vec![OpEvent {
+            tick: 0,
+            entity: 0,
+            op: OpKind::Assists(AssistProfile::keyboard_default()),
+        }];
+        let bytes = r.encode();
+        let back = Replay::decode(&bytes).unwrap();
+        let OpKind::Assists(p) = back.ops[0].op else {
+            panic!("assists op")
+        };
+        assert_eq!((p.abs, p.tcs), (AbsLevel::Full, TcsLevel::Full));
     }
 
     #[test]

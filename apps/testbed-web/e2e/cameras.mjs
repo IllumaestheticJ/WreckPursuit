@@ -1,4 +1,4 @@
-// Camera check + screenshots in the city chase preset (headless Chromium, Playwright).
+// Camera check + screenshots in the night run preset (headless Chromium, Playwright).
 // Usage: npm run e2e:cameras  (needs `npm run wasm` first). Env: CHROMIUM=/path/to/chrome,
 // SHOTS=dir (default ../../docs/media/cameras).
 //
@@ -69,7 +69,7 @@ await ready();
 await page.evaluate(() => localStorage.removeItem("wp.testbed.camera.v1"));
 await page.reload();
 await ready();
-await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+await page.evaluate(() => window.__wp.startNightRun("debug_sedan", "Arcade"));
 // Hide the debug panels so the shots show the camera, not the HUD.
 await page.addStyleTag({ content: "#overlay > :not(.left-col), .left-col > :not(.hud-main) { display: none !important; }" });
 // Plain car body for the shots (debug overlays off; this browser context only).
@@ -77,7 +77,7 @@ await page.evaluate(() => ["lattice", "tireForces", "cgVelocity", "contacts"].fo
 await page.keyboard.down("KeyW");
 await page.waitForTimeout(3500);
 
-// Near chase at city-chase speed: close and low, not zoomed out.
+// Near chase at night-run speed: close and low, not zoomed out.
 const samples = [];
 for (let i = 0; i < 6; i++) {
   samples.push(await camPose());
@@ -109,7 +109,7 @@ for (let i = 0; i < modes.length; i++) {
     await page.keyboard.up("KeyV");
     check(back.includes("look back"), "V held: look-back view (HUD shows it)");
   }
-  await page.keyboard.press("KeyC");
+  await page.keyboard.press("F3");
 }
 const back = await camPose();
 check(

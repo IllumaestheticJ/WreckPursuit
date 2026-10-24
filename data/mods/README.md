@@ -8,7 +8,7 @@ from this folder.
 `ModDef` fields: `id` (snake_case, unique), `name` (no trademarks), `slot` (UI grouping), `line`
 (mods in one line replace each other), `tier` 1–5, `price`, optional `requires` (satisfied by the
 same line at an equal or higher tier), `class_whitelist`, `modes`, `effects`, `tradeoff`
-(required: what the mod costs you besides money).
+(required: what the mod costs you besides money), optional `visuals`.
 
 Effects (externally tagged JSON):
 - `{"Vehicle": {"param": "engine.torque_scale", "op": "Mul", "value": 1.05}}` — parameter paths
@@ -18,5 +18,13 @@ Effects (externally tagged JSON):
   add mass; weakening (`scale < 1`) must not.
 - `{"Cosmetic": {"kind": "BodyKitFront", "value": "lip_a"}}` — body kits become detachable regions.
 - `{"Tool": {"kind": "RadarDetector", "tier": 1}}`.
+
+`visuals` (optional): parts the mod bolts on that you can see, beyond what its effects already say
+(`Cosmetic` effects and `wheels.tire_id` are drawn without it):
+`"visuals": [{"part": "RearWing", "style": "gt"}]`. Kinds and their styles are
+`wp_economy::visuals::PartKind` / `PartKind::styles` (validated at load). Each kind is mounted on
+body regions (`PartKind::regions`), so the drawn part dents and detaches with that panel. A mod in
+a visible slot (Wheels, Tires, Aero, Body*, Hood, Roof, Paint, Vinyls) must draw something
+(`visuals::tests::every_visible_slot_mod_draws_something`).
 
 No licensed brand or product names anywhere (CLAUDE.md rule 9): generic part names only.

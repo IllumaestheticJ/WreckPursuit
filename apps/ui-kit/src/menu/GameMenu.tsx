@@ -17,14 +17,14 @@
 import type { ComponentChildren } from "preact";
 import { Fragment, render } from "preact";
 import { keyAction, PadNav, stepIndex, type NavAction } from "./nav";
-import { DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type GameSettings, type SettingsStorage, type Volumes } from "./settings";
+import { ASSIST_LEVELS, DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type AssistLevel, type GameSettings, type RadioFilter, type SettingsStorage, type Volumes } from "./settings";
 import { CONTROL_DEVICES, CONTROL_RANGES, defaultDeviceControls, type ControlDevice, type DeviceControls, type InputProbe } from "./controls";
 import { paintInputBars } from "./bars";
 import "../ui/theme.css";
 import "./menu.css";
 
 /** What the main menu can start. */
-export type PlayChoice = "chase" | "chaseRain" | "races" | "free" | "garage";
+export type PlayChoice = "chase" | "chaseRain" | "races" | "touge" | "free" | "garage";
 
 /** Which screen is showing ("closed" = none). */
 export type MenuScreen = "closed" | "main" | "pause" | "settings";
@@ -417,6 +417,13 @@ export class GameMenu {
 }
 
 /** Mount the game menu into `parent` (a positioned element). Closed until `openMain` / `openPause`. */
+
+/** One-line hint per damage mode (Settings has the full table). */
+const DAMAGE_HINT: Record<"Arcade" | "Simulation" | "Extreme", string> = {
+  Arcade: "Forgiving: racers take 20 % damage; traffic and police take full damage",
+  Simulation: "Punishing but survivable",
+  Extreme: "One hard hit at speed is a total loss",
+};
 export function mountGameMenu(parent: HTMLElement, opts: GameMenuOptions): GameMenu {
   return new GameMenu(parent, opts);
 }
@@ -459,9 +466,10 @@ function Brand(props: { kicker: string }) {
 }
 
 const PLAY: { id: PlayChoice; label: string; hint: string }[] = [
-  { id: "chase", label: "City chase", hint: "Night in Port Vesper. You're speeding; the police will come." },
+  { id: "chase", label: "Night run", hint: "Night in Port Vesper. You're speeding; the police will come." },
   { id: "chaseRain", label: "Rainy night", hint: "Same chase on a soaked road" },
   { id: "races", label: "Street races", hint: "Races against AI drivers" },
+  { id: "touge", label: "Touge battles", hint: "One-on-one down sealed mountain passes. Bets and pink slips with rep" },
   { id: "free", label: "Free drive", hint: "Explore the city with traffic" },
   { id: "garage", label: "Garage", hint: "Your career: cars, repairs, mods" },
 ];
@@ -536,6 +544,23 @@ function Row(props: { label: string; hint?: string; children: ComponentChildren 
     </div>
   );
 }
+
+/** Off / Half / Full choices for the TCS and ABS rows (reference game levels). */
+const LEVEL_OPTIONS = ASSIST_LEVELS.map((l) => ({ id: l, label: l }));
+const RADIO_FILTER_OPTIONS: { id: RadioFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "important", label: "Important only" },
+];
+const TCS_HINT: Record<AssistLevel, string> = {
+  Off: "The throttle you press: wheelspin is yours",
+  Half: "Lets the wheels spin a little (slides, smoke)",
+  Full: "Barely any wheelspin",
+};
+const ABS_HINT: Record<AssistLevel, string> = {
+  Off: "Wheels lock under hard braking",
+  Half: "Short lock-ups, still steers",
+  Full: "No lock-ups, shortest stops",
+};
 
 /** A value picked from a list: click / Enter / Right = next, Left = previous. */
 function Cycle<T extends string | number>(props: { id: string; label: string; value: T; options: { id: T; label: string }[]; onChange: (v: T) => void }) {
@@ -626,7 +651,7 @@ function SettingsScreen(props: {
   setTestInput: (on: boolean) => void;
 }) {
   const { s, change } = props;
-  const assist = (k: keyof GameSettings["assists"], v: boolean | number) => change({ ...s, assists: { ...s.assists, [k]: v } });
+  const assist = (k: keyof GameSettings["assists"], v: boolean | number | AssistLevel) => change({ ...s, assists: { ...s.assists, [k]: v } });
   const cams = [{ id: "", label: "Default" }, ...props.cameras];
   return (
     <div class="wp-gm-card wp-gm-settings" role="dialog" aria-label="Settings">
@@ -667,12 +692,15 @@ function SettingsScreen(props: {
         <Row label="Police radio voice" hint={s.radioVoice ? "Units and dispatch speak their lines" : "Squelch and text only"}>
           <Toggle id="gm-radio-voice" label="Police radio voice" value={s.radioVoice} onChange={(radioVoice) => change({ ...s, radioVoice })} />
         </Row>
-        <h3>Assists</h3>
-        <Row label="ABS" hint="Anti-lock brakes">
-          <Toggle id="gm-abs" label="ABS" value={s.assists.abs} onChange={(v) => assist("abs", v)} />
+        <Row label="Radio" hint={s.radioFilter === "important" ? "Warnings, heat changes and crashes only" : "Every transmission"}>
+          <Cycle id="gm-radio-filter" label="Radio" value={s.radioFilter} options={RADIO_FILTER_OPTIONS} onChange={(radioFilter) => change({ ...s, radioFilter })} />
         </Row>
-        <Row label="Traction control">
-          <Toggle id="gm-tcs" label="Traction control" value={s.assists.tcs} onChange={(v) => assist("tcs", v)} />
+        <h3>Assists</h3>
+        <Row label="ABS" hint={ABS_HINT[s.assists.abs]}>
+          <Cycle id="gm-abs" label="ABS" value={s.assists.abs} options={LEVEL_OPTIONS} onChange={(v) => assist("abs", v)} />
+        </Row>
+        <Row label="Traction control" hint={TCS_HINT[s.assists.tcs]}>
+          <Cycle id="gm-tcs" label="Traction control" value={s.assists.tcs} options={LEVEL_OPTIONS} onChange={(v) => assist("tcs", v)} />
         </Row>
         <Row label="Stability control">
           <Toggle id="gm-esc" label="Stability control" value={s.assists.esc} onChange={(v) => assist("esc", v)} />
@@ -683,7 +711,7 @@ function SettingsScreen(props: {
         <Row label="Steering help" hint="Less steering lock at speed">
           <Toggle id="gm-steer" label="Steering help" value={s.assists.steerHelp} onChange={(v) => assist("steerHelp", v)} />
         </Row>
-        <Row label="Countersteer help" hint={props.countersteer ? "Catches slides for you" : "Coming soon (needs a vehicle update)"}>
+        <Row label="Countersteer help" hint={props.countersteer ? "Hands off in a slide: the wheels follow it (up to 30 % lock)" : "Coming soon (needs a vehicle update)"}>
           <Slider id="gm-cstr" label="Countersteer help" value={s.assists.countersteer} disabled={!props.countersteer} onChange={(v) => assist("countersteer", v)} />
         </Row>
         <ControlsSection
@@ -695,7 +723,7 @@ function SettingsScreen(props: {
           setTestInput={props.setTestInput}
         />
         <h3>Gameplay</h3>
-        <Row label="Damage" hint={s.damageMode === "Simulation" ? "One hard hit at speed is a total loss" : "Punishing but survivable"}>
+        <Row label="Damage" hint={DAMAGE_HINT[s.damageMode]}>
           <Cycle
             id="gm-mode"
             label="Damage mode"
@@ -703,6 +731,7 @@ function SettingsScreen(props: {
             options={[
               { id: "Arcade", label: "Arcade" },
               { id: "Simulation", label: "Simulation" },
+              { id: "Extreme", label: "Extreme" },
             ]}
             onChange={(damageMode) => change({ ...s, damageMode })}
           />

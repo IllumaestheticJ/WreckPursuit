@@ -169,7 +169,7 @@ impl RacingLine {
         line
     }
 
-    /// A line that simply follows offset `n` (no optimisation) — used for flight routes.
+    /// A line that simply follows offset `n` (no optimisation).
     pub fn constant(corridor: &Corridor, n: f32) -> Self {
         let m = corridor.len();
         let mut line = Self {
@@ -286,22 +286,31 @@ impl SpeedProfile {
         let a_brk = cap.brake_g * GRAVITY_MPS2 * usage.braking;
         let a_acc0 = cap.accel_mps2 * usage.accel;
         let v_top = (cap.top_speed_mps * 0.98).min(v_cap);
+        // Grip under each sample as a fraction of the measured (asphalt) grip: exactly 1.0 on
+        // paved roads, the tyres' ratio on gravel / dirt / grass. Cornering, braking and
+        // traction-limited drive all scale with it.
+        let mu: Vec<f32> = corridor
+            .samples
+            .iter()
+            .map(|s| cap.surface_grip(s.surface))
+            .collect();
         let mut v: Vec<f32> = line
             .curvature
             .iter()
-            .map(|k| {
+            .zip(&mu)
+            .map(|(k, g)| {
                 let k = k.abs();
                 if k < 1e-5 {
                     v_top
                 } else {
-                    (a_lat / k).sqrt().min(v_top)
+                    (a_lat * g / k).sqrt().min(v_top)
                 }
             })
             .collect();
         let v_corner = v.clone();
         // Remaining longitudinal grip inside the friction ellipse at speed `u` on sample `i`.
         let ellipse = |i: usize, u: f32| -> f32 {
-            let lat = u * u * line.curvature[i].abs() / a_lat.max(0.1);
+            let lat = u * u * line.curvature[i].abs() / (a_lat * mu[i]).max(0.1);
             (1.0 - lat * lat).max(0.0).sqrt().max(0.25)
         };
         // Road grade per sample (rise over run to the next sample): gravity takes
@@ -332,7 +341,8 @@ impl SpeedProfile {
                     break;
                 };
                 let u = v[i];
-                let a = drive_accel(cap, a_acc0, u) * ellipse(i, u) - GRAVITY_MPS2 * grade[i];
+                let a =
+                    drive_accel(cap, a_acc0 * mu[i], u) * ellipse(i, u) - GRAVITY_MPS2 * grade[i];
                 let lim = (u * u + 2.0 * a * line.step_len[i]).max(0.0).sqrt();
                 if v[nx] > lim {
                     v[nx] = lim;
@@ -351,8 +361,9 @@ impl SpeedProfile {
                     break;
                 };
                 let u = v[i];
-                let a = (a_brk * ellipse(pv, v[pv].min(v_corner[pv])) + GRAVITY_MPS2 * grade[pv])
-                    .max(0.25 * a_brk);
+                let brk = a_brk * mu[pv];
+                let a = (brk * ellipse(pv, v[pv].min(v_corner[pv])) + GRAVITY_MPS2 * grade[pv])
+                    .max(0.25 * brk);
                 let lim = (u * u + 2.0 * a * line.step_len[pv]).sqrt();
                 if v[pv] > lim {
                     v[pv] = lim;
@@ -410,6 +421,7 @@ mod tests {
                 left_pass_m: 4.0,
                 right_m: 4.0,
                 junction: false,
+                surface: wp_contracts::SurfaceType::Asphalt,
             });
             s += CORRIDOR_STEP_M;
         }
@@ -457,6 +469,7 @@ mod tests {
             max_steer_rad: 0.6,
             length_m: 4.5,
             width_m: 1.8,
+            loose: Default::default(),
         };
         let usage = Usage {
             lateral: 0.9,
@@ -488,5 +501,53 @@ mod tests {
         );
         assert!(slow.v[apex] < v_apex);
         assert!(slow.lap_time_s(&line, false) > p.lap_time_s(&line, false));
+    }
+
+    #[test]
+    fn profile_takes_a_gravel_corner_slower() {
+        use wp_contracts::SurfaceType;
+        let mut c = corner();
+        let line = RacingLine::optimise(&c, 0.9, &LineParams::default());
+        let mut cap = CarCapability {
+            max_lat_g: 0.9,
+            brake_g: 1.0,
+            accel_mps2: 4.0,
+            top_speed_mps: 55.0,
+            wheelbase_m: 2.7,
+            max_steer_rad: 0.6,
+            length_m: 4.5,
+            width_m: 1.8,
+            loose: Default::default(),
+        };
+        let usage = Usage {
+            lateral: 0.9,
+            braking: 0.9,
+            accel: 1.0,
+        };
+        let paved = SpeedProfile::build(&c, &line, &cap, &usage, 100.0);
+        // Painted lines and concrete count as asphalt: the profile is unchanged, bit for bit.
+        for (i, s) in c.samples.iter_mut().enumerate() {
+            s.surface = if i % 2 == 0 {
+                SurfaceType::PaintedLine
+            } else {
+                SurfaceType::Concrete
+            };
+        }
+        assert_eq!(SpeedProfile::build(&c, &line, &cap, &usage, 100.0), paved);
+        // The same corner on gravel at 0.6 of asphalt grip: apex speed ∝ √grip.
+        for s in &mut c.samples {
+            s.surface = SurfaceType::Gravel;
+        }
+        cap.loose.gravel = 0.6;
+        let gravel = SpeedProfile::build(&c, &line, &cap, &usage, 100.0);
+        let apex = ((60.0 + std::f32::consts::FRAC_PI_4 * 15.0) / CORRIDOR_STEP_M) as usize;
+        let ratio = gravel.v[apex] / paved.v[apex];
+        assert!((ratio - 0.6f32.sqrt()).abs() < 0.03, "apex ratio {ratio}");
+        // Braking on gravel never asks for more than the gravel grip.
+        for i in 0..c.len() - 1 {
+            let dv2 = gravel.v[i] * gravel.v[i] - gravel.v[i + 1] * gravel.v[i + 1];
+            assert!(dv2 <= 2.0 * 0.6 * gravel.a_brake * line.step_len[i] + 1e-2);
+        }
+        assert!(gravel.lap_time_s(&line, false) > paved.lap_time_s(&line, false));
     }
 }

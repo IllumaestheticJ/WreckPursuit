@@ -41,7 +41,7 @@ the fog/rain cap in `wp_weather`'s adapter (which wraps the world query).
 | Span | Road | Length | Profile | Inner half width / ceiling |
 |---|---|---|---|---|
 | **Hollins Tunnel** (`Tunnel`) | Loop 9, through the northern shoulder of Hollins Heights, (−720, 1377) → (−1110, 1399), climbing 41 → 57.5 m | 391 m | unchanged (Loop 9 already ran in a cut there); ground backfilled over the roof on the hill side | 12.6 m / 6.5 m |
-| **Founders Cut** (`CoveredTrench`) | Uptown Connector, (418, 1005) → (419.5, 1110) | 105 m (250 m before the merge with main, whose Uptown diamond bridge needs the climb room north of it) | dropped 7 m below the lowest natural ground (road at 16.2–16.5 m; internal profile anchor, ≈ 5 % ramps inside the 8 % arterial cap) under a plaza deck at ≈ 23 m; ground backfilled level with the deck | 10.5 m / 6 m |
+| **Founders Cut** (`CoveredTrench`) | Uptown Connector, (418, 1005) → (413, 1255) | 250 m | dropped 7 m below the lowest natural ground (road at 16.2–16.5 m; internal profile anchor, ≈ 5 % ramps inside the 8 % arterial cap) under a plaza deck at ≈ 23 m; ground backfilled level with the deck | 10.5 m / 6 m |
 
 Terrain: the normal carve leaves the road and its 7.5 m shoulder at road level (so the ground
 never enters the tube); beyond `inner wall + 0.6 m wall + 8.5 m - 1 m` the ground is raised to

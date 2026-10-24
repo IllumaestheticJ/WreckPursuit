@@ -16,6 +16,8 @@ Screenshots: `docs/media/` (`drive_chase.png`, `debug_layers_orbit.png`, `camera
 `replay.png`, `scenario_barrier.png`, `scenario_head_on.png`, `city_traffic.png`,
 `bench_24.png`, `native_testbed.png`). Regenerate with `SHOTS=../../docs/media npm run e2e`.
 
+- **Mod visuals:** mod shop (`ui/modShop.ts`) and parts on the car (`render/mod_parts.ts`) — see `docs/integration/mod-visuals.md`.
+
 ## How it fits together
 
 ```
@@ -56,7 +58,7 @@ Car data (`data/{cars,lattices,tires,materials,modes}`) is embedded at build tim
 |---|---|---|---|
 | `init` | `seed: u32`, `scenario_json`, `scripted: bool` | `Uint32Array` entity ids | Fresh live session from a v2 scenario as JSON. `seed` 0 = scenario's. `scripted` = drive entities by their scenario drivers until `duration_s`, then entity 1 is live. |
 | `free_drive_json` | `car`, `mode`, `city: bool` | scenario JSON | Free-drive scenario (city = procedural 12×12 with traffic). |
-| `city_chase_json` | `car`, `mode` | scenario JSON | "City chase" preset (live): procedural city at 23:00, `police_presence: 1.0`, traffic, player starts on the race grid at 30 m/s (`EntitySpec::speed_mps`). Seed 23. |
+| `night_run_json` | `car`, `mode` | scenario JSON | "Night run" preset (live): procedural city at 23:00, `police_presence: 1.0`, traffic, player starts on the race grid at 30 m/s (`EntitySpec::speed_mps`). Seed 23. |
 | `scenario_from_ron` | `text` | scenario JSON | simcli format v2 (`apps/simcli/SCENARIOS.md`). |
 | `scenario_with_speed` | `json`, `target_mps` | scenario JSON | Overrides every `cruise` driver's target (the speed box). |
 | `step` | `dt_seconds: f32` | `f32` alpha | Runs the whole 240 Hz ticks covered (max 60/call); leftover interpolation alpha between `vehicle_states_prev()` and `vehicle_states()`. Replays scale `dt` by the playback speed. |
@@ -79,16 +81,17 @@ Car data (`data/{cars,lattices,tires,materials,modes}`) is embedded at build tim
 | `state_hash` | – | 16 hex digits | `Sim::state_hash()` (hash spec v1: includes lattice nodes). |
 | `police_status` | `entity` | JSON or `null` | From `Sim::police()`: `{level ("None"/"L1".."L5"), heat, heat_in_level 0..1, status (Clear/Wanted/Pursuit/Searching), cooldown 0..1 (escape progress while Searching), units_in_pursuit, bounty, units_total}`; `null` when the police system is off. Mapped onto the UI kit's `HeatHud`. |
 | `police_units` | – | `Float32Array` 8 × units | Police units that are **not** sim vehicles (internally driven cars, helicopters): `[x, y, z, yaw, speed_mps, flags, unit_id, model]`, flags 1 helicopter, 2 pursuing/intercepting; `unit_id` = stable `wp_police` id (hash it for light phases); `model` indexes `police_models()` (-1 = helicopter / single-model session / not yet reconciled). |
-| `police_models` | – | JSON `string[]` | Car ids of the multi-model police fleet (`Sim::set_police_cars`) in fleet-index order; `[]` with one police model. City chase: warden, cruiser, bastion, wolfhound, harrier. Fetch once. |
+| `police_models` | – | JSON `string[]` | Car ids of the multi-model police fleet (`Sim::set_police_cars`) in fleet-index order; `[]` with one police model. City chase: warden, cruiser, bastion, wolfhound, vigil. Fetch once. |
 | `signal_heads` | – | `Float32Array` 10 × heads | Static, fetch once per session. One head per signalised junction approach (signal group): `[x, y, z, yaw, left_m, right_m, radius_m, centre_z, intersection, group]` — stop-line centre (z from the lane polyline, so heads follow elevation), travel yaw (lamps face `yaw + π`), stop-line lateral extent along travel-right, junction radius and node height (far-side heads). Empty on the flat world. `signal_head_stride()` = 10. |
 | `signal_states` | – | `Uint8Array` 1 × heads | Per frame, `signal_heads` order: 0 off, 1 red, 2 yellow, 3 green, from the world's signal clock (`wp_world::signals::group_state`), so pauses/replays show the simulated state. No turn arrows: the city has no protected turn phases. |
+| `traffic_agents` | – | `Float32Array` 5 × agents | `[x, y, z, yaw, flags]`; flags 1 physical LOD, 2 brake lights, 4 hazards, 8 yielding to siren, 16 / 32 turn signal L / R, 64 aggressive, `variant << 8`. Empty on the flat world. |
+| `props_static` / `props_moved` | – | `Float32Array` 11 × props / 8 × moved | City props (parked cars, cones; `props.rs`, lead helper `lead/draw-props`): static list once per session `[kind, x, y, z, qx, qy, qz, qw, hx, hy, hz]`, then per frame only props whose pose changed `[index, x, y, z, qx, qy, qz, qw]`. Drawn by `render/props.ts`. See `docs/integration/props.md`. |
+| `traffic_draw` | – | `Float32Array` 10 × agents | Every agent at any LOD (`lod.rs`): `[agent id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags]`, flags as `traffic_agents`. Embodied agents report their vehicle's state; kinematic ones are seated on the ground exactly as the sim places a promoted car (`ground_pose`) and carried forward between 60 Hz traffic steps. `lod_draw_stride()` = 10. |
+| `police_draw` | – | `Float32Array` 10 × units | Every police unit, bound or not: `[unit id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags]`, flags 1 helicopter, 2 pursuing. |
+| `session_car_models` | – | JSON | `{ cars, traffic, police }`: every car model the session can show (scenario cars, physical traffic, police) for preloading. |
+| `car_model_info` | `car_id` | JSON | `{ car_id, body_size_m, wheels }` of a model without a vehicle (builds the instanced far-LOD mesh). |
 | `traffic_agents` | – | `Float32Array` 7 × agents | `[x, y, z, yaw, flags, agent_id, model]`; flags 1 physical LOD, 2 brake lights, 4 hazards, 8 yielding to siren, 16 / 32 turn signal L / R, 64 aggressive, `variant << 8`; `agent_id` = stable `wp_world` id; `model` indexes `traffic_models()` = `wp_world::traffic::traffic_model_index(agent_id, n)`. Model and variant never change when the agent is promoted to a physical car. Empty on the flat world. |
 | `traffic_models` | – | JSON `string[]` | Car ids of the physical traffic models (`Sim::set_traffic_cars`) in model-index order; `[]` when traffic is kinematic-only. City chase: `simcli::run::CAR_MIX_TRAFFIC`. Fetch once. |
-| `props_static` / `props_moved` | – | `Float32Array` 11 × props / 8 × moved | City props (parked cars, cones; `props.rs`, lead helper `lead/draw-props`): static list once per session `[kind, x, y, z, qx, qy, qz, qw, hx, hy, hz]`, then per frame only props whose pose changed `[index, x, y, z, qx, qy, qz, qw]`. Drawn by `render/props.ts`. See `docs/integration/props.md`. |
-| `traffic_draw` | – | `Float32Array` 11 × agents | Every agent at any LOD (`lod.rs`): `[agent id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags, model]`, flags as `traffic_agents`, `model` indexes `session_car_models().traffic`. Embodied agents report their vehicle's state; kinematic ones are seated on the ground exactly as the sim places a promoted car (`ground_pose`) and carried forward between 60 Hz traffic steps. `lod_draw_stride()` = 10. |
-| `police_draw` | – | `Float32Array` 11 × units | Every police unit, bound or not: `[unit id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags, model]`, flags 1 helicopter, 2 pursuing; `model` indexes `session_car_models().police`. |
-| `session_car_models` | – | JSON | `{ cars, traffic, police }`: every car model the session can show (scenario cars, physical traffic, police) for preloading; `traffic` / `police` are the model lists (`string[]`, model-index order) the draw records index. |
-| `car_model_info` | `car_id` | JSON | `{ car_id, body_size_m, wheels }` of a model without a vehicle (builds the instanced far-LOD mesh). |
 | `lattice_nodes` | `entity` | `Float32Array` xyz × nodes | Current, chassis space (`Sim::node_positions`). |
 | `lattice_rest` | `entity` | `Float32Array` xyz × nodes | Rest pose. |
 | `lattice_beams` | `entity` | `Uint32Array` `[a, b]` × beams | |
@@ -259,7 +262,7 @@ traffic; signals: the junction nearest the player framed at 12:00 and 22:00
 23:00, a `TrafficViolation` was counted (`__wp.app.eventCounts`) and exactly one heat panel is mounted. `BENCH=1` adds perf, `SHOTS=dir` screenshots.
 
 ### City chase
-**city chase** (button, `__wp.startCityChase()`): the procedural 12×12 city at 23:00 with
+**night run** (button, `__wp.startNightRun()`): the procedural 12×12 city at 23:00 with
 traffic and full police presence; the player starts on the race grid already doing ~110 km/h,
 so speeding violations (event feed) start the heat. Police cars (`VehicleKind::Police` sim
 vehicles, or instanced from `police_draw()` for internally driven units) are white with a
@@ -277,7 +280,7 @@ closes on the next session, one the user opened (F) stays.
 **weather** selector (`scenario` = the scenario's own weather, off, clear, overcast, rain, heavy
 rain, fog, dynamic) restarts the running session with that weather written into its scenario
 (`scenario_with_weather`), so replays and `simcli replay` carry it; **rainy night** = the city
-chase in a downpour on a soaked road (`city_chase_rain_json`; `?chase=rain`, `?weather=<id>`).
+chase in a downpour on a soaked road (`night_run_rain_json`; `?chase=rain`, `?weather=<id>`).
 `src/render/weather.ts`: instanced rain streaks animated in the vertex shader (one draw, ≤ 5000
 lines), wet road materials (`asphalt`, `highway_concrete`, `parking`, `sidewalk`, `kerb`, `bridge`
 and the flat ground: darker, glossier, sky-dome reflections, puddle sheen) driven by the 8 m
@@ -286,7 +289,7 @@ water grid (`weather_grid()`, RG8 texture refreshed at 1 Hz), spray points behin
 bumper / cockpit cameras, and a HUD line (`#weather-hud`) with regime, rain rate, visibility,
 temperature, road state and an aquaplaning warning (player car's `Telemetry::aquaplane`).
 Exports (`crates/wp_wasm/src/weather.rs`): `weather_choices`, `scenario_with_weather`,
-`scenario_weather_choice`, `city_chase_rain_json`, `weather_info` (18 floats, `WX` in
+`scenario_weather_choice`, `night_run_rain_json`, `weather_info` (18 floats, `WX` in
 `render/weather.ts`), `weather_grid_meta`, `weather_grid`, `weather_spray`. Check:
 `npm run e2e:weather` (also run by `npm run e2e`); screenshots in `docs/media/weather/`.
 
@@ -981,3 +984,214 @@ embedded tire / material (`data::resolve_with`), runs `CarStats::measure`, and c
 sorted mods, mode). ~0.3 s native, ~1 s in the browser per new build; an empty set returns the
 stock row. Illegal sets (missing requirement, unknown id, class) are refused. Not called by the
 testbed yet; it is what a live garage provider fills `GarageCar.stats` from (`docs/integration/ui.md`).
+## Photo mode (owner request, 2026-10-20 — built by D's session, for C to review)
+
+**F7**, the **📷 photo** button opens it, in a live session or during a
+replay; **F7 / Esc / Start / B** leaves. (Ported in the 2026-10-21 branch triage: F3 became the
+camera cycle and gamepad Start the pause menu, so photo mode moved to F7 and Start no longer
+enters it.) `src/photo.ts` (`PhotoMode`), wired in `main.ts`.
+
+- **Freeze:** a live session is paused (`togglePause`); a replay is held at its tick (speed 0) and
+  `,` / `.` (or the ◀ ▶ buttons) step it 4 ticks. Leaving restores exactly the previous state: a
+  game that was paused before stays paused, a playing replay resumes at its speed. While open,
+  `sim.setInput` is not called and the frame loop passes `dt = 0` to the views, debris and audio.
+- **Free camera** (Three world space, its own `PerspectiveCamera`, starts at the game camera's
+  view): WASD/arrows fly along the view, Q/E world down/up, Shift ×4, Alt ×¼, mouse drag looks,
+  wheel = field of view (10–100°), Z/X roll (±45°), **reset camera** puts it 6 m behind the
+  focused car. It is kept within 80 m of the focused car. Gamepad: left stick fly, right stick
+  look, LB/RB down/up, A save, Y hide the panel.
+- **Filters:** a post-process pass after Three's `OutputPass` (so it works on display sRGB
+  values): exposure, contrast, saturation, warmth, fade (lifted blacks), vignette, grain (fixed
+  hash, no time input, so preview = saved image) and a 2.39:1 letterbox; presets 1–7 natural /
+  noir / sepia / golden hour / cold steel / punchy / faded film. The composer renders into a
+  4× MSAA half-float target, so photos keep the antialiasing.
+- **Clean image:** the HUD is DOM (`#overlay`, hidden while open) and never reaches the canvas;
+  the debug layers lattice, stress, tire forces, suspension, slip colouring, contacts, CG/velocity
+  and intents are hidden through `layers.hide()` (new in `settings.ts`: a temporary override,
+  the saved toggles are untouched) and come back on leaving.
+- **Save / copy:** Space/Enter or **💾 save PNG** downloads `wreckpursuit-<scenario>-t<tick>.png`;
+  C or **📋 copy** writes `image/png` to the clipboard (needs https or localhost; otherwise the
+  panel says to use save). Size **screen** or **2× screen** (capped at the GPU's max texture size
+  and 8192 px).
+- **Touch:** the **hide** button hides the panel, the 📷 chip brings it back; drag looks, the
+  sliders set field of view and roll.
+- Automation: `__wp.photo` (`enter(camera)`, `exit()`, `capture(scale)` → `{ blob, width,
+  height }`, `usePreset(id)`, `resetCamera()`, `saved` / `copied` counters), `__wp.layersOn(id)`.
+
+**e2e:** `npm run e2e:photo` (`e2e/photo.mjs`, `SHOTS=dir` keeps the captured PNGs): 22 checks —
+freeze, HUD and debug layers hidden, flying the camera does not drive the car, hide/chip, noir
+is grey, golden hour changes the pixels, 2× capture doubles the size, Space download, C
+clipboard, Esc restores (and keeps a prior pause), replay held / stepped / captured / resumed,
+no page errors.
+
+**Changes outside `src/photo.ts`:** `main.ts` (construct + key/frame-loop wiring, `still`
+flag, `__wp.photo` / `__wp.layersOn`), `settings.ts` (`layers.hide`), `cameras.ts`
+(`CameraRig.suspendInput`: orbit controls and look-drag ignore the mouse while photo mode has
+it), `audio/index.ts` (J: `AudioSystem.setDucked`, fades the mix out while frozen without
+touching the M mute toggle), `hud.ts` (help line), `index.html` (button + panel styles),
+`package.json` (`e2e:photo`).
+
+**Known gaps:** no depth of field; no fly controls on touch screens without a gamepad (look,
+field of view, roll and reset camera only); the free camera can pass through buildings and
+terrain (no collision); police light bars freeze in whatever phase they were in.
+
+## Lead helper note (P9 helicopter, 2026-10-20; merged 2026-10-21 by `triage/helicopter`)
+
+- `wp_wasm::police_helicopters()` → 8 floats per tracking helicopter `[x, y, z, aimX, aimY,
+  aimZ, coneHalfAngle, flags]` (flag 1 = has visual). Airframes come from round 12's
+  `police_draw()` (flag 1); the helicopter position in both is ground + `alt_m`.
+- `scene.ts`: round 12's `updateHelicopters(policeDraw, …)` draws an airframe (fuselage, boom,
+  skids, spinning main and tail rotor, blinking beacon, the red / blue light bar flashing while
+  pursuing) instead of the scaled box; the branch's second drawing path through
+  `police_units()` was dropped. `updateHelicopterBeams` adds a night spotlight (faint additive
+  beam cone + light pool on the road) from night factor 0.35, dimmed to 45 % while the
+  helicopter has lost visual (it stays on the last known spot). The branch's real
+  `THREE.SpotLight` was dropped in the merge: a light that switches on mid-chase recompiles every
+  lit shader and every light costs every lit pixel (the `sirenLight` rule); the pool opacity went
+  0.12 → 0.18 to make up for it. One beam exists from the start (hidden, in `prewarmRoots`).
+  `scene.helicoptersShown` / `scene.spotlightsLit` for automation; `e2e/run.mjs` and
+  `e2e/helicopter.mjs` check it.
+
+## Lead helper note: headless e2e "Target crashed" (2026-10-20)
+
+`just web-e2e` died with `Target crashed` at random points (also on `main`, in the capture
+block, about one run in two). Under gdb (`--renderer-cmd-prefix`) the renderer stops with SIGTRAP,
+which is a Chromium `CHECK`, on the audio output thread in
+`blink::AudioParamHandler::ValuesForFrameRangeImpl` ← `OscillatorHandler` behind a biquad and a
+`PannerNode`, i.e. the siren oscillators' frequency automation. Cause: after a slow main-thread
+frame (SwiftShader frames can take ~1 s) `synth.ts`'s siren restarted its back-to-back
+`setValueCurveAtTime` curves at `ctx.currentTime`, a time the audio thread may already have
+rendered. A page with only the siren scheduling and random 0.2–1.4 s main-thread stalls crashes
+3 runs in 6 (60 s each); restarting the schedule `SIREN_LEAD_S` = 50 ms ahead of `currentTime`
+gives 0 in 4 (linear ramps instead of curves: 0 in 3 too). Real players with slow frames could hit
+it as well, not just CI. (Merge note: the fix is in the v1 `synth.ts` siren; the v2 `siren.ts`
+`CurvePlan` never back-dates a curve before `now` but does not keep a 50 ms lead either.)
+
+## Lead helper note (2026-10-21) — garages open repairs
+
+Until now the map's `Garage` POIs did nothing (police skip them, the testbed did not draw them, and
+the economy's "garage" was only the end-of-run screen). New module `crates/wp_wasm/src/garage_visit.rs`
+plus `Session::check_garage` (native tests in `run_tests.rs`):
+
+| Export | Returns |
+|---|---|
+| `garages_json()` | `GarageSite[]`: `index, name, pos, heading_rad, radius_m` (15 m, like `PoiInfo`), `kind` (`Legit` / `Crooked`), `district` |
+| `garage_visit_json()` | `GarageOffer` or `null`: `seq, tick, site, wanted, health, quote` (G's `RepairQuote` at that shop, or `null`), `note` (`"nothing to repair"` / refusal), `cash, can_repair` |
+| `garage_repair()` | pays the shop's `RepairAll` (damage recorded first, then G's `repair`), repairs the car in place (replay op `Repair`), releases the brakes; `GarageRepairReport` (`shop, paid, insurance_covers, reported_to_police, cash_after, ledger`); throws when refused |
+| `garage_leave()` | closes the visit without repairing |
+| `debug_place(entity, x, y, yaw, speed)` | e2e / debug teleport, not in replays |
+
+Behaviour (sessions with a `PlayerRun`, i.e. live with police, not replays): after each live tick,
+the player's car stopped (< 3 m/s) inside a garage radius with no pursuit (`Pursuit` / `Searching`)
+opens a visit. The car is held on the brakes (logged inputs, same path as the end-of-run hold) until
+**Repair** or **Leave**; a pursuit starting or the run ending closes it. The car has to leave every
+garage radius before the next visit (no re-trigger while parked). Pricing uses the shop's kind,
+its district's labour rate and the car's current wanted level, so crooked shops mark up and legit
+ones flag `reports_to_police` at L2+. Outside the sim step: hashes and goldens unchanged.
+
+Shop kind: `wp_world`'s POIs have no legit / crooked field yet (`docs/design/CITY.md` C3, open for
+05 / 08). `garage_visit::shop_kind` uses the CITY.md §5.2 list by name (Vesper: Meridian
+Motorworks legit; Sal's Paint & Panel and Gantry Garage crooked) and falls back to the district
+(industrial / port crooked) for the procedural city's `Garage N`. Drop it when C3 lands.
+
+Testbed: `src/ui/garageVisit.tsx` (`GarageVisitView`, kit primitives) in `#ui-garage`: shop name,
+kind, district, condition, priced lines, labour / insurance / police badges, cash before → after,
+**Repair (cost)** / **Leave**, and a 4 s "Repaired at …" toast. `scene.setGarages()` draws a ring
+at the radius and a 40 m light beam per shop (blue legit, amber crooked). `main.ts`: construct,
+`garageView.update(sim.garageVisit(), now)` per frame (not in replays), reset on rebuild, on
+`window.__wp`. `e2e/run.mjs`: free drive → markers = shops → stop in the first shop → panel, input
+held, "Nothing to repair" → **Leave** → input live.
+
+Gaps: police do not act on a legit shop's report (would need a logged sim op that adds heat);
+only `RepairAll` (no per-item repair, drive-damaged or scrap at the counter); no garage test lot
+(backlog B07).
+## Lead helper note (2026-10-21) — street racers, A→B races, betting
+
+Owner request: NPC race cars roam the city; honk to challenge one, pick the finish B (A = where you
+met), bet on it; several driver levels, the map icon colour shows the level.
+
+**Rust** (`crates/wp_wasm/src/street.rs`, tests in `street_tests.rs`; `wp_wasm` now depends on
+`wp_opponent`, wasm32-clean):
+
+- `StreetRacers` spawns 16 racers, 4 per level (`ROSTER_LEVELS` = 2 ×4, 3 ×4, 4 ×4, 5 ×4; owner
+  2026-10-22: "about 16, 4 at each skill level, get rid of the slowest") on through / highway
+  lanes ≥ 140 m from the player and from each other in every live city session with police (free drive and city chase;
+  not the flat world, not scripted scenarios). Kind `AiRacer`, AI assists.
+- `LEVELS` (4; Rookie `#3fb950` was dropped, level numbers stay 2..=5): Street `#2f81f7` · Pro `#a371f7` · Elite `#f0883e` · Legend
+  `#f85149`. Each has a car pool (analog names from `data/cars`), a race `DriverProfile`
+  (skill 0.25 → 0.97, aggression, consistency, risk), a cruise speed and a bet range
+  ($100–500 … $2 000–10 000). No `debug_*` cars in the pools (a test checks).
+- **Roaming**: each racer is a one-racer `wp_opponent::Field` on a planned route to a random lane
+  point 300–1 200 m away, with a *cruise capability* (top speed 11.5–13.3 m/s, under the speeding threshold of a 25 mph street, plus a stop-line guard for red and catchable amber lights, 0.4 g, 0.45 g braking)
+  and a calm, low-risk profile, so it keeps traffic pace, follows cars, stops at reds and plans a
+  new route at the end. At most one route is planned per tick.
+- **Challenge**: a horn rising edge (the rebindable `horn` action: Q / pad L3 / the touch 📯) right behind a roaming racer (at most 15 m back, within 2.5 m of
+  its centre line, facing its way within 45°: `street::tailing`, owner request 2026-10-23) stops it and opens
+  an `Offer`. It lapses when the player drives 70 m away, after 2 min, or when the run ends.
+- **Race**: `street_accept(x, y, stake)` checks the stake (level range, cash) and the route
+  (250 m – 6 km, `World::plan_route` from the player's pose), posts the stake as a ledger line
+  (`PlayerRun::wager` → `Economy::adjust`), places the racer beside the player (the roomier side of
+  the corridor, else behind), and holds both for a 3 s countdown (the player's hold is a logged
+  input, like the end-of-run hold). The racer then drives a full-pace `Field` (its level profile,
+  its car's measured `CarCapability`, signals on, opposing lanes for overtaking, no civilian DQ).
+  First within 18 m of B wins, by any path (shortcuts are fair). The race is also
+  decided by a player wreck or capture (loss), by the racer retiring, fleeing or being busted (win),
+  or by the time limit (route / 8 m/s + 60 s: whoever is further along wins). A win posts 2 × stake
+  (even money). Racers keep a W/L record against the player and can be challenged again 20 s later.
+- **Replays**: racer inputs are logged (`log_input`) and their moves recorded as `ResetAt` /
+  `Ghost` ops, like picker races, so browser playback and crash-replay windows of a street race
+  verify with 0 drift (`street_race_replays_without_drift_and_its_crash_window_too`). simcli's
+  `replay` verify still cannot run them (no city setup / AI kinds there), as for picker races.
+
+| Export | Returns |
+|---|---|
+| `set_street_racers(on)` | spawn racers in city sessions started after the call (default on) |
+| `street_racers()` | `[entity, level, x, y, yaw, mode]` × racers (mode 0 roam, 1 waiting, 2 racing) |
+| `street_status_json()` | `{ levels, roster, hint, offer, race, result }` or `null` |
+| `street_preview(x, y)` | route from the player to (x, y): `{ ok, reason, length_m, finish, polyline }`; throws if there is no route |
+| `street_accept(x, y, stake)` | start the race; throws (nothing changed) when refused |
+| `street_decline()` | the racer drives off |
+| `map_lanes()` | drivable lane polylines `[n, x0, y0, …]` for the map (once per session) |
+
+**Testbed** (`src/ui/street.ts`, `StreetUi`; wired in `main.ts`, on `window.__wp.street`):
+
+- Minimap (bottom right, heading-up, ≈ 260 m radius): roads, the player arrow, every racer as a dot
+  in its level colour with the level number (white ring = waiting, yellow ring = racing you;
+  clamped to the rim when out of range), the route and the B flag. Level legend above it.
+- City map (click the minimap, or `` ` ``): north-up; roster with level, car and record.
+  During a challenge it is the picker: click to set B (route preview and length), bet slider,
+  **Race!** (Enter) / **Decline** (Esc).
+- "Q honk to challenge …" hint near a racer; race HUD (opponent, stake, distance left for both,
+  AHEAD / BEHIND, time left); 3-2-1-GO countdown; WON / LOST banner with the cash change.
+- Racer cars are painted in their level colour.
+
+**Perf** (native release, Port Vesper free drive, `street_perf` ignored test): 4.27 → 6.05 ms of
+sim per 60 Hz frame with the 7 racers; the street AI (fields, route planning, guard) is ~0.16 ms
+of that, the rest is vehicle + lattice physics of 7 more cars (~0.22 ms/car, inside the
+0.15 + 0.25 ms/car budget). `set_street_racers(false)` before a session turns them off.
+`e2e/street.mjs` (headless Chromium; `SHOTS=dir`): roster, minimap, honk → picker → route →
+stake paid → countdown → win at B pays even money → result banner → city map; 15 checks.
+
+**Requests** (not done here):
+
+- SR-1 (harness, 10): simcli `replay` verify for recordings with street (and picker) racers
+  (city setup + AI kinds); browser playback already verifies (inputs logged, round-12 merge).
+- SR-3 (lead, wp_sim): a dormant / kinematic mode for far scenario vehicles (skip vehicle +
+  lattice stepping, switched by a logged op): each roaming racer is a full physics car, +0.04 ms
+  (grid) / +0.06 ms (Port Vesper) per tick natively; 16 racers ≈ +0.65 / +1.0 ms per tick.
+- SR-2 (economy, G): an `EventReason::StreetRaceWager { opponent, level }` instead of the
+  `Adjustment` ledger lines the wagers use now; race stats (`races_entered`, `races_won`) are not
+  counted for street races yet.
+- SR-3 (opponent, N): a cruise mode in `Field` (posted speed limits, lane keeping instead of the
+  racing line). Roaming now relies on a capped capability, so racers cut corners within their
+  own carriageway.
+
+## Lead helper note (2026-10-22) — shader re-resolve every frame (perf_check)
+`perf_check` "no shader program re-resolve in steady frames" failed with 24 material version
+bumps over 3 renders. Cause: transparent `DoubleSide` materials without `forceSinglePass`;
+three.js draws those back faces then front faces, setting `side` + `needsUpdate` twice per
+render, so each one re-resolves its program every frame. They were the garage marker rings
+(`scene.ts`), police car decals (`render/livery.ts`), cosmetics mesh / cabin materials
+(`render/cosmetics/*.ts`), vinyls (`render/mod_parts.ts`) and the helicopter spotlight cone.
+All now `forceSinglePass: true` (flat or additive surfaces, so one pass draws the same); 0
+bumps. New transparent double-sided materials need the same flag.

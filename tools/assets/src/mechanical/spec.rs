@@ -398,6 +398,15 @@ fn exhaust(tips: Tips, tip_r: f32, pipe_r: f32, dual: bool) -> ExhaustSpec {
 
 /// Table entry for a car id (`None` = not in the roster).
 pub fn table(id: &str) -> Option<CarSpec> {
+    // Round-12 roster cars reuse their archetype's spec (same family as their style).
+    match id {
+        "stoat_16v" | "marten_20" => return table("vireo_xs"),
+        "bulwark_400" | "brigand_400" => return table("ironside_440"),
+        "arashi_t4" | "talus_20t" => {
+            return table("kestrel_ts").map(|s| CarSpec { awd: true, ..s });
+        }
+        _ => {}
+    }
     use Caliper::*;
     use DiscFace::*;
     use MaterialSlot as M;
@@ -462,7 +471,7 @@ pub fn table(id: &str) -> Option<CarSpec> {
                 exhaust(Tips::QuadTrap, 0.04, 0.032, true),
             )
         },
-        "sentinel_harrier" => {
+        "sentinel_vigil" => {
             let mut w = wheel(R::SixSpoke, 6, 18.0, 5, 114.3, M::Trim);
             w.bright = M::Trim;
             base(
@@ -711,6 +720,24 @@ pub fn table(id: &str) -> Option<CarSpec> {
                     Susp::SlaCoil,
                     leaf(4, false),
                     exhaust(Tips::BareSide, 0.038, 0.038, false),
+                )
+            }
+        }
+        // 2000s FWD high-roof panel vans: transverse I4, strut front, torsion-beam rear.
+        "satchel_20" | "tumbril_20" => {
+            let mut w = wheel(R::Steel, 6, 15.0, 5, 118.0, M::Trim);
+            w.cap = CapKind::Small;
+            CarSpec {
+                hero: false,
+                ..base(
+                    w,
+                    brake(0.28, 0.024, true, Plain, Floating1, 165.0),
+                    drum(0.254),
+                    i4(false, false),
+                    Mount::Transverse,
+                    Susp::Strut,
+                    Susp::TorsionBeam,
+                    exhaust(Tips::Single, 0.026, 0.022, false),
                 )
             }
         }

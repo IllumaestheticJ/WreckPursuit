@@ -11,7 +11,7 @@ use wp_contracts::{
 };
 use wp_sim::{Sim, SimConfig, Systems};
 
-use crate::data::{load_car, load_mode, load_world, DataSource};
+use crate::data::{load_car, load_mod_catalog, load_modded_car, load_mode, load_world, DataSource};
 use crate::replay::{Checkpoint, EntityCheckpoint, InputEvent, OpEvent, OpKind, Replay};
 use crate::scenario::{tick_of, CitySpec, Driver, Expect, OrderKind, Scenario};
 use crate::RunError;
@@ -95,8 +95,11 @@ pub struct BuiltSim {
     pub sim: Sim,
     /// Entity ids in scenario order.
     pub ids: Vec<EntityId>,
-    /// Loaded cars by car id.
+    /// Loaded cars by car id (stock).
     pub cars: BTreeMap<String, wp_contracts::LoadedCar>,
+    /// The modified car of every scenario entity with `mods` (it drives this, not the stock
+    /// car in `cars`).
+    pub modded: BTreeMap<EntityId, wp_contracts::LoadedCar>,
     /// Systems that will run.
     pub selection: Selection,
     /// Unsupported features / unapplied overrides.
@@ -177,6 +180,9 @@ pub fn scenario_states(sim: &Sim, ids: &[EntityId]) -> Vec<(EntityId, wp_contrac
 pub const POLICE_CAR: &str = "sentinel_cruiser";
 /// Car model for physical (near-player) traffic in city scenarios.
 pub const TRAFFIC_CAR: &str = "debug_sedan";
+/// Car model whose lattice dents parked cars (`Sim::set_parked_car`); the same model as
+/// traffic, so the testbed draws parked cars with the traffic mesh.
+pub const PARKED_CAR: &str = TRAFFIC_CAR;
 
 /// `car_mix` police fleet: `(car, min level, max level, measured limits)`. Limits are
 /// `[skidpad g, 100-0 m, 0-100 s, vmax km/h]` from `data/cars/VALIDATION.md` (sim-measured,
@@ -187,7 +193,7 @@ pub const CAR_MIX_POLICE: &[(&str, u8, u8, Option<[f32; 4]>)] = &[
     ("sentinel_cruiser", 1, 2, None),
     ("sentinel_bastion", 2, 3, Some([0.72, 42.7, 7.97, 214.0])),
     ("sentinel_wolfhound", 3, 5, Some([0.85, 39.6, 5.54, 244.0])),
-    ("sentinel_harrier", 4, 5, Some([0.87, 38.2, 5.74, 275.0])),
+    ("sentinel_vigil", 4, 5, Some([0.87, 38.2, 5.74, 275.0])),
 ];
 
 /// `car_mix` physical traffic models, in model-index order (agent `id` drives
@@ -346,15 +352,36 @@ pub fn build_sim(
     }
     let mut ids = Vec::new();
     let mut cars: BTreeMap<String, wp_contracts::LoadedCar> = BTreeMap::new();
+    let mut modded = BTreeMap::new();
+    let catalog = if sc.entities.iter().any(|e| !e.mods.is_empty()) {
+        Some(load_mod_catalog(data)?)
+    } else {
+        None
+    };
     for spec in &sc.entities {
         if !cars.contains_key(&spec.car) {
             cars.insert(spec.car.clone(), load_car(data, &spec.car)?);
         }
-        let id = sim.spawn_vehicle(&cars[&spec.car], spec.pos, spec.yaw)?;
+        let id = match &catalog {
+            Some(catalog) if !spec.mods.is_empty() => {
+                let car = load_modded_car(data, catalog, &spec.car, &spec.mods, sc.mode)?;
+                let id = sim.spawn_vehicle_tuned(&car, spec.pos, spec.yaw, spec.tune)?;
+                modded.insert(id, car);
+                id
+            }
+            _ => sim.spawn_vehicle_tuned(&cars[&spec.car], spec.pos, spec.yaw, spec.tune)?,
+        };
         if spec.speed_mps != 0.0 {
             sim.place_vehicle(id, spec.pos, spec.yaw, spec.speed_mps)?;
         }
         sim.set_assists(id, spec.assists.unwrap_or(sc.assists).profile())?;
+        // Player steering aids: a live-driven entity only (see `EntitySpec::player_steering`).
+        let live = matches!(spec.driver, Driver::Scripted) && spec.inputs.is_empty();
+        match spec.player_steering {
+            Some(on) => sim.set_player_steering(id, Some(on))?,
+            None if !live => sim.set_player_steering(id, Some(false))?,
+            None => {}
+        }
         if sc.panels {
             let rel = format!("panels/{}.json", spec.car);
             let spec_p = wp_damage::PanelSpec::parse(&spec.car, &data.read(&rel)?)
@@ -405,6 +432,13 @@ pub fn build_sim(
         }
         None => false,
     };
+    // Parked cars dent with the traffic car's lattice (the testbed draws them with its mesh).
+    for p in &sc.parked {
+        sim.add_parked_car(p.pos, p.yaw);
+    }
+    if sim.prop_count() > 0 {
+        sim.set_parked_car(load_car(data, PARKED_CAR)?);
+    }
     // Weather after the city (the wetness grid covers its road network).
     if let Some(w) = &sc.weather {
         sim.set_weather(w.config(sc.seed));
@@ -473,7 +507,7 @@ pub fn build_sim(
         let yaw = wp_world::geom::yaw_of(d0);
         sim.place_on_ground(*id, [p0[0], p0[1]], yaw, spec.speed_mps, Some(p0[2]))?;
         let follower = wp_world::drive::PathFollower::for_vehicle(
-            &cars[&spec.car].def,
+            &modded.get(id).unwrap_or(&cars[&spec.car]).def,
             wp_world::drive::FollowParams::PURSUIT,
             spec.speed_mps,
         );
@@ -490,6 +524,7 @@ pub fn build_sim(
         sim,
         ids,
         cars,
+        modded,
         selection,
         warnings,
         has_city,
@@ -524,6 +559,8 @@ pub fn apply_op(
             }
         }
         OpKind::Ghost { ticks } => sim.set_ghost(id, u32::from(ticks))?,
+        OpKind::Dormant { on } => sim.set_dormant(id, on)?,
+        OpKind::LightWhenFar { on } => sim.set_light_when_far(id, on)?,
     }
     Ok(())
 }
@@ -584,6 +621,11 @@ pub struct EntitySummary {
     pub max_long_g: f32,
     /// Maximum |yaw rate|, rad/s.
     pub max_yaw_rate_rps: f32,
+    /// Time with any ground-contact wheel's |slip ratio| above 0.2, s (launch wheelspin,
+    /// braking lock-ups).
+    pub wheelspin_s: f32,
+    /// Largest |heading change| from the first tick, degrees (a straight launch stays < 3).
+    pub max_heading_change_deg: f32,
     /// Maximum lattice node displacement from rest, m.
     pub crush_depth_m: f32,
     /// Distinct components failed.
@@ -635,6 +677,8 @@ impl EntitySummary {
             "max_lateral_g" => self.max_lateral_g,
             "max_long_g" => self.max_long_g,
             "max_yaw_rate_rps" => self.max_yaw_rate_rps,
+            "wheelspin_s" => self.wheelspin_s,
+            "max_heading_change_deg" => self.max_heading_change_deg,
             "crush_depth_m" => self.crush_depth_m,
             "components_failed" => self.components_failed as f32,
             "parts_detached" => self.parts_detached as f32,
@@ -655,7 +699,7 @@ impl EntitySummary {
     }
 
     /// Every metric name [`EntitySummary::metric`] accepts.
-    pub const METRICS: [&'static str; 23] = [
+    pub const METRICS: [&'static str; 25] = [
         "final_speed_mps",
         "max_speed_mps",
         "distance_m",
@@ -664,6 +708,8 @@ impl EntitySummary {
         "max_lateral_g",
         "max_long_g",
         "max_yaw_rate_rps",
+        "wheelspin_s",
+        "max_heading_change_deg",
         "crush_depth_m",
         "components_failed",
         "parts_detached",
@@ -735,6 +781,16 @@ pub struct WorldSummary {
     /// Civilians that pulled over for a siren unit coming up behind them
     /// (`TrafficStats::siren_yields`, playtest row 62).
     pub traffic_siren_yields: u64,
+    /// Longest a civilian stood still outside a red / amber light, s
+    /// (`TrafficStats::max_stop_s`, owner row 85).
+    pub traffic_max_stop_s: f32,
+    /// Longest queue of stopped civilians back from a stop line (`TrafficStats::max_queue`).
+    pub traffic_max_queue: u32,
+    /// Times a civilian stood > 5 s inside a junction box (`TrafficStats::box_stops`).
+    pub traffic_box_stops: u64,
+    /// Unseen civilians recycled after standing still 30 s outside a red light
+    /// (`TrafficStats::jam_recycled`).
+    pub traffic_jam_recycled: u64,
     /// City props turned into physics bodies (parked cars, cones).
     pub props: u32,
     /// Static boxes from `barriers`.
@@ -749,6 +805,19 @@ pub struct WorldSummary {
     pub spike_strips_max: u32,
     /// Farthest any roadblock barrier was pushed from where it was placed, m (shows a hit).
     pub barrier_displaced_max_m: f32,
+    /// Parked cars hit hard enough to dent (promoted to a damage lattice).
+    pub parked_dented: u32,
+    /// Deepest dent on any parked car at the end (`DamageModel::structural_crush_m`, as the
+    /// per-entity `crush_depth_m`), m.
+    pub parked_crush_max_m: f32,
+    /// Lowest health of any dented parked car at the end (1 when none was dented).
+    pub parked_health_min: f32,
+    /// Glass regions shattered on parked cars.
+    pub parked_glass_shattered: u32,
+    /// Parts torn off parked cars.
+    pub parked_parts_detached: u32,
+    /// Farthest any parked car was shoved from where it was parked, m.
+    pub parked_moved_max_m: f32,
 }
 
 impl WorldSummary {
@@ -765,6 +834,10 @@ impl WorldSummary {
             "traffic_go_arounds" => self.traffic_go_arounds as f32,
             "traffic_turnarounds" => self.traffic_turnarounds as f32,
             "traffic_siren_yields" => self.traffic_siren_yields as f32,
+            "traffic_max_stop_s" => self.traffic_max_stop_s,
+            "traffic_max_queue" => self.traffic_max_queue as f32,
+            "traffic_box_stops" => self.traffic_box_stops as f32,
+            "traffic_jam_recycled" => self.traffic_jam_recycled as f32,
             "props" => self.props as f32,
             "static_boxes" => self.static_boxes as f32,
             "police_units_max" => self.police_units_max as f32,
@@ -772,12 +845,18 @@ impl WorldSummary {
             "roadblock_barriers_max" => self.roadblock_barriers_max as f32,
             "spike_strips_max" => self.spike_strips_max as f32,
             "barrier_displaced_max_m" => self.barrier_displaced_max_m,
+            "parked_dented" => self.parked_dented as f32,
+            "parked_crush_max_m" => self.parked_crush_max_m,
+            "parked_health_min" => self.parked_health_min,
+            "parked_glass_shattered" => self.parked_glass_shattered as f32,
+            "parked_parts_detached" => self.parked_parts_detached as f32,
+            "parked_moved_max_m" => self.parked_moved_max_m,
             _ => return None,
         })
     }
 
     /// Every metric name [`WorldSummary::metric`] accepts.
-    pub const METRICS: [&'static str; 17] = [
+    pub const METRICS: [&'static str; 27] = [
         "traffic_agents_final",
         "traffic_agents_min",
         "traffic_moving_frac_final",
@@ -788,6 +867,10 @@ impl WorldSummary {
         "traffic_go_arounds",
         "traffic_turnarounds",
         "traffic_siren_yields",
+        "traffic_max_stop_s",
+        "traffic_max_queue",
+        "traffic_box_stops",
+        "traffic_jam_recycled",
         "props",
         "static_boxes",
         "police_units_max",
@@ -795,6 +878,12 @@ impl WorldSummary {
         "roadblock_barriers_max",
         "spike_strips_max",
         "barrier_displaced_max_m",
+        "parked_dented",
+        "parked_crush_max_m",
+        "parked_health_min",
+        "parked_glass_shattered",
+        "parked_parts_detached",
+        "parked_moved_max_m",
     ];
 }
 
@@ -811,6 +900,9 @@ struct WorldTracker {
     /// First-seen position of every barrier: `(tool, index within tool) -> pos`.
     barrier_start: BTreeMap<(u32, u32), [f32; 3]>,
     barrier_displaced_max: f32,
+    /// Where each parked car stood at the first tick (filled lazily, parked props only).
+    parked_start: Vec<[f32; 3]>,
+    parked_moved_max: f32,
 }
 
 fn moving_frac(world: &wp_world::World) -> f32 {
@@ -832,6 +924,24 @@ impl WorldTracker {
             let start = *self.barrier_start.entry((b.tool, *i)).or_insert(b.pos);
             *i += 1;
             self.barrier_displaced_max = self.barrier_displaced_max.max(dist(start, b.pos));
+        }
+    }
+
+    /// Farthest shove of any parked car: checks only the props that are dynamic now (the
+    /// others have not moved since they last were).
+    fn parked(&mut self, sim: &Sim) {
+        if self.parked_start.len() != sim.prop_count() {
+            self.parked_start = (0..sim.prop_count())
+                .map(|i| sim.prop_pose(i).map_or([0.0; 3], |p| p.0))
+                .collect();
+        }
+        for i in sim.active_props() {
+            if sim.prop_kind(i) != Some(wp_world::props::PropKind::ParkedCar) {
+                continue;
+            }
+            if let Some((p, _)) = sim.prop_pose(i) {
+                self.parked_moved_max = self.parked_moved_max.max(dist(self.parked_start[i], p));
+            }
         }
     }
 
@@ -867,6 +977,10 @@ impl WorldTracker {
             traffic_go_arounds: stats.oncoming_passes + stats.go_around_lane_changes,
             traffic_turnarounds: stats.turnarounds_completed + stats.reverses,
             traffic_siren_yields: stats.siren_yields,
+            traffic_max_stop_s: stats.max_stop_s,
+            traffic_max_queue: stats.max_queue,
+            traffic_box_stops: stats.box_stops,
+            traffic_jam_recycled: stats.jam_recycled,
             props: sim.prop_count() as u32,
             static_boxes: sim.static_box_count() as u32,
             police_units_max: self.police_max,
@@ -874,6 +988,20 @@ impl WorldTracker {
             roadblock_barriers_max: self.barriers_max,
             spike_strips_max: self.spikes_max,
             barrier_displaced_max_m: self.barrier_displaced_max,
+            parked_dented: sim.parked_wrecks().len() as u32,
+            parked_crush_max_m: sim
+                .parked_wrecks()
+                .iter()
+                .map(|w| w.damage.structural_crush_m())
+                .fold(0.0, f32::max),
+            parked_health_min: sim
+                .parked_wrecks()
+                .iter()
+                .map(|w| w.damage.health())
+                .fold(1.0, f32::min),
+            parked_glass_shattered: sim.parked_stats().glass_shattered,
+            parked_parts_detached: sim.parked_stats().parts_detached,
+            parked_moved_max_m: self.parked_moved_max,
         }
     }
 }
@@ -1119,6 +1247,8 @@ struct Tracker {
     last_pos: [f32; 3],
     lat_g: f32,
     long_g: f32,
+    /// Heading at the first tick, rad (`None` before it).
+    heading0: Option<f32>,
     summary: EntitySummary,
     failed: BTreeSet<Component>,
 }
@@ -1128,6 +1258,23 @@ impl Tracker {
         let e = &mut self.summary;
         e.max_speed_mps = e.max_speed_mps.max(s.speed_mps);
         e.max_yaw_rate_rps = e.max_yaw_rate_rps.max(s.ang_vel[2].abs());
+        if s.wheel_states
+            .iter()
+            .any(|w| w.contact && w.slip_ratio.abs() > 0.2)
+        {
+            e.wheelspin_s += PHYSICS_DT;
+        }
+        // Report-only metric (never fed back into the sim), so plain atan2 is fine here.
+        let fwd = rotate(s.rot, [0.0, 1.0, 0.0]);
+        let heading = fwd[0].atan2(fwd[1]);
+        let h0 = *self.heading0.get_or_insert(heading);
+        let mut d = (heading - h0).to_degrees();
+        if d > 180.0 {
+            d -= 360.0;
+        } else if d < -180.0 {
+            d += 360.0;
+        }
+        e.max_heading_change_deg = e.max_heading_change_deg.max(d.abs());
         e.min_z_m = e.min_z_m.min(s.pos[2]);
         e.path_length_m += dist(
             [s.pos[0], s.pos[1], 0.0],
@@ -1218,7 +1365,8 @@ pub fn run_with_hook(
     let BuiltSim {
         mut sim,
         ids,
-        cars: _,
+        cars,
+        modded: _,
         selection,
         warnings,
         has_city,
@@ -1241,6 +1389,7 @@ pub fn run_with_hook(
             last_pos: start,
             lat_g: 0.0,
             long_g: 0.0,
+            heading0: None,
             failed: BTreeSet::new(),
             summary: EntitySummary {
                 id: spec.id.clone(),
@@ -1254,6 +1403,8 @@ pub fn run_with_hook(
                 max_lateral_g: 0.0,
                 max_long_g: 0.0,
                 max_yaw_rate_rps: 0.0,
+                wheelspin_s: 0.0,
+                max_heading_change_deg: 0.0,
                 crush_depth_m: 0.0,
                 components_failed: 0,
                 parts_detached: 0,
@@ -1320,6 +1471,8 @@ pub fn run_with_hook(
     let mut events_total = 0u64;
     let mut max_events_per_tick = 0u64;
     let mut police_first: BTreeMap<u16, u64> = BTreeMap::new();
+    // Captured route drivers to restart next tick (`restart_after_capture`).
+    let mut restarts: Vec<EntityId> = Vec::new();
     // (tick, racer, outcome) of every PursuitEnded, in order.
     let mut pursuit_ends: Vec<(u64, EntityId, wp_contracts::PursuitOutcome)> = Vec::new();
     let mut event_counts: Vec<(&'static str, Vec<EntityId>)> = Vec::new();
@@ -1358,6 +1511,25 @@ pub fn run_with_hook(
                 track_cursor += 1;
             }
         } else {
+            // `restart_after_capture`: a captured route driver starts its run again.
+            for racer in std::mem::take(&mut restarts) {
+                let Some(idx) = ids.iter().position(|i| *i == racer) else {
+                    continue;
+                };
+                let spec = &sc.entities[idx];
+                if let Some(route) = routes[idx].as_mut() {
+                    let (p0, d0) = route.path.point_at(0.0);
+                    let yaw = wp_world::geom::yaw_of(d0);
+                    sim.place_on_ground(racer, [p0[0], p0[1]], yaw, spec.speed_mps, Some(p0[2]))?;
+                    route.follower = wp_world::drive::PathFollower::for_vehicle(
+                        &cars[&spec.car].def,
+                        wp_world::drive::FollowParams::PURSUIT,
+                        spec.speed_mps,
+                    );
+                    route.progress_m = 0.0;
+                    sim.police_mut().set_heat(racer, spec.police_heat);
+                }
+            }
             let states = scenario_states(&sim, &ids);
             for (idx, id) in ids.iter().enumerate() {
                 let input = match routes[idx].as_mut() {
@@ -1406,6 +1578,15 @@ pub fn run_with_hook(
                     police_first.entry(p.kind()).or_insert(now);
                     if let wp_contracts::PoliceEvent::PursuitEnded { racer, outcome, .. } = p {
                         pursuit_ends.push((now, *racer, *outcome));
+                        if sc.restart_after_capture
+                            && matches!(
+                                outcome,
+                                wp_contracts::PursuitOutcome::Captured
+                                    | wp_contracts::PursuitOutcome::CapturedTotalLoss
+                            )
+                        {
+                            restarts.push(*racer);
+                        }
                     }
                 }
                 SimEvent::ComponentFailed { vehicle, component } => {
@@ -1522,6 +1703,7 @@ pub fn run_with_hook(
         }
         // Police tools exist on any world (`roadblock_at` / `spikes_at` work on the flat one).
         world_tr.police_tools(&sim);
+        world_tr.parked(&sim);
 
         // Hashes.
         let checkpoint = now.is_multiple_of(sc.hash_every) || now == ticks;

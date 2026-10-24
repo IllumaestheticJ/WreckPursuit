@@ -24,7 +24,7 @@ fn car() -> &'static LoadedCar {
 }
 
 fn sim(net: &RoadNetwork) -> Sim {
-    let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
+    let mode = load_mode_table(data("modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed: 4,
         mode,
@@ -75,17 +75,17 @@ fn cars_stay_on_the_ground_across_stop_lines_at_120_kmh() {
     let (mut drives, mut fails, mut worst_air) = (0, Vec::new(), 0.0f32);
     let mut seen = std::collections::BTreeSet::new();
     // No ribbon ends overlap any more (Port Vesper node 81's cul-de-sac used to leave 6° off
-    // a street: `docs/integration/sidewalk-lots.md`), so every approach is driven. Freeway
-    // merges and diverges overlap by design (the ramp ribbon lies on the carriageway); they
-    // are driven too.
-    let merge = |node: u32| {
-        net.nodes[node as usize]
+    // a street: `docs/integration/sidewalk-lots.md`), so every approach is driven.
+    // Freeway merges / diverges (main's radius-0 junctions) overlap by design: every road's
+    // paving runs to the node.
+    let freeway = |node: u32| {
+        map.net.nodes[node as usize]
             .intersection
-            .is_some_and(|ix| net.intersections[ix as usize].radius_m <= 0.0)
+            .is_some_and(|ix| map.net.intersections[ix as usize].radius_m <= 0.0)
     };
     let overlapping: Vec<u32> = wp_world::surface::node_patches(&map)
         .iter()
-        .filter(|p| p.overlapping_ends && !merge(p.node))
+        .filter(|p| p.overlapping_ends && !freeway(p.node))
         .map(|p| p.node)
         .collect();
     assert!(

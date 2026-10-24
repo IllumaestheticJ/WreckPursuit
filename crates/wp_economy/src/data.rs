@@ -18,7 +18,9 @@ use crate::error::{invalid, DataError};
 use crate::garage::Condition;
 use crate::ledger::Money;
 use crate::mods::{ModCatalog, ModPack};
+use crate::parts::PartsTable;
 use crate::payouts::RaceType;
+use crate::progression::ProgressionRules;
 
 /// Every vehicle class, in declaration order.
 pub const ALL_CLASSES: [VehicleClass; 9] = [
@@ -52,7 +54,11 @@ pub const ALL_PHASES: [DayPhase; 4] = [
 ];
 
 /// Every damage mode.
-pub const ALL_MODES: [DamageMode; 2] = [DamageMode::Arcade, DamageMode::Simulation];
+pub const ALL_MODES: [DamageMode; 3] = [
+    DamageMode::Arcade,
+    DamageMode::Simulation,
+    DamageMode::Extreme,
+];
 
 /// Every body region.
 pub const ALL_REGIONS: [BodyRegion; 20] = [
@@ -553,12 +559,18 @@ pub struct DataSources {
     pub consequences: String,
     /// `data/economy/market.toml`.
     pub market: String,
+    /// `data/economy/parts.toml` (workshop slots).
+    pub parts: String,
+    /// `data/economy/career.toml` (rep tiers, unlocks, betting limits).
+    pub career: String,
     /// `data/mods/*.json` as `(file stem, contents)`.
     pub mods: Vec<(String, String)>,
     /// `data/modes/arcade.toml` (owned by workstream 03; read-only here).
     pub arcade_mode: String,
     /// `data/modes/sim.toml`.
     pub sim_mode: String,
+    /// `data/modes/extreme.toml`.
+    pub extreme_mode: String,
 }
 
 /// File stems of the embedded mod packs (`data/mods/<stem>.json`).
@@ -614,6 +626,8 @@ impl DataSources {
             stakes: data_file!("economy/stakes.toml").to_string(),
             consequences: data_file!("economy/consequences.toml").to_string(),
             market: data_file!("economy/market.toml").to_string(),
+            parts: data_file!("economy/parts.toml").to_string(),
+            career: data_file!("economy/career.toml").to_string(),
             mods: MOD_PACKS
                 .iter()
                 .zip(EMBEDDED_MODS.iter())
@@ -621,6 +635,7 @@ impl DataSources {
                 .collect(),
             arcade_mode: data_file!("modes/arcade.toml").to_string(),
             sim_mode: data_file!("modes/sim.toml").to_string(),
+            extreme_mode: data_file!("modes/extreme.toml").to_string(),
         }
     }
 
@@ -658,9 +673,12 @@ impl DataSources {
             stakes: read("economy/stakes.toml")?,
             consequences: read("economy/consequences.toml")?,
             market: read("economy/market.toml")?,
+            parts: read("economy/parts.toml")?,
+            career: read("economy/career.toml")?,
             mods,
             arcade_mode: read("modes/arcade.toml")?,
             sim_mode: read("modes/sim.toml")?,
+            extreme_mode: read("modes/extreme.toml")?,
         })
     }
 }
@@ -679,6 +697,10 @@ pub struct Economy {
     pub market: MarketTables,
     /// All mods.
     pub catalog: ModCatalog,
+    /// Workshop slots (`parts.toml`).
+    pub parts: PartsTable,
+    /// Career progression (`career.toml`, see [`crate::progression`]).
+    pub progression: ProgressionRules,
     /// Damage mode tables keyed by mode.
     pub modes: BTreeMap<DamageMode, ModeTable>,
 }
@@ -723,6 +745,8 @@ impl Economy {
         let mode_err = |e: wp_contracts::LoadError| invalid("mode table", e.to_string());
         let arcade = parse_mode_table("modes/arcade.toml", &src.arcade_mode).map_err(mode_err)?;
         let sim = parse_mode_table("modes/sim.toml", &src.sim_mode).map_err(mode_err)?;
+        let extreme =
+            parse_mode_table("modes/extreme.toml", &src.extreme_mode).map_err(mode_err)?;
         let mut packs = Vec::new();
         for (name, text) in &src.mods {
             let pack: ModPack = serde_json::from_str(text).map_err(|source| DataError::Json {
@@ -743,9 +767,15 @@ impl Economy {
             consequences: parse_toml("economy/consequences.toml", &src.consequences)?,
             market: parse_toml("economy/market.toml", &src.market)?,
             catalog: ModCatalog::from_packs(packs)?,
-            modes: [(DamageMode::Arcade, arcade), (DamageMode::Simulation, sim)]
-                .into_iter()
-                .collect(),
+            parts: PartsTable::parse(&src.parts)?,
+            progression: parse_toml("economy/career.toml", &src.career)?,
+            modes: [
+                (DamageMode::Arcade, arcade),
+                (DamageMode::Simulation, sim),
+                (DamageMode::Extreme, extreme),
+            ]
+            .into_iter()
+            .collect(),
         };
         econ.validate()?;
         Ok(econ)
@@ -769,6 +799,8 @@ impl Economy {
 
     /// Check every table is complete and in range.
     pub fn validate(&self) -> Result<(), DataError> {
+        self.parts.validate(&self.catalog)?;
+        self.progression.validate()?;
         let k = &self.consequences.career;
         require_frac("consequences.career.heat_carry_frac", k.heat_carry_frac)?;
         if !(k.heat_carry_min >= 0.0 && k.heat_carry_min <= k.heat_carry_max) {

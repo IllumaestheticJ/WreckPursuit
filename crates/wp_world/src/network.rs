@@ -22,8 +22,13 @@ pub const ROAD_MAGIC: [u8; 4] = *b"WPRD";
 /// v4 (residential streets, playtest rows 94–95): building kind and roof
 /// ([`Building::kind`], [`Building::roof`], [`Building::roof_rise_m`]) and street / yard
 /// furniture ([`RoadNetwork::decor`]).
-/// v5 (divided highways): `RoadSurface::median_barrier`.
-pub const ROAD_FORMAT_VERSION: u32 = 5;
+/// v5 (main's divided highways, merged on lead/main-sync): `RoadSurface::median_barrier`
+/// (main's own v3).
+/// v6 (Ashpeak County): road material ([`RoadSurface::material`]: gravel and dirt roads),
+/// farm / landmark / construction building kinds and construction, farm and forest decor.
+/// v7 (Port Vesper city features, PR #38 ported): [`RoadNetwork::features`] (waterways,
+/// bridges, structures, landmarks, hideouts; PR #38's own v4).
+pub const ROAD_FORMAT_VERSION: u32 = 7;
 
 /// Index into [`RoadNetwork::nodes`].
 pub type NodeId = u32;
@@ -81,6 +86,10 @@ pub struct RoadNetwork {
     /// drawn only.
     #[serde(default)]
     pub decor: Vec<Decor>,
+    /// Rivers, bridges, landmarks and hiding spots (empty for the grid city and imports).
+    /// Tunnels are [`RoadNetwork::covered`] spans.
+    #[serde(default)]
+    pub features: CityFeatures,
 }
 
 /// What kind of cover a [`CoveredSpan`] is (drawing and radio flavour; line of sight treats
@@ -141,6 +150,23 @@ pub struct RoadSurface {
     /// A concrete median barrier runs along the left paved edge (one carriageway of a
     /// divided highway carries it; [`crate::surface::median_barriers`] gives its line).
     pub median_barrier: bool,
+    /// What the road is paved with (`WorldQuery::surface_at` on its lanes).
+    #[serde(default)]
+    pub material: RoadMaterial,
+}
+
+/// Road paving (v6). Highways stay concrete whatever this says.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
+pub enum RoadMaterial {
+    /// Asphalt (every road before v6).
+    #[default]
+    Asphalt,
+    /// Graded gravel (farm roads, forest roads).
+    Gravel,
+    /// Packed dirt (field tracks, trails).
+    Dirt,
 }
 
 impl RoadSurface {
@@ -345,6 +371,9 @@ pub enum PoiKind {
     PoliceStation,
     /// Police helipad.
     Helipad,
+    /// Highway rest stop: a pull-off with a lit parking road (pose = the middle of the
+    /// parking road, facing its travel direction). Not in `wp_contracts`' POI list.
+    RestStop,
 }
 
 /// A point of interest.
@@ -376,6 +405,14 @@ pub enum BuildingKind {
     Garage,
     /// Corner shop in a residential district.
     Shop,
+    /// Farm building: barn, shed, farmhouse outbuilding (pitched roof, timber colours).
+    Farm,
+    /// Grain silo (round-ish footprint, tall).
+    Silo,
+    /// Named landmark (supertall tower, stadium, observatory, dam, ...).
+    Landmark,
+    /// Building under construction (open frame, scaffolding colours).
+    Construction,
 }
 
 /// Roof shape over a building's walls.
@@ -482,6 +519,18 @@ pub enum DecorKind {
     Fence,
     /// Paved driveway from the sidewalk to a garage (drawn only; level with the yard).
     Driveway,
+    /// Conifer in a mountain forest (trunk + narrow crown; the trunk is solid).
+    PineTree,
+    /// Construction tower crane (the mast is solid; size = mast footprint and full height).
+    Crane,
+    /// Concrete jersey barrier (solid box).
+    JerseyBarrier,
+    /// Construction-site hoarding / chain-link fence panel (solid box).
+    SiteFence,
+    /// Round hay bale on a field (solid box).
+    HayBale,
+    /// Roadside billboard on posts (solid box).
+    Billboard,
 }
 
 /// One piece of street / yard furniture: an oriented box standing on the ground.
@@ -496,6 +545,165 @@ pub struct Decor {
     /// Full size: width (local X), length (local Y), height, m. Trees: crown diameter,
     /// crown diameter, total height.
     pub size: [f32; 3],
+}
+
+/// Water surface level of the sea (and of every waterway at its mouth), m. Terrain below it
+/// is seabed.
+pub const SEA_LEVEL_M: f32 = 0.25;
+
+/// Everything about a city beyond roads, zones and plain buildings: water, named bridges,
+/// landmark structures and the places a racer can hide from the police. Tunnels are
+/// [`RoadNetwork::covered`] spans; the Hollins Tunnel's landmark and hideout entries point at
+/// its span.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CityFeatures {
+    /// Rivers and canals.
+    pub waterways: Vec<Waterway>,
+    /// Named road bridges over water.
+    pub bridges: Vec<Bridge>,
+    /// Solid prisms that are not ordinary buildings: canopies and their pillars, landmark
+    /// parts, bridge trusses. They collide, render and block line
+    /// of sight like buildings, but may float (`z0_m` above the ground).
+    pub structures: Vec<Structure>,
+    /// Named landmarks (orientation points for players and the minimap).
+    pub landmarks: Vec<Landmark>,
+    /// Places where a car is hidden from the air (tunnels, canopies).
+    pub hideouts: Vec<Hideout>,
+}
+
+/// Kind of waterway.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum WaterwayKind {
+    /// A natural river (water surface falls towards the mouth).
+    River,
+    /// A level canal (water surface at sea level).
+    Canal,
+}
+
+/// A river or canal: a water ribbon over a channel carved into the terrain.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Waterway {
+    /// Display name.
+    pub name: String,
+    /// River or canal.
+    pub kind: WaterwayKind,
+    /// Centreline from source to mouth; `z` is the water surface, m.
+    pub centre: Vec<[f32; 3]>,
+    /// Half width of the water surface per centreline point, m.
+    pub half_width_m: Vec<f32>,
+    /// Water depth in the middle of the channel, m.
+    pub depth_m: f32,
+}
+
+/// Kind of bridge (looks and deck surface).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum BridgeKind {
+    /// Concrete beam bridge (road surface on the deck).
+    Beam,
+    /// Steel truss with a steel-grate deck (`SurfaceType::Metal`).
+    Truss,
+    /// Long highway viaduct.
+    Viaduct,
+}
+
+/// A named bridge: the deck stretch of one road surface over water.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Bridge {
+    /// Display name.
+    pub name: String,
+    /// Kind.
+    pub kind: BridgeKind,
+    /// Index into [`RoadNetwork::surfaces`].
+    pub surface: u32,
+    /// Deck centreline (on the road surface), m.
+    pub centre: Vec<[f32; 3]>,
+    /// Half width of the deck (widest paved side), m.
+    pub half_width_m: f32,
+}
+
+/// What a [`Structure`] is (render material and diagnostics).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum StructureKind {
+    /// Roof slab of a canopy you can drive under.
+    Canopy,
+    /// Pillar holding up a canopy.
+    Pillar,
+    /// Part of a landmark.
+    Landmark,
+    /// Steel truss member over a bridge deck.
+    Truss,
+}
+
+/// A solid vertical prism from `z0_m` to `z1_m` over a convex footprint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Structure {
+    /// What it is.
+    pub kind: StructureKind,
+    /// Convex footprint (counter-clockwise), m.
+    pub footprint: Vec<[f32; 2]>,
+    /// Bottom height, m.
+    pub z0_m: f32,
+    /// Top height, m.
+    pub z1_m: f32,
+}
+
+/// Kind of landmark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum LandmarkKind {
+    /// The tallest tower downtown.
+    Tower,
+    /// Lighthouse on the coast.
+    Lighthouse,
+    /// Observatory dome.
+    Observatory,
+    /// Industrial chimney.
+    Chimney,
+    /// Ship-to-shore container crane.
+    Crane,
+    /// Water tower.
+    WaterTower,
+    /// A named bridge with a distinctive structure.
+    Bridge,
+    /// A named tunnel.
+    Tunnel,
+}
+
+/// A named landmark.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Landmark {
+    /// Display name.
+    pub name: String,
+    /// Kind.
+    pub kind: LandmarkKind,
+    /// Base centre, m.
+    pub pos: [f32; 3],
+    /// Height above `pos`, m.
+    pub height_m: f32,
+    /// Its parts in [`CityFeatures::structures`] (may be empty for bridges and tunnels).
+    pub structures: Vec<u32>,
+}
+
+/// Kind of hiding spot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum HideoutKind {
+    /// Inside a road tunnel.
+    Tunnel,
+    /// Under a canopy (open sides: ground units still see in from close by).
+    Canopy,
+}
+
+/// A place where a car is out of sight from the air (`WorldQuery::line_of_sight` from above
+/// is blocked anywhere within `radius_m` of `pos` at ground level, under the cover).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Hideout {
+    /// Display name.
+    pub name: String,
+    /// Kind.
+    pub kind: HideoutKind,
+    /// Centre at ground level, m.
+    pub pos: [f32; 3],
+    /// Rough radius of the covered area, m.
+    pub radius_m: f32,
 }
 
 /// Errors loading or validating a road network.
@@ -521,15 +729,6 @@ pub enum RoadError {
 }
 
 impl RoadNetwork {
-    /// The terrain when it has relief (hills, embankments); `None` for a city without terrain
-    /// or with a flat one (the grid city's, under its viaduct). Sidewalk lots, wedges and
-    /// slope support follow the flat-city rules then.
-    pub fn relief(&self) -> Option<&crate::terrain::Heightfield> {
-        self.terrain
-            .as_ref()
-            .filter(|t| t.z.iter().any(|z| *z != t.z[0]))
-    }
-
     /// Ground height at `p` (terrain, or 0 without one). Roads are not included; see
     /// `CityMap::surface_height`.
     pub fn ground_z(&self, p: [f32; 2]) -> f32 {
@@ -691,6 +890,30 @@ impl RoadNetwork {
                 || c.road as usize >= self.surfaces.len().max(1)
             {
                 return bad(format!("covered span {i}: bad centreline, size or road"));
+            }
+        }
+        let f = &self.features;
+        for (i, w) in f.waterways.iter().enumerate() {
+            if w.centre.len() < 2 || w.half_width_m.len() != w.centre.len() {
+                return bad(format!("waterway {i}: bad centreline / widths"));
+            }
+        }
+        for (i, b) in f.bridges.iter().enumerate() {
+            if b.centre.len() < 2 || b.surface as usize >= self.surfaces.len() {
+                return bad(format!("bridge {i}: bad centreline / surface"));
+            }
+        }
+        for (i, s) in f.structures.iter().enumerate() {
+            if s.footprint.len() < 3 || s.z1_m <= s.z0_m {
+                return bad(format!("structure {i}: bad footprint / heights"));
+            }
+        }
+        for (i, l) in f.landmarks.iter().enumerate() {
+            if l.structures
+                .iter()
+                .any(|s| *s as usize >= f.structures.len())
+            {
+                return bad(format!("landmark {i}: structure out of range"));
             }
         }
         if let Some(t) = &self.terrain {

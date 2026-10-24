@@ -1,0 +1,1311 @@
+//! Drift Lab W measurements: the [`crate::drift_lab`] scripted drivers run under the plain
+//! keyboard steering profile ([`crate::plain`]) with the owner's reference assists (TCS off,
+//! ESC off, manual gears), for the reference-parity test cars (`data/cars/parity/`) and roster
+//! comparison cars. Used by `examples/drift_lab_w.rs`, `tests/drift_lab_w.rs` and
+//! `docs/integration/drift-lab-w.md`.
+//!
+//! The owner's technique (reference clips 1–2): the countersteer key held + full throttle in
+//! 2nd ([`crate::drift_lab::DriftDriver::Naive`]), steering taps of 0.1–0.25 s, handbrake
+//! 0.3–1.0 s.
+//!
+//! The plain profile is a process-wide override: callers set it with
+//! [`crate::plain::set_override`] before measuring (and keep other tests out of the process).
+
+use std::path::Path;
+
+use wp_contracts::{AssistProfile, LoadedCar};
+
+/// The owner's reference assists for the plain lab: keyboard preset with TCS off, ESC off,
+/// manual gears (automatic clutch), no pedal filters, no countersteer help.
+pub fn reference_assists() -> AssistProfile {
+    AssistProfile {
+        tcs: wp_contracts::TcsLevel::Off,
+        esc: false,
+        countersteer_help: 0.0,
+        throttle_filter: 0.0,
+        brake_filter: 0.0,
+        auto_gears: false,
+        auto_clutch: true,
+        ..AssistProfile::keyboard_default()
+    }
+}
+
+/// Load a car by id from the data root `data` (`…/data`): a roster car (`cars/<id>.json`) or
+/// a reference-parity test car (`cars/parity/<id>.json`). A parity car borrows its tyres,
+/// lattice and materials from the roster car whose lattice it uses.
+pub fn load_any_car(data: &Path, id: &str) -> Result<LoadedCar, String> {
+    let roster = data.join("cars").join(format!("{id}.json"));
+    if roster.exists() {
+        return wp_contracts::load_car(&roster).map_err(|e| e.to_string());
+    }
+    let parity = data.join("cars").join("parity").join(format!("{id}.json"));
+    let def = wp_contracts::load_vehicle_def(&parity).map_err(|e| format!("{id}: {e}"))?;
+    let template =
+        wp_contracts::load_car(data.join("cars").join(format!("{}.json", def.lattice_id)))
+            .map_err(|e| format!("{id} (template {}): {e}", def.lattice_id))?;
+    wp_contracts::resolve_car(
+        def,
+        &template.tires,
+        std::slice::from_ref(&template.lattice),
+        &template.materials,
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// The four reference-parity test cars.
+pub const PARITY_CARS: [&str; 4] = [
+    "parity_rwd_a",
+    "parity_rwd_b",
+    "parity_rwd_d",
+    "parity_fwd_c",
+];
+
+/// Roster cars measured next to them (Drift Lab C's comparison pair).
+pub const ROSTER_CARS: [&str; 2] = ["shiro_turbo", "rampart_50"];
+
+/// Result of [`handbrake_pivot`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HandbrakePivot {
+    /// Heading change while the handbrake is held, degrees (into the turn).
+    pub pivot_deg: f32,
+    /// Heading change from the handbrake to the end, degrees.
+    pub total_deg: f32,
+    /// Largest body slip, degrees.
+    pub max_slip_deg: f32,
+    /// Time from the countersteer key until caught (body slip < 15°, |yaw rate| < 0.5 rad/s,
+    /// moving forward), s (`None`: not within 2 s).
+    pub catch_s: Option<f32>,
+    /// Spun: travelling backwards or past 120° of slip after the catch started.
+    pub spun: bool,
+}
+
+/// A handbrake pivot as the owner drives it (clips 2 / 3 / 5): straight at `speed_mps`
+/// (holding speed), then the key into a right-hand turn + the handbrake for `hb_s` with the
+/// throttle off, then the throttle on with the key still held for 0.3 s, then the
+/// countersteer key + full throttle until caught (at most 2 s), then the keys released +
+/// throttle for 1 s.
+pub fn handbrake_pivot(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    speed_mps: f32,
+    hb_s: f32,
+) -> HandbrakePivot {
+    use crate::drift_lab::slide_state;
+    use crate::math::{atan2, V3};
+    use wp_contracts::{VehicleInput, PHYSICS_DT};
+    const TPS: usize = 240;
+    let mut rig = crate::rig::Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
+    let auto = AssistProfile {
+        auto_gears: true,
+        ..*assists
+    };
+    for _ in 0..TPS {
+        let err = speed_mps - rig.state().speed_mps;
+        let (throttle, brake) = if err > -1.0 {
+            ((0.25 + 0.35 * err).clamp(0.0, 1.0), 0.0)
+        } else {
+            (0.0, (-0.2 * err).clamp(0.0, 1.0))
+        };
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            &auto,
+        );
+    }
+    let heading = |rig: &crate::rig::Rig| {
+        let f = rig.vehicle.chassis().rot * V3::Y;
+        atan2(-f.x, f.y)
+    };
+    let wrap = |d: f32| {
+        if d > std::f32::consts::PI {
+            d - std::f32::consts::TAU
+        } else if d < -std::f32::consts::PI {
+            d + std::f32::consts::TAU
+        } else {
+            d
+        }
+    };
+    let hb = ((hb_s * TPS as f32) as usize).max(1);
+    let power = TPS * 3 / 10;
+    let end = hb + power + 3 * TPS;
+    let mut prev = heading(&rig);
+    let (mut total, mut pivot, mut max_slip) = (0.0f32, 0.0f32, 0.0f32);
+    let (mut catch_start, mut caught): (Option<usize>, Option<usize>) = (None, None);
+    let mut spun = false;
+    for tick in 0..end {
+        // Right-hand turn: into the turn = right (+1), the countersteer key = left (−1).
+        let input = if tick < hb {
+            VehicleInput {
+                steer: 1.0,
+                handbrake: 1.0,
+                ..Default::default()
+            }
+        } else if tick < hb + power {
+            VehicleInput {
+                steer: 1.0,
+                throttle: 1.0,
+                ..Default::default()
+            }
+        } else if caught.is_none() && tick < hb + power + 2 * TPS {
+            catch_start.get_or_insert(tick);
+            VehicleInput {
+                steer: -1.0,
+                throttle: 1.0,
+                ..Default::default()
+            }
+        } else {
+            VehicleInput {
+                throttle: 1.0,
+                ..Default::default()
+            }
+        };
+        rig.step(&input, assists);
+        let h = heading(&rig);
+        let d = wrap(h - prev);
+        prev = h;
+        total += d;
+        if tick < hb {
+            pivot += d;
+        }
+        let n = slide_state(&rig);
+        let slip = n.body_slip.abs().to_degrees();
+        max_slip = max_slip.max(slip);
+        if let Some(t0) = catch_start {
+            if n.v_fwd < -1.0 || slip > 120.0 {
+                spun = true;
+            }
+            if caught.is_none()
+                && tick > t0
+                && slip < 15.0
+                && n.yaw_rate.abs() < 0.5
+                && n.v_fwd > 2.0
+            {
+                caught = Some(tick);
+            }
+        }
+    }
+    HandbrakePivot {
+        pivot_deg: -pivot.to_degrees(),
+        total_deg: -total.to_degrees(),
+        max_slip_deg: max_slip,
+        catch_s: match (catch_start, caught) {
+            (Some(a), Some(b)) => Some((b - a) as f32 * PHYSICS_DT),
+            _ => None,
+        },
+        spun,
+    }
+}
+
+/// Scripted keyboard drivers for the plain lab ([`plain_drift_run`]). All enter the same way:
+/// the key into the turn + full throttle until the slide passes `entry_deg`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PlainDriver {
+    /// The owner's clip-1 technique: from `entry_deg` on, the countersteer key held + the
+    /// throttle at `throttle` (1 = the owner's full throttle) for the rest of the run.
+    HoldCounter {
+        /// Slide angle where the countersteer key goes down, degrees.
+        entry_deg: f32,
+        /// Throttle after the entry, 0..=1 (a diagnostic; the keyboard has only 0 / 1).
+        throttle: f32,
+    },
+    /// Reference clip 8: from `entry_deg` on, the key **into** the turn stays held with full
+    /// throttle (the owner held it 2.9 s through a hairpin power slide; it must not spin).
+    IntoTurnHeld {
+        /// Slide angle where the driver keeps holding (no change of key), degrees.
+        entry_deg: f32,
+    },
+    /// From `entry_deg` on, both steering keys released, full throttle (the slide should hold,
+    /// then straighten).
+    Released {
+        /// Slide angle where the keys are released, degrees.
+        entry_deg: f32,
+    },
+    /// A keyboard drifter steering with taps (clips 1–2): the countersteer key while the slide
+    /// is past `target_deg` or growing faster than 15°/s, released otherwise, and the key into
+    /// the turn below `target_deg − 15°`; full throttle, lifted while past `target_deg + 10°`.
+    Tapper {
+        /// Slide angle where the countersteer key goes down, degrees.
+        entry_deg: f32,
+        /// Slide angle the driver aims for, degrees.
+        target_deg: f32,
+    },
+}
+
+/// Drift-hold metrics, **direction-aware** (the definition shared with `lead/tyre-slip`). From
+/// the per-tick slide angle on the intended side `a` (left-hand corner: `a = −body slip`,
+/// degrees; + = tail out of the turn as intended), up to the first tick with |a| ≥ 90° or
+/// travelling backwards (a spin):
+/// - `drift_s`: time with `a` in 10..=50° (the other side never counts);
+/// - `band_s`: time with `a` in 30..=45° (reference clip 1's band);
+/// - `side_swaps`: times the slide went from the intended side (`a` ≥ 10°) through to the
+///   other side (`a` ≤ −10°) — a swing through, counted as a failure;
+/// - `mean_deg` / `sd_deg`: of `a` while drifting;
+/// - `held`: not spun, no side swap, and `drift_s` ≥ half the run.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HoldMetrics {
+    /// Time on the intended side within 10–50°, s.
+    pub drift_s: f32,
+    /// Time on the intended side within 30–45°, s.
+    pub band_s: f32,
+    /// Swings from the intended side through to the other side.
+    pub side_swaps: usize,
+    /// Mean intended-side angle while drifting, degrees.
+    pub mean_deg: f32,
+    /// Standard deviation of it, degrees.
+    pub sd_deg: f32,
+    /// Spun (|a| ≥ 90° or backwards).
+    pub spun: bool,
+    /// Held: not spun, no side swap, `drift_s` ≥ half of `run_s`.
+    pub held: bool,
+    /// Length of the run, s.
+    pub run_s: f32,
+    /// Intended-side angle at the end of the run (or at the spin), degrees.
+    pub end_deg: f32,
+}
+
+impl HoldMetrics {
+    /// Metrics of intended-side angles `a` (degrees, one per tick) and per-tick "travelling
+    /// backwards" flags.
+    pub fn from_angles(a: &[f32], backwards: &[bool]) -> Self {
+        use wp_contracts::PHYSICS_DT;
+        let (mut drift, mut band, mut swaps) = (0usize, 0usize, 0usize);
+        let (mut sum, mut sum2) = (0.0f32, 0.0f32);
+        let mut spun = false;
+        let mut on_side = false;
+        for (k, &x) in a.iter().enumerate() {
+            if x.abs() >= 90.0 || backwards.get(k).copied().unwrap_or(false) {
+                spun = true;
+                break;
+            }
+            if (10.0..=50.0).contains(&x) {
+                drift += 1;
+                sum += x;
+                sum2 += x * x;
+            }
+            if (30.0..=45.0).contains(&x) {
+                band += 1;
+            }
+            if x >= 10.0 {
+                on_side = true;
+            } else if x <= -10.0 && on_side {
+                swaps += 1;
+                on_side = false;
+            }
+        }
+        let (mean, sd) = if drift > 0 {
+            let m = sum / drift as f32;
+            (m, (sum2 / drift as f32 - m * m).max(0.0).sqrt())
+        } else {
+            (0.0, 0.0)
+        };
+        let run_s = a.len() as f32 * PHYSICS_DT;
+        let drift_s = drift as f32 * PHYSICS_DT;
+        Self {
+            drift_s,
+            band_s: band as f32 * PHYSICS_DT,
+            side_swaps: swaps,
+            mean_deg: mean,
+            sd_deg: sd,
+            spun,
+            held: !spun && swaps == 0 && drift_s >= 0.5 * run_s,
+            run_s,
+            end_deg: a
+                .iter()
+                .take_while(|x| x.abs() < 90.0)
+                .last()
+                .copied()
+                .unwrap_or(0.0),
+        }
+    }
+
+    /// One table cell: `drift s / band s / mean ° sd ° / outcome`.
+    pub fn cell(&self) -> String {
+        let outcome = if self.spun {
+            "SPUN".to_string()
+        } else if self.side_swaps > 0 {
+            format!("SWAPPED ×{}", self.side_swaps)
+        } else if self.held {
+            "**held**".to_string()
+        } else {
+            "no hold".to_string()
+        };
+        format!(
+            "{:.1} / {:.1} / {:.0}° sd {:.1} / {outcome}",
+            self.drift_s, self.band_s, self.mean_deg, self.sd_deg
+        )
+    }
+}
+
+/// [`plain_drift_run`] scored with [`HoldMetrics`].
+pub fn plain_hold(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    driver: PlainDriver,
+    radius: f32,
+    lat_g: f32,
+) -> HoldMetrics {
+    use crate::drift_lab::slide_state;
+    let (mut a, mut back) = (Vec::with_capacity(1440), Vec::with_capacity(1440));
+    plain_drift_run_with(car, assists, driver, radius, lat_g, |rig, _, _| {
+        let s = slide_state(rig);
+        a.push(-s.body_slip.to_degrees());
+        back.push(s.v_fwd < 0.0);
+    });
+    HoldMetrics::from_angles(&a, &back)
+}
+
+/// Like [`crate::drift_lab::drift_run`] (40 m circle at `lat_g`, left-hand, 6 s) with a
+/// [`PlainDriver`]; also reports key changes per second (how busy the driver's hands are).
+/// `drift_s`, `longest_s`, `mean_deg`, `sd_deg` count the intended side only (see
+/// [`HoldMetrics`]; [`plain_hold`] adds the band and side swaps).
+pub fn plain_drift_run(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    driver: PlainDriver,
+    radius: f32,
+    lat_g: f32,
+) -> (crate::drift_lab::DriftRun, f32) {
+    plain_drift_run_with(car, assists, driver, radius, lat_g, |_, _, _| {})
+}
+
+/// [`plain_drift_run`] calling `on_tick(rig, steer, throttle)` after every tick of the drift
+/// phase (traces).
+pub fn plain_drift_run_with(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    driver: PlainDriver,
+    radius: f32,
+    lat_g: f32,
+    mut on_tick: impl FnMut(&crate::rig::Rig, f32, f32),
+) -> (crate::drift_lab::DriftRun, f32) {
+    use crate::drift_lab::{settle_on_circle, slide_state, DriftRun, DRIFT_GEAR};
+    use wp_contracts::{VehicleInput, PHYSICS_DT};
+    const TPS: usize = 240;
+    let mut rig = settle_on_circle(car, assists, radius, lat_g);
+    let (mut drift, mut run, mut longest) = (0usize, 0usize, 0usize);
+    let (mut max_slip, mut flip, mut sum, mut sum2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let mut spun = false;
+    let mut entered = false;
+    let mut prev_angle = (-slide_state(&rig).body_slip).to_degrees();
+    let mut prev_key = 0.0f32;
+    let mut changes = 0usize;
+    for _ in 0..6 * TPS {
+        let s = slide_state(&rig);
+        // Left-hand corner: slide angle = −body slip; into the turn = −1, countersteer = +1.
+        let angle = (-s.body_slip).to_degrees();
+        let rate = (angle - prev_angle) / PHYSICS_DT;
+        prev_angle = angle;
+        let entry = match driver {
+            PlainDriver::HoldCounter { entry_deg, .. }
+            | PlainDriver::Tapper { entry_deg, .. }
+            | PlainDriver::IntoTurnHeld { entry_deg }
+            | PlainDriver::Released { entry_deg } => entry_deg,
+        };
+        entered |= angle > entry;
+        let (steer, throttle) = if !entered {
+            (-1.0, 1.0)
+        } else {
+            match driver {
+                PlainDriver::HoldCounter { throttle, .. } => (1.0, throttle),
+                PlainDriver::IntoTurnHeld { .. } => (-1.0, 1.0),
+                PlainDriver::Released { .. } => (0.0, 1.0),
+                PlainDriver::Tapper { target_deg, .. } => {
+                    let steer = if angle > target_deg || rate > 15.0 {
+                        1.0
+                    } else if angle < target_deg - 15.0 {
+                        -1.0
+                    } else {
+                        0.0
+                    };
+                    (steer, if angle > target_deg + 10.0 { 0.0 } else { 1.0 })
+                }
+            }
+        };
+        if steer != prev_key {
+            changes += 1;
+            prev_key = steer;
+        }
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                gear_down: !assists.auto_gears && rig.vehicle.gear() > DRIFT_GEAR,
+                ..Default::default()
+            },
+            assists,
+        );
+        on_tick(&rig, steer, throttle);
+        let n = slide_state(&rig);
+        let a = n.body_slip.to_degrees().abs();
+        // Direction-aware (shared with lead/tyre-slip, see [`HoldMetrics`]): only the intended
+        // side counts — left-hand corner, slide angle = −body slip; the other side is a swing
+        // through, not a drift.
+        let intended = -n.body_slip.to_degrees();
+        max_slip = max_slip.max(a);
+        flip = flip.max(n.body_slip.to_degrees());
+        if a > 90.0 || n.v_fwd < 0.0 {
+            spun = true;
+        }
+        let a = intended;
+        if !spun && (10.0..=50.0).contains(&a) {
+            drift += 1;
+            sum += a;
+            sum2 += a * a;
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    let (mean, sd) = if drift > 0 {
+        let m = sum / drift as f32;
+        (m, (sum2 / drift as f32 - m * m).max(0.0).sqrt())
+    } else {
+        (0.0, 0.0)
+    };
+    (
+        DriftRun {
+            drift_s: drift as f32 * PHYSICS_DT,
+            longest_s: longest as f32 * PHYSICS_DT,
+            max_slip_deg: max_slip,
+            flip_deg: flip,
+            mean_deg: mean,
+            sd_deg: sd,
+            spun,
+            hash: rig.state_hash(),
+        },
+        changes as f32 / 6.0,
+    )
+}
+
+/// Roll response of a keyboard manoeuvre ([`roll_run`]): how big, how fast and how calm the
+/// body roll is (owner: "suspension feels far too switchy").
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RollRun {
+    /// Largest roll angle, degrees.
+    pub peak_roll_deg: f32,
+    /// Largest roll rate, degrees per second.
+    pub peak_roll_rate_dps: f32,
+    /// Time from the first key press to the first roll peak (how fast the weight transfers), s.
+    pub time_to_peak_s: f32,
+    /// Roll-rate sign changes (|rate| past 3°/s between them) after the last key is released:
+    /// rocking back and forth (0 or 1 = settles, more = switchy).
+    pub rocks_after: usize,
+    /// Time from the last key release until the roll stays within 0.3° with |rate| < 2°/s, s.
+    pub settle_s: f32,
+    /// Lateral offset at the end, m (the manoeuvre's size).
+    pub lateral_m: f32,
+}
+
+/// Roll angle of the rig's body, rad (+ = right side down).
+pub fn body_roll(rig: &crate::rig::Rig) -> f32 {
+    use crate::math::V3;
+    let right = rig.vehicle.chassis().rot * V3::X;
+    -crate::math::atan2(right.z, (right.x * right.x + right.y * right.y).sqrt())
+}
+
+/// Lane change (owner: 60 mph) as keyboard keys: straight at `speed_mps` holding speed, then
+/// `keys` = `[(steer key, seconds), …]` (−1 left, +1 right, 0 released), then 2.5 s released;
+/// the throttle holds the speed throughout.
+pub fn roll_run(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    speed_mps: f32,
+    keys: &[(f32, f32)],
+) -> RollRun {
+    use wp_contracts::{VehicleInput, PHYSICS_DT};
+    const TPS: usize = 240;
+    let mut rig = crate::rig::Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
+    let auto = AssistProfile {
+        auto_gears: true,
+        ..*assists
+    };
+    let hold = |rig: &crate::rig::Rig| {
+        let err = speed_mps - rig.state().speed_mps;
+        if err > -1.0 {
+            ((0.25 + 0.35 * err).clamp(0.0, 1.0), 0.0)
+        } else {
+            (0.0, (-0.2 * err).clamp(0.0, 1.0))
+        }
+    };
+    for _ in 0..2 * TPS {
+        let (throttle, brake) = hold(&rig);
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            &auto,
+        );
+    }
+    let x0 = rig.vehicle.chassis().pos.x;
+    let script: Vec<f32> = keys
+        .iter()
+        .flat_map(|&(k, s)| std::iter::repeat_n(k, (s * TPS as f32) as usize))
+        .collect();
+    let release = script.len();
+    let total = release + TPS * 5 / 2;
+    let (mut peak, mut peak_rate, mut t_peak) = (0.0f32, 0.0f32, None::<f32>);
+    let mut prev = body_roll(&rig);
+    let mut prev_rate = 0.0f32;
+    let mut last_sign = 0.0f32;
+    let mut rocks = 0usize;
+    let mut settled_at: Option<usize> = None;
+    for tick in 0..total {
+        let steer = script.get(tick).copied().unwrap_or(0.0);
+        let (throttle, brake) = hold(&rig);
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            assists,
+        );
+        let r = body_roll(&rig);
+        let rate = (r - prev) / PHYSICS_DT;
+        prev = r;
+        let rd = r.to_degrees().abs();
+        if rd > peak {
+            peak = rd;
+        }
+        peak_rate = peak_rate.max(rate.to_degrees().abs());
+        // First roll peak: the roll rate changes sign once the body has rolled.
+        if t_peak.is_none() && rd > 0.2 && rate * prev_rate < 0.0 {
+            t_peak = Some(tick as f32 * PHYSICS_DT);
+        }
+        prev_rate = rate;
+        if tick >= release {
+            let rdps = rate.to_degrees();
+            if rdps.abs() > 3.0 {
+                let sgn = rdps.signum();
+                if last_sign != 0.0 && sgn != last_sign {
+                    rocks += 1;
+                }
+                last_sign = sgn;
+            }
+            let calm = rd < 0.3 && rate.to_degrees().abs() < 2.0;
+            if calm {
+                settled_at.get_or_insert(tick);
+            } else {
+                settled_at = None;
+            }
+        }
+    }
+    RollRun {
+        peak_roll_deg: peak,
+        peak_roll_rate_dps: peak_rate,
+        time_to_peak_s: t_peak.unwrap_or(f32::NAN),
+        rocks_after: rocks,
+        settle_s: settled_at.map_or(f32::NAN, |t| (t - release) as f32 * PHYSICS_DT),
+        lateral_m: (rig.vehicle.chassis().pos.x - x0).abs(),
+    }
+}
+
+/// Keyboard lane change at 100 km/h (60 mph): left 0.3 s, right 0.45 s, left 0.15 s.
+pub const LANE_CHANGE_KEYS: [(f32, f32); 3] = [(-1.0, 0.3), (1.0, 0.45), (-1.0, 0.15)];
+
+/// Keyboard S-bend (the lab's 40 m S, 40° / 80° / 40° at ~70 km/h): left 0.6 s, release 0.2 s,
+/// right 1.0 s, release 0.2 s, left 0.6 s.
+pub const S_BEND_KEYS: [(f32, f32); 5] =
+    [(-1.0, 0.6), (0.0, 0.2), (1.0, 1.0), (0.0, 0.2), (-1.0, 0.6)];
+
+/// Largest body slip in the keyboard lane change at 100 km/h ([`LANE_CHANGE_KEYS`]), degrees
+/// (grip-driving sanity: a lane change should stay in grip, a few degrees).
+pub fn lane_change_slip(car: &LoadedCar, assists: &AssistProfile) -> f32 {
+    use crate::drift_lab::slide_state;
+    use wp_contracts::VehicleInput;
+    const TPS: usize = 240;
+    let speed = 100.0 / 3.6;
+    let mut rig = crate::rig::Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed, 0.0);
+    let auto = AssistProfile {
+        auto_gears: true,
+        ..*assists
+    };
+    let hold = |rig: &crate::rig::Rig| {
+        let err = speed - rig.state().speed_mps;
+        (
+            (0.25 + 0.35 * err).clamp(0.0, 1.0),
+            if err < -1.0 {
+                (-0.2 * err).clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
+        )
+    };
+    for _ in 0..2 * TPS {
+        let (throttle, brake) = hold(&rig);
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            &auto,
+        );
+    }
+    let script: Vec<f32> = LANE_CHANGE_KEYS
+        .iter()
+        .flat_map(|&(k, s)| std::iter::repeat_n(k, (s * TPS as f32) as usize))
+        .collect();
+    let mut max_slip = 0.0f32;
+    for tick in 0..script.len() + 2 * TPS {
+        let (throttle, brake) = hold(&rig);
+        let steer = script.get(tick).copied().unwrap_or(0.0);
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            assists,
+        );
+        max_slip = max_slip.max(slide_state(&rig).body_slip.to_degrees().abs());
+    }
+    max_slip
+}
+
+/// Straight launch (owner: "spins off the line"; reference clip 5 goes dead straight): rest →
+/// full throttle for 3 s, steer 0, on a road cross-slope of `slope_deg` (sideways gravity
+/// g·sin θ added each tick; 0 = flat). Largest heading change, degrees (target < 3). Same
+/// definition as `lead/tyre-slip`'s `tests/tyre_slip.rs::launch_yaw`.
+pub fn launch_yaw(car: &LoadedCar, assists: &AssistProfile, slope_deg: f32) -> f32 {
+    use crate::math::{atan2, sin, V3};
+    use crate::rig::Rig;
+    use wp_contracts::VehicleInput;
+    let mut rig = Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, 0.0, 0.0);
+    for _ in 0..120 {
+        rig.step(&VehicleInput::default(), assists);
+    }
+    let heading = |rig: &Rig| {
+        let f = rig.vehicle.chassis().rot * V3::Y;
+        atan2(-f.x, f.y).to_degrees()
+    };
+    let h0 = heading(&rig);
+    let side_dv = 9.81 * sin(slope_deg.to_radians()) / 240.0;
+    let mut yaw = 0.0f32;
+    for _ in 0..3 * 240 {
+        rig.kick([side_dv, 0.0, 0.0], [0.0; 3]);
+        rig.step(
+            &VehicleInput {
+                throttle: 1.0,
+                ..Default::default()
+            },
+            assists,
+        );
+        yaw = yaw.max((heading(&rig) - h0).abs());
+    }
+    yaw
+}
+
+/// Result of [`step_steer_roll`] (reference clip 4, "weight transfer speed").
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StepRoll {
+    /// Time from the key press until the roll passes 10 % of its peak, s (clip 4: no visible
+    /// roll for 0.2–0.3 s).
+    pub roll_delay_s: f32,
+    /// 10 → 90 % roll rise time, s (target 0.6–0.8 s).
+    pub rise_s: f32,
+    /// Peak roll while the key is held, degrees (target 5–7° at ~0.8 g).
+    pub peak_roll_deg: f32,
+    /// Roll overshoot past the value at the end of the hold, % (target ≈ 0).
+    pub overshoot_pct: f32,
+    /// Peak lateral acceleration while the key is held, g.
+    pub peak_lat_g: f32,
+    /// Time from the key press until the heading has changed by 1°, s (clip 4: 0.3–0.4 s).
+    pub heading_start_s: f32,
+    /// Largest roll rate, degrees per second.
+    pub peak_roll_rate_dps: f32,
+    /// Largest suspension compression as a fraction of the travel (≥ 1 = on the bump stop).
+    pub max_travel_frac: f32,
+}
+
+/// Clip 4's move as a keyboard script: straight at `speed_mps` holding speed, then one steering
+/// key held for `hold_s` (throttle holding speed), measured while held.
+pub fn step_steer_roll(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    speed_mps: f32,
+    hold_s: f32,
+) -> StepRoll {
+    use crate::math::{atan2, V3};
+    use wp_contracts::{VehicleInput, PHYSICS_DT};
+    const TPS: usize = 240;
+    let mut rig = crate::rig::Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
+    let auto = AssistProfile {
+        auto_gears: true,
+        ..*assists
+    };
+    let hold = |rig: &crate::rig::Rig| {
+        let err = speed_mps - rig.state().speed_mps;
+        if err > -1.0 {
+            ((0.25 + 0.35 * err).clamp(0.0, 1.0), 0.0)
+        } else {
+            (0.0, (-0.2 * err).clamp(0.0, 1.0))
+        }
+    };
+    for _ in 0..2 * TPS {
+        let (throttle, brake) = hold(&rig);
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            &auto,
+        );
+    }
+    let heading = |rig: &crate::rig::Rig| {
+        let f = rig.vehicle.chassis().rot * V3::Y;
+        atan2(-f.x, f.y)
+    };
+    let h0 = heading(&rig);
+    let r0 = body_roll(&rig);
+    let n = (hold_s * TPS as f32) as usize;
+    let (mut rolls, mut lat_g, mut head_t, mut rate, mut trav) =
+        (Vec::with_capacity(n), 0.0f32, f32::NAN, 0.0f32, 0.0f32);
+    let mut prev = r0;
+    let (throttle, _) = hold(&rig);
+    for tick in 0..n {
+        rig.step(
+            &VehicleInput {
+                steer: 1.0,
+                throttle,
+                ..Default::default()
+            },
+            assists,
+        );
+        let r = body_roll(&rig) - r0;
+        rate = rate.max(((r - prev) / PHYSICS_DT).to_degrees().abs());
+        prev = r;
+        rolls.push(r.to_degrees().abs());
+        let ch = rig.vehicle.chassis();
+        let right = ch.rot * V3::X;
+        lat_g = lat_g.max(ch.lin_vel.cross(ch.ang_vel).dot(right).abs() / 9.81);
+        if head_t.is_nan() && (heading(&rig) - h0).to_degrees().abs() > 1.0 {
+            head_t = (tick + 1) as f32 * PHYSICS_DT;
+        }
+        for (k, ws) in rig.state().wheel_states.iter().enumerate() {
+            let travel = car.def.suspension[k].travel_m
+                * crate::ride_lab::active().map_or(1.0, |t| t.travel.clamp(0.5, 3.0));
+            trav = trav.max(ws.compression_m / travel);
+        }
+    }
+    let peak = rolls.iter().copied().fold(0.0f32, f32::max);
+    let end = *rolls.last().unwrap_or(&0.0);
+    let t_at = |frac: f32| {
+        rolls
+            .iter()
+            .position(|&x| x >= frac * peak)
+            .map_or(f32::NAN, |k| (k + 1) as f32 * PHYSICS_DT)
+    };
+    let (t10, t90) = (t_at(0.1), t_at(0.9));
+    StepRoll {
+        roll_delay_s: t10,
+        rise_s: t90 - t10,
+        peak_roll_deg: peak,
+        overshoot_pct: if end > 1e-3 {
+            (peak / end - 1.0) * 100.0
+        } else {
+            0.0
+        },
+        peak_lat_g: lat_g,
+        heading_start_s: head_t,
+        peak_roll_rate_dps: rate,
+        max_travel_frac: trav,
+    }
+}
+
+/// How the driver leaves the drift in a [`snap_back`] run (lead: snap-back metric).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapExit {
+    /// Countersteer out: the counter key stays held and the throttle is lifted; the key is let
+    /// go once the slide is under [`SNAP_KEY_OFF_DEG`].
+    CounterLift,
+    /// Key released, throttle kept ("letting go of the steering mid-drift").
+    Release,
+    /// Key released and throttle lifted (drive out straight).
+    ReleaseLift,
+}
+
+impl SnapExit {
+    /// All exits, for tables.
+    pub const ALL: [SnapExit; 3] = [
+        SnapExit::CounterLift,
+        SnapExit::Release,
+        SnapExit::ReleaseLift,
+    ];
+
+    /// Short name for tables.
+    pub fn name(self) -> &'static str {
+        match self {
+            SnapExit::CounterLift => "counter+lift",
+            SnapExit::Release => "release",
+            SnapExit::ReleaseLift => "release+lift",
+        }
+    }
+}
+
+/// [`SnapExit::CounterLift`]: the counter key is let go once the slide is under this, degrees
+/// (a driver unwinding the lock as the car straightens; the rack still takes `t_return_s`).
+pub const SNAP_KEY_OFF_DEG: f32 = 15.0;
+
+/// Snap-back measurement ([`snap_back`]): how violently the car comes back when the driver
+/// leaves a held 30–40° drift. Left-hand drift: the drift's yaw is + (left); the snap-back is
+/// yaw toward the right (−) and body slip to the other side (+).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SnapBack {
+    /// A 30–45° hold was reached (else the other fields are zero).
+    pub reached: bool,
+    /// Slide angle when the driver left the drift, degrees.
+    pub exit_deg: f32,
+    /// Largest yaw acceleration after the exit, rad/s² (any direction; 40 ms difference).
+    pub peak_yaw_acc: f32,
+    /// Largest yaw rate toward the right (against the drift's rotation), rad/s: the swing
+    /// past straight. 0 = never rotates the other way.
+    pub yaw_overshoot: f32,
+    /// Largest body slip to the other side, degrees (the tail swinging out the other way).
+    pub slip_overshoot_deg: f32,
+    /// Time from the exit until the slide is under 3° and the yaw rate under 0.3 rad/s for
+    /// 0.25 s, s (`f32::INFINITY` = not within the 3 s window).
+    pub settle_s: f32,
+    /// Spun (over 90° or travelling backwards) after the exit.
+    pub spun: bool,
+}
+
+/// Snap-back run (lead, 2026-10-20: "measure peak yaw acceleration and yaw-rate overshoot when
+/// countersteering out of a 30–40° drift and on key release"): 0.6 g on a 40 m left-hander, key
+/// into the turn + full throttle to 6°, then a key-tapping driver holding ~35° on the throttle
+/// until the slide has been inside 30–45° (clip 1's band) for 0.5 s with the counter key down
+/// (at most 6 s), then `exit` for 3 s.
+pub fn snap_back(car: &LoadedCar, assists: &AssistProfile, exit: SnapExit) -> SnapBack {
+    snap_back_with(car, assists, exit, |_, _, _| {})
+}
+
+/// [`snap_back`] with `on_tick(rig, steer, throttle)` called after every tick of the exit.
+pub fn snap_back_with(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    exit: SnapExit,
+    mut on_tick: impl FnMut(&crate::rig::Rig, f32, f32),
+) -> SnapBack {
+    use crate::drift_lab::{settle_on_circle, slide_state, DRIFT_GEAR};
+    use wp_contracts::{VehicleInput, PHYSICS_DT};
+    const TPS: usize = 240;
+    const LAG: usize = 10;
+    let mut rig = settle_on_circle(car, assists, 40.0, 0.6);
+    let gear = |rig: &crate::rig::Rig| !assists.auto_gears && rig.vehicle.gear() > DRIFT_GEAR;
+    let (mut entered, mut in_band) = (false, 0usize);
+    let mut reached = false;
+    let mut prev = (-slide_state(&rig).body_slip).to_degrees();
+    for _ in 0..6 * TPS {
+        let angle = (-slide_state(&rig).body_slip).to_degrees();
+        let rate = (angle - prev) / PHYSICS_DT;
+        prev = angle;
+        entered |= angle > 6.0;
+        // Into the drift with the key into the turn, then the key-tapping driver
+        // ([`PlainDriver::Tapper`] at 35°): it holds 30–45° under every tyre / balance set,
+        // where a held counter key does only on some (docs/integration/drift-lab-w.md, step 10).
+        let (steer, throttle) = if !entered {
+            (-1.0, 1.0)
+        } else {
+            let steer = if angle > 35.0 || rate > 15.0 {
+                1.0
+            } else if angle < 20.0 {
+                -1.0
+            } else {
+                0.0
+            };
+            (steer, if angle > 45.0 { 0.0 } else { 1.0 })
+        };
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                gear_down: gear(&rig),
+                ..Default::default()
+            },
+            assists,
+        );
+        let s = slide_state(&rig);
+        let a = (-s.body_slip).to_degrees();
+        if s.body_slip.to_degrees().abs() > 90.0 || s.v_fwd < 0.0 {
+            break;
+        }
+        in_band = if (30.0..=45.0).contains(&a) {
+            in_band + 1
+        } else {
+            0
+        };
+        // Leave the drift while the counter key is down (the exit starts from countersteer).
+        if in_band >= TPS / 2 && steer > 0.0 {
+            reached = true;
+            break;
+        }
+    }
+    let none = SnapBack {
+        reached: false,
+        exit_deg: 0.0,
+        peak_yaw_acc: 0.0,
+        yaw_overshoot: 0.0,
+        slip_overshoot_deg: 0.0,
+        settle_s: 0.0,
+        spun: false,
+    };
+    if !reached {
+        return none;
+    }
+    let exit_deg = (-slide_state(&rig).body_slip).to_degrees();
+    let mut rates = vec![slide_state(&rig).yaw_rate];
+    let (mut acc, mut over, mut slip_over) = (0.0f32, 0.0f32, 0.0f32);
+    let (mut calm, mut settle, mut spun, mut key_off) = (0usize, None, false, false);
+    for t in 0..3 * TPS {
+        let angle = (-slide_state(&rig).body_slip).to_degrees();
+        key_off |= angle < SNAP_KEY_OFF_DEG;
+        let (steer, throttle) = match exit {
+            SnapExit::CounterLift => (if key_off { 0.0 } else { 1.0 }, 0.0),
+            SnapExit::Release => (0.0, 1.0),
+            SnapExit::ReleaseLift => (0.0, 0.0),
+        };
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                gear_down: gear(&rig),
+                ..Default::default()
+            },
+            assists,
+        );
+        on_tick(&rig, steer, throttle);
+        let s = slide_state(&rig);
+        if s.body_slip.to_degrees().abs() > 90.0 || s.v_fwd < 0.0 {
+            spun = true;
+            break;
+        }
+        rates.push(s.yaw_rate);
+        if rates.len() > LAG {
+            let d = rates[rates.len() - 1] - rates[rates.len() - 1 - LAG];
+            acc = acc.max(d.abs() / (LAG as f32 * PHYSICS_DT));
+        }
+        over = over.max(-s.yaw_rate);
+        slip_over = slip_over.max(s.body_slip.to_degrees());
+        calm = if s.body_slip.to_degrees().abs() < 3.0 && s.yaw_rate.abs() < 0.3 {
+            calm + 1
+        } else {
+            0
+        };
+        if settle.is_none() && calm >= TPS / 4 {
+            settle = Some((t + 1 - TPS / 4) as f32 / TPS as f32);
+        }
+    }
+    SnapBack {
+        reached,
+        exit_deg,
+        peak_yaw_acc: acc,
+        yaw_overshoot: over,
+        slip_overshoot_deg: slip_over,
+        settle_s: settle.unwrap_or(f32::INFINITY),
+        spun,
+    }
+}
+
+/// Over-rotation catch ([`over_rotation_catch`], owner step 18: "more steering lock so we can
+/// catch over-rotations a little easier").
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OverCatch {
+    /// The push past the target angle happened.
+    pub reached: bool,
+    /// Slide angle when the counter key went down, degrees.
+    pub start_deg: f32,
+    /// Largest slide angle after that, degrees.
+    pub peak_deg: f32,
+    /// No spin, a peak under 70°, back under 45° within 1.5 s, and no swing more than 15° to
+    /// the other side.
+    pub caught: bool,
+    /// Time from the counter key to under 45°, s (`f32::INFINITY` = never).
+    pub catch_s: f32,
+    /// Largest slide to the other side after the catch, degrees.
+    pub overcatch_deg: f32,
+    /// Spun (over 90° or travelling backwards).
+    pub spun: bool,
+}
+
+/// Over-rotation catch run: 0.7 g on a 60 m left-hander, the key into the turn + full throttle
+/// (a fast, committed entry that over-rotates) until the slide passes `push_deg` (at most 3 s),
+/// then the counter key with half throttle until the slide is back under 35°, then the
+/// key-tapping hold ([`snap_back`]'s driver), for 3 s. Caught = no spin, the slide peaks under
+/// 70°, is back under 45° within 1.5 s and swings no more than 15° to the other side.
+pub fn over_rotation_catch(car: &LoadedCar, assists: &AssistProfile, push_deg: f32) -> OverCatch {
+    over_rotation_catch_with(car, assists, push_deg, CatchKey::Held)
+}
+
+/// How the driver works the counter key in [`over_rotation_catch_with`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatchKey {
+    /// Counter key held (half throttle) until the slide is back under 35°, then tapping.
+    Held,
+    /// Tapping from the start: the key-tapping hold driver (counter key while the slide is
+    /// over 35° or growing faster than 15°/s; throttle off over 45°).
+    Tapping,
+}
+
+/// [`over_rotation_catch`] with the catch driver `key`.
+pub fn over_rotation_catch_with(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    push_deg: f32,
+    key: CatchKey,
+) -> OverCatch {
+    use crate::drift_lab::{settle_on_circle, slide_state, DRIFT_GEAR};
+    use wp_contracts::{VehicleInput, PHYSICS_DT};
+    const TPS: usize = 240;
+    let mut rig = settle_on_circle(car, assists, 60.0, 0.7);
+    let gear = |rig: &crate::rig::Rig| !assists.auto_gears && rig.vehicle.gear() > DRIFT_GEAR;
+    let angle_of = |rig: &crate::rig::Rig| (-slide_state(rig).body_slip).to_degrees();
+    let gone = |rig: &crate::rig::Rig| {
+        let s = slide_state(rig);
+        s.body_slip.to_degrees().abs() > 90.0 || s.v_fwd < 0.0
+    };
+    let tap = |angle: f32, rate: f32| {
+        let steer = if angle > 35.0 || rate > 15.0 {
+            1.0
+        } else if angle < 20.0 {
+            -1.0
+        } else {
+            0.0
+        };
+        (steer, if angle > 45.0 { 0.0 } else { 1.0 })
+    };
+    let step = |rig: &mut crate::rig::Rig, steer: f32, throttle: f32| {
+        let g = gear(rig);
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                gear_down: g,
+                ..Default::default()
+            },
+            assists,
+        );
+    };
+    let none = OverCatch {
+        reached: false,
+        start_deg: 0.0,
+        peak_deg: 0.0,
+        caught: false,
+        catch_s: f32::INFINITY,
+        overcatch_deg: 0.0,
+        spun: false,
+    };
+    // Push: key into the turn + full throttle past the target.
+    let mut pushed = false;
+    for _ in 0..3 * TPS {
+        step(&mut rig, -1.0, 1.0);
+        if gone(&rig) {
+            return OverCatch { spun: true, ..none };
+        }
+        if angle_of(&rig) > push_deg {
+            pushed = true;
+            break;
+        }
+    }
+    if !pushed {
+        return none;
+    }
+    // Catch.
+    let start_deg = angle_of(&rig);
+    let (mut peak, mut over, mut catch_s, mut spun) = (start_deg, 0.0f32, f32::INFINITY, false);
+    let mut catching = true;
+    let mut prev = start_deg;
+    for t in 0..3 * TPS {
+        let a = angle_of(&rig);
+        let rate = (a - prev) / PHYSICS_DT;
+        prev = a;
+        catching &= a > 35.0 && key == CatchKey::Held;
+        let (st, th) = if catching { (1.0, 0.5) } else { tap(a, rate) };
+        step(&mut rig, st, th);
+        if gone(&rig) {
+            spun = true;
+            break;
+        }
+        let a = angle_of(&rig);
+        peak = peak.max(a);
+        // Back under 45° once the slide is closing (past its peak).
+        if a < 45.0 && a < peak - 2.0 && catch_s.is_infinite() {
+            catch_s = (t + 1) as f32 / TPS as f32;
+        }
+        if catch_s.is_finite() {
+            over = over.max(-a);
+        }
+    }
+    OverCatch {
+        reached: true,
+        start_deg,
+        peak_deg: peak,
+        caught: !spun && peak < 70.0 && catch_s <= 1.5 && over <= 15.0,
+        catch_s,
+        overcatch_deg: over,
+        spun,
+    }
+}
+
+/// Result of [`lift_flick`] (the owner's lift-flick transition).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Flick {
+    /// The 30–45° left drift held for 0.5 s before the flick.
+    pub reached: bool,
+    /// Time from the flick (lift + key release) until the slide is 10° on the new side, s.
+    pub swing_s: Option<f32>,
+    /// At that sign change the car yawed toward the new side at ≥ 25 km/h (tyre-slip's
+    /// real-swing metric: not a pivot at a crawl).
+    pub real_swing: bool,
+    /// Largest new-side slide, degrees.
+    pub peak_deg: f32,
+    /// Real swing, no spin, never back below −10°, and at least half the remaining time in
+    /// 10–50° on the new side.
+    pub caught: bool,
+    /// Spun (|slip| ≥ 90° or travelling backwards).
+    pub spun: bool,
+    /// Time from the sign change until the new-side slide stays within ±8° of its mean over
+    /// the last 1 s (tyre-slip's settle), s; `None` = not settled 0.5 s before the end.
+    pub settle_s: Option<f32>,
+}
+
+/// The owner's lift-flick (reference clip 1; tyre-slip's transition harness, `Init::LiftFlick`):
+/// 40 m left-hander at 0.5 g, key into the turn to 12°, then the counter key + full throttle
+/// until the slide has been in 30–45° for 0.5 s; then the throttle off for `lift_s` while the
+/// keys are switched (counter key released, `gap_s`, the new side's countersteer = the left
+/// key), throttle back on after the lift; measured for 4 s.
+pub fn lift_flick(car: &LoadedCar, assists: &AssistProfile, lift_s: f32, gap_s: f32) -> Flick {
+    use crate::drift_lab::{settle_on_circle, slide_state, DRIFT_GEAR};
+    use wp_contracts::VehicleInput;
+    const TPS: usize = 240;
+    let mut rig = settle_on_circle(car, assists, 40.0, 0.5);
+    let mut out = Flick {
+        reached: false,
+        swing_s: None,
+        real_swing: false,
+        peak_deg: 0.0,
+        caught: false,
+        spun: false,
+        settle_s: None,
+    };
+    let (mut entered, mut in_band, mut flick_at) = (false, 0usize, None::<usize>);
+    let mut log: Vec<f32> = Vec::new();
+    let (lift_t, gap_t, after) = (
+        (lift_s * TPS as f32) as usize,
+        (gap_s * TPS as f32) as usize,
+        4 * TPS,
+    );
+    let (mut crossed, mut back, mut in_new) = (None::<usize>, false, 0usize);
+    for tick in 0..14 * TPS {
+        let old = (-slide_state(&rig).body_slip).to_degrees();
+        if flick_at.is_none() {
+            entered |= old > 12.0;
+            in_band = if entered && (30.0..=45.0).contains(&old) {
+                in_band + 1
+            } else {
+                0
+            };
+            if in_band >= TPS / 2 {
+                flick_at = Some(tick);
+                out.reached = true;
+            } else if tick > 8 * TPS {
+                return out;
+            }
+        }
+        let (steer, throttle) = match flick_at {
+            None => (if entered { 1.0 } else { -1.0 }, 1.0),
+            Some(f) => {
+                let k = tick - f;
+                (
+                    if k < gap_t { 0.0 } else { -1.0 },
+                    if k < lift_t { 0.0 } else { 1.0 },
+                )
+            }
+        };
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                gear_down: !assists.auto_gears && rig.vehicle.gear() > DRIFT_GEAR,
+                ..Default::default()
+            },
+            assists,
+        );
+        let Some(f) = flick_at else { continue };
+        let k = tick + 1 - f;
+        let n = slide_state(&rig);
+        let b = n.body_slip.to_degrees();
+        if b.abs() >= 90.0 || n.v_fwd < 0.0 {
+            out.spun = true;
+            break;
+        }
+        if crossed.is_none() && b >= 10.0 {
+            crossed = Some(k);
+            out.swing_s = Some(k as f32 / TPS as f32);
+            out.real_swing = n.yaw_rate < 0.0 && n.v_fwd * 3.6 >= 25.0;
+        }
+        if crossed.is_some() {
+            log.push(b);
+            out.peak_deg = out.peak_deg.max(b);
+            back |= b <= -10.0;
+            if (10.0..=50.0).contains(&b) {
+                in_new += 1;
+            }
+        }
+        if k >= after {
+            break;
+        }
+    }
+    if let Some(cx) = crossed {
+        let remaining = after.saturating_sub(cx).max(1);
+        out.caught = out.real_swing && !out.spun && !back && in_new * 2 >= remaining;
+        let n = log.len();
+        let last = &log[n.saturating_sub(TPS)..];
+        let mean = last.iter().sum::<f32>() / last.len().max(1) as f32;
+        let mut settle = n;
+        for i in (0..n).rev() {
+            if (log[i] - mean).abs() > 8.0 {
+                break;
+            }
+            settle = i;
+        }
+        if settle < n.saturating_sub(TPS / 2) && !out.spun {
+            out.settle_s = Some(settle as f32 / TPS as f32);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hold_metrics_count_only_the_intended_side_and_swaps_fail() {
+        // 2 s at +30°, then a swing through to 2 s at −25°.
+        let mut a = vec![30.0f32; 480];
+        a.extend(std::iter::repeat_n(-25.0f32, 480));
+        let back = vec![false; a.len()];
+        let m = HoldMetrics::from_angles(&a, &back);
+        assert!((m.drift_s - 2.0).abs() < 1e-3, "{m:?}");
+        assert_eq!(m.side_swaps, 1);
+        assert!(!m.held && !m.spun);
+        // 4 s steady at 35°: held, all in the band.
+        let a = vec![35.0f32; 960];
+        let m = HoldMetrics::from_angles(&a, &vec![false; 960]);
+        assert!(m.held && (m.band_s - 4.0).abs() < 1e-3, "{m:?}");
+    }
+}

@@ -14,7 +14,6 @@
 //! | [`high_speed_catch`] | straight at speed, sudden yaw-rate kick (a nudge from traffic), driver countersteers with keys / stick after 0.15 s: peak body slip and whether the car is caught |
 //! | [`split_mu_launch`] | standing start with the left wheels on ice, right on dry asphalt, heading held: distance, speed and ice-side wheelspin (differentials) |
 //! | [`exit_on_circle`] | steady lateral g on a circle, then full throttle while following the line: inside/outside driven-wheel slip, exit speed, peak body slip (differentials) |
-//! | [`catch_snap_back`] | straight at speed, yaw kick, keyboard driver holds the countersteer key until the car is nearly straight (and optionally a bit longer): peak slide, then peak slide the other way (the snap-back) |
 //! | [`top_speed_kmh`] | full throttle on a straight until acceleration stops |
 
 use wp_contracts::{AssistProfile, LoadedCar, VehicleInput, GRAVITY_MPS2, PHYSICS_DT};
@@ -28,8 +27,8 @@ const TICKS_PER_S: usize = 240;
 /// filtering, 1:1 steering (so the controllers command road-wheel angle directly).
 pub fn metric_assists() -> AssistProfile {
     AssistProfile {
-        abs: true,
-        tcs: true,
+        abs: wp_contracts::AbsLevel::Full,
+        tcs: wp_contracts::TcsLevel::Full,
         esc: false,
         steer_speed_sensitivity: 0.0,
         countersteer_help: 0.0,
@@ -42,7 +41,7 @@ pub fn metric_assists() -> AssistProfile {
 
 fn no_tcs() -> AssistProfile {
     AssistProfile {
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         ..metric_assists()
     }
 }
@@ -477,30 +476,7 @@ pub fn power_oversteer_exit(
     lat_g: f32,
     react_s: f32,
 ) -> SlideExit {
-    power_oversteer_exit_tuned(
-        car,
-        assists,
-        style,
-        radius,
-        lat_g,
-        react_s,
-        crate::DriftTuning::default(),
-    )
-}
-
-/// [`power_oversteer_exit`] with an explicit drift-assist tuning (e.g. throttle smoothing 0 to
-/// compare against).
-pub fn power_oversteer_exit_tuned(
-    car: &LoadedCar,
-    assists: &AssistProfile,
-    style: DriverStyle,
-    radius: f32,
-    lat_g: f32,
-    react_s: f32,
-    tuning: crate::DriftTuning,
-) -> SlideExit {
     let mut rig = Rig::new(car);
-    rig.vehicle.set_drift_tuning(tuning);
     let mut follow = CircleFollower::new(radius);
     let v = (lat_g * GRAVITY_MPS2 * radius).sqrt();
     rig.teleport([0.0; 3], 0.0, v, v / radius);
@@ -813,89 +789,6 @@ pub fn high_speed_catch(
             && yaw_rate(&rig).abs() < 0.5
             && final_speed > 8.0,
         hash: rig.state_hash(),
-    }
-}
-
-/// Result of [`catch_snap_back`].
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SnapBack {
-    /// Peak body slip in the direction of the kick, degrees.
-    pub first_deg: f32,
-    /// Peak body slip the other way after the catch (the snap-back), degrees.
-    pub snap_deg: f32,
-    /// Body slip at the end of the run (4 s after the kick), degrees.
-    pub final_deg: f32,
-}
-
-/// Slide catch with a keyboard driver (owner playtest: "hard to catch a slide at speed
-/// without snap oversteer"): hold `speed_mps`, a sudden yaw-rate kick, the countersteer key
-/// held from 0.25 s until the body slip is under 3°, then for `late_s` more (a human lets go
-/// a little late), 30% throttle throughout.
-pub fn catch_snap_back(
-    car: &LoadedCar,
-    assists: &AssistProfile,
-    speed_mps: f32,
-    yaw_kick: f32,
-    late_s: f32,
-) -> SnapBack {
-    let mut rig = Rig::new(car);
-    rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
-    for _ in 0..TICKS_PER_S {
-        let (throttle, brake) = hold_speed(&rig, speed_mps);
-        rig.step(
-            &VehicleInput {
-                throttle,
-                brake,
-                ..Default::default()
-            },
-            assists,
-        );
-    }
-    {
-        let s = rig.state();
-        let fwd = rig.vehicle.chassis().rot * V3::Y;
-        let v = speed(&rig);
-        rig.teleport(s.pos, atan2(-fwd.x, fwd.y), v, yaw_kick);
-    }
-    let react = TICKS_PER_S / 4;
-    let late = (late_s * TICKS_PER_S as f32) as usize;
-    let mut first = 0.0f32;
-    let mut snap = 0.0f32;
-    let mut dir = 0.0f32;
-    let mut released: Option<usize> = None;
-    for tick in 0..4 * TICKS_PER_S {
-        let slip = body_slip_deg(&rig);
-        if dir == 0.0 && slip.abs() > 1.0 {
-            dir = slip.signum();
-        }
-        if slip * dir > 0.0 {
-            first = first.max(slip.abs());
-        } else {
-            snap = snap.max(slip.abs());
-        }
-        let mut steer = 0.0;
-        if tick >= react && dir != 0.0 {
-            if released.is_none() && slip * dir < 3.0 {
-                released = Some(tick);
-            }
-            if released.is_none_or(|r| tick < r + late) {
-                // Slip > 0 = sliding toward the left of the heading: steer right (+).
-                steer = -dir;
-            }
-        }
-        rig.step(
-            &VehicleInput {
-                steer,
-                throttle: 0.3,
-                ..Default::default()
-            },
-            assists,
-        );
-    }
-    SnapBack {
-        first_deg: first,
-        snap_deg: snap,
-        final_deg: body_slip_deg(&rig),
     }
 }
 
@@ -1414,219 +1307,5 @@ pub fn slide_catch(
             && body_slip_deg(&rig).abs() < 15.0
             && yaw_rate(&rig).abs() < 0.5
             && speed(&rig) > 5.0,
-    }
-}
-
-/// Scripted drift drivers for [`drift_run`] (owner row 91).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum DriftDriver {
-    /// Holds the key into the turn and taps the throttle to keep the slide near `target_deg`
-    /// (throttle on below it, off above it).
-    Good {
-        /// Slide angle the driver aims for, degrees.
-        target_deg: f32,
-    },
-    /// Holds the key into the turn and keeps full throttle (a mistake at a big angle).
-    Sloppy,
-    /// Lets go of the steering and keeps the throttle off (the naive "release" driver).
-    Released,
-    /// Drives like [`DriftDriver::Good`] (25°) for `after_s`, then lifts abruptly and lets go
-    /// of the steering.
-    AbruptLift {
-        /// Seconds of holding before the lift.
-        after_s: f32,
-    },
-}
-
-/// Result of [`drift_run`].
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DriftRun {
-    /// Seconds with the body slip between 10° and 60° (a held drift) while still moving
-    /// faster than 5 m/s.
-    pub drift_s: f32,
-    /// Standard deviation of the slide angle during those seconds, degrees (steadiness).
-    pub slip_sd_deg: f32,
-    /// Largest body slip, degrees.
-    pub max_slip_deg: f32,
-    /// Spun: past 90° of body slip.
-    pub spun: bool,
-    /// Straight and moving at the end (< 15° slip, |yaw rate| < 0.5 rad/s, > 5 m/s).
-    pub recovered: bool,
-}
-
-/// Drift run (owner row 91): settle on a 30 m counter-clockwise circle at 0.6 g, kick the
-/// slide off with a handbrake flick and full throttle while steering in (0.6 s), then let
-/// `driver` drive for 6 s. The drift hold is switched on for the run (it is off by default).
-/// `style` = keys (steering ±1 / 0, throttle on / off) or analog (the same targets, smooth).
-pub fn drift_run(
-    car: &LoadedCar,
-    assists: &AssistProfile,
-    style: DriverStyle,
-    driver: DriftDriver,
-) -> DriftRun {
-    let radius = 30.0;
-    let mut rig = Rig::new(car);
-    // This metric measures the (default-off, lab-only) drift hold: switch it on.
-    rig.vehicle.set_drift_tuning(crate::DriftTuning {
-        hold_enabled: true,
-        ..crate::DriftTuning::default()
-    });
-    let mut follow = CircleFollower::new(radius);
-    let v = (0.6 * GRAVITY_MPS2 * radius).sqrt();
-    rig.teleport([0.0; 3], 0.0, v, v / radius);
-    let keys = style == DriverStyle::Keyboard;
-    let quantise = |s: f32| match style {
-        DriverStyle::Analog => s,
-        DriverStyle::Keyboard if s > 0.15 => 1.0,
-        DriverStyle::Keyboard if s < -0.15 => -1.0,
-        DriverStyle::Keyboard => 0.0,
-    };
-    for _ in 0..3 * TICKS_PER_S {
-        let (steer, _) = follow.steer(&rig);
-        let (throttle, brake) = hold_speed(&rig, v);
-        rig.step(
-            &VehicleInput {
-                steer: quantise(steer),
-                throttle,
-                brake,
-                ..Default::default()
-            },
-            assists,
-        );
-    }
-    // Kick: a 0.35 s handbrake flick with full throttle, steering into the (left-hand)
-    // corner, then 0.25 s more throttle.
-    let into = if keys { -1.0 } else { -0.6 };
-    for tick in 0..(0.6 * TICKS_PER_S as f32) as usize {
-        rig.step(
-            &VehicleInput {
-                steer: into,
-                throttle: 1.0,
-                handbrake: if tick < (0.35 * TICKS_PER_S as f32) as usize {
-                    1.0
-                } else {
-                    0.0
-                },
-                ..Default::default()
-            },
-            assists,
-        );
-    }
-    let (mut drift, mut sum, mut sum2) = (0usize, 0.0f32, 0.0f32);
-    let mut max_slip = 0.0f32;
-    for tick in 0..6 * TICKS_PER_S {
-        let slip = body_slip_deg(&rig).abs();
-        let t = tick as f32 / TICKS_PER_S as f32;
-        let good = |target: f32| {
-            let thr = if keys {
-                if slip < target {
-                    1.0
-                } else {
-                    0.0
-                }
-            } else {
-                (0.5 + 0.08 * (target - slip)).clamp(0.0, 1.0)
-            };
-            (into, thr)
-        };
-        let (steer, throttle) = match driver {
-            DriftDriver::Good { target_deg } => good(target_deg),
-            DriftDriver::Sloppy => (into, 1.0),
-            DriftDriver::Released => (0.0, 0.0),
-            DriftDriver::AbruptLift { after_s } => {
-                if t < after_s {
-                    good(25.0)
-                } else {
-                    (0.0, 0.0)
-                }
-            }
-        };
-        rig.step(
-            &VehicleInput {
-                steer,
-                throttle,
-                ..Default::default()
-            },
-            assists,
-        );
-        let s = body_slip_deg(&rig).abs();
-        max_slip = max_slip.max(s);
-        if (10.0..60.0).contains(&s) && speed(&rig) > 5.0 && max_slip < 90.0 {
-            drift += 1;
-            sum += s;
-            sum2 += s * s;
-        }
-    }
-    let n = drift.max(1) as f32;
-    let mean = sum / n;
-    DriftRun {
-        drift_s: drift as f32 / TICKS_PER_S as f32,
-        slip_sd_deg: (sum2 / n - mean * mean).max(0.0).sqrt(),
-        max_slip_deg: max_slip,
-        spun: max_slip >= 90.0,
-        recovered: max_slip < 90.0
-            && body_slip_deg(&rig).abs() < 15.0
-            && yaw_rate(&rig).abs() < 0.5
-            && speed(&rig) > 5.0,
-    }
-}
-
-/// Result of [`keyboard_launch`].
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct KeyboardLaunch {
-    /// Seconds from rest to 100 km/h (`None` if not within 20 s).
-    pub to_100_s: Option<f32>,
-    /// Seconds with a driven wheel's slip ratio more than 50 % past its tyre's peak.
-    pub wheelspin_s: f32,
-}
-
-/// Standing start with the throttle key held (full pedal, automatic gears and clutch), the
-/// steering held straight, under `assists` and `tuning` (owner row 98: keyboard, TCS off).
-pub fn keyboard_launch(
-    car: &LoadedCar,
-    assists: &AssistProfile,
-    tuning: crate::DriftTuning,
-) -> KeyboardLaunch {
-    let mut rig = Rig::new(car);
-    rig.vehicle.set_drift_tuning(tuning);
-    for _ in 0..TICKS_PER_S / 2 {
-        rig.step(&VehicleInput::default(), assists);
-    }
-    let driven: &[usize] = match car.def.drivetrain.layout {
-        wp_contracts::DriveLayout::Fwd => &[0, 1],
-        wp_contracts::DriveLayout::Rwd => &[2, 3],
-        _ => &[0, 1, 2, 3],
-    };
-    let peaks: Vec<f32> = driven
-        .iter()
-        .map(|&i| rig.vehicle.corners[i].tire.peak_slip_ratio)
-        .collect();
-    let mut spin = 0usize;
-    for tick in 0..20 * TICKS_PER_S {
-        rig.step(
-            &VehicleInput {
-                throttle: 1.0,
-                ..Default::default()
-            },
-            assists,
-        );
-        let w = rig.state().wheel_states;
-        if driven
-            .iter()
-            .zip(&peaks)
-            .any(|(&i, p)| w[i].slip_ratio.abs() > 1.5 * p)
-        {
-            spin += 1;
-        }
-        if speed(&rig) >= 100.0 / 3.6 {
-            return KeyboardLaunch {
-                to_100_s: Some((tick + 1) as f32 / TICKS_PER_S as f32),
-                wheelspin_s: spin as f32 / TICKS_PER_S as f32,
-            };
-        }
-    }
-    KeyboardLaunch {
-        to_100_s: None,
-        wheelspin_s: spin as f32 / TICKS_PER_S as f32,
     }
 }

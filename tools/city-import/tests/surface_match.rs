@@ -29,7 +29,9 @@ enum Kind {
 
 fn kind_of(material: &str) -> Kind {
     match material {
-        "asphalt" | "highway_concrete" | "parking" | "bus_lane" => Kind::Paved,
+        "asphalt" | "highway_concrete" | "parking" | "bus_lane" | "gravel_road" | "dirt_road" => {
+            Kind::Paved
+        }
         // Sidewalks, corner fills and the level lots behind them: walkable, must agree.
         "sidewalk" | "verge" | "sidewalk_corner" | "lot" => Kind::Sidewalk,
         // The skirt from a lot down into the ground is ground: physics may not be lower.

@@ -131,6 +131,8 @@ pub fn node_patches(map: &CityMap) -> Vec<NodePatch> {
         let nd = &net.nodes[node];
         let c = nd.pos;
         let highway = ends.iter().all(|e| e.highway);
+        // Freeway merge / diverge (radius-0 junction, main's divided highways): every road's
+        // paving runs to the node, so only the ramp's taper connectors are paved here.
         if nd
             .intersection
             .is_some_and(|ix| net.intersections[ix as usize].radius_m <= 0.0)
@@ -139,9 +141,8 @@ pub fn node_patches(map: &CityMap) -> Vec<NodePatch> {
                 node: node as u32,
                 kind: NodePatchKind::Junction,
                 highway,
-                mesh: merge_tapers(map, node as u32),
-                // The ramp ribbon lies on the carriageway at its own height (and bank).
                 overlapping_ends: true,
+                mesh: freeway_tapers(map, node as u32),
                 rims: Vec::new(),
             });
             continue;
@@ -186,8 +187,7 @@ pub fn node_patches(map: &CityMap) -> Vec<NodePatch> {
                 (kind, m, Vec::new())
             }
         };
-        let overlapping_ends =
-            ends.len() > 1 && merge_spans(geom::xy(c), ends, TOUCH_RAD).len() < ends.len();
+        let overlapping_ends = ends.len() > 1 && merge_spans(geom::xy(c), ends).len() < ends.len();
         out.push(NodePatch {
             node: node as u32,
             kind,
@@ -202,33 +202,83 @@ pub fn node_patches(map: &CityMap) -> Vec<NodePatch> {
 
 type Patch = (NodePatchKind, TriMesh, Vec<Vec<V3>>);
 
-/// The pavement of a freeway merge or diverge (a radius-0 junction): the ribbons run to the
-/// node untrimmed, the main road's paving runs through, and only the ramp's taper
-/// connectors (between roads with different lane counts) are paved.
-fn merge_tapers(map: &CityMap, node: u32) -> TriMesh {
+/// The taper connector ribbons through a freeway merge / diverge `node`: connectors between
+/// roads with different lane counts (ramp lane ↔ carriageway; the carriageway's own lanes run
+/// on its paving, which reaches the node).
+fn freeway_tapers(map: &CityMap, node: u32) -> TriMesh {
     let net = &map.net;
     let mut lanes_per_road: BTreeMap<u32, u32> = BTreeMap::new();
     for l in &net.lanes {
-        *lanes_per_road.entry(l.road).or_default() += 1;
+        *lanes_per_road.entry(l.road).or_insert(0) += 1;
     }
     let lanes_of = |l: u32| lanes_per_road.get(&net.lanes[l as usize].road).copied();
     let mut m = TriMesh::default();
     for s in map.segs.iter() {
-        let SegKind::Connector {
-            node: nd, from, to, ..
+        if let SegKind::Connector {
+            node: n, from, to, ..
         } = s.kind
-        else {
-            continue;
-        };
-        if nd != node || lanes_of(from) == lanes_of(to) {
-            continue;
+        {
+            if n != node || lanes_of(from) == lanes_of(to) {
+                continue;
+            }
+            let half = s.width * 0.5;
+            let mut l = geom::offset_polyline(&s.pts, -half);
+            let mut r = geom::offset_polyline(&s.pts, half);
+            // Banked like the roads it joins (row 162: a level strip across banked ribbons left
+            // 4-5 cm steps at its edges and a ridge where it lies on the carriageway): the cross
+            // slope of the from lane's road surface at the start blending into the to lane's at
+            // the end, measured under the strip (so a lane running against its surface's
+            // direction gets the sign right).
+            let road_surface = |lane: u32| {
+                let road = net.lanes[lane as usize].road;
+                net.surfaces.iter().find(|x| x.road == road)
+            };
+            let (sa, sb) = (road_surface(from), road_surface(to));
+            for k in 0..s.pts.len() {
+                let f = if s.length > 1e-3 {
+                    s.cum[k] / s.length
+                } else {
+                    0.0
+                };
+                let (_, d) = s.point_at(s.cum[k]);
+                let rr = geom::right_of(d);
+                let c = geom::xy(s.pts[k]);
+                let slope = |x: Option<&crate::network::RoadSurface>| {
+                    x.map_or(0.0, |x| {
+                        let (_, zr) = super::height_under(x, geom::add(c, rr));
+                        let (_, zl) = super::height_under(x, geom::sub(c, rr));
+                        0.5 * (zr - zl)
+                    })
+                };
+                let bank = slope(sa) + (slope(sb) - slope(sa)) * f;
+                l[k][2] = s.pts[k][2] - bank * half;
+                r[k][2] = s.pts[k][2] + bank * half;
+                // Over a ribbon it joins, a vertex takes that ribbon's height (the strip's own
+                // heights come from the lane curve: up to 2.5 cm proud of the paving there).
+                for v in [&mut l[k], &mut r[k]] {
+                    let q = geom::xy(*v);
+                    let on: Vec<f32> = [sa, sb]
+                        .into_iter()
+                        .flatten()
+                        .filter(|x| over_paving(x, q))
+                        .map(|x| super::height_under(x, q).1)
+                        .collect();
+                    if !on.is_empty() {
+                        v[2] = on.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                    }
+                }
+            }
+            m.strip(&l, &r);
         }
-        let half = s.width * 0.5;
-        let l = geom::offset_polyline(&s.pts, -half);
-        let r = geom::offset_polyline(&s.pts, half);
-        m.strip(&l, &r);
     }
     m
+}
+
+/// Whether `q` lies on surface `x`'s paving (between its ends and paved edges).
+fn over_paving(x: &crate::network::RoadSurface, q: V2) -> bool {
+    let cum = geom::cumulative(&x.centre);
+    let pr = geom::project(&x.centre, &cum, q);
+    pr.s >= 0.0 && pr.s <= cum[cum.len() - 1] && pr.lateral >= -x.left_m && pr.lateral <= x.right_m
 }
 
 /// Counter-clockwise angle of `p` around `c`, in [0, 2π).
@@ -266,15 +316,10 @@ fn turning_footprint(map: &CityMap, node: u32) -> Vec<V2> {
 /// 5 cm past them).
 pub const PATH_MARGIN_M: f32 = 0.1;
 
-/// Ribbon end spans closer than this (rad) only touch: not [`NodePatch::overlapping_ends`].
-const TOUCH_RAD: f32 = 1e-3;
-
 /// The ribbon ends at a node grouped into openings: the union of their angular spans
 /// (clockwise → counter-clockwise corner around `c2`), each with its member ends; ends whose
 /// spans overlap (roads leaving at a sharp angle, ribbons crossing near the node) share one.
-/// Spans that only touch (within `touch` rad, e.g. two carriageways sharing their median
-/// edge) share one when `touch` is 0 and stay apart for a positive `touch`.
-fn merge_spans(c2: V2, ends: &[End], touch: f32) -> Vec<(End, Vec<End>)> {
+fn merge_spans(c2: V2, ends: &[End]) -> Vec<(End, Vec<End>)> {
     let tau = std::f32::consts::TAU;
     let rel = |from: V3, x: V3| {
         (angle_around(c2, geom::xy(x)) - angle_around(c2, geom::xy(from))).rem_euclid(tau)
@@ -286,7 +331,7 @@ fn merge_spans(c2: V2, ends: &[End], touch: f32) -> Vec<(End, Vec<End>)> {
     let mut merged: Vec<(End, Vec<End>)> = Vec::new();
     for e in by_cw {
         if let Some((last, members)) = merged.last_mut() {
-            if rel(last.cw, e.cw) + touch <= rel(last.cw, last.ccw) {
+            if rel(last.cw, e.cw) <= rel(last.cw, last.ccw) {
                 if rel(last.cw, e.ccw) > rel(last.cw, last.ccw) {
                     last.ccw = e.ccw;
                     last.out_ccw = e.out_ccw;
@@ -301,7 +346,7 @@ fn merge_spans(c2: V2, ends: &[End], touch: f32) -> Vec<(End, Vec<End>)> {
     // The last span may wrap past 0 into the first.
     while merged.len() > 1 {
         let (first, last) = (merged[0].0, merged[merged.len() - 1].0);
-        if rel(last.cw, first.cw) + touch > rel(last.cw, last.ccw) {
+        if rel(last.cw, first.cw) > rel(last.cw, last.ccw) {
             break;
         }
         let (_, last_members) = merged.pop().unwrap_or((last, Vec::new()));
@@ -328,7 +373,7 @@ fn junction(c: V3, ends: &[End], paths: &[V2]) -> Option<Patch> {
     let rel = |from: V3, x: V3| {
         (angle_around(c2, geom::xy(x)) - angle_around(c2, geom::xy(from))).rem_euclid(tau)
     };
-    let mut merged = merge_spans(c2, ends, 0.0);
+    let mut merged = merge_spans(c2, ends);
     // Back to counter-clockwise order; a merged opening's outline follows the outermost of its
     // members' end edges (in 2° steps) so it reaches under every member ribbon.
     merged.sort_by(|a, b| {
@@ -459,15 +504,11 @@ fn fan_around(mesh: &mut TriMesh, centre: V3, ring: &[V3]) -> bool {
     true
 }
 
-/// Highway edges meeting at less than this unpaved angle get a fillet, not a sharp corner
-/// (75°), rad.
-const HIGHWAY_SHARP_RAD: f32 = 1.309;
-
 /// Interior points of the kerb between `a`'s counter-clockwise corner `p` and `b`'s clockwise
 /// corner `q`, going counter-clockwise around the junction centre `c`:
 /// - kerb lines meeting in front of both corners: a circular fillet tangent to both, its
 ///   radius capped so it stays within the sidewalk band (a highway edge has no kerb: the
-///   sharp corner where the edges meet, unless that corner is acute);
+///   sharp corner where the edges meet);
 /// - kerb lines in line or meeting behind the corners: a curve tangent to both road edges
 ///   (straight when in line, bulging out on the outside of a bend like the lane connectors);
 /// - when that curve would not sweep steadily round the centre: an arc around the centre.
@@ -488,15 +529,19 @@ fn kerb_curve(c: V2, a: &End, b: &End) -> Vec<V2> {
         let u = geom::cross(geom::sub(q, p), a.out) / den;
         if s < -0.05 && u < -0.05 && cos_beta > -0.966 && gap < std::f32::consts::PI {
             let k = geom::add(p, geom::scale(a.out, s));
+            if a.highway || b.highway {
+                // No kerb on a highway edge: pave up to where the edges meet. A meeting point
+                // right at a corner (a ramp end beside a street end at main's ramp terminals)
+                // left a sliver: join the corners straight instead.
+                if geom::dist(k, p).min(geom::dist(k, q)) < 1.0 {
+                    return Vec::new();
+                }
+                return vec![k];
+            }
             // Interior angle β at k; the fillet's deepest point lies t·(1 − sin β/2)/cos β/2
             // past k, the sidewalk's outer corner W / sin β/2: keep the fillet within 60 % of
             // that, and its radius t·tan β/2 within MAX_KERB_RADIUS_M.
             let beta = wp_math::atan2(den.abs(), cos_beta);
-            if (a.highway || b.highway) && beta >= HIGHWAY_SHARP_RAD {
-                // No kerb on a highway edge: pave up to where the edges meet (an acute corner,
-                // e.g. a diamond ramp beside a street, is rounded like a kerb instead).
-                return vec![k];
-            }
             let (sh, ch) = wp_math::sin_cos(beta * 0.5);
             let depth_cap = 0.6 * super::SIDEWALK_W_M / sh.max(1e-3) * ch / (1.0 - sh).max(1e-3);
             let radius_cap = MAX_KERB_RADIUS_M * ch / sh.max(1e-3);

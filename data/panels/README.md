@@ -6,9 +6,32 @@ Owned by workstream R (`ws/panels`). Every car in `data/cars` has:
 |---|---|---|
 | `<car>.json` | Panel spec (`wp_damage::PanelSpec`): hinged/bolted panels, hinge + latch nodes, swing limits, mass, inertia, damping, thresholds | `cargo run -p car-assets --bin gen-panels` (first pass from the lattice; hand edits welcome) |
 | `meshes/<car>.json` | Procedural low-poly mesh (`car_assets::mesh::CarMesh`), one part per body region + glass, lights, mirrors, interior, wheels; skinned to the lattice | `cargo run -p car-assets --bin gen-car-mesh` (runs `bind-skin`) |
+| `meshes/mid/<car>.json` | Mid level of detail of the same car (same format and fields, `car_assets::mesh::Lod::Mid`), not skinned; see "Mid LOD" below | `cargo run -p car-assets --bin gen-car-mesh` (same run) |
 
 Both are checked by `cargo run -p car-assets --bin validate-car-asset` and by
-`cargo test -p car-assets` (which also fails if `meshes/` is stale, like the lattices test).
+`cargo test -p car-assets` (which also fails if `meshes/` or `meshes/mid/` is stale, like the
+lattices test).
+
+### Mid LOD (`meshes/mid/<car>.json`)
+A second file per car in the same format 4 / `CarMesh` shape, in a subfolder so anything listing
+`meshes/*.json` still sees one (full) mesh per car. Generated from the car's own style
+(`mesh::generate_mid`): loft stations every 0.20 m / 0.12 m near the ends and arches
+(`MID_LOFT_STEPS`; full meshes 0.07 / 0.036 hero, 0.11 / 0.065 traffic), 12-segment wheels,
+16 cm surface-patch grids, traffic-tier mechanical detail, and only the parts that read from outside at a distance
+(`mesh::keep_in_mid`): body panels, glass, lights, mirrors, light bars, tires, rims, exhaust tips
+and style details ≥ 0.2 m across. Interior, engine bay, suspension / exhaust runs, brake discs,
+calipers, uprights, decal carriers, underglow and small details (handles, fuel fillers, mirror
+glass …) are dropped; details, rims, lamps, light bars and mirrors are decimated by vertex
+clustering on a 3.5 cm grid. `id`, `lattice_id`, `atlas`, `livery`, `tints` and `wheel_camber_deg` equal
+the full mesh's, paint / livery parts keep their livery-atlas UVs, so paint, police liveries and
+tints look identical. Part names, kinds and materials are a subset of the full mesh's. No
+`skin_nodes` / `skin_weights` / `fold`: it is only drawn undeformed. 2k–6.5k triangles
+(`MID_TRI_BUDGET`, test `every_car_has_an_up_to_date_mid_lod`).
+
+Used by the browser testbed (`render/panels.ts` `loadCarMidMesh`, falling back to the full mesh
+when the file is missing) for the instanced fleet's near tier and the nearest parked cars;
+promoted cars within ~30–40 m, the player and the AI racers draw the full, skinned mesh (their
+own `VehicleView`), so dents and crumple show where they can be seen.
 Analog names only, no badges or trademarks (`tools/specsheet/nameplate_check.py`).
 
 ## Panel spec (`<car>.json`)
@@ -49,11 +72,24 @@ doors exist on 4-door lattices only; hatch/pickup tailgates whose lattice nodes 
 hinge line are skipped (they stay plain detachables). Mirrors have no lattice region yet (they are
 part of the front-door mesh; see `docs/integration/panels.md`, contract request R-1).
 
-## Mesh (`meshes/<car>.json`), format 2
+## Mesh (`meshes/<car>.json`), format 4
+
+Format 4 is the union of two independent extensions of format 1: `claude/detailed-car-models`
+called its extension "format 2", `lead/round12` went to "format 3" (its own earlier format 2 had
+`fold_chords` / `fold_weights`, now gone). The field names and JSON shapes below are unchanged
+from each side; only the number is new:
+
+| Field | From |
+|---|---|
+| `id`, `lattice_id`, `format`, `tri_count`, `parts[]` with `name region kind material wheel positions_mm uvs indices skin_nodes skin_weights` | format 1 |
+| `tints`, `livery`, `atlas`, `wheel_camber_deg`; part `rigid`; new `kind` / `material` values; livery-atlas UVs on paint parts | `claude/detailed-car-models` (its "format 2") |
+| part `fold` = `{ chords, leads, across, dir, gain, max_m, pop_m, weights }`; head / tail lamps in `FrameFront` / `FrameRear` bound to their end of the car | `lead/round12` (its "format 3") |
+
+Readers should accept format 4 only (`validate-car-asset` and `tests/assets.rs` do).
 
 ```jsonc
 {
-  "id": "debug_coupe", "lattice_id": "debug_coupe", "format": 3, "tri_count": 9413,
+  "id": "debug_coupe", "lattice_id": "debug_coupe", "format": 4, "tri_count": 16617,
   "tints": { "caliper": [200, 30, 30], "rim": [184, 150, 62] }, // optional: per-car material colours (sRGB)
   "livery": { "scheme": "...", "colors": [], "text": [] }, // optional: hint for render/livery.ts
   "atlas": { "y": [-2.35, 2.35], "z": [0.0, 1.62], "x_half": 1.04 }, // livery atlas frame (m)
@@ -67,9 +103,9 @@ parts), `kind`, `material`, `wheel` (0–3 FL FR RL RR, wheel-space parts only; 
 the axle on +X, +X = the car's +X for every wheel), `rigid` (optional, default false: every
 vertex bound to one node with weight 255), `positions_mm` (xyz ints, mm, chassis space), `uvs`
 (u, v in 1/65535), `indices` (CCW from outside), `skin_nodes` (4 lattice node ids per vertex)
-and `skin_weights` (4 per vertex in 1/255, summing to 255). Renderer:
-`apps/testbed-web/src/render/panels.ts` (reads formats 1–3; unknown materials fall back to
-paint).
+and `skin_weights` (4 per vertex in 1/255, summing to 255), `fold` (optional, hood / trunk lid /
+front fenders / rear quarters only: the crumple binding below). Renderer:
+`apps/testbed-web/src/render/panels.ts` (unknown materials fall back to paint).
 
 | `kind` | Space | Renderer behaviour |
 |---|---|---|
@@ -97,6 +133,71 @@ Any material colour can be overridden per car with `tints` (`underglow` sets the
 `PanelBody.materialFor(slot)` returns a slot's shared material and `PanelBody.amberMaterials`
 the amber one(s), for code that animates them (police lights).
 
+### Crumple binding (`fold`, from round 12's format 3)
+
+Hood, trunk-lid, front-fender and
+rear-quarter parts carry `fold` (`car_assets::mesh::FoldBinding`), how the sheet crumples in the renderer —
+visual only, the lattice, hull and repair bill never see it:
+- `chords`: lattice node pairs from the fixed end (lid hinge row; the door-side row of a fender
+  or quarter) to the leading end (latch row; fender nose; quarter tail), sorted along `across`
+  (0 = x for lids, 2 = z for fenders and quarters);
+- `leads`: per chord the three front-structure nodes nearest its leading node (hood: bumper,
+  frame, fenders; trunk: rear bumper, frame, quarters; fenders: bumper, frame; quarters: rear bumper, rear frame). When they moved
+  toward the fixed end further than the panel's own leading node, the panel's front is pulled
+  back by the difference, so it never floats over a crushed nose. A hanging bumper's nodes are
+  rotated back about its mount (the crushed pose it was released in); a detached one's skipped;
+- `gain` (visual crumple gain: hood 1.8, trunk 1.4, fenders and quarters 1.5), `max_m` (lid
+  0.28 m, fender / quarter 0.12 m), `pop_m` (lids 0.09 m), `dir` (buckle direction: lids up, fenders and quarters outward and up);
+- `weights`: 3 per vertex in 1/255 — crease shape (lids: main ridge a little behind mid-lid, a
+  valley, a second ridge toward the latch, diagonal, tented at the centre line; fenders and
+  quarters: one ridge between the wheel and the car's end), fixed-edge lift (lids), leading-end follow (0 at the fixed row → 1 at
+  the leading row; its square shapes the latch pop).
+
+Per chord the effective shortening `gain × max(own chord loss, lead push)` (1.5 cm dead zone)
+becomes a fold height `0.7 × fold_height` (an inextensible strip pushed into a tent), capped at
+`max_m`; once the lid is unlatched or hangs, the hinge edge bows up (0.45 × fold) and the latch
+edge pops up by `pop_m`. The renderer keeps the largest shortening / pull-back per chord (sheet
+metal does not spring back) and clears it when every bound node is back at rest (repair).
+`car_assets::skin::deform_detail` and `car_assets::crumple::render_part` are the Rust reference
+of `render/panels.ts`.
+### Head / tail lamps (from round 12's format 3)
+
+`headlight_l/_r` and `taillight_l/_r` (`kind: light`, materials `headlight` / `taillight`) have
+region `FrameFront` / `FrameRear` and are skinned to the nearest bumper, hood/trunk, same-side
+fender/quarter and frame nodes (`car_assets::skin::light_regions`), so they crush with the end of
+the car (and travel with a crushed bumper). Style kits re-shape these four parts in place. Every
+other lamp a style adds (fog lamps, DRLs, reverse lamps, light bars, roof / side markers, a trunk
+light bar) is a normal `light` / `lightbar` part skinned to its own region (bumper, fender,
+trunk, roof …) like any other part. Renderer: `apps/testbed-web/src/render/panels.ts`.
+
+### Turn signals (`indicator_*`, playtest row 136)
+
+Every car mesh, full and mid LOD (all roster cars and the `parity_*` copies), has exactly these
+turn-signal parts, all `kind: light`; no other part name starts with `indicator_`:
+
+| part | region | material | what it is |
+|---|---|---|---|
+| `indicator_front_l` / `_r` | `FrameFront` | `emissive_amber` | amber segment of the head-lamp cluster |
+| `indicator_rear_l` / `_r` | `FrameRear` | `emissive_amber`, or `taillight` (red-on-red, blinked red) | section of the tail-lamp cluster |
+| `indicator_side_l` / `_r` (optional pair) | `FrontLeftFender` / `FrontRightFender`, or `LeftDoorF` / `RightDoorF` (mirror) | `emissive_amber` | flush side repeater on the front fender or the door mirror |
+
+`_l` is the x < 0 side. Each front / rear lens is cut out of its lamp cluster (same housing, same
+lens face and bevel, split from the lamp by a 5 mm divider, `mesh::INDICATOR_SEAM_M`) and holds
+only the signal, so it can be lit on its own; the rest of the cluster stays in `headlight_*` /
+`taillight_*`. Front / rear signals bind like the head / tail lamps (`skin::is_end_lamp`: they
+crush with their end of the car); repeaters bind like their fender / mirror. Amber parts that are
+not turn signals keep their own names (`side_marker_*`, `clearance_lamps`, light-bar cells such as
+`rear_window_bar_lens_amber` / `traffic_advisor_cells`). Layout per family:
+
+| family | front | rear | repeaters |
+|---|---|---|---|
+| hatch (`vireo_xs` / `stoat_16v` / `marten_20`, `lindwurm_4t`) | outboard corner segment of the lens | amber band of the tri-colour cluster / inboard section | front fender / door mirror (`lindwurm_4t`) |
+| tuner (`kestrel_ts` family, `shiro_turbo`, `hakone_gt`, `sperber_32`, `debug_coupe`) | inboard segment next to the grille | inboard section, or the inner round element | front fender (90s) / door mirror (`sperber_32`, `debug_coupe`) |
+| muscle (`ironside_440` family, `rampart_50`) | amber parking / turn lens in the grille beside the lamps / outboard segment of the lens | outer lamp segment, red-on-red | none |
+| exotic (`lucciola_350`, `fulmine_v10`) | outboard corner segment (wrapping onto the fender on `lucciola_350`) | inner round lamp / outer stroke of the C | front fender / door mirror |
+| traffic | corner segment (the former amber corner lamps of `junkyard_beater` / `furrow_24`), teardrop tip (`tansy_13`), bottom strip (`hauler_1500`), outer strip (vans) | inboard amber section, middle band (`tansy_13`), bottom section (vans), red-on-red top section (pickups) | none (amber side markers) |
+| police (`sentinel_*`, the foundation layout) | amber strip along the bottom of the lamp | inboard amber section | none |
+
 ### Livery atlas (UVs of `paint` / `livery` parts)
 
 Paint parts use **U 0–0.5** of the texture; other parts keep a side projection in U 0.5–1
@@ -123,32 +224,3 @@ bands and rows 0.5H – H hold the sides. Helpers in `render/panels.ts`:
 `a, b` = (y, z) for sides, (y, x) for top, (x, z) for front / rear) and `liveryBandPx(side, W, H)`.
 Debug: open the testbed with `?livery=grid` (or call `debugLiveryTexture(atlas)`) to paint
 labelled bands, a 0.5 m grid and `FRONT` arrows on every car.
-
-Format 3 (adds crumple bindings to format 2): hood, trunk-lid, front-fender and
-rear-quarter parts carry `fold` (`car_assets::mesh::FoldBinding`), how the sheet crumples in the renderer —
-visual only, the lattice, hull and repair bill never see it:
-- `chords`: lattice node pairs from the fixed end (lid hinge row; the door-side row of a fender
-  or quarter) to the leading end (latch row; fender nose; quarter tail), sorted along `across`
-  (0 = x for lids, 2 = z for fenders and quarters);
-- `leads`: per chord the three front-structure nodes nearest its leading node (hood: bumper,
-  frame, fenders; trunk: rear bumper, frame, quarters; fenders: bumper, frame; quarters: rear bumper, rear frame). When they moved
-  toward the fixed end further than the panel's own leading node, the panel's front is pulled
-  back by the difference, so it never floats over a crushed nose. A hanging bumper's nodes are
-  rotated back about its mount (the crushed pose it was released in); a detached one's skipped;
-- `gain` (visual crumple gain: hood 1.8, trunk 1.4, fenders and quarters 1.5), `max_m` (lid
-  0.28 m, fender / quarter 0.12 m), `pop_m` (lids 0.09 m), `dir` (buckle direction: lids up, fenders and quarters outward and up);
-- `weights`: 3 per vertex in 1/255 — crease shape (lids: main ridge a little behind mid-lid, a
-  valley, a second ridge toward the latch, diagonal, tented at the centre line; fenders and
-  quarters: one ridge between the wheel and the car's end), fixed-edge lift (lids), leading-end follow (0 at the fixed row → 1 at
-  the leading row; its square shapes the latch pop).
-
-Per chord the effective shortening `gain × max(own chord loss, lead push)` (1.5 cm dead zone)
-becomes a fold height `0.7 × fold_height` (an inextensible strip pushed into a tent), capped at
-`max_m`; once the lid is unlatched or hangs, the hinge edge bows up (0.45 × fold) and the latch
-edge pops up by `pop_m`. The renderer keeps the largest shortening / pull-back per chord (sheet
-metal does not spring back) and clears it when every bound node is back at rest (repair).
-`car_assets::skin::deform_detail` and `car_assets::crumple::render_part` are the Rust reference
-of `render/panels.ts`.
-Head / tail light lenses (`kind: light`, region `FrameFront` / `FrameRear`) are skinned to the
-nearest bumper, hood/trunk, same-side fender/quarter and frame nodes of their end of the car, so
-they crush with it; other lights (indicators, markers, fog lamps) skin to their own region.

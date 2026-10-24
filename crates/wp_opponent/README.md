@@ -12,7 +12,7 @@ gap to the player — pace is car capability × how much of it the driver dares 
 |---|---|---|
 | Corridor | `corridor` | A `wp_world::Route` resampled every 2 m with drivable left/right widths from the lane's same-direction neighbours (parking lanes never), blended through junctions. `OpposingLanes::{Never, ForOvertaking, Always}` decides whether the other direction is usable. |
 | Racing line | `line::RacingLine` | Minimum discrete curvature inside the corridor (half car width + 0.4 m from the edges), projected Gauss–Seidel run coarse-to-fine (strides 16→1). Out-in-out falls out. |
-| Speed profile | `line::SpeedProfile` | `v ≤ √(a_lat/|κ|)`, forward pass (`line::drive_accel`: traction-limited to 22 m/s, then power-limited minus drag sized to the top speed; friction ellipse; road grade), backward pass (braking, friction ellipse, grade). Circuits wrap. |
+| Speed profile | `line::SpeedProfile` | `v ≤ √(a_lat/|κ|)`, forward pass (`line::drive_accel`: traction-limited to 22 m/s, then power-limited minus drag sized to the top speed; friction ellipse; road grade), backward pass (braking, friction ellipse, grade). Grip, braking and traction scale per sample by `CarCapability::surface_grip` of the sample's `surface` (the tyres' gravel / dirt / grass ratio to asphalt; exactly 1.0 on paved roads). Circuits wrap. |
 | Capability | `capability::CarCapability` | Measured with `wp_vehicle::metrics` (skidpad 30 m, 100–0 braking, 0–100, top speed); `for_car` reads the pre-measured `capability_table` (every car in `data/cars`, fingerprinted; falls back to `measure`) — use it in race glue, `geometry_only` is for unit tests. `damaged()` scales it by `HandlingEffects`. |
 | Driver | `profile` | `DriverProfile { skill, aggression, consistency, risk, awareness }` → `DriverParams` (table below). |
 | Race | `field::Field` | Per tick: observe (corridor position, laps, damage, heat, civilian DQ) → perceive (racers, other vehicles, civilians as obstacles in corridor coordinates) → decide (tactics, lateral target with hard side constraints, speed target) → track with `wp_world::drive::DriveController` (machine D's pure pursuit + PID, shared with physical traffic). Decisions at 60 Hz. |
@@ -212,6 +212,25 @@ for (entity, input) in inputs { sim.set_input(*entity, *input)?; }
 body size for every sim vehicle. Events: `drain_events()` (`LapCompleted`, `Finished`,
 `Overtook`… see `OpponentEvent`); `standings()`, `debug_of(k)` (speed target, what limits it,
 lateral command, pass-decision counters), `state_hash()`.
+
+## Evader bot (`evader`, police benchmark)
+`Evader` is a scripted escapee for `simcli police-bench` (`docs/integration/police-bench.md`).
+It is not a race opponent: it perceives police cars it can see (line of sight within its sense
+range) or hear (close by), acts on what it saw `reaction_s` ago, plans over the lane graph
+(Dijkstra out to `foresight_m`, roads near known units cost more, ends far from every unit
+score best, bonuses for tunnels / covered roads and turns, seeded noise), keeps the next
+max(40 m, 2.5 s) of its route unless a unit is on it, drives it with the shared
+`PathFollower` near the car's limit (wet roads: `set_grip_scale`), changes lane round stopped
+cars and past slower traffic, reverses out of dead stops and turns round when reversing twice
+in one place. Skills (`EvaderSkill::{Casual, Good, Expert}`):
+
+| | reaction s | replan s | foresight m | sense m | lateral m/s² | top m/s | min target m/s | steer noise | overtakes |
+|---|---|---|---|---|---|---|---|---|---|
+| casual | 1.2 | 3.0 | 300 | 150 | 5.5 | 30 | 16 | 0.05 | no (only round stopped cars) |
+| good | 0.6 | 1.5 | 600 | 250 | 6.8 | 40 | 22 | 0.025 | yes |
+| expert | 0.25 | 0.75 | 1000 | 350 | 7.8 | 48 | 28 | 0.01 | yes |
+
+It reads only positions it could see — never police assignments or plans.
 
 ## Tests
 ```sh

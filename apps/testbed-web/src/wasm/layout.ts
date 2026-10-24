@@ -75,6 +75,8 @@ export const INPUT_FLAG = {
 
 /** world_info() offsets. */
 export const W = { tick: 0, hours: 1, night: 2, mode: 3, replay: 4, recording: 5, city: 6, scripted: 7 } as const;
+/** world_info()[W.mode] value (0 / 1 / 2) to the damage mode name. */
+export const MODE_NAMES = ["Arcade", "Simulation", "Extreme"] as const;
 
 /** Floats per head in signal_heads() (crates/wp_wasm/src/signals.rs). */
 export const SIGNAL_HEAD_STRIDE = 10;
@@ -102,16 +104,17 @@ export const AGENT_FLAG = {
   aggressive: 64,
 } as const;
 
-/** Floats per record in traffic_draw() / police_draw() (crates/wp_wasm/src/lod.rs). */
+/** Floats per record in traffic_draw() / police_draw() (crates/wp_wasm/src/lod.rs; `lod_draw_stride()`). */
 export const DRAW_STRIDE = 11;
 /**
  * Offsets inside a draw record: id (agent / unit), entity (0 = none), pos xyz, rot quaternion
- * xyzw, flags, model. `model` indexes sim.sessionCarModels().traffic (traffic_draw()) /
- * .police (police_draw(); 0 without a multi-model fleet).
+ * xyzw, flags, model. `model` indexes `SessionModels.traffic_models` (traffic; -1 = no physical
+ * traffic model) or `SessionModels.police_models` (police; -1 = single-model fleet, which draws
+ * `SessionModels.police`).
  */
 export const D = { id: 0, entity: 1, pos: 2, rot: 5, flags: 9, model: 10 } as const;
 /** police_draw() flag bits. */
-export const POLICE_DRAW_FLAG = { helicopter: 1, chasing: 2 } as const;
+export const POLICE_DRAW_FLAG = { helicopter: 1, chasing: 2, county: 4 } as const;
 
 /** Floats per intent arrow in intents(). */
 export const INTENT_STRIDE = 8;
@@ -121,7 +124,8 @@ export const POLICE_UNIT_STRIDE = 8;
 /**
  * Offsets inside one police_units() record. `unitId` is the stable wp_police unit id (hash it
  * for light-bar phase); `model` indexes sim.policeModels() (-1 = none: helicopter or
- * single-model session). Flags: 1 helicopter, 2 pursuing.
+ * single-model session). Flags: 1 helicopter, 2 pursuing, 4 Ashpeak County unit (ACSO livery;
+ * wp_wasm police::Agencies).
  */
 export const PU = { x: 0, y: 1, z: 2, yaw: 3, speed: 4, flags: 5, unitId: 6, model: 7 } as const;
 
@@ -130,7 +134,7 @@ export const META_STRIDE = 3;
 /** vehicle_meta() kinds (`wp_sim::VehicleKind`). */
 export const VEHICLE_KIND = { player: 0, aiRacer: 1, police: 2, traffic: 3 } as const;
 /** vehicle_meta() flag bits (from the input the vehicle drives with). */
-export const META_FLAG = { siren: 1, headlights: 2, brake: 4, horn: 8 } as const;
+export const META_FLAG = { siren: 1, headlights: 2, brake: 4, horn: 8, turnLeft: 16, turnRight: 32 } as const;
 
 /** Floats per record in police_tools(): [kind, x, y, z, qx, qy, qz, qw, hx, hy, hz]. */
 export const TOOL_STRIDE = 11;
@@ -179,6 +183,21 @@ export const PROP_STRIDE = 11;
 /** Offsets inside one props_static() record: kind, box-centre pos xyz, rot quaternion xyzw, half extents xyz. */
 export const P = { kind: 0, pos: 1, rot: 4, half: 8 } as const;
 /** props_static() kind codes. */
-export const PROP_KIND = { parkedCar: 0, cone: 1 } as const;
+export const PROP_KIND = { parkedCar: 0, cone: 1, krail: 2 } as const;
 /** Floats per record in props_moved(): [prop index, x, y, z, qx, qy, qz, qw]. */
 export const PROP_MOVED_STRIDE = 8;
+/** Floats per record in parked_wrecks() (crates/wp_wasm/src/props.rs). */
+export const WRECK_STRIDE = 12;
+/** Offsets inside one parked_wrecks() record: prop index, lattice awake (0/1), health, shattered
+ * glass regions, chassis → prop-body scale xyz and origin xyz (body = chassis ⊙ scale + origin). */
+export const WK = { prop: 0, awake: 1, health: 2, shattered: 3, scale: 4, origin: 7 } as const;
+
+/** Wheel-centre height in chassis space for a reported compression (matches wp_vehicle: the
+ * hub sits at `position_m` at the static compression; playtest row 92 — drawing it at half
+ * the travel left wheels 1–3 cm off the road). */
+export function wheelCentreZ(
+  wi: { position_m: [number, number, number]; travel_m: number; static_compression_m?: number },
+  compression: number,
+): number {
+  return wi.position_m[2] + compression - (wi.static_compression_m ?? wi.travel_m * 0.5);
+}

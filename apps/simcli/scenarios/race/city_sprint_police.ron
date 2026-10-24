@@ -1,7 +1,7 @@
 // wp_race: an illegal daytime street race that pulls in the police. Same procedural 7x7 city
 // and northbound arterial as race_city_sprint, open roads: civilian traffic on (density 0.3)
-// and police on. Route (60.55, -437) → (60.55, -300), ~137 m, finishing ~190 m short of the
-// next cross street so finished cars have slowed down before the patrol there. Four entrants on the
+// and police on. Route (60.55, -437) → (60.55, -230), ~207 m, finishing ~100 m short of the
+// next signalled junction so finished cars don't queue on the line. Four entrants on the
 // judge's staggered grid (row gap 8 m, columns 5 m apart; x = 59.55 / 64.55 since the grid
 // highway became a divided viaduct with ramps: the course runs down the middle lane of the
 // northbound carriageway).
@@ -13,12 +13,12 @@
 // The race itself is driven and judged by crates/wp_race/tests/race_police.rs: the entrants
 // are wp_opponent AI racers (wp_race::entrants), the venue is already hot from two earlier
 // meets, so starting this race emits RaceSignal::PatrolAttracted, and wp_race::police turns it
-// into civilian reports that wp_police consumes like any traffic violation (+3 heat each).
+// into civilian reports that wp_police consumes like any traffic violation (+1.5 heat each since wp_police row 157; was +3).
 // The test asserts a pursuit starts during or after the race, and a control run without the
 // report asserts nobody is chased (the report is what lifts a racer over wanted level 1).
 //
 // Re-aimed in round 8 (contract v0.3.0 moved patrol spawns): a traffic camera now covers the
-// grid, so the meet report counts as witnessed (full +3 heat, no civilian call, no patrol
+// grid, so the meet report counts as witnessed (full heat, no civilian call, no patrol
 // sent), and wanted level 1 needs 10 heat. The entrants are meet regulars police already know
 // (police_heat 3.0): report + witnessed speeding lifts them over L1, while without the report
 // they stay below it. Searched with WP_RACE_AIM_HEAT in race_police.rs: starting heat 2.0-4.5
@@ -35,6 +35,9 @@
 // 1.5 m, grid slots with them): at seed 5 a patrol now starts a pursuit at 21 s in the control
 // run at any starting heat (0-5). Seed 5 -> 1: heat 2.5-5.0 passes both runs, 3.75 is the
 // middle (seed 2: 2.0-4.5).
+// Re-aimed for wp_police row 157 (2026-10-23: every heat gain halved, so the report and the
+// racers' own violations add half as much): at 3.75 nobody reaches L1 and no pursuit starts.
+// Seed 1: heat 4.5-8.25 passes both runs, starting heat 3.75 -> 6.0.
 //
 // Run standalone, simcli has no race block and no AI driver for these entities (see
 // docs/integration/race.md, requests to I and N), so the cars wait on the grid while traffic
@@ -45,25 +48,21 @@
     // release CI jobs (`simcli determinism`, `simcli goldens`).
     slow: true,
     // Re-aimed for the grid highway's ramps (WP_RACE_AIM_*, crates/wp_race/tests/race_police.rs):
-    // seed 12 passes both police tests at dy = -10, 0 and +10 m. Merged with round 12 (cars
-    // race on their real limits, ~42 m/s at y = -230): the winner then passed the patrol on the
-    // y = -112 cross street at 44 over and was chased in the control run at every seed and heat.
-    // The finish moved to y = -300: finishes at -330 … -260 pass both runs (seeds 1, 5, 12, 20;
-    // heat 2.5-5.0).
+    // seed 12 passes both police tests at dy = -10, 0 and +10 m.
     seed: 12,
     city: procedural(seed: 1, blocks_x: 7, blocks_y: 7, block_m: 110.0),
     time_of_day_h: 13.0,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     traffic_density: 0.3,
     police_presence: 2.0,
     // Parked cars make debug test runs very slow and take no part in the race.
     parked_cars: false,
     entities: [
-        (id: "ai_coupe", car: "debug_coupe", pos: (59.55, -440.0, 0.0), police_heat: 3.75),
-        (id: "ai_sedan", car: "debug_sedan", pos: (64.55, -444.0, 0.0), police_heat: 3.75),
-        (id: "ai_coupe_2", car: "debug_coupe", pos: (59.55, -448.0, 0.0), police_heat: 3.75),
-        (id: "ai_sedan_2", car: "debug_sedan", pos: (64.55, -452.0, 0.0), police_heat: 3.75),
+        (id: "ai_coupe", car: "debug_coupe", pos: (59.55, -440.0, 0.0), police_heat: 6.0),
+        (id: "ai_sedan", car: "debug_sedan", pos: (64.55, -444.0, 0.0), police_heat: 6.0),
+        (id: "ai_coupe_2", car: "debug_coupe", pos: (59.55, -448.0, 0.0), police_heat: 6.0),
+        (id: "ai_sedan_2", car: "debug_sedan", pos: (64.55, -452.0, 0.0), police_heat: 6.0),
     ],
     duration_s: 30.0,
     hash_every: 240,

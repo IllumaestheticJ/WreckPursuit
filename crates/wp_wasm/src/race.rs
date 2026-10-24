@@ -13,8 +13,7 @@
 //! - a hot meet calls in a patrol (`PatrolAttracted` → `wp_race::police` reports delivered to
 //!   the sim's police), and illegal races put their stake heat on every racer;
 //! - the buy-in is charged at the start and the result paid at the end through G's economy
-//!   (`Economy::enter_race_scaled` / `settle_race_scaled` with `wp_race::bridge`'s R5 scales,
-//!   so the player pays and wins exactly what the race card advertised), on
+//!   (`Economy::enter_race` / `settle_race`, priced by kind and legality: the R5 scale), on
 //!   the player's [`crate::run::PlayerRun`] account. A police capture mid-race is a DNF and
 //!   the existing end-of-run panel takes over (`handoff_run_end`).
 //!
@@ -28,9 +27,12 @@ use serde::Serialize;
 use simcli::run::world_config;
 use simcli::Scenario;
 use wp_contracts::{DamageMode, EntityId, LoadedCar, RaceKind, SimEvent, VehicleInput, VehicleSim};
+use wp_economy::BetVenue;
 use wp_opponent::{CarCapability, SimPolice, VehicleObs};
+use wp_race::betting::{BetWallet, BettingRules, Book, Outcome, Selection, Settlement};
 use wp_race::catalog::{self, RaceDef};
 use wp_race::live::{LiveEntrant, LiveRace, Standing};
+use wp_race::roster::{Placing, Roster, RosterState, PLAYER_KEY};
 use wp_race::{RaceData, RacerResult, RacerSample, RacerStatus};
 use wp_sim::{Sim, VehicleKind};
 
@@ -47,7 +49,8 @@ pub const STANDING_STRIDE: usize = 10;
 /// Floats in `race_info()`.
 pub const INFO_LEN: usize = 12;
 
-/// The race a scenario name stands for, and whether the player's car is on autopilot.
+/// The race a scenario name stands for (a picker race or a touge battle,
+/// [`catalog::race_for_scenario`]), and whether the player's car is on autopilot.
 pub fn race_for_scenario(name: &str) -> Option<(RaceDef, bool)> {
     match name.strip_suffix(AUTOPILOT_SUFFIX) {
         Some(base) => catalog::race_for_scenario(base).map(|d| (d, true)),
@@ -70,7 +73,33 @@ pub fn race_scenario(
     mode: DamageMode,
     autopilot: bool,
 ) -> Result<Scenario, String> {
-    let mut sc = free_drive_in(car, mode, city_spec(def.city.id()));
+    race_scenario_in(def, car, mode, autopilot, def.city.id())
+}
+
+/// The city a race started from a session on `current` runs on: the current map when the race
+/// can run there (a Port Vesper race started on the combined `ashpeak` map stays on it, so the
+/// player stays in the same world), else the race's own city.
+pub fn race_city<'a>(def: &RaceDef, current: &'a str) -> &'a str {
+    if def.city.runs_on(current) {
+        current
+    } else {
+        def.city.id()
+    }
+}
+
+/// [`race_scenario`] on city `city_id` (one of `def.city.hosts()`; the course is planned on
+/// that map).
+pub fn race_scenario_in(
+    def: &RaceDef,
+    car: &str,
+    mode: DamageMode,
+    autopilot: bool,
+    city_id: &str,
+) -> Result<Scenario, String> {
+    if !def.city.runs_on(city_id) {
+        return Err(format!("{} does not run on {city_id:?}", def.id));
+    }
+    let mut sc = free_drive_in(car, mode, city_spec(city_id));
     sc.name = def.scenario_name();
     if autopilot {
         sc.name.push_str(AUTOPILOT_SUFFIX);
@@ -86,7 +115,7 @@ pub fn race_scenario(
         .map_err(|e| e.to_string())?
         .ok_or("race city did not load")?;
     let race = catalog::plan_course(&world, def)
-        .ok_or_else(|| format!("{}: no route on {}", def.id, def.city.id()))?;
+        .ok_or_else(|| format!("{}: no route on {city_id}", def.id))?;
     let slots = wp_race::live::grid(def, &race);
     let yaw = |s: &wp_race::GridSlot| wp_world::geom::yaw_of(s.dir);
     let player = slots.last().ok_or("empty grid")?;
@@ -99,9 +128,107 @@ pub fn race_scenario(
     Ok(sc)
 }
 
+thread_local! {
+    /// The regulars' records in this browser (form ratings, wins, recent form). The testbed
+    /// saves it with [`roster_state_text`] and restores it with [`roster_state_load`].
+    static ROSTER_STATE: std::cell::RefCell<Option<RosterState>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Run `f` on the browser's roster records (fresh records on first use).
+pub fn with_roster<T>(f: impl FnOnce(&mut RosterState) -> T) -> T {
+    ROSTER_STATE.with(|r| {
+        let mut r = r.borrow_mut();
+        f(r.get_or_insert_with(|| RosterState::new(&Roster::embedded())))
+    })
+}
+
+/// The roster records as text (TOML) for the testbed's local save.
+pub fn roster_state_text() -> String {
+    with_roster(|s| s.to_json())
+}
+
+/// Restore the roster records from [`roster_state_text`] output (regulars added since get
+/// fresh records).
+pub fn roster_state_load(text: &str) -> Result<(), String> {
+    let mut st = RosterState::from_json(text)?;
+    st.sync(&Roster::embedded());
+    with_roster(|s| *s = st);
+    Ok(())
+}
+
+/// One regular with their record (`roster_json`).
+#[derive(Debug, Clone, Serialize)]
+pub struct RegularCard {
+    /// Roster id.
+    pub id: String,
+    /// `Name "Nickname" Surname`.
+    pub billing: String,
+    /// Car id.
+    pub car: String,
+    /// Home turf.
+    pub home: String,
+    /// Specialty key.
+    pub specialty: &'static str,
+    /// Personality.
+    pub style: String,
+    /// Form rating.
+    pub rating: i32,
+    /// Starts / wins / podiums / DNFs.
+    pub starts: u32,
+    /// Wins.
+    pub wins: u32,
+    /// Podiums.
+    pub podiums: u32,
+    /// DNFs.
+    pub dnfs: u32,
+    /// Last five results, oldest first (`1`–`9`, `X` DNF, `-` not raced).
+    pub form: String,
+}
+
+/// Every regular with their current record, strongest first.
+pub fn regular_cards() -> Vec<RegularCard> {
+    let roster = Roster::embedded();
+    with_roster(|st| {
+        let mut out: Vec<RegularCard> = roster
+            .racers
+            .iter()
+            .map(|r| {
+                let rec = st
+                    .get(&r.id)
+                    .cloned()
+                    .unwrap_or_else(|| wp_race::roster::RacerRecord::new(r.rating));
+                RegularCard {
+                    id: r.id.clone(),
+                    billing: r.billing(),
+                    car: r.car.clone(),
+                    home: r.home.clone(),
+                    specialty: r.specialty.key(),
+                    style: r.style.clone(),
+                    rating: rec.rating,
+                    starts: rec.starts,
+                    wins: rec.wins,
+                    podiums: rec.podiums,
+                    dnfs: rec.dnfs,
+                    form: rec.form_string(),
+                }
+            })
+            .collect();
+        out.sort_by(|a, b| b.rating.cmp(&a.rating).then(a.id.cmp(&b.id)));
+        out
+    })
+}
+
 /// One AI driver in the picker (`race_list`).
 #[derive(Debug, Clone, Serialize)]
 pub struct DriverCard {
+    /// Roster id.
+    pub id: &'static str,
+    /// Street name.
+    pub nickname: String,
+    /// Current form rating.
+    pub rating: i32,
+    /// Last five results, oldest first.
+    pub form: String,
     /// Name.
     pub name: &'static str,
     /// Personality.
@@ -121,7 +248,9 @@ pub struct RaceCard {
     pub blurb: &'static str,
     /// City id.
     pub city: &'static str,
-    /// Kind key (`sprint`, `circuit`, `checkpoint`).
+    /// Every city id it runs on (its own and the maps containing it, e.g. `ashpeak`).
+    pub cities: &'static [&'static str],
+    /// Kind key (`sprint`, `circuit`, `checkpoint`, `drag`).
     pub kind: &'static str,
     /// Laps.
     pub laps: u32,
@@ -135,21 +264,152 @@ pub struct RaceCard {
     pub police: f32,
     /// The meet is hot: a patrol is called in at the green light.
     pub hot_meet: bool,
+    /// Name of the race's police style (`data/police/races.toml`), e.g. "Speed trap".
+    pub police_style: String,
+    /// One line on how the police work this race.
+    pub police_summary: String,
     /// The AI field.
     pub drivers: Vec<DriverCard>,
     /// Advertised winner purse for `car` (`data/events/stakes.toml`, reconciled with G's).
     pub purse: i64,
     /// Advertised buy-in for `car`.
     pub entry_fee: i64,
+    /// Course character (`hill`, `highway`, `downtown`, `mixed`).
+    pub terrain: &'static str,
+    /// What the player may bet on themselves, with today's odds (empty without a car).
+    pub odds: Vec<OddsCard>,
+}
+
+/// One bet the player may place on themselves (`race_list`, `race_bet`).
+#[derive(Debug, Clone, Serialize)]
+pub struct OddsCard {
+    /// Selection label for `race_bet` (`win:player`, `podium:player`, `h2h:player>vic`).
+    pub label: String,
+    /// `win`, `podium` or `h2h`.
+    pub kind: &'static str,
+    /// Head-to-head opponent's name.
+    pub opponent: Option<String>,
+    /// Decimal odds.
+    pub odds: f32,
+}
+
+/// A ticket on the results panel.
+#[derive(Debug, Clone, Serialize)]
+pub struct BetCard {
+    /// Selection label.
+    pub label: String,
+    /// Human-readable selection ("You to win", "You beat Vic Marlowe").
+    pub text: String,
+    /// Stake.
+    pub stake: i64,
+    /// Decimal odds locked in.
+    pub odds: f32,
+    /// `open`, `won`, `lost`, `void`.
+    pub outcome: &'static str,
+    /// Paid back (stake included; potential return while open).
+    pub paid: i64,
+}
+
+/// Rating points for the player's car against race `def`'s field (the career economy's
+/// class index; [`wp_race::roster::RatingConfig::car_adjust`]).
+fn player_car_adjust(
+    econ: &wp_economy::Economy,
+    rules: &BettingRules,
+    def: &RaceDef,
+    car: &LoadedCar,
+) -> i32 {
+    let field: Vec<u16> = def
+        .ai
+        .iter()
+        .filter_map(|d| simcli::data::load_car(mem_data(), d.car).ok())
+        .map(|c| econ.class_index(&c.def))
+        .collect();
+    rules.rating.car_adjust(econ.class_index(&car.def), &field)
+}
+
+/// The betting book for race `def` with the player in `car`, priced from the browser's roster
+/// records.
+fn book_for(
+    econ: &wp_economy::Economy,
+    def: &RaceDef,
+    car: &LoadedCar,
+) -> Book<wp_economy::BetTicket> {
+    let rules = BettingRules::embedded();
+    let adjust = player_car_adjust(econ, &rules, def, car);
+    let market =
+        with_roster(|st| catalog::betting_market(def, &Roster::embedded(), st, &rules, adjust));
+    Book::for_player(market)
+}
+
+fn selection_text(def: &RaceDef, sel: &Selection) -> String {
+    let name = |k: &str| {
+        def.ai
+            .iter()
+            .find(|d| d.id == k)
+            .map_or_else(|| "You".to_string(), |d| d.name.to_string())
+    };
+    match sel {
+        Selection::Win(k) => format!("{} to win", name(k)),
+        Selection::Podium(k) => format!("{} on the podium", name(k)),
+        Selection::HeadToHead { backed, opponent } => {
+            format!("{} beat {}", name(backed), name(opponent))
+        }
+    }
+}
+
+fn odds_cards(def: &RaceDef, book: &Book<wp_economy::BetTicket>) -> Vec<OddsCard> {
+    book.offered()
+        .into_iter()
+        .map(|(sel, o)| {
+            let (kind, opponent) = match &sel {
+                Selection::Win(_) => ("win", None),
+                Selection::Podium(_) => ("podium", None),
+                Selection::HeadToHead { opponent, .. } => (
+                    "h2h",
+                    def.ai
+                        .iter()
+                        .find(|d| d.id == opponent)
+                        .map(|d| d.name.to_string()),
+                ),
+            };
+            OddsCard {
+                label: sel.label(),
+                kind,
+                opponent,
+                odds: o.decimal(),
+            }
+        })
+        .collect()
+}
+
+/// The career economy's account as a betting wallet.
+struct RunWallet<'a>(&'a mut PlayerRun);
+
+impl BetWallet for RunWallet<'_> {
+    type Receipt = wp_economy::BetTicket;
+
+    fn max_stake(&self) -> i64 {
+        self.0.max_bet(BetVenue::City)
+    }
+
+    fn take_stake(&mut self, stake: i64, label: &str) -> Result<wp_economy::BetTicket, String> {
+        self.0.place_bet(BetVenue::City, stake, label)
+    }
+
+    fn pay_out(&mut self, receipt: &wp_economy::BetTicket, gross: i64) {
+        self.0.settle_bet(receipt, gross);
+    }
 }
 
 /// The picker for a player in `car` (stakes depend on the car's class bracket).
 pub fn race_cards(car: Option<&LoadedCar>, mode: DamageMode) -> Vec<RaceCard> {
     let data = RaceData::embedded();
+    let roster = Roster::embedded();
     crate::garage::with_economy(|econ| {
         catalog::races()
             .iter()
             .map(|d| {
+                let profile = d.police_profile();
                 let (purse, entry_fee) = car.map_or((0, 0), |c| {
                     let r = advertised(econ, &data, d, c, d.length_hint_m, mode);
                     (r.purse, r.entry_fee)
@@ -159,6 +419,7 @@ pub fn race_cards(car: Option<&LoadedCar>, mode: DamageMode) -> Vec<RaceCard> {
                     name: d.name,
                     blurb: d.blurb,
                     city: d.city.id(),
+                    cities: d.city.hosts(),
                     kind: d.kind.key(),
                     laps: d.laps(),
                     legality: d.legality.key(),
@@ -166,17 +427,35 @@ pub fn race_cards(car: Option<&LoadedCar>, mode: DamageMode) -> Vec<RaceCard> {
                     length_m: d.length_hint_m,
                     police: d.police_presence(),
                     hot_meet: d.prior_meets >= 2,
+                    police_style: profile
+                        .as_ref()
+                        .map_or_else(String::new, |p| p.name.clone()),
+                    police_summary: profile.map_or_else(String::new, |p| p.summary),
                     drivers: d
                         .ai
                         .iter()
-                        .map(|a| DriverCard {
-                            name: a.name,
-                            style: a.style,
-                            car: a.car,
+                        .map(|a| {
+                            let (rating, form) = with_roster(|st| {
+                                st.get(a.id)
+                                    .map_or((0, String::new()), |r| (r.rating, r.form_string()))
+                            });
+                            DriverCard {
+                                id: a.id,
+                                nickname: roster
+                                    .get(a.id)
+                                    .map_or_else(String::new, |r| r.nickname.clone()),
+                                rating,
+                                form,
+                                name: a.name,
+                                style: a.style,
+                                car: a.car,
+                            }
                         })
                         .collect(),
                     purse,
                     entry_fee,
+                    terrain: d.terrain.key(),
+                    odds: car.map_or_else(Vec::new, |c| odds_cards(d, &book_for(econ, d, c))),
                 }
             })
             .collect()
@@ -187,8 +466,25 @@ fn phase_of(def: &RaceDef) -> wp_contracts::DayPhase {
     wp_contracts::TimeOfDay::from_hours(def.time_of_day_h).phase()
 }
 
+/// Ledger note of the adjustment that brings the economy's price to the advertised stake.
+pub const STAKE_NOTE: &str = "race stake (advertised purse / buy-in)";
+
+/// `amount × scale`, rounded (how [`wp_race::bridge::economy_race`] scales the economy's
+/// numbers to the advertised stake).
+pub fn to_stake(amount: i64, scale: f32) -> i64 {
+    (amount as f32 * scale).round() as i64
+}
+
+/// The economy's purse and clean bonus brought to the advertised stake (`purse_scale`).
+pub fn stake_settlement(purse: i64, clean_bonus: i64, purse_scale: f32) -> (i64, i64) {
+    (
+        to_stake(purse, purse_scale),
+        to_stake(clean_bonus, purse_scale),
+    )
+}
+
 /// Advertised stake (`wp_race::bridge::economy_race`, request R5).
-fn advertised(
+pub(crate) fn advertised(
     econ: &wp_economy::Economy,
     data: &RaceData,
     def: &RaceDef,
@@ -270,6 +566,10 @@ pub struct RaceReport {
     pub economy_error: Option<String>,
     /// The police caught the player (or the run ended): the end-of-run panel owns the screen.
     pub handoff_run_end: bool,
+    /// The player's bets on this race (settled once the results are final).
+    pub bets: Vec<BetCard>,
+    /// Form-rating changes from this race (`(name, change, new rating)`), once final.
+    pub rating_changes: Vec<(String, i32, i32)>,
 }
 
 /// A picker race attached to a session (see the module docs).
@@ -280,13 +580,24 @@ pub struct RaceRun {
     names: BTreeMap<EntityId, (String, String)>,
     prev_events: Vec<SimEvent>,
     setup: wp_economy::RaceSetup,
-    /// `(purse, entry)` scales from the economy's prices to the advertised ones.
-    scale: (f32, f32),
     advertised: (i64, i64),
+    /// `(purse_scale, entry_scale)` of the advertised stake ([`wp_race::bridge::EconomyRace`]):
+    /// the economy prices the race, these bring it to what the lobby advertised.
+    stake_scale: (f32, f32),
     entry: Option<(i64, Vec<LedgerLine>)>,
     payout: Option<RacePayout>,
     economy_error: Option<String>,
     settled: bool,
+    /// Off-course resets from the last judged tick ([`RaceRun::take_resets`]).
+    resets: Vec<wp_race::CourseReset>,
+    /// The player's betting book (live runs only; closes at the green light).
+    book: Option<Book<wp_economy::BetTicket>>,
+    /// Settled tickets.
+    bets: Vec<Settlement>,
+    /// Form-rating changes recorded at the end.
+    rating_changes: Vec<(String, i32, i32)>,
+    /// A touge battle (`crate::touge`): wall breaches, wager; no buy-in or picker purse.
+    touge: Option<crate::touge::TougeRun>,
 }
 
 impl RaceRun {
@@ -311,8 +622,12 @@ impl RaceRun {
                 def.entrants()
             ));
         }
-        let race = catalog::plan_course(sim.world(), def)
-            .ok_or_else(|| format!("{}: no route", def.id))?;
+        let touge_setup = crate::touge::setup_for_scenario(&sc.name);
+        let race = match touge_setup {
+            Some(_) => wp_race::touge::plan_course(sim.world(), def),
+            None => catalog::plan_course(sim.world(), def),
+        }
+        .ok_or_else(|| format!("{}: no route", def.id))?;
         let entrant = |i: usize| -> Result<LiveEntrant, String> {
             let car = cars
                 .get(&sc.entities[i].car)
@@ -329,6 +644,12 @@ impl RaceRun {
             sim.set_vehicle_kind(e.entity, VehicleKind::AiRacer)
                 .map_err(|e| e.to_string())?;
         }
+        // Autopilot: the AI drives the player's car, so no player steering aids on it (the AI
+        // steers with the normal model, like the field).
+        if autopilot {
+            sim.set_player_steering(player.entity, Some(false))
+                .map_err(|e| e.to_string())?;
+        }
         let abs_s = (def.time_of_day_h * 3600.0) as u64;
         let live = LiveRace::new(
             def,
@@ -339,7 +660,12 @@ impl RaceRun {
             sim.tick(),
             abs_s,
             autopilot,
-        );
+        )
+        // A route with nothing to drive refuses the race (row 154: a panic froze the game).
+        .map_err(|e| e.to_string())?;
+        // The race's own police: doctrine and scripted roadblocks / spikes / stakeouts.
+        let racers = live.racers().to_vec();
+        wp_race::police::start_race(sim.police_mut(), def, live.race(), &racers);
         let mut names = BTreeMap::new();
         names.insert(ids[0], ("You".to_string(), sc.entities[0].car.clone()));
         for (i, d) in def.ai.iter().enumerate() {
@@ -360,38 +686,114 @@ impl RaceRun {
             let adv = advertised(econ, &data, def, player_car, length, sc.mode);
             (setup, adv)
         });
-        let scale = (adv.purse_scale, adv.entry_scale);
-        let adv = (adv.purse, adv.entry_fee);
+        let touge = match touge_setup {
+            Some(t) => {
+                let npc = cars
+                    .get(&sc.entities[1].car)
+                    .ok_or("touge opponent car not loaded")?;
+                Some(crate::touge::TougeRun::new(
+                    t,
+                    sim,
+                    ids[0],
+                    ids[1],
+                    npc.def.class,
+                    npc.def.base_price,
+                )?)
+            }
+            None => None,
+        };
         let mut me = Self {
             live,
             names,
             prev_events: Vec::new(),
             setup,
-            scale,
-            advertised: adv,
+            advertised: if touge.is_some() {
+                (0, 0)
+            } else {
+                (adv.purse, adv.entry_fee)
+            },
+            stake_scale: (adv.purse_scale, adv.entry_scale),
             entry: None,
             payout: None,
             economy_error: None,
             settled: false,
+            resets: Vec::new(),
+            book: None,
+            bets: Vec::new(),
+            rating_changes: Vec::new(),
+            touge,
         };
+        if me.touge.is_some() {
+            return Ok(me);
+        }
         if let Some(run) = run {
-            match run.enter_race(&me.setup, me.scale.1) {
-                Ok(e) => me.entry = Some(e),
-                Err(e) => me.economy_error = Some(format!("buy-in refused: {e}")),
-            }
+            me.book = Some(book_for(run.economy(), def, player_car));
+            me.charge_entry(run);
         }
         Ok(me)
+    }
+
+    /// Charge the buy-in at the advertised stake: G's `enter_race` prices it, an adjustment
+    /// line brings it to `entry_fee × entry_scale` (as `wp_race::bridge::economy_race`).
+    fn charge_entry(&mut self, run: &mut PlayerRun) {
+        match run.enter_race(&self.setup) {
+            Ok((fee, mut lines)) => {
+                let want = to_stake(fee, self.stake_scale.1);
+                if want != fee {
+                    match run.adjust(fee - want, STAKE_NOTE) {
+                        Ok(l) => lines.extend(l),
+                        Err(e) => self.economy_error = Some(format!("buy-in stake: {e}")),
+                    }
+                }
+                self.entry = Some((want, lines));
+            }
+            Err(e) => self.economy_error = Some(format!("buy-in refused: {e}")),
+        }
     }
 
     /// Charge the buy-in on another account (the session adopted the previous run's account
     /// after this race was attached).
     pub fn reenter(&mut self, run: &mut PlayerRun) {
+        if self.touge.is_some() {
+            // The wager is taken at the first tick, on whichever account the session has then.
+            return;
+        }
         self.economy_error = None;
         self.entry = None;
-        match run.enter_race(&self.setup, self.scale.1) {
-            Ok(e) => self.entry = Some(e),
-            Err(e) => self.economy_error = Some(format!("buy-in refused: {e}")),
+        self.charge_entry(run);
+    }
+
+    /// Bet on yourself while the countdown runs (`label` from [`OddsCard::label`]): the stake
+    /// goes through the career economy (`place_bet`: rep-tier cap, cash, debt) on `run`'s
+    /// account, the odds are locked in. Refused once the light is green.
+    pub fn place_bet(
+        &mut self,
+        run: &mut PlayerRun,
+        label: &str,
+        stake: i64,
+    ) -> Result<BetCard, String> {
+        let def = self.live.def().clone();
+        let book = self.book.as_mut().ok_or("no betting in this session")?;
+        if let Some(lock) = run.bet_lock(BetVenue::City) {
+            return Err(lock);
         }
+        let sel = book
+            .offered()
+            .into_iter()
+            .map(|(s, _)| s)
+            .find(|s| s.label() == label)
+            .ok_or_else(|| format!("not offered: {label}"))?;
+        let t = book
+            .place(&mut RunWallet(run), sel, stake)
+            .map_err(|e| e.to_string())?;
+        Ok(BetCard {
+            label: t.selection.label(),
+            text: selection_text(&def, &t.selection),
+            stake: t.stake,
+            odds: t.odds.decimal(),
+            outcome: "open",
+            paid: t.potential,
+        })
     }
 
     /// The car was moved on purpose (reset, debug park): judge its next sample from `pos`.
@@ -399,9 +801,20 @@ impl RaceRun {
         self.live.relocate(racer, pos, tick);
     }
 
+    /// Racers the judge wants put back on the course (off it past the grace time), oldest
+    /// first. The session moves each car and calls [`RaceRun::relocate`].
+    pub fn take_resets(&mut self) -> Vec<wp_race::CourseReset> {
+        std::mem::take(&mut self.resets)
+    }
+
     /// The live race (judge, standings, course).
     pub fn live(&self) -> &LiveRace {
         &self.live
+    }
+
+    /// The player's throttle while held on the grid (revs on the line during the countdown).
+    pub fn set_grid_throttle(&mut self, throttle: f32) {
+        self.live.set_grid_throttle(throttle);
     }
 
     /// Inputs for this tick (AI cars, the player's grid hold), before `Sim::step_fixed`.
@@ -446,9 +859,36 @@ impl RaceRun {
             .filter(|v| v.kind == VehicleKind::Police)
             .map(|v| v.id)
             .collect();
+        // Touge: a car through the wall is totaled before the judge sees the tick.
+        let breach = match &mut self.touge {
+            Some(t) => t.check_walls(sim),
+            None => Vec::new(),
+        };
+        let judged: Vec<SimEvent>;
+        let events = if breach.is_empty() {
+            events
+        } else {
+            judged = events
+                .iter()
+                .cloned()
+                .chain(breach.iter().cloned())
+                .collect();
+            &judged
+        };
         let out = self.live.post_step(sim.tick(), &samples, events, &police);
+        if let Some(book) = &mut self.book {
+            if book.open && !self.live.in_countdown(sim.tick()) {
+                book.close();
+            }
+        }
+        if let Some(t) = &mut self.touge {
+            let mode_table = sim.mode_table().clone();
+            t.after_judge(sim, &self.live, &mode_table);
+        }
         self.prev_events = events.to_vec();
-        let mut emitted: Vec<SimEvent> = out.signals.iter().map(|s| s.to_sim_event()).collect();
+        self.resets.extend_from_slice(&out.resets);
+        let mut emitted: Vec<SimEvent> = breach;
+        emitted.extend(out.signals.iter().map(|s| s.to_sim_event()));
         if !out.reports.is_empty() {
             let views: Vec<wp_police::RacerView> = samples
                 .iter()
@@ -480,21 +920,111 @@ impl RaceRun {
 
     /// Pay the player once the results are final (G's `settle_race` on `run`'s account).
     pub fn settle(&mut self, run: Option<&mut PlayerRun>) {
+        if let Some(t) = &mut self.touge {
+            t.tick_economy(run);
+            return;
+        }
         if self.settled || !self.live.is_finished() {
             return;
         }
         self.settled = true;
-        let (Some(run), Some(entry)) = (run, self.entry.take()) else {
+        let Some(run) = run else {
+            return;
+        };
+        self.settle_bets_and_form(run);
+        let Some(entry) = self.entry.take() else {
             return;
         };
         let Some(r) = self.player_result() else {
             return;
         };
         let res = wp_race::bridge::economy_result(&r, run.wanted_level());
-        match run.settle_race(&self.setup, &res, entry, self.scale.0) {
-            Ok(p) => self.payout = Some(p),
+        match run.settle_race(&self.setup, &res, entry) {
+            Ok(mut p) => {
+                // Pay the advertised stake: purse and clean bonus × purse_scale (the bridge's
+                // R5 scale; the economy alone pays its own per-km base).
+                let (purse, bonus) = stake_settlement(p.purse, p.clean_bonus, self.stake_scale.0);
+                let diff = purse + bonus - p.purse - p.clean_bonus;
+                if diff != 0 {
+                    match run.adjust(diff, STAKE_NOTE) {
+                        Ok(lines) => {
+                            p.ledger.extend(lines);
+                            p.purse = purse;
+                            p.clean_bonus = bonus;
+                            p.cash_after = run.account().cash;
+                        }
+                        Err(e) => self.economy_error = Some(format!("payout stake: {e}")),
+                    }
+                }
+                self.payout = Some(p);
+            }
             Err(e) => self.economy_error = Some(format!("payout refused: {e}")),
         }
+    }
+
+    /// Record the race in the regulars' records and settle the player's bets.
+    fn settle_bets_and_form(&mut self, run: &mut PlayerRun) {
+        let def = self.live.def().clone();
+        let results = match self.live.final_results() {
+            Some(r) => r.to_vec(),
+            None => self.live.judge().results(),
+        };
+        let placings = Placing::from_results(&results, |e| {
+            self.names
+                .get(&e)
+                .and_then(|(name, _)| catalog::roster_key_of(&def, name))
+                .map(str::to_string)
+        });
+        let rules = BettingRules::embedded();
+        let deltas = with_roster(|st| {
+            st.record_race(&placings, &rules.rating)
+                .into_iter()
+                .map(|(k, d)| (k.clone(), d, st.rating(&k)))
+                .collect::<Vec<_>>()
+        });
+        self.rating_changes = deltas
+            .into_iter()
+            .map(|(k, d, r)| {
+                let name = if k == PLAYER_KEY {
+                    "You".to_string()
+                } else {
+                    def.ai
+                        .iter()
+                        .find(|a| a.id == k)
+                        .map_or(k.clone(), |a| a.name.to_string())
+                };
+                (name, d, r)
+            })
+            .collect();
+        if let Some(book) = &mut self.book {
+            self.bets = book.settle(&mut RunWallet(run), &placings);
+        }
+    }
+
+    fn bet_cards(&self) -> Vec<BetCard> {
+        let def = self.live.def();
+        let Some(book) = &self.book else {
+            return Vec::new();
+        };
+        book.tickets
+            .iter()
+            .map(|t| {
+                let s = self.bets.iter().find(|s| s.ticket == t.id);
+                BetCard {
+                    label: t.selection.label(),
+                    text: selection_text(def, &t.selection),
+                    stake: t.stake,
+                    odds: t.odds.decimal(),
+                    outcome: match s.map(|s| s.outcome) {
+                        None => "open",
+                        Some(Outcome::Won) => "won",
+                        Some(Outcome::Lost) => "lost",
+                        Some(Outcome::Void) => "void",
+                    },
+                    paid: s.map_or(t.potential, |s| s.paid),
+                }
+            })
+            .collect()
     }
 
     fn player_result(&self) -> Option<RacerResult> {
@@ -553,7 +1083,8 @@ impl RaceRun {
         };
         let player_done = self
             .player_result()
-            .is_some_and(|r| r.status != RacerStatus::Running);
+            .is_some_and(|r| r.status != RacerStatus::Running)
+            || self.touge.as_ref().is_some_and(|t| t.decided());
         vec![
             phase,
             l.countdown_s(tick),
@@ -598,7 +1129,8 @@ impl RaceRun {
     /// The results panel, once the player is no longer racing (`None` before).
     pub fn report(&self, player_run_over: bool) -> Option<RaceReport> {
         let me = self.player_result()?;
-        if me.status == RacerStatus::Running {
+        let touge_decided = self.touge.as_ref().is_some_and(|t| t.decided());
+        if me.status == RacerStatus::Running && !touge_decided {
             return None;
         }
         let def = self.live.def();
@@ -616,6 +1148,14 @@ impl RaceRun {
                 let (name, car) = self.names.get(&r.racer).cloned().unwrap_or_default();
                 let (status, reason) = match r.status {
                     RacerStatus::Finished => ("Finished", None),
+                    RacerStatus::Running if touge_decided => (
+                        if self.touge_won() == Some(r.racer == self.live.player()) {
+                            "Battle won"
+                        } else {
+                            "Beaten"
+                        },
+                        None,
+                    ),
                     RacerStatus::Running => ("Running", None),
                     RacerStatus::Dnf(x) => ("DNF", Some(format!("{x:?}"))),
                     RacerStatus::Dq(x) => ("DQ", Some(format!("{x:?}"))),
@@ -644,7 +1184,7 @@ impl RaceRun {
             kind: def.kind.key(),
             legality: def.legality.key(),
             length_m: self.live.race().route.length_m,
-            final_results: self.live.is_finished(),
+            final_results: self.live.is_finished() || touge_decided,
             rows,
             player_row,
             advertised_purse: self.advertised.0,
@@ -653,7 +1193,22 @@ impl RaceRun {
             economy_error: self.economy_error.clone(),
             handoff_run_end: player_run_over
                 || me.status == RacerStatus::Dnf(wp_race::DnfReason::Captured),
+            bets: self.bet_cards(),
+            rating_changes: self.rating_changes.clone(),
         })
+    }
+
+    /// Touge: whether the player won the decided battle.
+    fn touge_won(&self) -> Option<bool> {
+        self.touge
+            .as_ref()
+            .and_then(|t| t.battle().outcome())
+            .map(|o| o.result == wp_race::touge::BattleResult::Won)
+    }
+
+    /// The touge battle state, for a touge battle.
+    pub fn touge(&self) -> Option<&crate::touge::TougeRun> {
+        self.touge.as_ref()
     }
 
     /// The buy-in charged at the start (fee, ledger lines), if any.

@@ -94,8 +94,9 @@ names when refreshing). Refresh the demo only from a green `main`, not from roun
   their scenarios, wasm + tsc) plus the browser smoke drive, and republish the **preview** link.
   Target: minutes, not hours. Failures found here go straight back to the owning session.
 - **Main track (safe):** the full gate (fmt, clippy -D warnings, cargo test --workspace, all
-  scenarios, goldens + [bless], native-vs-wasm, web-e2e, tsc) on a batch, at most a couple of
-  times a day; only a green full gate moves `main`, the main testbed link and the public demo.
+  scenarios, goldens + [bless], native-vs-wasm, web-e2e, tsc, and `just pace-loop9`: the
+  release-only 8-seed Loop 9 traffic finishers + mean-time check, ~20 min) on a batch, at most
+  a couple of times a day; only a green full gate moves `main`, the main testbed link and the public demo.
 - Scheduled rounds: do the preview track every time something is ready; run the main track when
   the round branch has been quiet (no new merges) for ~1 h or once a day.
 - Lesson (2026-10-20): a branch whose session had pushed only docs at merge time "merged" as a

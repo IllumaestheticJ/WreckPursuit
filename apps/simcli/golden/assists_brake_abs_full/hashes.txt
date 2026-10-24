@@ -1,0 +1,6 @@
+# simcli hashes scenario=assists_brake_abs_full systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 fa06b727ffbe6ce7
+480 6d8137b3d615db21
+720 5e5dcdf7e3fd380d
+960 7bcddfb2e7699984
+1200 d3cdd42124a732c7

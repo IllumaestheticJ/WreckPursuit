@@ -86,6 +86,10 @@ pub struct Setup {
     /// Live police: the AI reads `Sim::police()` through `SimPolice`, and police units are
     /// physical cars of this model (e.g. `sentinel_cruiser`).
     pub sim_police: Option<String>,
+    /// Racers may give up on the police (abandon the race and run, pull over):
+    /// `RaceConfig::allow_abandon`. Off in the game (owner, 2026-10-21); the flee tests turn
+    /// it on to exercise that machinery.
+    pub allow_abandon: bool,
     /// Starting heat per racer (police system rebuilt with it before the first tick).
     pub heat: Vec<(EntityId, f32)>,
     /// Keep running to `max_s` after every racer has left the race (chases).
@@ -114,6 +118,7 @@ impl Default for Setup {
             heat: Vec::new(),
             run_full: false,
             draft: false,
+            allow_abandon: false,
         }
     }
 }
@@ -140,6 +145,8 @@ pub struct Outcome {
     pub police_events: Vec<wp_police::PoliceEvent>,
     /// `SimEvent::TrafficViolation`s of the run (any vehicle).
     pub violations: u32,
+    /// `SimEvent::TrafficViolation`s per offending vehicle.
+    pub violations_by: std::collections::BTreeMap<EntityId, u32>,
     /// Longest continuous time each racer (grid order) stood still (< 0.5 m/s) with nothing
     /// holding it (no car, civilian or red light ahead; not parked / yielding), s.
     pub max_stuck_s: Vec<f32>,
@@ -221,6 +228,7 @@ pub fn run(
         },
         signals: !setup.closed_roads && std::env::var("WP_NO_SIGNALS").is_err(),
         draft: setup.draft && cfg!(feature = "sim-draft-hook"),
+        allow_abandon: setup.allow_abandon,
         ..RaceConfig::default()
     };
     // Entities are assigned 1.. in spawn order, before any other vehicle.
@@ -238,7 +246,7 @@ pub fn run(
     let max_len = caps.iter().fold(0.0f32, |m, c| m.max(c.length_m));
     let max_w = caps.iter().fold(0.0f32, |m, c| m.max(c.width_m));
     let slots = field.grid_slots(specs.len(), max_len, max_w, setup.grid);
-    let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+    let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed: setup.seed,
         mode,
@@ -289,6 +297,7 @@ pub fn run(
     let mut field_wall_s = 0.0f64;
     let mut heat = EventHeat::new();
     let mut violations = 0u32;
+    let mut violations_by: std::collections::BTreeMap<EntityId, u32> = Default::default();
     let mut police_events: Vec<wp_police::PoliceEvent> = Vec::new();
     let mut events: Vec<SimEvent> = Vec::new();
     let mut stuck_s = vec![0.0f32; entities.len()];
@@ -353,8 +362,9 @@ pub fn run(
             _ => None,
         }));
         for e in &events {
-            if matches!(e, SimEvent::TrafficViolation { .. }) {
+            if let SimEvent::TrafficViolation { vehicle, .. } = e {
                 violations += 1;
+                *violations_by.entry(*vehicle).or_default() += 1;
             }
         }
         for ev in &events {
@@ -453,6 +463,7 @@ pub fn run(
         field_wall_s,
         police_events,
         violations,
+        violations_by,
         max_stuck_s,
         max_wait_s,
         tow_s,

@@ -16,8 +16,11 @@
 //! `cargo test --release -p wp_race --test opponent_pace -- --ignored --nocapture`
 //! Knobs: `WP_PACE_RACES=loop9_circuit,hollins_sprint`, `WP_PACE_SKILLS=0.25,0.95`,
 //! `WP_PACE_POLICE=1` (keep the scenario's police; default off), `WP_PACE_DENSITY=0.0`,
+//! `WP_PACE_TOD=23.0` (time of day, h),
 //! `WP_PACE_SOLO=1` (one car only: the pole car), `WP_PACE_GEOM=1` (geometry-only limits,
-//! the pre-row-99 behaviour), `WP_PACE_TRACE=<grid idx>` (2 Hz trace of that car).
+//! the pre-row-99 behaviour), `WP_PACE_TRACE=<grid idx>` (2 Hz trace of that car),
+//! `WP_PACE_TYRE` / `WP_PACE_GRIP` / `WP_PACE_RIDE='{…}'` (wp_vehicle lab overrides: fields over
+//! the shipped car / tyre tune, grip balance, ride, for physics A/B on every car).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -77,6 +80,8 @@ pub struct PaceOpts {
     pub trace: Option<usize>,
     /// Scenario seed override.
     pub seed: Option<u64>,
+    /// Time of day override, h (`WP_PACE_TOD`).
+    pub tod: Option<f32>,
 }
 
 impl PaceOpts {
@@ -89,6 +94,7 @@ impl PaceOpts {
             geometry: var("WP_PACE_GEOM").is_some(),
             trace: var("WP_PACE_TRACE").and_then(|v| v.parse().ok()),
             seed: var("WP_PACE_SEED").and_then(|v| v.parse().ok()),
+            tod: var("WP_PACE_TOD").and_then(|v| v.parse().ok()),
         }
     }
 }
@@ -118,10 +124,32 @@ pub struct CarPace {
     pub rejoins: u32,
     /// Reverse manoeuvres.
     pub reverses: u32,
+    /// Resets back onto the course after being stranded off it.
+    pub resets: u32,
     /// Static-geometry contacts (walls, kerbs, props), ≥ 400 N·s.
     pub wall_hits: u32,
     /// Mean |n − n_cmd| at speed, m.
     pub track_err_m: f32,
+    /// Share of racing time out on the opposing lanes (0..1).
+    pub opposing_frac: f32,
+    /// Spread of the lateral position while racing (standard deviation of n), m.
+    pub lateral_sd_m: f32,
+    /// Overtakes completed per km of route.
+    pub passes_per_km: f32,
+    /// Nose-to-nose stand-offs (standing facing a standing car in my path): how many, and the
+    /// time spent in them, s.
+    pub head_on: (u32, f32),
+    /// Of those, the ones out on the opposing lanes (a racer met on the wrong side of the road
+    /// by a car coming the other way or out of a side road).
+    pub head_on_opposing: u32,
+    /// The judge's contact counts: (civilians / traffic, all cars).
+    pub contacts: (u32, u32),
+    /// Completed passes made between two cars (lane-splitting).
+    pub splits: u32,
+    /// Mean civilians within 300 m of the car (sampled at 1 Hz): (my direction, opposing).
+    pub civ_near: (f32, f32),
+    /// Lane-splits given up (tucked back in).
+    pub split_aborts: u32,
     /// Judge status.
     pub status: String,
 }
@@ -168,10 +196,13 @@ fn assists_override() -> Option<wp_contracts::AssistProfile> {
     let base = wp_contracts::AssistProfile::ai();
     match std::env::var("WP_PACE_ASSISTS").ok()?.as_str() {
         "esc_off" => Some(wp_contracts::AssistProfile { esc: false, ..base }),
-        "tcs_off" => Some(wp_contracts::AssistProfile { tcs: false, ..base }),
+        "tcs_off" => Some(wp_contracts::AssistProfile {
+            tcs: wp_contracts::TcsLevel::Off,
+            ..base
+        }),
         "both_off" => Some(wp_contracts::AssistProfile {
             esc: false,
-            tcs: false,
+            tcs: wp_contracts::TcsLevel::Off,
             ..base
         }),
         _ => None,
@@ -243,6 +274,9 @@ pub fn race_pace_in(
     if let Some(s) = opts.seed {
         sc.seed = s;
     }
+    if let Some(t) = opts.tod {
+        sc.time_of_day_h = t;
+    }
     // Picker scenarios list the player first, the AI field (pole first) after; the judge
     // enters the AI field first.
     let picker = id != "city_sprint";
@@ -255,6 +289,10 @@ pub fn race_pace_in(
     let data_src = FsData::new(repo().join("data"));
     let built = build_sim(&sc, &data_src, &RunOptions::default()).unwrap();
     let mut sim = built.sim;
+    // The AI drives every seat, the player's car included: no player steering aids anywhere.
+    for &id in &built.ids {
+        sim.set_player_steering(id, Some(false)).unwrap();
+    }
     let ids = built.ids;
     let (race, kind, closed, seed) = plan(id, sim.world());
     let data = RaceData::embedded();
@@ -272,7 +310,12 @@ pub fn race_pace_in(
                 redline_rpm: car.def.engine.redline_rpm,
             })
             .unwrap();
-        sim.set_vehicle_kind(ids[i], VehicleKind::AiRacer).unwrap();
+        // The player seat stays a `VehicleKind::Player` car (AI-driven) as in the browser, so
+        // traffic spawns round it (with every seat an AI racer it spreads over the whole city:
+        // Loop 9 at night had none near the field). Lead, 2026-10-22.
+        if !(picker && i == 0) {
+            sim.set_vehicle_kind(ids[i], VehicleKind::AiRacer).unwrap();
+        }
         if let Some(a) = assists_override() {
             sim.set_assists(ids[i], a).unwrap();
         }
@@ -301,9 +344,12 @@ pub fn race_pace_in(
         entrants.truncate(1);
     }
     let entrants_profiles: Vec<DriverProfile> = entrants.iter().map(|e| e.profile).collect();
-    let mut ai = AiEntrants::new(sim.world(), &race, kind, closed, &entrants, seed);
-    let green = judge.start(sim.tick()).unwrap();
+    let mut ai = AiEntrants::new(sim.world(), &race, kind, closed, &entrants, seed)
+        .expect("a drivable route");
     let racers: Vec<EntityId> = entrants.iter().map(|e| e.racer).collect();
+    // Every seat is AI-driven: stranded cars go back on the course, as in a picker race.
+    judge.set_stranded_reset(&racers);
+    let green = judge.start(sim.tick()).unwrap();
     let k_n = racers.len();
 
     // Ideal profiles (100 % usage on the measured limits) on each car's own line.
@@ -329,8 +375,16 @@ pub fn race_pace_in(
     let mut loss = vec![[0.0f32; BUCKETS.len()]; k_n];
     let mut rejoins = vec![0u32; k_n];
     let mut reverses = vec![0u32; k_n];
+    let mut resets = vec![0u32; k_n];
     let mut walls = vec![0u32; k_n];
     let mut track_err = vec![(0.0f32, 0u32); k_n];
+    // Racing ticks, ticks on the opposing lanes, Σn, Σn² (lateral line usage).
+    let mut lateral = vec![(0u32, 0u32, 0.0f64, 0.0f64); k_n];
+    // (stand-offs, seconds in them, in one now).
+    let mut head_on = vec![(0u32, 0.0f32, false); k_n];
+    let mut head_on_opp = vec![0u32; k_n];
+    // Civilians within 300 m of each racer once a second, (same direction, opposing, samples).
+    let mut civ_near = vec![(0u32, 0u32, 0u32); k_n];
     let mut last_tactic = vec![Tactic::Follow; k_n];
     // Last non-profile cause; the climb back to the profile afterwards is booked to it.
     let mut recovering: Vec<Option<usize>> = vec![None; k_n];
@@ -407,12 +461,44 @@ pub fn race_pace_in(
             .collect();
         judge.observe(sim.tick(), &samples, &events);
         ai.report_to(&mut judge, sim.tick());
+        // Stranded AI racers go back on the course at rest, as the browser session does (it
+        // also picks a clear lane spot there; the centreline point is enough here).
+        for r in judge.drain_resets() {
+            let yaw = wp_math::atan2(-r.dir[0], r.dir[1]);
+            sim.place_on_ground(r.racer, [r.pos[0], r.pos[1]], yaw, 0.0, Some(r.pos[2]))
+                .unwrap();
+            sim.set_ghost(r.racer, 240).unwrap();
+            judge.relocate(r.racer, r.pos, sim.tick());
+            ai.relocate(r.racer, r.pos);
+            if let Some(k) = racers.iter().position(|x| *x == r.racer) {
+                resets[k] += 1;
+                if opts.trace == Some(k) {
+                    eprintln!(
+                        "    RESET t={:.2} to ({:.1},{:.1})",
+                        (sim.tick().saturating_sub(green)) as f32 * PHYSICS_DT,
+                        r.pos[0],
+                        r.pos[1]
+                    );
+                }
+            }
+        }
         if tick < green {
             continue;
         }
         // `WP_PACE_DUMP=x,y,t`: every vehicle within 35 m of (x, y) at race time t (s).
         if let Ok(v) = std::env::var("WP_PACE_DUMP") {
-            let f: Vec<f32> = v.split(',').filter_map(|x| x.parse().ok()).collect();
+            let mut f: Vec<f32> = v.split(',').filter_map(|x| x.parse().ok()).collect();
+            if f.len() == 2 {
+                // `WP_PACE_DUMP=k,t`: round racer k.
+                let st = sim
+                    .vehicles()
+                    .iter()
+                    .find(|x| x.id == racers[f[0] as usize])
+                    .unwrap()
+                    .vehicle
+                    .state();
+                f = vec![st.pos[0], st.pos[1], f[1]];
+            }
             if f.len() == 3 && tick == green + (f[2] * 240.0) as u64 {
                 for a in sim.world().agents() {
                     let (dx, dy) = (a.pos[0] - f[0], a.pos[1] - f[1]);
@@ -445,6 +531,10 @@ pub fn race_pace_in(
                 .find(|r| r.racer == racers[k])
                 .is_some_and(|r| r.status == wp_race::RacerStatus::Running);
             if !running {
+                if opts.trace == Some(k) && tick.is_multiple_of(trace_every()) {
+                    let d = field.debug_of(k);
+                    eprintln!("  DONE t={:6.1} s={:7.1} tgt={:5.1} lim={:?} tac={:?} n={:5.2} ncmd={:5.2}", (tick - green) as f32 * PHYSICS_DT, d.s, d.v_target, d.limit, field.tactic_of(k), d.n, d.n_cmd);
+                }
                 continue;
             }
             let d = field.debug_of(k);
@@ -518,6 +608,42 @@ pub fn race_pace_in(
                 track_err[k].0 += (d.n - d.n_cmd).abs();
                 track_err[k].1 += 1;
             }
+            {
+                let h = &mut head_on[k];
+                if d.head_on {
+                    if !h.2 && d.opposing {
+                        head_on_opp[k] += 1;
+                    }
+                    h.0 += u32::from(!h.2);
+                    h.1 += PHYSICS_DT;
+                }
+                h.2 = d.head_on;
+            }
+            if tick.is_multiple_of(240) {
+                if let Some(me) = sim.vehicles().iter().find(|x| x.id == racers[k]) {
+                    let st = me.vehicle.state();
+                    let fw = wp_world::drive::forward_of(st.rot);
+                    let c = &mut civ_near[k];
+                    c.2 += 1;
+                    for a in sim.world().agents() {
+                        let (dx, dy) = (a.pos[0] - st.pos[0], a.pos[1] - st.pos[1]);
+                        if dx * dx + dy * dy > 300.0 * 300.0 || (a.pos[2] - st.pos[2]).abs() > 5.0 {
+                            continue;
+                        }
+                        let dir = wp_world::geom::dir_of_yaw(a.yaw);
+                        let along = dir[0] * fw[0] + dir[1] * fw[1];
+                        c.0 += u32::from(along > 0.5);
+                        c.1 += u32::from(along < -0.5);
+                    }
+                }
+            }
+            if v > 2.0 {
+                let l = &mut lateral[k];
+                l.0 += 1;
+                l.1 += u32::from(d.opposing);
+                l.2 += f64::from(d.n);
+                l.3 += f64::from(d.n) * f64::from(d.n);
+            }
             if opts.trace == Some(k) && tick.is_multiple_of(trace_every()) {
                 if let SpeedLimit::Obstacle(w) = d.limit {
                     if w >= 1_000_000 {
@@ -538,7 +664,7 @@ pub fn race_pace_in(
                     }
                 }
                 eprintln!(
-                    "  t={:6.1} s={:7.1} v={:5.1} tgt={:5.1} own={:5.1} ideal={:5.1} lim={:?} tac={:?} n={:5.2} ncmd={:5.2} pass={:?}",
+                    "  t={:6.1} s={:7.1} v={:5.1} tgt={:5.1} own={:5.1} ideal={:5.1} lim={:?} tac={:?} n={:5.2} ncmd={:5.2} opp={} ho={} pass={:?}",
                     (tick - green) as f32 * PHYSICS_DT,
                     d.s,
                     v,
@@ -549,6 +675,8 @@ pub fn race_pace_in(
                     tac,
                     d.n,
                     d.n_cmd,
+                    u8::from(d.opposing),
+                    u8::from(d.head_on),
                     d.pass_checks
                 );
             }
@@ -611,8 +739,29 @@ pub fn race_pace_in(
                 loss: loss[k],
                 rejoins: rejoins[k],
                 reverses: reverses[k],
+                resets: resets[k],
                 wall_hits: walls[k],
                 track_err_m: track_err[k].0 / track_err[k].1.max(1) as f32,
+                opposing_frac: lateral[k].1 as f32 / lateral[k].0.max(1) as f32,
+                lateral_sd_m: {
+                    let (n, _, sum, sq) = lateral[k];
+                    let n = f64::from(n.max(1));
+                    ((sq / n - (sum / n) * (sum / n)).max(0.0)).sqrt() as f32
+                },
+                // Completed overtakes of anything on the road (racers and civilians alike:
+                // weaving through traffic counts), per km raced.
+                passes_per_km: ai.field().passes_by(k) as f32
+                    / (race.route.length_m * laps as f32 / 1000.0).max(0.1),
+                head_on: (head_on[k].0, head_on[k].1),
+                head_on_opposing: head_on_opp[k],
+                contacts: (r.civilian_hits, r.contacts),
+                splits: ai.field().splits_by(k) as u32,
+                civ_near: {
+                    let c = civ_near[k];
+                    let n = c.2.max(1) as f32;
+                    (c.0 as f32 / n, c.1 as f32 / n)
+                },
+                split_aborts: ai.field().split_aborts_by(k) as u32,
                 status: format!("{:?}", r.status),
             }
         })
@@ -626,9 +775,34 @@ fn list<T: std::str::FromStr + Clone>(var: &str, default: &[T]) -> Vec<T> {
         .unwrap_or_else(|| default.to_vec())
 }
 
+/// `{…}` merged over `base`'s JSON fields.
+fn merged<T: serde::Serialize + serde::de::DeserializeOwned>(base: &T, json: &str) -> T {
+    let mut v = serde_json::to_value(base).unwrap();
+    let patch: serde_json::Value = serde_json::from_str(json).expect("override json");
+    for (k, x) in patch.as_object().expect("override object") {
+        v[k] = x.clone();
+    }
+    serde_json::from_value(v).expect("override fields")
+}
+
+/// `WP_PACE_TYRE` / `WP_PACE_GRIP` / `WP_PACE_RIDE`: wp_vehicle lab overrides (process-wide).
+fn lab_overrides_from_env() {
+    use wp_vehicle::{car_lab, grip_lab, ride_lab};
+    if let Ok(j) = std::env::var("WP_PACE_TYRE") {
+        car_lab::set_override(Some(merged(&car_lab::CarTune::shipped(), &j)));
+    }
+    if let Ok(j) = std::env::var("WP_PACE_GRIP") {
+        grip_lab::set_override(Some(merged(&grip_lab::GripBalance::shipped(), &j)));
+    }
+    if let Ok(j) = std::env::var("WP_PACE_RIDE") {
+        ride_lab::set_override(Some(merged(&ride_lab::RideTune::owner(), &j)));
+    }
+}
+
 #[test]
 #[ignore = "measurement sweep (minutes in release); see the module docs"]
 fn pace_sweep() {
+    lab_overrides_from_env();
     let opts = PaceOpts::from_env();
     let races: Vec<String> = list(
         "WP_PACE_RACES",
@@ -654,7 +828,7 @@ fn pace_sweep() {
                     .map(|(b, l)| format!("{b} {l:.1}"))
                     .collect();
                 eprintln!(
-                    "  {:<14} time {:>7} ideal {:6.1} own {:6.1} ratio {:>5} | rej {} rev {} wall {} trk {:.2} | {} | {}",
+                    "  {:<14} time {:>7} ideal {:6.1} own {:6.1} ratio {:>5} | rej {} rev {} rst {} wall {} trk {:.2} | opp {:.0}% latsd {:.2} pass/km {:.1} nose {} {:.1}s opp-nose {} civhit {} hit {} split {} splitab {} civnear {:.2} {:.2} | {} | {}",
                     c.car,
                     c.time_s.map_or("-".into(), |t| format!("{t:.1}")),
                     c.ideal_s,
@@ -662,8 +836,21 @@ fn pace_sweep() {
                     ratio.map_or("-".into(), |r| format!("{r:.3}")),
                     c.rejoins,
                     c.reverses,
+                    c.resets,
                     c.wall_hits,
                     c.track_err_m,
+                    100.0 * c.opposing_frac,
+                    c.lateral_sd_m,
+                    c.passes_per_km,
+                    c.head_on.0,
+                    c.head_on.1,
+                    c.head_on_opposing,
+                    c.contacts.0,
+                    c.contacts.1,
+                    c.splits,
+                    c.split_aborts,
+                    c.civ_near.0,
+                    c.civ_near.1,
                     c.status,
                     lost.join(", ")
                 );
@@ -749,8 +936,12 @@ fn pace_scenarios_hold_their_ranges() {
         density: None,
         solo: false,
         geometry: false,
-        trace: None,
+        // `WP_PACE_TRACE=<grid idx>` traces one car here too (with `WP_PACE_ONLY`).
+        trace: std::env::var("WP_PACE_TRACE")
+            .ok()
+            .and_then(|v| v.parse().ok()),
         seed: None,
+        tod: None,
     };
     let mut caps = BTreeMap::new();
     let mut fails = Vec::new();
@@ -773,6 +964,13 @@ fn pace_scenarios_hold_their_ranges() {
                 c.rejoins
             );
         }
+        // A scenario whose `finishers` range allows a car short of the flag (or that has no
+        // `finishers` metric: Loop 9, checked over 8 seeds by `loop9_traffic_field_finishes`)
+        // checks the times of the cars that finish only.
+        let dnf_ok = !expects.iter().any(|x| {
+            matches!(x, simcli::scenario::Expect::Metric { name, min, .. }
+                if name == "finishers" && *min >= cars.len() as f32)
+        });
         for x in &expects {
             let simcli::scenario::Expect::Metric {
                 name,
@@ -783,6 +981,10 @@ fn pace_scenarios_hold_their_ranges() {
             else {
                 continue;
             };
+            let unfinished = |e: &str| cars.iter().any(|c| c.entity == e && c.time_s.is_none());
+            if name == "race_time_s" && dnf_ok && entity.as_deref().is_some_and(unfinished) {
+                continue;
+            }
             match pace_metric(&cars, name, entity.as_deref()) {
                 Some(v) if v >= *min && v <= *max => {}
                 Some(v) => fails.push(format!(
@@ -791,6 +993,64 @@ fn pace_scenarios_hold_their_ranges() {
                 )),
                 None => fails.push(format!("{}: unknown pace metric {name:?}", sc.name)),
             }
+        }
+    }
+    assert!(fails.is_empty(), "{fails:#?}");
+}
+
+/// Loop 9 field mean finishing time over seeds 1-8, s, per skill (0.50, 0.95): measured
+/// 2026-10-22 on lead/opponent-pace (round12 6e0639e1 + 55058973). The check allows
+/// −15 % .. +15 % (+20 % at skill 0.50), the pace RON rule applied to the 8-seed mean.
+const LOOP9_MEAN_TIME_S: [(f32, f32); 2] = [(0.5, 242.0), (0.95, 220.0)];
+
+/// Loop 9 at 23:00 with traffic density 2.0, over seeds 1-8 per skill: at least 44 of 48 cars
+/// finish, and the mean time of the cars that finish is within the pace rule's range of
+/// [`LOOP9_MEAN_TIME_S`]. A single seed's finishers swing by ±3 cars and its times by 30-80 s
+/// on millimetre grid differences (the pack packs up behind racers held by traffic; the
+/// rest-stop bisect in opponent-pace.md), so this is Loop 9's finishers and pace gate and the
+/// single-seed pace RONs only catch gross breakage. Release only, ~20 min: `just pace-loop9`
+/// (lead main-track gate, docs/LEAD_AUTOMATION.md).
+#[test]
+#[ignore = "release-only 8-seed Loop 9 traffic check: `just pace-loop9`"]
+fn loop9_traffic_field_finishes() {
+    let mut caps = BTreeMap::new();
+    let mut fails = Vec::new();
+    for skill in [0.5f32, 0.95] {
+        let mut times = Vec::new();
+        let mut all = 0;
+        for seed in 1..=8u64 {
+            let opts = PaceOpts {
+                police: false,
+                density: None,
+                solo: false,
+                geometry: false,
+                trace: None,
+                seed: Some(seed),
+                tod: None,
+            };
+            let cars = race_pace("loop9_circuit", skill, &opts, &mut caps);
+            all += cars.len();
+            times.extend(cars.iter().filter_map(|c| c.time_s));
+        }
+        let fin = times.len();
+        let mean = times.iter().sum::<f32>() / fin.max(1) as f32;
+        eprintln!("loop9 skill {skill}: {fin}/{all} finished over seeds 1-8, mean {mean:.1} s");
+        if fin * 48 < 44 * all {
+            fails.push(format!(
+                "skill {skill}: {fin}/{all} finished, want >= 44/48"
+            ));
+        }
+        let today = LOOP9_MEAN_TIME_S
+            .iter()
+            .find(|(k, _)| *k == skill)
+            .map(|(_, t)| *t)
+            .expect("a locked mean time per skill");
+        let up = if skill < 0.75 { 1.20 } else { 1.15 };
+        let (lo, hi) = (today * 0.85, today * up);
+        if !(lo..=hi).contains(&mean) {
+            fails.push(format!(
+                "skill {skill}: mean time {mean:.1} s outside {lo:.1}..{hi:.1} s"
+            ));
         }
     }
     assert!(fails.is_empty(), "{fails:#?}");

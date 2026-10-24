@@ -16,23 +16,26 @@ day = 40.0
 dusk = 36.0
 night = 32.0
 
-# Ground unit line-of-sight range (headlights at night).
+# Ground unit line-of-sight range: the same as heat.witness_range_m (row 89, symmetric sight;
+# was 140-260 m). Fog and rain cap it further via the weather sight range.
 [los_range_m]
-dawn = 200.0
-day = 260.0
-dusk = 200.0
-night = 140.0
+dawn = 320.0
+day = 380.0
+dusk = 320.0
+night = 260.0
 
 [unit]
 accel_mps2 = 4.0
 brake_mps2 = 6.5
 grip_g = 0.95
 crash_offset_m = 7.0
-# Health lost per (impact speed m/s)^2 / 1000. Simulation: a 25 m/s impact is a total loss.
-crash_health_per_kmps2 = { arcade = 0.8, simulation = 1.7 }
-contact_health_per_kmps2 = { arcade = 1.0, simulation = 2.5 }
-# At or below this health the unit is a total loss (Simulation: one hard hit ends it).
-total_loss_health = { arcade = 0.0, simulation = 0.25 }
+# Health lost per (impact speed m/s)^2 / 1000. Extreme: a 25 m/s impact is a total loss.
+# Police take full damage in every mode, so Arcade = Simulation (the pre-v0.4.0 Arcade numbers)
+# and Extreme has the pre-v0.4.0 Simulation numbers.
+crash_health_per_kmps2 = { arcade = 0.8, simulation = 0.8, extreme = 1.7 }
+contact_health_per_kmps2 = { arcade = 1.0, simulation = 1.0, extreme = 2.5 }
+# At or below this health the unit is a total loss (Extreme: one hard hit ends it).
+total_loss_health = { arcade = 0.0, simulation = 0.0, extreme = 0.25 }
 
 [risk]
 budget = 10.0
@@ -62,8 +65,8 @@ rolling_block_speed_factor = 0.85
 intercept_horizon_s = { min = 10.0, max = 20.0 }
 intercept_min_gap_m = 150.0
 # Arcade health levels off around 0.2-0.3 under repeated hits and rarely gets below 0.1-0.23,
-# so Arcade units stay in the chase until properly wrecked (lead round 8, H's note).
-disengage_health = { arcade = 0.15, simulation = 0.4 }
+# so Arcade/Simulation units stay in the chase until properly wrecked (lead round 8, H's note).
+disengage_health = { arcade = 0.15, simulation = 0.15, extreme = 0.4 }
 bent_wheel_toe_rad = 0.02
 puncture_pull_over = 0.5
 
@@ -140,8 +143,8 @@ yield_max_siren_s = 3.0
 gridlock_s = 2.0
 # Pursuing / intercepting units drive at the limit: through junctions fast, reds barely
 # slowed, a short look for cross traffic, and quick passes.
-chase_junction_mps = 18.0
-chase_red_mps = 13.0
+chase_junction_mps = 24.0
+chase_red_mps = 17.0
 chase_turn_mps = 9.0
 chase_yield_max_s = 0.6
 chase_decel_mps2 = 7.5
@@ -200,7 +203,7 @@ confidence_drop = 0.05
 confidence_min = 0.8
 confidence_regain_per_s = 0.02
 run_wide_m = 1.2
-turn_around_mps = 4.0
+turn_around_mps = 5.5
 stuck_s = 1.5
 reverse_s = 2.5
 reverse_min_s = 1.5

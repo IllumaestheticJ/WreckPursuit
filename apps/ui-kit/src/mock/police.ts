@@ -15,8 +15,9 @@ export const UNIT_SPEED: Record<UnitKind, number> = { Car: 28, Helicopter: 55 };
 
 /** `presence.toml` `[unlocks]` and `tools.toml` numbers the toy enforces. */
 export const TOOL_RULES = {
-  spikesLevel: 2,
+  spikesLevel: 4,
   roadblockLevel: 3,
+  heloLevel: 5,
   roadblockMaxActive: 1,
   spikesMaxActive: 2,
   roadblockCooldownS: { Dawn: 60, Day: 40, Dusk: 60, Night: 90 } as Record<DayPhase, number>,
@@ -224,6 +225,7 @@ export function toyCaptainCommand(s: ToyCaptain, cmd: CaptainCommand, ctx: Comma
     const { target } = cmd.RequestHelicopter;
     if (!racer(target)) return "UnknownTarget";
     if (!pursued(target)) return "NotPursued";
+    if (level(target) < TOOL_RULES.heloLevel) return { Locked: { need_level: TOOL_RULES.heloLevel } };
     if (s.readiness.helo_s > 0) return { Cooldown: { remaining_s: s.readiness.helo_s } };
     if (s.units.some((u) => u.kind === "Helicopter" && u.assignment !== "out-of-service")) return "Budget";
     const id = Math.max(0, ...s.units.map((u) => u.id)) + 1;

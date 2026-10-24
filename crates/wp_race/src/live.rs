@@ -34,7 +34,8 @@ use crate::bridge::CityRace;
 use crate::catalog::{venue_pos, RaceDef};
 use crate::data::RaceData;
 use crate::entrants::{AiEntrant, AiEntrants};
-use crate::judge::{RaceJudge, RacePhase, RacerEntry, RacerSample};
+use crate::error::RaceSetupError;
+use crate::judge::{CourseReset, RaceJudge, RacePhase, RacerEntry, RacerSample};
 use crate::kind::{ClassBracket, EventId, VenueId};
 use crate::result::{DnfReason, RacerResult, RacerStatus};
 use crate::schedule::{MeetHeat, MeetHeatRules, Venue};
@@ -74,6 +75,10 @@ pub struct StepOut {
     /// Busted AI cars to tow away now: the caller removes them (`Sim::despawn_vehicle`).
     /// Each is reported once; the race no longer drives them.
     pub impound: Vec<EntityId>,
+    /// Racers that stayed off the course too long: move each car to the reset pose (on the
+    /// route, at rest) and call [`LiveRace::relocate`]. In picker races only AI entrants
+    /// stranded off the course ([`crate::judge::STRANDED_GRACE_S`]).
+    pub resets: Vec<CourseReset>,
 }
 
 /// One racer's live standing (HUD).
@@ -110,6 +115,8 @@ pub struct LiveRace {
     ai: AiEntrants,
     player: EntityId,
     autopilot: bool,
+    /// The player's throttle on the grid (see [`LiveRace::set_grid_throttle`]).
+    grid_throttle: f32,
     /// Judge entry order: the AI field (pole first), then the player.
     order: Vec<EntityId>,
     meet: MeetHeat,
@@ -152,6 +159,8 @@ impl LiveRace {
     /// Set up the race and start its countdown at `tick`. `ai` are the AI cars in
     /// `def.ai` order (pole first), `player` starts behind them. `abs_s`: in-game time of
     /// the start, s (meet heat). `autopilot`: the AI drives the player's car too.
+    /// [`RaceSetupError::NoDrivableRoute`] when the route has nothing to drive: the race is
+    /// refused (never a panic, which froze the browser — row 154).
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         def: &RaceDef,
@@ -162,13 +171,18 @@ impl LiveRace {
         tick: u64,
         abs_s: u64,
         autopilot: bool,
-    ) -> LiveRace {
+    ) -> Result<LiveRace, RaceSetupError> {
         let data = RaceData::embedded();
         let mut judge = RaceJudge::new(
             EventId(def.seed as u32),
             data.rules.for_kind(def.kind),
             race.course.clone(),
         );
+        // Off route is never a DQ and never a reset in a picker race (owner, 2026-10-21): take
+        // any line, the gates still have to be driven through in order. The judge's reset
+        // option stays off. The AI entrants alone are put back on the course once stranded
+        // outside the corridor for `STRANDED_GRACE_S` (a bank they cannot climb; lead,
+        // 2026-10-23): those are the only `StepOut::resets` here.
         let mut order = Vec::new();
         for e in ai.iter().chain(std::iter::once(&player)) {
             judge
@@ -196,7 +210,10 @@ impl LiveRace {
             });
         }
         let closed = def.legality == Legality::Sanctioned;
-        let field = AiEntrants::new(world, &race, def.kind, closed, &drivers, def.seed);
+        let field = AiEntrants::new(world, &race, def.kind, closed, &drivers, def.seed)?;
+        // AI entrants only: the player's car keeps "never a reset", autopilot or not.
+        let ai_ids: Vec<EntityId> = ai.iter().map(|e| e.entity).collect();
+        judge.set_stranded_reset(&ai_ids);
         judge.start(tick).expect("enough racers");
 
         let venue = Venue {
@@ -222,13 +239,14 @@ impl LiveRace {
             .iter()
             .map(|e| (*e, if closed_loop { 1 } else { 0 }))
             .collect();
-        LiveRace {
+        Ok(LiveRace {
             def: def.clone(),
             race,
             judge,
             ai: field,
             player: player.entity,
             autopilot,
+            grid_throttle: 0.0,
             order,
             meet,
             meet_rules,
@@ -241,7 +259,7 @@ impl LiveRace {
             last_tick: tick,
             tow_due: BTreeMap::new(),
             impounded: Vec::new(),
-        }
+        })
     }
 
     /// The race definition.
@@ -290,7 +308,9 @@ impl LiveRace {
     }
 
     /// Inputs for this tick, before `Sim::step_fixed`: every AI car (held on the handbrake
-    /// until green) and the player's grid hold during the countdown. `vehicles`: every sim
+    /// until green) and the player's grid hold during the countdown: handbrake on, clutch
+    /// pedal down and the player's own throttle (see [`LiveRace::set_grid_throttle`]), so the
+    /// engine revs freely on the line without moving the car. `vehicles`: every sim
     /// vehicle; `events`: the previous tick's events; `police`: e.g. `SimPolice(sim.police())`.
     pub fn pre_step(
         &mut self,
@@ -309,6 +329,8 @@ impl LiveRace {
                 self.player,
                 VehicleInput {
                     handbrake: 1.0,
+                    clutch: 1.0,
+                    throttle: self.grid_throttle,
                     ..VehicleInput::default()
                 },
             ));
@@ -316,9 +338,16 @@ impl LiveRace {
         out
     }
 
+    /// The player's throttle while held on the grid (0..=1): revs the engine during the
+    /// countdown through the grid hold's declutched driveline. Ignored once green.
+    pub fn set_grid_throttle(&mut self, throttle: f32) {
+        self.grid_throttle = throttle.clamp(0.0, 1.0);
+    }
+
     /// The server moved a racer on purpose (reset, respawn): not judged as a teleport.
     pub fn relocate(&mut self, racer: EntityId, pos: [f32; 3], tick: u64) {
         self.judge.relocate(racer, pos, tick);
+        self.ai.relocate(racer, pos);
     }
 
     /// The race has not gone green yet at `tick` (cars must stay on the grid).
@@ -346,7 +375,8 @@ impl LiveRace {
     }
 
     /// Feed one stepped tick: `samples` for the racers, the tick's sim `events`, and the
-    /// police vehicles currently in the sim (contacts with them are not civilian hits).
+    /// police vehicles currently in the sim (contacts with them are not civilian hits; the
+    /// judge remembers every police id it has seen, see [`RaceJudge::add_police`]).
     pub fn post_step(
         &mut self,
         tick: u64,
@@ -355,7 +385,7 @@ impl LiveRace {
         police: &[EntityId],
     ) -> StepOut {
         self.last_tick = tick;
-        self.judge.set_police(police);
+        self.judge.add_police(police);
         for e in events {
             if let SimEvent::Police(PoliceEvent::PursuitEnded { racer, outcome, .. }) = e {
                 if outcome.is_capture() {
@@ -370,7 +400,10 @@ impl LiveRace {
         self.judge.observe(tick, samples, events);
         self.ai.report_to(&mut self.judge, tick);
 
-        let mut out = StepOut::default();
+        let mut out = StepOut {
+            resets: self.judge.drain_resets(),
+            ..StepOut::default()
+        };
         let tow_ticks = (IMPOUND_AFTER_S / PHYSICS_DT) as u64;
         let towed: Vec<EntityId> = self
             .tow_due
@@ -383,6 +416,8 @@ impl LiveRace {
             self.impounded.push(e);
             out.impound.push(e);
         }
+        // A towed car is gone from the sim: nothing to put back on the course.
+        out.resets.retain(|r| !self.impounded.contains(&r.racer));
         for sig in self.judge.drain_signals() {
             match &sig {
                 RaceSignal::Green { .. } => self.on_green(samples, &mut out),
@@ -521,12 +556,20 @@ mod tests {
         };
         def.prior_meets = 2;
         let ai: Vec<LiveEntrant> = (2..=def.entrants() as u32).map(entrant).collect();
-        let mut live = LiveRace::new(&def, &world, race, &ai, entrant(1), 0, 23 * 3600, false);
+        let mut live = LiveRace::new(&def, &world, race, &ai, entrant(1), 0, 23 * 3600, false)
+            .expect("a drivable route");
         // The player is held through the countdown.
         let held = live.pre_step(0, &world, &[], &[], &wp_opponent::NoPolice);
-        assert!(held
+        assert!(held.iter().any(|(e, i)| *e == EntityId(1)
+            && i.handbrake == 1.0
+            && i.clutch == 1.0
+            && i.throttle == 0.0));
+        // ...and may rev on the line: the throttle passes through the hold.
+        live.set_grid_throttle(0.8);
+        let revving = live.pre_step(1, &world, &[], &[], &wp_opponent::NoPolice);
+        assert!(revving
             .iter()
-            .any(|(e, i)| *e == EntityId(1) && i.handbrake == 1.0));
+            .any(|(e, i)| *e == EntityId(1) && i.handbrake == 1.0 && i.throttle == 0.8));
         assert!(live.countdown_s(0) > 2.0);
         let samples: Vec<RacerSample> = slots
             .iter()
@@ -563,5 +606,27 @@ mod tests {
         let st = live.standings();
         let two = st.iter().find(|s| s.racer == EntityId(2)).unwrap();
         assert_eq!(two.status, RacerStatus::Dnf(DnfReason::Captured));
+
+        // A police unit seen on one tick and despawned (retired) by the tick its contact is
+        // reported: still police, so a contact, not a civilian hit.
+        let unit = EntityId(500);
+        live.post_step(green + 3, &samples, &[], &[unit]);
+        let bump = SimEvent::Contact {
+            a: EntityId(3),
+            b: unit,
+            point: [0.0; 3],
+            normal: [1.0, 0.0, 0.0],
+            impulse_ns: 5000.0,
+            rel_speed: 4.0,
+        };
+        live.post_step(green + 4, &samples, &[bump], &[]);
+        let three = live
+            .judge()
+            .results()
+            .into_iter()
+            .find(|r| r.racer == EntityId(3))
+            .unwrap();
+        assert_eq!(three.civilian_hits, 0);
+        assert_eq!(three.contacts, 1);
     }
 }

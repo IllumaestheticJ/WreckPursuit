@@ -1,0 +1,26 @@
+// Full-width rigid barrier, Extreme (the pre-v0.4.0 Simulation table). Calibration targets (prompt 03): 56 km/h => ~0.6 m
+// frame crush and TotalLoss; 25 km/h => bumper cover dented and cracked; failures progress
+// bumper -> radiator -> engine with speed.
+(
+    name: "frontal_extreme",
+    car: "debug_sedan",
+    mode: Extreme,
+    impact: Frontal,
+    other_mass_kg: 0.0,
+    duration_s: 0.5,
+    seed: 1,
+    monotone: ["crush_m", "plastic_energy_kj", "damage", "repair_total"],
+    runs: [
+        (speed_kmh: 15.0, expect: [(metric: "crush_m", min: 0.0, max: 0.1)],
+            intact: [Radiator, Engine, SteeringRack], total_loss: Some(false)),
+        (speed_kmh: 25.0, expect: [(metric: "crush_m", min: 0.05, max: 0.3), (metric: "severity:FrontBumper", min: 0.3, max: 1.0)],
+            intact: [Radiator, Engine], cracked: [FrontBumper], total_loss: Some(false)),
+        (speed_kmh: 40.0, expect: [(metric: "crush_m", min: 0.2, max: 0.5), (metric: "health", min: 0.4, max: 0.85)],
+            intact: [Engine], cracked: [FrontBumper], total_loss: Some(false)),
+        (speed_kmh: 56.0, expect: [(metric: "crush_m", min: 0.45, max: 0.75), (metric: "cabin_intrusion_m", min: 0.0, max: 0.25)],
+            failed: [Radiator], total_loss: Some(true)),
+        (speed_kmh: 80.0, expect: [(metric: "crush_m", min: 0.75, max: 1.6), (metric: "power_scale", min: 0.0, max: 0.0)],
+            failed: [Radiator, Engine], total_loss: Some(true),
+            order: [Cracked(FrontBumper), Failed(Radiator), Failed(Engine)]),
+    ],
+)

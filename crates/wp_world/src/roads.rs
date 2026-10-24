@@ -601,7 +601,7 @@ impl<'a> RoadNetworkIndex<'a> {
         let mut pois: Vec<wp_contracts::PoiInfo> = view
             .pois
             .iter()
-            .map(|p| {
+            .filter_map(|p| {
                 use crate::network::PoiKind as W;
                 use wp_contracts::PoiKind as C;
                 let (kind, radius_m) = match p.kind {
@@ -610,13 +610,15 @@ impl<'a> RoadNetworkIndex<'a> {
                     W::RaceStartGrid => (C::RaceStartGrid, 15.0),
                     W::PoliceStation => (C::PoliceStation, 15.0),
                     W::Helipad => (C::Helipad, 15.0),
+                    // World-only site (no contract kind).
+                    W::RestStop => return None,
                 };
-                wp_contracts::PoiInfo {
+                Some(wp_contracts::PoiInfo {
                     kind,
                     pos: p.pos,
                     heading_rad: p.heading_rad,
                     radius_m,
-                }
+                })
             })
             .collect();
         // Traffic cameras: every third signalised junction (the same rule `wp_police` uses).

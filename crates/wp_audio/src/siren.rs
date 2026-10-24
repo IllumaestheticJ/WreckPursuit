@@ -52,7 +52,8 @@ impl SirenPattern {
 /// Shape of one cadence cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SirenShape {
-    /// Rise (ease-out) then fall (ease-in) between `lo_hz` and `hi_hz`.
+    /// Smoothstep rise then smoothstep fall between `lo_hz` and `hi_hz` (glides at both
+    /// turnarounds).
     Sweep,
     /// `hi_hz` for the first half of the cycle, `lo_hz` for the second.
     TwoTone,
@@ -74,6 +75,27 @@ pub struct SirenCadence {
     pub shape: SirenShape,
 }
 
+/// `3u² - 2u³` on `0..=1`: zero slope at both ends (the sweep's turnarounds).
+fn smoothstep(u: f32) -> f32 {
+    u * u * (3.0 - 2.0 * u)
+}
+
+/// `u` in `0..=1` with `smoothstep(u) == x` (bisection: monotonic, no transcendental functions,
+/// bit-identical on every target).
+fn inverse_smoothstep(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    let (mut lo, mut hi) = (0.0f32, 1.0f32);
+    for _ in 0..24 {
+        let mid = 0.5 * (lo + hi);
+        if smoothstep(mid) < x {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
+
 impl SirenCadence {
     /// Instantaneous frequency at cycle phase `p` in `0..1`, Hz.
     pub fn freq_at_phase(&self, p: f32) -> f32 {
@@ -87,13 +109,15 @@ impl SirenCadence {
                 }
             }
             SirenShape::Sweep => {
+                // Smoothstep rise and fall: the pitch eases in and out at both ends, so the
+                // turnarounds are glides. The old ease-out-rise / ease-in-fall had a corner at
+                // the top (pitch fell at full speed straight from the peak) and lingered at the
+                // bottom, which at yelp rate sounded like "ha-ha-ha" rather than a siren.
                 let r = self.rise_frac.clamp(0.01, 0.99);
                 if p < r {
-                    let u = p / r;
-                    1.0 - (1.0 - u) * (1.0 - u)
+                    smoothstep(p / r)
                 } else {
-                    let u = (p - r) / (1.0 - r);
-                    (1.0 - u) * (1.0 - u)
+                    1.0 - smoothstep((p - r) / (1.0 - r))
                 }
             }
         };
@@ -106,8 +130,8 @@ impl SirenCadence {
         (ticks % cycle_ticks) as f32 / cycle_ticks as f32
     }
 
-    /// Synth parameters for the procedural siren voice (it runs the cadence itself, phase
-    /// locked to `VoiceParams::phase`).
+    /// Synth parameters for the procedural siren voice (it starts at `VoiceParams::phase` and
+    /// then runs the cadence on its own audio clock).
     pub fn synth_params(&self) -> std::collections::BTreeMap<String, f32> {
         let mut m = std::collections::BTreeMap::new();
         m.insert("lo_hz".into(), self.lo_hz);
@@ -155,12 +179,12 @@ impl SirenCadence {
             SirenShape::Sweep => {
                 let r = self.rise_frac.clamp(0.01, 0.99);
                 if rising {
-                    // x = 1 - (1 - u)^2  →  u = 1 - sqrt(1 - x)
-                    let u = 1.0 - (1.0 - x).max(0.0).sqrt();
+                    // x = smoothstep(u)
+                    let u = inverse_smoothstep(x);
                     (u * r).clamp(0.0, 0.999)
                 } else {
-                    // x = (1 - u)^2  →  u = 1 - sqrt(x)
-                    let u = 1.0 - x.sqrt();
+                    // x = 1 - smoothstep(u)
+                    let u = inverse_smoothstep(1.0 - x);
                     (r + u * (1.0 - r)).clamp(0.0, 0.999)
                 }
             }
@@ -370,6 +394,48 @@ mod tests {
         assert!((c.freq_at_phase(0.55) - 1500.0).abs() < 1e-3);
         assert!(c.freq_at_phase(0.3) > c.freq_at_phase(0.1), "rising");
         assert!(c.freq_at_phase(0.9) < c.freq_at_phase(0.7), "falling");
+    }
+
+    /// The sweep has no corners: the pitch slope is ~0 on both sides of the peak and the
+    /// trough, and no step between neighbouring ticks is a jump. Guards against the old
+    /// kinked shape (sudden drop from the peak, dwell at the bottom) that made the yelp
+    /// sound like laughing.
+    #[test]
+    fn sweep_turnarounds_are_smooth() {
+        for pattern in [SirenPattern::Wail, SirenPattern::Yelp, SirenPattern::Phaser] {
+            let c = cfg().cadence[&pattern];
+            let span = c.hi_hz - c.lo_hz;
+            let eps = 0.002;
+            let r = c.rise_frac;
+            // One-sided slopes at each turnaround, in units of the mean slope of the faster
+            // half. A corner (the old shape) shows up as ~2; a smooth glide as ~0.
+            let unit = span / r.min(1.0 - r);
+            for turn in [0.0, r] {
+                let before = c.freq_at_phase(turn - eps + 1.0);
+                let at = c.freq_at_phase(turn);
+                let after = c.freq_at_phase(turn + eps);
+                let (s_in, s_out) = ((at - before) / eps / unit, (after - at) / eps / unit);
+                assert!(
+                    s_in.abs() < 0.2 && s_out.abs() < 0.2,
+                    "{pattern:?}: corner at phase {turn}: slopes {s_in} / {s_out}"
+                );
+            }
+            // Largest per-tick change stays within the smoothstep peak slope (1.5x the mean
+            // of the faster half): no steps anywhere in the cycle.
+            let ticks = (c.cycle_s / PHYSICS_DT) as u64;
+            let mut max_step: f32 = 0.0;
+            for t in 0..ticks {
+                let a = c.freq_at_phase(t as f32 / ticks as f32);
+                let b = c.freq_at_phase((t + 1) as f32 / ticks as f32);
+                max_step = max_step.max((b - a).abs());
+            }
+            let fastest_half = r.min(1.0 - r) * ticks as f32;
+            let bound = 1.6 * span / fastest_half;
+            assert!(
+                max_step < bound,
+                "{pattern:?}: step {max_step} Hz/tick vs bound {bound}"
+            );
+        }
     }
 
     #[test]

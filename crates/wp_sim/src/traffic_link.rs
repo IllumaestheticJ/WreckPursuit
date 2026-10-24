@@ -39,6 +39,31 @@ impl Sim {
         &self.traffic_cars
     }
 
+    /// Let `wp_world` promote only as many traffic cars to physics as this sim can give a body
+    /// (playtest row 149). [`Sim::embody_agent`] refuses a body once the vehicles plus
+    /// [`TRAFFIC_SLOT_RESERVE`] reach [`MAX_VEHICLES`]; an agent promoted past that limit was
+    /// physical in the world (drawn, driving) but had no collider, so the player drove through
+    /// it — with 16 street racers in a busy city, 6 of the 16 promoted cars. Capping the world's
+    /// `max_physical` at the slots left keeps promotion to the cars nearest the player (the
+    /// world promotes nearest first), and every physical agent has a body. Unchanged while
+    /// slots are plentiful. A car clearly nearer the player takes the farthest one's slot
+    /// (`wp_world`'s LOD swap), so the car the player drives into is one with a body.
+    pub(crate) fn cap_traffic_promotion(&mut self) {
+        if self.traffic_cars.is_empty() {
+            return;
+        }
+        let traffic = self
+            .vehicles
+            .iter()
+            .filter(|v| v.traffic_agent.is_some())
+            .count();
+        let others = self.vehicles.len() - traffic;
+        let room = MAX_VEHICLES.saturating_sub(TRAFFIC_SLOT_RESERVE + others);
+        let cfg = self.world.traffic_config_mut();
+        let base = *self.traffic_physical_base.get_or_insert(cfg.max_physical);
+        cfg.max_physical = base.min(room);
+    }
+
     /// After the world step: give promoted agents a vehicle, remove demoted / despawned ones.
     pub(crate) fn apply_traffic_lod(&mut self) {
         for change in self.world.drain_lod_changes() {
@@ -160,7 +185,7 @@ mod tests {
     fn run(models: &[&str], list: bool) -> (u64, Vec<(u32, String)>) {
         let player = car("debug_sedan");
         let mode = wp_contracts::load_mode_table(format!(
-            "{}/../../data/modes/arcade.toml",
+            "{}/../../data/modes/sim.toml",
             env!("CARGO_MANIFEST_DIR")
         ))
         .unwrap();

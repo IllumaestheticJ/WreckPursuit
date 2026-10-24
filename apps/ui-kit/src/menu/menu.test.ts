@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultGameSettings, loadGameSettings, normalizeSettings, saveGameSettings, SETTINGS_KEY, speedIn, type SettingsStorage } from "./settings";
+import { assistLevel, defaultGameSettings, loadGameSettings, normalizeSettings, saveGameSettings, SETTINGS_KEY, speedIn, type SettingsStorage } from "./settings";
 import { keyAction, PadNav, REPEAT_DELAY_MS, REPEAT_EVERY_MS, stepIndex } from "./nav";
 
 const memory = (): SettingsStorage & { data: Map<string, string> } => {
@@ -15,6 +15,32 @@ describe("game settings", () => {
     expect(saveGameSettings(s, st)).toBe(true);
     expect(loadGameSettings(defaultGameSettings(true), st)).toEqual(s);
   });
+  it("reads TCS / ABS levels, legacy bools and junk", () => {
+    const base = defaultGameSettings(true);
+    expect(base.assists.abs).toBe("Full");
+    expect(base.assists.tcs).toBe("Off");
+    const legacy = normalizeSettings({ assists: { abs: true, tcs: true } }, base);
+    expect([legacy.assists.abs, legacy.assists.tcs]).toEqual(["Full", "Full"]);
+    const half = normalizeSettings({ assists: { abs: "half", tcs: "Half" } }, base);
+    expect([half.assists.abs, half.assists.tcs]).toEqual(["Half", "Half"]);
+    const junk = normalizeSettings({ assists: { abs: "max", tcs: 3 } }, base);
+    expect([junk.assists.abs, junk.assists.tcs]).toEqual(["Full", "Off"]);
+    expect(assistLevel(false, "Full")).toBe("Off");
+  });
+  it("countersteer 30 % by default; migrates the old untouched 50 % and 0 (rows 137 / 142)", () => {
+    const base = defaultGameSettings(true);
+    expect(base.assists.countersteer).toBe(0.3);
+    // Saved before row 137 (no mark): the old 50 % reads as 30 %, a changed value stays.
+    expect(normalizeSettings({ assists: { countersteer: 0.5 } }, base).assists.countersteer).toBe(0.3);
+    expect(normalizeSettings({ assists: { countersteer: 0.8 } }, base).assists.countersteer).toBe(0.8);
+    // Saved by 0.12.44 (mark 137): its untouched 0 reads as 30 %, a changed value stays.
+    expect(normalizeSettings({ countersteerRev: 137, assists: { countersteer: 0 } }, base).assists.countersteer).toBe(0.3);
+    expect(normalizeSettings({ countersteerRev: 137, assists: { countersteer: 0.5 } }, base).assists.countersteer).toBe(0.5);
+    // Saved now: 0 is the player's choice and survives a save / load.
+    const st = memory();
+    saveGameSettings({ ...base, assists: { ...base.assists, countersteer: 0 } }, st);
+    expect(loadGameSettings(base, st).assists.countersteer).toBe(0);
+  });
   it("falls back field by field on bad data", () => {
     const base = defaultGameSettings(true);
     const n = normalizeSettings({ gfx: "ultra", units: "mph", drawDistanceM: 123, volumes: { master: 7, engine: "loud" }, assists: { abs: false, countersteer: -1 } }, base);
@@ -23,7 +49,7 @@ describe("game settings", () => {
     expect(n.drawDistanceM).toBe(0);
     expect(n.volumes.master).toBe(1);
     expect(n.volumes.engine).toBe(base.volumes.engine);
-    expect(n.assists.abs).toBe(false);
+    expect(n.assists.abs).toBe("Off");
     expect(n.assists.countersteer).toBe(0);
     expect(n.developer).toBe(true);
     expect(n.radioVoice).toBe(true);
@@ -33,6 +59,12 @@ describe("game settings", () => {
     expect(base.radioVoice).toBe(true);
     expect(normalizeSettings({ radioVoice: false }, base).radioVoice).toBe(false);
     expect(normalizeSettings({ radioVoice: "no" }, base).radioVoice).toBe(true);
+  });
+  it("keeps the radio filter (row 144), default all", () => {
+    const base = defaultGameSettings(true);
+    expect(base.radioFilter).toBe("all");
+    expect(normalizeSettings({ radioFilter: "important" }, base).radioFilter).toBe("important");
+    expect(normalizeSettings({ radioFilter: "loud" }, base).radioFilter).toBe("all");
   });
   it("never throws on corrupt or blocked storage", () => {
     const st = memory();

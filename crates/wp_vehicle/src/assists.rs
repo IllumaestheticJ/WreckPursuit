@@ -1,6 +1,8 @@
 //! Driver assists: pedal filtering, traction control and stability control. Each is
 //! independent and nothing in the physics depends on them being on.
 
+use wp_contracts::{AssistProfile, TcsLevel};
+
 use crate::math::approach;
 
 /// Full 0→1 pedal ramp time at filter strength 1, s. Keyboard drivers (strength 0.7) get a
@@ -18,6 +20,42 @@ pub fn filter_pedal(current: f32, target: f32, strength: f32, dt: f32) -> f32 {
     let rate = if target < current { rate * 3.0 } else { rate };
     approach(current, target, rate * dt)
 }
+
+/// Throttle pedal filter strength in effect: [`AssistProfile::throttle_filter`] with traction
+/// control on, **0 with TCS Off** (owner row 104: "TCS off = the throttle you press", no ramp,
+/// no smoothing; the reference game's keyboard throttle is raw).
+pub fn throttle_filter_strength(assists: &AssistProfile) -> f32 {
+    if assists.tcs.is_on() {
+        assists.throttle_filter
+    } else {
+        0.0
+    }
+}
+
+/// TCS Full: no cut up to this many × the tyre's peak slip ratio…
+pub const TCS_FULL_START: f32 = 1.2;
+/// …growing to the full [`TCS_MAX_CUT`] over this many × peak more (3.2× peak): barely any
+/// wheelspin.
+pub const TCS_FULL_SPAN: f32 = 2.0;
+/// Largest throttle cut of either level.
+pub const TCS_MAX_CUT: f32 = 0.9;
+/// TCS Half regulates the driven-wheel slip around this many × the tyre's peak (3× Full's
+/// start): a floored launch in a powerful car spins and smokes through 1st into 2nd with a
+/// little tail movement (reference clip 4), but never flares to the limiter.
+pub const TCS_HALF_TARGET: f32 = 3.6;
+/// TCS Half integral gain: cut change per second per × peak of slip error. Integral, not
+/// proportional, because a slip target past the tyre's peak is an unstable balance: a
+/// proportional cut either loses the wheels or snaps them back to grip (measured: Half then
+/// behaved like Off or like Full), while the integral settles the throttle where the wheels
+/// keep spinning at about the target.
+pub const TCS_HALF_GAIN: f32 = 0.8;
+/// TCS Half proportional cut per × peak of slip above the target (added on top of the
+/// integral for this tick only, so a flare is answered at once).
+pub const TCS_HALF_P: f32 = 0.08;
+/// The Half slip error is clamped to ± this many × peak, so one flare does not slam the cut
+/// shut (the driven wheels spin up within a few ticks; an unclamped integral limit-cycled at
+/// ~5 Hz between grip and a 0.9 slip ratio).
+pub const TCS_HALF_ERR_MAX: f32 = 2.0;
 
 /// Traction control: throttle cut plus brake-based traction control (the "electronic diff
 /// lock" of open-diff cars).
@@ -87,15 +125,26 @@ pub fn btc_rear_authority(speed: f32) -> f32 {
 
 impl Tcs {
     /// Update from the largest driven-wheel slip ratio and return the throttle multiplier.
-    pub fn update(&mut self, enabled: bool, driven_slip: f32, peak_slip: f32, dt: f32) -> f32 {
-        if !enabled {
-            self.cut = 0.0;
-            return 1.0;
+    /// `Off` clears the cut; `Full` is proportional ([`TCS_FULL_START`]), `Half` integral
+    /// around [`TCS_HALF_TARGET`].
+    pub fn update(&mut self, level: TcsLevel, driven_slip: f32, peak_slip: f32, dt: f32) -> f32 {
+        match level {
+            TcsLevel::Off => self.cut = 0.0,
+            TcsLevel::Full => {
+                let target = ((driven_slip - TCS_FULL_START * peak_slip)
+                    / (TCS_FULL_SPAN * peak_slip))
+                    .clamp(0.0, TCS_MAX_CUT);
+                let rate = if target > self.cut { 15.0 } else { 4.0 };
+                self.cut = approach(self.cut, target, rate * dt);
+            }
+            TcsLevel::Half => {
+                let raw = driven_slip / peak_slip.max(1e-3) - TCS_HALF_TARGET;
+                let err = raw.clamp(-TCS_HALF_ERR_MAX, TCS_HALF_ERR_MAX);
+                self.cut = (self.cut + TCS_HALF_GAIN * err * dt).clamp(0.0, TCS_MAX_CUT);
+                let p = TCS_HALF_P * raw.max(0.0);
+                return 1.0 - (self.cut + p).min(TCS_MAX_CUT);
+            }
         }
-        // Proportional: no cut up to 1.2× peak slip, full (0.9) cut at 3.2× peak.
-        let target = ((driven_slip - 1.2 * peak_slip) / (2.0 * peak_slip)).clamp(0.0, 0.9);
-        let rate = if target > self.cut { 15.0 } else { 4.0 };
-        self.cut = approach(self.cut, target, rate * dt);
         1.0 - self.cut
     }
 
@@ -260,10 +309,73 @@ mod tests {
     #[test]
     fn tcs_cuts_on_wheelspin() {
         let mut t = Tcs::default();
-        let m = t.update(true, 0.5, 0.1, 0.05);
-        assert_eq!(Tcs::default().update(true, 0.1, 0.1, 0.05), 1.0);
+        let m = t.update(TcsLevel::Full, 0.5, 0.1, 0.05);
+        assert_eq!(Tcs::default().update(TcsLevel::Full, 0.1, 0.1, 0.05), 1.0);
         assert!(m < 1.0);
-        assert_eq!(Tcs::default().update(false, 0.5, 0.1, 0.05), 1.0);
+        assert_eq!(Tcs::default().update(TcsLevel::Off, 0.5, 0.1, 0.05), 1.0);
+    }
+
+    /// Steady cut each level settles to at `slip` (peak 0.1).
+    fn settled_cut(level: TcsLevel, slip: f32) -> f32 {
+        let mut t = Tcs::default();
+        for _ in 0..240 {
+            t.update(level, slip, 0.1, 1.0 / 240.0);
+        }
+        t.cut
+    }
+
+    #[test]
+    fn tcs_levels_order_their_slip_targets() {
+        // Off: never cuts. Full: cuts from 1.2× peak. Half: lets ~3× more slip through.
+        for slip in [0.1, 0.25, 0.5, 1.0] {
+            assert_eq!(settled_cut(TcsLevel::Off, slip), 0.0);
+        }
+        assert_eq!(settled_cut(TcsLevel::Full, 0.11), 0.0);
+        assert!(settled_cut(TcsLevel::Full, 0.25) > 0.3);
+        assert_eq!(
+            settled_cut(TcsLevel::Half, 0.25),
+            0.0,
+            "Half allows 2.5× peak (target 3.6×)"
+        );
+        // Past its target Half keeps cutting until the slip comes down (integral).
+        assert!(settled_cut(TcsLevel::Half, 0.5) > 0.5);
+        assert_eq!(settled_cut(TcsLevel::Half, 2.0), TCS_MAX_CUT);
+        let ratio = TCS_HALF_TARGET / TCS_FULL_START;
+        assert!((2.0..=3.0).contains(&ratio), "{ratio}");
+    }
+
+    #[test]
+    fn tcs_half_holds_a_spinning_wheel_near_its_target() {
+        // Toy plant: slip grows with the throttle that gets through (more power than grip).
+        let mut t = Tcs::default();
+        let mut slip = 0.0f32;
+        let mut sum = 0.0;
+        for i in 0..2400 {
+            let thr = t.update(TcsLevel::Half, slip, 0.1, 1.0 / 240.0);
+            slip += ((1.2 * thr - 0.4) * 2.0 - 0.3 * slip) / 240.0 * 4.0;
+            slip = slip.max(0.0);
+            if i >= 1200 {
+                sum += slip;
+            }
+        }
+        let mean = sum / 1200.0;
+        assert!((0.2..=0.4).contains(&mean), "{mean}");
+    }
+
+    #[test]
+    fn throttle_filter_is_raw_with_tcs_off() {
+        let kb = AssistProfile::keyboard_default();
+        assert_eq!(throttle_filter_strength(&kb), kb.throttle_filter);
+        let half = AssistProfile {
+            tcs: TcsLevel::Half,
+            ..kb
+        };
+        assert_eq!(throttle_filter_strength(&half), kb.throttle_filter);
+        let off = AssistProfile {
+            tcs: TcsLevel::Off,
+            ..kb
+        };
+        assert_eq!(throttle_filter_strength(&off), 0.0);
     }
 
     #[test]

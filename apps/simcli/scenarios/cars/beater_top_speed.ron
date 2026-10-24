@@ -2,7 +2,7 @@
 // 4-speed runs into the limiter / its power at ~146 km/h). 90 s is enough to converge.
 (
     name: "cars_beater_top_speed",
-    mode: Arcade,
+    mode: Simulation,
     seed: 1,
     duration_s: 90.0,
     entities: [

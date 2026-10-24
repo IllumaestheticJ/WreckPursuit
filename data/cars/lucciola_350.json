@@ -10,7 +10,7 @@
   "track_front_m": 1.51,
   "track_rear_m": 1.615,
   "cg_height_m": 0.41,
-  "inertia_kgm2": [440.0, 1630.0, 1820.0],
+  "inertia_kgm2": [440.0, 1630.0, 2184.0],
   "drag_cd_a_m2": 0.602,
   "lift_front": -0.05,
   "lift_rear": -0.12,
@@ -128,20 +128,20 @@
       "bump_stop_n_per_m": 200000.0
     },
     {
-      "spring_n_per_m": 66800.0,
+      "spring_n_per_m": 43420.0,
       "damper_bump_ns_per_m": 3790.0,
       "damper_rebound_ns_per_m": 7580.0,
       "travel_m": 0.13,
-      "preload_m": 0.02,
+      "preload_m": 0.0508,
       "arb_n_per_m": 0.0,
       "bump_stop_n_per_m": 200000.0
     },
     {
-      "spring_n_per_m": 66800.0,
+      "spring_n_per_m": 43420.0,
       "damper_bump_ns_per_m": 3790.0,
       "damper_rebound_ns_per_m": 7580.0,
       "travel_m": 0.13,
-      "preload_m": 0.02,
+      "preload_m": 0.0508,
       "arb_n_per_m": 0.0,
       "bump_stop_n_per_m": 200000.0
     }

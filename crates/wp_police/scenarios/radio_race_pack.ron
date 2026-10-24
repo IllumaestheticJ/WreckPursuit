@@ -1,0 +1,22 @@
+// Radio priority bench (owner playtest row 144), "a race with police": four racers flat out
+// across the whole 12×12 city at night (2.8× the limit, not kept in a district), as a street
+// race pack would be. The police-only harness has no race judge or AI racers (that is
+// wp_race's race_police test, which needs the full sim); this stands in for the radio load of a
+// race that pulls in the police: several pursuits at once, high levels, tools and helicopters.
+(
+    name: "police_radio_race_pack",
+    seed: 1440,
+    city: (nx: 12, ny: 12, seed: 1),
+    time_of_day_h: 23.0,
+    duration_s: 240.0,
+    runs: 3,
+    racers: [
+        (district: Core, speed_factor: 2.8, stay_in_district: false, initial_heat: 6.0),
+        (district: Core, speed_factor: 2.8, stay_in_district: false, initial_heat: 6.0),
+        (district: Suburb, speed_factor: 2.8, stay_in_district: false, initial_heat: 6.0),
+        (district: Industrial, speed_factor: 2.8, stay_in_district: false, initial_heat: 6.0),
+    ],
+    expect: [
+        (metric: "pursuits", min: 1, max: 1000),
+    ],
+)

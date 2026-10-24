@@ -6,7 +6,7 @@
 //! full lattice damage is kept as `wp_damage::FullDamageSnapshot` JSON in
 //! `CareerProfile::lattices`, so a dented car comes back dented.
 //!
-//! **A run** ([`Career::start_run`]) takes any live scenario (free drive, city chase, a race),
+//! **A run** ([`Career::start_run`]) takes any live scenario (free drive, night run, a race),
 //! puts the career's active car in the first entity slot with the career's damage mode and
 //! carried heat, builds the car from its installed mods (the modified `VehicleDef` /
 //! `LatticeDef` from `Economy::preview`, overlaid on the embedded data under the same car
@@ -23,6 +23,9 @@
 //! Persistence is the testbed's job: [`Career::save_json`] / [`Career::load_json`] (versioned
 //! by `wp_economy::profile`), stored in `localStorage` and exported / imported as a file.
 //!
+//! **The tune** ([`Career::set_tune`]): each car's free four-slider tune is stored on the car
+//! and goes into the first entity's `tune` when a run starts, so the sim builds it at spawn.
+//!
 //! Known gap: a replay of a career run whose car has mods or started damaged does not verify
 //! (the replay rebuilds the stock car, pristine). Plain careers (stock, undamaged) replay fine.
 
@@ -37,9 +40,9 @@ use wp_contracts::{
 };
 use wp_damage::{DamageModel, FullDamageSnapshot};
 use wp_economy::{
-    CarLocation, CarSpec, CarUid, CareerProfile, Condition, DamageReport, Economy, EconomyError,
-    EconomyEvent, EventReason, ImpoundStatus, Money, OwnedCar, RepairOption, RepairQuote, RunEnd,
-    ShopContext, ShopKind,
+    CarLocation, CarSpec, CarUid, CareerProfile, CareerProgress, Condition, DamageReport, Economy,
+    EconomyError, EconomyEvent, EventReason, ImpoundStatus, Money, OwnedCar, ProgressUpdate,
+    RepTier, RepairOption, RepairQuote, RunEnd, ShopContext, ShopKind,
 };
 
 use crate::data::mem_data;
@@ -165,6 +168,8 @@ pub struct CarView {
     pub scrap_value: Money,
     /// Installed mods.
     pub mods: Vec<InstalledModView>,
+    /// The free tune (four 1..=5 sliders, 3 = stock), applied at the next run's spawn.
+    pub tune: wp_economy::CarTune,
     /// Insurance tier, if insured.
     pub insurance: Option<String>,
     /// Daily premium, if insured.
@@ -177,8 +182,8 @@ pub struct CarView {
     pub impound: Option<ImpoundStatus>,
     /// Performance of the build as it is.
     pub stats: Option<StatsView>,
-    /// Damage was taken while wanted (insurance will not pay).
-    pub damage_while_wanted: bool,
+    /// Some outstanding damage dates from a police capture (insurance will not pay for it).
+    pub damage_before_capture: bool,
 }
 
 /// A car the dealer sells.
@@ -200,6 +205,10 @@ pub struct DealerCar {
     pub price_worn: Money,
     /// Stock performance.
     pub stats: StatsView,
+    /// Rep tier at which the dealer sells this class (career progression).
+    pub unlock_tier: RepTier,
+    /// True while the player's tier is below `unlock_tier` (refreshed by every view).
+    pub locked: bool,
 }
 
 /// An insurance tier on offer.
@@ -267,6 +276,8 @@ pub struct CareerView {
     pub districts: Vec<DistrictView>,
     /// Career counters.
     pub stats: wp_economy::CareerStats,
+    /// Rep tier, next tier, unlocked features and classes, bet limits.
+    pub progress: CareerProgress,
     /// Police history.
     pub captures: u32,
     /// Escapes.
@@ -364,6 +375,8 @@ pub struct RunClose {
     pub cash: Money,
     /// Ledger lines of the run and the night.
     pub ledger: Vec<LedgerLine>,
+    /// Tier changes from the run (promotion, rewards paid, features opened or closed).
+    pub progress: ProgressUpdate,
 }
 
 // ----- the career ------------------------------------------------------------------------------
@@ -389,6 +402,17 @@ pub struct Career {
 
 fn e2s(e: EconomyError) -> String {
     e.to_string()
+}
+
+/// The economy's stored tune as the sim's (same fields; one type once the contract carries
+/// `CarTune`, request WP-4).
+fn vehicle_tune(t: wp_economy::CarTune) -> wp_vehicle::CarTune {
+    wp_vehicle::CarTune {
+        suspension: t.suspension,
+        gearing: t.gearing,
+        diff: t.diff,
+        brake_balance: t.brake_balance,
+    }
 }
 
 fn stats_of(p: &wp_economy::Preview) -> StatsView {
@@ -501,9 +525,16 @@ impl Career {
         let mut rng = wp_math::Rng::new(
             CAREER_SEED_SALT ^ ABANDONED_SEED_SALT ^ ((p.account.day as u64) << 32),
         );
-        let settled = econ
-            .settle_abandoned_run(&mut p, &mut rng)
-            .map(|_| RunClose {
+        let settled = econ.settle_abandoned_run(&mut p, &mut rng).map(|_| {
+            // The bust can cost a tier; progression only credits, so it never refuses.
+            let progress = match econ.update_progression(&mut p.account) {
+                Ok((up, ev)) => {
+                    p.ledger.extend(ev);
+                    up
+                }
+                Err(_) => ProgressUpdate::default(),
+            };
+            RunClose {
                 end: RunEnd::Captured,
                 carried_heat: p.carry.heat,
                 cash: p.account.cash,
@@ -513,7 +544,9 @@ impl Career {
                     .filter(|e| e.seq >= first_seq)
                     .map(LedgerLine::of)
                     .collect(),
-            });
+                progress,
+            }
+        });
         let mut career = Self::from_profile(econ, p);
         career.abandoned = settled;
         Ok(career)
@@ -569,13 +602,13 @@ impl Career {
     /// drive `sentinel_*`, traffic `debug_sedan`, and neither is sold).
     pub fn car_files(&self, car: &OwnedCar) -> Result<BTreeMap<String, String>, String> {
         let mut files = BTreeMap::new();
-        if car.mods.is_empty() {
+        if car.mods.is_empty() && self.econ.wear_torque_factor(car) >= 1.0 {
             return Ok(files);
         }
         let base = base_car(&car.def_id)?;
         let p = self
             .econ
-            .preview(&base.def, &base.lattice, &car.mods, Some(self.mode()))
+            .car_preview(&base.def, &base.lattice, car, Some(self.mode()))
             .map_err(e2s)?;
         let v = &p.applied.vehicle;
         let l = &p.applied.lattice;
@@ -610,6 +643,23 @@ impl Career {
         let loaded = self.loaded_car(car)?;
         let mut model = DamageModel::new(&loaded.lattice, &loaded.materials);
         if let Some(snap) = self.lattice(car.uid)? {
+            // A panel torn off in a session is saved as a synthetic detached group
+            // (>= SYNTHETIC_GROUP_BASE), which exists only once the car's panels are attached
+            // (as the session did): attach them before restoring (playtest row 163).
+            if snap
+                .snapshot
+                .detached_groups
+                .iter()
+                .any(|g| *g >= wp_damage::panels::SYNTHETIC_GROUP_BASE)
+            {
+                let files = self.car_files(car)?;
+                let rel = format!("panels/{}.json", car.def_id);
+                let text = simcli::data::DataSource::read(&Overlay { files: &files }, &rel)
+                    .map_err(|e| e.to_string())?;
+                let spec =
+                    wp_damage::PanelSpec::parse(&car.def_id, &text).map_err(|e| e.to_string())?;
+                model.attach_panels(&spec).map_err(|e| e.to_string())?;
+            }
             model.restore_full(&snap)?;
         }
         Ok(model)
@@ -691,6 +741,9 @@ impl Career {
                 let Ok(stats) = self.stats_for(&id, &[]) else {
                     continue;
                 };
+                let Some(unlock_tier) = self.econ.progression.class_tier(d.class) else {
+                    continue;
+                };
                 list.push(DealerCar {
                     def_id: id.clone(),
                     name: d.display_name.clone(),
@@ -700,6 +753,8 @@ impl Career {
                     price_used: self.econ.market_price(&spec, Condition::Used),
                     price_worn: self.econ.market_price(&spec, Condition::Worn),
                     stats,
+                    unlock_tier,
+                    locked: false,
                 });
             }
             list.sort_by(|a, b| (a.price_worn, &a.def_id).cmp(&(b.price_worn, &b.def_id)));
@@ -762,13 +817,14 @@ impl Career {
             paid: self.econ.resale_basis(c),
             scrap_value: self.econ.scrap_value(c),
             mods,
+            tune: c.tune,
             insurance: c.insurance.as_ref().map(|i| i.tier.clone()),
             premium_per_day: c.insurance.as_ref().map(|i| i.premium_per_day),
             repair_all,
             repair_lines,
             impound: self.econ.impound_status(acct, c.uid).ok(),
             stats: self.stats_for(&c.def_id, &c.mods).ok(),
-            damage_while_wanted: c.damage.sustained_while_wanted,
+            damage_before_capture: c.damage.sustained_before_capture,
         }
     }
 
@@ -797,6 +853,13 @@ impl Career {
         if !c.damage.is_drivable() {
             return Some("the car is wrecked: repair or scrap it".into());
         }
+        let missing = self.econ.missing_parts(c);
+        if !missing.is_empty() {
+            return Some(format!(
+                "the car is missing parts: {} (fit them in the workshop)",
+                missing.join(", ")
+            ));
+        }
         None
     }
 
@@ -822,7 +885,16 @@ impl Career {
             can_start: self.start_blocker().is_none(),
             start_blocker: self.start_blocker(),
             cars: a.garage.iter().map(|c| self.car_view(c)).collect(),
-            dealer: self.dealer.clone().unwrap_or_default(),
+            dealer: self
+                .dealer
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|mut d| {
+                    d.locked = !self.econ.class_unlocked(a, d.class);
+                    d
+                })
+                .collect(),
             floor_car: (!a.has_usable_car())
                 .then(|| (floor.def_id.clone(), floor.price.min(a.cash.max(0)))),
             insurance: self
@@ -851,6 +923,7 @@ impl Career {
                 })
                 .collect(),
             stats: p.stats.clone(),
+            progress: self.econ.career_progress(a),
             captures: a.heat_history.captures,
             escapes: a.heat_history.escapes,
             ledger: p
@@ -990,6 +1063,9 @@ impl Career {
             .find(|d| d.def_id == def_id)
             .cloned()
             .ok_or_else(|| format!("the dealer does not sell {def_id:?}"))?;
+        self.econ
+            .require_class(&self.profile.account, d.class)
+            .map_err(e2s)?;
         let spec = CarSpec {
             def_id: d.def_id,
             class: d.class,
@@ -1053,6 +1129,14 @@ impl Career {
             .map_err(e2s)
     }
 
+    /// Set a car's free tune (no money; applied when the next run spawns the car).
+    pub fn set_tune(&mut self, uid: CarUid, tune: wp_economy::CarTune) -> Result<(), String> {
+        self.guard()?;
+        self.econ
+            .set_tune(&mut self.profile.account, uid, tune)
+            .map_err(e2s)
+    }
+
     /// Install a mod (pays; a same-line mod is replaced and refunded at resale value).
     pub fn install_mod(&mut self, uid: CarUid, mod_id: &str) -> Result<(), String> {
         self.guard()?;
@@ -1065,15 +1149,15 @@ impl Career {
         self.change_mods(uid, |e, acct, _| e.uninstall_mod(acct, uid, mod_id))
     }
 
-    fn change_mods(
+    fn change_mods<T>(
         &mut self,
         uid: CarUid,
         f: impl FnOnce(
             &Economy,
             &mut wp_economy::PlayerAccount,
             DamageMode,
-        ) -> wp_economy::EconResult<()>,
-    ) -> Result<(), String> {
+        ) -> wp_economy::EconResult<T>,
+    ) -> Result<T, String> {
         let before = self.profile.account.try_car(uid).map_err(e2s)?.clone();
         let base = base_car(&before.def_id)?;
         let now = self
@@ -1081,7 +1165,7 @@ impl Career {
             .preview(&base.def, &base.lattice, &before.mods, Some(self.mode()))
             .map_err(e2s)?;
         let mut acct = self.profile.account.clone();
-        let ((), ev) = f(&self.econ, &mut acct, self.mode()).map_err(e2s)?;
+        let (out, ev) = f(&self.econ, &mut acct, self.mode()).map_err(e2s)?;
         let after = acct.try_car(uid).map_err(e2s)?.clone();
         let next = self
             .econ
@@ -1100,7 +1184,131 @@ impl Career {
         }
         self.profile.account = acct;
         self.post(ev);
+        Ok(out)
+    }
+
+    // ----- garage workshop -----------------------------------------------------------------
+
+    /// The workshop screen of car `uid`: slots, missing parts, inventory and parts catalog.
+    pub fn workshop(&self, uid: CarUid) -> Result<WorkshopScreen, String> {
+        let a = &self.profile.account;
+        let car = a.try_car(uid).map_err(e2s)?;
+        Ok(WorkshopScreen {
+            view: self.econ.workshop(a, uid, self.mode()).map_err(e2s)?,
+            catalog: self.econ.part_catalog(a, uid, self.mode()).map_err(e2s)?,
+            cash: a.cash,
+            def_id: car.def_id.clone(),
+        })
+    }
+
+    /// Take the part in `slot` off car `uid` into the inventory. Returns the part's uid.
+    pub fn remove_part(&mut self, uid: CarUid, slot: &str) -> Result<u32, String> {
+        self.guard()?;
+        self.change_mods(uid, |e, acct, _| e.remove_part(acct, uid, slot))
+    }
+
+    /// Fit inventory part `part` into `slot` of car `uid`. A new part restores its area of the
+    /// stored lattice (`apply_repair`), and the car's damage is re-recorded from it.
+    pub fn fit_part(&mut self, uid: CarUid, slot: &str, part: u32) -> Result<(), String> {
+        self.guard()?;
+        let fit = self.change_mods(uid, |e, acct, mode| e.fit_part(acct, uid, slot, part, mode))?;
+        if fit.restore.is_empty() || !self.profile.lattices.contains_key(&uid.0) {
+            return Ok(());
+        }
+        let car = self.profile.account.try_car(uid).map_err(e2s)?.clone();
+        let loaded = self.loaded_car(&car)?;
+        let mut model = self.damage_model(&car)?;
+        model.apply_repair(&fit.restore);
+        let wanted = car.damage.sustained_before_capture;
+        let ev = self.store_damage(uid, &model, wanted, &loaded.lattice, &loaded.materials)?;
+        self.post(ev);
         Ok(())
+    }
+
+    /// Take everything in the way of `slot` off car `uid` (DIY, free). Returns the uids of
+    /// the parts taken off, in removal order.
+    pub fn clear_way(&mut self, uid: CarUid, slot: &str) -> Result<Vec<u32>, String> {
+        self.guard()?;
+        self.change_mods(uid, |e, acct, _| e.clear_way(acct, uid, slot))
+    }
+
+    /// Pay the mechanic to fit a part in `slot` of car `uid` (see
+    /// [`Economy::mechanic_install`]). New parts restore their area of the stored lattice,
+    /// as [`Self::fit_part`] does.
+    pub fn mechanic_install(
+        &mut self,
+        uid: CarUid,
+        slot: &str,
+        source: &wp_economy::PartSource,
+        sell_old: bool,
+    ) -> Result<wp_economy::MechanicJob, String> {
+        self.guard()?;
+        let job = self.change_mods(uid, |e, acct, mode| {
+            e.mechanic_install(acct, uid, slot, source, sell_old, mode)
+        })?;
+        if job.restore.is_empty() || !self.profile.lattices.contains_key(&uid.0) {
+            return Ok(job);
+        }
+        let car = self.profile.account.try_car(uid).map_err(e2s)?.clone();
+        let loaded = self.loaded_car(&car)?;
+        let mut model = self.damage_model(&car)?;
+        model.apply_repair(&job.restore);
+        let wanted = car.damage.sustained_before_capture;
+        let ev = self.store_damage(uid, &model, wanted, &loaded.lattice, &loaded.materials)?;
+        self.post(ev);
+        Ok(job)
+    }
+
+    /// Buy a part of `kind` for car `uid` into the inventory (`grade` = a mod id, or `None`
+    /// for the stock replacement). Returns the new parts' uids.
+    pub fn buy_part(
+        &mut self,
+        uid: CarUid,
+        kind: &str,
+        grade: Option<&str>,
+    ) -> Result<Vec<u32>, String> {
+        self.guard()?;
+        let mode = self.mode();
+        let (uids, ev) = self
+            .econ
+            .buy_part(&mut self.profile.account, uid, kind, grade, mode)
+            .map_err(e2s)?;
+        self.post(ev);
+        Ok(uids)
+    }
+
+    /// Engine stand: take the part in `slot` out of loose assembly `assembly` (an engine in
+    /// the inventory). Returns the part's uid.
+    pub fn strip_part(&mut self, assembly: u32, slot: &str) -> Result<u32, String> {
+        self.guard()?;
+        let (uid, ev) = self
+            .econ
+            .strip_part(&mut self.profile.account, assembly, slot)
+            .map_err(e2s)?;
+        self.post(ev);
+        Ok(uid)
+    }
+
+    /// Engine stand: put inventory part `part` into `slot` of loose assembly `assembly`.
+    pub fn build_part(&mut self, assembly: u32, slot: &str, part: u32) -> Result<(), String> {
+        self.guard()?;
+        let ((), ev) = self
+            .econ
+            .build_part(&mut self.profile.account, assembly, slot, part)
+            .map_err(e2s)?;
+        self.post(ev);
+        Ok(())
+    }
+
+    /// Sell inventory part `part` to the dealer. Returns the price.
+    pub fn sell_part(&mut self, part: u32) -> Result<Money, String> {
+        self.guard()?;
+        let (price, ev) = self
+            .econ
+            .sell_part(&mut self.profile.account, part)
+            .map_err(e2s)?;
+        self.post(ev);
+        Ok(price)
     }
 
     fn shop(&self, req: &ShopRequest) -> Result<ShopContext, String> {
@@ -1135,10 +1343,7 @@ impl Career {
         let car = self.profile.account.try_car(uid).map_err(e2s)?.clone();
         // Build the model before paying, so a broken save cannot take money for nothing.
         let loaded = self.loaded_car(&car)?;
-        let mut model = DamageModel::new(&loaded.lattice, &loaded.materials);
-        if let Some(snap) = self.lattice(uid)? {
-            model.restore_full(&snap)?;
-        }
+        let mut model = self.damage_model(&car)?;
         let mut acct = self.profile.account.clone();
         let (order, ev) = self
             .econ
@@ -1159,7 +1364,7 @@ impl Career {
             } else {
                 model.apply_repair(&order.items);
             }
-            let wanted = car.damage.sustained_while_wanted;
+            let wanted = car.damage.sustained_before_capture;
             self.store_damage(uid, &model, wanted, &loaded.lattice, &loaded.materials)?;
             self.econ.tidy_profile(&mut self.profile);
         }
@@ -1225,30 +1430,44 @@ impl Career {
         self.guard()?;
         let heat = self.profile.carry.heat;
         self.profile.carry.heat = self.econ.carry_heat(heat, RunEnd::Free);
-        Ok(self.econ.next_night(&mut self.profile))
+        let mut ev = self.econ.next_night(&mut self.profile);
+        ev.extend(self.update_progression().1);
+        Ok(ev)
+    }
+
+    /// Pay first-time tier rewards and record tier changes after rep moved.
+    fn update_progression(&mut self) -> (ProgressUpdate, Vec<EconomyEvent>) {
+        match self.econ.update_progression(&mut self.profile.account) {
+            Ok((up, ev)) => {
+                let ev = self.post(ev);
+                (up, ev)
+            }
+            // Progression never refuses (it only credits); keep the run closing if it ever did.
+            Err(_) => (ProgressUpdate::default(), Vec::new()),
+        }
     }
 
     // ----- runs ------------------------------------------------------------------------------
 
-    /// Start a career run of `sc` (any live scenario): the active car in the first slot, the
-    /// career's mode and carried heat, mods applied, saved damage restored, the account bound
-    /// to the session's economy run. Returns the session (install it with `crate::install`).
-    pub fn start_run(&mut self, mut sc: simcli::Scenario) -> Result<Session, String> {
-        if let Some(why) = self.start_blocker() {
-            return Err(why);
-        }
-        let acct = &self.profile.account;
-        let uid = acct.active_car.expect("start_blocker checked");
-        let car = acct.try_car(uid).map_err(e2s)?.clone();
+    /// A session of `sc` with owned car `uid` in the first slot: the career's mode, its mods
+    /// (overlay files), its saved damage, `heat` as police heat outside the flat lot.
+    fn car_session(
+        &self,
+        uid: CarUid,
+        mut sc: simcli::Scenario,
+        heat: f32,
+    ) -> Result<(Session, EntityId), String> {
+        let car = self.profile.account.try_car(uid).map_err(e2s)?.clone();
         let first = sc
             .entities
             .first_mut()
             .ok_or("the scenario has no player entity")?;
         first.car = car.def_id.clone();
+        first.tune = vehicle_tune(car.tune);
         first.police_heat = if sc.city == simcli::scenario::CitySpec::Flat {
             0.0
         } else {
-            self.profile.carry.heat
+            heat
         };
         sc.mode = self.mode();
         let files = self.car_files(&car)?;
@@ -1263,6 +1482,35 @@ impl Career {
                 .map_err(|e| e.to_string())?
                 .restore_full(&snap);
         }
+        Ok((session, player))
+    }
+
+    /// The garage workshop's view of car `uid`: a sandbox session of `sc` (a flat lot) with
+    /// the car as it is (mods, saved damage), not a run. Any owned car in the garage, even one
+    /// that cannot drive (parts missing, wrecked).
+    pub fn showroom(&self, uid: CarUid, sc: simcli::Scenario) -> Result<Session, String> {
+        if self.run.is_some() {
+            return Err("finish the run first (back to the garage)".into());
+        }
+        let car = self.profile.account.try_car(uid).map_err(e2s)?;
+        if car.location != CarLocation::Garage {
+            return Err("the car is in the pound".into());
+        }
+        Ok(self.car_session(uid, sc, 0.0)?.0)
+    }
+
+    /// Start a career run of `sc` (any live scenario): the active car in the first slot, the
+    /// career's mode and carried heat, mods applied, saved damage restored, the account bound
+    /// to the session's economy run. Returns the session (install it with `crate::install`).
+    pub fn start_run(&mut self, sc: simcli::Scenario) -> Result<Session, String> {
+        if let Some(why) = self.start_blocker() {
+            return Err(why);
+        }
+        let acct = &self.profile.account;
+        let uid = acct.active_car.expect("start_blocker checked");
+        let heat = self.profile.carry.heat;
+        let (mut session, player) = self.car_session(uid, sc, heat)?;
+        let acct = &self.profile.account;
         let run = if session.run().is_some() {
             let seed = session.scenario().seed ^ CAREER_SEED_SALT ^ ((acct.day as u64) << 32);
             Some(PlayerRun::for_career_car(
@@ -1303,6 +1551,12 @@ impl Career {
             RunEnd::Free
         };
         let mut wanted = false;
+        // A pink slip won in a touge battle: the car's lattice as it finished.
+        let won_lattice = s
+            .race()
+            .and_then(|r| r.touge())
+            .and_then(|t| t.won_lattice())
+            .cloned();
         if let Some(run) = s.end_career() {
             if run.is_over() {
                 end = match run.report().map(|r| r.outcome) {
@@ -1316,6 +1570,11 @@ impl Career {
                 .ledger
                 .extend(ledger.into_iter().filter(|e| e.seq >= start.start_seq));
             self.profile.account = acct;
+            if let Some((uid, json)) = won_lattice {
+                if self.profile.account.car(uid).is_some() {
+                    self.profile.lattices.insert(uid.0, json);
+                }
+            }
         }
         let bounty_cash: Money = self
             .profile
@@ -1344,6 +1603,7 @@ impl Career {
         }
         self.econ
             .close_run(&mut self.profile, end, heat, bounty_cash, driven_ticks);
+        let (progress, _) = self.update_progression();
         let ledger = self
             .profile
             .ledger
@@ -1356,6 +1616,7 @@ impl Career {
             carried_heat: self.profile.carry.heat,
             cash: self.profile.account.cash,
             ledger,
+            progress,
         })
     }
 
@@ -1416,6 +1677,12 @@ thread_local! {
     static CAREER: RefCell<Option<Career>> = const { RefCell::new(None) };
 }
 
+/// The loaded career's account as saved between runs (`None` without a career): the touge
+/// menu reads rep and cash from it.
+pub(crate) fn career_account() -> Option<wp_economy::PlayerAccount> {
+    CAREER.with(|c| c.borrow().as_ref().map(|c| c.profile.account.clone()))
+}
+
 fn with_career<T>(f: impl FnOnce(&mut Career) -> Result<T, String>) -> Result<T, JsValue> {
     CAREER.with(|c| match c.borrow_mut().as_mut() {
         Some(c) => f(c).map_err(crate::err),
@@ -1437,6 +1704,20 @@ pub(crate) fn absorb(prev: &mut Session) {
         // No career to absorb into: just detach.
         prev.end_career();
     });
+}
+
+/// The workshop screen ([`career_workshop_json`]).
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkshopScreen {
+    /// Slots, missing parts, upgrades, inventory.
+    #[serde(flatten)]
+    pub view: wp_economy::WorkshopView,
+    /// Parts catalog for the car.
+    pub catalog: Vec<wp_economy::CatalogEntry>,
+    /// Cash on hand.
+    pub cash: Money,
+    /// Car model (panel mesh id).
+    pub def_id: String,
 }
 
 fn json<T: Serialize>(v: &T) -> String {
@@ -1478,6 +1759,22 @@ pub fn career_new(mode: &str) -> Result<String, JsValue> {
     detach_session();
     let econ = crate::garage::with_economy(|e| e.clone());
     CAREER.with(|c| *c.borrow_mut() = Some(Career::new(econ, mode)));
+    with_career(view_json)
+}
+
+/// Start a new career like [`career_new`] but with `starting_cash` instead of the market's
+/// (owner request 2026-10-21: preview / demo builds start with $150 000 so every feature can be
+/// tested). The economy tables are unchanged; only this career's opening balance differs.
+#[wasm_bindgen]
+pub fn career_new_with_cash(mode: &str, starting_cash: f64) -> Result<String, JsValue> {
+    let mode = crate::data::parse_mode(mode).map_err(crate::err)?;
+    detach_session();
+    let mut econ = crate::garage::with_economy(|e| e.clone());
+    econ.market.starting_cash = starting_cash.max(0.0).round() as wp_economy::Money;
+    let career = Career::new(econ, mode);
+    // Keep the shared tables for later runs: only the opening balance came from the override.
+    let econ = crate::garage::with_economy(|e| e.clone());
+    CAREER.with(|c| *c.borrow_mut() = Some(Career::from_profile(econ, career.profile)));
     with_career(view_json)
 }
 
@@ -1555,7 +1852,7 @@ pub fn career_run_active() -> bool {
     CAREER.with(|c| c.borrow().as_ref().is_some_and(Career::run_active))
 }
 
-/// Start a career run of `scenario_json` (free drive, city chase, a race: any live scenario;
+/// Start a career run of `scenario_json` (free drive, night run, a race: any live scenario;
 /// the first entity becomes the career car). Ends a career run in progress first. Returns the
 /// entity ids like `init`.
 #[wasm_bindgen]
@@ -1563,6 +1860,16 @@ pub fn career_start_run(scenario_json: &str) -> Result<Vec<u32>, JsValue> {
     let sc: simcli::Scenario = serde_json::from_str(scenario_json).map_err(crate::err)?;
     end_active_run()?;
     let session = with_career(|c| c.start_run(sc))?;
+    Ok(crate::install(session))
+}
+
+/// Show career car `uid` in the garage workshop: installs a sandbox session of
+/// `scenario_json` (use the flat lot) with the car as it is, not a run. Returns the entity ids.
+#[wasm_bindgen]
+pub fn career_workshop_session(uid: u32, scenario_json: &str) -> Result<Vec<u32>, JsValue> {
+    let sc: simcli::Scenario = serde_json::from_str(scenario_json).map_err(crate::err)?;
+    end_active_run()?;
+    let session = with_career(|c| c.showroom(CarUid(uid), sc))?;
     Ok(crate::install(session))
 }
 
@@ -1618,6 +1925,18 @@ pub fn career_set_active(uid: u32) -> Result<String, JsValue> {
     })
 }
 
+/// Set car `uid`'s free tune from JSON (`{"suspension":1..5,"gearing":…,"diff":…,
+/// "brake_balance":…}`; missing sliders are stock). Free. Returns the view JSON.
+#[wasm_bindgen]
+pub fn career_set_tune(uid: u32, tune_json: &str) -> Result<String, JsValue> {
+    with_career(|c| {
+        let tune: wp_economy::CarTune =
+            serde_json::from_str(tune_json).map_err(|e| format!("bad tune: {e}"))?;
+        c.set_tune(CarUid(uid), tune)?;
+        view_json(c)
+    })
+}
+
 /// Install mod `mod_id` on car `uid`. Returns the view JSON.
 #[wasm_bindgen]
 pub fn career_install_mod(uid: u32, mod_id: &str) -> Result<String, JsValue> {
@@ -1633,6 +1952,108 @@ pub fn career_uninstall_mod(uid: u32, mod_id: &str) -> Result<String, JsValue> {
     with_career(|c| {
         c.uninstall_mod(CarUid(uid), mod_id)?;
         view_json(c)
+    })
+}
+
+/// The garage workshop of car `uid`: `WorkshopScreen` JSON (slots with condition and what
+/// blocks them, missing parts, upgrades, inventory with where each part fits, parts catalog).
+#[wasm_bindgen]
+pub fn career_workshop_json(uid: u32) -> Result<String, JsValue> {
+    with_career(|c| c.workshop(CarUid(uid)).map(|w| json(&w)))
+}
+
+/// Take the part in `slot` off car `uid` into the inventory. Returns the workshop JSON.
+#[wasm_bindgen]
+pub fn career_remove_part(uid: u32, slot: &str) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.remove_part(CarUid(uid), slot)?;
+        c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Fit inventory part `part` into `slot` of car `uid`. Returns the workshop JSON.
+#[wasm_bindgen]
+pub fn career_fit_part(uid: u32, slot: &str, part: u32) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.fit_part(CarUid(uid), slot, part)?;
+        c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Take everything in the way of `slot` off car `uid`. Returns the workshop JSON.
+#[wasm_bindgen]
+pub fn career_clear_way(uid: u32, slot: &str) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.clear_way(CarUid(uid), slot)?;
+        c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Pay the mechanic to fit a part in `slot` of car `uid`: inventory part `part` when it is
+/// not 0, otherwise one bought now (`grade` = mod id, `""` = stock). The old part is sold when
+/// `sell_old`, kept otherwise. Returns `{"job": MechanicJob, "workshop": WorkshopScreen}`.
+#[wasm_bindgen]
+pub fn career_mechanic_install(
+    uid: u32,
+    slot: &str,
+    part: u32,
+    grade: &str,
+    sell_old: bool,
+) -> Result<String, JsValue> {
+    with_career(|c| {
+        let source = if part != 0 {
+            wp_economy::PartSource::Inventory(part)
+        } else {
+            wp_economy::PartSource::Buy((!grade.is_empty()).then(|| grade.to_string()))
+        };
+        let job = c.mechanic_install(CarUid(uid), slot, &source, sell_old)?;
+        let workshop = c.workshop(CarUid(uid))?;
+        Ok(serde_json::json!({ "job": job, "workshop": workshop }).to_string())
+    })
+}
+
+/// Buy a part of `kind` for car `uid` (`grade` = mod id, `""` = stock replacement). Returns
+/// the workshop JSON.
+#[wasm_bindgen]
+pub fn career_buy_part(uid: u32, kind: &str, grade: &str) -> Result<String, JsValue> {
+    with_career(|c| {
+        let grade = (!grade.is_empty()).then_some(grade);
+        c.buy_part(CarUid(uid), kind, grade)?;
+        c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Engine stand: take the part in `slot` out of loose engine `assembly`. Returns the workshop
+/// JSON of car `uid`.
+#[wasm_bindgen]
+pub fn career_strip_part(uid: u32, assembly: u32, slot: &str) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.strip_part(assembly, slot)?;
+        c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Engine stand: put inventory part `part` into `slot` of loose engine `assembly`. Returns
+/// the workshop JSON of car `uid`.
+#[wasm_bindgen]
+pub fn career_build_part(
+    uid: u32,
+    assembly: u32,
+    slot: &str,
+    part: u32,
+) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.build_part(assembly, slot, part)?;
+        c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Sell inventory part `part`; returns the workshop JSON of car `uid`.
+#[wasm_bindgen]
+pub fn career_sell_part(uid: u32, part: u32) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.sell_part(part)?;
+        c.workshop(CarUid(uid)).map(|w| json(&w))
     })
 }
 

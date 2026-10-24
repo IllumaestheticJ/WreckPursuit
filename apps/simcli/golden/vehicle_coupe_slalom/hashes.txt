@@ -1,13 +1,13 @@
-# simcli hashes scenario=vehicle_coupe_slalom systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
-240 e0d3ab10b4754f81
-480 5433d1a3700778c9
-720 d6ecfaca8c256b48
-960 01ff95cb4f84c7f1
-1200 d60c58dcf1c75544
-1440 7d39e90b0ff3d4b1
-1680 d6b02668abe85b72
-1920 4715fd7620296a0e
-2160 dc5a1e2cde1454b0
-2400 e6e158b857eb5043
-2640 7988d5ebf9fc13a9
-2880 eaf71f5b2f664e64
+# simcli hashes scenario=vehicle_coupe_slalom systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 9f436c96ba09db7f
+480 54658ef779feb4e6
+720 5ec8e66fcf4659be
+960 3fc5216ff5cc8c8c
+1200 132466618e20c94a
+1440 56a51dc199b7184e
+1680 740be019fb336ad3
+1920 214f19204e8a2da3
+2160 b19ffe399363874e
+2400 ae0ca07612875988
+2640 0798c4ebf3a56a59
+2880 90676757a5102e55

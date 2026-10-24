@@ -1,5 +1,5 @@
 // Static-frame cost of each part of the low-poly dark style (machine S). Pauses one night
-// city-chase frame and times GPU-synced renders (render + 1-pixel readPixels) with each part
+// night-run frame and times GPU-synced renders (render + 1-pixel readPixels) with each part
 // toggled live, so every row sees the same view. Usage: node e2e/art_cost.mjs (needs
 // `npm run wasm`; own Vite). Env: QUERY=<url params> (e.g. gfx=high), N=<renders per row>.
 // Headless SwiftShader: compare rows with each other only.
@@ -31,7 +31,7 @@ const browser = await chromium.launch({
 const page = await (await browser.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
 await page.goto(`http://localhost:${PORT}/?style=lowpoly${process.env.QUERY ? `&${process.env.QUERY}` : ""}`);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 90000 });
-await page.evaluate(() => window.__wp.startCityChase(undefined, "Arcade", false));
+await page.evaluate(() => window.__wp.startNightRun(undefined, "Arcade", false));
 await page.keyboard.down("KeyW");
 await page.waitForTimeout(8000);
 await page.keyboard.up("KeyW");

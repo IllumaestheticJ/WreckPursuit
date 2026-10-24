@@ -1,11 +1,11 @@
-# simcli hashes scenario=race_grid_highway_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
-240 479d458a7a967f91
-480 d5a821d58f40ac0d
-720 365a03543dac5db1
-960 4924b8a68ce17c31
-1200 d90a42600706f848
-1440 914779fd24f54312
-1680 72a6a9fa5de24e3c
-1920 1115d9f7df97c442
-2160 4854ec551d907360
-2400 1790d3ea7ea0a8d0
+# simcli hashes scenario=race_grid_highway_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 622f494413ebfd69
+480 5ce72c712f97627b
+720 27b930ae24dbd449
+960 7ab94b2c7ee19467
+1200 987643e6e4258e0e
+1440 4b1be6bc5a367d9b
+1680 1935330452828727
+1920 ae18dc08bdd886bd
+2160 d8751d8669a0d159
+2400 c13b65c6f9b599d0

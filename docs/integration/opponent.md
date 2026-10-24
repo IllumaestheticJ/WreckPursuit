@@ -339,3 +339,38 @@ trig).
 - **Report to K / race (judge)**: police units spawned during the race are not in the judge's
   police list, so a racer's low-speed bump with one (Hollins seed 5, unit 14 arriving at a
   capture) counts as a civilian hit (`civilian_hits`).
+- **Flee test on the round-12 tip (police give-way, grid fit, residential grid layout)**:
+  `wanted_ai_racer_flees_police_through_the_city` now asserts that racer 1 (injected L3)
+  flees and that **any other racer that flees has a record of its own**: traffic violations
+  by its own car (`Outcome::violations_by`, new), a wanted level the sim's police raised for
+  it, and its own `Abandoned` event at or below that level. On the new map seed 1 failed on
+  distance, not attribution: a left-turning civilian stood 45 s at the (141, −167) junction
+  across racer 1's flight route (≈2.2 m beside it for a 1.8 m car; civilians keep 0.4 m
+  clearance — letting the AI squeeze parked civilians too spread the grid-highway field badly,
+  so not done). Seed → 3 (`WP_FLEE_SEED` sweep 1–8: 2, 3, 7 pass; 1 civilian above; 4 247 m
+  of the 250 m bar; 5, 8 flight goal away from every known patrol, not only the injected
+  unit; 6 caught after 112 m). Seeds 3, 5, 7, 8 have racers 2 and 3 fleeing with 8–13
+  violations each and their own wanted level — all pass the new check.
+- **Pace lock-in red on the round-12 tip (release only)** — causes, fixes and re-measured
+  ranges in `opponent-pace.md` ("Round-12 tip re-measure"). Outside my crates:
+  `crates/wp_race/tests/race_picker.rs` new `hollins_hill_sprint_pace_without_police`
+  (like Loop 9's split); `opponent_pace.rs` lock-in honours `WP_PACE_TRACE`.
+- **Report to E (police), Hollins with police on the round-12 tip**: across `WP_RACE_SEED`
+  1–8 only 15–19 of 32 racers finish and 2 of 8 races never end. Pattern: the leader touches
+  a unit stopped on the hairpin near (−840, 1139), is chased and captured there; the unit then
+  stands (Patrol, v = 0) beside the busted car while the field queues behind both. The AI now
+  pulls a busted car to the kerb, but a unit giving way to cars that are waiting for it
+  remains a stand-off.
+
+
+## Playtest row 135 (lead): fleeing racers use every lane
+
+Owner: "on the Loop 9 race, AI racers only follow the green line". Measured on Loop 9 (native and
+in the browser): racing racers run 2–7 m off the route line, using the whole carriageway; the
+first `START_HOLD_M` (150 m) keeps the grid lanes on purpose. The exception was a racer the
+police chase: `plan_flight` gave its flight route `RacingLine::constant(0.0)` (the planned
+lane's centre, ±0.1 m), and on Loop 9 that lane is the race route's. Flights now get
+`RacingLine::optimise` with 30 / 30 sweeps (`FLIGHT_LINE_*_SWEEPS`; the race line keeps
+100 / 150). The full race line takes ~27 ms for Loop 9's 5 000 samples (native release); the
+cost scales with the fine-level sweeps, so a 2 km flight (1 000 samples) should cost about 1 ms
+per replan (estimated, not measured; replans every `FLIGHT_REPLAN_S` = 6 s).

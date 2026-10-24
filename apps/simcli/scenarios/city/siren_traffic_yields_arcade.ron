@@ -1,5 +1,7 @@
+// Contract v0.4.0: the pre-v0.4.0 Arcade table is now Simulation, so this scenario keeps its
+// name and runs `mode: Simulation` (same behaviour and hashes as before).
 // Playtest rows 61-62 (traffic gets out of the way of police with sirens on): a police car drives
-// Garage 1 -> Garage 2 on the 12x12 grid (403 m, mostly two-lane streets) through busy civilian
+// Garage 1 -> Safehouse 2 on the 12x12 grid (≈ 440 m, mostly two-lane streets) through busy civilian
 // traffic, riding the line on the left of its lane (lateral_offset_m -1.55, where a unit passes
 // yielding traffic) and keeping its distance from anything in its way (keep_distance).
 // Civilians signal, pull over to the kerb (or away from the unit), stop, let it past and merge
@@ -8,11 +10,15 @@
 // The exact "six cars passed within 10 s" check is wp_world tests/siren.rs (deterministic
 // geometry); this scenario runs the same behaviour in the full sim (physical traffic, wp_sim's
 // siren flag, damage mode Arcade).
+// lead/main-sync: main's grid rework (divided viaduct, ramps) reshuffled the POIs and put
+// Garage 3 at (0, 185) under the viaduct (a 2.3 km route), so the route and seed moved from
+// Garage 2 -> Garage 3, seed 2. Seeds 1-12 on the new route: siren runs finish on 5 and 12,
+// the no-siren control stays below 0.8 on 12 (it also finishes on 5).
 (
     name: "city_siren_traffic_yields_arcade",
-    seed: 8,
+    seed: 12,
     city: file("city/procedural_12x12.road.json"),
-    mode: Arcade,
+    mode: Simulation,
     time_of_day_h: 12.0,
     time_ratio: 1.0,
     traffic_density: 10.0,
@@ -25,7 +31,7 @@
             car: "sentinel_cruiser",
             speed_mps: 10.0,
             driver: follow_route(
-                route_id: "Garage 1 -> Garage 2",
+                route_id: "Garage 1 -> Safehouse 2",
                 target_speed: 16.0,
                 lateral_offset_m: -1.55,
                 keep_distance: true,
@@ -35,9 +41,6 @@
     ],
     duration_s: 45.0,
     expect: [
-        // Merged with main's highway layout: the garages moved (Garage 2 -> Garage 3 is now
-        // 2 km), so the route is Garage 1 -> Garage 2 (418 m) and the seed 8 (seeds 1-9: only
-        // 8 finishes; the rest stall behind pulled-over cars as before).
         // Measured (seed 2, round 13: time-of-day curve + two siren deadlock fixes in
         // wp_world): 4 pull-overs, route done, 0 contacts. Seeds 1-9: 3 of 9 finish (2, 4, 5;
         // 7 of 9 with the round-12b curves). The rest stall where a pulled-over car

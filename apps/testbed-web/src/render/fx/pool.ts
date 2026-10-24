@@ -325,3 +325,38 @@ export function randomOrientation(d: Float32Array, o: number, rng: FxRng): void 
   d[o + P.qz] = b * Math.sin(u3);
   d[o + P.qw] = b * Math.cos(u3);
 }
+
+/**
+ * Run `ballistic` and `spin` through every branch (resting, flying, landing, bouncing, not
+ * spinning) on a scratch record with fractional values, once at load, so V8 optimises them
+ * before the first crash. Fed only by the chase at 3–4 fps they spent the first ~10 s in a
+ * tier where every float operation allocates (~15 KB a frame, allocation pass 2026-10-20).
+ * Touches only its own scratch array.
+ */
+function warmPoolKernels(): void {
+  const d = new Float32Array(STRIDE);
+  for (let n = 0; n < 20000; n++) {
+    d.fill(0);
+    d[P.rest] = n % 7 === 0 ? 1 : 0;
+    d[P.px] = 0.31 + (n % 13) * 0.07;
+    d[P.py] = -0.27 + (n % 11) * 0.05;
+    // Above the ground plane (flying) or just under it (lands, bounces).
+    d[P.pz] = n % 2 === 0 ? 1.37 : 0.013;
+    d[P.vx] = 1.3;
+    d[P.vy] = -0.7;
+    d[P.vz] = n % 3 === 0 ? 0.45 : -2.3;
+    d[P.ga] = 0.021;
+    d[P.gb] = 0.003;
+    d[P.gc] = -0.002;
+    d[P.wx] = n % 5 === 0 ? 0 : 1.7;
+    d[P.wy] = n % 5 === 0 ? 0 : -0.9;
+    d[P.wz] = n % 5 === 0 ? 0 : 2.3;
+    d[P.qx] = 0.1;
+    d[P.qy] = 0.2;
+    d[P.qz] = 0.3;
+    d[P.qw] = 0.927;
+    ballistic(d, 0, 0.0167, 0.35, 0.3, 0.55, 0.1);
+    spin(d, 0, 0.0167);
+  }
+}
+warmPoolKernels();

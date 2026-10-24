@@ -1,41 +1,23 @@
 {
   "id": "siren_rec",
   "kind": "Siren",
-  "description": "Electronic siren loops cut from aquinn's 'Sirens and Alarm Noise' (CC0): wail (rise + fall), yelp, phaser, hi-lo. Play at their own cadence.",
-  "fallback": "siren_proc",
+  "description": "Recorded police siren loops (whole natural cycles, played at their own cadence): wail, yelp and fast phaser from a fire-apparatus electronic siren (Heggyhomolit, CC0) and a German police two-tone for hi-lo (Work With Sounds / Konrad Gutkowski, CC-BY 4.0). Whoop and air horn stay synthesized (siren_v2).",
+  "fallback": "siren_v2",
   "cues": {
-    "siren/wail": {
+    "siren/airhorn": {
       "source": {
-        "Samples": {
-          "files": [
-            "wail.ogg"
-          ]
+        "Synth": {
+          "synth": "siren",
+          "params": {
+            "driver": 1.0,
+            "kind": 2.0,
+            "bright": 0.7
+          }
         }
       },
-      "gain": 1.995,
-      "looped": true
-    },
-    "siren/yelp": {
-      "source": {
-        "Samples": {
-          "files": [
-            "yelp.ogg"
-          ]
-        }
-      },
-      "gain": 1.995,
-      "looped": true
-    },
-    "siren/phaser": {
-      "source": {
-        "Samples": {
-          "files": [
-            "phaser.ogg"
-          ]
-        }
-      },
-      "gain": 1.995,
-      "looped": true
+      "gain": 0.7,
+      "looped": false,
+      "duration_s": 0.5
     },
     "siren/hilo": {
       "source": {
@@ -45,8 +27,60 @@
           ]
         }
       },
-      "gain": 1.995,
-      "looped": true
+      "gain": 2.371,
+      "looped": true,
+      "release_s": 0.15
+    },
+    "siren/phaser": {
+      "source": {
+        "Samples": {
+          "files": [
+            "phaser.ogg"
+          ]
+        }
+      },
+      "gain": 2.371,
+      "looped": true,
+      "release_s": 0.15
+    },
+    "siren/wail": {
+      "source": {
+        "Samples": {
+          "files": [
+            "wail.ogg"
+          ]
+        }
+      },
+      "gain": 2.371,
+      "looped": true,
+      "release_s": 0.15
+    },
+    "siren/whoop": {
+      "source": {
+        "Synth": {
+          "synth": "siren",
+          "params": {
+            "driver": 1.0,
+            "kind": 1.0,
+            "bright": 0.6
+          }
+        }
+      },
+      "gain": 0.6,
+      "looped": false,
+      "duration_s": 0.7
+    },
+    "siren/yelp": {
+      "source": {
+        "Samples": {
+          "files": [
+            "yelp.ogg"
+          ]
+        }
+      },
+      "gain": 2.371,
+      "looped": true,
+      "release_s": 0.15
     }
   }
 }

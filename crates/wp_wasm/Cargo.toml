@@ -29,7 +29,8 @@ wp_net.workspace = true
 # Audio director (workstream J); pure logic, wasm32-clean. Used only by src/audio.rs.
 wp_audio.workspace = true
 wp_weather.workspace = true
-# Race picker (workstream 15): judge, AI entrants (wp_opponent), stakes; pure logic, wasm32-clean.
+# Race picker (workstream 15) and NPC street racers (src/street.rs): judge, AI entrants
+# (wp_opponent), stakes; pure logic, wasm32-clean.
 wp_race.workspace = true
 wp_opponent.workspace = true
 # Canonical scenario format v2, sim setup (`build_sim`), drivers, expectations and replay.bin
@@ -40,6 +41,8 @@ serde_json.workspace = true
 wasm-bindgen.workspace = true
 # Pure-Rust, no_std-capable binary codec for events and replays (wasm32-clean).
 postcard = { version = "1", default-features = false, features = ["alloc"] }
+# Pure-Rust deflate (no native build step): the embedded data blob (build.rs, src/data.rs).
+miniz_oxide = "0.9"
 
 [dev-dependencies]
 # tests/drawn_colliders.rs: classify which static collider a contact hit (already in the tree
@@ -51,3 +54,7 @@ wasm-opt = false
 
 [package.metadata.wasm-pack.profile.dev]
 wasm-opt = false
+
+[build-dependencies]
+# Compresses the embedded data blob (build.rs).
+miniz_oxide = "0.9"

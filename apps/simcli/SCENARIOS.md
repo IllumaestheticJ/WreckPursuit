@@ -29,6 +29,7 @@ Parsing uses RON with `implicit_some`, so optional fields are written plainly
     slow: false,                     // true = minutes of a full city: debug `cargo test` skips it (release CI runs it)
     systems: "vehicle,damage,world", // optional; default all. --systems overrides. "net" adds the snapshot round trip
     barriers: [(pos: (0.0, 20.0, 0.75), size: (8.0, 1.0, 1.5), yaw: 0.0)],  // static boxes (rigid walls)
+    parked: [(pos: (0.0, 30.0, 0.0), yaw: 0.0)],  // parked cars (dent when hit; any world)
     police_orders: [(t_s: 0.0, order: spikes_at(target: "car", pos: (0.0, 50.0), dir: (0.0, 1.0)))],
     weather: (kind: HeavyRain, intensity: 1.0, water_mm: 1.5, locked: true), // optional; see below
     entities: [ … ],                 // spawn order = entity id order (1, 2, 3, …); may be empty
@@ -83,6 +84,13 @@ route POIs `"<name> entry"`, `"<name> lay-by"` (mid-tunnel kerb lane) and `"<nam
 `barriers` are static boxes (`Sim::add_static_box`): centre `pos`, full `size` `[x, y, z]`,
 `yaw` about +Z. Contacts with them reach damage as static world geometry.
 
+`parked` adds parked cars (`Sim::add_parked_car`) on top of the city's kerbside ones: `pos` is
+the ground point under the car's centre (on a city with terrain only x, y count), `yaw` its
+heading. Like the city's parked cars they are cheap boxes until something moving hits them,
+then dent with the traffic car's lattice (`debug_sedan`) and the scenario's mode table
+(`wp_sim` parked-car damage, `docs/integration/parked-signals.md`). Their damage is reported
+by the `parked_*` world metrics (not per entity; they are not entities).
+
 `police_orders` deploy police tools at `t_s` (applied once, at tick `round(t_s/dt)`):
 - `roadblock(target: "car")` and `spikes(target: "car")` are captain orders
   (`Sim::captain_command`). wp_police checks them: the target must be in a pursuit and wanted
@@ -121,6 +129,7 @@ failures.
 (
     id: "striker",                  // scenario-local name used by expectations
     car: "debug_coupe",             // data/cars/<car>.json
+    mods: ["tires_semi_slick", "aero_splitter"], // installed mods (data/mods; default none)
     pos: (-40.0, 0.0, 0.0),         // world m (default origin)
     yaw: -1.5708,                   // rad about +Z, 0 = facing +Y (default 0)
     speed_mps: 13.9,                // start rolling forward at this speed (default 0, at rest)
@@ -134,6 +143,11 @@ failures.
 )
 ```
 
+- `mods`: the entity drives the car with these mods installed (`simcli::data::load_modded_car`
+  = `wp_economy::mods::apply_mods`: engine, tires, suspension, aero, lattice reinforcement…).
+  Must be a legal set for the car's class (requirements, class whitelist); only mods active in
+  the scenario's `mode` change the physics. The browser draws the parts on the car
+  (`wp_wasm::mod_visuals`, testbed `render/mod_parts.ts`).
 - `inputs`: keyframes ascending by `t_s`; each `VehicleInput` holds until the next key
   (missing fields are 0/false). `gear_up`/`gear_down` are edges: they apply on the key's first
   tick only. A key at `t_s` applies before tick `round(t_s / PHYSICS_DT)` is stepped.
@@ -177,7 +191,8 @@ All ranges are inclusive. `entity` defaults to the first entity; a scenario with
 
 Metrics for `metric(...)`: `final_speed_mps`, `max_speed_mps`, `distance_m` (horizontal,
 from spawn), `path_length_m`, `final_health`, `max_lateral_g`, `max_long_g`,
-`max_yaw_rate_rps`, `crush_depth_m`, `components_failed`, `parts_detached`, `wheels_detached`,
+`max_yaw_rate_rps`, `wheelspin_s` (time with any ground-contact wheel's |slip ratio| > 0.2),
+`max_heading_change_deg` (largest |heading change| from the first tick), `crush_depth_m`, `components_failed`, `parts_detached`, `wheels_detached`,
 `total_loss` (0/1), `min_z_m`, `off_road_s` (time not on any lane, junction connector or
 junction box at about its height; city runs only), `max_airborne_s` (longest stretch with all
 four wheels off the ground), `route_progress` (fraction of a `follow_route` route covered, 0
@@ -193,11 +208,15 @@ after the warm-up), `civilian_collisions`, `traffic_spawned`, `traffic_stuck_rec
 `traffic_go_arounds` (civilians that got around a stationary vehicle: oncoming-lane passes plus
 lane changes made for it), `traffic_turnarounds` (civilians that turned around or reversed back
 to the last junction because their lane was blocked), `traffic_siren_yields` (civilians that
-pulled over for a siren unit coming up behind them), `props`
+pulled over for a siren unit coming up behind them), `traffic_max_stop_s` (longest a civilian stood still outside a red / amber light, s), `traffic_max_queue` (longest queue of stopped civilians back from a stop line, followed back through junctions; sampled each second), `traffic_box_stops` (civilians that stood > 5 s inside a junction box), `traffic_jam_recycled` (unseen civilians recycled after standing still 30 s outside a red light) (jam diagnostics, owner row 85), `props`
 (parked cars and cones turned into bodies), `static_boxes`, `police_units_max` (most police
 units alive at once), `police_units_final`, `roadblock_barriers_max` (most roadblock barrier bodies at once),
 `spike_strips_max`, `barrier_displaced_max_m` (furthest any barrier body was pushed from
-where it spawned). The police tool metrics also work on the flat world.
+where it spawned). The police tool metrics also work on the flat world. Parked cars (city or
+`parked`, any world): `parked_dented` (parked cars hit hard enough to get a damage lattice),
+`parked_crush_max_m` (deepest structural crush of any of them at the end, as `crush_depth_m`),
+`parked_health_min` (lowest health of any dented one; 1 when none), `parked_glass_shattered`,
+`parked_parts_detached`, `parked_moved_max_m` (farthest any parked car was shoved).
 
 Use ranges, never exact numbers: the hash goldens already pin exact behaviour, and ranges
 describe what "correct" means so they survive tuning.

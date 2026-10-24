@@ -100,6 +100,20 @@ mod tests {
         let golden =
             std::fs::read_to_string(root.join("apps/simcli/golden/smoke_straight_line/hashes.txt"))
                 .unwrap();
-        assert_eq!(got, golden);
+        // Every `<tick> <hash>` line must match, as `simcli goldens` checks it. The header
+        // must match too except its contract version: a contract bump (0.3.0 -> 0.3.1 for
+        // `DnfReason::Stuck`) does not re-bless every golden, and `simcli goldens` accepts it.
+        let diff = simcli::golden::compare_hashes(&golden, &got);
+        assert!(diff.matched, "hashes differ: {diff:?}");
+        let header = |t: &str| {
+            t.lines()
+                .next()
+                .unwrap_or_default()
+                .split_whitespace()
+                .filter(|w| !w.starts_with("contract="))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        assert_eq!(header(&got), header(&golden), "header (systems, hash spec)");
     }
 }

@@ -1,19 +1,19 @@
 // Scene: renderer, lights, sky colour from TimeOfDay, ground + 10 m grid, the city greybox
 // (data/city/<id>.greybox.glb, prompt 05), police helicopters, barriers, fading contact
-// markers and intent arrows. Traffic and police cars are drawn by render/lod.ts.
+// markers, garage markers and intent arrows. Traffic and police cars are drawn by render/lod.ts.
 // Sim space is +Z up / +Y forward; Three.js is +Y up, so `world` is rotated -90° about X and
 // every sim-space object is parented under it.
 import * as THREE from "three";
 import { tagFeature } from "./perf";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import type { Barrier, SimEvent } from "./wasm/sim";
+import { setCarEnvironment } from "./render/panels";
+import type { Barrier, GarageSite, SimEvent } from "./wasm/sim";
 import { D, DRAW_STRIDE, INTENT_STRIDE, POLICE_DRAW_FLAG, TL, TOOL_KIND, TOOL_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
 import { CityTiles } from "./render/city_tiles";
 import { Quality } from "./render/quality";
-import { artStyle } from "./render/style";
 import { MarkingsView } from "./markings_view";
 
 const DAY_SKY = new THREE.Color(0x8fb8de);
@@ -30,11 +30,120 @@ interface ContactMarker {
 const CONTACT_LIFETIME_S = 1.5;
 /** Contact markers are pooled (a crash emits dozens of contacts per frame): oldest reused. */
 const MAX_CONTACT_MARKERS = 64;
+/** Garage marker colours: legit (blue) and crooked (amber) shops. */
+const GARAGE_COLOUR = { Legit: 0x3399ff, Crooked: 0xffaa22 } as const;
+/** Height of a garage's light beam, m (visible over the greybox blocks). */
+const GARAGE_BEAM_M = 40;
 const CONTACT_DOT = new THREE.SphereGeometry(0.08, 8, 6);
 const tmpNormal = new THREE.Vector3();
 const groundRay = new THREE.Raycaster();
 const groundFrom = new THREE.Vector3();
 const groundDown = new THREE.Vector3(0, -1, 0);
+/** Floats per helicopter in police_helicopters(). */
+const HELO_STRIDE = 8;
+/** The spotlight is on from this night factor (0 noon … 1 midnight). */
+const SPOTLIGHT_NIGHT = 0.35;
+
+interface HeloAirframe {
+  obj: THREE.Group;
+  rotor: THREE.Object3D;
+  tailRotor: THREE.Object3D;
+  nav: THREE.MeshStandardMaterial;
+  /** Light bar (flashes while the unit is pursuing). */
+  red: THREE.MeshStandardMaterial;
+  blue: THREE.MeshStandardMaterial;
+}
+
+/** A helicopter spotlight. Unlit meshes only, no THREE light: a changing light count recompiles
+ * every lit shader mid-chase and every light costs every lit pixel (see `sirenLight`). */
+interface HeloBeam {
+  /** Visible beam: unit cone (apex at the origin, opening along +Z), scaled to length/radius. */
+  cone: THREE.Mesh;
+  /** Pool of light on the ground at the aim point. */
+  pool: THREE.Mesh;
+}
+
+/** Police helicopter: fuselage, tail boom, skids, main + tail rotor, a blinking nav light and a
+ * red / blue light bar under the nose. */
+function makeHelicopter(): HeloAirframe {
+  const g = new THREE.Group();
+  const body = new THREE.MeshStandardMaterial({ color: 0x1d2433 });
+  const white = new THREE.MeshStandardMaterial({ color: 0xe9ebf0 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x223344, emissive: 0x0a1220 });
+  const fuselage = new THREE.Mesh(new THREE.BoxGeometry(2.2, 5.0, 2.2), body);
+  fuselage.position.set(0, 0.5, 1.6);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.25, 4.0, 0.4), white);
+  stripe.position.set(0, 0.3, 1.4);
+  const nose = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.4, 1.5), glass);
+  nose.position.set(0, 3.4, 1.4);
+  const boom = new THREE.Mesh(new THREE.BoxGeometry(0.5, 5.5, 0.5), body);
+  boom.position.set(0, -4.6, 2.1);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.9, 1.6), body);
+  fin.position.set(0, -7.2, 2.7);
+  const skidGeo = new THREE.BoxGeometry(0.15, 5.0, 0.15);
+  const skidL = new THREE.Mesh(skidGeo, white);
+  skidL.position.set(-1.2, 0.5, 0.1);
+  const skidR = new THREE.Mesh(skidGeo, white);
+  skidR.position.set(1.2, 0.5, 0.1);
+  const rotor = new THREE.Group();
+  const bladeMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+  for (let k = 0; k < 2; k++) {
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(10.5, 0.35, 0.06), bladeMat);
+    blade.rotation.z = (k * Math.PI) / 2;
+    rotor.add(blade);
+  }
+  rotor.position.set(0, 0.5, 2.95);
+  const tailRotor = new THREE.Group();
+  const tb = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.2, 1.8), bladeMat);
+  tailRotor.add(tb);
+  tailRotor.position.set(0.3, -7.2, 2.9);
+  const nav = new THREE.MeshStandardMaterial({ color: 0x400000, emissive: 0x000000 });
+  const beacon = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, 0.25), nav);
+  beacon.position.set(0, -1.2, 2.8);
+  const red = new THREE.MeshStandardMaterial({ color: 0x661018 });
+  const blue = new THREE.MeshStandardMaterial({ color: 0x102266 });
+  const barR = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), red);
+  barR.position.set(-0.32, 2.2, 0.4);
+  const barB = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), blue);
+  barB.position.set(0.32, 2.2, 0.4);
+  g.add(fuselage, stripe, nose, boom, fin, skidL, skidR, rotor, tailRotor, beacon, barR, barB);
+  return { obj: g, rotor, tailRotor, nav, red, blue };
+}
+
+/** One spotlight's beam and ground pool, hidden, added to `parent`. */
+function makeBeam(parent: THREE.Object3D): HeloBeam {
+  // Unit cone: apex at the origin, opening along +Z (lookAt's axis), length 1, base radius 1.
+  // Three's cone has its apex at +Y 0.5; rotating -90° about X puts it at -Z 0.5.
+  const geo = new THREE.ConeGeometry(1, 1, 24, 1, true);
+  geo.rotateX(-Math.PI / 2);
+  geo.translate(0, 0, 0.5);
+  const cone = new THREE.Mesh(
+    geo,
+    new THREE.MeshBasicMaterial({
+      color: 0xfff6d8,
+      transparent: true,
+      opacity: 0.07,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      // One pass: transparent + DoubleSide would flip `side` and re-resolve the program twice a frame.
+      forceSinglePass: true,
+    }),
+  );
+  const pool = new THREE.Mesh(
+    new THREE.CircleGeometry(1, 32),
+    new THREE.MeshBasicMaterial({
+      color: 0xfff6d8,
+      transparent: true,
+      opacity: 0.18,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  cone.visible = pool.visible = false;
+  parent.add(cone, pool);
+  return { cone, pool };
+}
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
@@ -45,6 +154,7 @@ export class SceneView {
   readonly hemi: THREE.HemisphereLight;
   readonly sun: THREE.DirectionalLight;
   private readonly barriers = new THREE.Group();
+  private readonly garages = new THREE.Group();
   private readonly contacts: ContactMarker[] = [];
   private nextContact = 0;
   /** Contact markers created since the page loaded (for automation). */
@@ -60,7 +170,13 @@ export class SceneView {
   /** Small city detail (city_tiles.ts CITY_DETAIL) past this distance is not drawn, m. */
   detailDistanceM = Infinity;
   private readonly camPos = new THREE.Vector3();
-  private readonly policeUnits: { obj: THREE.Group; red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
+  /** Police helicopter airframes (police_draw()), pooled; see updateHelicopters(). */
+  private readonly helicopters: HeloAirframe[] = [];
+  /** Helicopter spotlights (police_helicopters()), pooled; see updateHelicopterBeams(). */
+  private readonly beams: HeloBeam[] = [];
+  /** Helicopters drawn last frame and spotlights lit (for automation). */
+  helicoptersShown = 0;
+  spotlightsLit = 0;
   /** Roadblock barriers (police_tools()), pooled; see updatePoliceTools(). */
   private readonly tools = new THREE.Group();
   private readonly toolPool: { barrier: THREE.Group; body: THREE.Mesh; bulb: THREE.Mesh; lamp: THREE.MeshStandardMaterial }[] = [];
@@ -82,6 +198,11 @@ export class SceneView {
   readonly prewarmRoots: THREE.Object3D[] = [];
 
   private debugGrid!: THREE.GridHelper;
+  /** Axis hint at the sim origin (hidden in the workshop). */
+  private originAxes!: THREE.AxesHelper;
+  /** The flat world's ground plane (hidden inside the garage workshop). */
+  private flatGround!: THREE.Mesh;
+  private workshopOn = false;
   /** The one siren point light (browser perf pass): every point light costs every lit pixel,
    * even at intensity 0, and a changing light count recompiles the lit shaders. It follows
    * the nearest police car with its siren on and is hidden when no siren is on. */
@@ -94,9 +215,6 @@ export class SceneView {
   onCityLoaded: ((root: THREE.Object3D, cityId: string) => void) | null = null;
   /** Painted road markings (markings_view.ts). */
   readonly markings = new MarkingsView();
-  /** Image-based lighting for the greybox style (see the constructor); low-poly dark is matte
-   * and lit by its own palette, so it renders without it. */
-  private readonly envMap: THREE.Texture;
 
   /**
    * `postAA: true` when the art style's post stack does the antialiasing (its own MSAA target,
@@ -111,14 +229,14 @@ export class SceneView {
     this.drawDistanceM = draw > 0 ? draw : this.quality.drawDistanceM;
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     parent.appendChild(this.renderer.domElement);
-    // Image-based lighting so metallic paint, chrome and bare metal on the car meshes read as
-    // metal instead of black (they only reflect an environment, never the direct lights).
-    const pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    this.scene.environment = this.envMap;
-    this.scene.environmentIntensity = 0.6;
-    pmrem.dispose();
     window.addEventListener("resize", () => this.renderer.setSize(window.innerWidth, window.innerHeight));
+    // Image-based lighting for the car materials (detailed-car-models), so metallic paint,
+    // chrome and bare metal read as metal instead of black: they only reflect an environment,
+    // never the direct lights. Car materials only (render/panels.ts applyCarEnv), not
+    // `scene.environment`, which would relight the whole city.
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    setCarEnvironment(pmrem.fromScene(new RoomEnvironment(), 0.04).texture);
+    pmrem.dispose();
 
     this.scene.background = DAY_SKY.clone();
     this.hemi = new THREE.HemisphereLight(0xffffff, 0x333333, 2.0);
@@ -129,6 +247,7 @@ export class SceneView {
     this.world.rotation.x = -Math.PI / 2;
     this.scene.add(this.world);
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), this.groundMaterial);
+    this.flatGround = ground;
     // Below the city's zone ground (-0.05 m) and roads (0 m), so they never z-fight with it.
     ground.position.z = -0.2;
     this.world.add(ground);
@@ -140,9 +259,15 @@ export class SceneView {
     // Axis hint at the origin: +X red, +Y (forward) green.
     const axes = new THREE.AxesHelper(3);
     axes.position.z = 0.02;
+    this.originAxes = axes;
     this.sirenLight.visible = false;
     tagFeature(this.signals.group, "signals");
-    this.world.add(axes, this.barriers, this.tools, this.intentGroup, this.signals.group, this.sirenLight, this.markings.group);
+    this.world.add(axes, this.barriers, this.garages, this.tools, this.intentGroup, this.signals.group, this.markings.group, this.sirenLight);
+    // One helicopter spotlight exists from the start (hidden) so its two programs are prewarmed,
+    // not compiled in the frame the first helicopter switches it on.
+    const beam = makeBeam(this.world);
+    this.beams.push(beam);
+    this.prewarmRoots.push(beam.cone, beam.pool);
     // The first contact marker exists from the start (hidden), so its shader programs are
     // prewarmed instead of compiled in the frame of the first contact (browser-perf.md 12b).
     const first = this.newContactMarker();
@@ -161,7 +286,7 @@ export class SceneView {
     for (const [id, obj] of this.cities) obj.visible = id === cityId;
     this.cityShown = cityId;
     // The debug grid sits on the road surface and flickers through it; hide it in the city.
-    this.debugGrid.visible = !cityId;
+    this.debugGrid.visible = !cityId && !this.workshopOn;
     if (!cityId || this.cities.has(cityId)) return;
     const holder = new THREE.Group();
     this.cities.set(cityId, holder);
@@ -174,7 +299,7 @@ export class SceneView {
       try {
         gltf = await new GLTFLoader().loadAsync(`data/city/${cityId}.greybox.glb`);
       } catch {
-        const b64 = await (await fetch(`data/city/${cityId}.greybox.b64.txt`)).text();
+        const b64 = await fetchGreyboxB64(cityId);
         const bytes = Uint8Array.from(atob(b64.trim()), (c) => c.charCodeAt(0));
         gltf = await new GLTFLoader().parseAsync(bytes.buffer, "");
       }
@@ -195,6 +320,8 @@ export class SceneView {
         lot_skirt: 1,
         asphalt: 1,
         highway_concrete: 1,
+        gravel_road: 1,
+        dirt_road: 1,
         ramp_taper: 2,
       };
       gltf.scene.traverse((o) => {
@@ -209,10 +336,14 @@ export class SceneView {
         }
       });
       holder.add(gltf.scene);
-      this.cityTiles.set(cityId, new CityTiles(gltf.scene));
+      this.cityTiles.set(cityId, new CityTiles(gltf.scene, this.quality.cityTileM));
       this.onCityLoaded?.(gltf.scene, cityId);
       this.warmLightVariants();
     } catch (e) {
+      // Forget the empty holder so the next session in this city tries again (a cached empty
+      // holder kept the city invisible for the rest of the page's life).
+      this.scene.remove(holder);
+      this.cities.delete(cityId);
       console.warn("city greybox not available", cityId, e);
     }
   }
@@ -222,6 +353,14 @@ export class SceneView {
    * the greybox; null without a city or a hit. For rarely placed objects (spike strips), not per
    * frame per car.
    */
+  /** Garage workshop: hide the flat ground and grid (the bay has its own floor). */
+  setWorkshop(on: boolean): void {
+    this.workshopOn = on;
+    this.flatGround.visible = !on;
+    this.debugGrid.visible = !on && !this.cityShown;
+    this.originAxes.visible = !on;
+  }
+
   groundZ(x: number, y: number): number | null {
     const city = this.cityShown ? this.cities.get(this.cityShown) : null;
     if (!city) return null;
@@ -234,40 +373,36 @@ export class SceneView {
 
   /**
    * Draw police helicopters from police_draw() records (layout.ts D; flags 1 helicopter,
-   * 2 pursuing): a box at altitude with a flashing light bar while pursuing. Police cars, bound
-   * or not, are drawn by render/lod.ts.
+   * 2 pursuing): an airframe at altitude with a spinning rotor, a blinking beacon and a flashing
+   * light bar while pursuing. Police cars, bound or not, are drawn by render/lod.ts.
    */
   updateHelicopters(units: Float32Array, timeS: number): void {
     let n = 0;
     for (let o = 0; o < units.length; o += DRAW_STRIDE) {
       const flags = units[o + D.flags];
       if (!(flags & POLICE_DRAW_FLAG.helicopter)) continue;
-      if (n >= this.policeUnits.length) {
-        const g = new THREE.Group();
-        const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 4.8, 1.4), new THREE.MeshStandardMaterial({ color: 0xe9ebf0 }));
-        body.position.z = 0.7;
-        const red = new THREE.MeshStandardMaterial({ color: 0x661018 });
-        const blue = new THREE.MeshStandardMaterial({ color: 0x102266 });
-        const barR = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), red);
-        barR.position.set(-0.32, -0.1, 1.48);
-        const barB = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), blue);
-        barB.position.set(0.32, -0.1, 1.48);
-        g.add(body, barR, barB);
-        g.scale.setScalar(1.4);
-        this.world.add(g);
-        this.policeUnits.push({ obj: g, red, blue });
+      if (n >= this.helicopters.length) {
+        const h = makeHelicopter();
+        h.obj.scale.setScalar(1.4);
+        this.world.add(h.obj);
+        this.helicopters.push(h);
       }
-      const u = this.policeUnits[n];
-      u.obj.position.set(units[o + D.pos], units[o + D.pos + 1], units[o + D.pos + 2]);
-      u.obj.quaternion.set(units[o + D.rot], units[o + D.rot + 1], units[o + D.rot + 2], units[o + D.rot + 3]);
+      const h = this.helicopters[n];
+      h.obj.position.set(units[o + D.pos], units[o + D.pos + 1], units[o + D.pos + 2]);
+      h.obj.quaternion.set(units[o + D.rot], units[o + D.rot + 1], units[o + D.rot + 2], units[o + D.rot + 3]);
+      // Rotor speed is a look, not a simulation: about 6 rev/s main, 30 rev/s tail.
+      h.rotor.rotation.z = (timeS * 38) % (Math.PI * 2);
+      h.tailRotor.rotation.x = (timeS * 190) % (Math.PI * 2);
+      h.nav.emissive.setHex((timeS + n * 0.3) % 1 < 0.12 ? 0xff2020 : 0x000000);
       const chasing = (flags & POLICE_DRAW_FLAG.chasing) !== 0;
       const phase = (timeS * 2.5 + n * 0.17) % 1;
-      u.red.emissive.setHex(chasing && phase < 0.5 ? 0xff2040 : 0x000000);
-      u.blue.emissive.setHex(chasing && phase >= 0.5 ? 0x2060ff : 0x000000);
-      u.red.emissiveIntensity = u.blue.emissiveIntensity = this.policeGlow;
+      h.red.emissive.setHex(chasing && phase < 0.5 ? 0xff2040 : 0x000000);
+      h.blue.emissive.setHex(chasing && phase >= 0.5 ? 0x2060ff : 0x000000);
+      h.red.emissiveIntensity = h.blue.emissiveIntensity = this.policeGlow;
       n++;
     }
-    this.policeUnits.forEach((u, i) => (u.obj.visible = i < n));
+    this.helicopters.forEach((h, i) => (h.obj.visible = i < n));
+    this.helicoptersShown = n;
   }
 
   /**
@@ -310,6 +445,44 @@ export class SceneView {
     });
   }
 
+  /**
+   * Helicopter spotlights (police_helicopters(): [x, y, z, aimX, aimY, aimZ, coneHalfAngle,
+   * flags], flag 1 = has visual). At night each tracking helicopter lights its target: a faint
+   * visible beam and a pool of light on the road (additive, unlit: no THREE light). Without
+   * visual the beam stays on the last known position, dimmer, so the player can see that the
+   * helicopter has lost them.
+   */
+  updateHelicopterBeams(helos: Float32Array, night: number): void {
+    const n = helos.length / HELO_STRIDE;
+    while (this.beams.length < n) this.beams.push(makeBeam(this.world));
+    const on = night >= SPOTLIGHT_NIGHT;
+    let lit = 0;
+    const from = new THREE.Vector3();
+    const to = new THREE.Vector3();
+    this.beams.forEach((b, i) => {
+      const show = on && i < n;
+      b.cone.visible = b.pool.visible = show;
+      if (!show) return;
+      lit++;
+      const o = i * HELO_STRIDE;
+      from.set(helos[o], helos[o + 1], helos[o + 2]);
+      to.set(helos[o + 3], helos[o + 4], helos[o + 5]);
+      const half = helos[o + 6];
+      const visual = (helos[o + 7] & 1) !== 0;
+      const k = Math.min(1, (night - SPOTLIGHT_NIGHT) / 0.3) * (visual ? 1 : 0.45);
+      const len = from.distanceTo(to);
+      const r = Math.tan(half) * len;
+      b.cone.position.copy(from);
+      b.cone.lookAt(this.world.localToWorld(to.clone()));
+      b.cone.scale.set(r, r, len);
+      (b.cone.material as THREE.MeshBasicMaterial).opacity = 0.07 * k;
+      b.pool.position.set(to.x, to.y, to.z + 0.08);
+      b.pool.scale.setScalar(r);
+      (b.pool.material as THREE.MeshBasicMaterial).opacity = 0.18 * k;
+    });
+    this.spotlightsLit = lit;
+  }
+
   /** Siren light at `pos` (sim space) with this colour / intensity; `null` = no siren on. */
   setSiren(pos: THREE.Vector3 | null, colour = 0, intensity = 0): void {
     this.sirenLight.visible = pos !== null;
@@ -342,6 +515,41 @@ export class SceneView {
       );
       m.add(stripe);
       this.barriers.add(m);
+    }
+  }
+
+  /** Repair shop markers (`garages_json()`): a ring on the ground at the shop's radius and a
+   * light beam, blue for legit shops, amber for crooked ones. Stop inside the ring to repair. */
+  setGarages(list: GarageSite[]): void {
+    for (const old of this.garages.children) {
+      old.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.geometry.dispose();
+          (o.material as THREE.Material).dispose();
+        }
+      });
+    }
+    this.garages.clear();
+    for (const g of list) {
+      const colour = GARAGE_COLOUR[g.kind] ?? GARAGE_COLOUR.Legit;
+      const holder = new THREE.Group();
+      holder.position.set(...g.pos);
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(g.radius_m - 0.6, g.radius_m, 48),
+        // Single pass (transparent + DoubleSide would flip `side` and re-resolve the program twice a frame).
+        new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false, forceSinglePass: true }),
+      );
+      ring.position.z = 0.08;
+      const beam = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.5, 0.5, GARAGE_BEAM_M, 12, 1, true),
+        new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.35, depthWrite: false }),
+      );
+      // CylinderGeometry runs along +Y; the world group is +Z up.
+      beam.rotation.x = Math.PI / 2;
+      beam.position.z = GARAGE_BEAM_M / 2;
+      holder.add(ring, beam);
+      holder.name = `garage:${g.name}`;
+      this.garages.add(holder);
     }
   }
 
@@ -494,13 +702,14 @@ export class SceneView {
   }
 
   render(camera: THREE.PerspectiveCamera): void {
-    // Environment lighting only in the greybox style (changes programs on a style switch only).
-    const env = artStyle.lowpoly ? null : this.envMap;
-    if (this.scene.environment !== env) this.scene.environment = env;
     const tiles = this.cityShown ? this.cityTiles.get(this.cityShown) : undefined;
     if (tiles) {
       camera.getWorldPosition(this.camPos);
       tiles.update(this.camPos, this.cullDistanceM(camera), this.detailDistanceM);
+    }
+    if (this.markings.tileCount > 0) {
+      camera.getWorldPosition(this.camPos);
+      this.markings.update(this.camPos, this.cullDistanceM(camera));
     }
     // Three bakes the number of visible point lights into every lit shader, so the shared siren
     // light turning on (first police lights) used to recompile every lit material mid-chase
@@ -614,4 +823,29 @@ function prewarmStandIn(o: THREE.Object3D, m: THREE.Material, kind: number): THR
       return new THREE.Points(geo, m);
   }
   return null;
+}
+
+/**
+ * Fetches a city greybox as base64 text. The published build caps each file at 15 MB, so
+ * `tools/preview_build.sh` splits larger greyboxes into `<id>.greybox.b64.partN.txt` files
+ * listed in `<id>.greybox.b64.parts.txt` (one line: the part count). Those are joined in order.
+ */
+async function fetchGreyboxB64(cityId: string): Promise<string> {
+  const base = `data/city/${cityId}.greybox.b64`;
+  const whole = await fetch(`${base}.txt`);
+  if (whole.ok) {
+    const text = await whole.text();
+    if (!text.trimStart().startsWith("<")) return text;
+  }
+  const manifest = await fetch(`${base}.parts.txt`);
+  if (!manifest.ok) throw new Error(`greybox ${cityId}: no .b64.txt and no parts manifest`);
+  const count = parseInt((await manifest.text()).trim(), 10);
+  if (!(count > 0)) throw new Error(`greybox ${cityId}: bad parts manifest`);
+  const parts: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const r = await fetch(`${base}.part${i}.txt`);
+    if (!r.ok) throw new Error(`greybox ${cityId}: missing part ${i}`);
+    parts.push((await r.text()).trim());
+  }
+  return parts.join("");
 }
