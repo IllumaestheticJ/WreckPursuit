@@ -560,9 +560,12 @@ fn parked_gap(v: f32, full: f32) -> f32 {
 
 /// Whether `o` is a parked sim vehicle that is not a racer (a police unit standing in the
 /// road): squeezed past slowly with little clearance. Racers pulled over and civilians keep
-/// their normal clearance.
+/// their normal clearance. A police unit standing still counts at once, without the parked
+/// timer (Lantern police: a unit standing beside a captured car at a capture scene shuffles
+/// now and then, never counted as parked, and boxed the car behind in for the rest of the
+/// race).
 fn parked_non_racer(o: &Obstacle) -> bool {
-    o.parked && matches!(o.who, Who::Vehicle(_))
+    matches!(o.who, Who::Vehicle(_)) && (o.parked || (o.police && o.v_s.abs() < 0.5))
 }
 
 /// Approximate standard normal from four uniforms (Irwin–Hall; no transcendental functions).
