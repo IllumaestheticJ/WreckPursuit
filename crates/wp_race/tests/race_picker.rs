@@ -895,8 +895,10 @@ fn tunnel_run() {
 #[test]
 fn hollins_descent() {
     let r = run_race("hollins_descent", 240);
-    // 1.35 km down the Hollins hairpins into Mercer.
-    check(&r, 40.0..150.0, 3);
+    // 1.35 km down the Hollins hairpins into Mercer, with a police stakeout on the course:
+    // since the road network centreline fix (playtest row 166) its pursuits catch two of the
+    // four (main: four pursuits, none caught), so captures count like `hollins_sprint`'s.
+    check_with_police(&r, 40.0..150.0, 3);
 }
 
 #[test]
