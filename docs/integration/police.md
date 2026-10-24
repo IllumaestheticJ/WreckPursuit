@@ -1828,3 +1828,26 @@ The city total per phase must stay ≥ 1: `PoliceSystem::unit_cap` reads a zero 
 - `escape_break_contact_night`: 7 escapes in 10, max 6 → 9.
 - With fewer pool units, more calls go to spawned responders and some are not met within the 60 s run (61 = never). `response_day_core` max 15 → 25 s (presence.toml's target). `response_day_suburb` mean 28 → 40 s, max 38 → 61. `response_night_core` 25 s reached 0.85 → 0.6, mean 17 → 30 s, max 40 → 61.
 - **Outside wp_police (test only):** `crates/wp_sim/tests/police_passby.rs` builds its police with the old dense table so it still finds a cop on a straight.
+## AI units that get nowhere despawn out of sight (owner request, 2026-10-23)
+
+Owner: AI police that are not making meaningful progress and not in view of any racer should
+despawn.
+
+- New `progress.rs`: `ProgressWatch` per unit (`Unit::progress`), updated at think rate by
+  `dispatch::maintain_progress` (right after `maintain_stuck`). Goal per assignment: `Pursue` →
+  racer, `Respond` → reported racer / crash, `Intercept` → point (ambush wait point included),
+  `Patrol` → destination node. Distance = remaining length of the unit's planned track (roads bend
+  away from a destination: straight-line distance despawned moving patrols in `traffic_soak`);
+  straight line for `Pursue` (local steering track) and once within 40 m. Progress = 25 m closer than the best since the job / patrol leg
+  began, or within 40 m of the goal; `Idle` (no goal) = 40 m driven. 30 s without progress →
+  despawn when `may_vanish` (out of every racer's sight, ≥ `despawn_min_m`); in sight it keeps
+  going and is re-checked every think step.
+- The call is handed back (`ResponseOutcome::NoProgress`) and dispatched again; pool patrols are
+  refilled by `maintain_pool`. `PoliceStats::no_progress_despawns` counts them.
+- Exempt: player units, `UnitRole::Tool`, helicopters, wrecked / out-of-service units, parked
+  roadblock / spike assignments. Applies to headless and physical units alike, both damage modes.
+  `set_unstick_recovery(false)` disables the despawn (measurements).
+- Constants in `progress.rs` (`NO_PROGRESS_S`, `GAIN_M`, `ARRIVED_M`, `MOVE_M`), like `stuck.rs`.
+- Tests: `progress::tests::*` (closing in vs. holding distance, arrival / new job / new patrol leg
+  reset, idle shuffling vs. driving).
+- Outside my crate: none.

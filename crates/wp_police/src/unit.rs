@@ -431,6 +431,9 @@ pub struct Unit {
     /// Branch and blocker when that stop began (row 86 audit).
     #[serde(skip)]
     pub active_stop_why: (u8, u8),
+    /// Watch for a unit getting nowhere ([`crate::progress`]).
+    #[serde(default)]
+    pub progress: crate::progress::ProgressWatch,
     /// Road route a pursuer is following to the racer (out of its sight), if any.
     #[serde(default)]
     pub chase_route: Option<ChaseRoute>,
@@ -519,6 +522,7 @@ impl Unit {
             active_stop_s: 0.0,
             flipped_since: None,
             active_stop_why: (0, 0),
+            progress: crate::progress::ProgressWatch::default(),
             chase_route: None,
             quiet: false,
             vel: [0.0, 0.0],
