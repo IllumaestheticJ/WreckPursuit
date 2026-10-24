@@ -256,11 +256,11 @@ helicopter = true
 box_in = false
 rolling_block = true
 junction_block = true
-pit = true
-rams = true
+pit = false
+rams = false
 
 [[harnell_dirt_run.stakeouts]]
-at = 0.35
+at = 0.85
 trigger_m = 80.0
 
 # Illegal daytime checkpoint run through Ashpeak City's downtown. Style: downtown crackdown,
