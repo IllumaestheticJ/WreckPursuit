@@ -18,7 +18,7 @@ claim those two. So the PR's own diff (`06d2b260..9565482e`, 96 files) was appli
 | Commit | What |
 |---|---|
 | `9c1d26b8` | The port: conflict resolutions, honk spots on round 12's challenge system, police profiles, name fixes |
-| `6408ed48` | Greyboxes and the grid road file regenerated on the tip; `pick_harlan_dirt_run.ron`, `pick_waterfront_drag.ron` rewritten (`WP_RACE_WRITE_SCENARIOS=1`) |
+| `6408ed48` | Greyboxes and the grid road file regenerated on the tip; `pick_harnell_dirt_run.ron`, `pick_waterfront_drag.ron` rewritten (`WP_RACE_WRITE_SCENARIOS=1`) |
 | `f23212ed` | testbed: duplicate `debugPlace` binding dropped (tsc) |
 | `b5281e40` | `[bless]` the 8 Ashpeak race goldens |
 | `10f7cdfa` | Merge round 12's new tip `5080fa80` (main #41 / #45 / #48, touge port #49, overpass fix, police row 156): 9 conflicts, below |
@@ -102,16 +102,16 @@ existing betting, not a parallel one.
 - **Police profiles for the 8 Ashpeak races** (`data/police/races.toml`), first proposals for
   E: presence = the stake table's default for the legality (1.0 street, 2.0 illegal daytime,
   as on `ws/ashpeak`). Styles: Mountain tail (Crowfoot up: no rams / PITs, stakeout at the
-  saddle), Valley net (Crowfoot down: junction block at the foot), Open country (Harlan:
+  saddle), Valley net (Crowfoot down: junction block at the foot), Open country (Harnell:
   helicopter, no spikes on gravel, backup ×0.75), Downtown crackdown (illegal daytime: all
   tactics, stakeout near the end), Tunnel exit (Route 7), Pass patrol (Grizzly Grade), Late
   response (drag: backup ×0.5, no tools), Block grid (metro circuit). All 8 still race to the
   flag (`race_picker`, release).
-- **Names (owner rule).** Renamed real names: "Harlan County Sheriff" (a real Kentucky
-  agency; also contradicted the ACSO lore) → "Ashpeak Sheriff Harlan Substation";
+- **Names (owner rule).** Renamed real names: "Harnell County Sheriff" (a real Kentucky
+  agency; also contradicted the ACSO lore) → "Ashpeak Sheriff Harnell Substation";
   "Cannery Row" (Monterey) → "Cannery Lane"; "Grand Concourse" (the Bronx) → "Grand
   Promenade". The sheriff livery prints only "SHERIFF" / "ASHPEAK COUNTY" with a drawn star
-  (no seal); police cars are round 12's analog `sentinel_*` models. Kept but flagged: "Harlan"
+  (no seal); police cars are round 12's analog `sentinel_*` models. Kept but flagged: "Harnell"
   (a common surname, also real US county names), "Crowfoot" (a Banff peak / glacier name),
   "Fifth Avenue" (generic), the internal scheme id `acso` (real agencies use that acronym; not
   shown in game).
@@ -231,7 +231,7 @@ per spot; frustum-culled). Every desktop gate that is machine-independent passes
 
 | # | Change | Why | Who | Status |
 |---|---|---|---|---|
-| 1 | `DistrictId::Farm` (or `Rural`) | Harlan Flats uses `DistrictId::Suburb` (traffic / police density and economy read it as suburb) | 05, 06, 08 | proposed (from PR #50's known gaps) |
+| 1 | `DistrictId::Farm` (or `Rural`) | Harnell Flats uses `DistrictId::Suburb` (traffic / police density and economy read it as suburb) | 05, 06, 08 | proposed (from PR #50's known gaps) |
 
 ## Open questions for the lead
 
@@ -240,4 +240,4 @@ per spot; frustum-culled). Every desktop gate that is machine-independent passes
    meant the street-race wager (one opponent, even money), spots would need a street-style
    offer card instead; say so and I'll switch.
 3. The 8 police profiles are proposals; route to E (police) for tuning?
-4. Names flagged but kept (Harlan, Crowfoot): rename?
+4. Names flagged but kept (Harnell, Crowfoot): rename?

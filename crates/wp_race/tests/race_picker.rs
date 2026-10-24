@@ -837,9 +837,9 @@ fn crowfoot_descent_touge() {
 }
 
 #[test]
-fn harlan_dirt_run() {
+fn harnell_dirt_run() {
     // 4 km of gravel section roads: winner ~266 s.
-    ashpeak_race("harlan_dirt_run", 500, 190.0..380.0, 3);
+    ashpeak_race("harnell_dirt_run", 500, 190.0..380.0, 3);
 }
 
 #[test]

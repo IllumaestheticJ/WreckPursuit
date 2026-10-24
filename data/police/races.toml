@@ -225,9 +225,9 @@ rams = false
 at = 0.9
 trigger_m = 60.0
 
-# Dusk run over Harlan Flats' gravel section roads. Proposed style: open country. Few units
+# Dusk run over Harnell Flats' gravel section roads. Proposed style: open country. Few units
 # out on the farm roads, so the helicopter does the spotting; no spikes on gravel.
-[harlan_dirt_run]
+[harnell_dirt_run]
 name = "Open country"
 summary = "Thin patrols on the section roads; the helicopter spots and calls in units ahead."
 presence = 1.0
@@ -235,7 +235,7 @@ backup_scale = 0.75
 tool_lifetime_s = 300.0
 recognise_on_sight = false
 
-[harlan_dirt_run.tactics]
+[harnell_dirt_run.tactics]
 roadblocks = true
 spikes = false
 helicopter = true
