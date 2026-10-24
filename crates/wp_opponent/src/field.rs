@@ -637,11 +637,8 @@ pub const POLICE_YIELD_RISK: f32 = 0.35;
 /// rams through rather than stopping behind it.
 const RAM_CLOSING_MPS: (f32, f32) = (4.0, 10.0);
 /// Only police cars moving faster than this along my road are rammed, m/s; slower ones are
-/// squeezed past or pushed aside at [`RAM_PUSH_MPS`].
+/// gone round like parked cars, with no room given.
 const RAM_MIN_MPS: f32 = 3.0;
-/// Speed a wanted racer keeps behind a standing police car in its way, m/s: it squeezes past
-/// or pushes the car aside at a walk instead of stopping there (and being caught).
-const RAM_PUSH_MPS: f32 = 3.0;
 /// Signals are looked up this far ahead, m.
 const SIGNAL_LOOKAHEAD_M: f32 = 150.0;
 /// After waiting this long at a junction for civilians that are standing still (each waiting
@@ -3331,20 +3328,20 @@ fn decide_racer(
             if !overlaps(band, o, margin, x.gap / closing) {
                 continue;
             }
-            if rams(o) {
-                // Wanted and a police car in my way: never stop behind it (standing still
-                // next to a unit is a capture). A moving one is rammed (shoved aside or
-                // knocked round); a standing one is not hit at speed (that pins me against
-                // it): I squeeze past it with no room given, or push it aside at a walk.
-                let cap = if o.v_s > RAM_MIN_MPS {
-                    let (c0, c1) = RAM_CLOSING_MPS;
-                    o.v_s + c0 + (c1 - c0) * r.profile.aggression
-                } else {
-                    RAM_PUSH_MPS
-                };
+            if rams(o) && o.v_s > RAM_MIN_MPS {
+                // Wanted and a moving police car in my way: rammed (shoved aside or knocked
+                // round), never stopped behind (standing still next to a unit is a capture).
+                let (c0, c1) = RAM_CLOSING_MPS;
+                let cap = o.v_s + c0 + (c1 - c0) * r.profile.aggression;
                 cap_to(&mut v_target, cap, SpeedLimit::Obstacle(who_id(o.who)));
                 continue;
             }
+            // A standing one is not hit at speed (that pins me against it): it is gone round
+            // like any parked car, with no room given (`margin_for`), at the speed the gap
+            // allows. (A walking-pace push for every standing unit near my line had wanted
+            // racers crawl at 3 m/s past an idle unit at the kerb two metres off their line,
+            // into a red light and a capture: race_picker lantern_checkpoint_draws_the_police
+            // never finished.)
             // Steering out round a parked car (pulled over, or standing for good): once the
             // lane I am heading for is clear of it, creep instead of standing still behind it
             // (a stopped car cannot move sideways), never closer than the stop gap.
