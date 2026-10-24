@@ -1,6 +1,7 @@
-//! The playable race picker: a fixed list of street races on the browser's cities (Port
-//! Vesper v2, Ashpeak County and the procedural 12 × 12 grid), each with its course, legality,
-//! time of day and a field of named `wp_opponent` AI drivers.
+//! The playable race picker: a fixed list of street races ([`races`]), each with its course,
+//! legality, time of day and a field of named `wp_opponent` AI drivers. Since 2026-10-24 the
+//! picker offers only Loop 9 night, Loop 9 day and the long Loop 9 → Ashpeak highway run; the
+//! older races ([`retired_races`]) are kept only as regression scenarios.
 //!
 //! A race runs on its own city or on any map that contains it ([`RaceCity::hosts`]): Port
 //! Vesper's races also run on the combined `ashpeak` map, at the same coordinates.
@@ -390,8 +391,113 @@ const LOOP9: &[[f32; 2]] = &[
     [1091.0, 1358.0],
 ];
 
-/// Every race in the picker, in menu order.
+/// The long highway run on the combined Port Vesper + Ashpeak County map, in driving order
+/// (the first point is the start/finish line): north up Loop 9's east side, out on Route 7
+/// at the Uptown Connector, through the Talon Tunnel and over the Silver Gorge, west along the
+/// Crosstown Expressway, south on Route 12 over the Grizzly Grade, back onto Loop 9 at Lantern
+/// Way and round its south side (counter-clockwise, as [`LOOP9`]).
+const HIGHWAY_RUN: &[[f32; 2]] = &[
+    [1530.0, 700.0],
+    [1091.0, 1358.0],
+    // On each freeway the point sits on the lane the previous ramp feeds (the planner does not
+    // change lanes): Route 7's kerb lane, the ramp to the Crosstown, the Crosstown's middle
+    // lane, then Route 12's kerb lane where it feeds Lantern Way's on-ramp to Loop 9.
+    [878.3, 2447.0],
+    [894.2, 3882.5],
+    [60.0, 3957.1],
+    [-2020.4, 564.6],
+    [-1502.0, -365.0],
+    [-578.0, -1072.0],
+    [621.0, -1053.0],
+    [1525.0, -343.0],
+];
+
+/// Every street race in the picker, in menu order (owner, 2026-10-24: only Loop 9 night,
+/// Loop 9 day and the Loop 9 → Ashpeak highway run are offered; the older races are
+/// [`retired_races`]).
 pub fn races() -> Vec<RaceDef> {
+    vec![
+        RaceDef {
+            // The night race keeps its old id (`loop9_circuit`): its police table, goldens and
+            // pace runs are keyed by it.
+            id: "loop9_circuit",
+            name: "Loop 9 night",
+            blurb: "One flat-out lap of the Loop 9 highway, through late-night traffic.",
+            city: RaceCity::Vesper,
+            kind: RaceKind::Circuit { laps: 1 },
+            terrain: Specialty::Highway,
+            legality: Legality::Street,
+            // Owner row 139 ("there should be SOME traffic in the loop9 race"): at 01:00 with
+            // 0.3 the night curve left nobody near the player. 23:00 at 2.0 puts a civilian
+            // about every 360 m of carriageway round the player (lead: aim 250-300 m, density
+            // 2-3; the AI field still finishes 95 of 96 runs here, see opponent-pace.md).
+            time_of_day_h: 23.0,
+            traffic_density: 2.0,
+            course: CourseSpec::Circuit { polygon: LOOP9 },
+            length_hint_m: 10142.0,
+            ai: &[VIC, MARA, DEZ, JUNO, TITO],
+            seed: 9,
+            prior_meets: 2,
+            finish_window_s: None,
+            grid: None,
+        },
+        RaceDef {
+            id: "loop9_day",
+            name: "Loop 9 day",
+            blurb: "The same flat-out Loop 9 lap in broad daylight: busy lanes, every cop awake.",
+            city: RaceCity::Vesper,
+            kind: RaceKind::Circuit { laps: 1 },
+            terrain: Specialty::Highway,
+            // Illegal daytime: a big purse, and the police at full strength (until the race
+            // has its own table in data/police/races.toml).
+            legality: Legality::IllegalDaytime,
+            // The day traffic curve is far busier than the night one: 0.5 here is about the
+            // night lap's 2.0 in cars per km. Daytime traffic spreads the field, so a longer
+            // finish window than the circuit kind's 90 s.
+            time_of_day_h: 14.0,
+            traffic_density: 0.5,
+            course: CourseSpec::Circuit { polygon: LOOP9 },
+            length_hint_m: 10142.0,
+            ai: &[VIC, MARA, DEZ, JUNO, TITO],
+            seed: 19,
+            prior_meets: 2,
+            finish_window_s: Some(150.0),
+            grid: None,
+        },
+        RaceDef {
+            id: "loop9_ashpeak_highway",
+            name: "Loop 9 to Ashpeak highway run",
+            blurb: "One long lap of the highways: Loop 9, Route 7 through the Talon Tunnel, \
+                    the Crosstown, Route 12 over the Grizzly Grade and back onto Loop 9.",
+            city: RaceCity::Ashpeak,
+            kind: RaceKind::Circuit { laps: 1 },
+            terrain: Specialty::Highway,
+            legality: Legality::Street,
+            time_of_day_h: 0.5,
+            traffic_density: 1.0,
+            course: CourseSpec::Circuit {
+                polygon: HIGHWAY_RUN,
+            },
+            length_hint_m: 17924.0,
+            // The Loop 9 field and the Ashpeak County regulars together (owner, 2026-10-24).
+            ai: &[VIC, MARA, DEZ, JUNO, TITO],
+            seed: 29,
+            prior_meets: 0,
+            // ~7.5 min for the winner: the field spreads over minutes, not the circuit kind's
+            // 90 s.
+            finish_window_s: Some(180.0),
+            grid: None,
+        },
+    ]
+}
+
+/// The races taken out of the picker (owner, 2026-10-24: "remove all current street races and
+/// only leave in loop 9 night, and loop 9 day"). They are offered nowhere in the game: no
+/// picker card, no meet spot, no schedule. They stay here, findable by id ([`race`],
+/// [`race_for_scenario`]), because their simcli scenarios and goldens
+/// (`apps/simcli/scenarios/race/pick_<id>.ron`) are long-standing physics, AI and police
+/// regression tests.
+pub fn retired_races() -> Vec<RaceDef> {
     vec![
         RaceDef {
             id: "hollins_sprint",
@@ -418,28 +524,6 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[MARA, VIC, JUNO],
             seed: 16,
             prior_meets: 0,
-            finish_window_s: None,
-            grid: None,
-        },
-        RaceDef {
-            id: "loop9_circuit",
-            name: "Loop 9 circuit",
-            blurb: "One flat-out lap of the Loop 9 highway, through late-night traffic.",
-            city: RaceCity::Vesper,
-            kind: RaceKind::Circuit { laps: 1 },
-            terrain: Specialty::Highway,
-            legality: Legality::Street,
-            // Owner row 139 ("there should be SOME traffic in the loop9 race"): at 01:00 with
-            // 0.3 the night curve left nobody near the player. 23:00 at 2.0 puts a civilian
-            // about every 360 m of carriageway round the player (lead: aim 250-300 m, density
-            // 2-3; the AI field still finishes 95 of 96 runs here, see opponent-pace.md).
-            time_of_day_h: 23.0,
-            traffic_density: 2.0,
-            course: CourseSpec::Circuit { polygon: LOOP9 },
-            length_hint_m: 10142.0,
-            ai: &[VIC, MARA, DEZ, JUNO, TITO],
-            seed: 9,
-            prior_meets: 2,
             finish_window_s: None,
             grid: None,
         },
@@ -821,9 +905,12 @@ pub fn races_on(city_id: &str) -> Vec<RaceDef> {
         .collect()
 }
 
-/// The race with this id.
+/// The race with this id: a picker race or a [`retired_races`] one.
 pub fn race(id: &str) -> Option<RaceDef> {
-    races().into_iter().find(|r| r.id == id)
+    races()
+        .into_iter()
+        .chain(retired_races())
+        .find(|r| r.id == id)
 }
 
 /// The race a scenario name stands for: a picker race (`race_<id>`, see
@@ -833,6 +920,7 @@ pub fn race(id: &str) -> Option<RaceDef> {
 pub fn race_for_scenario(name: &str) -> Option<RaceDef> {
     races()
         .into_iter()
+        .chain(retired_races())
         .find(|r| r.scenario_name() == name)
         .or_else(|| crate::touge::TougeSetup::from_scenario_name(name).map(|t| t.race_def()))
 }

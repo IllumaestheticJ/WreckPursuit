@@ -274,7 +274,11 @@ fn a_capture_mid_race_is_a_dnf_and_hands_off_to_the_end_of_run_panel() {
 fn race_scenario_files_match_the_picker() {
     let dir =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/simcli/scenarios/race");
-    for def in wp_race::catalog::races() {
+    // Retired races too: their scenarios stay as regression tests.
+    for def in wp_race::catalog::races()
+        .into_iter()
+        .chain(wp_race::catalog::retired_races())
+    {
         let mut sc = race_scenario(&def, CAR, DamageMode::Arcade, false).unwrap();
         sc.duration_s = 10.0;
         sc.expect = vec![

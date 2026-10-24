@@ -755,3 +755,26 @@ under it, `CarCapability::surface_grip` gives the car's tyre ratio for gravel / 
 (1.0 on every paved surface, so paved courses keep the same profile bit for bit), and
 `SpeedProfile::build` scales cornering, braking and traction-limited drive per sample. After
 the fix the largest lateral offset logged on Harnell is 1.4 m and all four cars finish.
+
+## Street races trimmed to Loop 9 + highway run (owner, 2026-10-24, branch `claude/project-thread-3jtx3j`)
+
+Owner: "remove all current street races and only leave in loop 9 night, and loop 9 day; also
+make another long highway street race using the loop 9 AND ashcroft racers". "Ashcroft" is
+read as Ashpeak County (no Ashcroft exists in the code or data).
+
+- `catalog::races()` (the picker, race cards, meet spots via `races_on`) now holds three races:
+  `loop9_circuit` (renamed "Loop 9 night"; id kept because its police table, goldens and pace
+  runs are keyed by it), the new `loop9_day` (same LOOP9 polygon, 14:00, illegal daytime,
+  traffic 1.0, seed 19) and the new `loop9_ashpeak_highway` (Ashpeak map, 17.9 km lap of Loop 9
+  + Route 7 + Crosstown + Route 12, 00:30, traffic 1.0, seed 29). Both new races field the Loop
+  9 regulars, who are also the whole Ashpeak County field (Vic, Mara, Dez, Juno, Tito).
+- Every other race moved to `catalog::retired_races()`: not offered anywhere, still found by
+  `race(id)` / `race_for_scenario`, so its scenario, golden and race_picker test still run.
+  `race_scenario_files_match_the_picker` checks retired scenarios too.
+- New scenarios `pick_loop9_day.ron`, `pick_loop9_ashpeak_highway.ron` (generated) and their
+  goldens (blessed with `simcli run --bless` on the two files only).
+- Police: untouched. `loop9_day` has no table in `data/police/races.toml` yet, so it gets the
+  illegal-daytime Max presence; the "Heavier police on Loop 9 daytime" work adds its table.
+- Known gap: the browser e2e scripts (`apps/testbed-web/e2e/race.mjs`, `race_spots.mjs`,
+  `menu.mjs`, `drift_lab_w.mjs`) still click or list retired races in the picker and need a
+  pass (they are not in CI; `?race=<id>` links still work).
