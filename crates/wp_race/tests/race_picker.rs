@@ -835,8 +835,9 @@ fn lantern_checkpoint_draws_the_police() {
 fn ashpeak_race(id: &str, max_s: u64, winner_s: std::ops::Range<f32>, min_finish: usize) {
     let r = run_race_with(id, max_s, Some(0.0));
     eprintln!(
-        "{id}: route {:.0} m, results {:?}",
+        "{id}: route {:.0} m, pursuits {}, results {:?}",
         r.route_m,
+        r.pursuits,
         r.results
             .iter()
             .map(|x| (x.position, x.status, x.elapsed_s(), x.gates_passed))
