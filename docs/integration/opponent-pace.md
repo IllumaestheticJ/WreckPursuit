@@ -1318,3 +1318,45 @@ in. Target: Lantern s50 ≥ 63/64 with no new walls, then weaving v2.
   regression check).
 - `sprint_off_route.ron` keyframes 11.2 / 12.6.
 - Goldens: one [bless] commit on the final tip (reasons in its message).
+
+## Lantern queueing under G, done (2026-10-24, lead)
+
+- On lead/round13 (D's 3affce58 included), the targets hold:
+  - Lantern s50: 64/64, mean 80.2 s, 0 walls (16 seeds).
+  - Loop 9 s50: 48/48 on seeds 1–8.
+- What's left is time. Per car, Lantern s50 loses about 31 s queued behind racers and 15 s
+  behind civilians.
+  - `opponent_pace` used to count time behind a racer as "veh": `Field` debug ids racers as
+    100 + grid index, not by entity id. Fixed in 59c510fa.
+  - Root case, seed 16: a careful leader (traffic risk 0.35) behind a civilian crawling at
+    8–9 m/s on a two-lane downtown street, with oncoming traffic, and the field queued
+    behind the leader.
+- Pass reach (a car ahead counts for a pass up to the follow gap + 8 m, not a flat 30 m):
+  no change on Lantern, three cars lost on Loop 9 seed 3. Dropped.
+- Crawler patience 4 → 2 s (`CRAWLER_PATIENCE_S`):
+  - Lantern s95: 61 → 64/64 finishers, walls 11 → 0.
+  - Lantern s50: 80.2 → 80.1 s.
+  - Loop 9 s50: identical.
+  - Kept.
+- `pass_checks` NoRoom counts only the last candidate tried (two lanes out), not why the main
+  candidate failed. Read it with that in mind.
+
+## Ashpeak metro circuit: course tuning (2026-10-24, lead)
+
+`race_picker` ashpeak_metro_circuit, police off, finishers per seed 1–4:
+
+| run | seed 1 | seed 2 | seed 3 | seed 4 |
+|---|---|---|---|---|
+| G tip (cd73812e), traffic 0.3, window 90 s | 3/6 | 4/6 | 5/6 | 4/6 |
+| traffic 0.15 | 3/6 | 6/6 | 6/6 | 5/6 |
+| traffic 0.15 + finish window 150 s | 6/6 | 6/6 | 6/6 | 6/6 |
+
+- Pre-G main on the catalog seed got 4/6, and its pace sweep 2/6, so the course is marginal
+  on its own.
+- The losses are civilians, lights and racer trains on the one-lane downtown blocks, over
+  two laps: the field spreads out over more than the circuit kind's 90 s.
+- Course-side fix, as agreed with the lead:
+  - traffic density 0.3 → 0.15 (catalog and `pick_ashpeak_metro_circuit.ron`);
+  - a per-race finish window override, `RaceDef::finish_window_s` = 150 s, applied by
+    `RaceDef::rules()` in `LiveRace` and in `opponent_pace`.
+- Every other race keeps its kind's window (`None`).

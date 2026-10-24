@@ -296,7 +296,9 @@ pub fn race_pace_in(
     let ids = built.ids;
     let (race, kind, closed, seed) = plan(id, sim.world());
     let data = RaceData::embedded();
-    let mut judge = RaceJudge::new(EventId(1), data.rules.for_kind(kind), race.course.clone());
+    // A picker race's own rules (its overrides: `RaceDef::finish_window_s`).
+    let rules = wp_race::catalog::race(id).map_or_else(|| data.rules.for_kind(kind), |d| d.rules());
+    let mut judge = RaceJudge::new(EventId(1), rules, race.course.clone());
     let mut entrants = Vec::new();
     let mut measured = Vec::new();
     let mut car_ids = Vec::new();

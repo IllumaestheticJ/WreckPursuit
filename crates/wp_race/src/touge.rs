@@ -459,6 +459,7 @@ impl TougeSetup {
             prior_meets: 0,
             // Touge lays out its own single-file grid ([`plan_course`]); no picker override.
             grid: None,
+            finish_window_s: None,
         }
     }
 }
