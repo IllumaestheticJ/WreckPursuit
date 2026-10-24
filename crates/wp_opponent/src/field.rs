@@ -164,6 +164,9 @@ pub enum Tactic {
     /// Pulled over for the police (wanted below the flee level with a unit on its tail);
     /// resumes if the police lose interest.
     Yield,
+    /// Going for a police car ahead while wanted: lined up on its rear quarter and driven
+    /// into it at a controlled closing speed ([`DriverParams::rams_police`]).
+    Ram,
 }
 
 /// Race events reported by the field (race/economy/UI consumers; not `SimEvent`s until the
@@ -293,6 +296,9 @@ struct Obstacle {
     out_of_race: bool,
     /// A racer stuck nose-in that cannot back out because something stands right behind it.
     wants_room: bool,
+    /// A police car (`PoliceQuery::police_entities`): dodged without queueing behind it, and
+    /// rammed by drivers who are up for it while wanted ([`Tactic::Ram`]).
+    police: bool,
 }
 
 /// An obstacle relative to one racer: arc distance ahead (`ds` < 0 = behind) and the
@@ -423,6 +429,14 @@ struct Racer {
     escaped: bool,
     /// Seconds held at a junction by civilians that are not moving (deadlock breaker).
     junction_wait_s: f32,
+    /// Wanted level at the last decision (0 = not wanted).
+    wanted: u8,
+    /// The police car I am going for ([`Tactic::Ram`]).
+    ram_target: Option<EntityId>,
+    /// Made contact with `ram_target` since the ram began.
+    ram_hit: bool,
+    /// Time before I go for a police car again, s.
+    ram_cooldown_s: f32,
 }
 
 /// Why a racer is doing what it does (last decision), for overlays and tuning.
@@ -507,6 +521,8 @@ pub struct Field {
     /// [`STILL_DRIFT_M`] of that spot, s (civilian agents by agent id, other sim vehicles by
     /// entity id + [`STILL_VEHICLE_KEY`]). Kept only near racers.
     still: BTreeMap<u64, (V2, f32)>,
+    /// Sim entities of the police cars on the road (refreshed every decision).
+    police_cars: Vec<EntityId>,
 }
 
 impl Racer {
@@ -736,6 +752,21 @@ const JUNCTION_GAP_S: f32 = 1.5;
 
 /// Extra clearance of the whole-road line from the far edge of the opposing lanes, m.
 const WIDE_EDGE_EXTRA_M: f32 = 0.6;
+/// A police car at most this far ahead (bumper to bumper), m, can be gone for
+/// ([`Tactic::Ram`]).
+const RAM_START_GAP_M: f32 = 35.0;
+/// A ram is given up once the police car pulls this far ahead, m.
+const RAM_GIVE_UP_GAP_M: f32 = 60.0;
+/// Longest a ram is kept up without landing, s.
+const RAM_MAX_S: f32 = 5.0;
+/// Pause after a ram (landed or not) before going for a police car again, s.
+const RAM_COOLDOWN_S: f32 = 6.0;
+/// Only a police car driving my way at least this fast is rammed, m/s. A slow one is
+/// setting up a rolling block or a box (sitting on its bumper is how racers get caught) and a
+/// standing unit or roadblock is a wall: those are dodged.
+const RAM_MIN_TARGET_MPS: f32 = 10.0;
+/// Police cars this close ahead, m, may be dodged on the opposing lanes by anyone.
+const POLICE_DODGE_M: f32 = 60.0;
 
 impl Field {
     /// Build a field on `corridor`. Lines are optimised once per distinct car width.
@@ -846,6 +877,10 @@ impl Field {
                 pull_over_s: 0.0,
                 line_cleared: false,
                 wants_room: false,
+                wanted: 0,
+                ram_target: None,
+                ram_hit: false,
+                ram_cooldown_s: 0.0,
                 stable_s: 0.0,
                 defended: false,
                 in_brake_zone: false,
@@ -890,6 +925,7 @@ impl Field {
             finishers: 0,
             contacts: BTreeMap::new(),
             still: BTreeMap::new(),
+            police_cars: Vec::new(),
         }
     }
 
@@ -1096,6 +1132,7 @@ impl Field {
             .is_multiple_of(self.config.decision_ticks.max(1) as u64)
         {
             let dt = self.config.decision_ticks.max(1) as f32 * PHYSICS_DT;
+            self.police_cars = police.police_entities();
             self.observe(world, vehicles, police, dt);
             self.update_still(world, vehicles, dt);
             let snapshot = self.perceive_all(world, vehicles);
@@ -1208,6 +1245,14 @@ impl Field {
             {
                 if *impulse_ns < AI_CONTACT_IMPULSE_NS {
                     continue;
+                }
+                // A ram landing on the police car I went for.
+                for r in &mut self.racers {
+                    if r.ram_target
+                        .is_some_and(|t| (t, r.entity) == (*a, *b) || (t, r.entity) == (*b, *a))
+                    {
+                        r.ram_hit = true;
+                    }
                 }
                 if self.racer_index(*a).is_some() && self.racer_index(*b).is_some() {
                     let key = if a < b { (*a, *b) } else { (*b, *a) };
@@ -1461,6 +1506,8 @@ impl Field {
             r.pressure = (r.pressure - 0.5 * dt).max(0.0);
             // Police heat.
             let lvl = police.wanted_level(r.entity);
+            r.wanted = lvl;
+            r.ram_cooldown_s = (r.ram_cooldown_s - dt).max(0.0);
             if lvl > 0 || r.status == RacerStatus::Fled || r.tactic == Tactic::Yield {
                 let at = police_at.get_or_insert_with(|| police.police_positions());
                 self.react_to_police(k, world, police, at, lvl, dt);
@@ -1693,6 +1740,7 @@ impl Field {
                             facing: 1.0,
                             out_of_race: false,
                             wants_room: r.wants_room,
+                            police: false,
                         });
                         continue;
                     }
@@ -1708,6 +1756,7 @@ impl Field {
             self.hints.insert(v.entity, cp.index);
             if let Some(mut o) = vehicle_obstacle(&self.corridor, who, cp, v) {
                 o.parked = self.is_still(STILL_VEHICLE_KEY + v.entity.0 as u64);
+                o.police = self.police_cars.contains(&v.entity);
                 o.out_of_race = self
                     .racer_index(v.entity)
                     .is_some_and(|k| !self.racers[k].in_race());
@@ -1748,6 +1797,7 @@ impl Field {
             let cp = corridor.project_unclamped(pos, Some(me.hint), 80);
             if let Some(mut o) = vehicle_obstacle(corridor, Who::Vehicle(v.entity), cp, v) {
                 o.parked = self.is_still(STILL_VEHICLE_KEY + v.entity.0 as u64);
+                o.police = self.police_cars.contains(&v.entity);
                 o.out_of_race = self
                     .racer_index(v.entity)
                     .is_some_and(|k| !self.racers[k].in_race());
@@ -2075,9 +2125,24 @@ fn decide_racer(
                     && o.v_s.abs() < 0.5
                     && (o.n - r.n).abs() < hw + o.half_w + 0.5
             });
+        // Wanted, with a police car just ahead: no queueing behind it — round it on the
+        // opposing lanes when the pass checks find them clear (or into it, `Tactic::Ram`). A
+        // clean racer keeps its manners in front of a patrol (a pass across the line there
+        // is a needless violation).
+        let police_ahead = r.wanted > 0
+            && obstacles.iter().any(|o| {
+                o.police && {
+                    let ds = corridor.delta_s(r.s_rel, o.s);
+                    ds > 0.0 && ds < POLICE_DODGE_M
+                }
+            });
         let may_use_opposing = corridor.opposing == OpposingLanes::ForOvertaking
             && !done_racing
-            && (p.traffic_risk >= 0.5 || parked_ahead || crawler_ahead || standing_ahead);
+            && (p.traffic_risk >= 0.5
+                || parked_ahead
+                || crawler_ahead
+                || standing_ahead
+                || police_ahead);
         // The next junction (within 120 m) has nobody coming to it: a pass on the opposing side
         // may go into it (risk check, as for the whole-road line).
         // (The cars queued in my own lane ahead are the ones being passed, not traffic coming
@@ -2443,6 +2508,33 @@ fn decide_racer(
                     r.tactic = Tactic::Follow;
                 }
             }
+            Tactic::Ram => {
+                let done = match r.ram_target.and_then(|e| target_rel(Who::Vehicle(e))) {
+                    None => true,
+                    Some(x) => {
+                        r.ram_hit
+                            // Drawn level with it without a hit: it is beside me now, a
+                            // side swipe at speed is the police's game, not mine.
+                            || x.ds < 0.0
+                            || x.gap > RAM_GIVE_UP_GAP_M
+                            // Spun or stopped: dodged like any standing car from here.
+                            || x.o.parked
+                            || x.o.v_s < 1.0
+                            || r.wanted == 0
+                            || done_racing
+                            // A corner coming: back to the line in time to brake for it.
+                            || brake_dist < v * 0.8
+                            || r.tactic_ticks as f32 * dt > RAM_MAX_S
+                    }
+                };
+                if done {
+                    r.tactic = Tactic::Follow;
+                    r.ram_target = None;
+                    r.ram_hit = false;
+                    r.ram_cooldown_s = RAM_COOLDOWN_S;
+                    r.blocked_s = 0.0;
+                }
+            }
             Tactic::Reverse => {
                 // Never back into anything: stop reversing when something is close behind in
                 // the band I occupy.
@@ -2537,6 +2629,57 @@ fn decide_racer(
             margin_for(o) + (0.15 * (closing - 2.0)).clamp(0.0, extra)
         };
 
+        // Going for a police car ahead: wanted, up for it (`rams_police`), on a straight, and
+        // the car is driving my way slower than my pace here. A standing unit, one facing me
+        // or one already sliding is dodged instead.
+        // Knocked out of a ram some other way (rejoin, reverse): it counts as done.
+        if r.tactic != Tactic::Ram && r.ram_target.take().is_some() {
+            r.ram_hit = false;
+            r.ram_cooldown_s = RAM_COOLDOWN_S;
+        }
+        if r.tactic == Tactic::Follow
+            && p.rams_police
+            && r.wanted > 0
+            && r.ram_cooldown_s <= 0.0
+            && matches!(r.status, RacerStatus::Racing | RacerStatus::Fled)
+            && !done_racing
+            && !start_phase
+            && r.escape.is_none()
+            && brake_dist > v * 1.5
+        {
+            let pick = rel
+                .iter()
+                .filter(|x| {
+                    x.o.police
+                        && x.ds > 0.0
+                        && x.gap < RAM_START_GAP_M
+                        && !x.o.parked
+                        && !x.o.unstable
+                        && x.o.facing > 0.5
+                        && x.o.v_s > RAM_MIN_TARGET_MPS
+                        && v_line(r.s) > x.o.v_s + 1.0
+                })
+                .min_by(|a, b| a.gap.total_cmp(&b.gap));
+            if let Some(x) = pick {
+                let aim = ram_aim((r.n - x.o.n).signum(), &x.o);
+                let (lo, hi) = pass_limits(r.s + x.ds);
+                if let (Who::Vehicle(e), true) = (x.o.who, aim >= lo - 0.05 && aim <= hi + 0.05) {
+                    r.tactic = Tactic::Ram;
+                    r.tactic_ticks = 0;
+                    r.ram_target = Some(e);
+                    r.ram_hit = false;
+                    r.n_goal = aim;
+                    r.pass_target = None;
+                    r.split_with = None;
+                    r.get_run = None;
+                }
+            }
+        }
+        let ram_who = match r.tactic {
+            Tactic::Ram => r.ram_target.map(Who::Vehicle),
+            _ => None,
+        };
+
         // Follow mode: who blocks the line? Held-up evidence = last decision's speed was set
         // by that car while my own pace here is clearly higher.
         let mut tuck: Option<f32> = None;
@@ -2587,7 +2730,9 @@ fn decide_racer(
                 // Street racing: a civilian ahead is gone round, not queued behind — look for
                 // a gap as soon as I am closing on it.
                 let weave = is_civ(&x.o) && v - x.o.v_s > 1.0;
-                if (r.blocked_s > p.overtake_patience_s || momentum || weave)
+                // Nor is a police car while I am wanted: dodged as soon as I close on it.
+                let dodge = x.o.police && r.wanted > 0 && v - x.o.v_s > 2.5;
+                if (r.blocked_s > p.overtake_patience_s || momentum || weave || dodge)
                     && x.o.v_s > -1.0
                     && !done_racing
                     // Start discipline is about the field: a civilian stopped in my lane
@@ -2742,6 +2887,11 @@ fn decide_racer(
             }
         }
 
+        // Keep lined up on the police car's rear quarter, on the side I started from.
+        if let Some(x) = ram_who.and_then(target_rel) {
+            r.n_goal = ram_aim((r.n_goal - x.o.n).signum(), &x.o).clamp(pass_lo, pass_hi);
+        }
+
         // Re-aim an overtake at the target's current position.
         if r.tactic == Tactic::Overtake && r.split_with.is_some() {
             // Splitting: aim at the middle of the gap.
@@ -2792,7 +2942,7 @@ fn decide_racer(
                     line_n(r.s) + r.line_noise
                 }
             },
-            Tactic::Overtake | Tactic::Defend => {
+            Tactic::Overtake | Tactic::Defend | Tactic::Ram => {
                 follow_w = 0.0;
                 r.n_goal
             }
@@ -2813,7 +2963,7 @@ fn decide_racer(
             // Lane changes run a little quicker at speed (up to 1.6×), but taper off above
             // 30 m/s: a lane change at highway speed while braking hard has to stay gentle or
             // the car overshoots the target lane.
-            Tactic::Overtake | Tactic::Defend => {
+            Tactic::Overtake | Tactic::Defend | Tactic::Ram => {
                 (1.4 + 1.0 * r.profile.aggression)
                     * (v / 15.0).clamp(1.0, 1.6)
                     * (30.0 / v.max(30.0))
@@ -2843,6 +2993,8 @@ fn decide_racer(
             }
         } else if matches!(r.tactic, Tactic::Park | Tactic::Yield) {
             (lim_lo, kerb_hi)
+        } else if r.tactic == Tactic::Ram {
+            (pass_lo, pass_hi)
         } else {
             (lim_lo, lim_hi)
         };
@@ -2866,6 +3018,10 @@ fn decide_racer(
                 && x.o.facing < -0.3
                 && x.gap < 1.5 * (v - x.o.v_s).max(0.0) + 2.5;
             if !alongside && !arriving && !meeting {
+                continue;
+            }
+            // The police car I am ramming is meant to be touched.
+            if ram_who == Some(x.o.who) {
                 continue;
             }
             // A car in line right behind me is not beside me: it bounds neither side (grid
@@ -3207,6 +3363,13 @@ fn decide_racer(
                 continue;
             }
             let o = &x.o;
+            // Ramming: close on it at my ram speed (a little more while still far off)
+            // instead of keeping a gap.
+            if ram_who == Some(o.who) {
+                let cap = o.v_s.max(0.0) + p.ram_closing_mps + 0.3 * x.gap.max(0.0);
+                cap_to(&mut v_target, cap, SpeedLimit::Obstacle(who_id(o.who)));
+                continue;
+            }
             let civ = is_civ(o);
             let closing = (v - o.v_s).max(0.5);
             // Arriving fast next to a car: want more lateral room the faster I close.
@@ -3305,9 +3468,12 @@ fn decide_racer(
         }
         // Squeezed side by side while behind, or past my side-by-side tolerance into a
         // braking zone: back out.
-        let alongside_ahead = rel
-            .iter()
-            .find(|x| !is_civ(&x.o) && x.ds > 0.0 && x.ds < hl + x.o.half_len + 0.5);
+        let alongside_ahead = rel.iter().find(|x| {
+            !is_civ(&x.o)
+                && ram_who != Some(x.o.who)
+                && x.ds > 0.0
+                && x.ds < hl + x.o.half_len + 0.5
+        });
         if let Some(x) = alongside_ahead {
             let into_corner = brake_dist < v * p.side_by_side_s && r.tactic != Tactic::Overtake;
             if x.o.parked || x.o.v_s.abs() < 1.0 {
@@ -3356,7 +3522,7 @@ fn decide_racer(
             ld = ld.min(1.5 + v * v / (2.0 * a_brk));
         }
         let s_t = r.s + ld;
-        let (t_lo, t_hi) = if r.tactic == Tactic::Overtake {
+        let (t_lo, t_hi) = if matches!(r.tactic, Tactic::Overtake | Tactic::Ram) {
             pass_limits(s_t)
         } else {
             limits(s_t)
@@ -3467,6 +3633,14 @@ fn decide_racer(
     }
 }
 
+/// Where a ram lines up across the corridor: my centre on the police car's edge on `side`
+/// (+1 = its right, −1 = its left), so my nose meets its rear quarter and shoves it round
+/// rather than burying itself square in its boot.
+fn ram_aim(side: f32, o: &Obstacle) -> f32 {
+    let side = if side < 0.0 { -1.0 } else { 1.0 };
+    o.n + side * o.half_w.max(0.6)
+}
+
 /// Extra lateral room beside a car being passed beyond the normal clearance, m: the
 /// driver's overtake margin for racers (contact is a race incident), a little for anyone
 /// else (civilians, physical traffic, police: passed in the next lane like any driver
@@ -3529,6 +3703,7 @@ fn vehicle_obstacle(
         facing: geom::dot(fwd, t),
         out_of_race: false,
         wants_room: false,
+        police: false,
     })
 }
 
@@ -3603,6 +3778,7 @@ fn civilians_on(
             facing: geom::dot(f, t),
             out_of_race: false,
             wants_room: false,
+            police: false,
         });
     }
     out
@@ -4124,6 +4300,7 @@ mod tests {
             facing: -1.0,
             out_of_race: false,
             wants_room: false,
+            police: false,
         }
     }
 
@@ -4243,6 +4420,7 @@ mod tests {
                 facing: 1.0,
                 out_of_race: false,
                 wants_room: false,
+                police: false,
             },
             ds: 10.0,
             gap: 5.4,
@@ -4333,6 +4511,7 @@ mod tests {
                     facing: 1.0,
                     out_of_race: false,
                     wants_room: false,
+                    police: false,
                 })
                 .collect();
             f.decide(0, &civs, &[], None, None, dt);
@@ -4556,6 +4735,7 @@ mod tests {
             facing: 1.0,
             out_of_race: false,
             wants_room: false,
+            police: false,
         };
         f.decide(0, &[civ], &[], None, None, dt);
         f.debug_of(0).limit
@@ -4688,6 +4868,98 @@ mod tests {
             assert!(f.debug_of(0).n_cmd <= 1e-3, "{:?}", f.debug_of(0));
             assert!(f.debug_of(1).n_cmd >= 2.6 - 1e-3, "{:?}", f.debug_of(1));
         }
+    }
+
+    /// Racer 1 wanted at `lvl`; entity 50 is a police car.
+    struct Cops(u8);
+
+    impl PoliceQuery for Cops {
+        fn wanted_level(&self, racer: EntityId) -> u8 {
+            if racer == EntityId(1) {
+                self.0
+            } else {
+                0
+            }
+        }
+
+        fn police_entities(&self) -> Vec<EntityId> {
+            vec![EntityId(50)]
+        }
+    }
+
+    /// One racer with `profile` at 200 m doing 25 m/s, a police car 20 m ahead doing 15 m/s,
+    /// both on the centreline; returns the field after `ticks` ticks.
+    fn ram_case(profile: DriverProfile, lvl: u8, ticks: usize) -> Field {
+        let spec = RacerSpec {
+            entity: EntityId(1),
+            profile,
+            capability: cap(),
+        };
+        let mut f = Field::new(straight(), &[spec], RaceConfig::default());
+        f.racers[0].laps_done = 1;
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        let cars = [
+            obs(1, 200.0, 25.0, HandlingEffects::NEUTRAL),
+            obs(50, 225.0, 15.0, HandlingEffects::NEUTRAL),
+        ];
+        for _ in 0..ticks {
+            f.tick(&world, &cars, &[], &Cops(lvl));
+        }
+        f
+    }
+
+    #[test]
+    fn wanted_racer_goes_for_the_police_car_ahead_instead_of_braking_for_it() {
+        let reckless = DriverProfile {
+            aggression: 0.9,
+            risk: 0.9,
+            ..DriverProfile::default()
+        };
+        let f = ram_case(reckless, 2, 8);
+        assert_eq!(f.tactic_of(0), Tactic::Ram, "{:?}", f.debug_of(0));
+        let d = f.debug_of(0);
+        // Closing on it well above its speed (a follower would hold ~15 m/s or less).
+        assert!(d.v_target > 15.0 + 5.0, "{d:?}");
+        // Lined up on its rear quarter: off its centreline, but overlapping its body.
+        assert!(d.n_cmd.abs() > 0.1 && d.n_cmd.abs() <= 0.9 + 0.1, "{d:?}");
+    }
+
+    #[test]
+    fn careful_or_unwanted_racers_do_not_ram_police() {
+        let careful = DriverProfile {
+            aggression: 0.2,
+            risk: 0.2,
+            ..DriverProfile::default()
+        };
+        let f = ram_case(careful, 2, 8);
+        assert_ne!(f.tactic_of(0), Tactic::Ram, "{:?}", f.debug_of(0));
+        let f = ram_case(DriverProfile::default(), 0, 8);
+        assert_ne!(f.tactic_of(0), Tactic::Ram, "{:?}", f.debug_of(0));
+    }
+
+    #[test]
+    fn a_landed_ram_ends_and_waits_before_the_next() {
+        let mut f = ram_case(DriverProfile::default(), 2, 8);
+        assert_eq!(f.tactic_of(0), Tactic::Ram, "{:?}", f.debug_of(0));
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        let cars = [
+            obs(1, 200.0, 25.0, HandlingEffects::NEUTRAL),
+            obs(50, 225.0, 15.0, HandlingEffects::NEUTRAL),
+        ];
+        let hit = SimEvent::Contact {
+            a: EntityId(50),
+            b: EntityId(1),
+            point: [0.0, 222.0, 0.5],
+            normal: [0.0, -1.0, 0.0],
+            impulse_ns: 3000.0,
+            rel_speed: 6.0,
+        };
+        f.tick(&world, &cars, &[hit], &Cops(2));
+        for _ in 0..8 {
+            f.tick(&world, &cars, &[], &Cops(2));
+        }
+        assert_ne!(f.tactic_of(0), Tactic::Ram, "{:?}", f.debug_of(0));
+        assert!(f.racers[0].ram_cooldown_s > 0.0);
     }
 
     fn side_state() -> VehicleState {

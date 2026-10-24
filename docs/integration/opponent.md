@@ -374,3 +374,28 @@ lane's centre, ±0.1 m), and on Loop 9 that lane is the race route's. Flights no
 100 / 150). The full race line takes ~27 ms for Loop 9's 5 000 samples (native release); the
 cost scales with the fine-level sweeps, so a 2 km flight (1 000 samples) should cost about 1 ms
 per replan (estimated, not measured; replans every `FLIGHT_REPLAN_S` = 6 s).
+
+
+## Racers dodge and ram police (owner request, 2026-10-24, branch `ws/ram-police`)
+
+Owner: "AI racers shouldn't be afraid to dodge and ram police cars during races/chases".
+Details in `crates/wp_opponent/README.md` (Police → Dodge and ram). Summary: wanted racers go
+round a police car ahead immediately instead of queueing; bold drivers (`rams_police`) ram
+police cars that drive their way at ≥ 10 m/s on straights (`Tactic::Ram`, new variant).
+New API: `PoliceQuery::police_entities()` (default empty; `SimPolice` lists bound, unwrecked
+ground units), `DriverParams::{rams_police, ram_closing_mps}` (`#[serde(default)]`),
+`profile::RAM_POLICE_NERVE`. No police-side or contract change.
+
+Tuning notes: a first version also rammed slow units (≥ 4 m/s) and dodged at any closing
+speed; on `race_picker::grid_arterial_sprint` two racers ended up captured right behind the
+units they went for or passed (police slow down ahead to box). Raised to ≥ 10 m/s for rams
+and ≥ 2.5 m/s closing for dodges; clean racers do not dodge patrols at all.
+In the live race tests rams start a few times per race, but none landed in the runs I
+watched: the units braked for corners and the ram timed out. Feel needs a testbed check.
+
+`tests/race.rs::live_police_chase_ends_in_escape_or_capture_without_stuck_cars` seed 1 → 3:
+with this change seed 1 ends with racer 3 busted ~25 s before the end still rolling to a stop
+along a 100 m+ stretch the corridor marks as junction (`near_junction` keeps the pull-over
+going up to `PULL_OVER_HARD_MAX_S`). Seed sweep 1–8: main fails seed 2 the same way; this
+branch fails seeds 1 and 2; 3–8 pass on both.
+

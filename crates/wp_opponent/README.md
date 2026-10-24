@@ -108,6 +108,18 @@ gap to the player — pace is car capability × how much of it the driver dares 
     perception and civilian rules, ignoring red lights. **Re-plans** when police wait within
     35 m of the next 160 m of the route (units ahead only — a chaser behind is beaten by
     driving on; at most every 6 s) or the route is about to end while still wanted.
+  - **Dodge and ram** (wanted, any status that is still driving: racing or fled). Police cars
+    are known by entity (`PoliceQuery::police_entities`, live from `SimPolice`). A police car
+    ahead is never queued behind: the driver goes round it as soon as it closes on it (≥ 2.5
+    m/s), on the opposing lanes where the pass checks find them clear. Drivers with
+    `DriverParams::rams_police` (mean of aggression and risk ≥ `RAM_POLICE_NERVE` = 0.4; the
+    default profile does) instead go for one within 35 m that drives their way at ≥ 10 m/s on a
+    straight (`Tactic::Ram`): lined up on its rear quarter, closing at `ram_closing_mps` (4–9
+    m/s by the same mean). The ram ends on contact (≥ `AI_CONTACT_IMPULSE_NS`), when drawn
+    level, after 5 s, before a braking zone, or when the car stops or spins; then 6 s before the
+    next. Slow or standing police (rolling blocks, boxes, roadblocks) are only dodged: sitting
+    on a slow unit's bumper is how racers get caught. Clean racers keep their manners around
+    patrols. Civilians, racers and other cars keep every normal clearance during a ram.
   - wanted but below the flee level → keeps racing; if a chasing unit stays within
     `YIELD_RADIUS_M` (30 m) for `YIELD_AFTER_S` (2 s) → `Tactic::Yield`: rolls on at ≤ 6 m/s
     to the kerb, clear of junctions, then stops (`Yielded` event); released back into the race
