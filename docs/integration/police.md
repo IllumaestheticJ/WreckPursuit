@@ -1854,6 +1854,18 @@ Re-aimed on the corrected graph (reasons and numbers in each file):
 - `wp_race` `hollins_descent`: `check_with_police` (its stakeout pursuits now catch two of
   four; captures count, like `hollins_sprint`).
 - `wp_opponent` `live_police_chase…`: seed 1 (its own harness has no tow).
+- `escape_break_contact_night`: max escapes 6 -> 8 (19 of 30 runs escape here vs 14 on main, no
+  captures either way). **Review with the police balance** together with `response_day_core`.
 
-Known gaps: units queue behind traffic jams (correctly) at the soak's 4x density;
+Native == wasm32 (the determinism suite failed on `jam/pursuit_jam_grid` and
+`jam/pursuit_jam_vesper` once police routes moved): traced to glamx's symmetric 3x3 eigen solver,
+whose `acos`/`cos` were platform libm calls. parry uses it for mass properties from convex hulls
+(a dented parked car's inertia) and to seed convex-hull construction (a building hull came out
+with different face normals). `third_party/glamx` patches it to the `libm` crate
+(`[patch.crates-io]`; see its `WRECKPURSUIT.md`).
+
+Known gaps: units queue behind traffic jams (correctly) at the soak's 4x density; the solid
+terrain in the band along road edges keeps the fine 5 m heights while the drawn terrain is the
+lowered coarse grid, so on steep embankments solid ground can sit 2-4 m above what is drawn (e.g.
+Port Vesper (-542, 239); world workstream, also on main);
 `opponent_pace` `lantern_checkpoint_s50` fails identically on main (not this branch's).
