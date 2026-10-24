@@ -581,6 +581,7 @@ fn train_one(id: &str, car_id: &str, rounds: u32, speed_rounds: u32) -> Trained 
         } else {
             String::new()
         },
+        lookahead_scale: la,
     };
     Trained {
         car: car_id.to_string(),
@@ -679,14 +680,12 @@ fn stage1() {
                 table.cars.push(LearnedCar {
                     car: t.car.clone(),
                     capability: t.capability,
-                    lookahead_scale: 1.0,
                     courses: Vec::new(),
                 });
                 table.cars.last_mut().unwrap()
             }
         };
         entry.capability = t.capability;
-        entry.lookahead_scale = t.lookahead;
         entry.courses.retain(|c| c.course != t.course);
         entry.courses.push(t.entry.clone());
         entry.courses.sort_by(|a, b| a.course.cmp(&b.course));
@@ -708,7 +707,7 @@ fn stage1() {
 }
 
 #[test]
-#[ignore = "release check of the embedded table (minutes): every trained car untrained vs as the game drives it"]
+#[ignore = "release check of the embedded table (minutes): every trained car untrained vs as the game drives it; WP_TRAIN_WRITE=1 drops the car courses that add incidents"]
 fn stage1_check() {
     let table = LearnedTable::embedded();
     let courses: Vec<String> = list("WP_TRAIN_RACES", &COURSES)
@@ -735,13 +734,37 @@ fn stage1_check() {
             raw.time_s, raw.walls, raw.resets, game.time_s, game.walls, game.resets
         );
         if score(game).0 > score(raw).0 + 2 {
-            worse.push(format!("{c} {k}"));
+            worse.push((c.clone(), k.clone()));
         }
+    }
+    if std::env::var("WP_TRAIN_WRITE").is_ok() && !worse.is_empty() {
+        // Validation failed: that car drives untrained on that course. (Chaotic courses: a
+        // correction that helped in training can tip a car on the edge into a wall under
+        // another seed or start, and the shipped table must never add crashes.)
+        let mut t = load_table();
+        for (c, k) in &worse {
+            let course = trained_course_of(c);
+            if let Some(car) = t.cars.iter_mut().find(|x| &x.car == k) {
+                car.courses.retain(|x| x.course != course);
+            }
+        }
+        t.cars.retain(|c| !c.courses.is_empty());
+        write_table(&t);
+        eprintln!("pruned {} car courses: {worse:?}", worse.len());
+        return;
     }
     assert!(
         worse.is_empty(),
         "more incidents with the embedded table: {worse:?}"
     );
+}
+
+/// The trained course whose rows race `id` drives on (Loop 9 day runs the night race's road).
+fn trained_course_of(id: &str) -> &str {
+    match id {
+        "loop9_day" => "loop9_circuit",
+        other => other,
+    }
 }
 
 /// One full race with traffic and police: what stage 2 scores.

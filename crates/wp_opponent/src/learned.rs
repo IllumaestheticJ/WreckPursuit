@@ -10,7 +10,7 @@
 //! - `v_scale`: how much faster (> 1) or slower (< 1) than the measured-grip corner speed
 //!   this car can really take this stretch. Applied to the corner-speed limit before the
 //!   braking / acceleration passes, so braking points move with it.
-//! - `aim_m`: a lateral aim correction, m (corridor normal, + = left), that cancels the drift
+//! - `aim_m`: a lateral aim correction, m (corridor normal, + = right), that cancels the drift
 //!   the car showed off its commanded line here. It was learned at `v_ref` and is applied in
 //!   proportion to `(v / v_ref)²` (the drift comes from lateral acceleration).
 //!
@@ -81,6 +81,10 @@ pub struct CarCourse {
     /// Corner-speed scale − 1 per point, in 0.5 % steps, as `i8` bytes (empty: all 1).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub v_scale: String,
+    /// Steering look-ahead multiplier found for this car on this course (a longer look-ahead
+    /// damps a car whose yaw answers the wheel late and weaves at highway speed). 1 = none.
+    #[serde(default = "one")]
+    pub lookahead_scale: f32,
 }
 
 /// Bytes as a hex string, two digits each.
@@ -115,10 +119,6 @@ pub struct LearnedCar {
     pub car: String,
     /// Capability it was trained with: `[max_lat_g, brake_g, accel_mps2, top_speed_mps]`.
     pub capability: [f32; 4],
-    /// Steering look-ahead multiplier found for this car (a longer look-ahead damps a car
-    /// whose yaw answers the wheel late and weaves at highway speed). 1 = untrained.
-    #[serde(default = "one")]
-    pub lookahead_scale: f32,
     /// Courses.
     pub courses: Vec<CarCourse>,
 }
@@ -235,46 +235,66 @@ impl LearnedTable {
         })
     }
 
-    /// Corrections for a car with `cap` on `corridor`, or `None` when the car is untrained or
-    /// no sample lies on trained road.
-    pub fn path_for(&self, corridor: &Corridor, cap: &CarCapability) -> Option<LearnedPath> {
+    /// What training gives a car with `cap` on `corridor`: the trained course that covers
+    /// most of it (each course was trained and checked on its own: corrections and look-ahead
+    /// from two courses are never mixed), or `None` when the car is untrained or the corridor
+    /// barely touches trained road (under [`MIN_COVER`] of its samples).
+    pub fn fit(&self, corridor: &Corridor, cap: &CarCapability) -> Option<Fit> {
         let car = self.car_for(cap)?;
-        let path = lay_onto(corridor, self.points_of(car).iter());
-        (!path.is_neutral()).then_some(path)
+        let mut best: Option<(usize, Fit)> = None;
+        for c in &car.courses {
+            let (path, matched) = lay_onto(corridor, self.points_of(c).iter());
+            if best.as_ref().is_none_or(|(m, _)| matched > *m) {
+                let fit = Fit {
+                    path: (!path.is_neutral()).then_some(path),
+                    lookahead_scale: c.lookahead_scale,
+                };
+                best = Some((matched, fit));
+            }
+        }
+        let (matched, fit) = best?;
+        (matched as f32 >= MIN_COVER * corridor.len() as f32).then_some(fit)
     }
 
-    /// Every trained point of `car`, laid out for matching.
-    pub fn points_of(&self, car: &LearnedCar) -> Vec<LearnedPoint> {
-        let mut out = Vec::new();
-        for c in &car.courses {
-            let Some(g) = self.courses.iter().find(|g| g.course == c.course) else {
-                continue;
-            };
-            let (aims, v_refs, scales) = (hex_i8(&c.aim_dm), hex_u8(&c.v_ref), hex_i8(&c.v_scale));
-            for (i, p) in g.points.iter().enumerate() {
+    /// Every trained point of one car course, laid out for matching.
+    pub fn points_of(&self, c: &CarCourse) -> Vec<LearnedPoint> {
+        let Some(g) = self.courses.iter().find(|g| g.course == c.course) else {
+            return Vec::new();
+        };
+        let (aims, v_refs, scales) = (hex_i8(&c.aim_dm), hex_u8(&c.v_ref), hex_i8(&c.v_scale));
+        g.points
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
                 let aim = aims.get(i).copied().unwrap_or(0) as f32 * 0.1;
                 let scale = 1.0 + scales.get(i).copied().unwrap_or(0) as f32 * 0.005;
                 let v_ref = v_refs.get(i).copied().unwrap_or(0) as f32;
-                if aim != 0.0 || scale != 1.0 {
-                    out.push([p[0], p[1], p[2], p[3], p[4], scale, aim, v_ref]);
-                }
-            }
-        }
-        out
-    }
-
-    /// The steering look-ahead multiplier for a car with `cap` (1 when untrained).
-    pub fn lookahead_scale(&self, cap: &CarCapability) -> f32 {
-        self.car_for(cap).map_or(1.0, |c| c.lookahead_scale)
+                [p[0], p[1], p[2], p[3], p[4], scale, aim, v_ref]
+            })
+            .collect()
     }
 }
 
-/// Lay trained points onto a corridor: each sample takes the nearest point within
+/// Least share of a corridor's samples that must lie on a trained course for its training
+/// to apply.
+pub const MIN_COVER: f32 = 0.25;
+
+/// What training gives one racer on one corridor ([`LearnedTable::fit`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fit {
+    /// Corrections per corridor sample (`None`: all neutral).
+    pub path: Option<LearnedPath>,
+    /// Steering look-ahead multiplier.
+    pub lookahead_scale: f32,
+}
+
+/// Lay trained points onto a corridor, and count the samples that took one: each sample
+/// takes the nearest point within
 /// [`MATCH_RADIUS_M`] / [`MATCH_HEIGHT_M`] facing its way ([`MATCH_DIR_COS`]).
 pub fn lay_onto<'a>(
     corridor: &Corridor,
     points: impl Iterator<Item = &'a LearnedPoint>,
-) -> LearnedPath {
+) -> (LearnedPath, usize) {
     const CELL_M: f32 = 20.0;
     let cell = |x: f32, y: f32| ((x / CELL_M).floor() as i32, (y / CELL_M).floor() as i32);
     let mut grid: BTreeMap<(i32, i32), Vec<&LearnedPoint>> = BTreeMap::new();
@@ -283,8 +303,9 @@ pub fn lay_onto<'a>(
     }
     let m = corridor.len();
     let mut out = LearnedPath::neutral(m);
+    let mut matched = 0;
     if grid.is_empty() {
-        return out;
+        return (out, 0);
     }
     for (i, s) in corridor.samples.iter().enumerate() {
         let (cx, cy) = cell(s.pos[0], s.pos[1]);
@@ -313,12 +334,13 @@ pub fn lay_onto<'a>(
             }
         }
         if let Some((_, p)) = best {
+            matched += 1;
             out.v_scale[i] = p[5].clamp(V_SCALE_RANGE.0, V_SCALE_RANGE.1);
             out.aim_m[i] = p[6].clamp(-AIM_MAX_M, AIM_MAX_M);
             out.v_ref[i] = p[7];
         }
     }
-    out
+    (out, matched)
 }
 
 #[cfg(test)]
@@ -351,7 +373,8 @@ mod tests {
     #[test]
     fn points_apply_only_in_their_driving_direction() {
         let pts: Vec<LearnedPoint> = vec![[0.0, 40.0, 0.0, 0.0, 1.0, 1.05, 0.4, 50.0]];
-        let fwd = lay_onto(&straight(1.0), pts.iter());
+        let (fwd, matched) = lay_onto(&straight(1.0), pts.iter());
+        assert_eq!(matched, 11);
         assert_eq!(fwd.v_scale[20], 1.05);
         assert_eq!(fwd.aim_m[20], 0.4);
         // Half the point spacing along the road: samples 15..=25 (y 30..50) take it,
@@ -359,7 +382,7 @@ mod tests {
         assert_eq!(fwd.v_scale[15], 1.05);
         assert_eq!(fwd.v_scale[25], 1.05);
         assert_eq!(fwd.v_scale[13], 1.0);
-        let back = lay_onto(&straight(-1.0), pts.iter());
+        let (back, _) = lay_onto(&straight(-1.0), pts.iter());
         assert!(back.is_neutral());
     }
 
@@ -383,10 +406,10 @@ mod tests {
     fn embedded_table_parses() {
         let t: LearnedTable = serde_json::from_str(EMBEDDED_JSON).expect("racer_training.json");
         for c in &t.cars {
-            assert!((0.5..=3.0).contains(&c.lookahead_scale), "{}", c.car);
             for k in &c.courses {
                 let g = t.courses.iter().find(|g| g.course == k.course);
                 let g = g.unwrap_or_else(|| panic!("{}: no geometry for {}", c.car, k.course));
+                assert!((0.5..=3.0).contains(&k.lookahead_scale), "{}", c.car);
                 let n = 2 * g.points.len();
                 assert_eq!(k.aim_dm.len(), n, "{} {}", c.car, k.course);
                 assert_eq!(k.v_ref.len(), n, "{} {}", c.car, k.course);

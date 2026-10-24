@@ -811,8 +811,10 @@ impl Field {
             let learned = if config.learned {
                 let table = LearnedTable::embedded();
                 params = table.traffic.apply(params);
-                params.lookahead_per_mps *= table.lookahead_scale(&spec.capability);
-                table.path_for(&corridor, &spec.capability)
+                table.fit(&corridor, &spec.capability).and_then(|fit| {
+                    params.lookahead_per_mps *= fit.lookahead_scale;
+                    fit.path
+                })
             } else {
                 None
             };
@@ -1017,7 +1019,7 @@ impl Field {
     }
 
     /// Set racer `k`'s steering look-ahead multiplier (on the personality's own look-ahead;
-    /// the trainer's search, see [`crate::learned::LearnedCar::lookahead_scale`]).
+    /// the trainer's search, see [`crate::learned::CarCourse::lookahead_scale`]).
     pub fn set_lookahead_scale(&mut self, k: usize, scale: f32) {
         let r = &mut self.racers[k];
         r.params.lookahead_per_mps = r.profile.params().lookahead_per_mps * scale;
