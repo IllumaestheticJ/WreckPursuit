@@ -1060,6 +1060,12 @@ impl Vehicle {
         std::array::from_fn(|i| self.wheels[i].vcomp)
     }
 
+    /// Strut compression speeds (FL, FR, RL, RR), m/s (+ = compressing), from the last step.
+    /// For the damage model's landing / kerb loads (`wp_damage::inertial`).
+    pub fn wheel_compression_speeds(&self) -> [f32; 4] {
+        std::array::from_fn(|i| self.wheels[i].vcomp)
+    }
+
     /// Peak slip angle of wheel `i`'s tire, rad.
     pub fn tire_peak_slip(&self, i: usize) -> f32 {
         self.corners[i].tire.peak_slip_angle_rad

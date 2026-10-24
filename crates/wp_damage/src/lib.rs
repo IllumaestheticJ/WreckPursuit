@@ -24,6 +24,7 @@ pub mod barrier;
 mod contact;
 pub mod debris;
 pub mod hull;
+pub mod inertial;
 pub mod lattice_gen;
 mod model;
 pub mod panels;
@@ -38,6 +39,7 @@ mod wear;
 
 pub use contact::scale_racer_contacts;
 pub use debris::{DetachedKind, DetachedPart};
+pub use inertial::InertialInput;
 pub use model::{
     component_health_weight, region_health_weight, DamageLogEntry, DamageLogKind, DamageModel,
     GlassBreak, ALL_REGIONS, REGION_COUNT,

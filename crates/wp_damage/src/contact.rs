@@ -68,6 +68,9 @@ pub(crate) struct Impactor {
     pub nodes: Vec<(u32, f32)>,
     /// Age, s.
     pub age: f32,
+    /// A landing / kerb load (`crate::inertial`), not a body contact: never merges with a
+    /// contact impactor (the floor's pinned nodes would stop it dead).
+    pub inertial: bool,
 }
 
 /// Lateral distance (perpendicular to unit `n`) from `q` to the footprint spanned by
@@ -207,9 +210,10 @@ impl DamageModel {
         self.awake = true;
         self.quiet_ticks = 0;
 
+        let inertial = g.other == Some(crate::inertial::INERTIAL_SOURCE);
         for k in 0..self.impactors.len() {
             let imp = &self.impactors[k];
-            if vec3::dot(imp.normal, n) < 0.9 {
+            if imp.inertial != inertial || vec3::dot(imp.normal, n) < 0.9 {
                 continue;
             }
             let near = g
@@ -250,7 +254,7 @@ impl DamageModel {
             }
             if grew {
                 let (footprint, normal, radius) = (imp.footprint.clone(), imp.normal, imp.radius);
-                let (face0, nodes) = self.build_face(&footprint, normal, radius);
+                let (face0, nodes) = self.build_face(&footprint, normal, radius, inertial);
                 let imp = &mut self.impactors[k];
                 imp.face0 = imp.face0.min(face0);
                 imp.nodes = nodes;
@@ -260,7 +264,7 @@ impl DamageModel {
             return;
         }
 
-        let (face0, nodes) = self.build_face(&g.points, n, radius);
+        let (face0, nodes) = self.build_face(&g.points, n, radius, inertial);
         if nodes.is_empty() {
             return;
         }
@@ -280,14 +284,23 @@ impl DamageModel {
             tangent_vel0: tan_vel,
             nodes,
             age: 0.0,
+            inertial,
         });
     }
 
     /// Nodes under a footprint (within `radius`, at least `contact_min_nodes`) with their
     /// face weights, nearest first, and the face plane offset (never ahead of a node).
-    fn build_face(&self, points: &[V3], n: V3, radius: f32) -> (f32, Vec<(u32, f32)>) {
+    /// `inertial` (a landing / kerb load at a suspension mount) leaves out the nodes pinned to
+    /// the chassis: the load bends the mount structure, while the floor carries the body.
+    fn build_face(
+        &self,
+        points: &[V3],
+        n: V3,
+        radius: f32,
+        inertial: bool,
+    ) -> (f32, Vec<(u32, f32)>) {
         let mut cand: Vec<(f32, u32)> = (0..self.pos.len())
-            .filter(|&i| !self.detached[i])
+            .filter(|&i| !self.detached[i] && !(inertial && self.inv_mass[i] == 0.0))
             .map(|i| (footprint_distance(points, n, self.pos[i]), i as u32))
             .collect();
         cand.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));

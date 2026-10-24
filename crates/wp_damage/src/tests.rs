@@ -1517,3 +1517,93 @@ fn mode_curves_extreme_one_hit_sim_a_few_arcade_several() {
         "Arcade 145 km/h: several hits end the car, totalled on hit {total:?} {h:?}"
     );
 }
+
+/// F8: a resting car or ordinary driving gets no inertial contacts; an overloaded wheel and a
+/// hard flat landing push up at the suspension mounts with exactly the excess impulse.
+#[test]
+fn inertial_contacts_only_above_the_thresholds() {
+    use crate::inertial::{InertialInput, BODY_ACCEL_THRESHOLD_G, WHEEL_LOAD_THRESHOLD};
+    let car = sedan();
+    let m = DamageModel::new(&car.lattice, &car.materials);
+    let mass = 1400.0;
+    let static_fz = mass * 9.81 / 4.0;
+    let calm = InertialInput {
+        mass_kg: mass,
+        wheel_fz_n: [3.0 * static_fz; 4],
+        wheel_vcomp_mps: [0.5; 4],
+        v_up_before_mps: -1.0,
+        v_up_after_mps: -0.9,
+        dt: PHYSICS_DT,
+    };
+    assert!(m.inertial_contacts(&calm).is_empty());
+    // Front-left wheel 2 kN over the line (a kerb strike).
+    let mut kerb = calm;
+    kerb.wheel_fz_n[0] = WHEEL_LOAD_THRESHOLD * static_fz + 2000.0;
+    kerb.wheel_vcomp_mps[0] = 3.0;
+    let c = m.inertial_contacts(&kerb);
+    assert_eq!(c.len(), 1);
+    assert!((c[0].impulse_ns - 2000.0 * PHYSICS_DT).abs() < 1e-3);
+    assert_eq!(c[0].normal_local, [0.0, 0.0, 1.0]);
+    assert_eq!(c[0].rel_speed_mps, 3.0);
+    assert_eq!(Some(c[0].point_local_m), m.suspension_mount_point(0));
+    assert_eq!(c[0].other, Some(crate::inertial::INERTIAL_SOURCE));
+    // A flat landing: 6 m/s stopped in one tick, shared by the four mounts.
+    let mut land = calm;
+    land.v_up_before_mps = -6.0;
+    land.v_up_after_mps = 0.0;
+    let c = m.inertial_contacts(&land);
+    assert_eq!(c.len(), 4);
+    let want = mass * (6.0 - BODY_ACCEL_THRESHOLD_G * 9.81 * PHYSICS_DT) * 0.25;
+    for k in &c {
+        assert!(
+            (k.impulse_ns - want).abs() < 0.5,
+            "{} vs {want}",
+            k.impulse_ns
+        );
+        assert_eq!(k.rel_speed_mps, 6.0);
+    }
+}
+
+/// F8: a hard landing deforms the mount structure (the floor's pinned nodes do not stop it);
+/// how much is the mode table's call: Extreme > Simulation > Arcade racer. Same loads in each.
+#[test]
+fn landing_loads_deform_by_mode() {
+    use crate::inertial::InertialInput;
+    let car = sedan();
+    let land = InertialInput {
+        mass_kg: 1400.0,
+        wheel_fz_n: [3400.0; 4],
+        wheel_vcomp_mps: [0.0; 4],
+        v_up_before_mps: -9.0,
+        v_up_after_mps: 0.0,
+        dt: PHYSICS_DT,
+    };
+    let landed = |mode: &ModeTable| {
+        let mut m = DamageModel::new(&car.lattice, &car.materials);
+        let mut c = m.inertial_contacts(&land);
+        crate::scale_racer_contacts(&mut c, mode);
+        let mut out = Vec::new();
+        m.apply_contacts(&c, mode, PHYSICS_DT, &mut out);
+        for _ in 0..720 {
+            m.apply_contacts(&[], mode, PHYSICS_DT, &mut out);
+            if !m.is_awake() {
+                break;
+            }
+        }
+        (m.total_plastic_energy_j(), m.health())
+    };
+    let (e_x, h_x) = landed(&extreme_mode());
+    let (e_s, h_s) = landed(&sim_mode());
+    let (e_a, _) = landed(&arcade_mode());
+    assert!(
+        e_x > 5_000.0,
+        "Extreme: a 9 m/s landing bends the mounts ({e_x} J)"
+    );
+    assert!(h_x < 0.97, "Extreme health {h_x}");
+    assert!(
+        e_s > 100.0 && e_s < e_x,
+        "Simulation {e_s} J vs Extreme {e_x} J"
+    );
+    assert!(h_s > h_x);
+    assert!(e_a < e_s, "Arcade racer {e_a} J vs Simulation {e_s} J");
+}

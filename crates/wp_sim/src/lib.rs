@@ -1380,6 +1380,33 @@ impl Sim {
             &infos,
         );
         out.extend(std::mem::take(&mut tick_contacts.events));
+        // Landing and kerb loads (F8, wp_damage::inertial) reach the lattice as synthetic
+        // contacts at the suspension mounts, before racer scaling and the contact filter, so
+        // every mode rule applies and replicas get them like any other contact.
+        if sys.damage {
+            let up_axis = rapier3d::math::Vector::Z;
+            for ((slot, info), contacts) in self
+                .vehicles
+                .iter()
+                .zip(&infos)
+                .zip(&mut tick_contacts.per_vehicle)
+            {
+                if slot.dormant || slot.light.is_some() {
+                    continue;
+                }
+                let rb = &self.physics.bodies[slot.body.body];
+                let up = *rb.rotation() * up_axis;
+                let input = wp_damage::InertialInput {
+                    mass_kg: rb.mass(),
+                    wheel_fz_n: slot.vehicle.wheel_loads(),
+                    wheel_vcomp_mps: slot.vehicle.wheel_compression_speeds(),
+                    v_up_before_mps: info.pre_linvel.dot(up),
+                    v_up_after_mps: rb.linvel().dot(up),
+                    dt,
+                };
+                contacts.extend(slot.damage.inertial_contacts(&input));
+            }
+        }
         // Arcade: racers (player and AI) take `racer_damage_scale` of the collision impulse;
         // traffic and police take it all. Before the filter, so the scaled contacts are the
         // ones quantised, recorded and replicated.
