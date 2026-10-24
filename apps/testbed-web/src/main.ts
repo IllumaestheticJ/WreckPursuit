@@ -58,6 +58,7 @@ import { DRIFT_LAB_W, DRIFT_LAB_W_CAR, DriftLabWPanel, driftLabWScenario } from 
 import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu, type ControlDevice, type GameSettings, type PlayChoice, type PlayOptions } from "../../ui-kit/src/live";
 import { gfxMode } from "./render/quality";
 import { RunEndView } from "./ui/runEnd";
+import { ResetHold } from "./reset_hold";
 import { ModShop } from "./ui/modShop";
 import { WorkshopMode } from "./workshop/mode";
 import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
@@ -445,6 +446,13 @@ async function main(): Promise<void> {
       leave: () => openGarage(),
     });
   };
+  // Reset key: tap = reset in place, hold 1 s = back to the last road (F41, src/reset_hold.ts).
+  /** A picker race is running (hold R restarts it from the last checkpoint, F42). */
+  const raceRunning = () => !!raceView.raceId && sim.raceInfo()[RI.phase] === 1;
+  const resetHold = new ResetHold(overlay, () => {
+    const k = getBindings().keys.reset[0];
+    return `HOLD ${k ? keyName(k) : "R"} · ${raceRunning() ? "BACK TO THE LAST CHECKPOINT" : "BACK TO THE ROAD"}`;
+  });
   // Instant crash replay (lead, row 70): offer after a big crash, replay, resume live play.
   const crash = new CrashReplayDirector(
     document.body,
@@ -1442,10 +1450,9 @@ async function main(): Promise<void> {
       case "reset":
         // Reset in place (playtest row 65): upright on the nearest clear lane, repaired outside a
         // career run; heat, pursuit and race progress carry on.
-        if (!isReplay()) {
-          const r = sim.resetInPlace(app.player);
-          hud.note(`${(sim.worldInfo()[W.tick] / 240).toFixed(2)}s reset in place${r.on_lane ? "" : " (no lane near)"} — ${r.repaired ? "repaired" : "career: repairs are bought in the garage"}`);
-        }
+        // F41: the press starts a hold; a release before 1 s resets in place, holding 1 s
+        // goes back to the last road (resolved in the frame loop, `resetHold.frame`).
+        if (!isReplay()) resetHold.press(performance.now());
         break;
       case "headlights":
         toggleHeadlights();
@@ -1807,6 +1814,21 @@ async function main(): Promise<void> {
     const { input, source, edges } = readInput(dt);
     // Photo mode reads the pad itself (sticks fly, B / Start leave): no game actions meanwhile.
     for (const a of edges) if (!photo.active) doAction(a);
+    // Reset key released (tap) or held 1 s (return to road), F41.
+    const resetKind = resetHold.frame(now, actionHeld("reset"));
+    if (resetKind && !isReplay()) {
+      let checkpoint = resetKind === "road" && raceRunning();
+      let r;
+      try {
+        r = checkpoint ? sim.raceRestartCheckpoint(app.player) : resetKind === "road" ? sim.resetToRoad(app.player) : sim.resetInPlace(app.player);
+      } catch {
+        // Out of the race already (DNF, finished): back to the road instead.
+        checkpoint = false;
+        r = sim.resetToRoad(app.player);
+      }
+      const how = checkpoint ? "back to the last checkpoint" : resetKind === "road" ? "back to the road" : "reset in place";
+      hud.note(`${(sim.worldInfo()[W.tick] / 240).toFixed(2)}s ${how} (${r.via}) — ${r.repaired ? "repaired" : "career: repairs are bought in the garage"}`);
+    }
     app.input = input;
     stalk.update(input.steer);
     const device = activeDevice();
@@ -2236,6 +2258,8 @@ async function main(): Promise<void> {
     activeDevice,
     /** Instant crash replay director (`crash.phase`, `crash.last`, `crash.accept()`). */
     crash,
+    /** Reset key hold (F41): `resetHold.last` = "tap" | "road". */
+    resetHold,
     /** Settings hook (pause menu): play crash replays without asking. */
     setAutoCrashReplay,
     /** Which crashes offer a replay: "off" | "big" (default) | "all" (F43). */

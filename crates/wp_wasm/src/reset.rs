@@ -252,6 +252,41 @@ fn lane_spot(
     None
 }
 
+/// The pose at `crumb` (or a few metres along it if that spot is taken), if it is within
+/// `max_m` of `p` (None = any distance) and clear.
+fn crumb_pose(c: Crumb, p: V2, max_m: Option<f32>, obstacles: &[Obstacle]) -> Option<ResetPose> {
+    let d = [c.pos[0] - p[0], c.pos[1] - p[1]];
+    if max_m.is_some_and(|m| d[0] * d[0] + d[1] * d[1] > m * m) {
+        return None;
+    }
+    let yaw = yaw_of(c.dir);
+    LANE_STEPS.iter().find_map(|&step| {
+        let xy = [c.pos[0] + c.dir[0] * step, c.pos[1] + c.dir[1] * step];
+        is_clear_at(xy, c.pos[2], yaw, obstacles).then_some(ResetPose {
+            xy,
+            yaw,
+            near_z: c.pos[2],
+            on_lane: true,
+            via: ResetVia::Crumb,
+        })
+    })
+}
+
+/// "Return to road" (feature F41, R held for 1 s): the car's last on-road spot at any distance
+/// (the road it came off, even through the building it is now wedged in), else the ordinary
+/// [`reset_pose`] chain.
+pub fn road_pose(
+    map: Option<&CityMap>,
+    pos: V3,
+    dir: V2,
+    obstacles: &[Obstacle],
+    crumb: Option<Crumb>,
+) -> ResetPose {
+    crumb
+        .and_then(|c| crumb_pose(c, [pos[0], pos[1]], None, obstacles))
+        .unwrap_or_else(|| reset_pose(map, pos, dir, obstacles, crumb))
+}
+
 /// Pick the reset pose for a car at `pos` travelling along `dir` (see the module docs).
 /// `crumb` = the car's last on-road spot, if the session recorded one.
 pub fn reset_pose(
@@ -305,23 +340,8 @@ pub fn reset_pose(
         }
         // 2. The last on-road spot, heading the way the car was going there (or a few metres
         //    along it if the spot itself is taken).
-        if let Some(c) = crumb {
-            let d = [c.pos[0] - p[0], c.pos[1] - p[1]];
-            if d[0] * d[0] + d[1] * d[1] <= CRUMB_MAX_M * CRUMB_MAX_M {
-                let yaw = yaw_of(c.dir);
-                for step in LANE_STEPS {
-                    let xy = [c.pos[0] + c.dir[0] * step, c.pos[1] + c.dir[1] * step];
-                    if is_clear_at(xy, c.pos[2], yaw, obstacles) {
-                        return ResetPose {
-                            xy,
-                            yaw,
-                            near_z: c.pos[2],
-                            on_lane: true,
-                            via: ResetVia::Crumb,
-                        };
-                    }
-                }
-            }
+        if let Some(pose) = crumb.and_then(|c| crumb_pose(c, p, Some(CRUMB_MAX_M), obstacles)) {
+            return pose;
         }
         // 3. The nearest clear lane spot anywhere (same level first), heading the car's way
         //    along it.

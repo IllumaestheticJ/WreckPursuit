@@ -811,6 +811,27 @@ impl RaceRun {
         std::mem::take(&mut self.resets)
     }
 
+    /// Where `racer` restarts from its last checkpoint (feature F42): the last gate it passed
+    /// (the start line before the first), heading through it. None during the countdown, after
+    /// the race, or once the racer is no longer running.
+    pub fn checkpoint_pose(&self, racer: EntityId, tick: u64) -> Option<([f32; 3], [f32; 2])> {
+        if self.live.in_countdown(tick) || self.live.is_finished() {
+            return None;
+        }
+        let s = self.standings().into_iter().find(|s| s.racer == racer)?;
+        if s.status != RacerStatus::Running {
+            return None;
+        }
+        let course = &self.live.race().course;
+        let n = course.gates.len();
+        if s.gates_passed == 0 || n == 0 {
+            return Some(course.start());
+        }
+        let last = (s.next_gate as usize + n - 1) % n;
+        let g = &course.gates[last];
+        Some((g.pos, g.dir))
+    }
+
     /// The live race (judge, standings, course).
     pub fn live(&self) -> &LiveRace {
         &self.live

@@ -507,6 +507,33 @@ pub fn reset_in_place(entity: u32) -> Result<String, JsValue> {
     })
 }
 
+/// "Return to road" (feature F41, testbed R held for 1 s): like [`reset_in_place`], but the
+/// player's last on-road spot comes first at any distance (the road it came off), then the
+/// reset-in-place chain. Same JSON as [`reset_in_place`].
+#[wasm_bindgen]
+pub fn reset_to_road(entity: u32) -> Result<String, JsValue> {
+    let repair = !career::career_run_active();
+    with(|s| s.reset_to_road(EntityId(entity), repair)).map(|p| {
+        json(&serde_json::json!({
+            "x": p.xy[0], "y": p.xy[1], "yaw": p.yaw, "on_lane": p.on_lane, "via": p.via.name(), "repaired": repair,
+            "ghost_ticks": reset::GHOST_TICKS,
+        }))
+    })
+}
+
+/// Restart racer `entity`'s race from its last checkpoint (feature F42; testbed: hold R in a
+/// race): back to the last gate it passed, at rest, damage kept, race clock running. Errors
+/// outside a running race. Same JSON as [`reset_in_place`] (`repaired` is always false).
+#[wasm_bindgen]
+pub fn race_restart_checkpoint(entity: u32) -> Result<String, JsValue> {
+    with(|s| s.restart_race_checkpoint(EntityId(entity))).map(|p| {
+        json(&serde_json::json!({
+            "x": p.xy[0], "y": p.xy[1], "yaw": p.yaw, "on_lane": p.on_lane, "via": "checkpoint", "repaired": false,
+            "ghost_ticks": reset::GHOST_TICKS,
+        }))
+    })
+}
+
 /// Physics ticks a vehicle stays a ghost after a reset in place (0 = solid; see
 /// `wp_sim::Sim::set_ghost`). The testbed draws ghost cars translucent.
 #[wasm_bindgen]

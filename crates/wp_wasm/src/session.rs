@@ -734,7 +734,47 @@ impl Session {
         } else {
             None
         };
-        self.reset_near(id, st.pos, dir, repair, crumb)
+        self.reset_near(id, st.pos, dir, repair, crumb, false)
+    }
+
+    /// "Return to road" (feature F41, R held for 1 s): like [`Self::reset_in_place`], but to
+    /// the player's last on-road spot at any distance first ([`crate::reset::road_pose`]), then
+    /// the reset-in-place chain. Logged as `ResetAt` like a reset in place.
+    pub fn reset_to_road(
+        &mut self,
+        id: EntityId,
+        repair: bool,
+    ) -> Result<crate::reset::ResetPose, String> {
+        let st = self
+            .vehicle(id)
+            .map(|v| v.vehicle.state())
+            .ok_or_else(|| format!("unknown vehicle {id:?}"))?;
+        let dir = crate::reset::travel_dir(st.rot, st.lin_vel);
+        let crumb = if self.ids.first() == Some(&id) {
+            self.road_crumb
+        } else {
+            None
+        };
+        self.reset_near(id, st.pos, dir, repair, crumb, true)
+    }
+
+    /// Restart a race from the last checkpoint (feature F42): racer `id` goes back to the last
+    /// gate it passed (the start line before the first; [`crate::race::RaceRun::checkpoint_pose`]),
+    /// on the nearest clear lane spot there heading through it, at rest. No repair (damage is
+    /// kept, career or not) and the race clock keeps running. Logged as `ResetAt`, so replays
+    /// replay it; the judge is told the car moved on purpose.
+    pub fn restart_race_checkpoint(
+        &mut self,
+        id: EntityId,
+    ) -> Result<crate::reset::ResetPose, String> {
+        let tick = self.sim.tick();
+        let (pos, dir) = self
+            .race
+            .as_ref()
+            .ok_or("not in a race")?
+            .checkpoint_pose(id, tick)
+            .ok_or("no checkpoint to restart from (countdown, finished, or out of the race)")?;
+        self.reset_near(id, pos, dir, false, None, false)
     }
 
     /// The player's last on-road spot, if one was recorded (see [`crate::reset::Crumb`]).
@@ -770,12 +810,13 @@ impl Session {
     /// [`Self::reset_in_place`].
     fn reset_onto_course(&mut self, id: EntityId, pos: [f32; 3], dir: [f32; 2]) {
         // Only an unknown id fails, and a racer is always a scenario entity.
-        let _ = self.reset_near(id, pos, dir, false, None);
+        let _ = self.reset_near(id, pos, dir, false, None, false);
     }
 
     /// The shared part of [`Self::reset_in_place`] and [`Self::reset_onto_course`]: the
     /// nearest clear lane spot to `origin` heading `dir` ([`crate::reset::reset_pose`]; `crumb`
-    /// = the car's last on-road spot, its fallback).
+    /// = the car's last on-road spot, its fallback; `to_road` = the crumb first, at any
+    /// distance, [`crate::reset::road_pose`]).
     fn reset_near(
         &mut self,
         id: EntityId,
@@ -783,8 +824,9 @@ impl Session {
         dir: [f32; 2],
         repair: bool,
         crumb: Option<crate::reset::Crumb>,
+        to_road: bool,
     ) -> Result<crate::reset::ResetPose, String> {
-        use crate::reset::{reset_pose, Obstacle, OTHER_HALF};
+        use crate::reset::{reset_pose, road_pose, Obstacle, OTHER_HALF};
         self.live_check()?;
         let idx = self.idx(id)?;
         let yaw_of_rot = |q: [f32; 4]| {
@@ -826,7 +868,11 @@ impl Session {
                 half: [p.half_extents[0], p.half_extents[1]],
             });
         }
-        let pose = reset_pose(Some(world.map()), origin, dir, &obstacles, crumb);
+        let pose = if to_road {
+            road_pose(Some(world.map()), origin, dir, &obstacles, crumb)
+        } else {
+            reset_pose(Some(world.map()), origin, dir, &obstacles, crumb)
+        };
         self.log_op(
             idx,
             OpKind::ResetAt {

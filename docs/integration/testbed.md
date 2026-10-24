@@ -991,6 +991,16 @@ still logged as `ResetAt`, so replays and goldens are unchanged. Tests:
 `reset_tests::{reset_on_the_viaduct_lands_on_a_deck_lane, reset_far_off_road_goes_to_the_nearest_lane,
 reset_far_off_road_returns_to_the_last_road_spot, crumbs_need_an_upright_moving_car_on_a_lane}`.
 
+### Hold R: back to the road / last checkpoint (features F41, F42)
+The reset action no longer fires on press: **tap** (release within 1 s) = reset in place as
+above; **hold 1 s** = `reset_to_road` (the player's last on-road spot at any distance, then the
+reset-in-place chain; `reset::road_pose`) or, in a running picker race,
+`race_restart_checkpoint` (back to the last gate passed, the start line before the first, at
+rest, **damage kept**, race clock running; `RaceRun::checkpoint_pose`). A bar under the car fills
+while held ("HOLD R · BACK TO THE ROAD / LAST CHECKPOINT", `src/reset_hold.ts`). Both are logged
+as `ResetAt`, so replays reproduce them. Tests: `reset_tests::{return_to_road_*,
+race_restart_from_the_last_checkpoint}`.
+
 ### Ghost window after a reset in place (2026-10-20, owner request, playtest row 65)
 The owner asked for the ghost window directly, so I added it in wp_sim (lead-owned crate; small
 and additive, **lead please review**). Base: merged `origin/lead/round12` @ `608a50a`.

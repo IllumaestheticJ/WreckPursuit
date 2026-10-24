@@ -172,3 +172,132 @@ fn crumbs_need_an_upright_moving_car_on_a_lane() {
         "off-road"
     );
 }
+
+/// "Return to road" (F41, R held): back to the last road the car drove on even when another
+/// lane is right next to it and the old road is far away (reset in place would take the near
+/// lane); deterministic.
+#[test]
+fn return_to_road_goes_back_to_the_last_road_spot_at_any_distance() {
+    let run = || {
+        let mut s = grid_free_drive();
+        let start = player_pos(&s);
+        let st = s.sim().vehicle_states()[0].1.clone();
+        let dir = crate::reset::travel_dir(st.rot, st.lin_vel);
+        let yaw = wp_math::atan2(-dir[0], dir[1]);
+        s.debug_sim_mut()
+            .unwrap()
+            .place_on_ground(PLAYER, [start[0], start[1]], yaw, 8.0, None)
+            .unwrap();
+        s.run_ticks(120);
+        let crumb = s.road_crumb().expect("a crumb while rolling on the lane");
+        // A lane point 600 m+ from the crumb, at ground level.
+        let far = {
+            let map = s.sim().world().map();
+            (0..map.n_lanes().min(map.segs.len()))
+                .filter(|&i| map.segs[i].drivable && map.segs[i].length > 20.0)
+                .map(|i| map.segs[i].point_at(map.segs[i].length * 0.5).0)
+                .find(|p| {
+                    (p[0] - crumb.pos[0]).hypot(p[1] - crumb.pos[1]) > 600.0 && p[2].abs() < 0.5
+                })
+                .expect("a far lane")
+        };
+        place(&mut s, [far[0], far[1]], 0.0, Some(0.0));
+        let in_place = crate::reset::reset_pose(
+            Some(s.sim().world().map()),
+            player_pos(&s),
+            [0.0, 1.0],
+            &[],
+            s.road_crumb(),
+        );
+        let pose = s.reset_to_road(PLAYER, true).unwrap();
+        (crumb, in_place, pose)
+    };
+    let (crumb, in_place, pose) = run();
+    assert_eq!(
+        in_place.via,
+        ResetVia::NearLane,
+        "reset in place would stay on the near lane"
+    );
+    assert_eq!(pose.via, ResetVia::Crumb, "{pose:?}");
+    let d = (pose.xy[0] - crumb.pos[0]).hypot(pose.xy[1] - crumb.pos[1]);
+    assert!(
+        d <= 18.5,
+        "at (or a few metres along from) the crumb: {d} m"
+    );
+    assert_eq!(run().2, pose, "deterministic");
+}
+
+/// Without a crumb, return to road is the ordinary reset chain.
+#[test]
+fn return_to_road_without_a_crumb_is_a_reset_in_place() {
+    let mut s = grid_free_drive();
+    let spot = off_road_spot(&s, player_pos(&s));
+    place(&mut s, spot, 0.0, None);
+    assert!(s.road_crumb().is_none());
+    let pose = s.reset_to_road(PLAYER, true).unwrap();
+    assert!(
+        pose.on_lane && pose.via == ResetVia::NearestLane,
+        "{pose:?}"
+    );
+}
+
+fn race_sprint() -> Session {
+    let def = wp_race::catalog::race("grid_highway_sprint").unwrap();
+    Session::new(
+        crate::race::race_scenario(&def, "lindwurm_4t", DamageMode::Arcade, true).unwrap(),
+        false,
+    )
+    .unwrap()
+}
+
+/// Restart from the last checkpoint (F42): refused during the countdown; mid-race the player
+/// goes back to the last gate it passed, at rest, damage kept, the race clock running on.
+/// Deterministic.
+#[test]
+fn race_restart_from_the_last_checkpoint() {
+    let run = || {
+        let mut s = race_sprint();
+        assert!(
+            s.restart_race_checkpoint(PLAYER).is_err(),
+            "not during the countdown"
+        );
+        // Autopilot drives the player through the first gate.
+        let mut passed = 0;
+        for _ in 0..240 * 60 {
+            s.run_ticks(24);
+            let st = s.race().unwrap().standings();
+            passed = st.iter().find(|x| x.racer == PLAYER).unwrap().gates_passed;
+            if passed >= 1 {
+                break;
+            }
+        }
+        assert!(passed >= 1, "the player passed a gate");
+        // Drive on a little past the gate, then restart from it.
+        s.run_ticks(240);
+        let health = s.sim().vehicle_states()[0].1.health;
+        let t0 = s.race().unwrap().info(s.sim().tick())[2];
+        let pose = s.restart_race_checkpoint(PLAYER).unwrap();
+        let race = s.race().unwrap();
+        let st = race
+            .standings()
+            .into_iter()
+            .find(|x| x.racer == PLAYER)
+            .unwrap();
+        let course = &race.live().race().course;
+        let n = course.gates.len();
+        let g = &course.gates[(st.next_gate as usize + n - 1) % n];
+        let d = (pose.xy[0] - g.pos[0]).hypot(pose.xy[1] - g.pos[1]);
+        s.run_ticks(2);
+        let after = s.sim().vehicle_states()[0].1.clone();
+        let t1 = s.race().unwrap().info(s.sim().tick())[2];
+        (pose, d, health, after.health, t0, t1)
+    };
+    let (pose, d, h0, h1, t0, t1) = run();
+    assert!(
+        pose.on_lane && d <= 20.0,
+        "back at the last gate ({d:.1} m): {pose:?}"
+    );
+    assert_eq!(h0, h1, "damage kept (no free repair)");
+    assert!(t1 > t0, "the race clock keeps running ({t0} → {t1})");
+    assert_eq!(run().0, pose, "deterministic");
+}

@@ -10,8 +10,11 @@ export interface ResetInPlace {
   x: number;
   y: number;
   yaw: number;
-  /** Landed on a lane (false: set upright where it was, no lane within 15 m). */
+  /** Landed on a lane (false: set upright where it was; no city). */
   on_lane: boolean;
+  /** Which rule picked the spot: a lane within 15 m, the last road the car was on, the nearest
+   * lane anywhere, or upright in place (wp_wasm `reset::ResetVia`). */
+  via: "lane" | "last_road" | "nearest_lane" | "in_place" | "checkpoint";
   repaired: boolean;
   /** Ghost window, physics ticks: the car passes through other cars, props and debris. */
   ghost_ticks: number;
@@ -397,6 +400,11 @@ export const sim = {
   /** Reset in place (R): upright at rest on the nearest clear lane within 15 m, heading its own
    * way; repaired unless a career run is active. Heat, pursuit and race progress carry on. */
   resetInPlace: (entity: number): ResetInPlace => JSON.parse(wasm.reset_in_place(entity)),
+  /** "Return to road" (F41, reset held 1 s): the last road spot first, at any distance. */
+  resetToRoad: (entity: number): ResetInPlace => JSON.parse(wasm.reset_to_road(entity)),
+  /** Restart the race from the last checkpoint (F42, reset held in a race): back to the last
+   * gate passed, damage kept, clock running. Throws outside a running race. */
+  raceRestartCheckpoint: (entity: number): ResetInPlace => JSON.parse(wasm.race_restart_checkpoint(entity)),
   /** Physics ticks the vehicle stays a ghost after a reset in place (0 = solid). */
   ghostTicks: (entity: number): number => wasm.ghost_ticks(entity),
   entities: (): number[] => Array.from(wasm.entities()),
