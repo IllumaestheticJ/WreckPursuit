@@ -29,7 +29,10 @@ use crate::crash_replay::{
     CrashMark, CrashRecorder, CrashReplayInfo, Snapshot, POST_IMPACT_TICKS, PRE_IMPACT_TICKS,
 };
 use crate::data::mem_data;
-use crate::garage_visit::{GarageOffer, GarageRepairReport, GarageSite, GARAGE_ENTER_SPEED_MPS};
+use crate::garage_visit::{
+    GarageOffer, GarageRepairReport, GarageSite, LayingLow, PlaceKind, PlaceStatus, PlaceVisit,
+    SafehouseSite, GARAGE_ENTER_SPEED_MPS,
+};
 use crate::race::RaceRun;
 use crate::race_spots::MeetSpots;
 use crate::roam::RoamRun;
@@ -121,6 +124,10 @@ pub struct Session {
     garage_armed: bool,
     /// Garage visits opened so far.
     visit_seq: u32,
+    /// The city's safehouses (sessions with an economy run; career places).
+    safehouses: Vec<SafehouseSite>,
+    /// The open career place visit (garage or safehouse; the player's car is held).
+    place: Option<PlaceVisit>,
     playback: Option<Playback>,
     mode: DamageMode,
     live_end_hash: Option<u64>,
@@ -244,10 +251,13 @@ impl Session {
         } else {
             CrashRecorder::default()
         };
-        let garages = if run.is_some() {
-            crate::garage_visit::sites(sim.world())
+        let (garages, safehouses) = if run.is_some() {
+            (
+                crate::garage_visit::sites(sim.world()),
+                crate::garage_visit::safehouse_sites(sim.world()),
+            )
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
         Ok(Self {
             street,
@@ -262,6 +272,8 @@ impl Session {
             visit: None,
             garage_armed: false,
             visit_seq: 0,
+            safehouses,
+            place: None,
             script_end: if scripted { sc.ticks() } else { 0 },
             mode: sc.mode,
             sc,
@@ -1076,13 +1088,124 @@ impl Session {
 
     // ----- garage visits (lead; see `crate::garage_visit`) ------------------------------
 
-    /// The city's repair shops (empty without an economy run or a city, in picker races and in
-    /// career runs).
+    /// The city's repair shops (empty without an economy run or a city, and in picker races).
+    /// In career runs they are career places (see [`Self::place`]).
     pub fn garages(&self) -> &[GarageSite] {
-        if self.race.is_some() || self.career {
+        if self.race.is_some() {
             return &[];
         }
         &self.garages
+    }
+
+    /// The city's safehouses (career runs only; empty otherwise).
+    pub fn safehouses(&self) -> &[SafehouseSite] {
+        if self.race.is_some() || !self.career {
+            return &[];
+        }
+        &self.safehouses
+    }
+
+    /// Career places: the open garage / safehouse visit, and the safehouse dwell while chased.
+    pub fn place(&self) -> PlaceStatus {
+        let mut status = PlaceStatus {
+            visit: self.place.clone(),
+            laying_low: None,
+        };
+        let Some(run) = self.run.as_ref().filter(|_| self.career) else {
+            return status;
+        };
+        let player = run.player();
+        let Some(rec) = self.sim.police().racer(player) else {
+            return status;
+        };
+        if !matches!(
+            rec.status,
+            wp_police::PursuitStatus::Pursuit | wp_police::PursuitStatus::Searching
+        ) {
+            return status;
+        }
+        let Some(st) = self.vehicle(player).map(|v| v.vehicle.state()) else {
+            return status;
+        };
+        if let Some(site) = self
+            .safehouses
+            .iter()
+            .find(|h| h.contains([st.pos[0], st.pos[1]]))
+        {
+            let cfg = &self.sim.police().config().heat.safehouse;
+            status.laying_low = Some(LayingLow {
+                name: site.name.clone(),
+                dwell_s: rec.safehouse_s,
+                need_s: cfg.dwell_s,
+                clear_radius_m: cfg.clear_radius_m,
+            });
+        }
+        status
+    }
+
+    /// "Back on the road" from the open career place visit (no-op without one).
+    pub fn place_leave(&mut self) {
+        if self.place.take().is_none() {
+            return;
+        }
+        if let Some(idx) = self.run.as_ref().and_then(|r| self.index(r.player())) {
+            self.release_player(idx);
+        }
+    }
+
+    /// Career runs: open a place visit when the car has stopped inside a garage or safehouse
+    /// with no pursuit on (close one a pursuit or the end of the run interrupts).
+    fn check_place(&mut self) {
+        let Some(run) = &self.run else {
+            return;
+        };
+        let player = run.player();
+        let police = self.sim.police().racer(player);
+        let chased = police.is_some_and(|r| {
+            matches!(
+                r.status,
+                wp_police::PursuitStatus::Pursuit | wp_police::PursuitStatus::Searching
+            )
+        });
+        if self.place.is_some() {
+            if run.is_over() || chased {
+                self.place_leave();
+            }
+            return;
+        }
+        if run.is_over() || self.race.is_some() {
+            return;
+        }
+        let Some(st) = self.vehicle(player).map(|v| v.vehicle.state()) else {
+            return;
+        };
+        let xy = [st.pos[0], st.pos[1]];
+        let wanted = police.map_or(wp_contracts::WantedLevel::None, |r| r.level);
+        let found = if let Some(g) = self.garages.iter().find(|g| g.contains(xy)) {
+            Some((PlaceKind::Garage, g.name.clone(), Some(g.kind)))
+        } else {
+            self.safehouses
+                .iter()
+                .find(|h| h.contains(xy))
+                .map(|h| (PlaceKind::Safehouse, h.name.clone(), None))
+        };
+        let Some((kind, name, shop)) = found else {
+            self.garage_armed = true;
+            return;
+        };
+        let speed = st.lin_vel[0].hypot(st.lin_vel[1]);
+        if !self.garage_armed || chased || speed >= GARAGE_ENTER_SPEED_MPS {
+            return;
+        }
+        self.visit_seq += 1;
+        self.garage_armed = false;
+        self.place = Some(PlaceVisit {
+            seq: self.visit_seq,
+            kind,
+            name,
+            shop,
+            wanted,
+        });
     }
 
     /// The open garage visit, if any.
@@ -1120,9 +1243,13 @@ impl Session {
             }
             return;
         }
-        // Not in picker races (a stop in a shop would hold a racer) nor career runs (the
-        // career garage screen owns repairs and the career account).
-        if self.garages.is_empty() || run.is_over() || self.race.is_some() || self.career {
+        // Career runs: garages and safehouses are career places (the career garage screen owns
+        // repairs and the career account).
+        if self.career {
+            return self.check_place();
+        }
+        // Not in picker races (a stop in a shop would hold a racer).
+        if self.garages.is_empty() || run.is_over() || self.race.is_some() {
             return;
         }
         let Some(st) = self.vehicle(player).map(|v| v.vehicle.state()) else {
@@ -1408,7 +1535,7 @@ impl Session {
         } else if let Some(idx) = self
             .run
             .as_ref()
-            .filter(|r| r.is_over() || self.visit.is_some())
+            .filter(|r| r.is_over() || self.visit.is_some() || self.place.is_some())
             .and_then(|r| self.index(r.player()))
         {
             // The run is over, or the car is in a garage: it brakes to a halt and stays there.
@@ -1935,6 +2062,8 @@ impl Session {
             visit: None,
             garage_armed: false,
             visit_seq: 0,
+            safehouses: Vec::new(),
+            place: None,
             sc: self.sc.clone(),
             scripted: self.scripted,
             script_end: self.script_end,

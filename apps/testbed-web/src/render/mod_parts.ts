@@ -965,8 +965,13 @@ export function fitBuild(panels: PanelBody, build: BuildVisuals, wheels: WheelIn
   }
   for (const [kind, region] of [["HoodPanel", "Hood"], ["TrunkPanel", "Trunk"]] as const) {
     if (!byStyle(kind)) continue;
-    // Format-4 body panels are `livery` (paint colour unless a livery texture is set).
-    panels.setPartMaterial((def) => def.region === region && (def.material === "paint" || def.material === "livery") && def.kind === "panel", "carbon");
+    // Format-4 body panels are `livery` (paint colour unless a livery texture is set). Stock
+    // dark `carbon` trim on the lid (the Shiro Turbo's hood) turns into the weave too, so the
+    // bought lid never looks like the stock one.
+    panels.setPartMaterial(
+      (def) => def.region === region && (((def.material === "paint" || def.material === "livery") && def.kind === "panel") || def.material === "carbon"),
+      "carbonWeave",
+    );
     drawn.add(kind);
   }
   if (byStyle("WindowTint")) {

@@ -167,6 +167,28 @@ fn a_rare_variant_comes_with_its_mods() {
     for m in &l.mods {
         assert!(car.mods.contains(m));
     }
+    // It stays the rare variant in the garage, in the paint it was sold in, and opening the
+    // workshop keeps its mods.
+    assert_eq!(car.paint, Some(l.paint));
+    let v = c.view();
+    let cv = v.cars.iter().find(|x| x.uid == uid.0).unwrap();
+    assert!(cv.rare);
+    assert_eq!(Some(&cv.name), l.variant_name.as_ref());
+    assert_eq!(cv.paint, Some(l.paint));
+    c.workshop(uid).unwrap();
+    let car = c.profile().account.car(uid).unwrap();
+    for m in &l.mods {
+        assert!(car.mods.contains(m), "{m} kept after the workshop");
+    }
+}
+
+#[test]
+fn lot_cars_keep_their_paint_once_bought() {
+    let mut c = rich(DamageMode::Arcade);
+    let (lot, l) = find(&mut c, LotKind::UsedLot, |_| true);
+    assert!(wp_economy::FACTORY_PAINTS.contains(&l.paint));
+    let uid = c.buy_listing(&lot, l.slot).unwrap();
+    assert_eq!(c.profile().account.car(uid).unwrap().paint, Some(l.paint));
 }
 
 #[test]
