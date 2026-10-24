@@ -53,6 +53,44 @@ const CONE_GLOW = 0x2a0e00;
 /** K-rail concrete (touge passes) and its faint glow so the barrier line reads at night. */
 const KRAIL_RGB = 0xb9b4a8;
 const KRAIL_GLOW = 0x16140f;
+/** Galvanised steel guard rail (touge passes) and its faint glow so the rail line reads at night. */
+const GUARD_RAIL_RGB = 0xc4c9cc;
+const GUARD_RAIL_GLOW = 0x121416;
+
+/**
+ * Unit guard rail section in its collider box ([-0.5, 0.5]³, base at z = -0.5): a W-beam on the
+ * −X face (the road side, `wp_world::touge`) over two posts with spacer blocks behind it.
+ */
+function guardRailGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const box = (sx: number, sy: number, sz: number, x: number, y: number, z: number) => {
+    const g = new THREE.BoxGeometry(sx, sy, sz).toNonIndexed();
+    g.translate(x, y, z);
+    parts.push(g);
+  };
+  // W-beam: two ridges with a shallow valley between them.
+  box(0.32, 1, 0.2, -0.34, 0, 0.3);
+  box(0.32, 1, 0.2, -0.34, 0, -0.02);
+  box(0.22, 1, 0.14, -0.29, 0, 0.14);
+  for (const y of [-0.25, 0.25]) {
+    box(0.18, 0.05, 0.5, -0.1, y, 0.14); // spacer block
+    box(0.22, 0.04, 1, 0.2, y, 0); // post
+  }
+  const count = parts.reduce((n, g) => n + g.getAttribute("position").count, 0);
+  const pos = new Float32Array(count * 3);
+  const nor = new Float32Array(count * 3);
+  let o = 0;
+  for (const g of parts) {
+    pos.set(g.getAttribute("position").array as Float32Array, o * 3);
+    nor.set(g.getAttribute("normal").array as Float32Array, o * 3);
+    o += g.getAttribute("position").count;
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  out.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+  return out;
+}
 
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 
@@ -249,10 +287,12 @@ export class PropView {
   private parkedCount = 0;
   private coneCount = 0;
   private krailCount = 0;
+  private guardRailCount = 0;
   private proxyFit: Fit | null = null;
   private full: { car: InstancedCar; fit: Fit } | null = null;
   private cones: THREE.InstancedMesh | null = null;
   private krails: THREE.InstancedMesh | null = null;
+  private guardRails: THREE.InstancedMesh | null = null;
   private farGeo: THREE.BufferGeometry | null = null;
   private proxyGeo: ReturnType<typeof proxyGeoms> | null = null;
   private mats: FleetMaterials | null = null;
@@ -270,6 +310,7 @@ export class PropView {
   private readonly tail = new THREE.Color(TAIL.off);
   private readonly coneMat = new THREE.MeshStandardMaterial({ color: CONE_RGB, emissive: CONE_GLOW, flatShading: true, roughness: 0.7 });
   private readonly krailMat = new THREE.MeshStandardMaterial({ color: KRAIL_RGB, emissive: KRAIL_GLOW, flatShading: true, roughness: 0.95 });
+  private readonly guardRailMat = new THREE.MeshStandardMaterial({ color: GUARD_RAIL_RGB, emissive: GUARD_RAIL_GLOW, flatShading: true, metalness: 0.6, roughness: 0.45 });
   /** Art-style version the props were built for, and the session inputs to rebuild them. */
   private styleVersion = -1;
   private lastSet: { list: Float32Array; models: SessionModels; mats: FleetMaterials } | null = null;
@@ -328,6 +369,10 @@ export class PropView {
         this.slot[i] = this.krailCount++;
         continue;
       }
+      if (this.kind[i] === PROP_KIND.guardRail) {
+        this.slot[i] = this.guardRailCount++;
+        continue;
+      }
       this.parkedCount++;
       if (firstCar < 0) firstCar = i;
       const key = `${Math.floor(this.pose[i * 7] / CHUNK_M)},${Math.floor(this.pose[i * 7 + 1] / CHUNK_M)}`;
@@ -369,6 +414,11 @@ export class PropView {
       this.krails = new THREE.InstancedMesh(geo, this.krailMat, this.krailCount);
       this.krails.frustumCulled = false;
       this.group.add(this.krails);
+    }
+    if (this.guardRailCount > 0) {
+      this.guardRails = new THREE.InstancedMesh(guardRailGeometry(), this.guardRailMat, this.guardRailCount);
+      this.guardRails.frustumCulled = false;
+      this.group.add(this.guardRails);
     }
     for (let i = 0; i < n; i++) this.writeInstance(i);
     this.flush();
@@ -455,6 +505,17 @@ export class PropView {
       this.s.set(this.half[i * 3] * 2, this.half[i * 3 + 1] * 2, this.half[i * 3 + 2] * 2);
       this.krails.setMatrixAt(this.slot[i], this.m.compose(this.p, this.q, this.s));
       this.krails.instanceMatrix.needsUpdate = true;
+      return;
+    }
+    if (this.kind[i] === PROP_KIND.guardRail) {
+      if (!this.guardRails) return;
+      const o = i * 7;
+      this.p.set(this.pose[o], this.pose[o + 1], this.pose[o + 2]);
+      this.q.set(this.pose[o + 3], this.pose[o + 4], this.pose[o + 5], this.pose[o + 6]);
+      // Unit section → the rail's collider box.
+      this.s.set(this.half[i * 3] * 2, this.half[i * 3 + 1] * 2, this.half[i * 3 + 2] * 2);
+      this.guardRails.setMatrixAt(this.slot[i], this.m.compose(this.p, this.q, this.s));
+      this.guardRails.instanceMatrix.needsUpdate = true;
       return;
     }
     const ch = this.chunks[this.chunkOf[i]];
@@ -681,6 +742,7 @@ export class PropView {
     if (i < 0 || i >= this.n) return null;
     if (this.kind[i] === PROP_KIND.cone) return this.cones ? { mesh: this.cones, slot: this.slot[i], fit: null } : null;
     if (this.kind[i] === PROP_KIND.krail) return this.krails ? { mesh: this.krails, slot: this.slot[i], fit: null } : null;
+    if (this.kind[i] === PROP_KIND.guardRail) return this.guardRails ? { mesh: this.guardRails, slot: this.slot[i], fit: null } : null;
     if (this.fullSlot[i] >= 0 && this.full) return { mesh: this.full.car.paint, slot: this.fullSlot[i], fit: this.full.fit };
     const ch = this.chunks[this.chunkOf[i]];
     if (!ch) return null;
@@ -814,10 +876,16 @@ export class PropView {
       this.krails.geometry.dispose();
       this.krails = null;
     }
+    if (this.guardRails) {
+      this.guardRails.removeFromParent();
+      this.guardRails.geometry.dispose();
+      this.guardRails = null;
+    }
     this.n = 0;
     this.parkedCount = 0;
     this.coneCount = 0;
     this.krailCount = 0;
+    this.guardRailCount = 0;
     this.fullProps = [];
     this.trafficModel = null;
     this.repicks = 0;

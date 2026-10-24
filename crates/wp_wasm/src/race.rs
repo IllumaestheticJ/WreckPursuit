@@ -628,14 +628,19 @@ impl RaceRun {
             None => catalog::plan_course(sim.world(), def),
         }
         .ok_or_else(|| format!("{}: no route", def.id))?;
+        // A touge battle in the rain: the AI plans for the wet road.
+        let grip = touge_setup.map_or(1.0, |t| t.surface.ai_grip());
         let entrant = |i: usize| -> Result<LiveEntrant, String> {
             let car = cars
                 .get(&sc.entities[i].car)
                 .ok_or_else(|| format!("car {} not loaded", sc.entities[i].car))?;
+            let mut capability = CarCapability::for_car(car);
+            capability.max_lat_g *= grip;
+            capability.brake_g *= grip;
             Ok(LiveEntrant {
                 entity: ids[i],
                 redline_rpm: car.def.engine.redline_rpm,
-                capability: CarCapability::for_car(car),
+                capability,
             })
         };
         let player = entrant(0)?;

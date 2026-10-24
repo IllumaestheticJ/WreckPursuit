@@ -19,9 +19,29 @@ pub enum PropKind {
     ParkedCar,
     /// A traffic cone (light, knockable).
     Cone,
-    /// A precast concrete K-rail section (touge outboard barrier: heavy, shoved aside by a hard
-    /// hit).
+    /// A precast concrete K-rail section (heavy, shoved aside by a hard hit). No built-in world
+    /// places these any more (the touge passes use [`PropKind::GuardRail`]); kept for scenarios.
     KRail,
+    /// A steel W-beam guard rail section on its posts (touge outboard edge): fixed while a car
+    /// slides along it, breaks away as a light body when a car hits it square enough
+    /// ([`PropKind::breakaway_mps`]).
+    GuardRail,
+}
+
+/// Closing speed (towards the rail, along its normal) above which a guard rail section breaks
+/// away from its posts, m/s. Below it the rail holds and redirects the car.
+pub const GUARD_RAIL_BREAK_MPS: f32 = 6.5;
+
+impl PropKind {
+    /// For props anchored to the ground: the closing speed (m/s, along the prop's local X
+    /// axis, i.e. square into its face) a mover needs before the prop is let loose. `None` for
+    /// props that turn loose whenever something comes near (parked cars, cones, K-rails).
+    pub fn breakaway_mps(self) -> Option<f32> {
+        match self {
+            PropKind::GuardRail => Some(GUARD_RAIL_BREAK_MPS),
+            PropKind::ParkedCar | PropKind::Cone | PropKind::KRail => None,
+        }
+    }
 }
 
 /// A static prop.

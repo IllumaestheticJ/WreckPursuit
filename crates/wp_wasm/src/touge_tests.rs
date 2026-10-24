@@ -4,6 +4,7 @@ use wp_contracts::{DamageMode, DamageSim, EntityId, VehicleSim};
 use wp_economy::Feature;
 use wp_race::touge::{BattleResult, BreachKind, TougeSetup, Wager};
 use wp_world::geom;
+use wp_world::touge::EdgeKind;
 
 use crate::session::Session;
 use crate::touge::{set_next_wager, touge_cards, touge_scenario};
@@ -39,22 +40,43 @@ fn pos(s: &Session, id: EntityId) -> [f32; 3] {
     s.vehicle(id).unwrap().vehicle.state().pos
 }
 
-/// Put `id` on a K-rail stretch of the pass, aimed through the rails at `speed_mps`.
-fn launch_at_krails(s: &mut Session, id: EntityId, speed_mps: f32) {
-    let track = wp_world::touge::generate_builtin(&s.sim().world().network().id)
-        .unwrap()
-        .track;
-    let span = track.krail[0];
+/// Put `id` in the far lane at distance `s_m` along the pass, aimed `angle_deg` off the road
+/// towards the edge on `side`, at `speed_mps`.
+fn launch(s: &mut Session, id: EntityId, s_m: f32, side: f32, angle_deg: f32, speed_mps: f32) {
     let surf = &s.sim().world().network().surfaces[0];
     let cum = geom::cumulative(&surf.centre);
-    let (p, d) = geom::point_at(&surf.centre, &cum, 0.5 * (span.from_m + span.to_m));
-    let out = geom::scale(geom::right_of(d), span.side);
-    // From the far lane, 40° off the road towards the rails.
+    let (p, d) = geom::point_at(&surf.centre, &cum, s_m);
+    let out = geom::scale(geom::right_of(d), side);
     let start = geom::add(geom::xy(p), geom::scale(out, -2.0));
-    let (sn, cs) = wp_math::sin_cos(40f32.to_radians());
+    let (sn, cs) = wp_math::sin_cos(angle_deg.to_radians());
     let aim = geom::normalize(geom::add(geom::scale(d, cs), geom::scale(out, sn)));
     s.debug_place(id, start, geom::yaw_of(aim), speed_mps, Some(p[2]))
         .unwrap();
+}
+
+/// The pass's longest stretch of edge `kind` that starts 100 m in or later: `(middle, side)`.
+fn longest(s: &Session, kind: EdgeKind) -> (f32, f32) {
+    let track = wp_world::touge::generate_builtin(&s.sim().world().network().id)
+        .unwrap()
+        .track;
+    let e = track
+        .spans(kind)
+        .filter(|e| e.from_m > 100.0)
+        .max_by(|a, b| (a.to_m - a.from_m).total_cmp(&(b.to_m - b.from_m)))
+        .copied()
+        .unwrap();
+    (0.5 * (e.from_m + e.to_m), e.side)
+}
+
+/// Run until the battle is decided (at most `secs`).
+fn decided_within(s: &mut Session, secs: u32) -> Option<wp_race::touge::BattleOutcome> {
+    for _ in 0..240 * secs {
+        s.run_ticks(1);
+        if let Some(o) = s.race().unwrap().touge().unwrap().battle().outcome() {
+            return Some(o.clone());
+        }
+    }
+    None
 }
 
 #[test]
@@ -75,7 +97,7 @@ fn every_pass_has_a_challenger_and_a_boss_and_a_scenario() {
 }
 
 #[test]
-fn ai_battle_runs_down_the_mountain_inside_the_walls() {
+fn ai_battle_runs_down_the_mountain_on_the_road() {
     let st = setup("touge_mistral_ridge", "down", "challenger");
     let mut s = battle(&st, true, Wager::None, None);
     let start = pos(&s, PLAYER);
@@ -92,26 +114,16 @@ fn ai_battle_runs_down_the_mountain_inside_the_walls() {
 }
 
 #[test]
-fn a_car_through_the_krails_is_totaled_and_loses_the_battle() {
+fn a_car_over_an_open_drop_falls_off_the_mountain_and_loses_the_battle() {
     let st = setup("touge_hollow_crown", "up", "challenger");
     let mut s = battle(&st, false, Wager::None, None);
     s.run_ticks(240 * 4); // countdown over
-    launch_at_krails(&mut s, PLAYER, 30.0);
-    let mut decided = None;
-    for _ in 0..240 * 6 {
-        s.run_ticks(1);
-        if let Some(o) = s.race().unwrap().touge().unwrap().battle().outcome() {
-            decided = Some(o.clone());
-            break;
-        }
-    }
-    let o = decided.expect("the K-rails gave way and the car went over");
+    let (at, side) = longest(&s, EdgeKind::Drop);
+    launch(&mut s, PLAYER, at, side, 40.0, 30.0);
+    let o = decided_within(&mut s, 6).expect("the car went over the drop");
     assert_eq!(o.result, BattleResult::Lost);
     assert_eq!(o.totaled, Some(PLAYER));
-    assert!(matches!(
-        o.breach,
-        Some(BreachKind::ThroughWall | BreachKind::OffTheEdge)
-    ));
+    assert_eq!(o.breach, Some(BreachKind::OffTheEdge));
     assert!(s.vehicle(PLAYER).unwrap().damage.summary().total_loss);
     // The results panel is up right away; the race is over for the player.
     let r = s.race_report().expect("results once decided");
@@ -119,27 +131,42 @@ fn a_car_through_the_krails_is_totaled_and_loses_the_battle() {
 }
 
 #[test]
-fn fixed_walls_hold() {
-    // Same hit on a fixed-wall stretch: the car bounces off, nobody is totaled.
-    let st = setup("touge_hollow_crown", "up", "challenger");
+fn a_square_hit_breaks_through_the_guard_rail() {
+    let st = setup("touge_mistral_ridge", "up", "challenger");
     let mut s = battle(&st, false, Wager::None, None);
     s.run_ticks(240 * 4);
-    let surf = &s.sim().world().network().surfaces[0];
-    let cum = geom::cumulative(&surf.centre);
-    let (p, d) = geom::point_at(&surf.centre, &cum, 300.0);
-    let out = geom::right_of(d);
-    let start = geom::add(geom::xy(p), geom::scale(out, -2.0));
-    let (sn, cs) = wp_math::sin_cos(40f32.to_radians());
-    let aim = geom::normalize(geom::add(geom::scale(d, cs), geom::scale(out, sn)));
-    s.debug_place(PLAYER, start, geom::yaw_of(aim), 30.0, Some(p[2]))
-        .unwrap();
+    let (at, side) = longest(&s, EdgeKind::Rail);
+    launch(&mut s, PLAYER, at, side, 40.0, 30.0);
+    let o = decided_within(&mut s, 8).expect("the rail gave way and the car went over");
+    assert_eq!(o.result, BattleResult::Lost);
+    assert_eq!(o.totaled, Some(PLAYER));
+    assert!(o.breach.is_some());
+    // At least one rail section was knocked loose and moved.
+    let moved = (0..s.sim().prop_count()).any(|i| {
+        s.sim().prop_kind(i) == Some(wp_world::props::PropKind::GuardRail)
+            && s.sim().prop_pose(i).is_some_and(|(p, _)| {
+                let r = s.sim().world().static_props().nth(i).unwrap();
+                (p[0] - r.pos[0]).hypot(p[1] - r.pos[1]) > 1.0
+            })
+    });
+    assert!(moved, "no guard rail section moved");
+}
+
+#[test]
+fn the_guard_rail_holds_a_glancing_scrape() {
+    let st = setup("touge_mistral_ridge", "up", "challenger");
+    let mut s = battle(&st, false, Wager::None, None);
+    s.run_ticks(240 * 4);
+    let (at, side) = longest(&s, EdgeKind::Rail);
+    // 8° at 25 m/s: ~3.5 m/s into the rail, under its breakaway speed.
+    launch(&mut s, PLAYER, at - 40.0, side, 8.0, 25.0);
     s.run_ticks(240 * 4);
     let t = s.race().unwrap().touge().unwrap();
     assert!(
         t.battle()
             .outcome()
             .is_none_or(|o| o.totaled != Some(PLAYER)),
-        "a fixed wall let the car through: {:?}",
+        "the rail let a glancing car through: {:?}",
         t.battle().outcome()
     );
 }
@@ -155,7 +182,8 @@ fn pink_slip_won_brings_the_wrecked_npc_car_home() {
     );
     let garage0 = s.run().unwrap().account().garage.len();
     s.run_ticks(240 * 4);
-    launch_at_krails(&mut s, NPC, 30.0);
+    let (at, side) = longest(&s, EdgeKind::Drop);
+    launch(&mut s, NPC, at, side, 40.0, 30.0);
     let mut report = None;
     for _ in 0..240 * 8 {
         s.run_ticks(1);

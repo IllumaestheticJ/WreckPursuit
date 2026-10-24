@@ -1,6 +1,6 @@
 // Touge battles in the testbed: the pass picker (pass, uphill / downhill, day / night,
 // dry / rain, challenger / boss), the rep-gated wager menu (side bet, pink slips) and the battle
-// panel shown next to the race results (who won, who went through the K-rails, the opponent
+// panel shown next to the race results (who won, who went off the mountain, the opponent
 // car's condition, the settlement). Data comes from wp_wasm's touge exports (`touge_list_json`,
 // `touge_menu_json`, `touge_result_json`); the battle itself is an ordinary race session, so the
 // race HUD and results (ui/race.tsx) draw the rest.
@@ -24,7 +24,7 @@ export interface TougeCard {
   blurb: string;
   length_m: number;
   climb_m: number;
-  krail_stretches: number;
+  drop_stretches: number;
   challenger: TougeRacer;
   boss: TougeRacer;
 }
@@ -81,7 +81,7 @@ export interface TougeReport {
   wager: Wager;
   wager_taken: boolean;
   wager_error: string | null;
-  outcome: { result: "Won" | "Lost" | "Draw"; tick: number; totaled: number | null; breach: "ThroughWall" | "OffTheEdge" | null } | null;
+  outcome: { result: "Won" | "Lost" | "Draw"; tick: number; totaled: number | null; breach: "OffCourse" | "OffTheEdge" | null } | null;
   opponent_health: number | null;
   opponent_totaled: boolean | null;
   settlement: TougeSettlement | null;
@@ -158,7 +158,7 @@ function Picker(props: {
                 </Button>
               </div>
               <div class="wp-dim" style={{ fontSize: "0.85em", margin: "0.3em 0" }}>
-                {k.blurb} {(k.length_m / 1000).toFixed(1)} km · {Math.round(k.climb_m)} m climb · {k.krail_stretches} K-rail drops
+                {k.blurb} {(k.length_m / 1000).toFixed(1)} km · {Math.round(k.climb_m)} m climb · {k.drop_stretches} open drops
               </div>
               <div style={{ fontSize: "0.8em" }}>
                 <div>
@@ -195,7 +195,7 @@ function Picker(props: {
             {racer && (
               <div class="wp-dim" style={{ margin: "0.3em 0" }}>
                 vs {racer.name} in the {m.opponent_car}: win {m.win_rep > 0 ? `+${m.win_rep}` : m.win_rep} rep
-                {m.purse > 0 ? <> and <Money value={m.purse} /></> : null}, lose {m.loss_rep} rep. Through a K-rail = totaled, battle over.
+                {m.purse > 0 ? <> and <Money value={m.purse} /></> : null}, lose {m.loss_rep} rep. Off the mountain = totaled, battle over.
               </div>
             )}
             {!canRace && <p class="wp-danger">Locked{locked(m.race)}</p>}
@@ -288,7 +288,7 @@ function BattlePanel(props: { report: TougeReport; onGarage: (() => void) | null
             {o.breach && (
               <div class="wp-danger" style={{ fontSize: "0.85em" }}>
                 {o.result === "Won" ? `${r.opponent} ` : "You "}
-                {o.breach === "ThroughWall" ? "went through the K-rails. Totaled." : "went off the edge. Totaled."}
+                {o.breach === "OffCourse" ? "left the road. Totaled." : "went off the mountain. Totaled."}
               </div>
             )}
           </div>

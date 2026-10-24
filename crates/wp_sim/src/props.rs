@@ -8,6 +8,10 @@
 //! first contact, and turns fixed again once it has fallen asleep with nothing near it.
 //! Fixed props stay in the broad phase, so ground probes and contacts still see them.
 //!
+//! Anchored props ([`PropKind::breakaway_mps`], the touge guard rails) are the exception:
+//! they stay fixed while a mover slides along them and only turn dynamic when a mover in
+//! reach closes on their face faster than their breakaway speed.
+//!
 //! Deterministic: the grid is a `BTreeMap`, the active set a `BTreeSet`, and promotion /
 //! demotion run in a fixed order from sim state only.
 
@@ -26,6 +30,12 @@ const WAKE_LOOKAHEAD_S: f32 = 0.35;
 const DEMOTE_MARGIN_M: f32 = 6.0;
 /// A dynamic prop faster than this wakes the props around it like a vehicle does, m/s.
 const PUSH_MOVER_MPS: f32 = 1.0;
+/// An anchored prop only weighs a mover's hit once the mover's centre is this close to its
+/// face (a car's half length and some slack), m...
+const BREAKAWAY_REACH_M: f32 = 3.0;
+/// ...plus its closing speed times this look-ahead, s (a few ticks: it lets go before the
+/// contact, while the mover still has its speed).
+const BREAKAWAY_LOOKAHEAD_S: f32 = 0.05;
 
 /// One thing that can push props: position and velocity (world, m and m/s).
 #[derive(Debug, Clone, Copy)]
@@ -62,6 +72,28 @@ pub(crate) struct Props {
 
 fn cell(x: f32, y: f32) -> (i32, i32) {
     ((x / CELL_M).floor() as i32, (y / CELL_M).floor() as i32)
+}
+
+/// Whether anchored prop body `rb` (half extents `half`) lets go of mover `m`: the mover is
+/// at its face (within [`BREAKAWAY_REACH_M`] of it across, plus the closing speed times
+/// [`BREAKAWAY_LOOKAHEAD_S`], and alongside it) and closes on it (along the prop's local X
+/// axis) faster than `v_break`.
+fn breaks_away(rb: &rapier3d::prelude::RigidBody, half: [f32; 3], m: &Mover, v_break: f32) -> bool {
+    use rapier3d::math::Vector;
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let n = (*rb.rotation() * Vector::X).to_array();
+    let t = (*rb.rotation() * Vector::Y).to_array();
+    let p = rb.translation().to_array();
+    let d = [p[0] - m.pos[0], p[1] - m.pos[1], p[2] - m.pos[2]];
+    let across = dot(d, n);
+    let closing = if across >= 0.0 {
+        dot(m.vel, n)
+    } else {
+        -dot(m.vel, n)
+    };
+    closing >= v_break
+        && across.abs() <= half[0] + BREAKAWAY_REACH_M + closing * BREAKAWAY_LOOKAHEAD_S
+        && dot(d, t).abs() <= half[1] + BREAKAWAY_REACH_M
 }
 
 fn dist2_xy(a: [f32; 3], b: [f32; 3]) -> f32 {
@@ -149,9 +181,17 @@ impl Props {
                         }
                         let rb = &bodies[self.bodies[i as usize]];
                         let r = reach + self.radius[i as usize];
-                        if dist2_xy(rb.translation().to_array(), m.pos) <= r * r {
-                            self.active.insert(i);
+                        if dist2_xy(rb.translation().to_array(), m.pos) > r * r {
+                            continue;
                         }
+                        // Anchored props (guard rails) only let go of a square enough hit, from
+                        // a mover right at their face.
+                        if let Some(v) = self.kinds[i as usize].breakaway_mps() {
+                            if !breaks_away(rb, self.half_extents[i as usize], m, v) {
+                                continue;
+                            }
+                        }
+                        self.active.insert(i);
                     }
                 }
             }
@@ -266,5 +306,51 @@ mod tests {
         props.update(&mut set, &[]);
         assert_eq!(props.active_count(), 0);
         assert!(set[h].is_fixed());
+    }
+
+    #[test]
+    fn guard_rail_holds_a_scrape_and_breaks_away_from_a_square_hit() {
+        // One rail along +Y at x = 0 (local X = world X: its face points along ±X).
+        let mut set = RigidBodySet::new();
+        let mut props = Props::default();
+        let h = set.insert(RigidBodyBuilder::fixed().build());
+        props.add(
+            h,
+            ColliderHandle::invalid(),
+            [0.0; 3],
+            PropKind::GuardRail,
+            [0.15, 2.0, 0.35],
+        );
+        let v = wp_world::props::GUARD_RAIL_BREAK_MPS;
+        // Sliding along it fast, barely closing: stays fixed.
+        let scrape = Mover {
+            pos: [-1.2, -3.0, 0.5],
+            vel: [0.3 * v, 30.0, 0.0],
+        };
+        props.update(&mut set, &[scrape]);
+        assert_eq!(props.active_count(), 0);
+        assert!(set[h].is_fixed());
+        // Closing fast but still 12 m short of its end (a rail further round a bend): fixed.
+        let ahead = Mover {
+            pos: [-1.0, -14.0, 0.5],
+            vel: [1.5 * v, 25.0, 0.0],
+        };
+        props.update(&mut set, &[ahead]);
+        assert_eq!(props.active_count(), 0);
+        // Moving away from it quickly: stays fixed.
+        let away = Mover {
+            pos: [-1.2, 0.0, 0.5],
+            vel: [-2.0 * v, 0.0, 0.0],
+        };
+        props.update(&mut set, &[away]);
+        assert_eq!(props.active_count(), 0);
+        // Into its face (from either side) faster than the breakaway speed: let loose.
+        let hit = Mover {
+            pos: [2.0, 0.0, 0.5],
+            vel: [-1.2 * v, 5.0, 0.0],
+        };
+        props.update(&mut set, &[hit]);
+        assert_eq!(props.active_count(), 1);
+        assert!(set[h].is_dynamic());
     }
 }
