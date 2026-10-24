@@ -4,6 +4,8 @@
 // of sight 150-350 m away along the roads (data/police/presence.toml [response]). Checks the
 // call -> first unit within 100 m time and that no unit appears in a racer's view cone or
 // closer than 120 m.
+// 2026-10-23 (owner: far fewer patrols, Core by day 8 -> 3): the slowest call can take longer
+// to meet now (20.9 s seen), so the worst case is held to presence.toml's 25 s target.
 (
     name: "police_response_day_core",
     seed: 300,
@@ -15,7 +17,7 @@
         (metric: "calls", min: 1.0, max: 10000.0),
         (metric: "call_reached_25s_frac", min: 0.875, max: 1.0),
         (metric: "call_to_unit_100m_s", min: 0.0, max: 10.0),
-        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 15.0),
+        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 25.0),
         (metric: "spawns_in_view", min: 0.0, max: 0.0),
         (metric: "despawns_in_sight", min: 0.0, max: 0.0),
         (metric: "spawn_min_racer_m", min: 120.0, max: 10000.0),

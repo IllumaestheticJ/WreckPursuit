@@ -1801,3 +1801,30 @@ Proposed follow-ups: a cornering-limited intercept speed on hairpins (wp_police)
 - Founders Cut pair re-seeded 60 → 58. Seeds 50–70: escape story on 11 of 21 (was 16), control captured on 20, both on 11. Units no longer stall next to the stopped racer in the lay-by (D's report), so he is caught more often.
 - `pick_harlan_dirt_run.ron` regenerated (`WP_RACE_WRITE_SCENARIOS=1`, wp_wasm): presence 0.5.
 - **Queue cap (lead/round13 lantern_checkpoint):** racer 4 sat behind busted racer 3, parked in the lane, from about 70 s to 300 s with units nearby. The queue exemption kept it Running, so the race never ended. A racer now waits behind another racer for at most `QUEUE_MAX_WAIT_S` (15 s) without moving; after that the normal stop and pinned rules apply. lantern_checkpoint ends at 66 s and passes. (`race_picker::ashpeak_metro_circuit` fails on lead/round13 7538c828 too, with police off: 1 of 6 finish. Not police.)
+## Owner tuning 2026-10-23: far fewer cops, far less suspicious
+
+Owner: "cops are far too common and spawn too much at night time — the night spawn rate should be the daytime rate, and the new night time rate should be 1/4 what it is now. The suspicion/investigation rate needs to also be FAR less sensitive."
+
+**Patrols (`data/police/presence.toml [patrols]`).** Core / Suburb / Industrial:
+
+| phase | before | after |
+|---|---|---|
+| dawn | 2 / 1 / 1 | 2 / 1 / 0 |
+| day | 8 / 3 / 2 | 3 / 1 / 1 (the old night) |
+| dusk | 6 / 2 / 2 | 2 / 1 / 0 |
+| night | 3 / 1 / 1 | 1 / 0 / 0 (a quarter of the old night's 5, rounded) |
+
+The city total per phase must stay ≥ 1: `PoliceSystem::unit_cap` reads a zero total as "no police in this city" and allows no units at all.
+
+**Investigations (`data/police/heat.toml`).**
+- `heat.unseen_factor` 0.2 → 0.1: an offence nobody saw adds half the heat it did.
+- New `heat.call_min_heat = 1.5` (`HeatConfig::call_min_heat`, checked in `PoliceSystem::on_violation`): an unseen offence only becomes a call (a unit sent to look) once the racer's heat reaches 1.5. Unseen heat decays all the time, so that takes a cluster of offences (a crash plus a red light), not a bit of unseen speeding. Before, every unseen offence was a call.
+- Radar (`heat.radar`): over by max(4.5 m/s, 25 %) held 2 s, was max(2.24 m/s, 10 %) held 1 s. This is no longer wp_world's own speeding margin.
+- Blatant speeding (`heat.blatant`) is unchanged: row 80's 20 km/h over within 90 m is an owner rule (`wp_sim/tests/police_passby.rs`).
+
+**Tests and scenarios re-aimed.**
+- `patrol_presence_*` take the new counts. `tests/system.rs::phase_change_adjusts_presence`: Core 3 → 2.
+- Mechanism tests that need several units near the racer (`pursued_at` in `tests/system.rs`, the `radio_chatter` harness) use `dense_patrols`, the old table. The two call tests set `call_min_heat = 0`.
+- `escape_break_contact_night`: 7 escapes in 10, max 6 → 9.
+- With fewer pool units, more calls go to spawned responders and some are not met within the 60 s run (61 = never). `response_day_core` max 15 → 25 s (presence.toml's target). `response_day_suburb` mean 28 → 40 s, max 38 → 61. `response_night_core` 25 s reached 0.85 → 0.6, mean 17 → 30 s, max 40 → 61.
+- **Outside wp_police (test only):** `crates/wp_sim/tests/police_passby.rs` builds its police with the old dense table so it still finds a cop on a straight.

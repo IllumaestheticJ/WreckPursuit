@@ -33,6 +33,8 @@
 // or in the racer's lane ahead don't make the arrest): seed 60 was Captured at 132.7 s. Seeds
 // 50-70: escape story on 11 of 21, control on 20, both on 11 (50, 52, 54, 56-59, 61, 63, 65,
 // 68). Re-seeded 60 -> 58.
+// PR #64 (owner 2026-10-23, Core day patrols 8 -> 3, investigations less sensitive) re-seeded
+// 54 -> 56 on its own base; on main the seed is re-measured in the police PR port.
 (
     name: "police_tunnel_escape_founders_cut_control",
     // Lead 2026-10-24: re-seeded 60 -> 58 after merging D's canal-bridge fix (ws/world 3affce58) with the PR #60 police power port; seed 60's main run became a capture. Seeds 50-70: both files pass on 11 of 21; 56-59 is the widest run, 58 its middle.

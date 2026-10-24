@@ -455,11 +455,16 @@ impl PoliceSystem {
                 return;
             }
         }
-        if !obs.witnessed && !self.racers[&racer].pursued() && !self.graph.nodes.is_empty() {
+        if !obs.witnessed
+            && !self.racers[&racer].pursued()
+            && self.racers[&racer].heat >= cfg.heat.call_min_heat
+            && !self.graph.nodes.is_empty()
+        {
             // No unit saw it: a civilian calls it in, or a traffic camera flags it, at the
             // violation's position, so a unit is sent to look (a camera alone never sends
             // anyone otherwise, and a racer that stays put would never be found). One open
-            // report per racer; later calls update the position.
+            // report per racer; later calls update the position. Only once the racer has
+            // built up `call_min_heat` (owner 2026-10-23: investigations far less sensitive).
             let district = self.graph.district_at(at);
             if let Some(inc) = self
                 .incidents

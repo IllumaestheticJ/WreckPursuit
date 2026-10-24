@@ -68,6 +68,7 @@ pub fn free_drive_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
         police_cars: true,
         covered_los: true,
         police_presence: None,
+        dense_patrols: false,
         restart_after_capture: false,
         car_mix: false,
         slow: false,

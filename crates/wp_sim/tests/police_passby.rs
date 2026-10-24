@@ -61,6 +61,9 @@ fn city_with_patrol_seeded(city: City, hour: f32, seed: u64) -> (Sim, EntityId) 
         City::Grid => World::procedural(&wp_world::procgen::ProcGenConfig::small(), cfg),
         City::Vesper => World::new(vesper().clone(), cfg),
     });
+    // The pre-2026-10-23 patrol counts: this checks how a cop reacts to a pass, not how many
+    // cops there are, and the shipped table is now too sparse to find one on a straight.
+    sim.set_police_config(wp_police::PoliceConfig::builtin_dense_patrols());
     let graph = wp_police::RoadGraph::from_city(sim.world().map());
     for _ in 0..240 * 60 {
         sim.step_fixed();
