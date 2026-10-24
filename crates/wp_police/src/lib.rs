@@ -503,6 +503,9 @@ pub struct PoliceSystem {
     /// Each racer's direction of travel when it last moved faster than 1 m/s (unit vector):
     /// which way a stopped racer faces (row 168, queues).
     pub(crate) racer_dir: BTreeMap<EntityId, [f32; 2]>,
+    /// How long each racer has waited behind another racer without moving, s (row 168: the
+    /// queue exemption lasts at most `pursuit::QUEUE_MAX_WAIT_S`).
+    pub(crate) queue_wait_s: BTreeMap<EntityId, f32>,
     pub(crate) units: Vec<Unit>,
     pub(crate) next_unit: u32,
     pub(crate) incidents: Vec<Incident>,
@@ -693,6 +696,7 @@ impl PoliceSystem {
             prev_pos: BTreeMap::new(),
             prev_vel: BTreeMap::new(),
             racer_dir: BTreeMap::new(),
+            queue_wait_s: BTreeMap::new(),
             units: Vec::new(),
             next_unit: 1,
             incidents: Vec::new(),
