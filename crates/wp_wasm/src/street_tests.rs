@@ -881,11 +881,11 @@ fn four_racers_lap_loop9_at_night_in_port_vesper() {
     assert!(city_top < 15.0, "city racers keep to city pace: {city_top}");
 }
 
-/// Row 150: no challenge while the player is wanted (a honk does nothing, an open offer lapses,
-/// accepting is refused); accepting resets both cars side by side at the start, at rest, facing
-/// along the route, as logged moves (the recording replays them).
+/// Row 150 (relaxed 2026-10-23): wanted with no unit on the player is no bar to a challenge;
+/// once a pursuit starts the open offer lapses and accepting is refused. (Cooling down,
+/// `Searching`, is no bar either: `street::tests::only_an_active_pursuit_blocks_challenges`.)
 #[test]
-fn no_challenge_while_wanted_and_both_cars_start_side_by_side() {
+fn wanted_is_no_bar_to_a_challenge_but_a_pursuit_is() {
     let mut s = city_session();
     s.run_ticks(240 * 2);
     s.debug_sim_mut()
@@ -894,42 +894,64 @@ fn no_challenge_while_wanted_and_both_cars_start_side_by_side() {
         .set_heat(PLAYER, 40.0);
     s.run_ticks(2);
     assert!(s.sim().police().is_wanted_or_pursued(PLAYER));
-    park_behind(&mut s, 0);
-    assert!(
-        s.street().unwrap().challengeable(s.sim(), PLAYER).is_none(),
-        "no hint while wanted"
-    );
-    assert!(s.street().unwrap().in_reach(s.sim(), PLAYER).is_some());
-    s.set_input(PLAYER, horn(true)).unwrap();
-    s.run_ticks(2);
-    s.set_input(PLAYER, horn(false)).unwrap();
-    s.run_ticks(2);
-    assert!(
-        s.street().unwrap().offer(s.sim(), s.run()).is_none(),
-        "a honk opens no challenge while wanted"
-    );
-    // Clean again: the challenge opens; wanted again: it lapses.
-    s.debug_sim_mut()
+    assert!(!street::pursued(s.sim(), PLAYER));
+    challenge(&mut s, 0);
+    assert!(s
+        .debug_sim_mut()
         .unwrap()
         .police_mut()
-        .set_heat(PLAYER, 0.0);
-    s.run_ticks(2);
-    assert!(!s.sim().police().is_wanted_or_pursued(PLAYER));
-    let racer = challenge(&mut s, 0);
-    s.debug_sim_mut()
-        .unwrap()
-        .police_mut()
-        .set_heat(PLAYER, 40.0);
-    s.run_ticks(2);
+        .begin_pursuit(PLAYER)
+        .is_some());
+    assert!(street::pursued(s.sim(), PLAYER));
+    let fin = finish_for(&s);
+    let stake = street::level(ROSTER[0].0).bet_min;
+    let err = s.street_accept(fin, &[], stake).unwrap_err();
+    assert!(err.contains("pursuit"), "{err}");
+    s.run_ticks(1);
     assert!(
         s.street().unwrap().offer(s.sim(), s.run()).is_none(),
         "the offer lapsed"
     );
+}
+
+/// Row 150: during an active pursuit there is no hint and a honk opens no challenge.
+#[test]
+fn a_honk_opens_no_challenge_during_a_pursuit() {
+    let mut s = city_session();
+    s.run_ticks(240 * 2);
     s.debug_sim_mut()
         .unwrap()
         .police_mut()
-        .set_heat(PLAYER, 0.0);
-    s.run_ticks(240 * 21);
+        .set_heat(PLAYER, 40.0);
+    park_behind(&mut s, 0);
+    assert!(s
+        .debug_sim_mut()
+        .unwrap()
+        .police_mut()
+        .begin_pursuit(PLAYER)
+        .is_some());
+    assert!(
+        s.street().unwrap().challengeable(s.sim(), PLAYER).is_none(),
+        "no hint while pursued"
+    );
+    assert!(s.street().unwrap().in_reach(s.sim(), PLAYER).is_some());
+    // The honk is read before the step, while the pursuit is on.
+    s.set_input(PLAYER, horn(true)).unwrap();
+    s.run_ticks(1);
+    s.set_input(PLAYER, horn(false)).unwrap();
+    s.run_ticks(1);
+    assert!(
+        s.street().unwrap().offer(s.sim(), s.run()).is_none(),
+        "a honk opens no challenge during a pursuit"
+    );
+}
+
+/// Row 150: accepting resets both cars side by side at the start, at rest, facing along the
+/// route, as logged moves (the recording replays them).
+#[test]
+fn both_cars_start_side_by_side() {
+    let mut s = city_session();
+    s.run_ticks(240 * 2);
     // Rolling a little and turned off the lane's heading before the accept.
     challenge(&mut s, 1);
     let fin = finish_for(&s);
@@ -988,7 +1010,6 @@ fn no_challenge_while_wanted_and_both_cars_start_side_by_side() {
         along.abs() < 1.5,
         "beside, not ahead or behind ({along:.2} m)"
     );
-    let _ = racer;
 }
 
 /// Row 151: a route through waypoints runs through them in order; the gates sit on the route

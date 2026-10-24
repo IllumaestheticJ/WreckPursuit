@@ -23,9 +23,10 @@
 //!   optionally waypoints the route must run through in order (up to [`MAX_WAYPOINTS`], owner
 //!   row 151; each a gate across the whole road, [`GATE_HALF_SPAN_M`] either side, that the
 //!   player must pass before B counts; a pick on any lane or carriageway of the road will do),
-//!   and a stake
-//!   inside the level's range (capped by their cash), then accepts. Not while the player is
-//!   wanted or chased (owner row 150): a honk does nothing and an open offer lapses.
+//!   and a stake inside the level's range (capped by their cash), then accepts. Not during an
+//!   active pursuit ([`pursued`]; owner row 150, relaxed 2026-10-23): a honk does nothing and an
+//!   open offer lapses. Wanted with no unit on the player, or cooling down (`Searching`, escape
+//!   timer running), is fine.
 //!   Both cars wait at a halt while the offer is open ([`StreetRacers::holds_player`]).
 //! - **Race.** Accepting clears civilian cars within [`START_CLEAR_M`] of the start, pays the stake (a betting ticket on the one career wallet:
 //!   `wp_economy` `place_bet`, venue `Street`, open from the start and capped only by cash and
@@ -65,6 +66,7 @@ use wp_opponent::{
     CarCapability, CorridorOptions, DriverProfile, Field, OpposingLanes, RaceConfig, RacerSpec,
     RacerStatus, SimPolice, VehicleObs,
 };
+use wp_police::PursuitStatus;
 use wp_sim::{Sim, VehicleKind};
 use wp_world::{geom, World};
 
@@ -699,10 +701,19 @@ pub struct StreetRacers {
     pending_light: Vec<(EntityId, bool)>,
 }
 
-/// The player is wanted or in a pursuit (search included): no street challenges then (owner
-/// row 150).
-fn pursued(sim: &Sim, player: EntityId) -> bool {
-    sim.police().is_wanted_or_pursued(player)
+/// The player is in an active pursuit: no street challenges then (owner row 150, relaxed
+/// 2026-10-23 to [`blocks_challenges`]: wanted or cooling down is fine).
+pub fn pursued(sim: &Sim, player: EntityId) -> bool {
+    sim.police()
+        .racer(player)
+        .is_some_and(|r| blocks_challenges(r.status))
+}
+
+/// Whether a player in this police status may not challenge street racers: only an active
+/// pursuit (a unit has them in sight) blocks. `Clear`, `Wanted` (no unit on them) and
+/// `Searching` (contact lost, the cooldown / escape timer running) do not.
+pub fn blocks_challenges(status: PursuitStatus) -> bool {
+    status == PursuitStatus::Pursuit
 }
 
 /// For each waypoint, the index of the nearest point of the route centreline (searched in
@@ -1137,7 +1148,7 @@ impl StreetRacers {
     }
 
     /// Nearest roaming racer the player is right behind ([`tailing`]) with no challenge or
-    /// race open, police or not (the hint says to lose the police first).
+    /// race open, pursuit or not (the hint says to shake the pursuit first).
     pub fn in_reach(&self, sim: &Sim, player: EntityId) -> Option<RosterEntry> {
         if self.offer.is_some() || self.race.is_some() {
             return None;
@@ -1223,7 +1234,7 @@ impl StreetRacers {
     /// Accept the open offer: race through the waypoints `via` (in order) to `finish` for
     /// `stake`. Pays the stake and starts the countdown; returns the moves that put both cars
     /// side by side at the start, at rest, facing along the route (owner row 150; the session
-    /// logs them). Refused while the police are after the player. Nothing changes on an error.
+    /// logs them). Refused during an active pursuit ([`pursued`]). Nothing changes on an error.
     pub fn accept(
         &mut self,
         sim: &Sim,
@@ -1238,7 +1249,7 @@ impl StreetRacers {
         }
         let player = run.player();
         if pursued(sim, player) {
-            return Err("lose the police first".into());
+            return Err("shake the pursuit first (cooling down is fine)".into());
         }
         let l = *level(self.racers[k].level);
         let cash = run.account().cash;
@@ -2366,6 +2377,16 @@ mod tests {
         assert_eq!(capped_at_gate(450.0, &gate_s, 0), 100.0);
         assert_eq!(capped_at_gate(450.0, &gate_s, 1), 300.0);
         assert_eq!(capped_at_gate(450.0, &gate_s, 2), 450.0);
+    }
+
+    /// Row 150 (relaxed 2026-10-23): only an active pursuit blocks challenges; wanted with no
+    /// unit on the player and cooling down (contact lost, escape timer running) do not.
+    #[test]
+    fn only_an_active_pursuit_blocks_challenges() {
+        assert!(blocks_challenges(PursuitStatus::Pursuit));
+        assert!(!blocks_challenges(PursuitStatus::Searching));
+        assert!(!blocks_challenges(PursuitStatus::Wanted));
+        assert!(!blocks_challenges(PursuitStatus::Clear));
     }
 
     /// Only right behind a racer (same lane, same way, close) counts as tailing it.

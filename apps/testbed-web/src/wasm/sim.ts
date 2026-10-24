@@ -636,7 +636,7 @@ export const sim = {
    * (x, y). Throws when no route. */
   streetPreview: (x: number, y: number, via: [number, number][] = []): StreetPreview => JSON.parse(wasm.street_preview(x, y, new Float32Array(via.flat()))),
   /** Accept the open challenge: race through `via` to (x, y) for `stake` dollars; both cars are
-   * reset side by side at the start. Throws if refused (also while the police are after you). */
+   * reset side by side at the start. Throws if refused (also during an active pursuit; cooling down is fine). */
   streetAccept: (x: number, y: number, stake: number, via: [number, number][] = []): void => wasm.street_accept(x, y, new Float32Array(via.flat()), stake),
   /** The street race's gates (waypoints, then B) and route, in `raceCourse()`'s layout. */
   streetCourse: (): Float32Array => wasm.street_course(),
@@ -760,9 +760,9 @@ export interface StreetStatus {
   levels: StreetLevel[];
   roster: StreetRacer[];
   hint: StreetRacer | null;
-  /** The police are after the player: no challenges (row 150). */
+  /** The player is in an active pursuit: no challenges (row 150; cooling down is fine). */
   pursued: boolean;
-  /** The racer in honking range while the police are after the player (hint: lose them). */
+  /** The racer in honking range during an active pursuit (hint: shake the pursuit). */
   blocked: StreetRacer | null;
   offer: StreetOffer | null;
   race: StreetRace | null;

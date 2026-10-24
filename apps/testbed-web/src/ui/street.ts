@@ -416,7 +416,7 @@ export class StreetUi {
       el.innerHTML =
         `<div class="wp-panel-title"><span>Street racers</span><b>${st.roster.length}</b></div>` +
         `<div class="st-row wp-dim">Pull up right behind a racer (same lane, same way) and honk (${this.hornLabel(horn)}) to challenge them. Dot colour and number = driver level.</div>` +
-        (st.pursued ? `<div class="st-row wp-warn">No challenges while the police are after you.</div>` : "") +
+        (st.pursued ? `<div class="st-row wp-warn">No challenges during an active pursuit (cooling down is fine).</div>` : "") +
         `<ul>${st.roster
           .map(
             (r) =>
@@ -520,7 +520,7 @@ export class StreetUi {
     } else if (h && !o && !st.race) {
       html = `Honk (${this.hornLabel()}) to challenge <b>${esc(h.name)}</b> <span class="st-lv" style="background:${h.colour}">Lv ${h.level} ${esc(h.level_name)}</span>`;
     } else if (st.blocked && !o && !st.race) {
-      html = `Lose the police first to challenge <b>${esc(st.blocked.name)}</b>`;
+      html = `Shake the pursuit to challenge <b>${esc(st.blocked.name)}</b>`;
     }
     this.hint.classList.toggle("hidden", !html || this.map.isOpen);
     if (html && this.hint.innerHTML !== html) this.hint.innerHTML = html;
