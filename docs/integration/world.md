@@ -1763,6 +1763,7 @@ Physics uses the smooth row-164 meshes. Tests:
 | Greybox | glb (MB) | b64 (MB) | Note |
 |---|---|---|---|
 | vesper_v2 | 10.44 | 13.92 | under the 15 MB preview cap; size check raised to 11 MB |
+| vesper_v2 (row 171) | 12.26 | 16.35 | road-band terrain drawn from the fine grid; the browser loads the parts (own 7.61 MB, shared 4.67 MB), size check raised to 12.5 MB |
 | procedural_12x12 | 3.02 | 4.02 | |
 | ashpeak | 25.86 | 34.48 | split for the preview by `tools/preview_build.sh` (b0269195) |
 
@@ -2134,3 +2135,29 @@ road (Douglas-Peucker, 0.2 m): every interior point is a node in users' graphs (
 destinations). Test:
 `tests/city_v2.rs::road_network_centrelines_offset_into_the_right_lane` (1918 samples: 937 in
 the wrong lane before, 4 at junction edges after). Police side: `docs/integration/police.md`.
+
+## Solid ground never stands above the drawn terrain (playtest row 171)
+**Cause.** Row 119's fix made physics collide with the drawn terrain everywhere except the road
+band (at-grade roads, junctions and bends: paved width + sidewalk + lot + skirt + half a cell),
+which keeps the fine 5 m heights the sidewalks, lots and skirts are laid on. The greybox drew the
+band with the coarse 10 m grid, each vertex lowered to the band's minimum within 10 m, and hid the
+step with curtain walls at the skirt feet, seen from the road side only. Where no sidewalk, lot or
+skirt was drawn (the half-cell margin, lot-less stretches, junction corners) and the slope was
+steep, solid ground stood up to 14.9 m above what was drawn: an invisible shelf (e.g. Port Vesper
+(-542, 239), hit by the drawn-colliders night run once police routes moved).
+**Fix.** `wp_world::surface::drawn_terrain_mesh` → `DrawnTerrain`: the coarse grid, with every
+coarse cell where any fine vertex on it has solid ground more than `DRAWN_BAND_TOLERANCE_M`
+(0.25 m) above the coarse surface drawn from the fine grid (the solid heights 5 cm down). A vertex
+a refined cell shares with a coarse one is within the tolerance (otherwise that cell is refined
+too) and is drawn at the coarse height, so the two resolutions meet without cracks. Port Vesper:
+13,290 of 103,700 coarse cells refined, terrain 207 k → 287 k triangles. Physics is unchanged (no
+goldens move). `city-import` draws it (`render_terrain`); greyboxes regenerated (`just city-v2`,
+`just city-ashpeak`, `gen-city --preset touge`).
+**Gate.** `tests/city_v2.rs::solid_ground_never_stands_above_the_drawn_terrain`: over the whole
+fine grid (vertices, cell centres, edge midpoints) solid ground is at most 0.25 m (+5 cm) above the
+drawn terrain (it was 14.9 m), and the drawn terrain, refined cells included, never rises above a
+road. `wp_wasm/tests/drawn_colliders.rs` (no hard contact more than 1 m from drawn geometry) passes
+on the regenerated greybox.
+**Not covered.** The touge passes' committed `road.bin` files do not match what `gen-city` writes
+today on main either; they are left as they are (only their greyboxes are regenerated).
+

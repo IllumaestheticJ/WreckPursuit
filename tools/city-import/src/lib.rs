@@ -114,8 +114,10 @@ mod tests {
             // 10.04 MB with the Loop 9 rest stops (row 153: six ramps, three parking roads);
             // 10.54 MB with PR #38's river, canal, bridges, landmarks and canopies and the
             // highway edge barriers (row 160). The base64 preview is 14.05 MB, under the
-            // 15 MB preview cap.
-            shipped.len() < 11_000_000,
+            // 15 MB preview cap. 12.26 MB with the road-band terrain drawn from the fine grid
+            // (row 171); the browser loads the parts (`greybox_parts.rs` keeps each under the
+            // preview cap: vesper_v2.own 7.61 MB), not this monolithic file.
+            shipped.len() < 12_500_000,
             "greybox grew to {} bytes",
             shipped.len()
         );
