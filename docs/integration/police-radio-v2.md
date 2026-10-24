@@ -402,3 +402,98 @@ What it would take to replace browser text-to-speech with recorded or generated 
 - `wp_wasm` (`audio.rs`): tiers passed to the director, `audio_set_radio_important_only`, `police_radio_tier`.
 - `apps/testbed-web`: scanner voices, tones and tier speech; strip styling; the important-only filter; `e2e/radio.mjs` checks.
 - `apps/ui-kit`: `GameSettings.radioFilter`, the menu row, a test.
+
+---
+
+# Radio relevance and plain speech (owner, 2026-10-23)
+
+Owner: "make sure police chatter and audio is cleaned up and simplified — generally speaking
+police should not be engaging random AI cars on the other side of the map, and it definitely
+should not be polluting the radio channel." Audit and probes: session `audio` (phase A report).
+Police *behaviour* toward AI racers is the cops workstream; this section is the radio only.
+
+## What changed
+
+- **The radio is the player's** (`PoliceSystem::set_listeners`). `wp_sim` sets the listeners to
+  the `VehicleKind::Player` cars every step (`police_link.rs`, one call; with a player cop seat
+  everyone listens). Every `RadioCue` knows the racer it is about (`RadioCue::about`, or
+  `PoliceSystem::radio_subject`: the racer the text names, else the speaking unit's target, else
+  the call it answers) and optionally where it happens (`RadioCue::at`). The director drops a
+  held line unless it concerns a listener: about a listener, or the racer / place / speaking
+  unit within `relevant_m` (300 m) of one; impact lines only within `impact_m` (250 m)
+  (`RadioStats::irrelevant` counts them). Pacing (gaps by level, line budget) follows the
+  listeners' level and state, not the hottest AI chase on the map. Headless scenarios without
+  listeners hear everything, as before; a scenario can name them (`listeners: [0]`).
+- **Line budget** (`max_lines_per_min = [2, 4, 6]`, calm / wanted or searching / pursuit): tiers
+  3–5 wait while the last 60 s already had that many lines; tiers 1–2 always go out.
+- **No routine chatter** (`routine = false`): "clear and available", "resuming patrol", crash
+  scenes, backup requests.
+- **Plain speech.** The single listener is "the suspect" (`radio::name_suspect`; other racers
+  keep "racer #N"). Gone: "10-80", "Code 4", "Resume patrol", "EMS", "PIT" ("going to spin him
+  out"), "Units, check the cover", "Spotlight on". Tool warnings are "Dispatch: roadblock 650
+  metres ahead, southbound on X." Level-up: "Dispatch: the suspect is now level 3. 4 units on
+  him. Highway Patrol is taking over the pursuit. Hard rams and rolling blocks authorised."
+- **Fewer low-value lines.** No per-unit "copy, searching …" lines; no helicopter position
+  reports ("still on him, 81 km/h"); "on his bumper" once per racer per 60 s (was 12 s), without
+  the place.
+- **Audio.** `wp_audio`'s own spike-hit radio line is off (`FlatTyreConfig::radio_line`, the hit
+  was heard twice); a released tier 3 line not spoken within 3 s is dropped
+  (`scanner::IMPACT_STALE_S`). Testbed: speech still running when the next line starts is cut,
+  never queued behind (the voice drifted behind the strip); a cut tier 1 line no longer speaks
+  after its alert tone; a new session resets the audio director, speech and the helicopter rotor
+  (`AudioSystem::resetSession`); the rotor loop stops after 5 s with no helicopter in range.
+- **HUD feed (ui-kit `reduce.ts`).** Violations, pursuit start / end, spikes, PITs, air launches
+  and wanted levels of other racers are no longer fed to the driver's scanner alerts / map
+  incidents (`ReduceContext.allRacers` turns them back on for a captain view).
+- **Contract (v0.5.0, applied by the contracts session):** `PoliceEvent::Radio` now carries
+  `tier` and `racer`; `flush_radio` fills both.
+
+## Numbers (probes in the audit session's scratch dir; police harness, lines per minute)
+
+"Before" = main at ee742a68. "After" = this change on the shared tree, which also has the cops
+session's uncommitted perception / dispatch work, so pursuit counts differ; the "no listeners"
+column is the same tree with every racer listening (old relevance), to separate the two.
+
+| Situation | Before: lines/min (about the player; about AI racers > 400 m away) | After, no listeners | After |
+|---|---|---|---|
+| (a) calm, nobody else misbehaving (`radio_calm_patrol`) | 0.0 | 0.0 | 0.0 |
+| (b) player calm, 3 AI racers chased elsewhere (`radio_npc_far`) | 9.7 (0; 6.0), 81 % airtime | 7.5 (0; 5.3) | **2.1 (0; 0)**, 18 % airtime |
+| (c) player's pursuit alone (`radio_city_chase`) | 7.5 (7.3; –) | – | **6.6** (6.5; –) |
+| (c') player's pursuit + 3 AI chases (`radio_npc_mixed`) | 9.7 (2.4; 5.2), 79 % airtime | 7.2 (1.9; 3.4) | **6.8 (4.9; 0)** |
+| (c'') player searching + AI chases | 12.1 (1.8; 4.9), 98 % airtime | 7.5 (1.6; 4.6) | **3.0 (1.3; 0)** |
+| (d) 60 s after an escape (`escape_break_contact_night`, no stop) | not reached | – | **0.5** (the "we've lost the suspect" line) |
+| searching, alone | 9.1–9.3 | – | 1.8–5.6 |
+
+The AI-racer lines left in (b) / (c') are AI chases that pass within 300 m of the player.
+
+Real game (native `wp_wasm::Session`, Port Vesper, 13 street racers, 30 min of sim time; the
+"after" tree also has the cops session's AI-racer scope, `npc_scope_m`):
+
+| Run | Before | After |
+|---|---|---|
+| 22:00, player cruising | 18 lines (0.6/min), 11 about AI racers (10 of them > 400 m away), 2 map-wide AI pursuits (a roaming racer rammed a patrol 568 m / 934 m away) | 1 line: "caller reports reckless driver, on Larkspur. Unit 7 responding." (an AI racer 152 m from the player); no AI pursuits |
+| 21:00, player parked | 1 line | 1 line (an AI racer near the player) |
+
+## Tests
+
+`cargo test -p wp_police --lib radio` (relevance, budget, routine off, "the suspect"),
+`--test radio_chatter`, `--test police_scenarios` (new `radio_npc_far.ron`, `radio_npc_mixed.ron`),
+`cargo test -p wp_audio` (spike hit without a second line, late impact dropped).
+
+## Known gaps
+
+- Networked clients: the server's listeners are all players; per-client filtering needs the
+  client to filter on `PoliceEvent::Radio.racer` (now in the contract) — `wp_net` follow-up.
+- "I just watched the suspect … I'm on it" and dispatch's "all units, pursuit of the suspect"
+  ~9 s later say the same thing twice.
+- Pursuits that flap (lost / restarted every 20–40 s) each get a start and an end line; seen with
+  the cops session's perception work in progress (62 pursuits in 70 min of
+  `escape_break_contact_night`, 15 before) — theirs to look at.
+
+## Contract change request (filed earlier as R144-1, extended)
+
+`PoliceEvent::Radio { unit, text, tier: u8, racer: Option<EntityId> }` (`#[serde(default)]`):
+`tier` 1 actionable … 5 routine (0 unknown); `racer` the racer the line is about. Needed for
+per-client filtering over the network (each client keeps lines about its own racer, or with a
+place near it) and replaces `PoliceSystem::radio_tier_of` text look-ups. Status 2026-10-24: being
+applied by the contracts session (v0.5.0); `wp_police` fills both fields.
