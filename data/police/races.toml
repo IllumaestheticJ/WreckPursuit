@@ -186,7 +186,7 @@ offset_m = 2.5
 [crowfoot_ascent]
 name = "Mountain tail"
 summary = "Deputies tail you up the hairpins and never pass; the net is at the saddle, where fresh units wait."
-presence = 0.5
+presence = 0.3
 backup_scale = 0.5
 tool_lifetime_s = 300.0
 recognise_on_sight = false
@@ -263,10 +263,6 @@ rams = true
 at = 0.35
 trigger_m = 80.0
 
-[[harnell_dirt_run.stakeouts]]
-at = 0.8
-trigger_m = 80.0
-
 # Illegal daytime checkpoint run through Ashpeak City's downtown. Style: downtown crackdown,
 # the county's answer to Port Vesper's Lantern lockdown: maximum presence in daylight, a
 # roadblock across the route halfway with one lane open, the side streets off the back half
@@ -280,12 +276,6 @@ presence = 2.0
 backup_scale = 1.0
 tool_lifetime_s = 300.0
 recognise_on_sight = true
-
-[[ashpeak_downtown_checkpoint.route_blocks]]
-at = 0.5
-gap_m = 3.5
-gap_side = "left"
-units = 2
 
 [[ashpeak_downtown_checkpoint.side_blocks]]
 from = 0.5
@@ -398,7 +388,7 @@ spikes = false
 helicopter = true
 box_in = false
 rolling_block = false
-junction_block = true
+junction_block = false
 pit = false
 rams = false
 
