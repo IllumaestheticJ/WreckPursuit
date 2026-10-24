@@ -7,7 +7,8 @@
 // in the night run R lands on a lane, keeps the police heat and makes the car a blinking ghost
 // for 1 s; in a career run R does not
 // repair (repairs are bought in the garage); on the grid viaduct through an interchange and far
-// off-road R still reaches a road (playtester B1).
+// off-road R still reaches a road (playtester B1); a tap of R resets in place, a 1 s hold goes
+// back to the road (F41).
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -188,6 +189,21 @@ check(
   `viaduct over an interchange: reset lands on the deck (${JSON.stringify(stuck.deck)})`,
 );
 check(stuck.off.on_lane && stuck.off.via !== "in_place", `far off-road: reset reaches a road (${JSON.stringify(stuck.off)})`);
+
+// 5. The reset key (F41): a tap resets in place, a 1 s hold goes back to the road (the bar shows
+//    while held).
+await page.keyboard.down("KeyR");
+await page.waitForTimeout(150);
+await page.keyboard.up("KeyR");
+await page.waitForFunction(() => window.__wp.resetHold.last !== null, null, { timeout: 10000 }).catch(() => {});
+const tapped = await page.evaluate(() => window.__wp.resetHold.last);
+await page.keyboard.down("KeyR");
+await page.waitForTimeout(500);
+const holdBar = await page.evaluate(() => document.querySelector("#reset-hold .t")?.textContent ?? "");
+await page.waitForFunction(() => window.__wp.resetHold.last === "road", null, { timeout: 10000 }).catch(() => {});
+await page.keyboard.up("KeyR");
+const held = await page.evaluate(() => window.__wp.resetHold.last);
+check(tapped === "tap" && held === "road" && /BACK TO THE ROAD/.test(holdBar), `reset key: tap → ${tapped}, hold → ${held} ("${holdBar}")`);
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();
