@@ -113,6 +113,10 @@ const frames = (p, n) =>
 
 await page.goto(`${URL}?city=${CITY}`);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 90000 });
+// These races are quick play (practice cash): untick the career box, or a quick-play
+// session takes no bets (row 169: with it ticked, bets must land in the career).
+const untickCareer = (p) => p.evaluate(() => (document.getElementById("career").checked = false));
+await untickCareer(page);
 
 // Sim cost without street racers, then with.
 const simMs = async () => {
@@ -640,6 +644,57 @@ await page.keyboard.press("KeyM");
   await frames(tp, 2);
   check(!(await status(tp))?.offer && !(await tp.evaluate(() => window.__wp.map.isOpen)), "touch: Decline closes the picker");
   await tctx.close();
+}
+
+// Row 169: street bets follow the career. Main menu → Free drive with the career box ticked
+// (and a career car) is a career run: the bet slip says "Career cash". Career box off: quick
+// play, and the slip says the bet is practice cash. (Settlement on the career account:
+// wp_wasm street_bets_settle_on_the_career.)
+// Third case: career box ticked but no career car (the menu falls back to quick play): the
+// bet is refused, so nothing is bet outside the career while it is ticked.
+for (const [careerBox, buyCar] of [[true, true], [false, true], [true, false]]) {
+  const label = !careerBox ? "career off" : buyCar ? "career on" : "career on, no car";
+  const cp = await context.newPage();
+  watch(cp);
+  await cp.goto(`${URL}?city=${CITY}&menu=1`);
+  await cp.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 120000 });
+  await cp.evaluate((on) => {
+    const wp = window.__wp;
+    wp.careerApi.newCareer("Arcade");
+    if (on[1]) wp.careerApi.buy("junkyard_beater", "Worn");
+    document.getElementById("career").checked = on[0];
+  }, [careerBox, buyCar]);
+  await cp.click("#gm-play-free");
+  await cp.waitForFunction(() => window.__wp.sim.streetStatus() !== null, null, { timeout: 60000 }).catch(() => {});
+  await wait(cp, 1500);
+  const st0 = await status(cp);
+  const active = await cp.evaluate(() => window.__wp.sim.careerRunActive());
+  const career = careerBox && buyCar;
+  check(active === career && st0?.career === career, `${label}: menu Free drive is ${career ? "a career run" : "quick play"} (career run ${active}, street career ${st0?.career})`);
+  const target = st0?.roster.find((r) => r.mode !== "OffDuty");
+  const hornKey = await cp.evaluate(() => window.__wp.bindings().keys.horn[0]);
+  if (target) {
+    await cp.keyboard.down(hornKey);
+    for (let i = 0; i < 40; i++) {
+      await placeBehind(cp, target.entity);
+      await wait(cp, 250);
+      if ((await status(cp))?.offer) break;
+    }
+    await cp.keyboard.up(hornKey);
+  }
+  await cp.waitForSelector('[data-testid="st-wallet"]', { timeout: 20000 }).catch(() => {});
+  const wallet = await cp.evaluate(() => {
+    const el = document.querySelector('[data-testid="st-wallet"]');
+    return el ? { career: el.getAttribute("data-career"), text: el.textContent } : null;
+  });
+  check(wallet?.career === (career ? "1" : "0"), `${label}: the bet slip says ${career ? "career cash" : "quick play"} ("${wallet?.text ?? "no offer"}")`);
+  const refused = await cp.evaluate(() => ({
+    note: !!document.querySelector('[data-testid="st-career-locked"]'),
+    goDisabled: document.querySelector("#st-go")?.disabled ?? null,
+  }));
+  const locked = careerBox && !career;
+  check(refused.note === locked && (!locked || refused.goDisabled === true), `${label}: ${locked ? "the bet is refused (career is ticked, the drive is quick play)" : "betting allowed"} (${JSON.stringify(refused)})`);
+  await cp.close();
 }
 
 check(errors.length === 0, `no page errors ${errors.slice(0, 3).join(" | ")}`);

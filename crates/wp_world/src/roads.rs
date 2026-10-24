@@ -147,14 +147,38 @@ impl RoadGraphView {
             } else {
                 RoadClass::Local
             };
-            // Centreline: node centres plus the interior bends of the first lane (offset by
-            // half a road width at most; exact geometry lives in the lanes).
-            let mut polyline = vec![geom::xy(net.nodes[a as usize].pos)];
-            let pl = &first.polyline;
-            for p in pl.iter().take(pl.len() - 1).skip(1) {
-                polyline.push(geom::xy(*p));
+            // Centreline: node centres plus the road's own centre between them (the paved
+            // surface's centreline: the line between the two directions, or the middle of a
+            // one-way road). Users offset from it into a lane, so it must not be a lane itself:
+            // the first lane's line put units driving one way a lane too far right and the other
+            // way onto the centre line (head-on with traffic on curved roads).
+            let (pa, pb) = (
+                geom::xy(net.nodes[a as usize].pos),
+                geom::xy(net.nodes[b as usize].pos),
+            );
+            let mut polyline = vec![pa];
+            match net.surfaces.iter().find(|sf| sf.road == first.road) {
+                Some(sf) => {
+                    let mut centre: Vec<V2> = sf.centre.iter().map(|p| geom::xy(*p)).collect();
+                    if geom::dist(centre[0], pa) > geom::dist(centre[centre.len() - 1], pa) {
+                        centre.reverse();
+                    }
+                    // Interior bends only: the trimmed ends sit just short of the nodes (a
+                    // straight road stays a single node-to-node line).
+                    let n = centre.len();
+                    polyline.extend(centre.into_iter().take(n.saturating_sub(1)).skip(1));
+                }
+                None => {
+                    let pl = &first.polyline;
+                    for p in pl.iter().take(pl.len() - 1).skip(1) {
+                        polyline.push(geom::xy(*p));
+                    }
+                }
             }
-            polyline.push(geom::xy(net.nodes[b as usize].pos));
+            polyline.push(pb);
+            // Only the points that shape the road (every interior point becomes a node in
+            // users' graphs, e.g. police patrol destinations).
+            let polyline = simplify(&polyline, CENTRELINE_TOLERANCE_M);
             let length_m = polyline.windows(2).map(|w| geom::dist(w[0], w[1])).sum();
             let (mp, _) = {
                 let pts: Vec<[f32; 3]> = polyline.iter().map(|p| [p[0], p[1], 0.0]).collect();
@@ -383,6 +407,39 @@ pub struct RoadNetworkIndex<'a> {
     out: Vec<Vec<u32>>,
     pois: Vec<wp_contracts::PoiInfo>,
     near: EdgeGrid,
+}
+
+/// Largest distance a road network centreline may stray from the road centre when points
+/// are dropped ([`simplify`]), m.
+const CENTRELINE_TOLERANCE_M: f32 = 0.2;
+
+/// Douglas–Peucker: the fewest points of `pts` (ends kept) within `tol` of the original line.
+fn simplify(pts: &[V2], tol: f32) -> Vec<V2> {
+    if pts.len() < 3 {
+        return pts.to_vec();
+    }
+    let mut keep = vec![false; pts.len()];
+    keep[0] = true;
+    keep[pts.len() - 1] = true;
+    let mut stack = vec![(0usize, pts.len() - 1)];
+    while let Some((a, b)) = stack.pop() {
+        let (mut far, mut far_d) = (a, 0.0f32);
+        for k in a + 1..b {
+            let d = geom::point_segment_distance(pts[k], pts[a], pts[b]);
+            if d > far_d {
+                (far, far_d) = (k, d);
+            }
+        }
+        if far_d > tol {
+            keep[far] = true;
+            stack.push((a, far));
+            stack.push((far, b));
+        }
+    }
+    pts.iter()
+        .zip(&keep)
+        .filter_map(|(p, k)| k.then_some(*p))
+        .collect()
 }
 
 /// Uniform grid over every edge's polyline pieces, for [`RoadNetworkIndex`]'s

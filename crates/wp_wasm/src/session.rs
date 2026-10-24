@@ -582,10 +582,11 @@ impl Session {
         &mut self,
         label: &str,
         stake: i64,
+        quoted: Option<f32>,
     ) -> Result<crate::race::BetCard, String> {
         let race = self.race.as_mut().ok_or("no race in this session")?;
         let run = self.run.as_mut().ok_or("no account in this session")?;
-        race.place_bet(run, label, stake)
+        race.place_bet(run, label, stake, quoted)
     }
 
     /// `(max stake, lock reason)` for picker-race bets (venue `City`) on this session's
@@ -817,7 +818,16 @@ impl Session {
 
     /// Take the run (its account carries over to the next session).
     pub fn take_run(&mut self) -> Option<PlayerRun> {
+        self.close_race_bets();
         self.run.take()
+    }
+
+    /// Settle the race's open bets on the run's account before the account leaves this
+    /// session (see [`crate::race::RaceRun::close_bets`]).
+    fn close_race_bets(&mut self) {
+        if let (Some(race), Some(run)) = (self.race.as_mut(), self.run.as_mut()) {
+            race.close_bets(run);
+        }
     }
 
     /// Continue the account of a previous session's run (restart): cash and the ledger carry
@@ -884,6 +894,7 @@ impl Session {
     /// (the career absorbs it).
     pub fn end_career(&mut self) -> Option<PlayerRun> {
         self.career = false;
+        self.close_race_bets();
         self.run.take()
     }
 

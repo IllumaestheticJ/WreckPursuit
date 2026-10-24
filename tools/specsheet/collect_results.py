@@ -10,7 +10,7 @@
   `vmax-trace` (`ram_probe` crate: the same run, stopped before the rig's ground slab ends).
 - Crashes: `damage-barrier --sweep <car>` (frontal / offset / side / rear × 15-80 km/h × both
   modes). Each barrier row of VALIDATION.md is checked here against its expectation; the cell
-  reads "PASS: …" or "FAIL: …" with the Simulation-mode numbers (crush, cabin intrusion,
+  reads "PASS: …" or "FAIL: …" with the Extreme-mode (pre-v0.4.0 Simulation) numbers (crush, cabin intrusion,
   health, total loss, failed components).
 """
 
@@ -104,6 +104,11 @@ def describe(r: dict) -> str:
     return s
 
 
+# Contract v0.4.0 renamed the modes: the barrier expectations were written for the old
+# Simulation, which is now `extreme`; the old Arcade (the "milder" comparison) is now `sim`.
+HARD = "extreme"
+
+
 def check(car: dict, rows: dict) -> dict:
     """Evaluate the VALIDATION.md barrier expectations. Returns {test name: cell text}."""
     dur = car["durability"]
@@ -112,33 +117,33 @@ def check(car: dict, rows: dict) -> dict:
     def cell(test, ok, r, why=""):
         out[test] = ("PASS: " if ok else "FAIL: ") + describe(r) + (f" ({why})" if why and not ok else "")
 
-    r = rows[("sim", "Frontal", 15)]
+    r = rows[(HARD, "Frontal", 15)]
     cell("frontal 15 km/h", not r["tl"] and set(r["failed"]) <= {"Lights"}, r, "components failed")
-    r = rows[("sim", "Frontal", 25)]
+    r = rows[(HARD, "Frontal", 25)]
     # Mid-engine: the radiators sit right behind the nose with no engine bay in front of them,
     # so a 25 km/h nose hit may take the radiator (as on real MR cars); the engine must survive.
     kill = {"Engine"} if car["profile"] == "mr" else {"Radiator", "Engine"}
     cell("frontal 25 km/h", not r["tl"] and not kill & set(r["failed"]), r,
          "radiator/engine failed" if car["profile"] != "mr" else "engine failed")
-    r = rows[("sim", "Frontal", 40)]
+    r = rows[(HARD, "Frontal", 40)]
     cell("frontal 40 km/h", r["crush"] >= 0.2 and not r["tl"], r,
          "crumple zone not engaged or total loss")
-    r = rows[("sim", "Frontal", 56)]
-    a = rows[("arcade", "Frontal", 56)]
+    r = rows[(HARD, "Frontal", 56)]
+    a = rows[("sim", "Frontal", 56)]  # milder mode (old Arcade)
     ok = (r["tl"] or dur >= 4) and 0.35 <= r["crush"] <= 1.3 and a["health"] > r["health"]
     cell("frontal 56 km/h", ok, r, "expected TotalLoss, 0.35-1.3 m crush, Arcade milder")
-    r = rows[("sim", "Frontal", 80)]
+    r = rows[(HARD, "Frontal", 80)]
     cell("frontal 80 km/h", r["tl"], r, "not a total loss")
-    r = rows[("sim", "Offset", 56)]
+    r = rows[(HARD, "Offset", 56)]
     cell("offset 40% 56 km/h", bool({"SuspensionFL", "WheelFL"} & set(r["failed"])), r,
          "struck-side corner intact")
-    r = rows[("sim", "Side", 40)]
+    r = rows[(HARD, "Side", 40)]
     # Exempt: body-on-frame (the barrier hits above the frame) and vans (the front axle sits
     # under the cab, so the striker footprint on the front door ends short of the wheel arch).
     exempt = car["lattice"].get("ladder_frame", False) or car["profile"] == "van"
     cell("side (T-bone) 40 km/h", exempt or any(f.startswith("Suspension") for f in r["failed"]),
          r, "struck-side suspension intact")
-    r = rows[("sim", "Rear", 40)]
+    r = rows[(HARD, "Rear", 40)]
     if car["era"] == "70s":
         ok, why = "FuelTank" in r["failed"], "rear fuel tank survived"
     elif car["id"] == "lucciola_350":

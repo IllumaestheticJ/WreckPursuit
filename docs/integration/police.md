@@ -1802,6 +1802,74 @@ Proposed follow-ups: a cornering-limited intercept speed on hairpins (wp_police)
 - `pick_harlan_dirt_run.ron` regenerated (`WP_RACE_WRITE_SCENARIOS=1`, wp_wasm): presence 0.5.
 - **Queue cap (lead/round13 lantern_checkpoint):** racer 4 sat behind busted racer 3, parked in the lane, from about 70 s to 300 s with units nearby. The queue exemption kept it Running, so the race never ended. A racer now waits behind another racer for at most `QUEUE_MAX_WAIT_S` (15 s) without moving; after that the normal stop and pinned rules apply. lantern_checkpoint ends at 66 s and passes. (`race_picker::ashpeak_metro_circuit` fails on lead/round13 7538c828 too, with police off: 1 of 6 finish. Not police.)
 
+## Stuck patrol cars (playtest row 170)
+Patrol cars in the Vesper traffic soak froze for good: nose to nose with traffic, in parked
+cars, tangled after a turn. Two route-geometry causes (round 12's `stuck` module recovers
+cars once stuck; these stop them getting there):
+- **Road network centrelines were a lane, not the road centre** (`wp_world::roads`, D's
+  crate; see `docs/integration/world.md`). Units add a 1.75 m lane offset to that line, so
+  one way they drove in the parking lane and the other way on the centre line, head-on with
+  oncoming traffic. Centrelines are also simplified (0.2 m): each interior point is a graph
+  node and a patrol destination.
+- **Routes turn on the spot at junction centres.** A physical car swings wide by its turning
+  radius: into the oncoming lane turning right, into the parking lane turning left.
+  `unit::round_junction_corners` replaces 25-150° corners with 10 m arcs (`TURN_RADIUS_M`;
+  the inside lane path stays ~8 m). Applied in `Unit::set_command` for physically driven
+  units without lights only: the pro driver smooths its own line, internal units follow the
+  track exactly.
+
+Measured on the Vesper traffic soak, seeds 5-12 (police-seconds still for > 5 s while
+wanting to move / units still stuck at the end), both with the `stuck` module: main 1793 /
+48, with these fixes 1129 / 28.
+
+Tests: `unit::tests::junction_corners_become_drivable_arcs`, `gentle_bends_and_u_turns_stay`,
+`wp_world/tests/city_v2.rs::road_network_centrelines_offset_into_the_right_lane`.
+
+Measured before merging main's world v7 map; not re-measured since.
+
+Moved police exposed a bug elsewhere, fixed here (outside this workstream's crates):
+- **A busted AI racer blocked the race for good** (`wp_race`, `wp_opponent`). It stopped where
+  it was caught; on a one-lane street (pass room ±0.35 m) with its cruiser beside it, nobody
+  could pass and Hollins sprint / Lantern checkpoint never finished. `LiveRace` now tows
+  busted AI cars `IMPOUND_AFTER_S` (6 s) after the capture (`StepOut::impound`; the wasm race
+  session and the `race_picker` loop despawn them; a towed car is never course-reset), and
+  busted racers pull over to the kerb clear of junctions first instead of braking where
+  they are.
+- simcli: new `police_tools: false` scenario switch (the AI captain lays no spikes or
+  roadblocks of its own; exact-spot `spikes_at` / `roadblock_at` orders still work).
+
+Re-aimed on the corrected graph (reasons and numbers in each file):
+- `police_sideswipe_patrol_night`: racer starts at (-164.9, -190) (unit 2 patrols ~270 m
+  further south); contact 8.70 s as before.
+- `police_tunnel_escape_founders_cut` + `_control`: `police_tools: false` (the captain now
+  finds spike sites on the route; these scenarios are about covered-road line of sight).
+- `day_core_speeder`: seed 106 (one run of 103-107 started at 20.9 s; elsewhere as quick
+  as main or quicker).
+- `response_day_core`: worst call 15 -> 20 s and mean 10 -> 11 s. **Review with the police
+  balance:** 48-run means are level (7.3/8.1/5.4/9.5 s vs main 6.8/7.3/6.0/8.3 s), but 4 of
+  68 calls take over 25 s (main 0 of 71). Main's Core patrols mostly drove to the highway:
+  patrol destinations are drawn per node, and 260 of main's 308 Core nodes were highway
+  sample points (here 32 of 80). Length-weighted destinations would remove the sampling
+  bias either way.
+- `wp_race` `hollins_descent`: `check_with_police` (its stakeout pursuits now catch two of
+  four; captures count, like `hollins_sprint`).
+- `wp_opponent` `live_police_chase…`: seed 1 (its own harness has no tow).
+- `escape_break_contact_night`: max escapes 6 -> 8 (19 of 30 runs escape here vs 14 on main, no
+  captures either way). **Review with the police balance** together with `response_day_core`.
+
+Native == wasm32 (the determinism suite failed on `jam/pursuit_jam_grid` and
+`jam/pursuit_jam_vesper` once police routes moved): traced to glamx's symmetric 3x3 eigen solver,
+whose `acos`/`cos` were platform libm calls. parry uses it for mass properties from convex hulls
+(a dented parked car's inertia) and to seed convex-hull construction (a building hull came out
+with different face normals). `third_party/glamx` patches it to the `libm` crate
+(`[patch.crates-io]`; see its `WRECKPURSUIT.md`).
+
+Known gaps: units queue behind traffic jams (correctly) at the soak's 4x density; the solid
+terrain in the band along road edges keeps the fine 5 m heights while the drawn terrain is the
+lowered coarse grid, so on steep embankments solid ground can sit 2-4 m above what is drawn (e.g.
+Port Vesper (-542, 239); world workstream, also on main);
+`opponent_pace` `lantern_checkpoint_s50` fails identically on main (not this branch's).
+
 ## Loop 9: daytime dragnet and patrols on the highway (owner request, 2026-10-24)
 
 Owner: "loop 9 daytime should have much heavier police presence, with helicopters, road blocks, etc" and "stop spawning cops off the highway on loop 9 races - not useful to anybody". The earlier rule that police never change per race is overridden for these Loop 9 changes only; the general police AI and radio are unchanged outside races that opt in.
