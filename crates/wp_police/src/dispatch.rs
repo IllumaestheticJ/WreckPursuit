@@ -1892,21 +1892,10 @@ impl PoliceSystem {
                 let r = self.racers.get(target)?;
                 let searching = r.status == crate::heat::PursuitStatus::Searching;
                 if searching {
-                    // Sent to the last known position (search points): say where (tier 4,
-                    // "checking the area").
-                    let eta = self
-                        .eta_phrase(i, *point)
-                        .map(|e| format!(", {e}"))
-                        .unwrap_or_default();
-                    line(
-                        RadioTier::Investigation,
-                        format!(
-                            "{callsign}, copy, searching {}{eta}.",
-                            self.place_phrase(*point, [0.0, 0.0])
-                        ),
-                        format!("search:{}", target.0),
-                        &format!("{{units}} searching for racer #{}.", target.0),
-                    )
+                    // Units sent to search are not announced (2026-10-23: one "lost visual"
+                    // per search is enough; "copy, searching" from every unit filled the
+                    // channel while the player was hiding).
+                    return None;
                 } else {
                     // Tier 1 only when it matters to the driver: L2+, and the intercept point
                     // is ahead of the racer ("a unit ahead of you").
@@ -3618,7 +3607,7 @@ impl PoliceSystem {
                     let text = if s.acquired {
                         format!("{callsign}: reacquired, {desc}.")
                     } else {
-                        format!("{callsign}: eyes on {desc}. Spotlight on.")
+                        format!("{callsign}: eyes on {desc}.")
                     };
                     cue = Some(
                         RadioCue::new(RadioTier::Actionable, Some(id), text)
@@ -3626,16 +3615,9 @@ impl PoliceSystem {
                     );
                     s.acquired = true;
                 } else if now >= s.next_report {
+                    // Position reports ("still on him, 80 km/h") are no longer spoken
+                    // (2026-10-23: no gameplay value); the cadence is kept.
                     s.next_report = now.plus(every);
-                    let desc = self.racer_desc(target);
-                    let kmh = self.racers.get(&target).map_or(0.0, |r| {
-                        (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt() * 3.6
-                    });
-                    cue = Some(RadioCue::new(
-                        RadioTier::Investigation,
-                        Some(id),
-                        format!("{callsign}: still on {desc}, {kmh:.0} km/h."),
-                    ));
                 }
             } else if s.visual && now.since(s.last_los) >= lost_after {
                 s.visual = false;
@@ -3644,7 +3626,7 @@ impl PoliceSystem {
                     RadioCue::new(
                         RadioTier::Actionable,
                         Some(id),
-                        format!("{callsign}: lost visual on {desc}. Units, check the cover."),
+                        format!("{callsign}: lost visual on {desc}."),
                     )
                     .supersedes(format!("air:{}", target.0)),
                 );

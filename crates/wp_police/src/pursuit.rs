@@ -391,7 +391,7 @@ impl PoliceSystem {
         self.radio(RadioCue::new(
             RadioTier::Escalation,
             None,
-            format!("Dispatch: 10-80, all units, pursuit of {desc}."),
+            format!("Dispatch: all units, pursuit of {desc}."),
         ));
         if let Some(i) = self.unit_index(unit) {
             // A unit already on another racer's pursuit stays on it (a pack of racers past
@@ -559,32 +559,21 @@ impl PoliceSystem {
         let by = capturer.map(|u| self.callsign(u));
         let text = match outcome {
             PursuitOutcome::Escaped => format!(
-                "Dispatch: all units, we've lost racer #{}, last seen {}. Resume patrol.",
+                "Dispatch: we've lost racer #{}, last seen {}.",
                 racer.0,
                 self.last_seen_phrase(racer)
             ),
-            PursuitOutcome::Safehouse => format!(
-                "Dispatch: racer #{} went to ground. Resume patrol.",
-                racer.0
-            ),
+            PursuitOutcome::Safehouse => format!("Dispatch: racer #{} went to ground.", racer.0),
             PursuitOutcome::Captured => match by {
-                Some(cs) => format!(
-                    "Dispatch: {cs} has racer #{} in custody {here}. Code 4, all units.",
-                    racer.0
-                ),
-                None => format!(
-                    "Dispatch: racer #{} in custody {here}. Code 4, all units.",
-                    racer.0
-                ),
+                Some(cs) => format!("Dispatch: {cs} has racer #{} in custody {here}.", racer.0),
+                None => format!("Dispatch: racer #{} in custody {here}.", racer.0),
             },
-            PursuitOutcome::CapturedTotalLoss => format!(
-                "Dispatch: racer #{} vehicle disabled {here}, suspect in custody. Code 4.",
-                racer.0
-            ),
-            PursuitOutcome::CalledOff => format!(
-                "Dispatch: pursuit of racer #{} terminated. All units resume patrol.",
-                racer.0
-            ),
+            PursuitOutcome::CapturedTotalLoss => {
+                format!("Dispatch: racer #{} wrecked {here}, in custody.", racer.0)
+            }
+            PursuitOutcome::CalledOff => {
+                format!("Dispatch: pursuit of racer #{} called off.", racer.0)
+            }
         };
         self.radio(
             RadioCue::new(RadioTier::Escalation, None, text)

@@ -74,7 +74,7 @@ pub const BUMPER_MIN_SPEED_MPS: f32 = 8.0;
 /// One bumper call per unit per this long, s.
 pub const BUMPER_UNIT_GAP_S: f32 = 25.0;
 /// One bumper call per racer per this long, s.
-pub const BUMPER_RACER_GAP_S: f32 = 12.0;
+pub const BUMPER_RACER_GAP_S: f32 = 60.0;
 /// The PIT verdict is called this long after the contact, s.
 pub const PIT_VERDICT_S: f32 = 2.5;
 /// One PIT line-up call per unit per this long, s.
@@ -377,7 +377,7 @@ pub fn impact_lines(sev: ImpactSeverity, role: ImpactRole) -> Option<&'static [&
         (Wreck, _) => &[
             "{cs}, I'm done! I'm done! Unit's totalled {place}!",
             "{cs}, I'm wrecked! I'm out, I'm out!",
-            "{cs}, officer down {place}! Need EMS!",
+            "{cs}, I'm hurt! Unit's wrecked {place}!",
         ],
     })
 }
@@ -391,17 +391,17 @@ pub const WRECK_PRIO: u8 = 5;
 /// `{place}` = where.
 pub const WRECK_REACTIONS: [&str; 3] = [
     "{other}, {cs} is down, {cs} is down!",
-    "{other}, officer down {place}, need EMS now!",
-    "{other}, {cs} just got wrecked {place}! Get EMS rolling!",
+    "{other}, officer down {place}!",
+    "{other}, {cs} just got wrecked {place}!",
 ];
 
 /// Dispatch reacting to a wreck when no other unit is on the racer.
-pub const WRECK_REACTION_DISPATCH: &str = "Dispatch: officer down {place}! EMS rolling, all units!";
+pub const WRECK_REACTION_DISPATCH: &str = "Dispatch: officer down {place}!";
 
 /// A pursued racer hitting a civilian car: `{cs}` = the lead unit (or Dispatch).
 pub const CIVILIAN_LINES: [&str; 3] = [
     "{cs}, he just took out a civilian {place}!",
-    "{cs}, he plowed into a civilian car {place}! Need EMS!",
+    "{cs}, he plowed into a civilian car {place}!",
     "{cs}, civilian vehicle hit {place}, he's still going!",
 ];
 
@@ -525,23 +525,6 @@ impl PoliceSystem {
         format!("{heading}{}", district_words(self.graph.district_at(p)))
     }
 
-    /// "ETA 40 seconds" for unit `i` driving to `p` (straight line × 1.3 at its road speed),
-    /// `None` when it is close (under 150 m) or a helicopter.
-    pub(crate) fn eta_phrase(&self, i: usize, p: [f32; 2]) -> Option<String> {
-        let u = &self.units[i];
-        let d = dist(u.body.pos, p);
-        if u.kind != UnitKind::Car || d < 150.0 {
-            return None;
-        }
-        let eta = d * 1.3 / u.limit_mps.max(15.0);
-        let rounded = ((eta / 10.0).round() * 10.0).max(10.0);
-        Some(if rounded >= 90.0 {
-            format!("ETA {:.0} minutes", (eta / 60.0).round().max(2.0))
-        } else {
-            format!("ETA {rounded:.0} seconds")
-        })
-    }
-
     /// What changes for the units when a racer goes from level `from` to `to` (row 144,
     /// tier 2): the rams sentence from the pursuit config's ram levels, then the highest
     /// "tougher department" sentence crossed (`radio.toml` `takeover`). Empty if nothing.
@@ -564,10 +547,8 @@ impl PoliceSystem {
         parts.join(" ")
     }
 
-    /// Dispatch's summary when a pursued racer's wanted level rises: level, where, who is on it.
+    /// Dispatch's summary when a pursued racer's wanted level rises: level and who is on it.
     pub(crate) fn level_summary(&self, racer: EntityId, level: u8) -> String {
-        let r = &self.racers[&racer];
-        let place = self.place_phrase(xy(r.pos), [r.vel[0], r.vel[1]]);
         let on_it = |kind: UnitKind| {
             self.units
                 .iter()
@@ -594,8 +575,10 @@ impl PoliceSystem {
         } else {
             ""
         };
+        // Short (2026-10-23): the level, how many units, the helicopter. Where the racer is,
+        // the player knows.
         format!(
-            "Dispatch, all units: racer #{} is now level {level}, {place}. {units}{air}.",
+            "Dispatch: racer #{} is now level {level}. {units}{air}.",
             racer.0
         )
     }
@@ -617,6 +600,29 @@ impl PoliceSystem {
     fn callout(&mut self, kind: Callout, cue: RadioCue) {
         *self.chatter.stats.raised.entry(kind).or_insert(0) += 1;
         self.radio(cue);
+    }
+
+    /// The racer a line raised without [`RadioCue::about`] is about: the racer it names
+    /// ("racer #N"), else the speaking unit's target (pursuit, intercept, helicopter track),
+    /// else the racer of the call it is answering. `None`: nobody in particular.
+    pub(crate) fn radio_subject(&self, cue: &RadioCue) -> Option<EntityId> {
+        if let Some(r) = crate::radio::racer_in_text(&cue.text) {
+            return Some(r);
+        }
+        let u = &self.units[self.unit_index(cue.unit?)?];
+        if let Some(t) = u.assignment.target() {
+            return Some(t);
+        }
+        let Assignment::Respond { incident } = u.assignment else {
+            return None;
+        };
+        self.incidents
+            .iter()
+            .find(|i| i.id == incident)
+            .and_then(|i| match i.kind {
+                crate::dispatch::IncidentKind::Report { racer } => Some(racer),
+                _ => None,
+            })
     }
 
     /// A deployment line was not spoken (row 144); counted for the bench.
@@ -692,8 +698,9 @@ impl PoliceSystem {
             parts.sort_by(|a, b| a.0.total_cmp(&b.0));
             let nearest = parts[0].0;
             let list: Vec<String> = parts.into_iter().map(|p| p.1).collect();
-            // Short: the line holds the channel while the racer closes in.
-            let text = format!("Dispatch, racer #{}: {}.", racer.0, list.join("; "));
+            // Short: the line holds the channel while the racer closes in. Who it is for is
+            // the cue's racer (only that racer's radio hears it, 2026-10-23).
+            let text = format!("Dispatch: {}.", list.join("; "));
             for k in &kinds[1..] {
                 *self.chatter.stats.raised.entry(*k).or_insert(0) += 1;
             }
@@ -704,7 +711,8 @@ impl PoliceSystem {
                 kinds[0],
                 RadioCue::new(RadioTier::Actionable, None, text)
                     .prio(crate::radio::TOOL_WARNING_PRIO)
-                    .ttl(ttl),
+                    .ttl(ttl)
+                    .about(racer),
             );
         }
     }
@@ -837,16 +845,24 @@ impl PoliceSystem {
             Callout::Impact,
             RadioCue::new(RadioTier::Impact, Some(id), text)
                 .prio(prio)
-                .ttl(ttl),
+                .ttl(ttl)
+                .at(pos),
         );
         if sev == ImpactSeverity::Wreck {
-            self.wreck_reaction(id, &cs, &place, target);
+            self.wreck_reaction(id, &cs, &place, pos, target);
         }
     }
 
     /// Another unit (or dispatch) reacts to unit `id`'s wreck: stacked after the victim's line
     /// when nothing more important waits (short life).
-    fn wreck_reaction(&mut self, id: UnitId, cs: &str, place: &str, target: Option<EntityId>) {
+    fn wreck_reaction(
+        &mut self,
+        id: UnitId,
+        cs: &str,
+        place: &str,
+        pos: [f32; 2],
+        target: Option<EntityId>,
+    ) {
         let other = target.and_then(|r| {
             self.units
                 .iter()
@@ -878,7 +894,9 @@ impl PoliceSystem {
                 .prio(WRECK_PRIO)
                 // It goes after its victim line (and any tier 1 traffic that cuts in), so it
                 // lives longer than the victim line's 8 s.
-                .ttl(12.0),
+                .ttl(12.0)
+                // Heard where the wreck is heard (radio relevance).
+                .at(pos),
         );
     }
 
@@ -1049,7 +1067,7 @@ impl PoliceSystem {
                     RadioCue::new(
                         RadioTier::Impact,
                         Some(w.unit),
-                        format!("{cs}, negative on the PIT, he got away {place}."),
+                        format!("{cs}, missed the spin, he got away {place}."),
                     )
                     .prio(0)
                     .ttl(3.0),
@@ -1094,11 +1112,12 @@ impl PoliceSystem {
                     Callout::UnitDown,
                     RadioCue::new(RadioTier::Impact, Some(unit), text)
                         .prio(WRECK_PRIO)
-                        .ttl(8.0),
+                        .ttl(8.0)
+                        .at(pos),
                 );
                 // A big wreck always stacks a second line: the nearest unit on the same
                 // racer, or dispatch.
-                self.wreck_reaction(unit, &cs, &place, target);
+                self.wreck_reaction(unit, &cs, &place, pos, target);
             }
             return;
         }
@@ -1365,13 +1384,12 @@ impl PoliceSystem {
                     .is_none_or(|t| now.since(t) >= BUMPER_RACER_GAP_S)
             };
             let cs = self.callsign(id);
-            let mut place_for: Option<([f32; 2], [f32; 2])> = None;
             let mut kind: Option<Callout> = None;
             {
                 let c = self.chatter.units.entry(id).or_default();
                 c.target = target;
                 match close_behind {
-                    Some((racer, rp, rv)) => {
+                    Some((racer, _, _)) => {
                         let since = *c.bumper_since.get_or_insert(now);
                         if now.since(since) >= BUMPER_HOLD_S
                             && c.last_bumper
@@ -1381,7 +1399,6 @@ impl PoliceSystem {
                             let c = self.chatter.units.get_mut(&id).expect("unit chat");
                             c.last_bumper = Some(now);
                             self.chatter.racers.entry(racer).or_default().last_bumper = Some(now);
-                            place_for = Some((rp, rv));
                             kind = Some(Callout::Bumper);
                         }
                     }
@@ -1404,13 +1421,12 @@ impl PoliceSystem {
             }
             match kind {
                 Some(Callout::Bumper) => {
-                    let (rp, rv) = place_for.expect("bumper place");
                     calls.push((
                         Callout::Bumper,
                         RadioCue::new(
                             RadioTier::Investigation,
                             Some(id),
-                            format!("{cs}, I'm on his bumper, {}.", self.place_phrase(rp, rv)),
+                            format!("{cs}, I'm on his bumper."),
                         )
                         .prio(1)
                         .ttl(2.5),
@@ -1421,7 +1437,7 @@ impl PoliceSystem {
                     RadioCue::new(
                         RadioTier::Impact,
                         Some(id),
-                        format!("{cs}, going for the PIT!"),
+                        format!("{cs}, going to spin him out!"),
                     )
                     .prio(1)
                     .ttl(2.5),

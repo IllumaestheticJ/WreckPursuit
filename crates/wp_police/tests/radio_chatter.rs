@@ -338,7 +338,7 @@ fn scripted_pursuit_callouts_in_order_with_places_and_no_overlap() {
     );
 
     // In order: pursuit start → lost visual → eyes on → custody; never two at once.
-    let start = find(&h.lines, 0, "10-80").expect("pursuit start");
+    let start = find(&h.lines, 0, "pursuit of").expect("pursuit start");
     assert!(
         start < lost && lost < eyes && eyes < custody,
         "{:#?}",
@@ -604,7 +604,14 @@ fn tool_lines_are_spoken_within_a_second_even_over_other_traffic() {
         while t < 90.0 && over.is_none() {
             h.run_with(PHYSICS_DT, |p| p.set_heat(RACER, heat));
             t += PHYSICS_DT;
-            if let Some(tier) = h.police.radio_on_air() {
+            // A line that started within the last half second is still being transmitted
+            // (`radio_on_air` also covers the silence after a line, which a warning does not
+            // need to cut).
+            let fresh = h
+                .lines
+                .last()
+                .is_some_and(|l| h.police.now().secs() - l.time.secs() < 0.5);
+            if let Some(tier) = h.police.radio_on_air().filter(|_| fresh) {
                 if tier < RadioTier::Actionable && h.police.captain_command(cmd()).is_ok() {
                     over = Some(tier);
                 }
@@ -626,7 +633,7 @@ fn tool_lines_are_spoken_within_a_second_even_over_other_traffic() {
         assert_eq!(l.tier, RadioTier::Actionable);
         assert!(l.cut_in, "seed {seed}: should cut the {over:?} line on air");
         assert!(
-            l.text.contains("racer #7") && l.text.contains("metres ahead"),
+            l.racer == Some(RACER) && l.text.contains("metres ahead"),
             "{}",
             l.text
         );

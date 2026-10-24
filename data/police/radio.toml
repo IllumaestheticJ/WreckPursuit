@@ -19,6 +19,10 @@
 #                   dropped while anything more important waits.
 # Deployment lines (units joining, responding to a known call, backup) are not spoken; at
 # L0-L1 one "units responding" summary when heat first rises.
+#
+# Simplified 2026-10-23 (audio audit): plain words (no "10-80", "Code 4", "EMS", "PIT",
+# "check the cover"), the player is "the suspect", no per-unit "copy, searching" or helicopter
+# position reports, no routine chatter, only lines that concern the player (see relevant_m).
 
 # After any spoken line, no tier 4 line for this long, by the highest wanted level of any racer
 # (L1..L5), s. L1 = the row-6 value.
@@ -45,6 +49,22 @@ stale_critical_s = 15.0
 impact_stale_s = 4.0
 # With nobody wanted, routine chatter plays only from units within this range of a racer, m.
 earshot_m = 200.0
+
+# Owner (2026-10-23): "police should not be engaging random AI cars on the other side of the
+# map, and it definitely should not be polluting the radio channel". The radio is the player's
+# (PoliceSystem::set_listeners, set by wp_sim to the player cars): a line about another racer
+# is heard only while that racer, the place or the speaking unit is within relevant_m of a
+# player; impact lines (tier 3) only within impact_m of one. Headless scenarios without
+# listeners hear everything.
+relevant_m = 300.0
+impact_m = 250.0
+# Line budget per minute (any 60 s window), by the players' state: [calm, wanted or searching,
+# in pursuit]. Tiers 3-5 wait while the last minute already had this many lines; tiers 1-2
+# always get through (and count).
+max_lines_per_min = [2.0, 4.0, 6.0]
+# Tier 5 (routine) lines: "clear and available", "resuming patrol", unrelated crash scenes,
+# backup requests. Off: no gameplay value (2026-10-23).
+routine = false
 
 # One transmission at a time: a line keeps the channel for words / words_per_s + line_pad_s,
 # then min_gap_s of silence. words_per_s and line_pad_s match wp_audio's scanner

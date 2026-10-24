@@ -508,6 +508,8 @@ pub struct PoliceSystem {
     pub(crate) punctures: BTreeMap<EntityId, Puncture>,
     pub(crate) radio: VecDeque<RadioLine>,
     pub(crate) radio_director: radio::RadioDirector,
+    /// Whose radio this is ([`PoliceSystem::set_listeners`]): `None` = every racer's.
+    pub(crate) radio_listeners: Option<BTreeSet<EntityId>>,
     /// Unit-to-unit callouts (row 79): observer state, never read by the simulation.
     pub(crate) chatter: chatter::Chatter,
     pub(crate) captain: CaptainState,
@@ -685,6 +687,7 @@ impl PoliceSystem {
             punctures: BTreeMap::new(),
             radio: VecDeque::new(),
             radio_director: radio::RadioDirector::new(),
+            radio_listeners: None,
             chatter: chatter::Chatter::new(setup.seed),
             captain: CaptainState {
                 human: false,
@@ -841,19 +844,62 @@ impl PoliceSystem {
 
     /// Raise a radio line. The radio director ([`radio`]) decides at the end of the step
     /// whether (and merged with which other lines) it is spoken.
-    pub(crate) fn radio(&mut self, cue: radio::RadioCue) {
+    /// A line built without [`radio::RadioCue::about`] is attributed here
+    /// ([`PoliceSystem::radio_subject`]).
+    pub(crate) fn radio(&mut self, mut cue: radio::RadioCue) {
+        if cue.racer.is_none() {
+            cue.racer = self.radio_subject(&cue);
+        }
         self.radio_director.raise(self.now, cue);
+    }
+
+    /// Whose radio this is: the racers (players) the police radio is played to. Lines about
+    /// other racers are heard only when they happen near a listener, impacts only near one,
+    /// the pacing follows the listeners' wanted level, and a single listener is called "the
+    /// suspect" instead of "racer #N" (owner, 2026-10-23: no chatter about AI cars on the
+    /// other side of the map). `None` (the default) = every racer listens: headless
+    /// scenarios, tests. Presentation only: nothing here changes what the police do.
+    pub fn set_listeners(&mut self, listeners: Option<&[EntityId]>) {
+        self.radio_listeners = listeners.map(|l| l.iter().copied().collect());
     }
 
     /// Speak what the radio director lets through: event + scanner log.
     fn flush_radio(&mut self) {
-        let racers: Vec<[f32; 2]> = self.racers.values().map(|r| [r.pos[0], r.pos[1]]).collect();
+        let listening = |r: &&RacerRecord| {
+            self.radio_listeners
+                .as_ref()
+                .is_none_or(|l| l.contains(&r.entity))
+        };
+        let racers: Vec<[f32; 2]> = self
+            .racers
+            .values()
+            .filter(listening)
+            .map(|r| [r.pos[0], r.pos[1]])
+            .collect();
         let level = self
             .racers
             .values()
+            .filter(listening)
             .map(|r| r.level.number())
             .max()
             .unwrap_or(0);
+        let state = self
+            .racers
+            .values()
+            .filter(listening)
+            .map(|r| match r.status {
+                PursuitStatus::Pursuit => radio::ListenerState::Pursuit,
+                PursuitStatus::Searching | PursuitStatus::Wanted => radio::ListenerState::Wanted,
+                PursuitStatus::Clear => radio::ListenerState::Calm,
+            })
+            .max()
+            .unwrap_or_default();
+        let listeners: Option<Vec<EntityId>> = self
+            .radio_listeners
+            .as_ref()
+            .map(|l| l.iter().copied().collect());
+        let racer_records = &self.racers;
+        let racer_pos = |e: EntityId| racer_records.get(&e).map(|r| [r.pos[0], r.pos[1]]);
         let units = &self.units;
         let unit_pos = |id: UnitId| {
             units
@@ -864,7 +910,10 @@ impl PoliceSystem {
         let ctx = radio::RadioContext {
             now: self.now,
             level,
+            state,
             racers: &racers,
+            listeners: listeners.as_deref(),
+            racer_pos: &racer_pos,
             unit_pos: &unit_pos,
         };
         for line in self.radio_director.flush(&self.cfg.radio, &ctx) {
@@ -875,6 +924,7 @@ impl PoliceSystem {
                 tier: line.tier,
                 duration_s: line.duration_s,
                 cut_in: line.cut_in,
+                racer: line.racer,
             });
             while self.radio.len() > self.cfg.tools.gadgets.radio_log_len {
                 self.radio.pop_front();

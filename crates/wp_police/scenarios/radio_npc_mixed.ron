@@ -1,0 +1,23 @@
+// Radio relevance in the player's own pursuit (2026-10-23): the player (racer 0, the listener)
+// is chased downtown while three AI racers are chased in other districts. Before the fix 70 %
+// of the channel during the player's pursuit was about the AI racers (9.7 lines/min, 2.4 about
+// the player). Now: the player's chase, within the radio.toml line budget.
+(
+    name: "police_radio_npc_mixed",
+    seed: 600,
+    city: (nx: 12, ny: 12, seed: 1),
+    time_of_day_h: 23.0,
+    duration_s: 300.0,
+    runs: 3,
+    racers: [
+        (district: Core, speed_factor: 2.5),
+        (district: Industrial, speed_factor: 2.5, stay_in_district: true),
+        (district: Suburb, speed_factor: 2.5, stay_in_district: true),
+        (district: Suburb, speed_factor: 2.0, stay_in_district: true),
+    ],
+    listeners: [0],
+    expect: [
+        (metric: "pursuits", min: 1, max: 1000),
+        (metric: "radio_per_min_pursuit", min: 0.5, max: 8.0),
+    ],
+)

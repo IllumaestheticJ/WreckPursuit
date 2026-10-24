@@ -400,6 +400,9 @@ pub struct RadioLine {
     /// Emergency traffic that cut the line before it.
     #[serde(default)]
     pub cut_in: bool,
+    /// The racer the line is about, if any (radio relevance, 2026-10-23).
+    #[serde(default)]
+    pub racer: Option<EntityId>,
 }
 
 /// Helicopter view for renderers / the captain.

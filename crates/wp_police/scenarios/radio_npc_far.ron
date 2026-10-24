@@ -1,0 +1,27 @@
+// Radio relevance (owner, 2026-10-23: "police should not be engaging random AI cars on the other
+// side of the map, and it definitely should not be polluting the radio channel"). The player
+// (racer 0, the listener) drives calmly downtown at 23:00 while three AI racers speed in the
+// other districts and get chased. Before the fix the player heard 9.7 lines/min, 8.6 of them
+// about the AI racers (tier 1 alerts included). Now the player's radio only carries what
+// happens near them: AI chases are heard only while within radio.toml's relevant_m. After:
+// 2.1 lines/min, none about racers more than 400 m away (budget: 2/min for tiers 3-5 when calm;
+// tiers 1-2 always get through, hence the 3.0 limit).
+(
+    name: "police_radio_npc_far",
+    seed: 700,
+    city: (nx: 12, ny: 12, seed: 1),
+    time_of_day_h: 23.0,
+    duration_s: 300.0,
+    runs: 3,
+    racers: [
+        (district: Core, speed_factor: 0.9, violations: false, stay_in_district: true),
+        (district: Industrial, speed_factor: 2.5, stay_in_district: true),
+        (district: Suburb, speed_factor: 2.5, stay_in_district: true),
+        (district: Suburb, speed_factor: 2.0, stay_in_district: true),
+    ],
+    listeners: [0],
+    expect: [
+        (metric: "pursuits", min: 1, max: 1000),
+        (metric: "radio_per_min_calm", min: 0.0, max: 3.0),
+    ],
+)

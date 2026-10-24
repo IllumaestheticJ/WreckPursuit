@@ -133,6 +133,12 @@ pub struct PoliceScenario {
     pub stop_after_first_pursuit: bool,
     /// Racers.
     pub racers: Vec<RacerScript>,
+    /// Indices (into `racers`) of the racers whose radio this is
+    /// ([`PoliceSystem::set_listeners`]), e.g. `[0]` = the first racer is the player. Empty
+    /// (default): every racer listens. With listeners, the calm / pursuit radio rates count the
+    /// listeners' state only, and `radio_about_others` counts lines about other racers.
+    #[serde(default)]
+    pub listeners: Vec<usize>,
     /// Expected ranges.
     #[serde(default)]
     pub expect: Vec<Expect>,
@@ -300,6 +306,8 @@ struct RunNumbers {
     /// Radio lines while no racer is wanted / while some racer is in a pursuit.
     radio_calm: u32,
     radio_hot: u32,
+    /// Radio lines about racers other than the listeners (with listeners only).
+    radio_about_others: u32,
     /// Seconds with no racer wanted / with some racer in a pursuit.
     calm_s: f32,
     hot_s: f32,
@@ -427,6 +435,14 @@ fn run_once(
             to_safehouse: false,
             hit_at: None,
         });
+    }
+    let listeners: Vec<EntityId> = sc
+        .listeners
+        .iter()
+        .filter_map(|&k| racers.get(k).map(|r| r.entity))
+        .collect();
+    if !listeners.is_empty() {
+        police.set_listeners(Some(&listeners));
     }
     let ticks = (sc.duration_s / PHYSICS_DT).round() as u64;
     let think_every = 24u64;
@@ -630,6 +646,9 @@ fn run_once(
         for r in &racers {
             let level = police.wanted_level(r.entity).number();
             nums.max_level = nums.max_level.max(level);
+            if !listeners.is_empty() && !listeners.contains(&r.entity) {
+                continue;
+            }
             wanted |= level > 0;
             hot |= police.racer(r.entity).is_some_and(|rec| rec.pursued());
         }
@@ -642,6 +661,13 @@ fn run_once(
                 )
             })
             .count() as u32;
+        if !listeners.is_empty() && lines > 0 {
+            let log: Vec<_> = police.radio_log().collect();
+            nums.radio_about_others += log[log.len().saturating_sub(lines as usize)..]
+                .iter()
+                .filter(|l| l.racer.is_some_and(|r| !listeners.contains(&r)))
+                .count() as u32;
+        }
         if hot {
             nums.hot_s += PHYSICS_DT;
             nums.radio_hot += lines;
@@ -842,6 +868,10 @@ pub fn run_scenario_with_hook(
     m.insert(
         "radio_per_min_pursuit".to_string(),
         per_min(sum(&|r| r.radio_hot) as u32, hot_s),
+    );
+    m.insert(
+        "radio_about_others".to_string(),
+        sum(&|r| r.radio_about_others),
     );
     m.insert("calm_s".to_string(), calm_s);
     m.insert("pursuit_s".to_string(), hot_s);

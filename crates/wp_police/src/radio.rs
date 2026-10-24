@@ -44,6 +44,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use wp_contracts::EntityId;
+
 use crate::events::UnitId;
 use crate::time::SimTime;
 
@@ -146,6 +148,15 @@ pub struct RadioCue {
     /// Emergency traffic: cut the transmission on air and go out at once (an officer rammed,
     /// a captain's order). Never cuts another break-in.
     pub break_in: bool,
+    /// The racer the line is about (`None` = nobody in particular). Lines about a racer who is
+    /// not a listener (see [`RadioContext::listeners`]) are only heard when that racer is near
+    /// a listener. Filled in by `PoliceSystem::radio` when the caller leaves it empty.
+    #[serde(default)]
+    pub racer: Option<EntityId>,
+    /// Where it happens (ground position, m), when that matters more than the speaker's own
+    /// position: a crash, a dispatch line about a place.
+    #[serde(default)]
+    pub at: Option<[f32; 2]>,
 }
 
 impl RadioCue {
@@ -161,7 +172,21 @@ impl RadioCue {
             group: None,
             slot: None,
             break_in: false,
+            racer: None,
+            at: None,
         }
+    }
+
+    /// The racer this line is about.
+    pub fn about(mut self, racer: EntityId) -> Self {
+        self.racer = Some(racer);
+        self
+    }
+
+    /// Where it happens, m.
+    pub fn at(mut self, pos: [f32; 2]) -> Self {
+        self.at = Some(pos);
+        self
     }
 
     /// Add a collapse rule (`callsign` names this unit in the collapsed text).
@@ -222,6 +247,18 @@ fn d_routine_gap() -> [f32; 5] {
 }
 fn d_routine_quiet() -> f32 {
     6.0
+}
+fn d_relevant() -> f32 {
+    300.0
+}
+fn d_impact_m() -> f32 {
+    250.0
+}
+fn d_max_per_min() -> [f32; 3] {
+    [2.0, 4.0, 6.0]
+}
+fn d_true() -> bool {
+    true
 }
 
 fn d_takeover() -> [String; 5] {
@@ -324,6 +361,27 @@ pub struct RadioConfig {
     /// pursuit config's ram levels.
     #[serde(default = "d_takeover")]
     pub takeover: [String; 5],
+    /// A line about a racer who is not a listener is heard only while that racer (or the
+    /// place, or the speaking unit) is within this distance of a listener, m (owner, 2026-10-23:
+    /// "police chatter about AI cars on the other side of the map should not pollute the
+    /// radio"). Only applies once listeners are set.
+    #[serde(default = "d_relevant")]
+    pub relevant_m: f32,
+    /// Tier 3 (impact) lines are heard only when the speaking unit (or the place) is within
+    /// this distance of a listener, m: a unit crashing a kilometre away is not news to the
+    /// driver. Only applies once listeners are set.
+    #[serde(default = "d_impact_m")]
+    pub impact_m: f32,
+    /// At most this many lines per minute (any 60 s window) may be spoken before a tier 3–5
+    /// line is held back, by the listeners' state: [calm, wanted or searching, in pursuit].
+    /// Tiers 1–2 always get through (and count).
+    #[serde(default = "d_max_per_min")]
+    pub max_lines_per_min: [f32; 3],
+    /// Speak tier 5 (routine) lines at all ("clear and available", "resuming patrol",
+    /// unrelated incidents). `data/police/radio.toml` switches them off (2026-10-23: no
+    /// gameplay value); the serde default keeps them for older tables.
+    #[serde(default = "d_true")]
+    pub routine: bool,
 }
 
 impl RadioConfig {
@@ -382,6 +440,24 @@ impl RadioConfig {
     pub fn unit_gap(&self, level: u8) -> f32 {
         self.unit_gap_s[(level.max(1) as usize - 1).min(4)]
     }
+
+    /// Line budget per minute for tiers 3–5 in listener `state`.
+    pub fn max_per_min(&self, state: ListenerState) -> f32 {
+        self.max_lines_per_min[state as usize]
+    }
+}
+
+/// What the listeners (the players) are going through, for the line budget
+/// ([`RadioConfig::max_lines_per_min`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum ListenerState {
+    /// Nobody listening is wanted.
+    #[default]
+    Calm = 0,
+    /// Wanted or searched for, not in an active pursuit.
+    Wanted = 1,
+    /// In an active pursuit.
+    Pursuit = 2,
 }
 
 /// Counters for tuning and tests.
@@ -399,18 +475,40 @@ pub struct RadioStats {
     pub spoken_by_tier: [u32; 5],
     /// Lines that cut a transmission on air.
     pub cuts: u32,
+    /// Raised lines dropped because they did not concern any listener (far away, or another
+    /// racer's business). Also counted in `dropped`.
+    #[serde(default)]
+    pub irrelevant: u32,
 }
 
 /// What the director needs to know about the moment of a flush.
 pub struct RadioContext<'a> {
     /// Current sim time.
     pub now: SimTime,
-    /// Highest wanted level of any racer (0 = nobody wanted, 1..=5).
+    /// Highest wanted level of any listener (0 = nobody wanted, 1..=5). Without listeners:
+    /// of any racer.
     pub level: u8,
-    /// Racer ground positions, m.
+    /// What the listeners are going through (line budget).
+    pub state: ListenerState,
+    /// Ground positions of the listeners (without listeners: of every racer), m.
     pub racers: &'a [[f32; 2]],
+    /// The racers whose radio this is (the players). `None`: everyone listens, no line is
+    /// dropped for relevance (headless harness, tests).
+    pub listeners: Option<&'a [EntityId]>,
+    /// Ground position of a racer, m (`None` if unknown).
+    pub racer_pos: &'a dyn Fn(EntityId) -> Option<[f32; 2]>,
     /// Ground position of a unit, m (`None` if gone).
     pub unit_pos: &'a dyn Fn(UnitId) -> Option<[f32; 2]>,
+}
+
+impl RadioContext<'_> {
+    /// Whether `p` lies within `r` metres of a listener.
+    fn near_listener(&self, p: [f32; 2], r: f32) -> bool {
+        self.racers.iter().any(|q| {
+            let (dx, dy) = (q[0] - p[0], q[1] - p[1]);
+            dx * dx + dy * dy <= r * r
+        })
+    }
 }
 
 /// A spoken line.
@@ -427,6 +525,8 @@ pub struct SpokenLine {
     /// Cut the transmission on air (a tier 1–2 line pre-empting a lower one, or emergency
     /// traffic): the only way two lines meet.
     pub cut_in: bool,
+    /// The racer the line is about, if any.
+    pub racer: Option<EntityId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -445,6 +545,8 @@ struct Held {
     group: Option<RadioGroup>,
     slot: Option<String>,
     break_in: bool,
+    racer: Option<EntityId>,
+    at: Option<[f32; 2]>,
     members: Vec<Member>,
 }
 
@@ -466,6 +568,11 @@ pub struct RadioDirector {
     /// Last tier 1–3 line spoken (routine lines keep quiet for a while after it).
     last_important: Option<SimTime>,
     last_unit: BTreeMap<UnitId, SimTime>,
+    /// Start times of the lines spoken in the last minute (line budget).
+    recent: Vec<SimTime>,
+    /// The one listener, if there is exactly one: lines name it "the suspect" instead of
+    /// "racer #N" (the player never knows their entity number).
+    suspect: Option<EntityId>,
     stats: RadioStats,
 }
 
@@ -538,6 +645,8 @@ impl RadioDirector {
             group: cue.group,
             slot: cue.slot,
             break_in: cue.break_in,
+            racer: cue.racer,
+            at: cue.at,
             members: vec![member],
         });
     }
@@ -550,6 +659,10 @@ impl RadioDirector {
         if self.held.is_empty() {
             return spoken;
         }
+        self.suspect = match ctx.listeners {
+            Some([one]) => Some(*one),
+            _ => None,
+        };
         let now = ctx.now;
         // 1. Drop stale lines (every tier, even while the channel is busy).
         let mut k = 0;
@@ -562,6 +675,25 @@ impl RadioDirector {
             } else {
                 k += 1;
             }
+        }
+        // 1b. Lines that concern no listener (another racer's chase across the map, a unit
+        // crashing far away) and, when switched off, routine chatter.
+        let mut k = 0;
+        while k < self.held.len() {
+            let h = &self.held[k];
+            let routine_off = h.tier == RadioTier::Routine && !cfg.routine;
+            if routine_off || !Self::relevant(h, cfg, ctx) {
+                let h = self.held.remove(k);
+                self.stats.dropped += h.members.len() as u32;
+                if !routine_off {
+                    self.stats.irrelevant += h.members.len() as u32;
+                }
+            } else {
+                k += 1;
+            }
+        }
+        if self.held.is_empty() {
+            return spoken;
         }
         // 2. Routine lines are dropped first when the channel is busy: anything more
         // important waiting, and they go.
@@ -628,6 +760,9 @@ impl RadioDirector {
         }
         // In the silence after a line only tier 1 may start.
         let silence = self.busy_until.is_some_and(|t| now < t);
+        // Line budget: tiers 3-5 wait while the last minute already had enough lines.
+        self.recent.retain(|t| now.since(*t) < 60.0);
+        let budget_left = (self.recent.len() as f32) < cfg.max_per_min(ctx.state);
         let unit_gap = cfg.unit_gap(ctx.level);
         let quiet_after_important = self
             .last_important
@@ -645,7 +780,8 @@ impl RadioDirector {
                 .last_line
                 .is_none_or(|t| now.since(t) >= cfg.gap(tier, ctx.level))
                 && (!silence || tier == RadioTier::Actionable);
-            if !gap_open || (tier == RadioTier::Routine && !quiet_after_important) {
+            let over_budget = tier <= RadioTier::Impact && !budget_left;
+            if !gap_open || over_budget || (tier == RadioTier::Routine && !quiet_after_important) {
                 k += 1;
                 continue;
             }
@@ -696,7 +832,32 @@ impl RadioDirector {
         (h.tier == RadioTier::Actionable, h.break_in, h.tier, h.prio)
     }
 
+    /// Whether a held line concerns a listener (always, without listeners): it is about a
+    /// listener, or it happens (the racer, the place or the speaking unit) within
+    /// `relevant_m` of one. Tier 3 lines need the place or the speaker within `impact_m`.
+    fn relevant(h: &Held, cfg: &RadioConfig, ctx: &RadioContext) -> bool {
+        let Some(listeners) = ctx.listeners else {
+            return true;
+        };
+        let speaker = h
+            .members
+            .iter()
+            .find_map(|m| m.unit.and_then(|u| (ctx.unit_pos)(u)));
+        let place = h.at.or(speaker);
+        if h.tier == RadioTier::Impact {
+            if let Some(p) = place {
+                return ctx.near_listener(p, cfg.impact_m);
+            }
+        }
+        match h.racer {
+            Some(r) if listeners.contains(&r) => true,
+            Some(r) => (ctx.racer_pos)(r).is_some_and(|p| ctx.near_listener(p, cfg.relevant_m)),
+            None => place.is_none_or(|p| ctx.near_listener(p, cfg.relevant_m)),
+        }
+    }
+
     fn speak(&mut self, cfg: &RadioConfig, now: SimTime, h: Held) -> SpokenLine {
+        self.recent.push(now);
         self.stats.spoken += 1;
         self.stats.spoken_by_tier[h.tier.number() as usize - 1] += 1;
         self.stats.collapsed += h.members.len().saturating_sub(1) as u32;
@@ -728,14 +889,48 @@ impl RadioDirector {
                     .replace("{count}", &h.members.len().to_string()),
             )
         };
+        let text = match self.suspect {
+            Some(r) => name_suspect(&text, r),
+            None => text,
+        };
         SpokenLine {
             unit,
             tier: h.tier,
             duration_s: cfg.line_s(&text),
             cut_in: false,
+            racer: h.racer,
             text,
         }
     }
+}
+
+/// `text` with the racer reference "racer #N" for `racer` replaced by "the suspect" (the
+/// single player's radio: they do not know their entity number). Other racers keep their
+/// number. Whole references only ("racer #12" is not "racer #1").
+pub fn name_suspect(text: &str, racer: EntityId) -> String {
+    let token = format!("racer #{}", racer.0);
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find(&token) {
+        let after = &rest[i + token.len()..];
+        let whole = !after.starts_with(|c: char| c.is_ascii_digit());
+        out.push_str(&rest[..i]);
+        out.push_str(if whole { "the suspect" } else { &token });
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The racer a line names ("racer #N"), if any: how `PoliceSystem::radio` attributes lines
+/// built without [`RadioCue::about`].
+pub fn racer_in_text(text: &str) -> Option<EntityId> {
+    let i = text.find("racer #")?;
+    let digits: String = text[i + 7..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse().ok().map(EntityId)
 }
 
 /// A tier 1 line with at least this `prio` is a roadblock / spike warning: it may cut other
@@ -799,7 +994,16 @@ mod tests {
             line_pad_s: 0.7,
             impact: ImpactConfig::default(),
             takeover: d_takeover(),
+            relevant_m: d_relevant(),
+            impact_m: d_impact_m(),
+            // The pacing tests below are about gaps and cuts, not the budget.
+            max_lines_per_min: [1000.0; 3],
+            routine: true,
         }
+    }
+
+    fn no_racer(_: EntityId) -> Option<[f32; 2]> {
+        None
     }
 
     fn patrol(u: u32) -> RadioCue {
@@ -836,7 +1040,10 @@ mod tests {
             let ctx = RadioContext {
                 now: SimTime::from_secs(t),
                 level,
+                state: ListenerState::Calm,
                 racers: &[[0.0, 0.0]],
+                listeners: None,
+                racer_pos: &no_racer,
                 unit_pos: &pos,
             };
             for l in d.flush(&cfg(), &ctx) {
@@ -943,7 +1150,10 @@ mod tests {
             let ctx = RadioContext {
                 now: SimTime::from_secs(now),
                 level: 3,
+                state: ListenerState::Calm,
                 racers: &[[0.0, 0.0]],
+                listeners: None,
+                racer_pos: &no_racer,
                 unit_pos: &near,
             };
             out.extend(d.flush(&c, &ctx).into_iter().map(|l| l.text));
@@ -1058,7 +1268,10 @@ mod tests {
             let ctx = RadioContext {
                 now: SimTime::from_secs(t),
                 level,
+                state: ListenerState::Calm,
                 racers: &[[0.0, 0.0]],
+                listeners: None,
+                racer_pos: &no_racer,
                 unit_pos: &near,
             };
             for l in d.flush(&cfg(), &ctx) {
@@ -1233,5 +1446,171 @@ mod tests {
         assert_eq!(join_callsigns(&s(&["Unit 4", "Unit 5"])), "Units 4 and 5");
         assert_eq!(join_callsigns(&s(&["Unit 4", "Air 9"])), "Unit 4 and Air 9");
         assert_eq!(join_callsigns(&s(&["Unit 4"])), "Unit 4");
+    }
+
+    /// One listener (racer #1 at the origin); racer #2 is `npc_m` metres away; units sit at
+    /// x = their id × 100 m. Spoken texts over `secs`.
+    fn listen(
+        d: &mut RadioDirector,
+        c: &RadioConfig,
+        state: ListenerState,
+        npc_m: f32,
+        secs: f32,
+    ) -> Vec<(f32, String)> {
+        let listeners = [EntityId(1)];
+        let racer_pos = move |r: EntityId| match r.0 {
+            1 => Some([0.0, 0.0]),
+            2 => Some([npc_m, 0.0]),
+            _ => None,
+        };
+        let unit_pos = |u: UnitId| Some([u.0 as f32 * 100.0, 0.0]);
+        let mut out = Vec::new();
+        let mut t = 0.0;
+        while t < secs {
+            let ctx = RadioContext {
+                now: SimTime::from_secs(t),
+                level: 2,
+                state,
+                racers: &[[0.0, 0.0]],
+                listeners: Some(&listeners),
+                racer_pos: &racer_pos,
+                unit_pos: &unit_pos,
+            };
+            out.extend(d.flush(c, &ctx).into_iter().map(|l| (t, l.text)));
+            t += 0.1;
+        }
+        out
+    }
+
+    fn texts(v: Vec<(f32, String)>) -> Vec<String> {
+        v.into_iter().map(|x| x.1).collect()
+    }
+
+    #[test]
+    fn another_racers_chase_far_away_is_not_heard() {
+        let c = cfg();
+        let mut d = RadioDirector::new();
+        let t0 = SimTime::ZERO;
+        d.raise(
+            t0,
+            RadioCue::new(
+                RadioTier::Actionable,
+                None,
+                "Dispatch: roadblock ahead of racer #2.".into(),
+            )
+            .about(EntityId(2)),
+        );
+        d.raise(
+            t0,
+            RadioCue::new(
+                RadioTier::Escalation,
+                None,
+                "Dispatch: pursuit of racer #1.".into(),
+            )
+            .about(EntityId(1)),
+        );
+        // A unit 2 km away crashing (no racer) and one 100 m away.
+        d.raise(
+            t0,
+            RadioCue::new(
+                RadioTier::Impact,
+                Some(UnitId(20)),
+                "Unit 20, into the wall!".into(),
+            ),
+        );
+        d.raise(
+            t0,
+            RadioCue::new(
+                RadioTier::Impact,
+                Some(UnitId(1)),
+                "Unit 1, into the wall!".into(),
+            )
+            .ttl(10.0),
+        );
+        let out = texts(listen(&mut d, &c, ListenerState::Pursuit, 1500.0, 20.0));
+        assert_eq!(
+            out,
+            [
+                "Dispatch: pursuit of the suspect.",
+                "Unit 1, into the wall!"
+            ],
+            "only the listener's own business and what happens next to them"
+        );
+        assert_eq!(d.stats().irrelevant, 2);
+        // The same chase right next to the listener is heard (with its racer number).
+        let mut d = RadioDirector::new();
+        d.raise(
+            t0,
+            RadioCue::new(
+                RadioTier::Actionable,
+                None,
+                "Dispatch: roadblock ahead of racer #2.".into(),
+            )
+            .about(EntityId(2)),
+        );
+        let out = texts(listen(&mut d, &c, ListenerState::Calm, 150.0, 5.0));
+        assert_eq!(out, ["Dispatch: roadblock ahead of racer #2."]);
+    }
+
+    #[test]
+    fn the_line_budget_holds_back_tiers_3_to_5_only() {
+        let mut c = cfg();
+        c.max_lines_per_min = [2.0, 2.0, 2.0];
+        c.global_gap_s = [0.5; 5];
+        c.unit_gap_s = [0.5; 5];
+        let mut d = RadioDirector::new();
+        for k in 0..4u32 {
+            d.raise(
+                SimTime::ZERO,
+                RadioCue::new(
+                    RadioTier::Investigation,
+                    Some(UnitId(1)),
+                    format!("Unit 1, line {k}."),
+                )
+                .about(EntityId(1))
+                .ttl(120.0),
+            );
+        }
+        d.raise(
+            SimTime::ZERO,
+            RadioCue::new(
+                RadioTier::Escalation,
+                None,
+                "Dispatch: pursuit of racer #1.".into(),
+            )
+            .about(EntityId(1)),
+        );
+        let out = listen(&mut d, &c, ListenerState::Pursuit, 1500.0, 130.0);
+        // The tier 2 line and one tier 4 line fill the budget of 2; the rest wait for the
+        // next minute.
+        let first = out.iter().filter(|(t, _)| *t < 59.0).count();
+        assert_eq!(first, 2, "{out:?}");
+        assert!(out.len() >= 4, "the next minute has room again: {out:?}");
+    }
+
+    #[test]
+    fn routine_lines_can_be_switched_off() {
+        let mut c = cfg();
+        c.routine = false;
+        let mut d = RadioDirector::new();
+        d.raise(SimTime::ZERO, patrol(1));
+        let out = texts(listen(&mut d, &c, ListenerState::Calm, 1500.0, 40.0));
+        assert!(out.is_empty(), "{out:?}");
+    }
+
+    #[test]
+    fn the_single_listener_is_the_suspect() {
+        assert_eq!(
+            name_suspect(
+                "Dispatch: racer #1 is now level 2; racer #12 too.",
+                EntityId(1)
+            ),
+            "Dispatch: the suspect is now level 2; racer #12 too."
+        );
+        assert_eq!(
+            racer_in_text("pursuit of racer #1002 eastbound"),
+            Some(EntityId(1002))
+        );
+        assert_eq!(racer_in_text("Unit 4, boxing him in."), None);
     }
 }
