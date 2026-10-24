@@ -101,6 +101,88 @@ trigger_m = 120.0
 at = 0.85
 trigger_m = 120.0
 
+# Loop 9 day (the same lap at 14:00, wp_race::catalog, 2026-10-24). Starter table: the night
+# lap's high-speed pursuit with full daytime strength (presence 2.0, the illegal-daytime Max).
+# The "Heavier police on Loop 9 daytime" work replaces it with its own daytime profile.
+[loop9_day]
+name = "Highway interceptors"
+summary = "Pure high-speed pursuit: interceptors join from the shoulder and run the field down. No roadblocks, no spikes."
+presence = 2.0
+backup_scale = 1.0
+tool_lifetime_s = 0.0
+recognise_on_sight = true
+
+[loop9_day.tactics]
+roadblocks = false
+spikes = false
+helicopter = false
+box_in = false
+rolling_block = false
+junction_block = false
+pit = true
+rams = true
+
+[loop9_day.speed]
+pit_max_kmh = [0.0, 180.0, 200.0, 220.0, 220.0]
+speed_margin = 0.35
+
+[[loop9_day.stakeouts]]
+at = 0.15
+trigger_m = 120.0
+
+[[loop9_day.stakeouts]]
+at = 0.4
+trigger_m = 120.0
+
+[[loop9_day.stakeouts]]
+at = 0.65
+trigger_m = 120.0
+
+[[loop9_day.stakeouts]]
+at = 0.85
+trigger_m = 120.0
+
+# Loop 9 to Ashpeak highway run (17.9 km of Loop 9, Route 7, the Crosstown and Route 12,
+# wp_race::catalog, 2026-10-24). Highways only, so the Loop 9 brief: pure high-speed pursuit,
+# interceptors joining from the shoulder along the lap.
+[loop9_ashpeak_highway]
+name = "Highway interceptors"
+summary = "Pure high-speed pursuit: interceptors join from the shoulder and run the field down. No roadblocks, no spikes."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 0.0
+recognise_on_sight = true
+
+[loop9_ashpeak_highway.tactics]
+roadblocks = false
+spikes = false
+helicopter = false
+box_in = false
+rolling_block = false
+junction_block = false
+pit = true
+rams = true
+
+[loop9_ashpeak_highway.speed]
+pit_max_kmh = [0.0, 180.0, 200.0, 220.0, 220.0]
+speed_margin = 0.35
+
+[[loop9_ashpeak_highway.stakeouts]]
+at = 0.15
+trigger_m = 120.0
+
+[[loop9_ashpeak_highway.stakeouts]]
+at = 0.4
+trigger_m = 120.0
+
+[[loop9_ashpeak_highway.stakeouts]]
+at = 0.65
+trigger_m = 120.0
+
+[[loop9_ashpeak_highway.stakeouts]]
+at = 0.85
+trigger_m = 120.0
+
 # Night hill sprint up six hairpins to the Knob Observatory Lot. Proposed style: summit trap.
 # Hairpins make a rammed chase pointless and deadly, so the police tail the field up the hill
 # without PITs or rams, seal the side roads near the top, and box the racers in at the

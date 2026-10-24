@@ -204,17 +204,28 @@ the player may bet (`wp_economy::Economy::max_bet / place_bet / settle_bet`, rep
 
 ### Picker races (`catalog`)
 
+Owner, 2026-10-24: the picker (`catalog::races()`, and so every meet spot and race card) offers
+only the Loop 9 races.
+
 | Id | Where | Kind | Terrain | Hour | Length | Field |
 |---|---|---|---|---|---|---|
-| `hollins_sprint` | Port Vesper | Sprint | hill | 23:00 | 1.0 km | Mara, Vic, Juno |
-| `loop9_circuit` | Port Vesper | Circuit ×1 | highway | 23:00 | 10.1 km | Vic, Mara, Dez, Juno, Tito |
-| `lantern_checkpoint` | Port Vesper | Checkpoint (illegal daytime) | downtown | 14:00 | 0.67 km | Juno, Dez, Tito |
-| `grid_highway_sprint` | grid city | Sprint | highway | 23:00 | 1.1 km | Vic, Juno, Tito |
-| `harbor_dash` | Port Vesper | Sprint | highway | 22:00 | 0.74 km | Sol, Vic, Rafi |
-| `tunnel_run` | Port Vesper | Sprint | highway | 00:30 | 1.27 km | Nina, Augusto, Dez, Vic |
-| `hollins_descent` | Port Vesper | Sprint | hill | 02:00 | 1.35 km | Kaito, Mara, Bex |
-| `offramp_sprint` | Port Vesper | Sprint | downtown | 20:30 | 2.3 km | Juno, Lupe, Rafi, Tito |
-| `grid_arterial_sprint` | grid city | Sprint | downtown | 22:30 | 1.0 km | Bex, Lupe, Dez |
+| `loop9_circuit` (Loop 9 night) | Port Vesper | Circuit ×1 | highway | 23:00 | 10.1 km | Vic, Mara, Dez, Juno, Tito |
+| `loop9_day` (Loop 9 day) | Port Vesper | Circuit ×1 (illegal daytime) | highway | 14:00 | 10.1 km | Vic, Mara, Dez, Juno, Tito |
+| `loop9_ashpeak_highway` | Ashpeak map | Circuit ×1 | highway | 00:30 | 17.9 km | Vic, Mara, Dez, Juno, Tito |
+
+The highway run is one lap of Loop 9's east side, Route 7 (Talon Tunnel, Silver Gorge), the
+Crosstown Expressway, Route 12 over the Grizzly Grade and back onto Loop 9 at Lantern Way:
+highway lanes all the way (the polygon's points sit on the lanes the ramps feed, because the
+planner does not change lanes).
+
+**Retired races** (`catalog::retired_races()`): `hollins_sprint`, `lantern_checkpoint`,
+`grid_highway_sprint`, the Ashpeak County races (`crowfoot_ascent`, `crowfoot_descent`,
+`harnell_dirt_run`, `ashpeak_downtown_checkpoint`, `route7_tunnel_sprint`,
+`grizzly_grade_sprint`, `waterfront_drag`, `ashpeak_metro_circuit`) and PR #47's city races
+(`harbor_dash`, `tunnel_run`, `hollins_descent`, `offramp_sprint`, `grid_arterial_sprint`).
+They are offered nowhere in the game, but `catalog::race(id)` and `race_for_scenario` still
+find them, so their `pick_<id>.ron` scenarios, goldens and `tests/race_picker.rs` runs stay as
+regression tests (and the browser's `?race=<id>` debug link still starts one).
 
 `catalog::betting_market(def, roster, state, rules, car_adjust)` prices any of them.
 ### Touge battles (`touge`, `data/events/touge.toml`)
