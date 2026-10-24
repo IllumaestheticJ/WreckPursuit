@@ -23,6 +23,10 @@
 // AI retune (lead/opponent-pace): this seed's back pair queues behind the front pair at s50
 // (+20 s) and runs clear at s95 (−4 s). 16-seed means: s50 72.7 s (pre-G 75.1, 59/64 finish),
 // s95 72.0 s (74.9). Reasons in docs/integration/opponent-pace.md "Candidate G".
+// Re-locked 2026-10-24 by the rule for the PR #63 port (bolder racers round traffic and the
+// player): this seed is slower (juno 60.7 -> 78.5 s, best ratio 1.685 -> 2.179: the front pair
+// meets a downtown civilian queue the old timing missed), while the 16-seed mean is faster
+// (s50 80.1 -> 76.1 s, 64/64). Reasons in docs/integration/opponent-pace.md "PR #63 port".
 (
     name: "opponent_pace_lantern_checkpoint_s50",
     seed: 31,
@@ -87,10 +91,10 @@
     ],
     expect_pending: [
         metric(name: "finishers", min: 4, max: 4),
-        metric(name: "best_ratio", min: 0.97, max: 1.74),
-        metric(name: "race_time_s", entity: "ai_juno", min: 51.6, max: 72.8),
-        metric(name: "race_time_s", entity: "ai_dez", min: 52.7, max: 74.3),
-        metric(name: "race_time_s", entity: "ai_tito", min: 70.1, max: 98.9),
-        metric(name: "race_time_s", entity: "player", min: 71.1, max: 100.4),
+        metric(name: "best_ratio", min: 0.97, max: 2.23),
+        metric(name: "race_time_s", entity: "ai_juno", min: 66.7, max: 94.1),
+        metric(name: "race_time_s", entity: "ai_dez", min: 76.0, max: 107.3),
+        metric(name: "race_time_s", entity: "ai_tito", min: 84.9, max: 119.9),
+        metric(name: "race_time_s", entity: "player", min: 86.4, max: 122.0),
     ],
 )
