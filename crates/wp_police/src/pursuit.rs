@@ -137,6 +137,10 @@ const ARREST_RACER_MPS: f32 = 3.0;
 const QUEUE_AHEAD_M: f32 = 12.0;
 /// ... and within this of its line of travel, m (its lane), is waiting, not caught.
 const QUEUE_LANE_M: f32 = 3.0;
+/// ... for at most this long, s. A queue that moves on clears long before; a racer stuck
+/// behind one that never moves again (busted and parked in the lane, the lantern checkpoint
+/// on lead/round13) is judged by the normal rules after it, so every race ends.
+pub(crate) const QUEUE_MAX_WAIT_S: f32 = 15.0;
 /// Row 168: a unit more than [`PAST_RACER_M`] past a stopped racer drives on at least this
 /// fast, m/s, on its way back by the roads, instead of standing in the racer's lane: a car
 /// that cut in ahead of a racer and stopped there was a roadblock (the racer stopped behind
@@ -391,8 +395,16 @@ impl PoliceSystem {
                 (v[0] * v[0] + v[1] * v[1]).sqrt()
             };
             let district = self.graph.district_at(p);
-            let held_up_by_racer =
-                speed < self.cfg.heat.capture.stop_speed_mps && self.held_up_by_racer(id);
+            let queued = speed < self.cfg.heat.capture.stop_speed_mps && self.held_up_by_racer(id);
+            let waited = if queued {
+                let w = self.queue_wait_s.entry(id).or_insert(0.0);
+                *w += tdt;
+                *w
+            } else {
+                self.queue_wait_s.remove(&id);
+                0.0
+            };
+            let held_up_by_racer = queued && waited <= QUEUE_MAX_WAIT_S;
             let inp = RuleInputs {
                 seen: o.seen,
                 nearest_unit_m: o.nearest_unit_m,
