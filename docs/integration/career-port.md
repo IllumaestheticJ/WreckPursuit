@@ -184,6 +184,30 @@ restarted there; rounds 1–2 are in main).
   were broken on main by round 1's Dealer lock-badge column (`td:last-child` became the badge
   cell): their "buy worn" selector now targets `td:nth-last-child(2)`.
 
+## Round 4: street bets reach the career (playtest row 169)
+
+Owner: "street race bets don't go to career". Base `origin/main` `431232c5`.
+
+- **Cause:** not the wasm side. A street race inside a career run already stakes and pays on
+  the career run's account, and `finish_run` writes it back (new test
+  `street_bets_settle_on_the_career`: one lost, one won race in a garage-started free drive →
+  both stakes, the even-money payout and the level's rep are in the career's ledger). The
+  testbed's **main menu** started Night run / Rainy night / Free drive as quick play
+  ("Quick play runs outside the career") even with the career box ticked, so those bets went on
+  the quick-play account and never reached the career. (The developer panel's buttons already
+  followed the box.)
+- **Fix:** with the career box ticked (the default), a career, and a career car that can go out
+  (`can_start`), the main menu's Night run / Rainy night / Free drive start **career runs**
+  (`startCareerRun`, which gained `rain` and `city` arguments; restarts keep the rainy night).
+  Otherwise they stay quick play.
+- **Career off / no usable career car = quick play:** betting still works on practice cash
+  that does not count for the career, and the street UI says so: the bet slip's stake line
+  carries a tag, "quick play: not your career" (or "career cash"; a tooltip explains), and the
+  result banner says "quick-play cash" / "career cash".
+  `street_status_json` gained `career` (the session is a career run).
+- **e2e (street.mjs, +4):** main menu → Free drive with the career box on is a career run and
+  the bet slip says career cash; with it off, quick play and the slip says so.
+
 ## Contract change requests
 
 | # | Change | Why | Who is affected | Status |

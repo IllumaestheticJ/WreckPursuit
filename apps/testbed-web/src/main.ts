@@ -958,14 +958,16 @@ async function main(): Promise<void> {
 
   /** A career run: the night run or a free drive (city box) with the career car, its saved
    * damage and mods. Opens the garage instead when the car cannot go out. */
-  const startCareerRun = (kind: RunKind): boolean => {
+  const startCareerRun = (kind: RunKind, rain = false, city = ($("city") as HTMLInputElement).checked): boolean => {
     // Garage runs follow the main menu's map (row 167; agreed with lead/ashpeak-port).
     const map = careerMap();
     if (map) citySel.value = map;
     const json =
       kind === "chase"
-        ? sim.nightRunCityJson(DEFAULT_CAR, "Arcade", citySel.value)
-        : ($("city") as HTMLInputElement).checked
+        ? rain
+          ? sim.nightRunRainJson(DEFAULT_CAR, "Arcade", citySel.value)
+          : sim.nightRunCityJson(DEFAULT_CAR, "Arcade", citySel.value)
+        : city
           ? sim.freeDriveCityJson(DEFAULT_CAR, "Arcade", citySel.value)
           : sim.freeDriveJson(DEFAULT_CAR, "Arcade", false);
     app.scenarioFile = null;
@@ -992,7 +994,7 @@ async function main(): Promise<void> {
     const sc = sim.scenario();
     // A career race or touge battle: back to the garage (its pickers start the next one).
     if (sim.careerRunActive() && sc.name.startsWith("race_")) return void openGarage();
-    if (sim.careerRunActive()) return void startCareerRun(sc.name === "night_run" ? "chase" : "free");
+    if (sim.careerRunActive()) return void startCareerRun(sc.name.startsWith("night_run") ? "chase" : "free", sc.name === "night_run_rainy_night");
     const car = sc.entities[0]?.car;
     const mods = sc.entities[0]?.mods ?? [];
     if (sc.name === "night_run") startNightRun(car, sc.mode, false, mods);
@@ -1238,7 +1240,7 @@ async function main(): Promise<void> {
     const name = sim.scenario()?.name;
     if (sim.careerRunActive()) {
       sim.careerEndRun();
-      void startCareerRun(name === "night_run" ? "chase" : "free");
+      void startCareerRun(name?.startsWith("night_run") ? "chase" : "free", name === "night_run_rainy_night");
     } else if (app.scenarioFile) void runScenario(app.scenarioFile);
     else if (name === "night_run") startNightRun();
     else if (name === "night_run_rainy_night") startNightRun(undefined, undefined, true);
@@ -1267,7 +1269,7 @@ async function main(): Promise<void> {
     if (sim.careerRunActive()) {
       // A career run restarts in the new city with the career car (the run so far is settled).
       sim.careerEndRun();
-      void startCareerRun(name === "night_run" ? "chase" : "free");
+      void startCareerRun(name?.startsWith("night_run") ? "chase" : "free", name === "night_run_rainy_night");
     } else if (name === "night_run") startNightRun();
     else if (name === "night_run_rainy_night") startNightRun(undefined, undefined, true);
     else if (($("city") as HTMLInputElement).checked) startFreeDrive();
@@ -1614,12 +1616,15 @@ async function main(): Promise<void> {
         // The main screen's map: night run, rainy night, street races, free drive and the
         // career garage's runs start on it (the developer panel's city box follows).
         if (map && CITY_IDS.includes(map) && choice !== "touge") citySel.value = map;
-        // Quick play runs outside the career; the career lives behind Garage (whose own race /
-        // touge entries run as career runs, row 167).
         careerPicker = null;
-        if (choice === "chase") startNightRun();
-        else if (choice === "chaseRain") startNightRun(undefined, undefined, true);
-        else if (choice === "free") startFreeDrive(undefined, undefined, true);
+        // Row 169: with the career box ticked (the default) and a career car that can go out,
+        // night run / rainy night / free drive are career runs, so street-race bets and wins
+        // land in the career. Otherwise they are quick play (practice cash; the street UI says
+        // so). The garage's own race / touge entries always run as career runs (row 167).
+        const career = careerOn() && sim.careerExists() && sim.careerView().can_start;
+        if (choice === "chase") void (career ? startCareerRun("chase") : startNightRun());
+        else if (choice === "chaseRain") void (career ? startCareerRun("chase", true) : startNightRun(undefined, undefined, true));
+        else if (choice === "free") void (career ? startCareerRun("free", false, true) : startFreeDrive(undefined, undefined, true));
         else if (choice === "races") raceView.openPicker();
         else if (choice === "touge") tougeView.openPicker();
         else openGarage();
