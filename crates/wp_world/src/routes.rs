@@ -273,14 +273,184 @@ pub fn plan_route(
     Some(build_route(map, segs, a.1, b.1, false))
 }
 
+/// How far beyond the lane nearest a waypoint pick other lanes of the road still count, m:
+/// a waypoint stands for the whole road there (owner, 2026-10-23: on Loop 9 a pick on the far
+/// carriageway, or on the wrong lane, must not matter; Loop 9 is two 3-lane carriageways
+/// either side of a median, ~30 m kerb to kerb).
+const WAYPOINT_ACROSS_M: f32 = 22.0;
+/// Lanes this far below or above the pick do not count (bridges, decks, tunnels under), m
+/// (as `CityMap::locate`).
+const WAYPOINT_DZ_M: f32 = 4.0;
+/// A lane counts for a pick only abreast of it: the pick at most this far beyond either end
+/// along the lane, m (not the collinear lane across a junction from a pick at a stop line).
+const ABREAST_M: f32 = 3.0;
+/// Most lanes tried for one waypoint (Loop 9 has six, a two-way avenue four).
+const WAYPOINT_LANES: usize = 8;
+/// A [`paths_to_any`] search gives up on the targets it has not reached once its paths take
+/// this many times the quickest target's time...
+const SEARCH_FACTOR: f32 = 2.0;
+/// ... plus this, s.
+const SEARCH_SLACK_S: f32 = 60.0;
+
+/// Lane positions a pick at `p` stands for, nearest first: every lane abreast of `p`
+/// ([`ABREAST_M`]) that runs along the road there (parallel or opposite to the nearest such
+/// lane: both directions, every lane, not cross streets) within [`WAYPOINT_ACROSS_M`] more
+/// than the nearest one, each at the point abreast of `p`.
+fn road_lanes_at(map: &CityMap, p: V3) -> Vec<(SegId, f32)> {
+    let q = geom::xy(p);
+    // (plan distance, lane, s, tangent, at road height)
+    let mut all: Vec<(f32, SegId, f32, V2, bool)> = Vec::new();
+    for i in 0..map.n_lanes() {
+        let s = &map.segs[i];
+        if !s.drivable {
+            continue;
+        }
+        let pr = s.project(q);
+        let sc = pr.s.clamp(0.0, s.length);
+        if (pr.s - sc).abs() > ABREAST_M {
+            continue;
+        }
+        let (pt, tan) = s.point_at(sc);
+        all.push((
+            pr.dist,
+            i as SegId,
+            sc,
+            tan,
+            (pt[2] - p[2]).abs() <= WAYPOINT_DZ_M,
+        ));
+    }
+    // At the pick's height if any lane is (a deck over a street keeps to the deck).
+    if all.iter().any(|c| c.4) {
+        all.retain(|c| c.4);
+    }
+    all.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    let Some(&(d0, _, _, t0, _)) = all.first() else {
+        return Vec::new();
+    };
+    all.into_iter()
+        .take_while(|c| c.0 <= d0 + WAYPOINT_ACROSS_M)
+        .filter(|c| geom::dot(c.3, t0).abs() >= 0.8)
+        .take(WAYPOINT_LANES)
+        .map(|c| (c.1, c.2))
+        .collect()
+}
+
+/// A [`paths_to_any`] target reached: (travel time s, segments from the start's), or not.
+type Reached = Option<(f32, Vec<SegId>)>;
+
+/// A pick's chosen lane in [`plan_route_via`]: (time there and on, lane position, path there,
+/// paths on from it to the next pick's lanes).
+type Pick = (f32, (SegId, f32), Vec<SegId>, Option<Vec<Reached>>);
+
+/// The quickest legal path (travel time at the limit) from lane position `from` to each of
+/// `targets`: `(time s, segments from `from.0` to the target's)`, `None` for a target the
+/// search did not reach. A target behind `from` on its lane goes round the block. One A*
+/// for all targets (heuristic: straight-line time to the nearest at 30 m/s); it stops when
+/// every target is reached or its paths pass [`SEARCH_FACTOR`] × the quickest found plus
+/// [`SEARCH_SLACK_S`] (a lane that far round is no use, and an unreachable one would
+/// otherwise search the whole city).
+fn paths_to_any(map: &CityMap, from: (SegId, f32), targets: &[(SegId, f32)]) -> Vec<Reached> {
+    const START: u32 = u32::MAX - 1;
+    let mut out: Vec<Reached> = vec![None; targets.len()];
+    let start = map.seg(from.0);
+    let mut best = f32::INFINITY;
+    for (k, t) in targets.iter().enumerate() {
+        if t.0 == from.0 && t.1 >= from.1 {
+            let time = (t.1 - from.1) / start.speed_limit.max(1.0);
+            best = best.min(time);
+            out[k] = Some((time, vec![from.0]));
+        }
+    }
+    let pts: Vec<V2> = targets
+        .iter()
+        .map(|t| geom::xy(map.seg(t.0).point_at(t.1).0))
+        .collect();
+    let h = |s: SegId| {
+        let p = geom::xy(map.seg(s).pts[0]);
+        pts.iter()
+            .map(|q| geom::dist(p, *q))
+            .fold(f32::INFINITY, f32::min)
+            / 30.0
+    };
+    let n = map.segs.len();
+    let mut g = vec![f32::INFINITY; n];
+    let mut came = vec![u32::MAX; n];
+    let mut done = vec![false; n];
+    let mut heap = BinaryHeap::new();
+    for &nx in &start.next {
+        let cost = (start.length - from.1) / start.speed_limit.max(1.0);
+        if cost < g[nx as usize] {
+            g[nx as usize] = cost;
+            came[nx as usize] = START;
+            heap.push(Open {
+                f: cost + h(nx),
+                seg: nx,
+            });
+        }
+    }
+    while let Some(Open { f, seg }) = heap.pop() {
+        if done[seg as usize] {
+            continue;
+        }
+        if f > SEARCH_FACTOR * best + SEARCH_SLACK_S || out.iter().all(Option::is_some) {
+            break;
+        }
+        done[seg as usize] = true;
+        let s = map.seg(seg);
+        for (k, t) in targets.iter().enumerate() {
+            if t.0 != seg || out[k].is_some() {
+                continue;
+            }
+            let time = g[seg as usize] + t.1 / s.speed_limit.max(1.0);
+            let mut path = vec![seg];
+            let mut cur = seg;
+            while came[cur as usize] != START && path.len() <= n {
+                cur = came[cur as usize];
+                path.push(cur);
+            }
+            path.push(from.0);
+            path.reverse();
+            best = best.min(time);
+            out[k] = Some((time, path));
+        }
+        if !s.drivable {
+            continue;
+        }
+        for &nx in &s.next {
+            let cost = g[seg as usize] + s.length / s.speed_limit.max(1.0);
+            if cost < g[nx as usize] {
+                g[nx as usize] = cost;
+                came[nx as usize] = seg;
+                heap.push(Open {
+                    f: cost + h(nx),
+                    seg: nx,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// The road's lanes at a pick ([`road_lanes_at`]), else the nearest lane.
+fn pick_lanes(map: &CityMap, p: V3) -> Vec<(SegId, f32)> {
+    let mut lanes = road_lanes_at(map, p);
+    if lanes.is_empty() {
+        lanes.extend(nearest_lane(map, p, None));
+    }
+    lanes
+}
+
 /// Lane-legal open route from `start` through the waypoints `via` in order to `finish`
-/// (start snapped to a lane agreeing with `start_heading` if given). Each waypoint goes onto
-/// the lane under it heading on towards the next point if there is one, else the lane under it
-/// either way, else the nearest lane; of those the first the route can reach (and, for a
-/// waypoint, leave again towards the next point) is kept, and a parallel lane of the road
-/// being driven is kept as it is. A waypoint behind the car on its lane goes round the block.
-/// `None` when a leg has no route. With no waypoints this is [`plan_route`]. Street races
-/// through player-picked waypoints (lead, owner row 151).
+/// (start snapped to a lane agreeing with `start_heading` if given). A pick, waypoint or
+/// finish, stands for the whole road under it, both directions and every lane
+/// ([`road_lanes_at`]; routes never change lanes mid-road, so only some of a wide road's lanes
+/// are reachable from a given lane): a waypoint goes on the lane that is quickest to reach
+/// from where the route is plus quickest to leave for the next pick, the finish on the lane
+/// quickest to reach. A pick on the far carriageway of a divided road, on the opposing lane of
+/// a street or on the wrong lane runs through the near side instead of round the block (owner,
+/// 2026-10-23, Loop 9). A waypoint behind the car on its lane goes round the block. `None`
+/// when no lane of a pick can be reached. Street races through player-picked waypoints (lead,
+/// owner row 151).
 pub fn plan_route_via(
     map: &CityMap,
     start: V3,
@@ -288,70 +458,52 @@ pub fn plan_route_via(
     via: &[V2],
     finish: V3,
 ) -> Option<Route> {
-    if via.is_empty() {
-        return plan_route(map, start, start_heading, finish);
-    }
     let first = nearest_lane(map, start, start_heading)?;
-    let goal = nearest_lane(map, finish, None)?;
+    let mut layers: Vec<Vec<(SegId, f32)>> = Vec::with_capacity(via.len() + 1);
+    let mut z = start[2];
+    for w in via {
+        z = map.ground_height(*w, Some(z));
+        layers.push(pick_lanes(map, [w[0], w[1], z]));
+    }
+    layers.push(pick_lanes(map, finish));
     let mut segs: Vec<SegId> = Vec::new();
     let mut cur = first;
-    let mut prev = geom::xy(start);
-    let mut z = start[2];
-    for (i, w) in via.iter().enumerate() {
-        z = map.ground_height(*w, Some(z));
-        let p = [w[0], w[1], z];
-        let after = via.get(i + 1).copied().unwrap_or(geom::xy(finish));
-        let heading = geom::normalize(geom::sub(after, prev));
-        let mut cands: Vec<(SegId, f32)> = Vec::new();
-        for l in [
-            map.locate(p, Some(heading), 2.0, true, false),
-            map.locate(p, None, 2.0, true, false),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            cands.push((l.seg, l.s));
-        }
-        cands.extend(nearest_lane(map, p, None));
-        let last = i + 1 == via.len();
-        let mut picked = None;
-        for c in cands {
-            let next = same_lane_group(map, cur, c, p);
-            // The last waypoint must also lead on to B (not every lane reaches every other).
-            if last && leg(map, next, goal).is_none() {
+    // Paths from `cur` to the next layer's lanes, when the look-ahead already found them.
+    let mut reach: Option<Vec<Reached>> = None;
+    for i in 0..layers.len() {
+        let cands = &layers[i];
+        let there = reach
+            .take()
+            .unwrap_or_else(|| paths_to_any(map, cur, cands));
+        let mut picked: Option<Pick> = None;
+        for (c, r) in cands.iter().zip(there) {
+            let Some((t, path)) = r else {
                 continue;
-            }
-            if let Some(part) = leg(map, cur, next) {
-                picked = Some((next, part));
-                break;
+            };
+            let (t, on) = match layers.get(i + 1) {
+                Some(after) => {
+                    let on = paths_to_any(map, *c, after);
+                    let Some(rest) = on.iter().flatten().map(|o| o.0).min_by(f32::total_cmp) else {
+                        // A lane that cannot reach the next pick is no use.
+                        continue;
+                    };
+                    (t + rest, Some(on))
+                }
+                None => (t, None),
+            };
+            if picked.as_ref().is_none_or(|b| t < b.0) {
+                picked = Some((t, *c, path, on));
             }
         }
-        let (next, mut part) = picked?;
+        let (_, next, mut path, on) = picked?;
         if !segs.is_empty() {
-            part.remove(0);
+            path.remove(0);
         }
-        segs.extend(part);
+        segs.extend(path);
         cur = next;
-        prev = *w;
+        reach = on;
     }
-    let mut part = leg(map, cur, goal)?;
-    part.remove(0);
-    segs.extend(part);
-    Some(build_route(map, segs, first.1, goal.1, false))
-}
-
-/// Path from lane position `cur` to `next` (round the block when `next` is behind `cur` on the
-/// same lane), starting with `cur.0`.
-fn leg(map: &CityMap, cur: (SegId, f32), next: (SegId, f32)) -> Option<Vec<SegId>> {
-    if cur.0 == next.0 && next.1 < cur.1 {
-        let s = map.seg(cur.0);
-        let round = *s.next.first()?;
-        let mut p = vec![cur.0];
-        p.extend(shortest_path(map, (round, 0.0), next)?);
-        Some(p)
-    } else {
-        shortest_path(map, cur, next)
-    }
+    Some(build_route(map, segs, first.1, cur.1, false))
 }
 
 /// Route between two POIs (indices into the network's POI list); starts facing the POI
@@ -378,27 +530,39 @@ fn same_lane_group(map: &CityMap, cur: (SegId, f32), next: (SegId, f32), p: V3) 
     if a == b {
         return next;
     }
-    let lanes = &map.net.lanes;
-    let mut l = Some(a);
-    while let Some(x) = l {
-        l = lanes[x as usize].left;
-        if l == Some(b) {
-            break;
-        }
-    }
-    let mut r = Some(a);
-    while let Some(x) = r {
-        r = lanes[x as usize].right;
-        if r == Some(b) {
-            break;
-        }
-    }
-    if l == Some(b) || r == Some(b) {
+    if parallel_lanes(map, cur.0, next.0) {
         let s = map.seg(cur.0);
         let pr = s.project(geom::xy(p));
         return (cur.0, pr.s.clamp(0.0, s.length));
     }
     next
+}
+
+/// Whether lane segments `a` and `b` are the same lane or lanes side by side of one road and
+/// direction (linked through `left` / `right`).
+fn parallel_lanes(map: &CityMap, a: SegId, b: SegId) -> bool {
+    let (SegKind::Lane { lane: a }, SegKind::Lane { lane: b }) = (map.seg(a).kind, map.seg(b).kind)
+    else {
+        return false;
+    };
+    if a == b {
+        return true;
+    }
+    let lanes = &map.net.lanes;
+    for side in [false, true] {
+        let mut l = Some(a);
+        while let Some(x) = l {
+            l = if side {
+                lanes[x as usize].right
+            } else {
+                lanes[x as usize].left
+            };
+            if l == Some(b) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Closed circuit visiting the polygon vertices in order and returning to the first.

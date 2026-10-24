@@ -21,10 +21,13 @@
 //! - **Challenge.** Honking (horn rising edge) while right behind a roaming racer (same lane and
 //!   heading, at most [`CHALLENGE_BEHIND_M`] back: [`tailing`]) stops it and opens an [`Offer`]: the player picks B on the map ([`StreetRacers::preview`]),
 //!   optionally waypoints the route must run through in order (up to [`MAX_WAYPOINTS`], owner
-//!   row 151; gates the player passes within [`GATE_RADIUS_M`] before B counts), and a stake
+//!   row 151; each a gate across the whole road, [`GATE_HALF_SPAN_M`] either side, that the
+//!   player must pass before B counts; a pick on any lane or carriageway of the road will do),
+//!   and a stake
 //!   inside the level's range (capped by their cash), then accepts. Not while the player is
 //!   wanted or chased (owner row 150): a honk does nothing and an open offer lapses.
-//! - **Race.** Accepting pays the stake (a betting ticket on the one career wallet:
+//!   Both cars wait at a halt while the offer is open ([`StreetRacers::holds_player`]).
+//! - **Race.** Accepting clears civilian cars within [`START_CLEAR_M`] of the start, pays the stake (a betting ticket on the one career wallet:
 //!   `wp_economy` `place_bet`, venue `Street`, open from the start and capped only by cash and
 //!   the level's range; ledger note `bet:stake:street:…`), resets both cars side by side at the
 //!   start, at rest, facing along the route (logged moves, owner row 150),
@@ -122,6 +125,16 @@ const REST_STOP_GRID_M: f32 = 2.0;
 const LOOP_IDLE_S: u64 = 40;
 /// See [`LOOP_IDLE_S`].
 const LOOP_IDLE_EXTRA_S: u32 = 50;
+/// A waypoint gate is a line across the whole road (owner, 2026-10-23: "make the gate cover
+/// the whole road"): crossing within this distance either side of the gate's centre counts it,
+/// whatever lane (or carriageway, on Loop 9) the player takes, m.
+pub const GATE_HALF_SPAN_M: f32 = 26.0;
+/// ... within this distance along the route of the gate line (a car covers well under a metre
+/// a tick, so it cannot skip the band), m.
+pub const GATE_DEPTH_M: f32 = 8.0;
+/// Civilian cars within this distance of a street race's start are cleared when it is
+/// accepted (owner, 2026-10-23: "clear the area out for race start"), m.
+pub const START_CLEAR_M: f32 = 80.0;
 /// Passing this close to a waypoint gate counts it, m (in order; B counts only after the
 /// last one).
 pub const GATE_RADIUS_M: f32 = 20.0;
@@ -475,7 +488,7 @@ pub struct StreetStep {
     /// Light-model permission changes (`Sim::set_light_when_far`, logged as
     /// `OpKind::LightWhenFar`): off for a racer racing the player, on again after.
     pub light: Vec<(EntityId, bool)>,
-    /// This tick's honk opened a challenge (the session's race spots then ignore it).
+    /// This tick's honk opened or called off a challenge (the session's race spots then ignore it).
     pub challenged: bool,
 }
 
@@ -643,8 +656,15 @@ struct Race {
     polyline: Vec<[f32; 2]>,
     /// Waypoint gates before B, in order.
     gates: Vec<[f32; 2]>,
+    /// Unit route direction through each gate.
+    gate_dirs: Vec<[f32; 2]>,
+    /// Distance along the route of each gate, m.
+    gate_s: Vec<f32>,
     /// The player's next gate.
     next_gate: usize,
+    /// The racer's next gate: it must pass them too (it may leave the route after a crash,
+    /// a spin or a police chase, and B or the end of its run counts only after every one).
+    racer_next_gate: usize,
     /// [`course_packed`].
     course: Vec<f32>,
     length_m: f32,
@@ -712,6 +732,66 @@ fn snap_gates(polyline: &[[f32; 3]], via: &[[f32; 2]]) -> Vec<[f32; 2]> {
         .collect()
 }
 
+/// Distance along the route of each snapped waypoint ([`gate_indices`]), m.
+fn gate_distances(polyline: &[[f32; 3]], via: &[[f32; 2]]) -> Vec<f32> {
+    let cum = geom::cumulative(polyline);
+    gate_indices(polyline, via)
+        .into_iter()
+        .filter_map(|i| cum.get(i).copied())
+        .collect()
+}
+
+/// Advance `next` past every gate in order that `p` is through ([`in_gate`]).
+fn pass_gates(p: [f32; 2], gates: &[[f32; 2]], dirs: &[[f32; 2]], next: &mut usize) {
+    while let (Some(g), Some(d)) = (gates.get(*next), dirs.get(*next)) {
+        if !in_gate(p, *g, *d) {
+            break;
+        }
+        *next += 1;
+    }
+}
+
+/// Progress `s` along the route counted only up to the next gate not yet passed (a car that
+/// skipped a waypoint is no further along than it), m.
+fn capped_at_gate(s: f32, gate_s: &[f32], next: usize) -> f32 {
+    gate_s.get(next).map_or(s, |g| s.min(*g))
+}
+
+/// Unit route direction at each snapped waypoint ([`gate_indices`]).
+fn gate_dirs(polyline: &[[f32; 3]], via: &[[f32; 2]]) -> Vec<[f32; 2]> {
+    gate_indices(polyline, via)
+        .into_iter()
+        .map(|i| route_dir(polyline, i))
+        .collect()
+}
+
+/// Unit route direction at polyline point `i` (from its neighbours).
+fn route_dir(polyline: &[[f32; 3]], i: usize) -> [f32; 2] {
+    let a = polyline[i.saturating_sub(1)];
+    let b = polyline[(i + 1).min(polyline.len() - 1)];
+    geom::normalize(geom::sub(geom::xy(b), geom::xy(a)))
+}
+
+/// Whether `p` is through the gate at `g` facing `dir`: on its line across the whole road
+/// ([`GATE_HALF_SPAN_M`] either side, [`GATE_DEPTH_M`] deep), or within [`GATE_RADIUS_M`].
+fn in_gate(p: [f32; 2], g: [f32; 2], dir: [f32; 2]) -> bool {
+    let d = geom::sub(p, g);
+    let along = geom::dot(d, dir);
+    let across = geom::dot(d, geom::right_of(dir));
+    dist(p, g) <= GATE_RADIUS_M || (along.abs() <= GATE_DEPTH_M && across.abs() <= GATE_HALF_SPAN_M)
+}
+
+/// Middle of the start grid: the cars' places of a race start (`accept`'s moves).
+pub fn grid_centre(moves: &[Move]) -> Option<[f32; 2]> {
+    if moves.is_empty() {
+        return None;
+    }
+    let n = moves.len() as f32;
+    let sx: f32 = moves.iter().map(|m| m.xy[0]).sum();
+    let sy: f32 = moves.iter().map(|m| m.xy[1]).sum();
+    Some([sx / n, sy / n])
+}
+
 /// Gate width drawn in the world, m (the arch spans the road; `FINISH_RADIUS_M` and
 /// [`GATE_RADIUS_M`] decide what counts).
 const GATE_WIDTH_M: f32 = 14.0;
@@ -727,9 +807,7 @@ fn course_packed(polyline: &[[f32; 3]], via: &[[f32; 2]]) -> Vec<f32> {
     idx.push(polyline.len() - 1);
     let mut out = vec![idx.len() as f32];
     for i in idx {
-        let a = polyline[i.saturating_sub(1)];
-        let b = polyline[(i + 1).min(polyline.len() - 1)];
-        let d = geom::normalize(geom::sub(geom::xy(b), geom::xy(a)));
+        let d = route_dir(polyline, i);
         let p = polyline[i];
         out.extend_from_slice(&[p[0], p[1], p[2], d[0], d[1], GATE_WIDTH_M]);
     }
@@ -899,9 +977,10 @@ impl StreetRacers {
         self.racers.iter().map(|r| r.entity).collect()
     }
 
-    /// Hold the player on the handbrake (race countdown).
+    /// Hold the player at a halt: while an offer is open (betting on the map; the racer
+    /// waits too) and through the race countdown.
     pub fn holds_player(&self, tick: u64) -> bool {
-        self.race.as_ref().is_some_and(|r| tick < r.go_tick)
+        self.offer.is_some() || self.race.as_ref().is_some_and(|r| tick < r.go_tick)
     }
 
     /// Per-racer packed state for the map: `[entity, level, x, y, yaw, mode]` per racer
@@ -1275,6 +1354,8 @@ impl StreetRacers {
         self.pending_light.push((r.entity, false));
         self.offer = None;
         let gates = snap_gates(&route.polyline, via);
+        let dirs = gate_dirs(&route.polyline, via);
+        let gate_s = gate_distances(&route.polyline, via);
         self.race = Some(Race {
             racer: k,
             field,
@@ -1282,7 +1363,10 @@ impl StreetRacers {
             finish: route.polyline.last().copied().unwrap_or([0.0; 3]),
             polyline: decimate(&route.polyline),
             gates,
+            gate_dirs: dirs,
+            gate_s,
             next_gate: 0,
+            racer_next_gate: 0,
             course: course_packed(&route.polyline, via),
             length_m: route.length_m,
             stake,
@@ -1342,6 +1426,11 @@ impl StreetRacers {
         }
     }
 
+    /// A challenge is open (betting: the player is held, only the horn gets through).
+    pub fn offer_open(&self) -> bool {
+        self.offer.is_some()
+    }
+
     /// A challenge is open or a street race is running (no other challenge then: the
     /// session's race spots ignore the horn too).
     pub fn busy(&self) -> bool {
@@ -1373,6 +1462,12 @@ impl StreetRacers {
                 self.offer_tick = tick;
                 out.challenged = true;
             }
+        }
+        // The player is held while an offer is open (betting), so with the map closed a honk
+        // calls it off (driving away no longer can).
+        if honk && self.offer.is_some() && !out.challenged {
+            self.decline(tick);
+            out.challenged = true;
         }
         if let Some(k) = self.offer {
             let far = match (xy_of(sim, player), xy_of(sim, self.racers[k].entity)) {
@@ -1693,17 +1788,23 @@ impl StreetRacers {
         }
         let st = race.field.standings();
         let npc = st.first();
-        let racer_s = npc.map_or(0.0, |s| s.progress_m.min(race.length_m));
         let elapsed = tick.saturating_sub(race.go_tick) as f32 / 240.0;
-        if let Some(p) = xy_of(sim, player) {
-            while race
-                .gates
-                .get(race.next_gate)
-                .is_some_and(|g| dist(p, *g) <= GATE_RADIUS_M)
-            {
-                race.next_gate += 1;
+        let racer_entity = self.racers[race.racer].entity;
+        if tick > race.go_tick {
+            if let Some(p) = xy_of(sim, player) {
+                pass_gates(p, &race.gates, &race.gate_dirs, &mut race.next_gate);
+            }
+            if let Some(q) = xy_of(sim, racer_entity) {
+                pass_gates(q, &race.gates, &race.gate_dirs, &mut race.racer_next_gate);
             }
         }
+        let racer_gates_done = race.racer_next_gate >= race.gates.len();
+        let racer_s = capped_at_gate(
+            npc.map_or(0.0, |s| s.progress_m.min(race.length_m)),
+            &race.gate_s,
+            race.racer_next_gate,
+        );
+        let player_s = capped_at_gate(race.player_s, &race.gate_s, race.next_gate);
         // B counts only once every waypoint gate is passed, in order.
         let near_b = race.next_gate >= race.gates.len()
             && xy_of(sim, player)
@@ -1714,13 +1815,14 @@ impl StreetRacers {
         // The session judges the racer's finish as it judges the player's: at B (or past it
         // along the route). The field only reports `Finished` at the end of its run-off, 60 m
         // further on at cool-down pace, as a picker race's AI (whose finish `wp_race` judges).
-        let racer_entity = self.racers[race.racer].entity;
-        let racer_at_b = npc.is_some_and(|s| {
-            matches!(s.status, RacerStatus::Racing | RacerStatus::Finished { .. })
-                && (s.progress_m >= race.length_m
-                    || xy_of(sim, racer_entity)
-                        .is_some_and(|q| dist(q, geom::xy(race.finish)) <= FINISH_RADIUS_M))
-        });
+        // B counts for the racer, as for the player, only once every gate is passed.
+        let racer_at_b = racer_gates_done
+            && npc.is_some_and(|s| {
+                matches!(s.status, RacerStatus::Racing | RacerStatus::Finished { .. })
+                    && (s.progress_m >= race.length_m
+                        || xy_of(sim, racer_entity)
+                            .is_some_and(|q| dist(q, geom::xy(race.finish)) <= FINISH_RADIUS_M))
+            });
         let outcome: Option<(bool, String)> = if tick <= race.go_tick {
             None
         } else if run.is_over() || player_wrecked {
@@ -1731,6 +1833,10 @@ impl StreetRacers {
             Some((false, "they crossed the line first".into()))
         } else {
             match npc.map(|s| s.status) {
+                // The end of its run with a waypoint missed: it cut the course.
+                Some(RacerStatus::Finished { .. }) if !racer_gates_done => {
+                    Some((true, "they missed a waypoint".into()))
+                }
                 Some(RacerStatus::Finished { .. }) => {
                     Some((false, "they crossed the line first".into()))
                 }
@@ -1740,7 +1846,7 @@ impl StreetRacers {
                 Some(RacerStatus::Fled) => Some((true, "they ran from the police".into())),
                 Some(RacerStatus::Disqualified) => Some((true, "they were disqualified".into())),
                 _ if tick >= race.limit_tick => {
-                    let won = race.player_s >= racer_s;
+                    let won = player_s >= racer_s;
                     Some((won, "time limit: whoever was further along wins".into()))
                 }
                 _ => None,
@@ -1754,7 +1860,7 @@ impl StreetRacers {
         let margin_m = if won {
             race.length_m - racer_s
         } else {
-            race.length_m - race.player_s
+            race.length_m - player_s
         }
         .max(0.0);
         let k = race.racer;
@@ -2223,6 +2329,44 @@ mod tests {
     use super::*;
     use crate::scenario::free_drive;
     use crate::session::Session;
+
+    /// A waypoint gate spans the whole road (owner, 2026-10-23): on its line any lane, or
+    /// Loop 9's far carriageway, counts; well before or after it nothing does.
+    #[test]
+    fn a_gate_spans_the_whole_road() {
+        let (g, dir) = ([100.0, 50.0], [1.0, 0.0]);
+        for across in [-24.0, -12.0, 0.0, 7.0, 24.0] {
+            assert!(in_gate([101.0, 50.0 + across], g, dir), "{across} m across");
+        }
+        assert!(!in_gate([100.0, 50.0 + 40.0], g, dir), "a parallel road");
+        assert!(
+            !in_gate([130.0, 50.0 + 12.0], g, dir),
+            "30 m on, beside the road"
+        );
+        assert!(
+            in_gate([115.0, 50.0], g, dir),
+            "within the radius on the line of travel"
+        );
+    }
+
+    /// Gates count in order for either car, and a car that skipped one is no further along
+    /// than it (owner, 2026-10-23: the AI won without hitting all the waypoints).
+    #[test]
+    fn gates_count_in_order_and_cap_progress() {
+        let gates = [[100.0, 0.0], [300.0, 0.0]];
+        let dirs = [[1.0, 0.0]; 2];
+        let mut next = 0;
+        pass_gates([300.0, 0.0], &gates, &dirs, &mut next);
+        assert_eq!(next, 0, "the second gate before the first does not count");
+        pass_gates([100.0, 3.0], &gates, &dirs, &mut next);
+        assert_eq!(next, 1);
+        pass_gates([300.0, -10.0], &gates, &dirs, &mut next);
+        assert_eq!(next, 2);
+        let gate_s = [100.0, 300.0];
+        assert_eq!(capped_at_gate(450.0, &gate_s, 0), 100.0);
+        assert_eq!(capped_at_gate(450.0, &gate_s, 1), 300.0);
+        assert_eq!(capped_at_gate(450.0, &gate_s, 2), 450.0);
+    }
 
     /// Only right behind a racer (same lane, same way, close) counts as tailing it.
     #[test]

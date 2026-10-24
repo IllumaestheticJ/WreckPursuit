@@ -457,6 +457,12 @@ impl World {
         self.traffic.drain_lod_changes()
     }
 
+    /// Despawn every civilian car within `radius_m` of `p` now, wrecks included (a race start
+    /// clearing its grid); returns how many went. See [`Traffic::clear_near`].
+    pub fn clear_traffic_near(&mut self, p: [f32; 2], radius_m: f32) -> usize {
+        self.traffic.clear_near(&self.map, p, radius_m)
+    }
+
     /// Record the sim-loop entity id of a (physical) agent.
     pub fn set_agent_entity(&mut self, agent: AgentId, entity: Option<wp_contracts::EntityId>) {
         self.traffic.set_entity(agent, entity);
