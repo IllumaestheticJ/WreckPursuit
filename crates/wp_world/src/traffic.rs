@@ -1094,6 +1094,25 @@ impl Traffic {
         std::mem::take(&mut self.lod_changes)
     }
 
+    /// Despawn every agent within `radius_m` of `p` (plan distance), wrecks included, now
+    /// (a race start clearing its grid). Physical ones leave a [`LodChange::Despawned`] like
+    /// any despawn. Returns how many went. Deterministic: agents in list order.
+    pub fn clear_near(&mut self, map: &CityMap, p: V2, radius_m: f32) -> usize {
+        let mut n = 0;
+        for i in 0..self.agents.len() {
+            let (q, _) = self.pose_of(map, &self.agents[i]);
+            if !self.agents[i].despawn && geom::dist(geom::xy(q), p) <= radius_m {
+                self.agents[i].despawn = true;
+                self.stats.despawned += 1;
+                n += 1;
+            }
+        }
+        if n > 0 {
+            self.remove_despawned();
+        }
+        n
+    }
+
     /// Assign the sim-loop entity id of an agent.
     pub fn set_entity(&mut self, agent: AgentId, entity: Option<EntityId>) {
         if let Some(a) = self.agents.iter_mut().find(|a| a.id == agent) {

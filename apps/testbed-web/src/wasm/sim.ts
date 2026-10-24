@@ -612,6 +612,14 @@ export const sim = {
   careerRelease: (uid: number): CareerView => JSON.parse(wasm.career_release(uid)),
   careerInsure: (uid: number, tier: string): CareerView => JSON.parse(wasm.career_insure(uid, tier)),
   careerNextNight: (): CareerView => JSON.parse(wasm.career_next_night()),
+  // ----- car lots (crates/wp_wasm/src/lots.rs) ----------------------------------------------
+  careerLot: (lotId: string): LotStockView => JSON.parse(wasm.career_lot_json(lotId)),
+  careerBuyListing: (lotId: string, slot: number): CareerView => JSON.parse(wasm.career_buy_listing(lotId, slot)),
+  careerReplaceTires: (uid: number, wheels: boolean[]): CareerView => JSON.parse(wasm.career_replace_tires(uid, JSON.stringify(wheels))),
+  /** Load the lot itself (ends a career run first). Returns entity ids like `init`. */
+  careerVisitLot: (lotId: string): number[] => Array.from(wasm.career_visit_lot(lotId)),
+  /** The lot being visited, or null when the session is not a lot visit. */
+  lotVisit: (): LotVisit | null => JSON.parse(wasm.lot_visit_json()),
   /** Put a police helicopter on a pursued racer now, offsetM away at altitude. Returns its unit id. */
   debugLaunchHelicopter: (entity: number, offsetM: number): number => wasm.debug_launch_helicopter(entity, offsetM),
   /** Debug / e2e: put `entity` on the ground at [x, y], facing `yaw`, at `speedMps` (not recorded in replays). */
@@ -628,7 +636,7 @@ export const sim = {
    * (x, y). Throws when no route. */
   streetPreview: (x: number, y: number, via: [number, number][] = []): StreetPreview => JSON.parse(wasm.street_preview(x, y, new Float32Array(via.flat()))),
   /** Accept the open challenge: race through `via` to (x, y) for `stake` dollars; both cars are
-   * reset side by side at the start. Throws if refused (also while the police are after you). */
+   * reset side by side at the start. Throws if refused (also during an active pursuit; cooling down is fine). */
   streetAccept: (x: number, y: number, stake: number, via: [number, number][] = []): void => wasm.street_accept(x, y, new Float32Array(via.flat()), stake),
   /** The street race's gates (waypoints, then B) and route, in `raceCourse()`'s layout. */
   streetCourse: (): Float32Array => wasm.street_course(),
@@ -653,7 +661,18 @@ export const sim = {
     JSON.parse(wasm.career_mechanic_install(uid, slot, part, grade ?? "", sellOld)),
 };
 
-import type { CarTune, CareerView, MechanicResult, ModTreeView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";
+import type {
+  CarTune,
+  CareerView,
+  LotStockView,
+  LotVisit,
+  MechanicResult,
+  ModTreeView,
+  RepairQuote,
+  RunClose,
+  ShopRequest,
+  WorkshopScreen,
+} from "../../../ui-kit/src/garage/types";
 
 /** A street-racer level (`wp_wasm::street::Level`). */
 export interface StreetLevel {
@@ -741,9 +760,9 @@ export interface StreetStatus {
   levels: StreetLevel[];
   roster: StreetRacer[];
   hint: StreetRacer | null;
-  /** The police are after the player: no challenges (row 150). */
+  /** The player is in an active pursuit: no challenges (row 150; cooling down is fine). */
   pursued: boolean;
-  /** The racer in honking range while the police are after the player (hint: lose them). */
+  /** The racer in honking range during an active pursuit (hint: shake the pursuit). */
   blocked: StreetRacer | null;
   offer: StreetOffer | null;
   race: StreetRace | null;

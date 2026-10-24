@@ -64,6 +64,15 @@ impl Sim {
         cfg.max_physical = base.min(room);
     }
 
+    /// Despawn every civilian car within `radius_m` of `xy` now, wrecks included, and remove
+    /// the bodies of the physical ones (a street race start clearing its grid). Callers that
+    /// record replays log it (`simcli` `OpKind::ClearTraffic`). Returns how many went.
+    pub fn clear_traffic_near(&mut self, xy: [f32; 2], radius_m: f32) -> usize {
+        let n = self.world.clear_traffic_near(xy, radius_m);
+        self.apply_traffic_lod();
+        n
+    }
+
     /// After the world step: give promoted agents a vehicle, remove demoted / despawned ones.
     pub(crate) fn apply_traffic_lod(&mut self) {
         for change in self.world.drain_lod_changes() {

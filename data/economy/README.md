@@ -10,6 +10,7 @@ in `crates/wp_economy/README.md` ("Tuning levers").
 | `stakes.toml` | purses, buy-ins, rep, day-phase / class / wanted / mode multipliers, debt, pink slips, bounties, informants |
 | `consequences.toml` | fines, bail, rep loss, impound, Arcade vs Simulation capture rules, cop XP and ranks |
 | `market.toml` | starting cash, dealer price bands, resale, economy-floor car, class index, tire grip |
+| `lots.toml` | dealerships (tiers), used car lots, junkyards: what each carries, daily fill, condition / tread / price bands, junkyard odds (dead, missing parts, flat tyres, rare finds), rare variants, tyre prices and wear |
 
 After changing numbers run `cargo test -p wp_economy --test career -- --nocapture` and update the
 "Tuning results" table in the crate README.

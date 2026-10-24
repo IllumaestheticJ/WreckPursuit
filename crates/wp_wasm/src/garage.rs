@@ -126,6 +126,7 @@ pub fn repair_quote_json(entity: u32, request_json: &str) -> Result<String, JsVa
                 location: CarLocation::Garage,
                 insurance: None,
                 purchase_price: None,
+                tires: Default::default(),
                 tune: Default::default(),
                 parts: None,
             };

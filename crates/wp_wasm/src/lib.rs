@@ -47,6 +47,7 @@ pub mod drift_lab;
 pub mod garage;
 pub mod garage_visit;
 pub mod lod;
+pub mod lots;
 pub mod map;
 pub mod mod_visuals;
 pub mod pack;
@@ -71,6 +72,8 @@ mod career_tests;
 mod collide_tests;
 #[cfg(test)]
 mod crash_replay_tests;
+#[cfg(test)]
+mod lots_tests;
 #[cfg(test)]
 mod police_audio_trace;
 #[cfg(test)]
@@ -1158,8 +1161,9 @@ pub fn street_racers() -> Result<Vec<f32>, JsValue> {
 
 /// Street-race state as JSON: `{ levels, roster, hint, pursued, blocked, offer, race, result }`
 /// — the level table ([`street::LEVELS`]), every racer ([`street::RosterEntry`]), the racer a
-/// honk would challenge now (`hint`), whether the police are after the player (no challenges
-/// then) and the racer in reach they block (`blocked`),
+/// honk would challenge now (`hint`), whether the player is in an active pursuit (no challenges
+/// then; wanted or cooling down is fine, [`street::pursued`]) and the racer in reach it blocks
+/// (`blocked`),
 /// the open challenge ([`street::Offer`]), the race in progress
 /// ([`street::RaceView`]) and the latest result ([`street::RaceResult`], `seq` grows). `null`
 /// without street racers.
@@ -1174,11 +1178,11 @@ pub fn street_status_json() -> Result<String, JsValue> {
             "levels": street::LEVELS,
             "roster": st.roster(),
             "hint": player.and_then(|p| st.challengeable(s.sim(), p)),
-            // Wanted or chased: no challenges (owner row 150); `blocked` = the racer a honk
-            // would challenge without the police.
-            "pursued": player.is_some_and(|p| s.sim().police().is_wanted_or_pursued(p)),
+            // Active pursuit: no challenges (owner row 150; cooldown is fine); `blocked` = the
+            // racer a honk would challenge without the pursuit.
+            "pursued": player.is_some_and(|p| street::pursued(s.sim(), p)),
             "blocked": player
-                .filter(|p| s.sim().police().is_wanted_or_pursued(*p))
+                .filter(|p| street::pursued(s.sim(), *p))
                 .and_then(|p| st.in_reach(s.sim(), p)),
             "offer": st.offer(s.sim(), s.run()),
             "race": st.race(s.sim()),
@@ -1206,7 +1210,7 @@ pub fn street_preview(x: f32, y: f32, via: Vec<f32>) -> Result<String, JsValue> 
 /// Accept the open challenge: race through the waypoints `via` (as in [`street_preview`]) to
 /// `(x, y)` for `stake` dollars (paid now; a win pays twice the stake). Both cars are reset
 /// side by side at the start. Errors (nothing changed) on a bad stake, no route, no open
-/// challenge, or while the police are after the player.
+/// challenge, or during an active pursuit (cooling down is fine).
 #[wasm_bindgen]
 pub fn street_accept(x: f32, y: f32, via: Vec<f32>, stake: f64) -> Result<(), JsValue> {
     with(|s| s.street_accept([x, y], &waypoints(&via), stake.round() as i64))
