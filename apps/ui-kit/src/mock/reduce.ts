@@ -61,6 +61,13 @@ export interface ReduceContext {
   bodySize: (entity: number) => [number, number, number];
   /** Display name per entity. */
   nameOf: (entity: number) => string;
+  /**
+   * Feed every racer's police events (a police captain's view). Default (unset): only the local
+   * player's — violations, pursuits, spikes, PITs and wanted levels of AI racers elsewhere on the
+   * map are not the driver's business (owner, 2026-10-23). State (levels, pursued list, units,
+   * tools) is tracked for everyone either way.
+   */
+  allRacers?: boolean;
 }
 
 /** Empty playback (pristine car, no heat). */
@@ -191,6 +198,8 @@ export function applyEvent(prev: Playback, line: EventLine, ctx: ReduceContext):
   const p: Playback = { ...prev, cursor: prev.cursor + 1, tick: Math.max(prev.tick, line.tick) };
   const e = line.event;
   const isPlayer = (v: number) => v === ctx.player;
+  /** Whether the feed shows this racer's violations / police events. */
+  const feeds = (racer: number) => ctx.allRacers === true || racer === ctx.player;
 
   if ("Contact" in e) {
     const c = e.Contact;
@@ -254,12 +263,12 @@ export function applyEvent(prev: Playback, line: EventLine, ctx: ReduceContext):
     const over = typeof v.kind === "object" && "Speeding" in v.kind ? ` +${(v.kind.Speeding.over_mps * 3.6).toFixed(0)} km/h` : "";
     // Speeding is continuous: keep the feed readable by logging it at most every 5 s per racer.
     const lastSpeeding = [...p.scanner].reverse().find((s) => s.entity === v.vehicle && s.channel === "civil" && s.text.startsWith("Speeding"));
-    if (vk !== "Speeding" || !lastSpeeding || line.t_s - lastSpeeding.tS >= 5) {
+    if (feeds(v.vehicle) && (vk !== "Speeding" || !lastSpeeding || line.t_s - lastSpeeding.tS >= 5)) {
       say(p, line, "civil", "info", `${split(vk)}${over} — ${ctx.nameOf(v.vehicle)}`, v.vehicle);
       incident(p, line, vk as Incident["kind"], [v.pos[0], v.pos[1]], v.vehicle);
     }
   } else if ("Police" in e) {
-    applyPolice(p, line, e.Police, ctx);
+    applyPolice(p, line, e.Police, ctx, feeds);
   } else if ("Economy" in e) {
     const d = e.Economy;
     {
@@ -286,7 +295,7 @@ const OUTCOME_TEXT = {
   CalledOff: "pursuit called off",
 } as const;
 
-function applyPolice(p: Playback, line: EventLine, ev: PoliceEvent, ctx: ReduceContext): void {
+function applyPolice(p: Playback, line: EventLine, ev: PoliceEvent, ctx: ReduceContext, feeds: (racer: number) => boolean): void {
   const unitKind = (u: number) => p.units.find((x) => x.unit === u)?.kind;
   const name = (u: number) => callsign(u, unitKind(u));
   if ("Radio" in ev) {
@@ -301,7 +310,7 @@ function applyPolice(p: Playback, line: EventLine, ev: PoliceEvent, ctx: ReduceC
     }
     // Only announce new highs: the level can flap at a threshold.
     const peak = p.scanner.some((s) => s.entity === racer && s.text.includes(`wanted level ${level.slice(1)}`));
-    if (WANTED_ORDER.indexOf(level) > WANTED_ORDER.indexOf(old) && !peak) {
+    if (feeds(racer) && WANTED_ORDER.indexOf(level) > WANTED_ORDER.indexOf(old) && !peak) {
       say(p, line, "dispatch", "alert", `${ctx.nameOf(racer)} now wanted level ${level.slice(1)}`, racer);
     }
   } else if ("PursuitStarted" in ev) {
@@ -310,7 +319,7 @@ function applyPolice(p: Playback, line: EventLine, ev: PoliceEvent, ctx: ReduceC
     if (!p.pursued.includes(racer)) p.pursued = [...p.pursued, racer];
     if (unit !== null && !p.pursuing.includes(unit) && racer === ctx.player) p.pursuing = [...p.pursuing, unit];
     if (racer === ctx.player) p.heat = { ...p.heat, state: "pursuit", cooldown: 0, unitsInPursuit: Math.max(1, p.pursuing.length) };
-    say(p, line, "dispatch", "alert", `Pursuit: ${unit === null ? "air unit" : name(unit)} on ${ctx.nameOf(racer)}`, racer);
+    if (feeds(racer)) say(p, line, "dispatch", "alert", `Pursuit: ${unit === null ? "air unit" : name(unit)} on ${ctx.nameOf(racer)}`, racer);
   } else if ("PursuitEnded" in ev) {
     const { racer, outcome } = ev.PursuitEnded;
     p.pursued = p.pursued.filter((r) => r !== racer);
@@ -320,7 +329,7 @@ function applyPolice(p: Playback, line: EventLine, ev: PoliceEvent, ctx: ReduceC
       p.heat = { ...p.heat, state: caught ? "pursuit" : "clear", cooldown: caught ? 0 : 1, unitsInPursuit: 0 };
     }
     const caught = outcome === "Captured" || outcome === "CapturedTotalLoss";
-    say(p, line, caught ? "dispatch" : "system", caught ? "alert" : "info", `${ctx.nameOf(racer)}: ${OUTCOME_TEXT[outcome]}`, racer);
+    if (feeds(racer)) say(p, line, caught ? "dispatch" : "system", caught ? "alert" : "info", `${ctx.nameOf(racer)}: ${OUTCOME_TEXT[outcome]}`, racer);
   } else if ("UnitSpawned" in ev) {
     const u = ev.UnitSpawned;
     p.units = [
@@ -352,14 +361,14 @@ function applyPolice(p: Playback, line: EventLine, ev: PoliceEvent, ctx: ReduceC
   } else if ("SpikeHit" in ev) {
     const { vehicle, wheels } = ev.SpikeHit;
     const n = wheels.filter(Boolean).length;
-    say(p, line, "system", "alert", `Spikes! ${n} tyre${n === 1 ? "" : "s"} deflating — ${ctx.nameOf(vehicle)}`, vehicle);
+    if (feeds(vehicle)) say(p, line, "system", "alert", `Spikes! ${n} tyre${n === 1 ? "" : "s"} deflating — ${ctx.nameOf(vehicle)}`, vehicle);
   } else if ("HeloLaunched" in ev) {
     const { unit, target } = ev.HeloLaunched;
     p.units = p.units.map((x) => (x.unit === unit ? { ...x, kind: "Helicopter" } : x));
-    say(p, line, "dispatch", "alert", `Air unit ${unit} launched on ${ctx.nameOf(target)}`, target);
+    if (feeds(target)) say(p, line, "dispatch", "alert", `Air unit ${unit} launched on ${ctx.nameOf(target)}`, target);
   } else if ("PitAttempt" in ev) {
     const { unit, target } = ev.PitAttempt;
-    say(p, line, "unit", "warn", `${name(unit)} attempting PIT on ${ctx.nameOf(target)}`, target);
+    if (feeds(target)) say(p, line, "unit", "warn", `${name(unit)} attempting PIT on ${ctx.nameOf(target)}`, target);
   }
 }
 
