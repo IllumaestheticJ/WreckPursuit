@@ -77,6 +77,8 @@ function hash(n: number): number {
 
 export class ScannerPlayer {
   private current: { line: number; stopStatic: () => void; air: boolean } | null = null;
+  /** Pending start of a tier 1 line's speech (after the alert tone); cleared when cut. */
+  private leadTimer: ReturnType<typeof setTimeout> | null = null;
   /** Last lines for the debug panel, newest first. */
   readonly log: RadioLog[] = [];
   /** Speak with TTS (off = squelch + static only): the "Police radio voice" setting. */
@@ -115,6 +117,10 @@ export class ScannerPlayer {
 
   say(line: number, unit: number, text: string, priority: RadioPriority, pitch: number, tier = 0): void {
     this.end(this.current?.line ?? -1, true);
+    // One transmission at a time: speech still running from an earlier line (the browser's
+    // voice took longer than the director's estimate) is cut, never queued behind (2026-10-23:
+    // the voice drifted behind the strip and lines ran back to back).
+    this.cancelSpeech();
     const air = !!this.heli && isAirLine(text);
     const loud = air ? HELI_LOUDNESS : 1;
     if (air) this.airLines++;
@@ -143,8 +149,12 @@ export class ScannerPlayer {
         u.rate = air ? base + 0.2 : tier === 3 ? base + 0.25 : priority === "Urgent" || priority === "Pursuit" ? base + 0.12 : base;
         u.volume = Math.min(1, this.volume * (tier === 3 ? 1 : 0.9) * loud);
         this.speechAttempts++;
-        if (lead_s > 0) setTimeout(() => speechSynthesis.speak(u), lead_s * 1000);
-        else speechSynthesis.speak(u);
+        if (lead_s > 0) {
+          this.leadTimer = setTimeout(() => {
+            this.leadTimer = null;
+            speechSynthesis.speak(u);
+          }, lead_s * 1000);
+        } else speechSynthesis.speak(u);
       } catch (e) {
         console.warn("radio voice:", e);
       }
@@ -155,7 +165,7 @@ export class ScannerPlayer {
     if (!this.current || this.current.line !== line) return;
     this.current.stopStatic();
     this.pool.playLocal(this.pack, "radio/squelch_off", 0.5 * (this.current.air ? HELI_LOUDNESS : 1));
-    if (interrupted && ScannerPlayer.speechSupported()) speechSynthesis.cancel();
+    if (interrupted) this.cancelSpeech();
     const entry = this.log.find((l) => l.line === line);
     if (entry) entry.interrupted = interrupted;
     this.current = null;
@@ -163,5 +173,15 @@ export class ScannerPlayer {
 
   stopAll(): void {
     if (this.current) this.end(this.current.line, true);
+    this.cancelSpeech();
+  }
+
+  /** Stop speech that is playing or queued, and a tier 1 line still waiting for its tone. */
+  private cancelSpeech(): void {
+    if (this.leadTimer !== null) {
+      clearTimeout(this.leadTimer);
+      this.leadTimer = null;
+    }
+    if (ScannerPlayer.speechSupported() && (speechSynthesis.speaking || speechSynthesis.pending)) speechSynthesis.cancel();
   }
 }

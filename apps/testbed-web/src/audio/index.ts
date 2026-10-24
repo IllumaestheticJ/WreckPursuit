@@ -235,6 +235,18 @@ export class AudioSystem {
     this.safe(() => this.apply(audioBridge.reset()));
   }
 
+  /**
+   * A new session (city, car or scenario): nothing from the old one may still be heard — the
+   * director's queued radio lines (and every loop) are reset, speech is cut and the helicopter
+   * rotor stops. main.ts calls it where it clears the radio strip.
+   */
+  resetSession(): void {
+    this.scanner?.stopAll();
+    this.heli?.stopWorld();
+    this.helis = [];
+    if (this.pool) this.resetDirector();
+  }
+
   /** Impacts & horns: modelled synthesis on the recordings ("synth", default) or recordings only. */
   setImpacts(mode: "synth" | "recorded"): void {
     this.panel.settings.impacts = mode;

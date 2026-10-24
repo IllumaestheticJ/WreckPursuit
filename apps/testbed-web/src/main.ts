@@ -676,6 +676,7 @@ async function main(): Promise<void> {
     plots.clear();
     ui.reset();
     radioStrip.clear();
+    audio.resetSession();
     map.reset();
     runEnd.reset();
     garageView.reset();

@@ -26,6 +26,8 @@ export function isAirLine(text: string): boolean {
 const ROTOR_HZ = 11;
 /** In-world rotor gain at the helicopter (before distance and HELI_LOUDNESS). */
 const WORLD_ROTOR_GAIN = 0.35;
+/** The in-world rotor stops after this long with no helicopter in range, s (per-frame count). */
+const ROTOR_IDLE_STOP_S = 5;
 /** Distance at which the in-world rotor fades out, m. */
 const WORLD_ROTOR_RANGE_M = 700;
 
@@ -34,7 +36,7 @@ export class HeliAudio {
   private readonly noise: AudioBuffer;
   /** Pilot radio EQ input (feeds the Police bus). */
   private readonly pilotIn: GainNode;
-  private world: { gain: GainNode; panner: PannerNode; level: number } | null = null;
+  private world: { gain: GainNode; panner: PannerNode; level: number; src: AudioBufferSourceNode; lfo: OscillatorNode; silentS: number } | null = null;
   /** Times the pilot keyed the mic (e2e). */
   keyUps = 0;
 
@@ -143,6 +145,18 @@ export class HeliAudio {
    * (sim space; police_helicopters() rows), `listener` = camera position. Plays at the nearest
    * one; silent when none is in range.
    */
+  /** Stop the in-world rotor (session reset); the next helicopter in range starts it again. */
+  stopWorld(): void {
+    const w = this.world;
+    if (!w) return;
+    const now = this.ctx.currentTime;
+    w.gain.gain.cancelScheduledValues(now);
+    w.gain.gain.setTargetAtTime(0, now, 0.05);
+    w.src.stop(now + 0.3);
+    w.lfo.stop(now + 0.3);
+    this.world = null;
+  }
+
   updateWorld(helis: ArrayLike<number>, stride: number, listener: number[]): void {
     let best = -1;
     let bestD = Infinity;
@@ -165,10 +179,17 @@ export class HeliAudio {
       panner.distanceModel = "linear";
       panner.rolloffFactor = 0;
       r.out.connect(gain).connect(panner).connect(this.mixer.input("World"));
-      this.world = { gain, panner, level: 0 };
+      this.world = { gain, panner, level: 0, src: r.src, lfo: r.lfo, silentS: 0 };
     }
     const w = this.world;
     if (!w) return;
+    // No helicopter in range for a while: stop the looped rotor instead of running it at
+    // gain 0 for the rest of the session.
+    w.silentS = target > 0 ? 0 : w.silentS + 1 / 60;
+    if (w.silentS > ROTOR_IDLE_STOP_S) {
+      this.stopWorld();
+      return;
+    }
     // Only re-automate on a real change (cheap path otherwise).
     if (Math.abs(target - w.level) > 0.002 || (target === 0 && w.level !== 0)) {
       w.gain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.2);
