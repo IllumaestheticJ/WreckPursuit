@@ -59,6 +59,11 @@
 // 95 s). Heat 95 -> seeds 50-63: escape story on 8 of 14 (51-53, 55-57, 63), control captured in
 // its window on 2 (54, 63; the other 12 are still in pursuit at 190 s or captured early, none
 // escapes). Re-seeded 54 -> 63, heat 90 -> 95.
+//
+// After the road network centreline fix (playtest row 166) the AI captain finds spike-strip
+// sites (120 m+ sight) on the racer's route and the flat tyres stop him at 81% of it (captured
+// 96.5 s). This scenario is about covered-road line of sight, not tools, so `police_tools:
+// false` keeps the captain's own spikes and roadblocks out of it. Measured: Escaped 133.0 s.
 (
     name: "police_tunnel_escape_founders_cut",
     seed: 63,
@@ -69,6 +74,7 @@
     traffic_density: 0.0,
     parked_cars: false,
     police_presence: 1.0,
+    police_tools: false,
     assists: ai,
     slow: true,
     entities: [
