@@ -186,10 +186,10 @@ offset_m = 2.5
 [crowfoot_ascent]
 name = "Mountain tail"
 summary = "Deputies tail you up the hairpins and never pass; the net is at the saddle, where fresh units wait."
-presence = 0.3
+presence = 0.1
 backup_scale = 0.5
 tool_lifetime_s = 300.0
-recognise_on_sight = false
+recognise_on_sight = true
 
 [crowfoot_ascent.tactics]
 roadblocks = false
@@ -377,7 +377,7 @@ trigger_m = 60.0
 [ashpeak_metro_circuit]
 name = "Block grid"
 summary = "No ramming between the towers: units cut across the grid to block the junctions ahead while the helicopter keeps you in sight."
-presence = 0.6
+presence = 0.4
 backup_scale = 0.5
 tool_lifetime_s = 300.0
 recognise_on_sight = false
@@ -385,7 +385,7 @@ recognise_on_sight = false
 [ashpeak_metro_circuit.tactics]
 roadblocks = false
 spikes = false
-helicopter = true
+helicopter = false
 box_in = false
 rolling_block = false
 junction_block = false
