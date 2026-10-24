@@ -479,19 +479,18 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
         max_s: 150.0,
         ..Setup::default()
     };
-    // Per racer: the last race time it was moving faster than 1 m/s while busted. (Checked
-    // as an invariant, not at one moment: a busted car pulling over may still be rolling to
-    // its stopping place when the run ends, and police tweaks move that moment around.)
-    let mut moving_busted_at = [f32::NEG_INFINITY; 3];
+    // Per racer: time spent moving faster than 1 m/s while busted. (Checked as an invariant
+    // over the run, not at one moment: a busted car rolls on to a place clear of the lane, and
+    // one held in a queue moves on when it clears; police tweaks move those moments around.)
+    let mut busted_moving_s = [0.0f32; 3];
     let out = common::run(&setup, &wp_opponent::NoPolice, &mut |sim, field| {
-        let t = field.tick_count() as f32 * wp_contracts::PHYSICS_DT;
         let st = field.standings();
         for (k, v) in sim.vehicles().iter().take(3).enumerate() {
             let busted = st
                 .iter()
                 .any(|s| s.entity == v.id && s.status == RacerStatus::Busted);
             if busted && v.vehicle.state().speed_mps.abs() > 1.0 {
-                moving_busted_at[k] = t;
+                busted_moving_s[k] += wp_contracts::PHYSICS_DT;
             }
         }
     });
@@ -529,23 +528,14 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
     for s in &st {
         match s.status {
             RacerStatus::Busted => {
-                // A booked car comes to a stop: it may roll on to a place clear of the lane,
+                // A booked car comes to a stop: it may roll on to a place clear of the lane
                 // for at most its pull-over time (30 s of rolling), not for good.
                 let k = (s.entity.0 - 1) as usize;
-                let busted_at = events
-                    .iter()
-                    .find_map(|e| match e {
-                        OpponentEvent::Busted { entity, time_s } if *entity == s.entity => {
-                            Some(*time_s)
-                        }
-                        _ => None,
-                    })
-                    .expect("busted without its event");
                 assert!(
-                    moving_busted_at[k] <= busted_at + 40.0,
-                    "busted {:?} at {busted_at:.0} s still moving at {:.0} s: {info}",
+                    busted_moving_s[k] <= 40.0,
+                    "busted {:?} rolled {:.0} s after its bust: {info}",
                     s.entity,
-                    moving_busted_at[k]
+                    busted_moving_s[k]
                 );
             }
             RacerStatus::Fled | RacerStatus::Racing | RacerStatus::Finished { .. } => {}
