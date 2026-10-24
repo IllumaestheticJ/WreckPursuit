@@ -48,6 +48,12 @@ pub struct Scenario {
     /// (`wp_world::World::set_covered_los`).
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub covered_los: bool,
+    /// Whether the AI police captain lays spike strips and roadblocks on its own (default on).
+    /// `false` isolates a scenario about something else (a tunnel escape) from where the
+    /// captain happens to find a tool site; exact-spot orders (`spikes_at`, `roadblock_at`)
+    /// still work.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub police_tools: bool,
     /// After a capture (`PursuitEnded` Captured / CapturedTotalLoss), put the captured route
     /// driver back at the start of its route with its starting `police_heat`, as a new run
     /// (in the game a capture ends the run). Without it the captured car stands in the road

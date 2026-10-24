@@ -293,6 +293,9 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
             let cur = sim.police().racer(*e).map_or(0.0, |r| r.heat);
             sim.police_mut().set_heat(*e, cur + h);
         }
+        for e in &out.impound {
+            sim.despawn_vehicle(*e).unwrap();
+        }
         signals.extend(out.signals);
         if sim.tick() == green_tick + 1 {
             heat_after_green = racers
@@ -332,12 +335,15 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
                 );
             }
             for s in live.standings() {
-                let st = sim
+                // Towed (impounded) cars are gone from the sim.
+                let Some(st) = sim
                     .vehicles()
                     .iter()
                     .find(|v| v.id == s.racer)
                     .map(|v| v.vehicle.state())
-                    .unwrap();
+                else {
+                    continue;
+                };
                 eprintln!(
                     "{id} t={} {:?} P{} {:?} gates {} prog {:.0} pos ({:.0},{:.0}) v {:.1}",
                     sim.tick() / 240,
@@ -353,14 +359,14 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
             }
         }
         if std::env::var("WP_RACE_TRACE_NEAR").is_ok() && sim.tick().is_multiple_of(240 * 20) {
-            let lead = sim
+            let Some(lead) = sim
                 .vehicles()
                 .iter()
                 .find(|v| v.id == racers[0])
-                .unwrap()
-                .vehicle
-                .state()
-                .pos;
+                .map(|v| v.vehicle.state().pos)
+            else {
+                continue;
+            };
             for a in sim.world().agents() {
                 let d = (a.pos[0] - lead[0]).hypot(a.pos[1] - lead[1]);
                 if d < 50.0 {
@@ -911,8 +917,10 @@ fn tunnel_run() {
 #[test]
 fn hollins_descent() {
     let r = run_race("hollins_descent", 240);
-    // 1.35 km down the Hollins hairpins into Mercer.
-    check(&r, 40.0..150.0, 3);
+    // 1.35 km down the Hollins hairpins into Mercer, with a police stakeout on the course:
+    // since the road network centreline fix (playtest row 170) its pursuits catch two of the
+    // four (main: four pursuits, none caught), so captures count like `hollins_sprint`'s.
+    check_with_police(&r, 40.0..150.0, 3);
 }
 
 #[test]
