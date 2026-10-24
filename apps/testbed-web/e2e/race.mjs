@@ -2,8 +2,8 @@
 // Usage: npm run e2e:race (needs `npm run wasm` first; `npm run e2e` runs it after run.mjs).
 // Env: CHROMIUM=/path/to/chrome, SHOTS=dir for screenshots.
 //
-// Checks: the "races" button opens the picker with every race; picking the grid highway
-// sprint starts a race session (countdown, HUD, player held on the grid, gate marker in the
+// Checks: the "races" button opens the picker with every race the city offers (Loop 9 night
+// and day since 2026-10-24); picking Loop 9 night starts a race session (countdown, HUD, player held on the grid, gate marker in the
 // world); after the green light the AI racers move and show on the city minimap; on autopilot the race runs to a results
 // table with a payout from the economy; no page errors.
 import { spawn } from "node:child_process";
@@ -59,25 +59,26 @@ await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 3
 await page.click("#sc-races");
 await page.waitForSelector('[data-testid="race-picker"]', { timeout: 10000 });
 const cards = await page.$$eval("[data-race]", (els) => els.map((e) => e.getAttribute("data-race")));
-check(cards.length >= 4, `race picker lists ${cards.length} races (${cards.join(", ")})`);
-for (const id of ["hollins_sprint", "loop9_circuit", "lantern_checkpoint", "grid_highway_sprint"]) check(cards.includes(id), `picker offers ${id}`);
-for (const id of ["harbor_dash", "tunnel_run", "hollins_descent", "offramp_sprint", "grid_arterial_sprint"]) check(cards.includes(id), `picker offers ${id}`);
+// Owner, 2026-10-24: Port Vesper offers Loop 9 night and day only (the highway run needs the
+// Ashpeak map; every older race is retired).
+check(cards.join(",") === "loop9_circuit,loop9_day", `race picker lists the Loop 9 races (${cards.join(", ")})`);
+for (const id of ["hollins_sprint", "lantern_checkpoint", "grid_highway_sprint", "harbor_dash"]) check(!cards.includes(id), `picker no longer offers ${id}`);
 // Betting: every card prices the player (odds on yourself); a fresh account below Street rep
 // sees them with the lock reason, an unlocked one gets the bet slip.
 const betRows = await page.$$eval('[data-testid="bet-locked"], [data-testid="bet-slip"]', (els) => els.map((e) => e.textContent ?? ""));
 check(betRows.length === cards.length && betRows.every((t) => /\d\.\d\d/.test(t)), `every race card shows odds on the player (${betRows[0] ?? "none"})`);
 await shot("race_picker.png");
 
-// 2. Pick the grid highway sprint from the menu: a race session with countdown and HUD.
-await page.click('[data-race="grid_highway_sprint"] button');
-await page.waitForFunction(() => window.__wp.raceView.raceId === "grid_highway_sprint", null, { timeout: 30000 });
+// 2. Pick Loop 9 night from the menu: a race session with countdown and HUD.
+await page.click('[data-race="loop9_circuit"] button');
+await page.waitForFunction(() => window.__wp.raceView.raceId === "loop9_circuit", null, { timeout: 30000 });
 const scName = await page.evaluate(() => window.__wp.sim.scenario().name);
-check(scName === "race_grid_highway_sprint", `menu started the race session (${scName})`);
+check(scName === "race_loop9_circuit", `menu started the race session (${scName})`);
 check((await page.$('[data-testid="race-picker"]')) === null, "picker closed");
 await page.waitForSelector('[data-testid="race-hud"]', { timeout: 10000 });
 check((await page.$('[data-testid="race-countdown"]')) !== null, "countdown shows on the grid");
 const entities = await page.evaluate(() => window.__wp.sim.entities());
-check(entities.length === 4, `player + 3 AI racers (${entities.length} entities)`);
+check(entities.length === 6, `player + 5 AI racers (${entities.length} entities)`);
 const posOf = (id) =>
   page.evaluate((e) => {
     const s = window.__wp.sim.states();
@@ -103,17 +104,19 @@ await page.waitForFunction((t) => window.__wp.sim.worldInfo()[0] > t + 240 * 5, 
 await page.keyboard.up("KeyW");
 let aiMoved = 0;
 for (const e of entities.slice(1)) if (moved(await posOf(e), gridPos[e]) > 15) aiMoved++;
-check(aiMoved >= 2, `AI racers move after the green light (${aiMoved}/3 moved > 15 m)`);
+check(aiMoved >= 3, `AI racers move after the green light (${aiMoved}/5 moved > 15 m)`);
 const st = await page.evaluate(() => Array.from(window.__wp.sim.raceStandings()));
-check(st.length === 4 * 10, `live standings for 4 racers (${st.length / 10})`);
+check(st.length === 6 * 10, `live standings for 6 racers (${st.length / 10})`);
 check((await page.$('[data-testid="race-minimap"]')) !== null, "race minimap (UI kit) shows the route");
 // The city minimap draws the AI racers (owner row 100): map_dynamic v2 racer block.
 const mapRacers = await page.evaluate(() => ({ n: window.__wp.sim.mapDynamic(window.__wp.app.player)[20], drawn: window.__wp.map.hud.stats().minimap.racers }));
-check(mapRacers.n === 4 && mapRacers.drawn === 3, `city minimap shows the 3 AI racers (map racers ${mapRacers.n}, drawn ${mapRacers.drawn})`);
+check(mapRacers.n === 6 && mapRacers.drawn === 5, `city minimap shows the 5 AI racers (map racers ${mapRacers.n}, drawn ${mapRacers.drawn})`);
 await shot("race_hud.png");
 
-// 4. A fresh page races the sprint on autopilot (the AI drives the player too), fast-forwarded
-//    (SwiftShader renders at ~0.3x real time): a result table with a payout from the economy.
+// 4. A fresh page races the grid highway sprint on autopilot (the AI drives the player too),
+//    fast-forwarded (SwiftShader renders at ~0.3x real time): a result table with a payout
+//    from the economy. The sprint is retired from the picker (2026-10-24), but the
+//    `?race=<id>` debug link still starts it, and it is short.
 await page.close();
 const page2 = await context.newPage();
 page2.on("pageerror", (e) => errors.push(String(e) + (process.env.E2E_STACK ? `\n${e.stack}` : "")));
@@ -178,19 +181,20 @@ if (shots) await page2.screenshot({ path: join(shots, "race_results.png") });
   });
   await page3.waitForSelector(G, { timeout: 10000 });
   await page3.click('[data-testid="career-races"]');
-  await page3.waitForSelector('[data-race="grid_highway_sprint"]', { timeout: 10000 });
-  const pickerOpen = await page3.evaluate(() => !window.__wp.garage.open && (window.__wp.raceView.cards?.length ?? 0) >= 9);
+  await page3.waitForSelector('[data-race="loop9_circuit"]', { timeout: 10000 });
+  const pickerOpen = await page3.evaluate(() => !window.__wp.garage.open && (window.__wp.raceView.cards?.length ?? 0) >= 2);
   check(pickerOpen, "career garage: Street races opens the race picker (garage closed)");
-  await page3.click('[data-race="grid_highway_sprint"] button:has-text("Race")');
+  await page3.click('[data-race="loop9_circuit"] button:has-text("Race")');
   const started = await page3.evaluate(() => {
     const wp = window.__wp;
     return { active: wp.sim.careerRunActive(), name: wp.sim.scenario().name, car: wp.sim.scenario().entities[0].car, cash: wp.sim.runAccount()?.cash ?? null };
   });
   check(
-    started.active && started.name.startsWith("race_grid_highway_sprint") && started.car === "junkyard_beater" && started.cash !== null && started.cash < before.cash,
+    started.active && started.name.startsWith("race_loop9_circuit") && started.car === "junkyard_beater" && started.cash !== null && started.cash < before.cash,
     `career race: a career run with the career car (${started.car}), buy-in off the career ($${before.cash} → $${started.cash})`,
   );
-  for (let i = 0; i < 80; i++) {
+  // A 10 km lap: up to ~10 min of race time in 2 s chunks.
+  for (let i = 0; i < 300; i++) {
     const done = await page3.evaluate(() => {
       for (let k = 0; k < 120; k++) window.__wp.sim.step(1 / 60);
       return window.__wp.sim.raceInfo()[0] === 2;
@@ -235,11 +239,11 @@ if (shots) await page2.screenshot({ path: join(shots, "race_results.png") });
   });
   await page4.waitForSelector('[data-testid="career-garage"]', { timeout: 10000 });
   await page4.click('[data-testid="career-races"]');
-  const card = '[data-race="hollins_sprint"]';
+  const card = '[data-race="loop9_circuit"]';
   await page4.waitForSelector(`${card} [data-testid="bet-pick"]`, { timeout: 10000 });
   const winLabel = await page4.$eval(`${card} [data-testid="bet-pick"]`, (el) => [...el.options].map((o) => o.value).find((v) => v.startsWith("win:")));
   await page4.selectOption(`${card} [data-testid="bet-pick"]`, winLabel);
-  const cardOdds = await page4.evaluate((l) => window.__wp.raceView.cards.find((c) => c.id === "hollins_sprint").odds.find((o) => o.label === l).odds, winLabel);
+  const cardOdds = await page4.evaluate((l) => window.__wp.raceView.cards.find((c) => c.id === "loop9_circuit").odds.find((o) => o.label === l).odds, winLabel);
   const stakeText = () => page4.$eval(`${card} [data-testid="bet-stake"]`, (el) => el.textContent);
   const before = await stakeText();
   await page4.focus(`${card} [data-testid="bet-range"]`);
@@ -250,7 +254,7 @@ if (shots) await page2.screenshot({ path: join(shots, "race_results.png") });
   check(before === "$500" && moved === "$800", `bet slip stake slider moves (${before} → ${moved})`);
   await page4.click(`${card} button:has-text("Race")`);
   await page4.waitForFunction(() => window.__wp.sim.careerRunActive(), null, { timeout: 30000 });
-  for (let i = 0; i < 120; i++) {
+  for (let i = 0; i < 300; i++) {
     const done = await page4.evaluate(() => {
       for (let k = 0; k < 120; k++) window.__wp.sim.step(1 / 60);
       return window.__wp.raceView.report !== null;
@@ -280,10 +284,10 @@ if (shots) await page2.screenshot({ path: join(shots, "race_results.png") });
   await page5.goto(`${URL}?autopilot=1`);
   await page5.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 30000 });
   await page5.click("#sc-races");
-  await page5.waitForSelector('[data-race="grid_highway_sprint"]', { timeout: 10000 });
-  await page5.click('[data-race="grid_highway_sprint"] button:has-text("Race")');
-  await page5.waitForFunction(() => window.__wp.raceView.raceId === "grid_highway_sprint", null, { timeout: 30000 });
-  for (let i = 0; i < 120; i++) {
+  await page5.waitForSelector('[data-race="loop9_circuit"]', { timeout: 10000 });
+  await page5.click('[data-race="loop9_circuit"] button:has-text("Race")');
+  await page5.waitForFunction(() => window.__wp.raceView.raceId === "loop9_circuit", null, { timeout: 30000 });
+  for (let i = 0; i < 300; i++) {
     const done = await page5.evaluate(() => {
       for (let k = 0; k < 120; k++) window.__wp.sim.step(1 / 60);
       return window.__wp.raceView.report !== null;
@@ -292,7 +296,7 @@ if (shots) await page2.screenshot({ path: join(shots, "race_results.png") });
   }
   await page5.evaluate(() => window.__wp.sim.tougeDebugSetRep(2000));
   await page5.click('button:has-text("Races…")');
-  const card = '[data-race="hollins_sprint"]';
+  const card = '[data-race="loop9_day"]';
   await page5.waitForSelector(`${card} [data-testid="bet-pick"]`, { timeout: 10000 });
   const label = await page5.$eval(`${card} [data-testid="bet-pick"]`, (el) => [...el.options].map((o) => o.value).find((v) => v.startsWith("win:")));
   await page5.selectOption(`${card} [data-testid="bet-pick"]`, label);

@@ -798,6 +798,8 @@ read as Ashpeak County (no Ashcroft exists in the code or data).
   merge conflict keep those and drop the starters.
 - Unit tests that pinned the old list (catalog, spots, wp_wasm race spots/cards) now pin the
   new one; spot honk tests use the Loop 9 night spot.
-- Known gap: the browser e2e scripts (`apps/testbed-web/e2e/race.mjs`, `race_spots.mjs`,
-  `menu.mjs`, `drift_lab_w.mjs`) still click or list retired races in the picker and need a
-  pass (they are not in CI; `?race=<id>` links still work).
+- `apps/testbed-web/e2e/race.mjs` runs its picker, betting and career flows on Loop 9 night
+  (and the stake check on Loop 9 day); its autopilot results run keeps the short retired grid
+  sprint through the `?race=grid_highway_sprint` debug link. All 33 checks pass headless.
+- Known gap: `race_spots.mjs` and `menu.mjs` still expect retired races' spots and cards
+  (not in CI); `drift_lab_w.mjs` only uses a `?race=` link, which still works.
