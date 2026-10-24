@@ -563,6 +563,8 @@ export const sim = {
   garageRepair: (): GarageRepairReport => JSON.parse(wasm.garage_repair()),
   /** "Leave" the open visit without repairing. */
   garageLeave: (): void => wasm.garage_leave(),
+  /** The car lots on this session's city map (F37; `lot_sites::LotSite` JSON array). */
+  lotSitesJson: (): string => wasm.lot_sites_json(),
   /** Tow-or-limp offer after a wreck (F17) and whether the player is limping. */
   wreckState: (): { offer: { tick: number; tow_fee: number; cash: number; career: boolean } | null; limping: boolean } => JSON.parse(wasm.wreck_offer_json()),
   wreckTow: (): void => wasm.wreck_tow(),

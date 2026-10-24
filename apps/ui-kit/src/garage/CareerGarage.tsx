@@ -136,6 +136,17 @@ export interface VisitShop {
   name: string;
   district: string;
   kind: ShopKind;
+  /** Mod groups the shop works on (F36 speciality); missing = all. */
+  groups?: string[];
+  /** One line about the shop (F36). */
+  blurb?: string;
+}
+
+/** Home garage repairs (F36: the menu garage is home; shops are in the city): a mobile
+ * mechanic, priced as a crooked shop in the dearest district. */
+function mobileMechanic(view: CareerView): { district: string; shop: ShopKind } {
+  const dearest = [...view.districts].sort((a, b) => b.labour - a.labour)[0];
+  return { district: dearest?.id ?? "Core", shop: "Crooked" };
 }
 
 const VisitShopContext = createContext<VisitShop | null>(null);
@@ -145,8 +156,11 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; ru
   const visit = useContext(VisitShopContext);
   const [pickedDistrict, setDistrict] = useState("Residential");
   const [pickedShop, setShop] = useState<ShopKind>("Legit");
-  const district = visit?.district ?? pickedDistrict;
-  const shop = visit?.kind ?? pickedShop;
+  // F36: at a city shop its district and kind; at home (no shop) a mobile mechanic; the free
+  // picker only with no districts listed (older wasm package).
+  const mobile = !visit && view.districts.length > 0 ? mobileMechanic(view) : null;
+  const district = visit?.district ?? mobile?.district ?? pickedDistrict;
+  const shop = visit?.kind ?? mobile?.shop ?? pickedShop;
   const [picked, setPicked] = useState<string[]>([]);
   const [scrapAsk, setScrapAsk] = useState(false);
   if (car.location !== "Garage") return null;
@@ -169,11 +183,17 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; ru
           At {visit.name} · {words(visit.district)} · {visit.kind === "Crooked" ? "crooked shop (no questions asked)" : "legit shop"}
         </p>
       )}
+      {mobile && (
+        <p class="wp-dim" style={{ fontSize: "0.85em" }} data-testid="repair-mobile">
+          At home: a mobile mechanic comes to you (city-centre, no-questions rates). Drive to a garage in the city (G on the map) for
+          shop prices.
+        </p>
+      )}
       {car.repair_lines.length === 0 ? (
         <p class="wp-dim">Nothing to repair.</p>
       ) : (
         <>
-          {!visit && (
+          {!visit && !mobile && (
           <div class="wp-row" style={{ gap: "0.6em", flexWrap: "wrap", marginBottom: "0.5em" }}>
             <label class="wp-mono wp-dim">
               district{" "}
@@ -357,7 +377,10 @@ const GROUPS: ModOption["group"][] = ["performance", "durability", "tool", "cosm
 
 function ModTree(props: { car: CarView; api: CareerApi; run: (f: () => CareerView) => void; onBack: () => void }) {
   const { car, api } = props;
-  const [group, setGroup] = useState<ModOption["group"]>("performance");
+  // F36: a shop works on its speciality's groups only.
+  const visit = useContext(VisitShopContext);
+  const groups = GROUPS.filter((g) => !visit?.groups || visit.groups.includes(g));
+  const [group, setGroup] = useState<ModOption["group"]>(groups[0] ?? "performance");
   const [hover, setHover] = useState<string | null>(null);
   let tree: ModTreeView | null = null;
   let error: string | null = null;
@@ -372,7 +395,8 @@ function ModTree(props: { car: CarView; api: CareerApi; run: (f: () => CareerVie
   return (
     <div class="wp-cg-mods" data-testid="mod-tree">
       <Panel title={`Mods · ${car.name}`} tag={<Button size="sm" onClick={props.onBack}>Back</Button>}>
-        <Tabs tabs={GROUPS.map((g) => ({ id: g, label: words(g) }))} value={group} onChange={setGroup} />
+        {visit?.blurb && <p class="wp-dim" style={{ fontSize: "0.85em", marginTop: 0 }}>{visit.name}: {visit.blurb}</p>}
+        <Tabs tabs={groups.map((g) => ({ id: g, label: words(g) }))} value={group} onChange={setGroup} />
         <table class="wp-table">
           <thead>
             <tr>
@@ -498,6 +522,9 @@ function TunePage(props: { car: CarView; api: CareerApi; run: (f: () => CareerVi
 
 function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
   const { view, api } = props;
+  // F36: mods are fitted at a garage in the city (the menu garage is home: parking, the
+  // workshop, the tune).
+  const atShop = !!useContext(VisitShopContext);
   const [sel, setSel] = useState<number | null>(view.active_car);
   const [mods, setMods] = useState(false);
   const [tuning, setTuning] = useState(false);
@@ -545,8 +572,13 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
                 Workshop
               </Button>
             )}
-            <Button disabled={car.location !== "Garage"} onClick={() => setMods(true)}>
-              Mods
+            <Button
+              disabled={car.location !== "Garage" || !atShop}
+              onClick={() => setMods(true)}
+              title={atShop ? "mods this shop fits" : "mods are fitted at a garage in the city: drive to one (G on the map)"}
+              testid="cars-mods"
+            >
+              Mods{atShop ? "" : " (at a garage)"}
             </Button>
             <Button disabled={car.location !== "Garage"} onClick={() => setTuning(true)} title="free: suspension, gearing, differential, brake balance">
               Tune

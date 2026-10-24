@@ -69,6 +69,7 @@ import { RaceView, type RaceFrame } from "./ui/race";
 import { GarageVisitView } from "./ui/garageVisit";
 import { SafehouseView } from "./ui/safehouse";
 import { WreckView } from "./ui/wreck";
+import { LotSpotsView } from "./ui/lotSpots";
 import { TougeView, type TougeChoice, type Wager } from "./ui/touge";
 import { RaceMarker, parseCourse } from "./race_marker";
 import { RaceSpotsView } from "./race_spots";
@@ -505,7 +506,7 @@ async function main(): Promise<void> {
     runEnd.reset();
     garageView.reset();
     app.paused = true;
-    garage.show(message, shop ? { name: shop.name, district: shop.district, kind: shop.kind } : null);
+    garage.show(message, shop ? { name: shop.name, district: shop.district, kind: shop.kind, groups: shop.mod_groups, blurb: shop.blurb } : null);
     if (ended) garage.onClose(() => void startCareerRun(shop ? "free" : kind, shop));
   };
   let careerSavedSeq = -1;
@@ -564,6 +565,8 @@ async function main(): Promise<void> {
   wreckEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
   overlay.appendChild(wreckEl);
   const wreck = new WreckView(wreckEl, { tow: () => sim.wreckTow(), limp: () => sim.wreckLimp() });
+  // Car lots on the map (F37): stop at one with a career to browse it (PR #57's lot visit).
+  const lotSpots = new LotSpotsView(scene.world, overlay, (id) => visitLot(id), () => sim.careerExists() && !garageView.offer && !app.paused && !lotView.open);
   // The city's regulars remember their results between visits (wp_race::roster records).
   const ROSTER_KEY = "wp.roster.v1";
   try {
@@ -722,6 +725,7 @@ async function main(): Promise<void> {
     garageView.sites = garageSites;
     safehouses.reset();
     wreck.reset();
+    lotSpots.reset();
     const city = sim.worldInfo()[W.city] > 0.5;
     const cityId = city ? sim.cityId() : "";
     void scene.setCity(cityId || null);
@@ -1976,6 +1980,7 @@ async function main(): Promise<void> {
         garageView.update(sim.garageVisit(), now, pp ? [pp.x, pp.y, pp.z] : null);
         safehouses.frame(app.player, pp && !map.isOpen ? [pp.x, pp.y, pp.z] : null);
         wreck.update(sim.wreckState());
+        lotSpots.frame(pp && !map.isOpen ? [pp.x, pp.y, pp.z] : null, now);
       }
       // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
       if (!replay && sim.careerRunActive()) {
@@ -2339,6 +2344,8 @@ async function main(): Promise<void> {
     ui,
     runEnd,
     garageView,
+    /** Car lots on the map (F37): `sites`, `here`. */
+    lotSpots,
     street,
     restartRun,
     /** Mod shop (src/ui/modShop.ts). */

@@ -259,7 +259,7 @@ export class MapHud {
     b.textContent = poi.name;
     const p = document.createElement("div");
     p.className = "wp-dim";
-    p.textContent = poiBlurb(poi) + (this.onPoi ? " Click: set GPS route." : "");
+    p.textContent = (poi.note ? poi.note + " " : "") + poiBlurb(poi) + (this.onPoi ? " Click: set GPS route." : "");
     this.tip.append(b, p);
     this.tip.style.left = `${Math.min(clientX - r.left + 14, r.width - 260)}px`;
     this.tip.style.top = `${Math.min(clientY - r.top + 14, r.height - 90)}px`;
@@ -515,6 +515,7 @@ export class MapHud {
     row("Garage, legit (stop inside to visit)", (c, s) => drawPoi(c, "Garage", s / 2, s / 2, s * 0.32, pal, "Legit"));
     row("Garage, crooked (no questions asked, dearer labour)", (c, s) => drawPoi(c, "Garage", s / 2, s / 2, s * 0.32, pal, "Crooked"));
     row("Race meet (stop inside, honk to start)", (c, s) => drawPoi(c, "RaceSpot", s / 2, s / 2, s * 0.32, pal));
+    row("Car lot: dealership, used cars, junkyard (career; stop to browse)", (c, s) => drawPoi(c, "CarLot", s / 2, s / 2, s * 0.32, pal));
     row("Safehouse (wait inside, no police near, to lose them)", (c, s) => drawPoi(c, "Safehouse", s / 2, s / 2, s * 0.32, pal));
     row("Police station", (c, s) => drawPoi(c, "PoliceStation", s / 2, s / 2, s * 0.32, pal));
     row("Police helipad", (c, s) => drawPoi(c, "Helipad", s / 2, s / 2, s * 0.32, pal));
@@ -566,6 +567,8 @@ export function poiBlurb(poi: MapPoi): string {
       return "Safehouse: while wanted, wait inside with no police near to lose them.";
     case "RaceSpot":
       return "Race meet: stop inside and honk to start the race.";
+    case "CarLot":
+      return "Car lot (career): stop inside to browse today's cars.";
     case "PoliceStation":
       return "Police station.";
     case "Helipad":

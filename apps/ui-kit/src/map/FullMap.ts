@@ -243,7 +243,7 @@ export class FullMapRenderer {
       if (poi.kind === "RaceStartGrid" && k < 0.3) continue;
       const [sx, sy] = worldToFull(v, poi.pos[0], poi.pos[1]);
       if (sx < -40 || sy < -40 || sx > w + 200 || sy > h + 40) continue;
-      const key = poi.kind === "Garage" || poi.kind === "RaceSpot";
+      const key = poi.kind === "Garage" || poi.kind === "RaceSpot" || poi.kind === "CarLot";
       const ps = (key ? 9 : 7) * dpr;
       drawPoi(ctx, poi.kind, sx, sy, ps, pal, poi.shop);
       if (poi.kind !== "Helipad" && (k > 0.35 || (key && k > 0.12))) {

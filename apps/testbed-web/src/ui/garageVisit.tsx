@@ -24,6 +24,12 @@ export interface GarageSite {
   radius_m: number;
   kind: "Legit" | "Crooked";
   district: string;
+  /** What the shop is known for (F36); missing with an older wasm package. */
+  speciality?: string;
+  /** Mod groups it works on (F36). */
+  mod_groups?: string[];
+  /** One line about the shop (F36). */
+  blurb?: string;
 }
 
 /** `wp_economy::RepairQuote` (the fields the panel shows). */
@@ -102,6 +108,11 @@ function GaragePanel(props: { offer: GarageOffer; error: string | null; tipped: 
   return (
     <div style={{ position: "absolute", left: "50%", top: "22%", transform: "translateX(-50%)", width: "min(340px, calc(100vw - 32px))", pointerEvents: "auto", zIndex: 70 }}>
       <Panel title={o.site.name} tag={`${o.site.kind.toUpperCase()} · ${o.site.district}`}>
+        {o.site.blurb && (
+          <p class="wp-dim" style={{ fontSize: "0.82em", marginTop: 0 }} data-testid="garage-blurb">
+            {o.site.blurb}
+          </p>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5em" }}>
           <Stat label="Condition" value={`${Math.round(o.health * 100)}%`} tone={o.health < 0.5 ? "danger" : "ok"} />
           <Stat label="Repair" value={<Money value={q?.player_pays ?? 0} />} tone="warn" />

@@ -120,7 +120,13 @@ export class MapOverlay {
  * race meets from the session's race spots, everything else as the city gives it. */
 export function sessionPois(city: MapPoi[]): MapPoi[] {
   const out = city.filter((p) => p.kind !== "Garage" && p.kind !== "RaceStartGrid");
-  for (const g of sim.garages()) out.push({ kind: "Garage", name: g.name, pos: [g.pos[0], g.pos[1]], shop: g.kind });
+  for (const g of sim.garages()) out.push({ kind: "Garage", name: g.name, pos: [g.pos[0], g.pos[1]], shop: g.kind, note: g.blurb });
   for (const r of sim.raceSpots()) out.push({ kind: "RaceSpot", name: r.name, pos: [r.x, r.y] });
+  // Car lots (F37): where PR #57's dealerships, used lots and junkyards are.
+  try {
+    for (const l of JSON.parse(sim.lotSitesJson()) as { name: string; pos: [number, number, number] }[]) out.push({ kind: "CarLot", name: l.name, pos: [l.pos[0], l.pos[1]] });
+  } catch {
+    // An older wasm package without lot sites: no lot icons.
+  }
   return out;
 }

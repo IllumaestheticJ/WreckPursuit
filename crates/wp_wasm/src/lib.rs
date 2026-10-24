@@ -48,6 +48,7 @@ pub mod garage;
 pub mod garage_visit;
 pub mod gps;
 pub mod lod;
+pub mod lot_sites;
 pub mod lots;
 pub mod map;
 pub mod mod_visuals;
@@ -1399,6 +1400,20 @@ pub fn wreck_tow() -> Result<(), JsValue> {
 #[wasm_bindgen]
 pub fn wreck_limp() -> Result<(), JsValue> {
     with(|s| s.wreck_limp())
+}
+
+/// The car lots on the session's city map (feature F37) as JSON ([`lot_sites::LotSite`] array:
+/// `id, name, kind, tier, pos, heading_rad, radius_m, district`); `[]` off-city. Fetch once
+/// per session: stopping at one offers PR #57's lot visit.
+#[wasm_bindgen]
+pub fn lot_sites_json() -> Result<String, JsValue> {
+    get(|s| {
+        if !s.has_city() {
+            return "[]".to_string();
+        }
+        let lots = garage::with_economy(|e| e.lots.lots.clone());
+        json(&lot_sites::lot_sites(s.sim().world(), &lots))
+    })
 }
 
 /// "Leave" the open garage visit without repairing (no-op without one).

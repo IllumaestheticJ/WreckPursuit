@@ -247,6 +247,15 @@ const inGarage = await page.evaluate(() => ({
 }));
 check(inGarage.open && !inGarage.active && inGarage.shop.includes(g0.name), `Enter: career garage at ${g0.name} ("${inGarage.shop}")`);
 if (shots) await shot("career_garage_at_shop.png");
+// F36: the shop fits mods (its speciality's groups); the blurb says what it does.
+{
+  await page.click('[data-testid="career-garage"] button[role="tab"]:has-text("Cars")').catch(() => {});
+  const mods = await page.evaluate(() => {
+    const b = document.querySelector('[data-testid="cars-mods"]');
+    return b ? !b.disabled : null;
+  });
+  check(mods === true, `at ${g0.name} the Mods button is enabled`);
+}
 await page.evaluate(() => {
   const b = [...document.querySelectorAll("#ui-garage button")].find((x) => /^Close/.test(x.textContent ?? ""));
   b?.click();
@@ -258,6 +267,43 @@ const after = await page.evaluate(([gx, gy]) => {
   return { active: wp.sim.careerRunActive(), open: wp.garage.open, paused: wp.app.paused, d: pos ? Math.hypot(pos.x - gx, pos.y - gy) : -1 };
 }, [g0.pos[0], g0.pos[1]]);
 check(after.active && !after.open && !after.paused && after.d >= 0 && after.d < 25, `Close: a new career drive out of ${g0.name} (${after.d.toFixed(1)} m from it)`);
+// F36: the menu garage is home: no mods there (they are fitted at a city garage).
+{
+  await page.evaluate(() => window.__wp.openGarage());
+  await page.waitForTimeout(500);
+  await page.click('[data-testid="career-garage"] button[role="tab"]:has-text("Cars")').catch(() => {});
+  const home = await page.evaluate(() => {
+    const b = document.querySelector('[data-testid="cars-mods"]');
+    return b ? b.disabled : null;
+  });
+  check(home === true, "home garage: Mods only at a city garage");
+  await page.evaluate(() => window.__wp.startCareerRun("free"));
+  await page.waitForTimeout(1500);
+}
+
+// 4. Car lots on the map (F37): a "$" icon per lot; stopping at one with a career, Enter opens
+// the lot visit.
+{
+  const lots = await page.evaluate(() => ({ sites: window.__wp.lotSpots?.sites ?? [], icons: (window.__wp.map.hud.map?.pois ?? []).filter((p) => p.kind === "CarLot").length }));
+  check(lots.sites.length > 0 && lots.icons === lots.sites.length, `car lots: ${lots.sites.length} on the city, ${lots.icons} map icons`);
+  const lot = lots.sites[0];
+  if (lot) {
+    const player = await page.evaluate(() => window.__wp.app.player);
+    await page.evaluate(([p, l]) => window.__wp.sim.debugPlace(p, l.pos[0], l.pos[1], l.heading_rad, 0), [player, lot]);
+    const prompt = await page
+      .waitForFunction(() => /browse/.test(document.querySelector('[data-testid="lot-prompt"]')?.textContent ?? "") && !!window.__wp.lotSpots.here, null, { timeout: 20000, polling: 200 })
+      .then(() => true)
+      .catch(() => false);
+    if (shots) await shot("lot_prompt.png");
+    await page.keyboard.press("Enter");
+    const visit = await page
+      .waitForSelector('[data-testid="lot-visit"]', { timeout: 30000 })
+      .then(() => page.evaluate(() => window.__wp.sim.lotVisit()?.lot ?? null))
+      .catch(() => null);
+    check(prompt && visit === lot.id, `stopping at ${lot.name} and pressing Enter opens its lot visit (${visit})`);
+    if (shots) await shot("lot_visit.png");
+  }
+}
 
 check(errors.length === 0, `no page errors (${errors.slice(0, 3).join(" | ")})`);
 await browser.close();

@@ -467,6 +467,15 @@ export function drawPoi(ctx: Ctx, kind: MapPoi["kind"], x: number, y: number, s:
       ctx.stroke();
       glyph(ctx, "P", s * 0.9, "#000");
       break;
+    case "CarLot":
+      // Car lot (F37): a "$" on a green tag.
+      ctx.fillStyle = "#2fbf71";
+      ctx.beginPath();
+      ctx.roundRect(-s * 0.65, -s * 0.6, s * 1.3, s * 1.2, s * 0.2);
+      ctx.fill();
+      ctx.stroke();
+      glyph(ctx, "$", s * 0.95, "#000");
+      break;
     case "RaceSpot":
       // Race meet (stop + honk): a chequered flag square on the race-spot orange.
       ctx.fillStyle = "#ff9a2e";

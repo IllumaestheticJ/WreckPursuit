@@ -71,6 +71,70 @@ pub struct GarageSite {
     pub kind: ShopKind,
     /// District the shop is in (labour rate).
     pub district: DistrictId,
+    /// What the shop is known for (feature F36): which mod work it does.
+    pub speciality: Speciality,
+    /// The mod groups it works on ([`Speciality::mod_groups`]).
+    pub mod_groups: Vec<String>,
+    /// One line about the shop ([`Speciality::blurb`]).
+    pub blurb: String,
+}
+
+/// What a shop is known for (feature F36). In a career the garage opened at a shop does the
+/// mod work of its speciality's groups ([`Speciality::mod_groups`]); every shop repairs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum Speciality {
+    /// Everything.
+    General,
+    /// Paint, vinyls, panels: cosmetic and durability work (Sal's Paint & Panel).
+    PaintAndBody,
+    /// The main dealer: everything, legit (Meridian Motorworks).
+    MainDealer,
+    /// No questions asked: performance, police tools and looks (Gantry Garage).
+    NoQuestions,
+    /// Bodywork: armour, bars, cages and looks (Spire Auto Body).
+    Bodywork,
+    /// Rural mechanic: engines, suspension and toughening (Harlan Feed & Tractor).
+    Rural,
+}
+
+impl Speciality {
+    /// The speciality of the shop named `name` (CITY.md §5.2 shops; others are general).
+    pub fn of(name: &str) -> Self {
+        match name {
+            "Sal's Paint & Panel" => Self::PaintAndBody,
+            "Meridian Motorworks" => Self::MainDealer,
+            "Gantry Garage" | "Roundhouse Customs" => Self::NoQuestions,
+            "Spire Auto Body" | "Harbor Auto Body" => Self::Bodywork,
+            "Harlan Feed & Tractor" | "Northfield Tire & Service" => Self::Rural,
+            _ => Self::General,
+        }
+    }
+
+    /// The mod groups (`ModOption::group`: performance, durability, tool, cosmetic) the shop
+    /// works on.
+    pub fn mod_groups(self) -> &'static [&'static str] {
+        match self {
+            Self::General | Self::MainDealer => &["performance", "durability", "tool", "cosmetic"],
+            Self::PaintAndBody => &["cosmetic", "durability"],
+            Self::NoQuestions => &["performance", "tool", "cosmetic"],
+            Self::Bodywork => &["durability", "cosmetic"],
+            Self::Rural => &["performance", "durability"],
+        }
+    }
+
+    /// One line for the visit panel and the map tooltip.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Self::General => "General garage: repairs and every kind of mod.",
+            Self::PaintAndBody => "Paint & panel: paint, vinyls, panels and toughening.",
+            Self::MainDealer => "Main dealer: repairs and every kind of mod, all by the book.",
+            Self::NoQuestions => {
+                "No questions asked: performance, police tools, looks; informants."
+            }
+            Self::Bodywork => "Bodywork: armour, bars, cages and looks.",
+            Self::Rural => "Rural mechanic: engines, suspension, toughening.",
+        }
+    }
 }
 
 impl GarageSite {
@@ -166,6 +230,13 @@ pub fn sites(world: &World) -> Vec<GarageSite> {
                 radius_m: GARAGE_RADIUS_M,
                 kind: shop_kind(&p.name, district),
                 district,
+                speciality: Speciality::of(&p.name),
+                mod_groups: Speciality::of(&p.name)
+                    .mod_groups()
+                    .iter()
+                    .map(|g| g.to_string())
+                    .collect(),
+                blurb: Speciality::of(&p.name).blurb().to_string(),
             }
         })
         .collect()
@@ -326,6 +397,20 @@ mod tests {
     }
 
     #[test]
+    fn named_shops_have_their_speciality() {
+        assert_eq!(
+            Speciality::of("Sal's Paint & Panel"),
+            Speciality::PaintAndBody
+        );
+        assert_eq!(Speciality::of("Garage 2"), Speciality::General);
+        assert!(Speciality::PaintAndBody.mod_groups().contains(&"cosmetic"));
+        assert!(!Speciality::PaintAndBody
+            .mod_groups()
+            .contains(&"performance"));
+        assert_eq!(Speciality::General.mod_groups().len(), 4);
+    }
+
+    #[test]
     fn a_tip_drops_at_most_one_wanted_level() {
         let t = [10.0, 30.0, 50.0, 70.0, 90.0];
         assert_eq!(heat_after_tip(55.0, 10.0, &t), 45.0);
@@ -344,6 +429,9 @@ mod tests {
             radius_m: GARAGE_RADIUS_M,
             kind: ShopKind::Legit,
             district: DistrictId::Core,
+            speciality: Speciality::General,
+            mod_groups: Vec::new(),
+            blurb: String::new(),
         };
         assert!(g.contains([3.0, 4.0, 3.0]));
         assert!(!g.contains([3.0, 4.0, 10.6]), "on a deck above");

@@ -149,7 +149,7 @@ export class MinimapRenderer {
     if (this.map && p) {
       const s = 5.5 * dpr;
       for (const poi of this.map.pois) {
-        if (poi.kind !== "Garage" && poi.kind !== "Safehouse" && poi.kind !== "RaceSpot") continue;
+        if (poi.kind !== "Garage" && poi.kind !== "Safehouse" && poi.kind !== "RaceSpot" && poi.kind !== "CarLot") continue;
         const [sx, sy] = worldToMinimap(view, poi.pos[0], poi.pos[1]);
         if ((sx - R) ** 2 + (sy - R) ** 2 > (inner - s) ** 2) continue;
         drawPoi(ctx, poi.kind, sx, sy, s, pal, poi.shop);
