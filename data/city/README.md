@@ -29,7 +29,7 @@ Format spec: `crates/wp_world/README.md`. Coordinates: metres, +X east, +Y north
   but not committed. A test fails if the greybox is stale.
 
 - `ashpeak.greybox.{glb,b64.txt}` — Port Vesper + Ashpeak County (the new region north and west
-  of Port Vesper: freeways, mountains and the Crowfoot Pass touge, Ashpeak City, Harlan Flats
+  of Port Vesper: freeways, mountains and the Crowfoot Pass touge, Ashpeak City, Harnell Flats
   farmland; `wp_world::ashpeak`), regenerate with `just city-ashpeak`. Generated in memory like
   Port Vesper (`World::ashpeak`, scenario `city: preset(name: "ashpeak", seed: 1)`); a test
   fails if the greybox is stale.

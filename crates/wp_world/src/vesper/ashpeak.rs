@@ -3,9 +3,9 @@
 //! north edges. Coordinates in metres, +X east, +Y north, +Z up (Port Vesper's frame).
 //!
 //! Districts (see [`plan`] for the anchor coordinates every district keeps to):
-//! - **Harlan Flats** ([`farms`]): farmland west of Port Vesper, gravel section-line roads,
-//!   dirt field tracks, farmsteads, the Sable River and the village of Harlan Crossing.
-//!   Route 40 West carries on into it as Harlan Road.
+//! - **Harnell Flats** ([`farms`]): farmland west of Port Vesper, gravel section-line roads,
+//!   dirt field tracks, farmsteads, the Sable River and the village of Harnell Crossing.
+//!   Route 40 West carries on into it as Harnell Road.
 //! - **Ashpeak Range** ([`mountains`]): the mountains north of Port Vesper. Route 40 North
 //!   becomes **Crowfoot Pass Road**, a touge of hairpins over the Crowfoot saddle; spur roads
 //!   to the Halcyon Observatory summit and scenic overlooks.
