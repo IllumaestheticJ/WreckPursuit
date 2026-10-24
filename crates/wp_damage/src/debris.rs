@@ -77,12 +77,7 @@ impl DetachedPart {
                     .iter()
                     .map(|p| Vector::new(p[0], p[1], p[2]))
                     .collect();
-                let hull = ColliderBuilder::convex_hull(&pts)?;
-                (
-                    rot,
-                    hull.mass_properties(hull_box_mass_properties(&pts, mass))
-                        .build(),
-                )
+                (rot, ColliderBuilder::convex_hull(&pts)?.mass(mass).build())
             }
             DetachedKind::Wheel { .. } => {
                 // Parry cylinders run along local Y; turn the axle onto chassis X.
@@ -105,66 +100,5 @@ impl DetachedPart {
             .linvel(world_vel)
             .build();
         Some((body, collider))
-    }
-}
-
-/// Mass properties of a debris hull of `mass` kg without an eigen solve: centred on the points'
-/// bounding box, with that box's principal inertia. Mass properties Rapier derives from a convex
-/// hull go through glamx's symmetric eigen solver, whose `acos`/`cos` are platform libm calls,
-/// so native and wasm could disagree in the last bit (and every run after).
-fn hull_box_mass_properties(pts: &[Vector], mass: f32) -> MassProperties {
-    let (mut lo, mut hi) = (pts[0], pts[0]);
-    for p in pts {
-        lo = lo.min(*p);
-        hi = hi.max(*p);
-    }
-    let d = hi - lo;
-    let k = mass / 12.0;
-    let floor = k * 1.0e-4;
-    MassProperties::new(
-        (lo + hi) * 0.5,
-        mass,
-        Vector::new(
-            (k * (d.y * d.y + d.z * d.z)).max(floor),
-            (k * (d.x * d.x + d.z * d.z)).max(floor),
-            (k * (d.x * d.x + d.y * d.y)).max(floor),
-        ),
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A part's debris collider carries its mass and a diagonal inertia in the body frame:
-    /// nothing for Rapier to eigen-solve (see `hull_box_mass_properties`).
-    #[test]
-    fn part_debris_mass_properties_skip_the_eigen_solve() {
-        let part = DetachedPart {
-            kind: DetachedKind::Part {
-                group: 1,
-                region: BodyRegion::FrontBumper,
-            },
-            mass_kg: 12.0,
-            // A skewed wedge: its hull inertia would have off-diagonal terms.
-            hull_points_local: vec![
-                [-0.6, -0.2, -0.1],
-                [0.7, -0.3, -0.1],
-                [0.5, 0.4, -0.1],
-                [-0.4, 0.3, 0.2],
-                [0.1, 0.0, 0.3],
-            ],
-            centroid_local: [0.0, 1.8, 0.4],
-            velocity_local: [0.0; 3],
-        };
-        let (_, col) = part
-            .to_rapier([0.0; 3], [0.0, 0.0, 0.0, 1.0], [0.0; 3], 0.3, 0.2)
-            .unwrap();
-        let mp = col.mass_properties();
-        assert!((mp.mass() - 12.0).abs() < 1e-4);
-        assert_eq!(mp.principal_inertia_local_frame, Rotation::IDENTITY);
-        // Box of 1.3 x 0.7 x 0.4 m: Ixx = m/12 (0.7² + 0.4²).
-        let i = mp.principal_inertia();
-        assert!((i.x - 12.0 / 12.0 * (0.49 + 0.16)).abs() < 1e-4, "{i:?}");
     }
 }
