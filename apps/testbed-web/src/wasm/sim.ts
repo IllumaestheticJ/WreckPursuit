@@ -688,7 +688,26 @@ export interface StreetLevel {
   cars: string[];
   bet_min: number;
   bet_max: number;
-  /** Rep for beating a racer of this level. */
+  /** Rep for beating a racer of this level in a car like yours (scaled by the car gap). */
+  win_rep: number;
+  /** Driver rating (Elo-like, you are 1000). */
+  rating: number;
+}
+
+/** A challenge priced (`wp_wasm::street_odds::Matchup`): their level and car vs your car. */
+export interface StreetOdds {
+  /** Their car's class index and bracket letter. */
+  racer_class: number;
+  racer_bracket: string;
+  /** Your car's class index and bracket letter. */
+  player_class: number;
+  player_bracket: string;
+  racer_rating: number;
+  /** Your estimated chance to win, 0..1. */
+  win_chance: number;
+  /** A win pays the stake times this / 1000 (stake included). */
+  odds_milli: number;
+  /** Rep for the win. */
   win_rep: number;
 }
 
@@ -713,6 +732,8 @@ export interface StreetOffer extends Omit<StreetRacer, "mode" | "shift"> {
   bet_max: number;
   cash: number;
   affordable: boolean;
+  /** What a win pays (odds and rep), from their level and car vs yours. */
+  odds: StreetOdds;
   start: [number, number];
   /** The Loop 9 rest stop this meet is at (row 153). */
   rest_stop: string | null;
@@ -728,6 +749,8 @@ export interface StreetRace {
   level_name: string;
   colour: string;
   stake: number;
+  /** What a win pays back (stake included). */
+  payout: number;
   countdown_s: number;
   elapsed_s: number;
   time_left_s: number;
@@ -754,7 +777,7 @@ export interface StreetResult {
   colour: string;
   stake: number;
   net: number;
-  /** Rep earned (the level's win_rep on a win, 0 on a loss). */
+  /** Rep earned (the challenge's odds.win_rep on a win, 0 on a loss). */
   rep: number;
   cash_after: number;
   time_s: number;
