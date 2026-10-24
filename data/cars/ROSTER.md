@@ -14,9 +14,9 @@
 | Lindwurm 4T | `lindwurm_4t` | Sport | AWD on-demand (≤ 50 % rear) | 1554 | 220 | 141 | 5.5 | 259 | 0.97 | 608 | 3 | 34,000 | sport |
 | Lucciola 350 | `lucciola_350` | Exotic | RWD | 1344 | 278 | 207 | 4.6 | 297 | 1.03 | 694 | 1 | 120,000 | sport |
 | Hauler 1500 | `hauler_1500` | Truck | RWD | 2438 | 265 | 109 | 8.0 | 221 | 0.71 | 440 | 5 | 32,000 | all_terrain |
-| Sentinel Cruiser | `sentinel_cruiser` | PoliceCruiser | RWD | 2048 | 276 | 135 | 6.2 | 267 | 0.91 | 559 | 5 | 30,000 | police_pursuit |
-| Sentinel Wolfhound | `sentinel_wolfhound` | PoliceInterceptor | AWD on-demand (≤ 50 % rear) | 2049 | 272 | 133 | 6.1 | 255 | 0.91 | 558 | 4 | 45,000 | police_pursuit |
-| Sentinel Bastion | `sentinel_bastion` | PoliceSuv | RWD | 2638 | 265 | 100 | 7.6 | 224 | 0.81 | 472 | 5 | 48,000 | police_pursuit |
+| Sentinel Cruiser | `sentinel_cruiser` | PoliceCruiser | RWD | 2048 | 390 | 190 | 5.7 | 301 | 0.91 | 601 | 5 | 30,000 | police_pursuit |
+| Sentinel Wolfhound | `sentinel_wolfhound` | PoliceInterceptor | AWD on-demand (≤ 50 % rear) | 2049 | 415 | 202 | 4.7 | 291 | 0.91 | 665 | 4 | 45,000 | police_pursuit |
+| Sentinel Bastion | `sentinel_bastion` | PoliceSuv | RWD | 2638 | 334 | 127 | 6.3 | 235 | 0.81 | 524 | 5 | 48,000 | police_pursuit |
 | Junkyard Beater | `junkyard_beater` | Beater | FWD | 1048 | 65 | 62 | 14.3 | 150 | 0.77 | 324 | 2 | 3,000 | vintage_bias |
 | Tansy 1.3 | `tansy_13` | Compact | FWD | 1058 | 66 | 62 | 12.1 | 176 | 0.90 | 381 | 2 | 7,000 | street |
 | Drayman Cargo | `drayman_cargo` | Truck | RWD | 2481 | 207 | 83 | 10.9 | 207 | 0.74 | 381 | 4 | 20,000 | street |
@@ -30,8 +30,8 @@
 | Talus 2.0T | `talus_20t` | Sport | AWD 45/55 | 1386 | 206 | 149 | 5.6 | 246 | 0.99 | 599 | 3 | 38,000 | sport |
 | Tumbril 2.0 | `tumbril_20` | Truck | FWD | 1845 | 85 | 46 | 15.6 | 147 | 0.78 | 315 | 3 | 20,000 | street |
 | Fulmine V10 | `fulmine_v10` | Exotic | AWD 30/70 | 1634 | 449 | 275 | 3.5 | 336 | 0.98 | 820 | 3 | 125,000 | sport |
-| Sentinel Warden | `sentinel_warden` | PoliceCruiser | RWD | 1873 | 155 | 83 | 8.6 | 207 | 0.91 | 455 | 4 | 26,000 | police_pursuit |
-| Sentinel Vigil | `sentinel_vigil` | PoliceInterceptor | RWD | 1813 | 319 | 176 | 5.7 | 282 | 0.95 | 601 | 4 | 52,000 | sport |
+| Sentinel Warden | `sentinel_warden` | PoliceCruiser | RWD | 1873 | 217 | 116 | 7.0 | 234 | 0.91 | 515 | 4 | 26,000 | police_pursuit |
+| Sentinel Vigil | `sentinel_vigil` | PoliceInterceptor | RWD | 1813 | 561 | 309 | 5.4 | 341 | 0.95 | 639 | 4 | 52,000 | sport |
 | Halberd 40 | `halberd_40` | Exotic | RWD | 1488 | 513 | 345 | 3.7 | 354 | 1.15 | 834 | 3 | 125,000 | semi_slick |
 | Ombra V12 | `ombra_v12` | Exotic | AWD 25/75 | 1692 | 517 | 305 | 3.4 | 349 | 0.98 | 845 | 3 | 124,000 | sport |
 | Ostwind 6T | `ostwind_6t` | Exotic | AWD 30/70 | 1690 | 470 | 278 | 3.8 | 342 | 0.97 | 791 | 4 | 110,000 | sport |

@@ -148,6 +148,42 @@ header-only blessed (contract 0.3.1 → 0.4.1, no tick hash moved). **Three gold
 blessed here: they belong to round12 (the police heat-level change, row 156, is the likely
 cause).
 
+## Round 3: races and touge from the career garage (playtest row 167)
+
+Owner: "I need to be able to reach the touge and race features in the career menu, instead of
+having to go back to the main menu to get to it." Base: `origin/main` `aa30f9ea` (the branch was
+restarted there; rounds 1–2 are in main).
+
+- **Garage start row** (`ui-kit` `CareerGarage`): Night run, Free drive (already there), and now
+  **Street races** and **Touge battles** (`CareerApi.races?()` / `touge?()`, optional so other
+  hosts hide them; disabled when the career car can't go out, like the others). The touge
+  button's tooltip names the tier touge needs while it is locked.
+- **Street races** open the race picker as a career run: cards priced for the career car and
+  mode, bet limits from the career (`progress.max_bet_city`; locked below the Street tier with
+  the reason). "Race" starts `career_start_run(race_scenario_json(…))` (new wasm export), so
+  buy-in, purse, bets and rep go through the career. **Fix:** `Session::begin_career` now
+  re-charges a picker race's buy-in on the career account (`RaceRun::reenter`); before, it went
+  on the session's throwaway account (test
+  `a_picker_race_from_the_garage_charges_the_career_account`).
+- **Touge battles** open the touge picker on the career's account (`tougeUsesCareer()` is true
+  for a garage-opened picker): locked battles and wagers show the rep tier they need
+  (`require_unlocked`, unchanged rules).
+- **Back to the garage:** closing a garage-opened picker reopens the garage; a career race's
+  results show **Back to garage** (instead of Race again / Races… / Free drive), and a decided
+  career touge battle shows it on its panel. Both end the run through `openGarage()` (settled
+  on the career, one night passes). "Restart" on the end-of-run panel of a career race / battle
+  also goes to the garage. Main-menu entries are unchanged (quick play stays outside the
+  career).
+- **Map** (agreed with the ashpeak-port helper): career races and garage night runs / free
+  drives use the main menu's remembered map (`loadMenuMap(MENU_MAPS)`, key `wp.menu.map.v1`);
+  the career race picker lists `racesForMap(…, citySel.value)` like the main one, and the
+  menu's `play()` now applies the map for the garage choice too (only touge stays off-map).
+- **e2e:** race.mjs (+5: garage → Street races → career race with the career car, buy-in off the
+  career → results → Back to garage, settled; closing the picker returns), touge.mjs (+3:
+  garage → Touge battles reads the career's tier, locked; closing returns). run.mjs and tune.mjs
+  were broken on main by round 1's Dealer lock-badge column (`td:last-child` became the badge
+  cell): their "buy worn" selector now targets `td:nth-last-child(2)`.
+
 ## Contract change requests
 
 | # | Change | Why | Who is affected | Status |

@@ -82,9 +82,12 @@ fn shifts_are_rev_matched_and_the_torque_gap_is_short() {
     let mut gear = rig.state().gear;
     let (mut gap, mut longest_gap) = (0usize, 0usize);
     let mut checked = 0;
-    // Full throttle to ~180 km/h (4 upshifts), then brake hard (downshifts).
+    // Full throttle to ~180 km/h (4 upshifts), then brake hard (downshifts). 18 s of throttle
+    // (was 17; physics lead 2026-10-23): with 17 s the 4→5 upshift came 0.35 s after the
+    // window on the pre-G handling and just missed it with candidate G, which is 0.08 s
+    // slower to 143 km/h (shifts 3.56 / 6.49 / 10.86 s vs 3.54 / 6.45 / 10.78 s).
     for i in 0..(24.0 * 240.0) as usize {
-        let input = if i < 17 * 240 {
+        let input = if i < 18 * 240 {
             throttle(1.0)
         } else {
             VehicleInput {
@@ -95,7 +98,7 @@ fn shifts_are_rev_matched_and_the_torque_gap_is_short() {
         rig.step(&input, &a);
         let s = rig.state();
         let tel = rig.vehicle.telemetry();
-        if i < 17 * 240 {
+        if i < 18 * 240 {
             let drive: f32 = tel.fx.iter().sum();
             gap = if drive <= 0.0 { gap + 1 } else { 0 };
             longest_gap = longest_gap.max(gap);

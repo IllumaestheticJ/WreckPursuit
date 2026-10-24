@@ -142,6 +142,38 @@ check((r.settlement?.rep ?? 0) < 0, `rep lost for the defeat and the wreck (${r.
 await page.waitForSelector('[data-testid="touge-settlement"]', { timeout: 10000 });
 await shot("touge_lost.png");
 
+// Playtest row 167: the career garage's "Touge battles" opens the touge picker on the career's
+// account (a fresh career: everything locked, with the tier it needs); closing it goes back to
+// the garage.
+{
+  const p3 = await context.newPage();
+  p3.on("pageerror", (e) => errors.push(String(e)));
+  await p3.goto(URL);
+  await p3.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 30000 });
+  await p3.evaluate(() => {
+    const wp = window.__wp;
+    wp.careerApi.newCareer("Arcade");
+    wp.careerApi.buy("junkyard_beater", "Worn");
+    wp.openGarage();
+  });
+  await p3.waitForSelector('[data-testid="career-touge"]', { timeout: 10000 });
+  await p3.click('[data-testid="career-touge"]');
+  await p3.waitForSelector('[data-testid="touge-picker"]', { timeout: 10000 });
+  const cm = await p3.evaluate(() => {
+    const wp = window.__wp;
+    const map = wp.sim.tougeList()[0].id;
+    return { garage: wp.garage.open, m: wp.sim.tougeMenu({ map, direction: "down", daylight: "night", surface: "dry", opponent: "challenger" }, true) };
+  });
+  check(
+    !cm.garage && cm.m.tier === "unknown" && !cm.m.race.unlocked && /Known/.test(cm.m.race.locked_reason ?? ""),
+    `career garage: Touge battles opens the picker on the career (tier ${cm.m.tier}; ${cm.m.race.locked_reason})`,
+  );
+  check(await p3.$eval('[data-testid="touge-picker"] button:has-text("Battle")', (b) => b.disabled), "career touge: Battle disabled while locked");
+  await p3.click('[data-testid="touge-picker"] button:has-text("close")');
+  check(await p3.evaluate(() => window.__wp.garage.open), "closing the career touge picker returns to the garage");
+  await p3.close();
+}
+
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();
 stopServer();

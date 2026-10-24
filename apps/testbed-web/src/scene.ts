@@ -293,16 +293,10 @@ export class SceneView {
     tagFeature(holder, "city");
     this.scene.add(holder);
     try {
-      // The published (artifact) build cannot serve binary files, so it ships the same bytes
-      // base64-encoded as `<id>.greybox.b64.txt`.
-      let gltf;
-      try {
-        gltf = await new GLTFLoader().loadAsync(`data/city/${cityId}.greybox.glb`);
-      } catch {
-        const b64 = await fetchGreyboxB64(cityId);
-        const bytes = Uint8Array.from(atob(b64.trim()), (c) => c.charCodeAt(0));
-        gltf = await new GLTFLoader().parseAsync(bytes.buffer, "");
-      }
+      // A city shipped as parts (`<id>.greybox.parts.json`: Port Vesper's shared part is
+      // loaded by both `vesper_v2` and `ashpeak`, city-import `parts`) loads them all into one
+      // group; any other city is one greybox.
+      const gltf = { scene: await loadGreybox(cityId) };
       // glTF is +Y up, same as Three: add to the scene, not the Z-up world group.
       // Layers that share a plane in the greybox (bus lanes and parking painted on asphalt,
       // sidewalks, their corner fills and the level lots behind them on zone ground) draw over
@@ -823,6 +817,40 @@ function prewarmStandIn(o: THREE.Object3D, m: THREE.Material, kind: number): THR
       return new THREE.Points(geo, m);
   }
   return null;
+}
+
+/** One greybox file (`data/city/<stem>.greybox.glb`, else its base64 text: the published
+ * build cannot serve binary files). */
+async function loadGreyboxFile(stem: string): Promise<THREE.Object3D> {
+  try {
+    return (await new GLTFLoader().loadAsync(`data/city/${stem}.greybox.glb`)).scene;
+  } catch {
+    const b64 = await fetchGreyboxB64(stem);
+    const bytes = Uint8Array.from(atob(b64.trim()), (c) => c.charCodeAt(0));
+    return (await new GLTFLoader().parseAsync(bytes.buffer, "")).scene;
+  }
+}
+
+/** The greybox of `cityId`: its parts in manifest order (`<id>.greybox.parts.json`,
+ * `{"parts": [...]}`), or the single `<id>.greybox` file. */
+async function loadGreybox(cityId: string): Promise<THREE.Object3D> {
+  let parts: string[] | null = null;
+  try {
+    const r = await fetch(`data/city/${cityId}.greybox.parts.json`);
+    if (r.ok) {
+      const text = await r.text();
+      // A dev server answers unknown paths with index.html.
+      if (!text.trimStart().startsWith("<")) parts = (JSON.parse(text) as { parts: string[] }).parts;
+    }
+  } catch {
+    parts = null;
+  }
+  if (!parts || parts.length === 0) return loadGreyboxFile(cityId);
+  const scenes = await Promise.all(parts.map((p) => loadGreyboxFile(p)));
+  const group = new THREE.Group();
+  group.name = `${cityId}.greybox`;
+  for (const sc of scenes) group.add(sc);
+  return group;
 }
 
 /**

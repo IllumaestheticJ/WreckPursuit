@@ -301,6 +301,13 @@ pub struct PoliceStats {
     pub spikes: u32,
     /// Spike hits.
     pub spike_hits: u32,
+    /// Spike strips requested but given up without a strip (row 165: no car could be beside it
+    /// in time without appearing in a racer's view, or the pursuit ended).
+    #[serde(default)]
+    pub spikes_given_up: u32,
+    /// Spike cars that appeared out of view and drove in to their post (row 165).
+    #[serde(default)]
+    pub spike_drive_ins: u32,
     /// PIT attempts.
     pub pit_attempts: u32,
     /// Helicopter launches.
@@ -318,7 +325,7 @@ pub struct PoliceStats {
     /// Built-in driver: ran wide and crashed.
     pub run_wide_crashes: u32,
     /// Built-in driver: near misses, traffic collisions and run-wide crashes by units while
-    /// pursuing or intercepting (what the risk budget and pursuit caps govern).
+    /// pursuing or intercepting (what the risk budget governs).
     pub pursuit_harm: u32,
     /// Built-in driver: seconds pursuing / intercepting units spent cornering above
     /// `pursuit.risk.lateral_g`, summed over units.
@@ -454,6 +461,11 @@ pub(crate) struct RacerObs {
     pub(crate) nearest_unit_m: f32,
     /// Nearest ground unit chasing this racer, m.
     pub(crate) nearest_chaser_m: f32,
+    /// Nearest ground unit / chaser that is not standing in the racer's lane in front of it
+    /// (row 168: [`crate::heat::RuleInputs::blocked_ahead_only`]), m.
+    pub(crate) nearest_unit_free_m: f32,
+    /// See `nearest_unit_free_m`, m.
+    pub(crate) nearest_chaser_free_m: f32,
 }
 
 /// Police state for one instance.
@@ -488,6 +500,12 @@ pub struct PoliceSystem {
     /// Racer velocity reported on the previous step, m/s: how the racer came into this tick's
     /// contacts (by the time a contact is reported, the hit has already changed its velocity).
     pub(crate) prev_vel: BTreeMap<EntityId, [f32; 3]>,
+    /// Each racer's direction of travel when it last moved faster than 1 m/s (unit vector):
+    /// which way a stopped racer faces (row 168, queues).
+    pub(crate) racer_dir: BTreeMap<EntityId, [f32; 2]>,
+    /// How long each racer has waited behind another racer without moving, s (row 168: the
+    /// queue exemption lasts at most `pursuit::QUEUE_MAX_WAIT_S`).
+    pub(crate) queue_wait_s: BTreeMap<EntityId, f32>,
     pub(crate) units: Vec<Unit>,
     pub(crate) next_unit: u32,
     pub(crate) incidents: Vec<Incident>,
@@ -500,6 +518,14 @@ pub struct PoliceSystem {
     pub(crate) spikes: Vec<SpikeStrip>,
     /// Tool cars waiting for their spot to leave every racer's view (row 131).
     pub(crate) tool_cars: Vec<dispatch::PendingToolCar>,
+    /// Spike strips on their way: each laid only together with its car (row 165).
+    pub(crate) spike_runs: Vec<dispatch::SpikeRun>,
+    /// Spike strips decided this step, for the radio's "spikes N metres ahead" line (said at
+    /// the decision; the strip itself is laid when its car stands at its post, row 165).
+    pub(crate) spikes_decided: Vec<(ToolId, EntityId)>,
+    /// Spike strips already announced at their decision (their later `SpikesPlaced` is not
+    /// announced again).
+    pub(crate) spikes_announced: BTreeSet<ToolId>,
     /// Indices into `stats.spawns` still watched for being seen soon after (pop-in audit).
     pub(crate) spawn_watch: Vec<usize>,
     /// Elevated road decks (race stakeouts park on the deck, not under it).
@@ -669,6 +695,8 @@ impl PoliceSystem {
             trails: BTreeMap::new(),
             prev_pos: BTreeMap::new(),
             prev_vel: BTreeMap::new(),
+            racer_dir: BTreeMap::new(),
+            queue_wait_s: BTreeMap::new(),
             units: Vec::new(),
             next_unit: 1,
             incidents: Vec::new(),
@@ -678,6 +706,9 @@ impl PoliceSystem {
             helo_sight: BTreeMap::new(),
             roadblocks: Vec::new(),
             tool_cars: Vec::new(),
+            spike_runs: Vec::new(),
+            spikes_decided: Vec::new(),
+            spikes_announced: BTreeSet::new(),
             spawn_watch: Vec::new(),
             decks: Vec::new(),
             spikes: Vec::new(),
@@ -731,6 +762,8 @@ impl PoliceSystem {
         self.process_events(world, events);
         self.rebuild_obstacles();
         self.drive_units(world, dt);
+        // Row 165: every tick, not only at think rate: no strip outlives its unit's leash.
+        self.lift_unmanned_spikes();
         self.think_accum += dt;
         let thought = self.think_accum >= 1.0 / self.cfg.pursuit.think_hz;
         if thought {
@@ -755,6 +788,19 @@ impl PoliceSystem {
             self.prev_vel.insert(r.entity, rec.vel);
             rec.pos = r.pos;
             rec.vel = r.vel;
+            let sp = (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt();
+            if sp > 1.0 {
+                let d = [r.vel[0] / sp, r.vel[1] / sp];
+                // Backing out of a queue flips the velocity at once; a turn sweeps round
+                // through the angles in between. Keep the facing through a reversal.
+                let flipped = self
+                    .racer_dir
+                    .get(&r.entity)
+                    .is_some_and(|o| o[0] * d[0] + o[1] * d[1] < -0.5);
+                if !flipped {
+                    self.racer_dir.insert(r.entity, d);
+                }
+            }
             let p = xy(r.pos);
             // Spike strips.
             if let Some(prev) = self.prev_pos.get(&r.entity).copied() {
@@ -1120,16 +1166,28 @@ impl PoliceSystem {
         self.decks = decks;
     }
 
-    /// Spots `(position, heading)` of tool `tool`'s cars not spawned yet. Roadblock cars wait
-    /// while their spot is in a racer's view (row 131) and appear once it is hidden; a spike
-    /// car is decided on the next think (hidden: it appears, in view: dropped, the strip stays
-    /// unmanned; PR #54 port).
+    /// Spots `(position, heading)` of tool `tool`'s cars not parked yet: roadblock cars waiting
+    /// while their spot is in a racer's view (row 131), each appearing once it is hidden, and a
+    /// spike strip's car post while the strip is on its way (row 165: laid only when its car
+    /// stands there).
     pub fn tool_cars_waiting(&self, tool: ToolId) -> Vec<([f32; 2], [f32; 2])> {
         self.tool_cars
             .iter()
             .filter(|c| c.tool == tool)
             .map(|c| (c.pos, c.heading))
+            .chain(
+                self.spike_runs
+                    .iter()
+                    .filter(|r| r.strip.id == tool)
+                    .map(|r| (r.post, r.heading)),
+            )
             .collect()
+    }
+
+    /// Spike strips requested but not on the road yet: each waits for its car, which appears
+    /// at its post out of view or drives in to it, and is laid only then (row 165).
+    pub fn spike_strips_pending(&self) -> Vec<&SpikeStrip> {
+        self.spike_runs.iter().map(|r| &r.strip).collect()
     }
 
     /// Spike strips in place (line colliders).
@@ -1890,9 +1948,18 @@ impl PoliceSystem {
         // Push-through (row 61): with lights on, blocked by a stopped civilian or parked car
         // it can't pass, shove it aside at low speed; if that doesn't move it, un-stick.
         let av = self.cfg.pursuit.avoid.clone();
+        // Never shove a racer or another unit: a push that started on traffic ends when the
+        // car in front turns out to be one (PR #60 port: a cruiser on Patrol kept shoving a
+        // captured, held player car down the road with the stronger engine).
+        let shoving_racer_or_unit = match u.avoid.blocked_by {
+            Some(avoid::BlockedBy::Vehicle(e)) => self.racers.contains_key(&e),
+            Some(avoid::BlockedBy::Unit(_)) => true,
+            _ => false,
+        };
+        let u = &mut self.units[i];
         if let stuck::Phase::Push { from, until } = u.unstick.phase {
             let moved = graph::dist(pos, from);
-            if moved < PUSH_DONE_M && now < until && !disabled {
+            if moved < PUSH_DONE_M && now < until && !disabled && !shoving_racer_or_unit {
                 // Straight ahead, a little left (nudging the blocker to the kerb): a shove,
                 // not a turn (steering for the track swung units across the road).
                 let tgt = graph::add(
@@ -1916,7 +1983,7 @@ impl PoliceSystem {
             u.unstick.phase = stuck::Phase::Drive;
             u.unstick.push_ready = now.plus(av.push_cooldown_s);
             u.avoid.push_wait_s = 0.0;
-            if moved < av.push_min_progress_m && !disabled {
+            if moved < av.push_min_progress_m && !disabled && !shoving_racer_or_unit {
                 // Didn't budge: back out / re-route / respawn like any stuck unit.
                 self.on_stuck(i, true);
             }

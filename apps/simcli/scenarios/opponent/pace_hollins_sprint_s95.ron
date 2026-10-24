@@ -15,6 +15,9 @@
 // Re-locked 2026-10-23 by the rule: the judged finish moved 60 m short of the Knob lot
 // (lead-approved layout change; the rest of the road is the AI run-off), 941 m instead of
 // 1001 m, so every time is about 3-4 s shorter. Reasons in docs/integration/opponent-pace.md.
+// 2026-10-23 (D, PR #38 port): spawns re-synced from the regenerated race pick file (the
+// Hollins Ascent grid moved across the Hollins Gorge Bridge; Loop 9's by millimetres). Ranges
+// unchanged: every time is inside them.
 (
     name: "opponent_pace_hollins_sprint_s95",
     seed: 16,
@@ -34,32 +37,32 @@
         (
             id: "player",
             car: "lindwurm_4t",
-            pos: (-424.88947, 877.1251, 22.403357),
-            yaw: 1.4438996,
+            pos: (-558.9696, 888.5032, 33.084213),
+            yaw: 1.0645496,
             driver: scripted,
             inputs: [],
         ),
         (
             id: "ai_mara",
             car: "hakone_gt",
-            pos: (-437.2992, 874.67615, 22.403357),
-            yaw: 1.4438996,
+            pos: (-579.9593, 900.14075, 33.084213),
+            yaw: 1.0645496,
             driver: scripted,
             inputs: [],
         ),
         (
             id: "ai_vic",
             car: "kestrel_ts",
-            pos: (-432.82513, 878.1376, 22.403357),
-            yaw: 1.4438996,
+            pos: (-572.96277, 896.26154, 33.084213),
+            yaw: 1.0645496,
             driver: scripted,
             inputs: [],
         ),
         (
             id: "ai_juno",
             car: "shiro_turbo",
-            pos: (-429.36353, 873.6637, 22.403357),
-            yaw: 1.4438996,
+            pos: (-565.9662, 892.3824, 33.084213),
+            yaw: 1.0645496,
             driver: scripted,
             inputs: [],
         ),

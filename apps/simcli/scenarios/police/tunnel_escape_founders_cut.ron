@@ -54,9 +54,22 @@
 // 50 (L3) the run never reached L5 and the helicopter never launched. Heat 90 (the bottom of L5)
 // keeps the story: pursuit at 9.8 s, helicopter at 72.2 s, lost inside the Cut, Escaped at
 // 133.8 s after 40 s unseen (the L5 day escape time); control Captured at 125.8 s.
+// Row 157 (2026-10-23: every heat gain halved): from heat 90 the racer drops below L5 and climbs
+// back at half the rate, so the helicopter launched at 95.7-111.2 s on every seed 50-63 (deadline
+// 95 s). Heat 95 -> seeds 50-63: escape story on 8 of 14 (51-53, 55-57, 63), control captured in
+// its window on 2 (54, 63; the other 12 are still in pursuit at 190 s or captured early, none
+// escapes). Re-seeded 54 -> 63, heat 90 -> 95.
+// PR #60 port (2026-10-23: no AI pursuit cap, stronger police cars, rolling-block deadlock fix):
+// seed 63 was Captured at 141.8 s. Seeds 50-70 at heat 95: escape story on 16 of 21, control
+// on 20, both on 15 (50-52, 56-62, 64-66, 68-70). Re-seeded 63 -> 60, the middle of 56-62.
+// Row 168 (2026-10-24: a unit in a stopped racer's lane drives on, units wedged against a wall
+// or in the racer's lane ahead don't make the arrest): seed 60 was Captured at 132.7 s. Seeds
+// 50-70: escape story on 11 of 21, control on 20, both on 11 (50, 52, 54, 56-59, 61, 63, 65,
+// 68). Re-seeded 60 -> 58.
 (
     name: "police_tunnel_escape_founders_cut",
-    seed: 54,
+    // Lead 2026-10-24: re-seeded 60 -> 58 after merging D's canal-bridge fix (ws/world 3affce58) with the PR #60 police power port; seed 60's main run became a capture. Seeds 50-70: both files pass on 11 of 21; 56-59 is the widest run, 58 its middle.
+    seed: 58,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,
     time_ratio: 1.0,
@@ -70,7 +83,7 @@
         (
             id: "racer",
             car: "debug_coupe",
-            police_heat: 90.0,
+            police_heat: 95.0,
             speed_mps: 20.0,
             driver: follow_route(route_id: "Lantern Run -> Founders Cut lay-by", target_speed: 25.0),
         ),

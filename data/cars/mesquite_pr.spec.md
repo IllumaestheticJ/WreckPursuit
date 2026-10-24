@@ -137,7 +137,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 8.0 s | 195 km/h | 48.1 m | 0.66 g | — |
+| sim | 8.1 s | 194 km/h | 48.4 m | 0.65 g | — |
 | estimate | 8.0 s | 211 km/h | 46.2 m | 0.71 g | 439 |
 
 ## Damage lattice (`data/lattices/mesquite_pr.json`)

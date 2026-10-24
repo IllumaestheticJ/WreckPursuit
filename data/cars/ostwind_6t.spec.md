@@ -143,7 +143,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 3.8 s | 336 km/h | 35.5 m | 0.94 g | — |
+| sim | 3.8 s | 334 km/h | 35.7 m | 0.94 g | — |
 | estimate | 3.8 s | 342 km/h | 34.8 m | 0.97 g | 791 |
 
 ## Damage lattice (`data/lattices/ostwind_6t.json`)

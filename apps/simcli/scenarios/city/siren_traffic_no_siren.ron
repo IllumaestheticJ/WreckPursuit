@@ -49,7 +49,9 @@
         // below until the vehicle side is fixed (docs/integration/world.md, round 13 merge).
         world_metric(name: "civilian_collisions", min: 0.0, max: 1.0),
         world_metric(name: "traffic_siren_yields", min: 0.0, max: 0.0),
-        metric(name: "route_progress", min: 0.0, max: 0.8),
+        // Police power package (2026-10-23): the faster cruiser gets 0.82 of the way (was
+        // < 0.8); still well short of the siren runs' 0.95.
+        metric(name: "route_progress", min: 0.0, max: 0.9),
         event_count(event: "Contact", entity: "unit", min: 0, max: 0),
     ],
     expect_pending: [

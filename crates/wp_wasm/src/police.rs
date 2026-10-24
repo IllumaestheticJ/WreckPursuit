@@ -354,6 +354,7 @@ mod tests {
             terrain: None,
             covered: vec![],
             decor: vec![],
+            features: Default::default(),
         }
     }
 
@@ -371,15 +372,15 @@ mod tests {
     #[test]
     fn unit_homed_at_an_ashpeak_station_is_a_county_unit() {
         let vesper_station = [200.0, 300.0];
-        let harlan_station = [-3300.0, 150.0];
+        let harnell_station = [-3300.0, 150.0];
         let net = net_with_stations(
             wp_world::ashpeak::CITY_ID,
-            &[vesper_station, harlan_station],
+            &[vesper_station, harnell_station],
         );
         let a = Agencies::of(Some(&net));
         // Spawned at the county station: county; at the city station: PVPD.
-        let county = unit_at(harlan_station);
-        assert_eq!(county.spawn_pos, harlan_station);
+        let county = unit_at(harnell_station);
+        assert_eq!(county.spawn_pos, harnell_station);
         assert_eq!(a.flag(&county), FLAG_COUNTY);
         assert_eq!(a.flag(&unit_at(vesper_station)), 0);
         // Inside Port Vesper but nearer the county station (west edge): homed in the county.
@@ -387,7 +388,7 @@ mod tests {
         // Outside Port Vesper but nearest the city station: a PVPD unit.
         assert!(!a.county([200.0, 1800.0]));
         // The flag follows the spawn point, not where the unit drives later.
-        let mut moved = unit_at(harlan_station);
+        let mut moved = unit_at(harnell_station);
         moved.body.pos = vesper_station;
         assert_eq!(a.flag(&moved), FLAG_COUNTY);
     }

@@ -143,7 +143,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 3.4 s | 343 km/h | 37.1 m | 0.97 g | — |
+| sim | 3.4 s | 341 km/h | 37.1 m | 0.96 g | — |
 | estimate | 3.4 s | 349 km/h | 34.9 m | 0.98 g | 845 |
 
 ## Damage lattice (`data/lattices/ombra_v12.json`)

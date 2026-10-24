@@ -1526,6 +1526,272 @@ on lead/round12 353744ec and on ws/world (debug and release: 1 go-around, contac
 failure opponent-pace saw on 0e84a9f7 predates a779ad57 (the fix and the re-aimed ≥ 1
 threshold are not in that commit), so it is not a regression. The margin is thin (exactly 1).
 
+## Ashpeak greybox de-dup, option A (lead + ashpeak-port, 2026-10-24)
+
+**Goal:** `ashpeak` ships `vesper_v2`'s greybox once, plus county tiles. Port Vesper inside
+Ashpeak must look the same to a player: same buildings and props in the same places. Small
+ground differences at the 8 m grid are fine (lead). Options B (Ashpeak terrain at 5 m: 26.0 →
+35.7 MB glb, 0.68 M → 1.74 M heightfield cells) and C (composite terrain) were turned down.
+
+**Before:** roads matched about 99 %, but almost no buildings or decor did (14 of 21 k building
+triangles):
+- the county drew from Port Vesper's random stream before its buildings;
+- buildings are drawn one after another from a single stream, so the few tie-in roads the county
+  changes (Route 40 West / North, Uptown Connector, Lantern Way: half a millimetre to 1 m in
+  height) shifted every later draw;
+- the terrain grid is 8 m against 5 m.
+
+**wp_world (`vesper.rs`, region path only; `vesper_v2` byte-identical: road.bin and greybox):**
+- The region (layout, extra buildings, POIs) draws from its own stream (`REGION_RNG_SALT`).
+- `ashpeak` generates `vesper_v2` itself. `reuse_vesper_lots` keeps its buildings and decor
+  wherever nothing the county changed or added is within `REUSE_CLEAR_M` (45 m), and they don't
+  clash with the county's own items or landmark lots. The generic pass skips the unchanged
+  streets (`buildings(.., skip)`) and fills only the others, clear of what is kept.
+- `reuse_vesper_features`: Port Vesper's structures, landmarks and hideouts take `vesper_v2`'s
+  heights, which come from its 5 m terrain.
+
+**city-import `dedup`:**
+- `drawn` keys every greybox triangle and decor instance by its exact bits.
+- `TERRAIN_BOUND` lists the materials the county always owns: ground_*, seabed, rock, water,
+  lot_skirt, retaining_wall, and bridge (piers reach the ground).
+- Every other item belongs to the 64 m cell its centroid is in; `partition` gives a cell inside
+  Port Vesper to the county wherever anything differs.
+- `Partition::check` proves the split adds up, and test `ashpeak_dedup` runs it.
+- Results:
+  - 43 % of `vesper_v2`'s items are shared (ground is about half of them).
+  - 127 of 2592 cells inside Port Vesper are the county's (the N / W tie-ins).
+  - Buildings, roofs, garages, trees, fences and landmarks are 90-95 % shared; roads 91-95 %.
+- `county_cells` is computed from the two maps on every run, never stored.
+
+**Rename (owner, via ashpeak-port):** Harlan → Harnell (Harnell Flats / Road / Crossing, race
+`harnell_dirt_run`) in the same regeneration.
+
+**Regenerated:**
+- `data/city/ashpeak.greybox.*`: 25.99 MB glb.
+- `race/pick_harnell_dirt_run.ron`.
+- [bless] ced8ac31: the 8 ashpeak goldens only.
+- 151523cc: `harnell_dirt_run` length hint 3978 → 4295 m. The county's own random stream moves
+  its farm section roads (686 nodes, 682 before). All four cars finish in 292-297 s (window
+  190-380 s), with no contacts.
+
+**Gate (release, `--no-fail-fast`; debug would not fit on this container's disk):**
+- fmt, clippy and wasm are clean.
+- The only failures:
+  - simcli: Founders Cut and the six Port Vesper goldens above (round12's);
+  - `pace_scenarios`: Lantern s50 (G's).
+
+**On lead/round12 7abc46aa, not caused here (vesper_v2's road.bin is byte-identical to
+round12's):**
+- `police_tunnel_escape_founders_cut` fails: Captured at 132.7 s, where the story wants Escaped.
+- Six Port Vesper goldens differ: jam_pursuit_vesper, the Founders Cut pair,
+  race_hollins_descent, race_lantern_checkpoint, world_traffic_soak_vesper. Not blessed.
+
+## Lead / G: "collider mid-lane on Loop 9 near (-1303, 1341)" (2026-10-23)
+
+**Not reproduced; the point is on the junction paving the row 162 fix rebuilt.**
+- (-1303, 1341) is 8.9 m from node 234. There Loop 9's carriageways (roads 5 / 23) continue as
+  road 6 and the one-lane ramp road 341 branches off. The point is 13 m from the nearest lane
+  centre.
+- On ws/world and on main ee742a68, no static collider stands above the road surface within
+  60 m along any lane. The median barriers there are 3.35 m from the lane centres.
+- Loop 9 s95, `WP_PACE_SEED=15`, every static contact over 100 N·s logged: the rampart has no
+  contact near the point on either branch.
+
+**Found instead (ws/world only): the canal bridge launched cars.**
+- The PR #38 port lifts Loop 9 2.25 m over the canal (x -550..-450). Floors were pinned where
+  they held the profile up, so smoothing rounded each deck corner on one side only, and the final
+  clamp put the kink back: a 4.6 % grade break in 10 m.
+- At 59 m/s hakone_gt and rampart_50 left the ground and bottomed out (5 + 1 static hits on that
+  seed; none on main).
+- 44780509 / 99b21a36: floors are no longer pinned; each is lifted by what the smoothing takes
+  off it until the smoothed profile clears it. Worst break there is now 1.65 % in 10 m, and the
+  deck is 0.35 m higher.
+- Holding floors further out instead (the first try) lengthened the embankments, and a lot back
+  edge came out 2.0 cm off the drawn terrain (`sidewalk_lots`).
+- New unit test `a_deck_floor_rounds_off_within_the_curvature_limit` (fails on the old code).
+
+**Knock-on:**
+- Greyboxes regenerated (35aec98d): vesper_v2 10.45 MB glb / 13.93 MB b64; ashpeak 25.87 MB.
+- 49afdab6 [bless]: 8 goldens moved (routes over the lifted decks).
+- The Founders Cut police pair is re-seeded 54 → 60. Seed 54's control never captured: the
+  lead unit braked 40 m short of the parked racer, then turned across the Cut at walking pace.
+  The Cut's geometry is unchanged. Over seeds 50-63 the control captures only on 60.
+  - Police (FYI): with most seeds the lead unit's final approach to a car parked in the lay-by
+    stalls crosswise.
+
+**Gate:**
+
+| Step | Result |
+|---|---|
+| fmt, clippy, wasm | 0 |
+| `cargo test --workspace` | 0 |
+| scenarios | 129/129 |
+| pace scenarios | lantern s50 unchanged (G is on it; identical numbers) |
+| `just pace-loop9` | **out at skill 0.5**: 42/48 (want ≥ 44), mean 236.1 s; skill 0.95: 48/48, 234.8 s |
+
+**`pace-loop9` at skill 0.5:**
+- Same test with only `vesper.rs` back at a7af2d79: 47/48 at skill 0.5, 45/48 at 0.95.
+- Totals are about even (90 against 92 out of 96); skill 0.95 is better.
+- Four of the six cars that don't finish are on seed 4, all `Dnf(FinishWindow)`. The pack sits
+  behind civilians and racers: civ + veh losses are 130-140 s each, with no wall hits, rejoins or
+  resets.
+- That is the traffic-draw swing the test's notes already describe (±3 cars per seed at 23:00 /
+  density 2.0), not a road fault.
+- Left to the lead and opponent-pace (G is reworking pack queueing); I did not widen the gate.
+
+**Seed 4 queue, dug out for the lead (skill 0.5, circuit finish window 90 s):**
+- Old map: leader kestrel 222.8 s; the other five 274-294 s, the slowest +71.6 s, so about
+  18 s from the cut-off already. civ + veh losses were 94-118 s each.
+- ws/world: the leader is bit-identical. Four of the five lose 130-140 s and get
+  `Dnf(FinishWindow)`.
+- Trace (hakone_gt, `WP_PACE_TRACE=1`): on the three-lane Loop 9 carriageways it follows one
+  obstacle at a time at 23-26 m/s for long stretches (one racer for 18 s, one civilian for 23 s,
+  then about 95 s behind civilians 102-105 and a racer). Only 12 passes in 180 s, with no
+  civilians side by side.
+- The pack rarely passes slow civilians on a multi-lane road, so the civilian draw decides its
+  time. The new deck heights moved a few buildings and spawn spots and reshuffled that draw.
+  No world change.
+
+## PR #38 port (lead, 2026-10-23): river, canal, bridges, landmarks, hideouts; rows 160 and 162
+Ported from `claude/beautiful-einstein-b1noth` onto round12 1da95294 (with Ashpeak): a1c11a27,
+6b753b84, 166ee01b, 122def2d and 5b49526a. 823f87a8 was skipped (already on round12), and
+a729a629 (its scenario re-bless) was replaced by blessing here.
+
+**Road format v7** (round12 was at v6 after Ashpeak; PR #38's own v4): `RoadNetwork::features`
+(`CityFeatures`: waterways, bridges, structures, landmarks, hideouts), `#[serde(default)]`.
+
+**Ported:**
+- The Vesper River and Calder Canal, cut into the natural ground. Ashpeak's region hook wraps
+  `Natural::vesper_z`.
+- Every water crossing is a bridge deck: 13 decks, 11 named bridges. The Iron Bridge is a
+  steel truss with a `Metal` deck.
+- 8 landmarks plus the Iron Bridge and Hollins Tunnel; 5 canopy hideouts plus the tunnel.
+  Their lots are reserved before buildings, which also keep out of the water.
+- Structure colliders (convex hulls) and line-of-sight occlusion.
+- `CityMap::water_surface_at` / `on_steel_deck` / `in_tunnel`.
+- The terrain competes in `ground_height` when it is much closer to the reference.
+- Greybox: river water, canopies, landmarks, steel.
+
+**Not ported: PR #38's Hollins Tunnel bore** (TUNNEL_* hold, terrain holes, lining
+structures). Round12 already has the Hollins Tunnel as a covered span at the same place. The
+features list that span as a landmark and hideout instead, and `in_tunnel` = inside any
+covered span. The two tunnel screenshots were dropped.
+
+**Changes to the PR on round12's map:**
+- **Water crossings are profile floors, not holds.** PR #38 held every crossing at the lower
+  bank. Under the grade cap that pulled the Hollins Knob summit junction from 109.8 m to
+  83.6 m, cutting Ridge Road and the Hollins Descent 26 m into the knob; it showed up as
+  drawn-terrain p99 1.04 m. `profile(…, floors, …)`: the deck clears banks and water and
+  stands higher where the road's line passes higher (Ridge Road Bridge: a high gorge bridge).
+- **Parked cars:** `PARK_MAX_TWIST_M` 0.06 → 0.05 (wp_sim). A driveway on the new layout
+  with 5.5 cm of twist left a wheel 3.1 cm in the lot. Vesper keeps 1850 of 1861 cars.
+- **Barrier meshes are not drivable ground** (`BARRIER_USER_DATA`, a row-164 follow-up).
+  `drivable_ground_z` took every triangle mesh as ground.
+- **Tests:**
+  - The drawn-terrain p99 limit is 0.85 m (0.78 with the steep river and canal banks; 0.70
+    before).
+  - The Port Vesper blocked-street test tries the nearest few 1+1 lanes for one that traffic
+    queues on.
+- **Scenarios:**
+  - city_hill_road_ascent: path ≥ 800 m (851 m: the grid moved across the gorge bridge).
+  - city_blocked_parked_player_vesper: seed 5 (no civilian reached the car on seed 7).
+
+**Row 160: highway outer edge barriers** (5b49526a, adapted). `surface::edge_barriers(map)`
+puts concrete barriers on carriageway outer edges and both ramp edges. They are open:
+- where other paving meets the edge (ramp tapers, gores, rest-stop ramps);
+- over node-patch paving (freeway-merge taper connectors);
+- within a junction's paved radius + 2 m (ramp terminals);
+- 40 m either side of each of those openings (row 162);
+- on decks and in covered spans (the barrier stops at the Hollins Tunnel portals).
+
+Physics uses the smooth row-164 meshes. Tests:
+- Vesper `highway_edges_…`: never on paving or in a covered span, every ramp end clear
+  across its width, ≥ 55 % of edges walled (61 % measured).
+- wp_sim `the_edge_barrier_keeps_a_car_off_the_verge`.
+
+**Row 162: ramp merges flush and clear.**
+- `profile_ramp`: a ramp lies in the carriageway's plane while its paving overlaps the
+  carriageway's. It used to leave the plane at the end of the parallel lane: the Hollins rest
+  exit ramp stood 0.64 m under the carriageway's paved edge along the taper, a wall a car
+  driving the ramp at 25 m/s hit.
+- Freeway taper strips are banked like the road surfaces they join. Level strips left 4–5 cm
+  steps at their edges and a ridge over the carriageway. Where a strip lies over a ribbon it
+  joins, its vertices take that ribbon's height (the lane curve's own heights stood 2.5 cm
+  proud).
+- Ramp banks beside the carriageway: the carriageway plane's gradient taken across the
+  ramp's own direction (bank·cos θ + grade·sin θ, up to 7.6 %), not clamped to the ramp
+  style's 5 %. Found with opponent-pace's report: an AI car at Loop 9 race speed was wrecked
+  by "world geometry" mid-carriageway at the Hollins rest off-ramp diverge (seed 15, s95).
+  The ramp's inner edge stood 6–9 cm proud in the right lane there.
+- New gate, city-import `vesper_carriageways_are_level_over_every_ramp_taper`: through
+  traffic over all 28 merge and diverge tapers, every 0.25 m pair on the paving under 3.5 cm
+  (worst 2.2 cm, grade and bank included; it was 7.9 cm on taper 1200, the Hollins rest
+  diverge).
+- Gates:
+  - city-import `ramp_merges` (14 merges, 32.6 k samples on the car's track): pavement, drawn
+    = physics (0.000 m), worst step 0.6 cm beyond the lane profile (was 5.5 cm), nothing
+    standing in the path.
+  - wp_sim `ramp_merges_are_driven_at_speed_without_contact`: every merge at 25 m/s from
+    100 m up the ramp to 120 m along, no static contact.
+  - Scenario `city_ramp_merge_hollins_rest_exit`: player seat, keyboard assists, at the ramp
+    limit.
+
+**Greyboxes:**
+
+| Greybox | glb (MB) | b64 (MB) | Note |
+|---|---|---|---|
+| vesper_v2 | 10.44 | 13.92 | under the 15 MB preview cap; size check raised to 11 MB |
+| procedural_12x12 | 3.02 | 4.02 | |
+| ashpeak | 25.86 | 34.48 | split for the preview by `tools/preview_build.sh` (b0269195) |
+
+**Race files:**
+- `catalog` hollins_sprint length hint is 796 m (941 m before): the Hollins Ascent grid moved across
+  the gorge bridge.
+- `race/pick_*.ron` regenerated (`WP_RACE_WRITE_SCENARIOS=1`).
+- The opponent pace hollins / loop9 files and `race/vesper_hollins_sprint.ron` get spawns
+  re-synced from the picks; pace ranges unchanged.
+
+**Pace** (release, `opponent_pace`):
+
+| Check | Result | Notes |
+|---|---|---|
+| `loop9_traffic_field_finishes` (`just pace-loop9`) | skill 0.5: 46/48 finish, mean 232.7 s; 0.95: 47/48, 242.7 s | measured before the diverge bank fix |
+| Hollins sprint s50 · s95 | best 55.4 · 51.6 s | in range |
+| Loop 9 circuit s50 · s95 | best 204 · 196 s | in range |
+| City sprint, grid highway | | in range |
+| Lantern checkpoint s95 | 47.7 s | in range |
+| Lantern checkpoint s50 | ai_juno 64.09 s (max 64.0), ai_dez 65.84 s (max 65.7); best ratio 1.78 (max 1.53) | **out**: every car logs a rejoin on this course (s50 and s95); likely the new Lantern Bridge on its route. Left to opponent-pace: ranges are theirs, widened only with a reason. |
+
+**Perf** (this container):
+- Native `wp_wasm --example chase_bench hakone_gt 30`: sim 3.21–3.35 ms per 60 Hz frame mean,
+  p95 4.06–4.30 (ashpeak-port's round-12 numbers on the same container class: 3.37–3.65 /
+  4.9–5.6), 21 vehicles, 1891 props.
+- Browser draw calls are not measured (no wasm-pack or testbed npm install here). The Vesper
+  greybox goes from 33 to 37 primitives (river, canopy, steel, edge walls) and from 504.2 k to
+  515.5 k triangles (+2.2 %). Ashpeak-port measured the desktop chase at 437 calls · 329 k
+  triangles against the < 600 · ≤ 400 k gate.
+
+**Gate (merged with round12 cae4f20f):**
+
+| Step | Result |
+|---|---|
+| fmt | 0 |
+| clippy `-D warnings` | 0 |
+| `cargo test --workspace` | 0 after the race-file fixes (the debug run's only failures were those race files) |
+| wasm build | 0 |
+| simcli scenarios | 129/129 |
+| goldens | blessed (two [bless] commits) |
+
+**Changes outside my crates:**
+- `crates/wp_sim/src/physics.rs`: structure colliders, edge barriers, `BARRIER_USER_DATA`.
+- `crates/wp_sim/src/parked.rs`: `PARK_MAX_TWIST_M`.
+- wp_sim tests.
+- `tools/city-import`: greybox features, size check, `ramp_merges` tests.
+- `crates/wp_race/src/catalog.rs`: hint.
+- `crates/wp_wasm/src/police.rs`: test literal.
+- simcli scenarios and goldens.
+- `data/city`: road files and greyboxes.
+
 ## Lead (2026-10-23): `world_traffic_soak` on candidate G handling — 1 civilian collision
 **Cause (traffic driving, not G).** Both cars were kinematic civilians; no racer or police unit
 was involved. G only changed the timing.

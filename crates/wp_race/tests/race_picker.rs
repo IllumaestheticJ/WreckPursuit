@@ -18,6 +18,26 @@ use wp_race::live::{grid, LiveEntrant, LiveRace};
 use wp_race::{RaceSignal, RacerResult, RacerSample, RacerStatus};
 use wp_sim::{Sim, VehicleKind};
 
+/// Row 165: every spike strip on the road has its police unit within the leash of its post.
+fn assert_strips_manned(sim: &Sim, id: &str) {
+    let p = sim.police();
+    for s in p.spike_strips() {
+        let u = s
+            .unit
+            .and_then(|uid| p.units().iter().find(|u| u.id == uid))
+            .unwrap_or_else(|| panic!("{id}: spike strip {:?} without its unit", s.id));
+        let post = s.post.unwrap_or(s.site.pos);
+        let d = (u.body.pos[0] - post[0]).hypot(u.body.pos[1] - post[1]);
+        assert!(
+            d <= wp_police::dispatch::SPIKE_UNIT_LEASH_M,
+            "{id}: spike strip {:?}'s unit {:.1} m from its post at tick {}",
+            s.id,
+            d,
+            sim.tick()
+        );
+    }
+}
+
 fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -220,6 +240,8 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         }
         sim.step_fixed();
         events = sim.drain_events();
+        // Row 165: no spike strip ever lies on the road without its unit beside it.
+        assert_strips_manned(&sim, id);
         pursuits += events
             .iter()
             .filter(|e| {
@@ -837,9 +859,9 @@ fn crowfoot_descent_touge() {
 }
 
 #[test]
-fn harlan_dirt_run() {
+fn harnell_dirt_run() {
     // 4 km of gravel section roads: winner ~266 s.
-    ashpeak_race("harlan_dirt_run", 500, 190.0..380.0, 3);
+    ashpeak_race("harnell_dirt_run", 500, 190.0..380.0, 3);
 }
 
 #[test]

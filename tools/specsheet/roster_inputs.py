@@ -679,7 +679,7 @@ CARS = [
         id="sentinel_cruiser",
         display_name="Sentinel Cruiser",
         cls="PoliceCruiser",
-        analog_of="2010s American full-size RWD police sedan, 5.7 L pushrod V8, pursuit package",
+        analog_of="2010s American full-size RWD police sedan, 6.2 L supercharged pushrod V8, pursuit package",
         era="2010s",
         profile="sedan",
         curb_kg=2000.0,
@@ -699,15 +699,16 @@ CARS = [
         extra_cda=0.05,
         lift=(0.10, 0.12),
         engine=dict(
-            desc="5.7 L OHV 16-valve V8, naturally aspirated, pursuit calibration (no cylinder deactivation)",
-            curve=[(800, 400), (1200, 440), (1600, 470), (2000, 490), (2500, 505), (3000, 515),
-                   (3500, 525), (4000, 533), (4400, 535), (4800, 528), (5200, 505), (5600, 470),
-                   (5900, 440)],
-            idle=600, redline=5800, limit=5900, inertia=0.24, brake_frac=0.10,
-            why=("Class-typical 2010s 5.7 L pushrod police V8 (~48 kW/L, 276 kW at 5200 rpm, "
-                 "~535 N·m at 4400) per fleet spec-class data and owner dynos. Pursuit tuning "
-                 "(round 6b): the V6 cruiser could not catch the traffic sedan to the 144 km/h "
-                 "pursuit cap; the V8 package is the period-correct fix."),
+            desc="6.2 L OHV 16-valve V8, supercharged, pursuit calibration (no cylinder deactivation)",
+            curve=[(800, 430), (1200, 520), (1600, 590), (2000, 640), (2500, 675), (3000, 695),
+                   (3500, 705), (4000, 705), (4500, 695), (5000, 680), (5500, 660), (6000, 620),
+                   (6200, 595)],
+            idle=600, redline=6000, limit=6200, inertia=0.24, brake_frac=0.10,
+            why=("Class-typical 2010s 6.2 L supercharged pushrod V8 (~63 kW/L, ~390 kW at 6000 "
+                 "rpm, ~705 N·m from 3500) per spec-class data and owner dynos. Pursuit tuning "
+                 "(owner, 2026-10-23: police were outrun by a stock Hakone GT): the old 5.7 L "
+                 "package (276 kW) is replaced so the everyday unit out-accelerates and "
+                 "out-runs the stock sports cars."),
         ),
         trans=dict(
             desc="5-speed automatic with torque converter, mild rear LSD (pursuit package, V8 final drive)",
@@ -729,10 +730,10 @@ CARS = [
         price=30000,
         durability=5,
         note=("The everyday patrol car: rear-drive, heavy and planted, with pursuit-rated tires, "
-              "big brakes and the V8 pursuit package. It gets to pursuit speed before anything "
-              "ordinary (traffic, beaters, hatches, trucks, old muscle, FF sport sedans) but "
-              "not before a modern sports car or exotic — those are the interceptor's job. "
-              "Boxing in, PIT manoeuvres and the push bar do the rest."),
+              "big brakes and a supercharged V8 pursuit package. On the straights it runs down "
+              "anything ordinary and every stock sports car; only the exotics stay ahead, and "
+              "those are the interceptor's job. Boxing in, PIT manoeuvres and the push bar do "
+              "the rest."),
         breaks=("Modern full-size unibody with UHSS cabin, plus a reinforced push bar bolted "
                 "through to the front rails: nose-to-tail shunts at pursuit speed mostly bend the "
                 "bar and the bumper cover before the radiator. Hard enough hits rip the bar off, "
@@ -754,7 +755,7 @@ CARS = [
         id="sentinel_wolfhound",
         display_name="Sentinel Wolfhound",
         cls="PoliceInterceptor",
-        analog_of="2010s American AWD police pursuit sedan, 3.5 L twin-turbo V6",
+        analog_of="2010s American AWD police pursuit sedan, 3.5 L twin-turbo V6, pursuit tune",
         era="2010s",
         profile="sedan",
         curb_kg=2000.0,
@@ -774,12 +775,15 @@ CARS = [
         extra_cda=0.05,
         lift=(0.08, 0.10),
         engine=dict(
-            desc="3.5 L DOHC V6, twin turbo, direct injection",
-            curve=[(800, 260), (1200, 330), (1600, 400), (2000, 455), (2500, 495), (3000, 495),
-                   (3500, 495), (4000, 495), (4500, 490), (5000, 490), (5500, 472), (6000, 420),
-                   (6300, 380)],
+            desc="3.5 L DOHC V6, twin turbo, direct injection, pursuit tune (larger turbos, raised boost)",
+            curve=[(800, 300), (1200, 430), (1600, 570), (2000, 660), (2500, 710), (3000, 720),
+                   (3500, 720), (4000, 720), (4500, 720), (5000, 715), (5500, 700), (6000, 660),
+                   (6300, 610)],
             idle=650, redline=6000, limit=6300, inertia=0.18, brake_frac=0.10,
-            why="Class-typical 2010s 3.5 TT V6 (~78 kW/L), boost plateau from 2500 rpm per fleet spec-class data and owner dynos.",
+            why=("High-output tune of the class 2010s 3.5 TT V6 (~118 kW/L, ~415 kW at 6000 rpm, "
+                 "720 N·m plateau from 3000 rpm) per performance-trim spec-class data and owner "
+                 "dynos. Pursuit tuning (owner, 2026-10-23): the stock 272 kW tune was outrun by "
+                 "stock sports cars."),
         ),
         trans=dict(
             desc="6-speed automatic with torque converter, on-demand AWD tuned for launches (90 % front until the fronts slip 2 %, then up to 50 % rear), open diffs",
@@ -800,9 +804,9 @@ CARS = [
         steer=dict(ratio=15.5, turn_circle_m=12.2, ackermann=0.6, rack_speed=1.4),
         price=45000,
         durability=4,
-        note=("The pursuit specialist. AWD and a twin-turbo V6 give it launch traction and "
-              "mid-range punch to stay on a sports car's bumper in the city, and it is stable at "
-              "speed. Heavy and tall, so it cannot match a real sports car through fast corners "
+        note=("The pursuit specialist. AWD and a hard-tuned twin-turbo V6 give it launch "
+              "traction and the mid-range punch to stay on a sports car's bumper, and it is "
+              "stable at well over 300 km/h. Heavy and tall, so it cannot match a real sports car through fast corners "
               "— it wins by never letting the gap open."),
         breaks=("Same reinforced police front as the cruiser (push bar through to the rails) on a "
                 "modern UHSS cell. AWD hardware under the floor means sill and centre-tunnel hits "
@@ -817,7 +821,7 @@ CARS = [
         id="sentinel_bastion",
         display_name="Sentinel Bastion",
         cls="PoliceSuv",
-        analog_of="2010s American full-size police SUV, 5.3 L pushrod V8, body-on-frame, RWD",
+        analog_of="2010s American full-size police SUV, 6.2 L pushrod V8, body-on-frame, RWD",
         era="2010s",
         profile="suv",
         curb_kg=2600.0,
@@ -837,11 +841,13 @@ CARS = [
         extra_cda=0.05,
         lift=(0.20, 0.15),
         engine=dict(
-            desc="5.3 L OHV pushrod V8, naturally aspirated, police calibration",
-            curve=[(800, 360), (1200, 400), (1600, 440), (2000, 465), (2500, 485), (3000, 500),
-                   (3500, 512), (4100, 519), (4500, 510), (5000, 485), (5600, 452), (6000, 410)],
+            desc="6.2 L OHV pushrod V8, naturally aspirated, direct injection, police calibration",
+            curve=[(800, 420), (1200, 480), (1600, 540), (2000, 580), (2500, 610), (3000, 630),
+                   (3500, 640), (4100, 645), (4500, 635), (5000, 610), (5600, 570), (6000, 530)],
             idle=600, redline=5800, limit=6000, inertia=0.25, brake_frac=0.12,
-            why="Same class engine as the Hauler (2010s 5.3 L truck V8).",
+            why=("Class-typical 2010s 6.2 L direct-injection truck V8 (~54 kW/L, ~334 kW at "
+                 "5600 rpm, ~645 N·m at 4100). Pursuit tuning (owner, 2026-10-23): replaces the "
+                 "Hauler's 5.3 L so the SUV keeps up with the rest of the fleet."),
         ),
         trans=dict(
             desc="6-speed automatic with torque converter, open rear diff",
@@ -1729,7 +1735,7 @@ CARS = [
         id="sentinel_warden",
         display_name="Sentinel Warden",
         cls="PoliceCruiser",
-        analog_of="late-80s American full-size body-on-frame RWD police sedan, 5.7 L pushrod V8 police package, 4-speed automatic, boxy three-box body",
+        analog_of="late-80s American full-size body-on-frame RWD police sedan, 7.4 L big-block V8 police package, 4-speed automatic, boxy three-box body",
         era="80s",
         profile="sedan",
         curb_kg=1830.0,
@@ -1749,14 +1755,15 @@ CARS = [
         extra_cda=0.05,
         lift=(0.12, 0.14),
         engine=dict(
-            desc="5.7 L OHV 16-valve V8, throttle-body injection, police package (performance cam, dual exhaust, high-flow intake)",
-            curve=[(800, 290), (1200, 340), (1600, 380), (2000, 400), (2400, 410), (2800, 412),
-                   (3200, 405), (3600, 392), (4000, 370), (4400, 330), (4800, 290), (5000, 265),
-                   (5200, 240)],
-            idle=600, redline=5000, limit=5200, inertia=0.26, brake_frac=0.12,
-            why=("Class-typical late-80s 5.7 L throttle-body police V8 (~27 kW/L, ~155 kW at "
-                 "4000 rpm, ~412 N·m at 2800) per fleet spec-class data and period road tests: "
-                 "all low-end torque, nothing above 4500 rpm."),
+            desc="7.4 L OHV 16-valve big-block V8, port injection, police package (performance cam, dual exhaust, high-flow intake)",
+            curve=[(800, 380), (1200, 450), (1600, 500), (2000, 530), (2400, 545), (2800, 550),
+                   (3200, 545), (3600, 530), (4000, 505), (4400, 470), (4800, 425), (5000, 400),
+                   (5200, 370)],
+            idle=600, redline=5000, limit=5200, inertia=0.30, brake_frac=0.12,
+            why=("Class-typical big-block police V8 (~29 kW/L, ~215 kW at 4400 rpm, ~550 N·m at "
+                 "2800) per fleet spec-class data and period road tests: a wall of low-end "
+                 "torque, nothing above 4500 rpm. Pursuit tuning (owner, 2026-10-23): replaces "
+                 "the 155 kW 5.7 L so the old unit is no longer left standing."),
         ),
         trans=dict(
             desc="4-speed automatic with overdrive and lock-up torque converter, clutch-type rear LSD (police option) on a coil-sprung live axle",
@@ -1779,8 +1786,8 @@ CARS = [
         durability=4,
         note=("The old workhorse still in service: a long, soft, boxy V8 sedan that leans, "
               "floats and squats like a boat, with drum rear brakes that fade after a few hard "
-              "stops. It has the low-end shove to close on ordinary traffic and nothing for a "
-              "sports car beyond 120 km/h — but it is a full-length steel frame on wheels, and "
+              "stops. The big-block has the low-end shove to close on anything ordinary and to "
+              "hang on to a sports car to highway speed — but it is a full-length steel frame on wheels, and "
               "nobody wants it in their door."),
         breaks=("Body-on-frame: a perimeter steel frame runs bumper to bumper under a separate "
                 "body, with steel bumpers and a bolted push bar, so it shrugs off shunts that "
@@ -1803,7 +1810,7 @@ CARS = [
         id="sentinel_vigil",
         display_name="Sentinel Vigil",
         cls="PoliceInterceptor",
-        analog_of="2010s American muscle-coupe pursuit car, 5.0 L DOHC V8, RWD, 2-door, pursuit package",
+        analog_of="2010s American muscle-coupe pursuit car, 5.2 L supercharged DOHC V8, RWD, 2-door, pursuit package",
         era="2010s",
         profile="coupe",
         curb_kg=1760.0,
@@ -1823,12 +1830,14 @@ CARS = [
         extra_cda=0.05,
         lift=(0.08, 0.10),
         engine=dict(
-            desc="5.0 L DOHC 32-valve V8, naturally aspirated, pursuit calibration (extra oil and transmission coolers)",
-            curve=[(1000, 350), (1500, 395), (2000, 430), (2500, 460), (3000, 485), (3500, 505),
-                   (4000, 522), (4250, 529), (4750, 525), (5250, 515), (5750, 500), (6250, 482),
-                   (6750, 452), (7000, 435), (7400, 395)],
-            idle=700, redline=7000, limit=7400, inertia=0.22, brake_frac=0.10,
-            why="Same class engine as the Rampart 5.0 (2010s NA 5.0 DOHC V8, ~64 kW/L); the pursuit package changes cooling, not output.",
+            desc="5.2 L DOHC 32-valve V8, supercharged, pursuit calibration (extra oil and transmission coolers)",
+            curve=[(1000, 450), (1500, 560), (2000, 680), (2500, 780), (3000, 830), (3500, 855),
+                   (4000, 865), (4500, 865), (5000, 855), (5500, 840), (6000, 820), (6500, 800),
+                   (7000, 765), (7400, 700)],
+            idle=700, redline=7000, limit=7400, inertia=0.24, brake_frac=0.10,
+            why=("Class-typical 2010s 5.2 L supercharged DOHC V8 from the muscle coupe's top "
+                 "trim (~108 kW/L, ~560 kW at 7000 rpm, ~865 N·m from 4000). Pursuit tuning "
+                 "(owner, 2026-10-23): the NA 5.0 could not run down stock sports cars."),
         ),
         trans=dict(
             desc="6-speed automatic with torque converter (pursuit packages are automatic-only), clutch-type rear LSD",
@@ -1850,8 +1859,8 @@ CARS = [
         price=52000,
         durability=4,
         note=("The highway-patrol hammer, sent when nothing else can keep up: the muscle "
-              "coupe's V8 and big brakes on performance tires, with a push bar on the nose. It "
-              "runs with the modern sports cars to pursuit speed and brakes later than any "
+              "coupe's supercharged V8 and big brakes on performance tires, with a push bar on "
+              "the nose. It runs with the exotics on the straights and brakes later than any "
               "other unit, but two doors, a heavy nose and rear drive make it a handful in the "
               "wet and useless for boxing in a truck."),
         breaks=("Modern UHSS coupe cell with long crumple rails, plus a reinforced push bar and "

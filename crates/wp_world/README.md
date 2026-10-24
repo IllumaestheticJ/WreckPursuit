@@ -11,7 +11,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `network` | The road file format (`.road.bin` / `.road.json`), validation |
 | `builder` | Abstract road graph → lanes, connections, junction control, signal plans |
 | `procgen` | Procedural fallback city (grid + ring + highway spine + 2 diagonals), flat |
-| `vesper` | Port Vesper v2 (`vesper_v2`): curved streets, hills, terrain, banked highway loop, grade separations |
+| `vesper` | Port Vesper v2 (`vesper_v2`): curved streets, hills, terrain, banked highway loop, grade separations, the Vesper River and Calder Canal with their bridges, the Hollins Tunnel, landmarks, hideouts |
 | `terrain` | `Heightfield` (stored with the network), value noise, bumps |
 | `surface` | Road trimesh (`road_mesh`: banked surface ribbons + `node_patches` — junction surfaces, bend strips, dead-end turnarounds sharing the ribbons' end edges), raised sidewalks + kerbs + level lots and skirts behind them (`sidewalk_mesh`, exact corner fills along the kerb curves), deck rails — one geometry for physics and the greybox; `MapGround` wheel probe |
 | `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building line of sight) |
@@ -115,6 +115,19 @@ extension). All coordinates are metres, +X east, +Y north, +Z up. Ids are `u32` 
   these.
 - `terrain` (v2): `Option<Heightfield>` — `origin`, `cell_m`, `nx`, `ny`, row-major heights
   (bilinear between vertices). `None` = flat ground at z = 0 (the procedural grid, imports).
+- `features` (v7, `CityFeatures`; empty for the grid city and imports; PR #38's v4 without
+  its tunnel bore: tunnels are `covered` spans):
+  - `waterways[]`: `name`, `kind` (`River` / `Canal`), `centre` (z = water surface, source →
+    mouth), `half_width_m[]` per point, `depth_m`. `network::SEA_LEVEL_M` (0.25 m) is the sea.
+  - `bridges[]`: named deck stretches over water — `name`, `kind` (`Beam`, `Truss` = steel-grate
+    deck, `Viaduct`), `surface` (index into `surfaces`), deck `centre`, `half_width_m`.
+  - `structures[]`: solid prisms that are not ordinary buildings, possibly floating — `kind`
+    (`Canopy`, `Pillar`, `Landmark`, `Truss`),
+    convex `footprint`, `z0_m`..`z1_m`. They collide (`wp_sim`), render and block line of sight.
+  - `landmarks[]`: `name`, `kind` (`Tower`, `Lighthouse`, `Observatory`, `Chimney`, `Crane`,
+    `WaterTower`, `Bridge`, `Tunnel`), base `pos`, `height_m`, its `structures`.
+  - `hideouts[]`: `name`, `kind` (`Tunnel`, `Canopy`), `pos` (ground level), `radius_m`: places
+    hidden from the air.
 
 Derived at load (`CityMap::new`), not stored: junction connector curves (cubic Bézier, tangent
 continuous), per-connector conflict sets (same target lane or swept paths closer than 2.4 m),
@@ -260,8 +273,47 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
 - **Lots:** buildings along every street side (district-sized lots), clear of all roads and
   dead-end turnarounds, skipped on > 8 m of slope or water; walls start at the lowest ground
   under the footprint.
+- **Vesper River** (`features.waterways[0]`): north edge to the sea along x ≈ −505, between
+  Larkspur and downtown; 32–60 m of water, 2.5 m deep, 12 m banks, cut into the natural ground
+  (`Natural::z`). The surface follows the ground 3 m down and never rises towards the mouth
+  (19.5 m at the north edge → sea level by Harbor Boulevard), so it runs through a gorge past
+  Hollins Heights. **Calder Canal**: a level 20 m cut west from the river through Canal Flats
+  (between its two rows; the grid moved west of the river) to a 60 m turning basin, 3 m deep
+  with steep quay banks.
+- **Bridges:** every road that crosses a channel stays at or above deck height across it
+  (water + banks: a profile *floor*, `Draft::floors`; deck just over the lower bank and ≥ 3 m
+  over the water, 4.5 m for Loop 9, 2.2 m over the canal), left uncarved, and gets deck rails
+  and piers like any deck. A floor, not a hold (PR #38 held it): a road whose line passes
+  higher keeps it, so Ridge Road crosses the gorge on a high bridge and the Hollins Knob
+  junction stays at 109.8 m (a hold pulled it to 83.6 m under the grade cap). Eleven named
+  bridges: Vesper Viaduct and Mouth Viaduct (Loop 9 north and
+  south), Ridge Road Bridge, Hollins Gorge Bridge, Lantern Bridge, Larkspur Avenue Bridge, the
+  **Iron Bridge** (Canal Street, 1+1, steel truss over a steel-grate deck: `surface_at` reads
+  `Metal`), Harbor Boulevard Bridge, and the Basin, Mill and Lock bridges over the canal. Loop
+  9 is never cut into pieces over the river or in the tunnel.
+- **Hollins Tunnel:** the covered span below (`covered`); `features` lists it as a landmark
+  and a hideout. `CityMap::in_tunnel(p)` = inside any covered span.
+- **Highway edge barriers** (row 160, `surface::edge_barriers`): the median's concrete
+  barrier along every carriageway's outer edge and both ramp edges, inner face on the paved
+  edge; open 40 m before and after any other paving meeting the edge (ramp tapers, gores, the
+  rest-stop ramps, junctions, freeway-merge taper patches), on decks and in covered spans.
+  Physics: the smooth row-164 barrier meshes; greybox: plain walls.
+- **Ramp merges** (row 162, `surface::ramp_merges`): a ramp lies in the carriageway's plane as
+  long as its paving overlaps the carriageway's (`profile_ramp`), and the freeway taper strips
+  are banked like (and lie on) the roads they join, and a ramp's bank beside the carriageway
+  is the carriageway plane's across the ramp, so every merge and diverge is flush (≤ 0.6 cm
+  steps on the merge line, drawn = physics) and clear.
+- **Landmarks** (`features.landmarks`; lots found by an outward search for dry, level ground
+  clear of roads, reserved before buildings are placed): Lantern Tower (230 m, downtown),
+  Vesper Point Lighthouse (south-east shore), Hollins Observatory (the knob), Calder Mill
+  Chimney (Canal Flats), three Gantry Cranes on the quay (booms over the shore highway), the
+  Larkspur Water Tower; plus the Iron Bridge and the Hollins Tunnel.
+- **Hideouts** (`features.hideouts`): the Hollins Tunnel and five canopies — roof slabs 4.2 m
+  over a level lot next to a road, on pillars, open at the sides (Calder Mill Shed, Gantry Row
+  Reefer Dock, Larkspur Carports, Eastgate Parking Deck, Lantern Row Arcade). A car under one is
+  out of the helicopter's sight; ground units see in from the side.
 - **POIs:** race grids `Lantern Run` (first: free drive / city chase spawn), `Loop 9 sprint`,
-  `Hollins Ascent`, `Hollins Descent`, `Ridge Road`, `Harbor Boulevard drag`, `Bluff Road`,
+  `Hollins Ascent` (just across the Hollins Gorge Bridge), `Hollins Descent`, `Ridge Road`, `Harbor Boulevard drag`, `Bluff Road`,
   `Loop 9 north`, `Loop 9 west`; 3 precincts + helipad, 3 garages, 4 safehouses (incl.
   `Knob Observatory Lot`); 3 rest stops.
 
@@ -280,11 +332,12 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   `CityMap::covered_los = false` / `World::set_covered_los(false)` switches only the
   sightline effect off (A/B controls). `World::covered_at(p)` names the span at a point.
 
-1012 lanes, 159 junctions (31 signalised, 22 freeway merges / diverges), 3395 buildings,
-14 grade separations (Route 40 West / North and five crossroads, each over or under both
-carriageways), 22 ramps, ≈ 10 km of median barrier, 2 covered roads, terrain
-681 × 611 vertices (−3 … 111 m); generation ≈ 0.12 s release (0.4 s debug), `CityMap::new`
-≈ 10 ms. `cargo run --release -p wp_world --example vesper_stats` prints grades, crest/sag g
+1180 lanes, 188 junctions (31 signalised), 3576 buildings, 14 grade separations (Route 40
+West / North and five crossroads, each over or under both carriageways), 22 interchange ramps
+and 6 rest-stop ramps, ≈ 10 km of median barrier and ≈ 29 km of highway edge barrier (61 % of
+the highway edges), 2 covered roads, 13 bridge decks over water (11 named bridges), 143
+structures, 10 landmarks, 6 hideouts, terrain 681 × 611 vertices (−3 … 111 m); generation
+≈ 0.29 s release, `CityMap::new` ≈ 10 ms. `cargo run --release -p wp_world --example vesper_stats` prints grades, crest/sag g
 at the limit and banks per road.
 
 ### Sidewalks, kerbs and junction discs (`surface`, playtest #20)
@@ -698,6 +751,12 @@ per 60 Hz frame (0.27 ms avg with collision diagnostics); 10-min soaks × 3 seed
 aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
 
 ## Known gaps
+- Water is scenery: a car that leaves a bridge drives on the river bed (no buoyancy, drag,
+  drowning or engine flooding yet). `CityMap::water_surface_at` is there for whoever adds it.
+- The Kettle Street drawbridge, rail line and Westline viaduct from `docs/design/CITY.md` are
+  not built; the river runs north–south here (the design's runs east–west).
+- Only the tunnel, canopies and other structures hide a car from the air: road decks do not
+  block line of sight (a car under a viaduct is still seen by the helicopter).
 - Grid cities smaller than 12×12 have half diamonds only (their inner blocks are too short
   for the other half): from the city you can join the highway towards the ring and leave it
   coming from the ring, plus the ring junctions at both ends.

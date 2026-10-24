@@ -145,7 +145,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 3.9 s | 321 km/h | 38.5 m | 0.95 g | — |
+| sim | 3.9 s | 319 km/h | 38.6 m | 0.95 g | — |
 | estimate | 3.9 s | 330 km/h | 35.2 m | 0.97 g | 773 |
 
 ## Damage lattice (`data/lattices/kagero_hx.json`)

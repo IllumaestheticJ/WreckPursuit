@@ -74,6 +74,8 @@ pub const BLOCK_SEGMENT_S: f32 = 30.0;
 pub const JAM_REROUTE_S: f32 = 3.0;
 /// Despawn (out of sight) a unit still stuck this long after its first event, s.
 pub const GIVE_UP_S: f32 = 8.0;
+/// [`UnstickState::wedged`]: a world contact this recent, s.
+pub const WEDGED_CONTACT_S: f32 = 3.0;
 /// Driving this far from the first event ends the stuck episode, m.
 pub const PROGRESS_M: f32 = 20.0;
 /// Turn-round tries (U-turn, reverse swing, back-out from a stopped racer) within
@@ -371,6 +373,16 @@ impl UnstickState {
     }
 
     /// Note forward progress: far enough from the first event ends the episode.
+    /// Stuck against the world and trying to free itself (row 168): an unstick attempt under
+    /// way (cleared once it moves [`PROGRESS_M`]) and touching a wall or the terrain within
+    /// the last [`WEDGED_CONTACT_S`]. Such a car is not there to make an arrest.
+    pub(crate) fn wedged(&self, now: SimTime) -> bool {
+        self.first.is_some()
+            && self
+                .world_contact
+                .is_some_and(|w| now.since(w.at) < WEDGED_CONTACT_S)
+    }
+
     pub(crate) fn progress(&mut self, pos: [f32; 2]) {
         if self.turn_first.is_some_and(|p| dist(p, pos) > PROGRESS_M) {
             self.turn_first = None;
