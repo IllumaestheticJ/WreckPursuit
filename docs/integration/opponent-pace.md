@@ -1360,3 +1360,20 @@ in. Target: Lantern s50 ≥ 63/64 with no new walls, then weaving v2.
   - a per-race finish window override, `RaceDef::finish_window_s` = 150 s, applied by
     `RaceDef::rules()` in `LiveRace` and in `opponent_pace`.
 - Every other race keeps its kind's window (`None`).
+
+## Unafraid of traffic (owner, 2026-10-24)
+
+Owner: "make AI completely unafraid of tagging/hitting pedestrian vehicles in a race — they are
+still far too slow and cautious around other traffic and player vehicles. Make it extreme."
+
+- New `RaceConfig::ram_traffic` (default **on**; `wp_opponent::roam` and `wp_wasm`'s
+  `roam_config` set it off). Details in the `wp_opponent` README ("Unafraid of traffic").
+- While racing, every non-racer (civilian, physical traffic, player, police) is fair game: no
+  following gap (brake only down to a `TAG_CLOSING_MPS` = 15 m/s hit), no junction yielding,
+  reds run by everyone, no side clearance (except head on), no patience, opposing lanes
+  always allowed for passes, 0.1 m clearance.
+- Racer–racer racecraft untouched; racers out of the race (fled/busted/retired) are not rammed.
+- Full sim, open roads, 25 % traffic, 4 racers, 60 s: 4768 m vs 2672 m careful (+78 %), zero
+  racer–racer hard contacts.
+- Cross-crate touch: `crates/wp_wasm/src/street.rs` `roam_config` (one field).
+- Tuning knob: `TAG_CLOSING_MPS` (lower = softer tags; `f32::INFINITY` = never brakes for traffic).
