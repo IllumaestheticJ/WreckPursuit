@@ -8,7 +8,7 @@
 // contact's tick. Without the fix this run has no police event for the racer at all; 0.3 m
 // further right the unit dodges and there is no contact. Re-aim with
 // `examples/probe_police.rs` if police spawning changes.
-// Re-aimed for the road network centreline fix (playtest row 166): unit 2's patrol now comes
+// Re-aimed for the road network centreline fix (playtest row 169): unit 2's patrol now comes
 // up x = -163.25 about 270 m further south, so the racer starts at (-164.9, -190) on the same
 // road: contact at 8.70 s (9.9 kN·s, 11.5 m/s closing), pursuit in the same tick. Starts at
 // y = -185 … -230 hit it (contact 8.9 … 6.1 s); -180 hits too late for the 9.1 s limit.

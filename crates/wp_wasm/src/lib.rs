@@ -20,7 +20,7 @@
 //! | scenario | `scenario_json()`, `scenario_result()` |
 //! | crash replay (lead) | `crash_take()`, `crash_tuning_json()`, `crash_tuning_set(json)`, `crash_detect_enable(on)`, `crash_buffer_ticks()`, `crash_replay_start(seq)`, `crash_replay_active()`, `crash_replay_stop()` — see [`crash_replay`] |
 //! | touge | `touge_list_json()`, `touge_menu_json(map, dir, daylight, surface, opponent)`, `touge_scenario_json(…, car, mode, wager_json, autopilot)`, `touge_start(…)`, `touge_result_json()`, `touge_debug_set_rep(rep)` — see [`touge`] |
-//! | race (19) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_spots()`, `race_spot_honked()`, `debug_place(entity, x, y, yaw, speed)`, `race_bet(label, stake)`, `race_bet_status()`, `roster_json()`, `roster_state()` / `roster_state_load(text)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
+//! | race (19) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_start_on(…, tune_json, map)`, `race_spots()`, `race_spot_honked()`, `debug_place(entity, x, y, yaw, speed)`, `race_bet(label, stake)`, `race_bet_status()`, `roster_json()`, `roster_state()` / `roster_state_load(text)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
 //! | props (lead) | `props_static()` once per session, `props_moved()` per frame, `prop_stride()`, `prop_moved_stride()`, `prop_pose(i)`, `debug_knock_prop(entity, prop, speed)` — see [`props`] |
 //! | parked-car damage (lead) | `parked_wrecks()` per frame, `parked_wreck_stride()`, `parked_entity_base()`, `parked_wreck_shattered(entity)`; a wreck's entity works with the `lattice_*` / `vehicle_info` calls — see [`props`] |
@@ -996,6 +996,26 @@ pub fn race_list(car: &str, mode: &str) -> Result<String, JsValue> {
     Ok(json(&race::race_cards(car.as_ref(), mode)))
 }
 
+/// Scenario JSON of race `id` for `career_start_run` (the career garage's "Street races",
+/// playtest row 167): the player in `car` (the career puts its own car in), on `city` when the
+/// race runs there (the main menu's map: a Port Vesper race on `ashpeak` stays on it), else on
+/// the race's own city (`city` "" = its own). Buy-in, purse, bets and rep then go through the
+/// career account.
+#[wasm_bindgen]
+pub fn race_scenario_json(
+    id: &str,
+    car: &str,
+    mode: &str,
+    autopilot: bool,
+    city: &str,
+) -> Result<String, JsValue> {
+    let def = wp_race::catalog::race(id).ok_or_else(|| err(format!("unknown race {id:?}")))?;
+    let city = race::race_city(&def, city);
+    let sc = race::race_scenario_in(&def, car, parse_mode(mode).map_err(err)?, autopilot, city)
+        .map_err(err)?;
+    Ok(json(&sc))
+}
+
 /// Start race `id` with the player in `car` (`mode` `"Arcade"` | `"Simulation"`): a new live
 /// session on the race's grid, countdown running, AI field on the slots ahead. `autopilot`
 /// hands the player's car to the AI (tests / e2e). The account carries over like a restart.
@@ -1017,14 +1037,33 @@ pub fn race_start_tuned(
     autopilot: bool,
     tune_json: &str,
 ) -> Result<Vec<u32>, JsValue> {
+    race_start_on(id, car, mode, autopilot, tune_json, "")
+}
+
+/// [`race_start_tuned`] on map `map` (a city id, e.g. the main menu's map choice): the race runs
+/// there when it can ([`race::race_city`]: a Port Vesper race on `ashpeak` stays on `ashpeak`),
+/// else on its own city. `map` empty = the current session's map, as `race_start`.
+#[wasm_bindgen]
+pub fn race_start_on(
+    id: &str,
+    car: &str,
+    mode: &str,
+    autopilot: bool,
+    tune_json: &str,
+    map: &str,
+) -> Result<Vec<u32>, JsValue> {
     let def = wp_race::catalog::race(id).ok_or_else(|| err(format!("unknown race {id:?}")))?;
-    let current = with_session_opt(|s| {
-        Ok::<_, ()>(
-            s.filter(|s| s.has_city())
-                .map_or(String::new(), |s| s.sim().world().network().id.clone()),
-        )
-    })
-    .unwrap_or_default();
+    let current = if map.is_empty() {
+        with_session_opt(|s| {
+            Ok::<_, ()>(
+                s.filter(|s| s.has_city())
+                    .map_or(String::new(), |s| s.sim().world().network().id.clone()),
+            )
+        })
+        .unwrap_or_default()
+    } else {
+        map.to_string()
+    };
     let city = race::race_city(&def, &current);
     let mut sc = race::race_scenario_in(&def, car, parse_mode(mode).map_err(err)?, autopilot, city)
         .map_err(err)?;

@@ -16,7 +16,7 @@
     time_ratio: 1.0,
     mode: Arcade,
     assists: ai,
-    traffic_density: 0.3,
+    traffic_density: 0.15,
     police_presence: 1.0,
     panels: true,
     entities: [

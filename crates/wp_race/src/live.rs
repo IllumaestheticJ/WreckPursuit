@@ -173,11 +173,7 @@ impl LiveRace {
         autopilot: bool,
     ) -> Result<LiveRace, RaceSetupError> {
         let data = RaceData::embedded();
-        let mut judge = RaceJudge::new(
-            EventId(def.seed as u32),
-            data.rules.for_kind(def.kind),
-            race.course.clone(),
-        );
+        let mut judge = RaceJudge::new(EventId(def.seed as u32), def.rules(), race.course.clone());
         // Off route is never a DQ and never a reset in a picker race (owner, 2026-10-21): take
         // any line, the gates still have to be driven through in order. The judge's reset
         // option stays off. The AI entrants alone are put back on the course once stranded

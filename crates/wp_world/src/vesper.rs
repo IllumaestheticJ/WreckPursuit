@@ -1732,6 +1732,62 @@ fn profile(
     kmax: f32,
 ) -> Vec<f32> {
     let n = desired.len();
+    if floors.is_empty() {
+        return profile_pass(desired, ds, anchors, internal, &[], pins, grade, kmax);
+    }
+    // Floors (decks over water) are not pinned: pinning one side of each corner where the
+    // approach meets the deck height left it rounded on the other side only, and the final
+    // clamp put the kink back (a 4.6 % grade break in 10 m on Loop 9's canal bridge launched
+    // cars at 59 m/s). Instead nothing is pinned and each floor is lifted by whatever the
+    // smoothing still took off it, until the smoothed profile clears it: the curvature limit
+    // holds over the deck too. (Holding floors further out instead lengthens the
+    // embankments and lifts the lots beside them off the drawn terrain.)
+    let mut lift = vec![0.0f32; floors.len()];
+    let mut z = Vec::new();
+    for _ in 0..8 {
+        let held: Vec<(usize, usize, f32)> = floors
+            .iter()
+            .zip(&lift)
+            .map(|(&(i0, i1, f), &l)| (i0, i1, f + l))
+            .collect();
+        z = profile_pass(desired, ds, anchors, internal, &held, pins, grade, kmax);
+        let mut clear = true;
+        for (k, &(i0, i1, f)) in floors.iter().enumerate() {
+            let short = (i0..=i1.min(n - 1))
+                .map(|i| f - z[i])
+                .fold(0.0f32, f32::max);
+            if short > 0.002 {
+                lift[k] += short * 1.1;
+                clear = false;
+            }
+        }
+        if clear {
+            break;
+        }
+    }
+    // Safety: nothing inside a floor range ends up under it (millimetres at most).
+    for &(i0, i1, f) in floors {
+        for v in z.iter_mut().take(i1.min(n - 1) + 1).skip(i0) {
+            *v = v.max(f);
+        }
+    }
+    z
+}
+
+/// One pass of [`profile`]: cones, grade limit and smoothing with `floors` as minimum
+/// heights on the cones only (never pinned).
+#[allow(clippy::too_many_arguments)]
+fn profile_pass(
+    desired: &[f32],
+    ds: f32,
+    anchors: &[(usize, usize, f32)],
+    internal: &[(usize, usize, f32)],
+    floors: &[(usize, usize, f32)],
+    pins: (usize, usize),
+    grade: f32,
+    kmax: f32,
+) -> Vec<f32> {
+    let n = desired.len();
     let g = grade * ds;
     let mut fixed: Vec<Option<f32>> = vec![None; n];
     let all: Vec<(usize, usize, f32)> = anchors.iter().chain(internal).copied().collect();
@@ -1811,27 +1867,12 @@ fn profile(
             *p = true;
         }
     }
-    // A floor that holds the profile up (a deck over water) stays pinned where it does, so
-    // the approaches round off outside the deck.
-    for &(i0, i1, f) in floors {
-        for i in i0..=i1.min(n - 1) {
-            if z[i] <= f + 0.01 {
-                pin[i] = true;
-            }
-        }
-    }
     for _ in 0..passes {
         let prev = z.clone();
         for i in 1..n - 1 {
             if !pin[i] {
                 z[i] = 0.25 * prev[i - 1] + 0.5 * prev[i] + 0.25 * prev[i + 1];
             }
-        }
-    }
-    // Safety: nothing inside a floor range ends up under it.
-    for &(i0, i1, f) in floors {
-        for v in z.iter_mut().take(i1.min(n - 1) + 1).skip(i0) {
-            *v = v.max(f);
         }
     }
     z
@@ -4047,6 +4088,7 @@ fn buildings(
     allowed: &dyn Fn(V2) -> bool,
     lots: &[Obb],
     wet: &dyn Fn(V2) -> bool,
+    skip: &dyn Fn(usize) -> bool,
 ) -> (Vec<Building>, Vec<Decor>) {
     // Junction / bend areas with the turning paths through them, plus a sidewalk.
     let node_r = node_radii(built, nodes);
@@ -4094,9 +4136,10 @@ fn buildings(
                 .iter()
                 .any(|q| dead_ends.iter().any(|d| geom::dist(*q, *d) < 20.0))
     };
-    for s in &built.surfaces {
-        // Rest stops: a lit parking road, no houses along it.
-        if s.highway || no_buildings.contains(&(s.road as usize)) {
+    for (si, s) in built.surfaces.iter().enumerate() {
+        // Rest stops: a lit parking road, no houses along it. Skipped streets keep the lots
+        // the caller reserved for them (a region's copy of Port Vesper's own).
+        if s.highway || no_buildings.contains(&(s.road as usize)) || skip(si) {
             continue;
         }
         let pts: Vec<V2> = s.centre.iter().map(|p| geom::xy(*p)).collect();
@@ -4360,6 +4403,163 @@ fn buildings(
 }
 
 /// Oriented box around a footprint, aligned with its first edge.
+/// For a region map: Port Vesper's structures, landmarks and hideouts exactly as `base`
+/// (`vesper_v2`) has them, where the region placed the same one (same kind and footprint, or
+/// same name): their heights follow `vesper_v2`'s finer terrain, so Port Vesper's canopies and
+/// landmarks look the same on both maps. Structure indices are unchanged.
+fn reuse_vesper_features(base: &RoadNetwork, features: &mut CityFeatures) {
+    let bf = &base.features;
+    for st in &mut features.structures {
+        if let Some(b) = bf
+            .structures
+            .iter()
+            .find(|b| b.kind == st.kind && b.footprint == st.footprint)
+        {
+            *st = b.clone();
+        }
+    }
+    for lm in &mut features.landmarks {
+        if let Some(b) = bf
+            .landmarks
+            .iter()
+            .find(|b| b.name == lm.name && b.kind == lm.kind)
+        {
+            // Keep the region's structure indices (its own structures come first).
+            lm.pos = b.pos;
+            lm.height_m = b.height_m;
+        }
+    }
+    for h in &mut features.hideouts {
+        if let Some(b) = bf
+            .hideouts
+            .iter()
+            .find(|b| b.name == h.name && b.kind == h.kind)
+        {
+            *h = b.clone();
+        }
+    }
+}
+
+/// How far a street's lots reach from its paved edge, m: Port Vesper buildings and decor this
+/// close to a street a region changed (or added) are left to the region's own pass.
+const REUSE_CLEAR_M: f32 = 45.0;
+
+/// Whether two road surfaces are the same street, bit for bit (the road index aside).
+fn same_surface(a: &RoadSurface, b: &RoadSurface) -> bool {
+    a.centre == b.centre
+        && a.bank == b.bank
+        && a.left_m == b.left_m
+        && a.right_m == b.right_m
+        && a.highway == b.highway
+        && a.sidewalk == b.sidewalk
+        && a.median_barrier == b.median_barrier
+        && a.material == b.material
+}
+
+/// For a region map: which of its surfaces are Port Vesper's, unchanged (`base` is
+/// `vesper_v2`), and the buildings and decor of `base` it keeps. An item is kept when nothing
+/// the region changed or added is near it: no other street within [`REUSE_CLEAR_M`] of it, no
+/// clash with the region's own buildings, decor or landmark lots, and generic buildings are
+/// allowed there.
+fn reuse_vesper_lots(
+    base: &RoadNetwork,
+    built: &Built,
+    extra_b: &[Building],
+    extra_d: &[Decor],
+    lots: &[Obb],
+    allowed: &dyn Fn(V2) -> bool,
+) -> (Vec<Building>, Vec<Decor>, Vec<bool>) {
+    let key = |s: &RoadSurface| {
+        s.centre
+            .first()
+            .map(|p| (p[0].to_bits(), p[1].to_bits(), s.centre.len()))
+    };
+    let mut by_key: BTreeMap<(u32, u32, usize), Vec<usize>> = BTreeMap::new();
+    for (i, s) in base.surfaces.iter().enumerate() {
+        if let Some(k) = key(s) {
+            by_key.entry(k).or_default().push(i);
+        }
+    }
+    let same: Vec<bool> = built
+        .surfaces
+        .iter()
+        .map(|s| {
+            key(s).is_some_and(|k| {
+                by_key
+                    .get(&k)
+                    .is_some_and(|c| c.iter().any(|i| same_surface(&base.surfaces[*i], s)))
+            })
+        })
+        .collect();
+    // Segments of the changed and added streets, in 64 m cells.
+    const CELL: f32 = 64.0;
+    let cell = |q: V2| ((q[0] / CELL).floor() as i32, (q[1] / CELL).floor() as i32);
+    let mut segs: Vec<(V2, V2, f32)> = Vec::new();
+    let mut cells: BTreeMap<(i32, i32), Vec<usize>> = BTreeMap::new();
+    for (s, _) in built.surfaces.iter().zip(&same).filter(|(_, same)| !**same) {
+        let hw = s.left_m.max(s.right_m);
+        for w in s.centre.windows(2) {
+            let (a, b) = (geom::xy(w[0]), geom::xy(w[1]));
+            let r = hw + REUSE_CLEAR_M;
+            let (lo, hi) = (
+                cell([a[0].min(b[0]) - r, a[1].min(b[1]) - r]),
+                cell([a[0].max(b[0]) + r, a[1].max(b[1]) + r]),
+            );
+            for x in lo.0..=hi.0 {
+                for y in lo.1..=hi.1 {
+                    cells.entry((x, y)).or_default().push(segs.len());
+                }
+            }
+            segs.push((a, b, hw));
+        }
+    }
+    let near_changed = |q: V2| {
+        cells.get(&cell(q)).is_some_and(|v| {
+            v.iter().any(|i| {
+                let (a, b, hw) = segs[*i];
+                geom::point_segment_distance(q, a, b) - hw < REUSE_CLEAR_M
+            })
+        })
+    };
+    let mut region = residential::ObbIndex::default();
+    for b in extra_b {
+        region.insert(footprint_obb(&b.footprint));
+    }
+    for d in extra_d {
+        region.insert(Obb {
+            c: [d.pos[0], d.pos[1]],
+            f: geom::dir_of_yaw(d.yaw),
+            hl: d.size[1] * 0.5,
+            hw: d.size[0] * 0.5,
+        });
+    }
+    for o in lots {
+        region.insert(*o);
+    }
+    let keep_at = |probes: &[V2]| probes.iter().all(|q| allowed(*q) && !near_changed(*q));
+    let kept_b: Vec<Building> = base
+        .buildings
+        .iter()
+        .filter(|b| keep_at(&b.footprint) && !region.clashes(&footprint_obb(&b.footprint)))
+        .cloned()
+        .collect();
+    let kept_d: Vec<Decor> = base
+        .decor
+        .iter()
+        .filter(|d| {
+            let o = Obb {
+                c: [d.pos[0], d.pos[1]],
+                f: geom::dir_of_yaw(d.yaw),
+                hl: d.size[1] * 0.5,
+                hw: d.size[0] * 0.5,
+            };
+            keep_at(&[o.c]) && !region.clashes(&o)
+        })
+        .cloned()
+        .collect();
+    (kept_b, kept_d, same)
+}
+
 fn footprint_obb(fp: &[V2]) -> Obb {
     let f = if fp.len() >= 2 && geom::dist(fp[0], fp[1]) > 1e-3 {
         geom::normalize(geom::sub(fp[1], fp[0]))
@@ -4632,6 +4832,9 @@ impl Site<'_> {
 }
 
 /// Generate Port Vesper alone (`region = None`) or Port Vesper plus a region as one map.
+/// Salt of a region's own random stream (see [`generate_region`]).
+const REGION_RNG_SALT: u64 = 0xa5_4ea7_c0de;
+
 fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetwork, VesperReport) {
     let mut rng = Rng::new(cfg.seed);
     let mut nat = Natural::new(&mut rng);
@@ -4656,8 +4859,14 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
         reserved: Vec::new(),
     };
     let (loop_drafts, hollins_draft, _knob, _lot, _r40w, _r40n) = g.layout();
+    // The region draws from its own stream (layout, extra buildings, POIs), so Port Vesper's
+    // draws (its buildings and decor) come out exactly as in `vesper_v2`: the combined map
+    // can ship Port Vesper's greybox unchanged (ashpeak-port's de-dup).
+    let mut region_rng = Rng::new(cfg.seed ^ REGION_RNG_SALT);
     if let Some(r) = region {
+        std::mem::swap(&mut g.rng, &mut region_rng);
         r.layout(&mut g);
+        std::mem::swap(&mut g.rng, &mut region_rng);
     }
     // Every road over the river and the canal is a bridge deck.
     plan_water_crossings(&mut g);
@@ -4795,7 +5004,7 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
         .collect();
     let (extra_b, extra_d) = match region {
         Some(r) => r.extra_buildings(&mut Site {
-            rng: &mut g.rng,
+            rng: &mut region_rng,
             built: &built,
             nodes: &g.nodes,
             drafts: &g.drafts,
@@ -4810,7 +5019,30 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
     // Landmarks and canopy hideouts first: their lots are kept clear of buildings.
     let lots = place_landmarks_and_hideouts(&mut features, &built, &hf, &g.nat, &covered, &grid);
     let wet = |q: V2| g.nat.wet(q, 2.0);
-    let (mut buildings, mut decor) = buildings(
+    // A region keeps Port Vesper's own buildings and decor (generated by `vesper_v2` itself)
+    // along every street it left unchanged, so Port Vesper looks the same on both maps; its
+    // own generic pass fills only the other streets, clear of what is kept.
+    let base = region.map(|_| {
+        generate(&VesperConfig {
+            seed: cfg.seed,
+            ..VesperConfig::default()
+        })
+    });
+    if let Some(base) = &base {
+        reuse_vesper_features(base, &mut features);
+    }
+    let reused = base
+        .as_ref()
+        .map(|base| reuse_vesper_lots(base, &built, &extra_b, &extra_d, &lots, &generic_at));
+    let (reuse_b, reuse_d, same) = match reused {
+        Some(r) => r,
+        None => (Vec::new(), Vec::new(), vec![false; built.surfaces.len()]),
+    };
+    let mut reserved_b = reuse_b.clone();
+    reserved_b.extend(extra_b.iter().cloned());
+    let mut reserved_d = reuse_d.clone();
+    reserved_d.extend(extra_d.iter().cloned());
+    let (generic_b, generic_d) = buildings(
         &mut g.rng,
         &built,
         &grid,
@@ -4819,13 +5051,18 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
         &hf,
         &dead_ends,
         &rest_roads,
-        &extra_b,
-        &extra_d,
+        &reserved_b,
+        &reserved_d,
         &generic_at,
         &lots,
         &wet,
+        &|si| same[si],
     );
+    let mut buildings = reuse_b;
+    buildings.extend(generic_b);
     buildings.extend(extra_b);
+    let mut decor = reuse_d;
+    decor.extend(generic_d);
     decor.extend(extra_d);
     let cover_shapes: Vec<CoverShape> = covered.iter().map(CoverShape::new).collect();
     buildings.retain(|b| !in_cover_corridor(&cover_shapes, &b.footprint));
@@ -5061,7 +5298,7 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
 
     if let Some(r) = region {
         pois.extend(r.pois(&mut Site {
-            rng: &mut g.rng,
+            rng: &mut region_rng,
             built: &built,
             nodes: &g.nodes,
             drafts: &g.drafts,
@@ -5142,6 +5379,25 @@ mod tests {
         }
         // The road cuts through the wall but still rises over it.
         assert!(z[50] > 3.0 && z[50] < 30.0, "{}", z[50]);
+    }
+
+    #[test]
+    fn a_deck_floor_rounds_off_within_the_curvature_limit() {
+        // Loop 9's canal bridge: a 600 m flat road held 2.25 m up over a 90 m crossing. The
+        // floor used to be pinned, leaving a 4.6 % grade break in 10 m at each end.
+        let ds = 2.0;
+        let (grade, kmax) = (0.06, max_vertical_curvature(30.0));
+        let desired = vec![2.5f32; 301];
+        let anchors = [(0, 2, 2.5), (298, 300, 2.5)];
+        let floors = [(130, 175, 4.75)];
+        let z = profile(&desired, ds, &anchors, &[], &floors, (2, 2), grade, kmax);
+        for (i, v) in z.iter().enumerate().take(176).skip(130) {
+            assert!(*v >= 4.75 - 1e-4, "{v} under the floor at {i}");
+        }
+        for i in 1..300 {
+            let k = ((z[i + 1] - 2.0 * z[i] + z[i - 1]) / (ds * ds)).abs();
+            assert!(k <= 1.25 * kmax, "curvature {k} at {i} (limit {kmax})");
+        }
     }
 
     fn city() -> &'static (RoadNetwork, VesperReport) {
@@ -5783,19 +6039,58 @@ mod tests {
         let (net, _) = city();
         let lines = crate::surface::edge_barriers(&crate::CityMap::new(net.clone()));
         let walled: f32 = lines.iter().map(|l| geom::cumulative(l)[l.len() - 1]).sum();
+        // Outer edges: the right edge of every highway surface, the left one too unless a
+        // median barrier walls it (a divided highway's median carries one barrier, owned by one
+        // carriageway).
+        let medians = crate::surface::median_barriers(net);
+        let near_median = |q: V2| {
+            medians.iter().any(|m| {
+                m.windows(2).any(|w| {
+                    geom::point_segment_distance(q, geom::xy(w[0]), geom::xy(w[1]))
+                        < crate::surface::MEDIAN_CLEAR_M
+                })
+            })
+        };
         let mut edges = 0.0;
         for s in net.surfaces.iter().filter(|s| s.highway) {
             let len = geom::cumulative(&s.centre)[s.centre.len() - 1];
-            edges += if s.median_barrier { len } else { 2.0 * len };
+            edges += len;
+            if !s.median_barrier {
+                let (l, _) = crate::surface::surface_edges(s);
+                let lc = geom::cumulative(&l);
+                let line = geom::offset_polyline(&l, -crate::surface::BARRIER_HALF_WIDTH_M);
+                for k in 0..l.len() - 1 {
+                    if !near_median(geom::xy(line[k])) {
+                        edges += lc[k + 1] - lc[k];
+                    }
+                }
+            }
         }
-        // Measured 61 %: open at ramp tapers, gores and junctions (and 40 m either side of
-        // them), on decks and in the Hollins Tunnel.
+        // Measured 61 % before the median-side duplicates were dropped; open at ramp tapers,
+        // gores and junctions (and 40 m either side of them), on decks and in the Hollins
+        // Tunnel.
         assert!(walled > 0.55 * edges, "walled {walled} of {edges} m");
         // Never on any paving (ramp joins stay open), never in a covered span (the Hollins
-        // Tunnel's walls; the barrier stops at its portals).
+        // Tunnel's walls; the barrier stops at its portals), never beside a median barrier
+        // (one ran 0.25 m beside Loop 9's north median and stuck out of its face).
         let covers: Vec<CoverShape> = net.covered.iter().map(CoverShape::new).collect();
+        let medians = crate::surface::median_barriers(net);
         for l in &lines {
             for p in l {
+                for m in &medians {
+                    for w in m.windows(2) {
+                        let d = geom::point_segment_distance(
+                            geom::xy(*p),
+                            geom::xy(w[0]),
+                            geom::xy(w[1]),
+                        );
+                        assert!(
+                            d >= crate::surface::MEDIAN_CLEAR_M - 0.01
+                                || (p[2] - w[0][2]).abs() > 3.0,
+                            "edge barrier {d:.2} m from a median barrier at {p:?}"
+                        );
+                    }
+                }
                 assert!(
                     !crate::surface::inside_other_paving(net, usize::MAX, *p),
                     "barrier on paving at {p:?}"

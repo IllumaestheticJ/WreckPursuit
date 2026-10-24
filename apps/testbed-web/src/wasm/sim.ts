@@ -518,8 +518,14 @@ export const sim = {
   /** Race picker for a player in `car` (`wp_wasm::race::RaceCard[]`). */
   raceList: (car: string, mode: string): RaceCard[] => JSON.parse(wasm.race_list(car, mode)),
   /** Start a picker race (new session; the account carries over). Returns entity ids, player first. */
-  raceStart: (id: string, car: string, mode: string, autopilot: boolean, tune?: CarTune): number[] =>
-    Array.from(wasm.race_start_tuned(id, car, mode, autopilot, tune ? JSON.stringify(tune) : "")),
+  /** Start picker race `id`; `map` (a city id, e.g. the main menu's map) runs it there when it
+   * can, else on its own city; "" / omitted = the current session's map. */
+  raceStart: (id: string, car: string, mode: string, autopilot: boolean, tune?: CarTune, map = ""): number[] =>
+    Array.from(wasm.race_start_on(id, car, mode, autopilot, tune ? JSON.stringify(tune) : "", map)),
+  /** Scenario JSON of race `id` for `careerStartRun` (the career garage's "Street races"); on
+   * `city` when the race runs there, else its own city ("" = its own). */
+  raceScenarioJson: (id: string, car: string, mode: string, autopilot: boolean, city: string): string =>
+    wasm.race_scenario_json(id, car, mode, autopilot, city),
   /** Honk-to-start meet spots on the session's map (`race_spots.ts`); `[]` during a race / replay / career. */
   raceSpots: (): RaceSpot[] => JSON.parse(wasm.race_spots()),
   /** The race the player just honked for in its spot (taken), or "". */

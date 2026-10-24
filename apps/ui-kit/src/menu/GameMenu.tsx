@@ -20,6 +20,7 @@ import { keyAction, PadNav, stepIndex, type NavAction } from "./nav";
 import { ASSIST_LEVELS, DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type AssistLevel, type GameSettings, type RadioFilter, type SettingsStorage, type Volumes } from "./settings";
 import { CONTROL_DEVICES, CONTROL_RANGES, defaultDeviceControls, type ControlDevice, type DeviceControls, type InputProbe } from "./controls";
 import { paintInputBars } from "./bars";
+import { loadMenuMap, saveMenuMap, type MenuMap } from "./maps";
 import "../ui/theme.css";
 import "./menu.css";
 
@@ -31,8 +32,9 @@ export type MenuScreen = "closed" | "main" | "pause" | "settings";
 
 /** What the host does for the menu. */
 export interface GameMenuHost {
-  /** Main menu choice: start that session (the menu has already closed). */
-  play(choice: PlayChoice): void;
+  /** Main menu choice: start that session (the menu has already closed). `map` is the
+   * main screen's map id (`GameMenuOptions.maps`; "" when the host lists none). */
+  play(choice: PlayChoice, map: string): void;
   /** Pause → Restart: the same session again (the menu has already closed). */
   restart(): void;
   /** Pause → Garage (career). The menu has already closed. */
@@ -68,6 +70,9 @@ export interface GameMenuOptions {
   developerDefault?: boolean;
   /** Storage for persistence (default localStorage; null = none). */
   storage?: SettingsStorage | null;
+  /** Maps the main screen offers (a "Map" picker when there are two or more; the first is the
+   * default). Night run, rainy night, street races and free drive start on the chosen one. */
+  maps?: MenuMap[];
 }
 
 /** Element that Left / Right adjust (cycle buttons, toggles). */
@@ -81,6 +86,8 @@ export class GameMenu {
   screen: MenuScreen = "closed";
   /** The controls panel is open on top (the menu is hidden meanwhile). */
   suspended = false;
+  /** The main screen's map id (remembered per browser; "" without `maps`). */
+  map: string;
   private settingsFrom: "main" | "pause" = "pause";
   private readonly root: HTMLElement;
   private readonly pad = new PadNav();
@@ -99,6 +106,7 @@ export class GameMenu {
     private readonly opts: GameMenuOptions,
   ) {
     this.settings = opts.settings;
+    this.map = loadMenuMap(opts.maps ?? [], opts.storage === undefined ? undefined : opts.storage);
     this.countersteer = !!opts.countersteer;
     this.root = document.createElement("div");
     this.root.id = "wp-game-menu";
@@ -176,6 +184,14 @@ export class GameMenu {
   /** Change settings from outside (e.g. the developer panel's assist boxes); applies + saves. */
   update(patch: Partial<GameSettings>): void {
     this.change({ ...this.settings, ...patch });
+  }
+
+  /** Choose the main screen's map (remembered per browser). */
+  setMap(id: string): void {
+    if (!(this.opts.maps ?? []).some((m) => m.id === id) || id === this.map) return;
+    this.map = id;
+    saveMenuMap(id, this.opts.storage === undefined ? undefined : this.opts.storage);
+    this.draw();
   }
 
   /** Remove from the page. */
@@ -363,7 +379,10 @@ export class GameMenu {
     if (this.screen === "main") {
       body = (
         <MainScreen
-          play={(c) => this.act(() => h.play(c))}
+          maps={this.opts.maps ?? []}
+          map={this.map}
+          setMap={(id) => this.setMap(id)}
+          play={(c) => this.act(() => h.play(c, this.map))}
           settings={() => this.openSettings("main")}
           controls={() => this.controls()}
         />
@@ -466,7 +485,7 @@ function Brand(props: { kicker: string }) {
 }
 
 const PLAY: { id: PlayChoice; label: string; hint: string }[] = [
-  { id: "chase", label: "Night run", hint: "Night in Port Vesper. You're speeding; the police will come." },
+  { id: "chase", label: "Night run", hint: "Night on the chosen map. You're speeding; the police will come." },
   { id: "chaseRain", label: "Rainy night", hint: "Same chase on a soaked road" },
   { id: "races", label: "Street races", hint: "Races against AI drivers" },
   { id: "touge", label: "Touge battles", hint: "One-on-one down sealed mountain passes. Bets and pink slips with rep" },
@@ -474,11 +493,19 @@ const PLAY: { id: PlayChoice; label: string; hint: string }[] = [
   { id: "garage", label: "Garage", hint: "Your career: cars, repairs, mods" },
 ];
 
-function MainScreen(props: { play: (c: PlayChoice) => void; settings: () => void; controls: () => void }) {
+function MainScreen(props: { maps: MenuMap[]; map: string; setMap: (id: string) => void; play: (c: PlayChoice) => void; settings: () => void; controls: () => void }) {
+  const cur = props.maps.find((m) => m.id === props.map);
   return (
     <div class="wp-gm-card wp-gm-main" role="dialog" aria-label="Main menu">
       <Brand kicker="// PORT VESPER · NIGHT SHIFT" />
       <p class="wp-gm-tag">Street racing, soft-body crashes and police chases in a living city.</p>
+      {props.maps.length > 1 && (
+        <div class="wp-gm-map">
+          <Row label="Map" hint={cur?.note ?? `Night run, rainy night, street races and free drive start here`}>
+            <Cycle id="gm-map" label="Map" value={props.map} options={props.maps.map((m) => ({ id: m.id, label: m.label }))} onChange={props.setMap} />
+          </Row>
+        </div>
+      )}
       <nav class="wp-gm-list" aria-label="Main menu">
         {PLAY.map((p, i) => (
           <Item key={p.id} id={`gm-play-${p.id}`} label={p.label} hint={p.hint} primary={i === 0} onClick={() => props.play(p.id)} />

@@ -159,11 +159,27 @@ impl CarTune {
         }
     }
 
-    /// The shipped tyres (unify, 2026-10-21): the owner's 7d6b66c9 spin model
-    /// ([`CarTune::spin_step22`]: b0 7.5) for every vehicle (`crate::lab_scope`). Candidate B
-    /// ([`CarTune::spin_candidate`]) measures close on the owner's combo but adds about one
-    /// lift-off step-out per car (tyre-slip.md, "The owner's target").
+    /// The shipped tyres (physics lead, 2026-10-23, owner rows physics-4 / physics-5):
+    /// `held_search` candidate G's spin model for every vehicle (`crate::lab_scope`), picked
+    /// blind twice by the owner. Spin weighting b0 6.48 / b2 1.75 / c 0.90, side-force floor
+    /// 0.38, rear relaxation × 1.41, rear peak slip × 1.10; goes with
+    /// [`crate::grip_lab::GripBalance::shipped`] and [`crate::ride_lab::RideTune::shipped`].
+    /// The set before it is [`CarTune::pre_g`].
     pub fn shipped() -> Self {
+        Self {
+            spin_b0: 6.48,
+            spin_b2: 1.75,
+            spin_c: 0.90,
+            side_floor: 0.38,
+            rear_relax: 1.41,
+            rear_peak_slip: 1.10,
+            ..Self::spin_step22()
+        }
+    }
+
+    /// The shipped tyres before candidate G (unify 2026-10-21 → 2026-10-23): the owner's
+    /// 7d6b66c9 spin model ([`CarTune::spin_step22`], b0 7.5). Lab A/B.
+    pub fn pre_g() -> Self {
         Self::spin_step22()
     }
 

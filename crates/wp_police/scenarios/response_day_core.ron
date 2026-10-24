@@ -14,7 +14,7 @@
     expect: [
         (metric: "calls", min: 1.0, max: 10000.0),
         (metric: "call_reached_25s_frac", min: 0.875, max: 1.0),
-        // 10 s before the road network centreline fix (playtest row 166). On main's world v7
+        // 10 s before the road network centreline fix (playtest row 169). On main's world v7
         // grid these 8 runs give 3.4 s from only 2 calls; here 10.04 s (2 calls). Over 48 runs
         // (seeds 300/400/500/600) the mean is level: 7.3/8.1/5.4/9.5 s here vs 6.8/7.3/6.0/8.3 s
         // on main, but here 4 of 68 calls take over 25 s (main 0 of 71). Main's patrols mostly

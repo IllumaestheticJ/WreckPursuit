@@ -5,7 +5,7 @@
     name: "police_day_core_speeder",
     // Seed 103 (was 100): with ramps on the 6×6 grid's highway (half diamonds on the two
     // core rows) one run of seeds 100-104 (seed 102) starts its pursuit at 20.2 s.
-    // Seed 106 (was 103) since the road network centreline fix (playtest row 166): of the
+    // Seed 106 (was 103) since the road network centreline fix (playtest row 169): of the
     // single runs on seeds 100-110 the branch is as quick as main or quicker on all but 105,
     // which starts at 20.9 s (main 15.3 s); seeds 106-110: worst 18.3 s on both.
     seed: 106,
