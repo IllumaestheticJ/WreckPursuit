@@ -920,14 +920,24 @@ impl RaceRun {
             t.tick_economy(run);
             return;
         }
+        let Some(run) = run else {
+            if self.live.is_finished() {
+                self.settled = true;
+            }
+            return;
+        };
+        // Bets on yourself are decided at your own finish line: pay them there, so the results
+        // panel shows them settled (not "open" until the field is home) and the money is on
+        // the account even if the player drives off before the last car finishes.
+        if self.player_result().map(|r| r.status) == Some(RacerStatus::Finished) {
+            self.settle_bets(run);
+        }
         if self.settled || !self.live.is_finished() {
             return;
         }
         self.settled = true;
-        let Some(run) = run else {
-            return;
-        };
-        self.settle_bets_and_form(run);
+        self.settle_bets(run);
+        self.record_form();
         let Some(entry) = self.entry.take() else {
             return;
         };
@@ -958,19 +968,51 @@ impl RaceRun {
         }
     }
 
-    /// Record the race in the regulars' records and settle the player's bets.
-    fn settle_bets_and_form(&mut self, run: &mut PlayerRun) {
-        let def = self.live.def().clone();
+    /// Every racer's placing so far (final results once the race is over; finishers keep
+    /// their positions, cars still running count as not finished).
+    fn placings(&self) -> Vec<Placing> {
+        let def = self.live.def();
         let results = match self.live.final_results() {
             Some(r) => r.to_vec(),
             None => self.live.judge().results(),
         };
-        let placings = Placing::from_results(&results, |e| {
+        Placing::from_results(&results, |e| {
             self.names
                 .get(&e)
-                .and_then(|(name, _)| catalog::roster_key_of(&def, name))
+                .and_then(|(name, _)| catalog::roster_key_of(def, name))
                 .map(str::to_string)
-        });
+        })
+    }
+
+    /// Settle the player's bets against the placings so far, through `run`'s account. Once
+    /// only: later calls (and a book that took no bets) change nothing.
+    fn settle_bets(&mut self, run: &mut PlayerRun) {
+        let placings = self.placings();
+        if let Some(book) = self.book.as_mut().filter(|b| !b.settled) {
+            book.close();
+            self.bets = book.settle(&mut RunWallet(run), &placings);
+        }
+    }
+
+    /// The account is leaving this race (the career takes it back, a new session adopts it):
+    /// settle any bet still open so its money is on the account it was staked from. Before
+    /// the green light every stake is refunded; after it, leaving counts as not finishing
+    /// (a head-to-head against a car still running is void).
+    pub fn close_bets(&mut self, run: &mut PlayerRun) {
+        let Some(book) = self.book.as_mut().filter(|b| !b.settled) else {
+            return;
+        };
+        if book.open {
+            self.bets = book.void_all(&mut RunWallet(run));
+        } else {
+            self.settle_bets(run);
+        }
+    }
+
+    /// Record the race in the regulars' records (once the results are final).
+    fn record_form(&mut self) {
+        let def = self.live.def().clone();
+        let placings = self.placings();
         let rules = BettingRules::embedded();
         let deltas = with_roster(|st| {
             st.record_race(&placings, &rules.rating)
@@ -992,9 +1034,6 @@ impl RaceRun {
                 (name, d, r)
             })
             .collect();
-        if let Some(book) = &mut self.book {
-            self.bets = book.settle(&mut RunWallet(run), &placings);
-        }
     }
 
     fn bet_cards(&self) -> Vec<BetCard> {

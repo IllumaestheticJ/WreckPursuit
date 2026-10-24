@@ -943,3 +943,97 @@ fn a_picker_race_from_the_garage_charges_the_career_account() {
         .iter()
         .any(|e| e.cash_delta < 0 && e.cash_after == run.account().cash));
 }
+
+/// A career picker race with street rep, the player's car driven by the autopilot.
+fn career_race_with_rep() -> (Career, Session) {
+    let (mut c, _) = career_with("kestrel_ts", 50_000, DamageMode::Arcade);
+    c.profile_mut().account.rep = 2_000;
+    let def = wp_race::catalog::race("hollins_sprint").unwrap();
+    let sc =
+        crate::race::race_scenario_in(&def, "ignored", DamageMode::Arcade, true, def.city.id())
+            .unwrap();
+    let s = c.start_run(sc).unwrap();
+    (c, s)
+}
+
+/// Ledger lines of the career since `seq`.
+fn career_cash_deltas(c: &Career, seq: u64) -> Vec<i64> {
+    c.profile()
+        .ledger
+        .iter()
+        .filter(|e| e.seq >= seq)
+        .map(|e| e.cash_delta)
+        .collect()
+}
+
+/// A bet on a career picker race is settled at the player's own finish (the results panel
+/// shows it paid, not open, while the rest of the field is still racing) and its money lands
+/// on the career account when the player goes back to the garage right away.
+#[test]
+fn a_career_race_bet_settles_at_the_finish_and_posts_to_the_career() {
+    let (mut c, mut s) = career_race_with_rep();
+    let seq = s.run().unwrap().account().next_event_seq;
+    let t = s.race_place_bet("win:player", 500).unwrap();
+    let me = player(&s);
+    let rivals: Vec<EntityId> = s
+        .race()
+        .unwrap()
+        .live()
+        .racers()
+        .iter()
+        .copied()
+        .filter(|&e| e != me)
+        .collect();
+    let mut report = None;
+    for i in 0..240 * 300 {
+        s.run_ticks(1);
+        // Keep the field well behind the player's car, so the player wins with it still racing.
+        let running = s
+            .race()
+            .unwrap()
+            .standings()
+            .iter()
+            .any(|st| st.racer == me && st.status == wp_race::RacerStatus::Running);
+        if i % 240 == 0 && running {
+            for &r in &rivals {
+                let _ = s.debug_park_in_front_of(r, me, -60.0);
+            }
+        }
+        if let Some(r) = s.race_report() {
+            report = Some(r);
+            break;
+        }
+    }
+    let report = report.expect("the player's result is in");
+    assert!(!report.final_results, "the field is still racing");
+    assert_eq!(report.bets.len(), 1);
+    let b = &report.bets[0];
+    assert_eq!(b.outcome, "won", "settled at the player's finish line");
+    assert_eq!(b.paid, t.paid);
+    // Later ticks do not change the ticket.
+    s.run_ticks(240);
+    let later = &s.race_report().unwrap().bets[0];
+    assert_eq!((later.outcome, later.paid), (b.outcome, b.paid));
+    // Back to the garage before the field is home: the win is on the career.
+    c.finish_run(&mut s).unwrap();
+    let deltas = career_cash_deltas(&c, seq);
+    assert!(
+        deltas.contains(&-500) && deltas.contains(&t.paid),
+        "stake and payout on the career ledger: {deltas:?}"
+    );
+}
+
+/// Going back to the garage during the countdown refunds the stake on the career account.
+#[test]
+fn leaving_a_career_race_before_the_green_light_refunds_the_bet() {
+    let (mut c, mut s) = career_race_with_rep();
+    let seq = s.run().unwrap().account().next_event_seq;
+    s.race_place_bet("win:player", 500).unwrap();
+    s.run_ticks(10);
+    c.finish_run(&mut s).unwrap();
+    let deltas = career_cash_deltas(&c, seq);
+    assert!(
+        deltas.contains(&-500) && deltas.contains(&500),
+        "{deltas:?}"
+    );
+}

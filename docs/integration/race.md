@@ -281,6 +281,19 @@ let settled = book.settle(&mut wallet, &placings);
 BetVenue::City)`, `take_stake` = `place_bet`, `pay_out` = `settle_bet` (see
 `wp_wasm::race::RunWallet`).
 
+### Betting fixes (2026-10-24)
+- **Bet slip stake**: a range slider (`onInput`) replaces the number box, which only
+  committed on blur and was reset by the picker's 10 Hz redraw after a race.
+- **Settled at the player's finish**: `RaceRun::settle` pays bets as soon as the player is
+  Finished (finishers' positions are final; cars still running count as behind), so the
+  results panel no longer shows them "open" and then flipping as the field comes home.
+  Form ratings are still recorded once the results are final.
+- **Money reaches the career**: `Session::end_career` / `take_run` call
+  `RaceRun::close_bets` before the account leaves (refund during the countdown; after the
+  green, leaving counts as not finishing). The testbed's picker races are career runs when
+  the career box is ticked and the career car can go out (`racesUseCareer` in `main.ts`),
+  like night runs and touge battles, instead of quick play on the practice account.
+
 ### Needs
 | From | What | Why | Workaround now |
 |---|---|---|---|
