@@ -709,8 +709,9 @@ Vesper and on the new combined map (Port Vesper + Ashpeak County, city id `ashpe
   spots are planned lazily (first `race_spots()` call or first press).
   **Ported to round 12 (`lead/ashpeak-port`):** the session owns one horn edge per tick for
   round 12's single challenge system: a roaming street racer within honking range takes the
-  honk (`StreetStep::challenged`), else the spot; no spot while wanted / chased, with a street
-  offer or street race open, or with the run over (owner row 150, as street challenges).
+  honk (`StreetStep::challenged`), else the spot; no spot while chased (pursuit or search; a
+  wanted level alone is fine since 2026-10-24, `street::pursued`), with a street offer or
+  street race open, or with the run over (owner row 150, as street challenges).
   `HonkTrigger` was replaced by `spots::honk_spot`. The race's money is the picker's existing
   stake (buy-in / purse from `race_list`, shown in the spot prompt); no second bet. See
   `docs/integration/ashpeak-port.md`.

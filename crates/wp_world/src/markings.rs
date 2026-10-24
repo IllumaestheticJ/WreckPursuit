@@ -436,6 +436,9 @@ pub fn marking_mesh(map: &CityMap) -> MarkingMesh {
     for g in &map.paint.gores {
         g.paint(map, &mut out.white);
     }
+    // Car park bay lines (drawn only: the pad reports asphalt, see `crate::car_park`).
+    out.white
+        .append(&crate::car_park::paint_mesh(&map.car_parks));
     out
 }
 

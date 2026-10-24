@@ -637,8 +637,8 @@ impl Session {
     /// A honk (`honk`: the horn's rising edge this tick) the street racers did not take: when
     /// the player stands nearly stopped in a race spot, record its race for the testbed
     /// (`race_spot_honked()`). The same rules as a street challenge (owner row 150): not while
-    /// the player is wanted or chased, not with a street challenge or street race open, not
-    /// with the run over. Reads the sim only (no writes), before the step.
+    /// the player is chased (a wanted level alone is fine), not with a street challenge or
+    /// street race open, not with the run over. Reads the sim only (no writes), before the step.
     fn observe_horn(&mut self, honk: bool) {
         if !honk || !self.race_spots_active() {
             return;
@@ -646,7 +646,7 @@ impl Session {
         let Some(&player) = self.ids.first() else {
             return;
         };
-        if self.sim.police().is_wanted_or_pursued(player)
+        if crate::street::pursued(&self.sim, player)
             || self.street.as_ref().is_some_and(|s| s.busy())
         {
             return;
@@ -1221,6 +1221,12 @@ impl Session {
     #[cfg(test)]
     pub(crate) fn street_mut_for_tests(&mut self) -> &mut StreetRacers {
         self.street.as_mut().expect("street racers")
+    }
+
+    /// Street racers, mutable, beside the sim they read (tests).
+    #[cfg(test)]
+    pub(crate) fn street_and_sim_for_tests(&mut self) -> (&mut StreetRacers, &Sim) {
+        (self.street.as_mut().expect("street racers"), &self.sim)
     }
 
     /// Tests: put scenario entity `id` at `xy` facing `yaw`, at rest, as a logged `ResetAt`
