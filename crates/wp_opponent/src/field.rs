@@ -583,7 +583,7 @@ fn approach(x: f32, target: f32, max_step: f32) -> f32 {
     x + (target - x).clamp(-max_step, max_step)
 }
 
-/// Side clearance kept to a car alongside (racer, player), m: careful drivers (aggression
+/// Side clearance kept to a sim vehicle alongside (the player), m: careful drivers (aggression
 /// 0) .. hard chargers (aggression 1), who lean on the other car.
 const SIDE_GAP_M: (f32, f32) = (0.5, 0.2);
 /// Side clearance kept to a police car alongside by a racer that is not wanted, m: a touch
@@ -591,6 +591,12 @@ const SIDE_GAP_M: (f32, f32) = (0.5, 0.2);
 const COP_SIDE_GAP_M: f32 = 0.6;
 /// Extra lateral room given to a car that is sliding / running wide / reversing, m.
 const UNSTABLE_EXTRA_M: f32 = 0.8;
+/// Side clearance kept to another racer alongside, m (the bolder [`SIDE_GAP_M`] is for the
+/// player and traffic: between racers at circuit speed it put Loop 9 walls 4 -> 69 over 16
+/// seeds, from racer-on-racer hits).
+const RACER_SIDE_GAP_M: f32 = 0.6;
+/// Extra lateral room given to a racer that is sliding / running wide, m.
+const RACER_UNSTABLE_EXTRA_M: f32 = 1.5;
 const MIN_GAP_M: f32 = 2.5;
 const LAT_MARGIN_M: f32 = 0.35;
 /// Distance from the start line over which racers hold their grid lane, m.
@@ -2579,7 +2585,14 @@ fn decide_racer(
             if parked_non_racer(o) {
                 return parked_gap(v, base);
             }
-            base + if o.unstable { UNSTABLE_EXTRA_M } else { 0.0 }
+            // A racer sliding or running wide keeps the old, wide berth (racer hits at
+            // circuit speed); anyone else the bolder one.
+            let unstable_extra = if matches!(o.who, Who::Racer(_)) {
+                RACER_UNSTABLE_EXTRA_M
+            } else {
+                UNSTABLE_EXTRA_M
+            };
+            base + if o.unstable { unstable_extra } else { 0.0 }
         };
         // Clearance used against a car ahead: grows with the closing speed. The same figure
         // decides what I brake for and who blocks me (Loop 9 at 23:00 with traffic: with a
@@ -2589,8 +2602,10 @@ fn decide_racer(
         // Lantern s95 seed 8 two cars, refused passes in a downtown queue).
         let ahead_margin = |o: &Obstacle| -> f32 {
             let closing = (v - o.v_s).max(0.5);
-            // Police (not wanted): the old, wide room. Everyone else: a little.
-            let (per_mps, extra) = if o.police {
+            // Police (not wanted) and other racers: the old, wide room (racers at circuit
+            // speed: with the little one, Loop 9 walls 4 -> 69 over 16 seeds, from racer hits).
+            // Traffic and the player: a little.
+            let (per_mps, extra) = if o.police || matches!(o.who, Who::Racer(_)) {
                 (0.15, 1.0)
             } else if is_civ(o) {
                 (0.08, 0.3)
@@ -2954,6 +2969,8 @@ fn decide_racer(
                 0.1
             } else if is_civ(&x.o) {
                 civ_margin + 0.2
+            } else if matches!(x.o.who, Who::Racer(_)) {
+                RACER_SIDE_GAP_M
             } else {
                 side_gap_m
             };
@@ -3374,7 +3391,13 @@ fn decide_racer(
                 (p.headway_s * 0.5).max(0.3)
             } else {
                 p.headway_s
-            } * if o.unstable { 1.25 } else { 1.0 };
+            } * if !o.unstable {
+                1.0
+            } else if matches!(o.who, Who::Racer(_)) {
+                1.6
+            } else {
+                1.25
+            };
             let min_gap = if civ { MIN_GAP_M + 1.0 } else { MIN_GAP_M };
             let vo = o.v_s.max(0.0);
             // Hold a time gap behind it (closing it over ~1.2 s), and never more speed than
