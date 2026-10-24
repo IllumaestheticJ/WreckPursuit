@@ -342,9 +342,12 @@ fn honk_opens_a_challenge_and_bad_bets_are_refused() {
         s.street_accept(fin, &[], before + 1).is_err(),
         "more than the cash"
     );
+    // 30 m ahead on the player's lane (a pick beside or behind the car may route round the
+    // block and back: it covers the whole road).
     let p = state(&s, PLAYER).pos;
+    let (sn, cs) = wp_math::sin_cos(yaw_of(state(&s, PLAYER).rot));
     assert!(
-        s.street_accept([p[0] + 1.0, p[1]], &[], offer.bet_min)
+        s.street_accept([p[0] - sn * 30.0, p[1] + cs * 30.0], &[], offer.bet_min)
             .is_err(),
         "too short"
     );
@@ -1332,4 +1335,52 @@ fn street_bets_settle_on_the_career() {
         .ledger
         .iter()
         .any(|e| e.seq >= start_seq && e.cash_delta == 2 * won));
+}
+
+/// Owner, 2026-10-23: "in betting mode for free roam it should pause both cars, and clear the
+/// area out for race start". While the offer is open the player is held at a halt beside the
+/// waiting racer (a honk calls it off); accepting clears civilian cars around the start.
+#[test]
+fn betting_holds_both_cars_and_the_start_is_cleared() {
+    let mut s = city_session();
+    s.run_ticks(240 * 2);
+    let racer = challenge(&mut s, 2);
+    assert!(s.held(PLAYER), "betting holds the player");
+    // The player's own throttle is overridden while the map is up.
+    s.set_input(
+        PLAYER,
+        VehicleInput {
+            throttle: 1.0,
+            headlights: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    s.run_ticks(240 * 3);
+    assert!(state(&s, PLAYER).speed_mps.abs() < 0.5, "player held");
+    assert!(state(&s, racer).speed_mps.abs() < 1.0, "racer waits");
+    // A honk calls the offer off and frees the player.
+    s.set_input(PLAYER, horn(true)).unwrap();
+    s.run_ticks(2);
+    s.set_input(PLAYER, horn(false)).unwrap();
+    s.run_ticks(2);
+    assert!(s.street().unwrap().offer(s.sim(), s.run()).is_none());
+    assert!(!s.held(PLAYER));
+    // Accepting clears the start of traffic before both cars go onto it.
+    let mut s = city_session();
+    s.run_ticks(240 * 2);
+    challenge(&mut s, 2);
+    let fin = finish_for(&s);
+    let lv = s.street().unwrap().roster()[2].level;
+    s.street_accept(fin, &[], street::level(lv).bet_min)
+        .unwrap();
+    let p = state(&s, PLAYER).pos;
+    let near = s
+        .sim()
+        .world()
+        .agents()
+        .filter(|a| dist2(a.pos, p) < street::START_CLEAR_M - 25.0)
+        .count();
+    assert_eq!(near, 0, "no civilian car near the start");
+    assert!(s.held(PLAYER), "countdown holds the player");
 }
