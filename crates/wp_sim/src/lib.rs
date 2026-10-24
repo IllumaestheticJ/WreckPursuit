@@ -500,6 +500,11 @@ impl Sim {
             .friction(0.6)
             .user_data(physics::PROP_USER_BIT)
             .build();
+        // Pin the box's mass properties: a dented parked car's collider becomes a convex hull
+        // (`parked.rs`), and mass properties derived from a hull go through an eigen solve whose
+        // `acos`/`cos` are platform libm calls (glamx), so native and wasm could disagree.
+        let box_mprops = col.mass_properties();
+        col.set_mass_properties(box_mprops);
         if hilly {
             // Resting on the road mesh: no pairs with the terrain tiles under it (thousands
             // of them otherwise cost ~0.6 ms per frame); restored when it wakes.
