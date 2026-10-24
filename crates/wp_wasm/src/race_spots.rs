@@ -6,8 +6,8 @@
 //! (`crate::street`): the session reads one horn edge per tick and a street racer within
 //! honking range takes it first; otherwise, when the player's car stands in a spot (slower
 //! than `wp_race::spots::HONK_MAX_SPEED_MPS`), the session records the race as *honked*. The
-//! same rules apply as to a street challenge: not while the player is wanted or chased, not
-//! with a street challenge or street race open, not with the run over.
+//! same rules apply as to a street challenge: not while the player is chased (a wanted level
+//! alone is fine), not with a street challenge or street race open, not with the run over.
 //!
 //! The testbed polls `race_spot_honked()` and starts it with the player's car and damage mode
 //! exactly like the picker's "Race" button (`race_start`, which keeps the player on the current

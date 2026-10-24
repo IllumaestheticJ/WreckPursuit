@@ -24,6 +24,7 @@
 #![warn(missing_docs)]
 
 pub mod builder;
+pub mod car_park;
 pub mod clock;
 pub mod covered;
 pub mod density;
@@ -173,11 +174,13 @@ impl World {
         map.time = cfg.start_time;
         let traffic = Traffic::new(&map, cfg.traffic.clone(), cfg.seed);
         let parked = if cfg.parked_cars {
-            // Kerbside cars (never across a driveway mouth), then the driveway cars
-            // (residential lots, playtest row 95).
+            // Kerbside cars (never across a driveway mouth or a car park's bays), then the
+            // driveway cars (residential lots, playtest row 95).
             let mut cars = props::parked_cars(&map, cfg.seed);
             cars.retain(|c| !residential::blocks_driveway(&map.net, c.pos));
             cars.extend(residential::driveway_cars(&map, cfg.seed));
+            // And the car parks' bays (rest stops).
+            cars.extend(props::car_park_cars(&map, cfg.seed));
             cars
         } else {
             Vec::new()
