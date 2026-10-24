@@ -20,7 +20,7 @@
 //! | scenario | `scenario_json()`, `scenario_result()` |
 //! | crash replay (lead) | `crash_take()`, `crash_tuning_json()`, `crash_tuning_set(json)`, `crash_detect_enable(on)`, `crash_buffer_ticks()`, `crash_replay_start(seq)`, `crash_replay_active()`, `crash_replay_stop()` — see [`crash_replay`] |
 //! | touge | `touge_list_json()`, `touge_menu_json(map, dir, daylight, surface, opponent)`, `touge_scenario_json(…, car, mode, wager_json, autopilot)`, `touge_start(…)`, `touge_result_json()`, `touge_debug_set_rep(rep)` — see [`touge`] |
-//! | race (19) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_start_on(…, tune_json, map)`, `race_spots()`, `race_spot_honked()`, `debug_place(entity, x, y, yaw, speed)`, `race_bet(label, stake)`, `race_bet_status()`, `roster_json()`, `roster_state()` / `roster_state_load(text)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
+//! | race (19) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_start_on(…, tune_json, map)`, `race_spots()`, `race_spot_honked()`, `debug_place(entity, x, y, yaw, speed)`, `race_bet(label, stake, odds)`, `race_bet_status()`, `roster_json()`, `roster_state()` / `roster_state_load(text)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
 //! | props (lead) | `props_static()` once per session, `props_moved()` per frame, `prop_stride()`, `prop_moved_stride()`, `prop_pose(i)`, `debug_knock_prop(entity, prop, speed)` — see [`props`] |
 //! | parked-car damage (lead) | `parked_wrecks()` per frame, `parked_wreck_stride()`, `parked_entity_base()`, `parked_wreck_shattered(entity)`; a wreck's entity works with the `lattice_*` / `vehicle_info` calls — see [`props`] |
@@ -1341,13 +1341,18 @@ pub fn place_leave() -> Result<(), JsValue> {
 }
 
 /// Bet on yourself in the current race while the countdown runs: `label` from the picker's
-/// `odds[].label` (`win:player`, `podium:player`, `h2h:player>vic`), `stake` in credits. The
+/// `odds[].label` (`win:player`, `podium:player`, `h2h:player>vic`), `stake` in credits, `odds`
+/// the decimal odds shown on the card (locked onto the ticket; 0 = the book's price now). The
 /// career economy takes the stake (rep tier cap, cash, debt). Returns the ticket
 /// ([`race::BetCard`]) as JSON; an error when betting is locked, closed or the stake is out of
 /// bounds.
 #[wasm_bindgen]
-pub fn race_bet(label: &str, stake: f64) -> Result<String, JsValue> {
-    with(|s| s.race_place_bet(label, stake as i64).map(|t| json(&t)))
+pub fn race_bet(label: &str, stake: f64, odds: f64) -> Result<String, JsValue> {
+    let quoted = (odds > 0.0).then_some(odds as f32);
+    with(|s| {
+        s.race_place_bet(label, stake as i64, quoted)
+            .map(|t| json(&t))
+    })
 }
 
 /// Picker-race betting (venue `City`) on the current session's account: `{"max": credits,

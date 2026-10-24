@@ -215,6 +215,95 @@ if (shots) await page2.screenshot({ path: join(shots, "race_results.png") });
   await page3.close();
 }
 
+// Betting on a career race: the stake slider moves (and keeps its value through the picker's
+// redraws), the bet is settled on the results panel as soon as the player is home, and the
+// stake and any payout land on the career account.
+{
+  const page4 = await context.newPage();
+  page4.on("pageerror", (e) => errors.push(String(e)));
+  await page4.goto(`${URL}?autopilot=1`);
+  await page4.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 30000 });
+  await page4.evaluate(() => {
+    const wp = window.__wp;
+    wp.careerApi.newCareer("Arcade");
+    wp.careerApi.buy("junkyard_beater", "Worn");
+    // Street rep, so city betting is open.
+    const save = JSON.parse(wp.sim.careerSave());
+    save.account.rep = 2000;
+    wp.sim.careerLoad(JSON.stringify(save));
+    wp.openGarage();
+  });
+  await page4.waitForSelector('[data-testid="career-garage"]', { timeout: 10000 });
+  await page4.click('[data-testid="career-races"]');
+  const card = '[data-race="hollins_sprint"]';
+  await page4.waitForSelector(`${card} [data-testid="bet-pick"]`, { timeout: 10000 });
+  const winLabel = await page4.$eval(`${card} [data-testid="bet-pick"]`, (el) => [...el.options].map((o) => o.value).find((v) => v.startsWith("win:")));
+  await page4.selectOption(`${card} [data-testid="bet-pick"]`, winLabel);
+  const cardOdds = await page4.evaluate((l) => window.__wp.raceView.cards.find((c) => c.id === "hollins_sprint").odds.find((o) => o.label === l).odds, winLabel);
+  const stakeText = () => page4.$eval(`${card} [data-testid="bet-stake"]`, (el) => el.textContent);
+  const before = await stakeText();
+  await page4.focus(`${card} [data-testid="bet-range"]`);
+  for (let i = 0; i < 3; i++) await page4.keyboard.press("ArrowRight");
+  // The picker redraws while a race session is up: the stake must survive it.
+  await page4.evaluate(() => window.__wp.raceView.draw());
+  const moved = await stakeText();
+  check(before === "$500" && moved === "$800", `bet slip stake slider moves (${before} → ${moved})`);
+  await page4.click(`${card} button:has-text("Race")`);
+  await page4.waitForFunction(() => window.__wp.sim.careerRunActive(), null, { timeout: 30000 });
+  for (let i = 0; i < 120; i++) {
+    const done = await page4.evaluate(() => {
+      for (let k = 0; k < 120; k++) window.__wp.sim.step(1 / 60);
+      return window.__wp.raceView.report !== null;
+    });
+    if (done) break;
+  }
+  const bet = await page4.evaluate(() => window.__wp.raceView.report?.bets?.[0] ?? null);
+  check(bet !== null && bet.stake === 800 && bet.outcome !== "open", `bet placed at $800 and settled at the player's finish (${JSON.stringify(bet)})`);
+  check(bet !== null && Math.abs(bet.odds - cardOdds) < 1e-3, `ticket keeps the card's odds (${cardOdds} → ${bet?.odds})`);
+  const paidEarly = await page4.evaluate(() => window.__wp.raceView.report?.payout != null);
+  check(paidEarly, "purse settled with the player's result");
+  await page4.waitForSelector('[data-testid="race-to-garage"]', { timeout: 60000 });
+  await page4.click('[data-testid="race-to-garage"]');
+  const ledger = await page4.evaluate(() => window.__wp.careerApi.view().ledger.map((l) => l.cash_delta));
+  const paid = bet?.outcome === "won" ? bet.paid : null;
+  check(ledger.includes(-800) && (paid === null || ledger.includes(paid)), `bet stake${paid ? " and payout" : ""} on the career ledger`);
+  await page4.close();
+}
+
+// Quick play, second race: after a race the picker opened from the results ("Races…") redraws
+// ten times a second; the stake slider must still move and hold its value.
+{
+  // A fresh context: no career saved by the blocks above, so this is quick play.
+  const ctx5 = await browser.newContext({ viewport: { width: 1400, height: 860 } });
+  const page5 = await ctx5.newPage();
+  page5.on("pageerror", (e) => errors.push(String(e)));
+  await page5.goto(`${URL}?autopilot=1`);
+  await page5.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 30000 });
+  await page5.click("#sc-races");
+  await page5.waitForSelector('[data-race="grid_highway_sprint"]', { timeout: 10000 });
+  await page5.click('[data-race="grid_highway_sprint"] button:has-text("Race")');
+  await page5.waitForFunction(() => window.__wp.raceView.raceId === "grid_highway_sprint", null, { timeout: 30000 });
+  for (let i = 0; i < 120; i++) {
+    const done = await page5.evaluate(() => {
+      for (let k = 0; k < 120; k++) window.__wp.sim.step(1 / 60);
+      return window.__wp.raceView.report !== null;
+    });
+    if (done) break;
+  }
+  await page5.evaluate(() => window.__wp.sim.tougeDebugSetRep(2000));
+  await page5.click('button:has-text("Races…")');
+  const card = '[data-race="hollins_sprint"]';
+  await page5.waitForSelector(`${card} [data-testid="bet-pick"]`, { timeout: 10000 });
+  const label = await page5.$eval(`${card} [data-testid="bet-pick"]`, (el) => [...el.options].map((o) => o.value).find((v) => v.startsWith("win:")));
+  await page5.selectOption(`${card} [data-testid="bet-pick"]`, label);
+  await page5.focus(`${card} [data-testid="bet-range"]`);
+  for (let i = 0; i < 4; i++) await page5.keyboard.press("ArrowRight");
+  await page5.waitForTimeout(600);
+  const held = await page5.$eval(`${card} [data-testid="bet-stake"]`, (el) => el.textContent);
+  check(held === "$900", `stake moves and holds through the picker's redraws after a race (${held})`);
+  await ctx5.close();
+}
+
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();
 stopServer();

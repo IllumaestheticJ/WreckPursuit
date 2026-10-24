@@ -512,12 +512,12 @@ async function main(): Promise<void> {
   const raceSpots = new RaceSpotsView(scene.world, overlay);
   const raceView = new RaceView(raceEl, {
     start: (id, bet) => {
-      if (careerPicker === "races") return void startCareerRace(id, bet ?? null);
+      if (racesUseCareer()) return void startCareerRace(id, bet ?? null);
       startRace(id);
       // The countdown is running: bets on yourself are taken until green.
       if (bet) {
         try {
-          sim.raceBet(bet.label, bet.stake);
+          sim.raceBet(bet.label, bet.stake, bet.odds);
         } catch (e) {
           console.warn("bet refused", e);
         }
@@ -528,13 +528,13 @@ async function main(): Promise<void> {
     // picker lists the races of the chosen map (main menu "Map", or the panel's city box).
     list: () =>
       racesForMap(
-        careerPicker === "races"
+        racesUseCareer()
           ? sim.raceList(careerCar(), sim.careerView().mode)
           : sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value),
         citySel.value,
       ),
     betStatus: () => {
-      if (careerPicker === "races") return careerBetStatus();
+      if (racesUseCareer()) return careerBetStatus();
       try {
         return sim.raceBetStatus();
       } catch {
@@ -609,6 +609,14 @@ async function main(): Promise<void> {
     closed: () => careerPickerClosed(),
     garage: () => (sim.careerRunActive() ? () => openGarage() : null),
   });
+  /** A picker race started now is a career run (buy-in, purse and bets on the career account):
+   * from the career garage's "Races", during a career run ("Race again" / another race from the
+   * results), else when the career box is ticked and the career car can go out. Otherwise it is
+   * quick play on the session's practice account. */
+  function racesUseCareer(): boolean {
+    if (careerPicker === "races" || sim.careerRunActive()) return true;
+    return ($("career") as HTMLInputElement).checked && sim.careerExists() && sim.careerView().can_start;
+  }
   /** A touge battle started now would be a career run (see `startTouge`): always from the
    * career garage's "Touge battles", else when the career box is ticked and a career exists. */
   function tougeUsesCareer(): boolean {
@@ -890,7 +898,7 @@ async function main(): Promise<void> {
     rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
     if (bet) {
       try {
-        sim.raceBet(bet.label, bet.stake);
+        sim.raceBet(bet.label, bet.stake, bet.odds);
       } catch (e) {
         console.warn("bet refused", e);
       }

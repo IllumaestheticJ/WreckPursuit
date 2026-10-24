@@ -537,7 +537,7 @@ export const sim = {
   /** Gates + route of the race (race_marker.ts parseCourse). */
   raceCourse: (): Float32Array => wasm.race_course(),
   /** Bet on yourself during the countdown (`odds[].label` from the picker). Throws if refused. */
-  raceBet: (label: string, stake: number): BetCard => JSON.parse(wasm.race_bet(label, stake)),
+  raceBet: (label: string, stake: number, odds = 0): BetCard => JSON.parse(wasm.race_bet(label, stake, odds)),
   /** Picker-race betting (venue City) on the current account: max stake and why it is locked (null = open). */
   raceBetStatus: (): { max: number; lock: string | null } => JSON.parse(wasm.race_bet_status()),
   /** The city's regulars with their records, strongest first. */
