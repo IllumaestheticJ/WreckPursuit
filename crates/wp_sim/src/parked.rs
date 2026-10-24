@@ -552,7 +552,15 @@ impl crate::Sim {
             }
             if let Some(shape) = SharedShape::convex_hull(&pts) {
                 let col = &mut self.physics.colliders[self.props.colliders[w.prop]];
+                // Keep the box's mass properties: derived from the hull they differ in the last
+                // bit between native and wasm (`wp_damage::hull::box_mass_properties`).
+                let mass = col.mass();
                 col.set_shape(shape);
+                col.set_mass_properties(wp_damage::hull::box_mass_properties(
+                    [0.0; 3],
+                    [hx, hy, hz],
+                    mass,
+                ));
                 col.set_position_wrt_parent(Pose::IDENTITY);
             }
         }
@@ -671,6 +679,35 @@ mod tests {
             // Settled: the lattice is asleep again, so it costs nothing.
             assert!(!w.damage.is_awake(), "{mode}: lattice still awake");
         }
+    }
+
+    /// Once the dented hull replaces the box, the collider keeps the box's mass properties:
+    /// axis-aligned (no principal-axis rotation, whose eigen-decomposition uses libm trig that
+    /// differs between native and wasm) and with the car's mass.
+    #[test]
+    fn dented_hull_keeps_axis_aligned_box_mass_properties() {
+        let mut sim = row("extreme", 1);
+        drive(&mut sim, [0.0, 0.0, 0.0], 0.0, 13.9, 3.0);
+        let w = sim
+            .parked_wreck(0)
+            .expect("the hit parked car was promoted");
+        assert!(w.hull_version > 0, "the hull was rebuilt");
+        let col = &sim.physics.colliders[sim.props.colliders[0]];
+        assert!(
+            col.shape().as_convex_polyhedron().is_some(),
+            "collider is the dented hull"
+        );
+        let mp = col.mass_properties();
+        assert_eq!(
+            mp.principal_inertia_local_frame,
+            rapier3d::prelude::Rotation::IDENTITY
+        );
+        assert_eq!(mp.local_com, Vector::ZERO);
+        assert!(
+            (mp.mass() - PARKED_CAR_MASS_KG).abs() < 1e-2,
+            "{}",
+            mp.mass()
+        );
     }
 
     #[test]
