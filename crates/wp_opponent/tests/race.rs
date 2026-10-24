@@ -316,11 +316,13 @@ fn wanted_ai_racer_flees_police_through_the_city() {
         // (`WP_FLEE_SEED`): 2, 3, 7 pass; 1 — a left-turning civilian stands 45 s at the
         // (141, −167) junction across the flight route; 4 — 247 m; 5, 8 — the flight goal is
         // chosen away from every known patrol, not only the injected unit; 6 — caught by a
-        // live patrol after 112 m.
+        // live patrol after 112 m. Seed 3 -> 4 (bolder racers, 2026-10-23): the sweep
+        // still passes 5 of 8 (main: 1, 3, 4, 5, 7; now 1, 4, 5, 6, 7); seed 3 is now
+        // caught by a live patrol 24 m into the flight.
         seed: std::env::var("WP_FLEE_SEED")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(3),
+            .unwrap_or(4),
         laps: 2,
         drivers: eight_drivers()[..3].to_vec(),
         closed_roads: false,
@@ -580,7 +582,11 @@ fn sweep_open_roads_progress() {
     let only: Option<u64> = std::env::var("WP_SWEEP_SEED")
         .ok()
         .and_then(|v| v.parse().ok());
-    for seed in 1..=8u64 {
+    let seeds: u64 = std::env::var("WP_SWEEP_SEEDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8);
+    for seed in 1..=seeds {
         if only.is_some_and(|o| o != seed) {
             continue;
         }

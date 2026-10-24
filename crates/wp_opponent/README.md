@@ -1,9 +1,9 @@
 # wp_opponent — AI street racers (workstream 17)
 
-AI racers that race cleanly and believably where contact is expensive: a racing line from the
-route geometry, braking points from the car's measured capability, overtakes only with margin,
-one defensive move, no ramming, mistakes that grow with pressure, civilians avoided at all
-costs, damage and police awareness. **No rubber-banding**: nothing reads race position or the
+AI street racers that race hard: a racing line from the route geometry, braking points from
+the car's measured capability, tight overtakes, one defensive move, mistakes that grow with
+pressure, traffic avoided but rubbed past when it holds them up, police shoved and rammed
+when wanted, damage and police awareness. **No rubber-banding**: nothing reads race position or the
 gap to the player — pace is car capability × how much of it the driver dares to use.
 
 ## How it works
@@ -54,27 +54,34 @@ gap to the player — pace is car capability × how much of it the driver dares 
 - **Defend**: one move per straight toward an attacker's side, never into a car alongside,
   never in braking zones or the start phase.
 - **Side constraints** (always on): never command a lateral position toward a car that overlaps
-  me longitudinally or is arriving from behind within 1.5 s; lateral closing speed adds to the
-  clearance; squeezed cars hold their line and the car behind backs out.
+  me longitudinally or is arriving from behind within 1.5 s, closer than the side gap (0.5 m
+  careful .. 0.2 m at aggression 1); lateral closing speed adds to the clearance; squeezed cars
+  hold their line and the car behind backs out. Police cars are exempt while wanted (below).
 - **Yield when losing the wheel**: body slip > ~11° = unstable (lift); drifting > 1.5 m wide of
-  the command in a corner = running wide (lift). Both are broadcast: others give such cars 1.5 m
-  more room and 1.6× the time gap.
+  the command in a corner = running wide (lift). Both are broadcast: others give such cars 0.8 m
+  more room and 1.25× the time gap. Other sim vehicles (the player, police) count as unstable
+  only past ~19° of slip: a controlled drift gets no extra room.
 - **Start discipline**: hold the grid lane, no passing, for the first 150 m.
 - **Rejoin** after an off (outside the corridor by 1 m or facing > 60° off): 7 m/s cap, waits for
   cars arriving from behind. **Reverse** when stuck against something for 2 s.
-- **Civilians**: obstacles with a margin that grows with my speed (0.4 m at a crawl, full
+- **Civilians**: obstacles with a margin that grows with my speed (0.3 m at a crawl, full
   `civilian_margin_m` at 15 m/s+ — a car in the next lane is not in my way), crossing traffic
   extrapolated 3 s, passed like anyone (planned 3.5 s ahead at the closing speed, the next
-  lane is enough). Physical traffic and police cars are passed with the same margins.
+  lane is enough). Physical traffic and police cars are passed with the same margins. Held up
+  by traffic for `overtake_patience_s` + 1.5 s with no clean pass, a racer gets **bold**:
+  0.1 m to any non-racer (it squeezes past and accepts a rub rather than sitting behind).
   Anything standing still for 8 s counts as **parked** (passable on the opposing lanes where
   the corridor has them; a car stuck in a traffic deadlock stays put for minutes). A sim
   vehicle (a police unit, another player) still counts as standing while it shuffles within
   2.5 m of where it stopped below 1 m/s, and a parked one is squeezed past at a crawl with
-  0.2 m clearance (normal clearance by 15 m/s), 0.15 m nearer the road edge. Perception
+  0.2 m clearance (normal clearance by 15 m/s), 0.15 m nearer the road edge; a police unit
+  standing still counts at once, without the parked timer. An out-of-race car (busted,
+  retired, fled) rolling on to a place to stop keeps 60 % of the pace there (≥ 6 m/s) while a
+  racing car is right behind it, else 6 m/s. Perception
   covers the whole road, opposing lanes included. **Junction awareness**: my swept strip
   through the box (my lane band × box length + my car) against each civilian's straight
   course through it; a civilian blocks only if its window in the strip overlaps mine (from
-  reaching the box, accelerating, to clearing it) within ±0.6 × `civilian_headway_s`. Cars
+  reaching the box, accelerating, to clearing it) within ±0.8 × `civilian_headway_s`. Cars
   waiting at their own stop line, oncoming cars going straight on (no turn signal) and
   crossings that are over before I arrive no longer hold racers; a car signalling a turn gets
   a lane more of strip.
@@ -108,7 +115,16 @@ gap to the player — pace is car capability × how much of it the driver dares 
     perception and civilian rules, ignoring red lights. **Re-plans** when police wait within
     35 m of the next 160 m of the route (units ahead only — a chaser behind is beaten by
     driving on; at most every 6 s) or the route is about to end while still wanted.
-  - wanted but below the flee level → keeps racing; if a chasing unit stays within
+  - wanted (any level) or fleeing → police cars get **no room**: no lateral margin and no side
+    constraint (aggression ≥ 0.4 leans into a unit alongside, 0.3 m of overlap), and the racer
+    never stops behind one: a moving unit in its path (> `RAM_MIN_MPS`, 3 m/s) is rammed at
+    `RAM_CLOSING_MPS` (4 .. 10 m/s with aggression) above its speed; a standing one is squeezed
+    past with no room, or pushed aside at `RAM_PUSH_MPS` (3 m/s) — standing still next to a
+    unit is a capture, and hitting one at speed pins the racer against it. Racers that are not
+    wanted keep the careful room (a touch is assault). Units are recognised from
+    `police_positions()`.
+  - wanted but below the flee level → keeps racing; drivers with risk < `POLICE_YIELD_RISK`
+    (0.35) pull over: if a chasing unit stays within
     `YIELD_RADIUS_M` (30 m) for `YIELD_AFTER_S` (2 s) → `Tactic::Yield`: rolls on at ≤ 6 m/s
     to the kerb, clear of junctions, then stops (`Yielded` event); released back into the race
     if the pursuit ends without a capture.
@@ -175,8 +191,8 @@ the procedural grid's highway diverge ramps (a world geometry snag, reported in
 | `side_by_side_s` | 0.5 → 3.0 s into a braking zone | aggression |
 | `defends` | aggression ≥ 0.3 | aggression |
 | `overtake_patience_s` | 2.5 → 0.6 s | aggression |
-| `civilian_margin_m` | 1.0 → 0.6 m (at speed; 0.4 m creeping) | risk |
-| `civilian_headway_s` | 1.6 → 0.9 s | risk |
+| `civilian_margin_m` | 0.6 → 0.35 m (at speed; 0.3 m creeping) | risk |
+| `civilian_headway_s` | 1.0 → 0.5 s | risk |
 | `flee_wanted_level` | 1 → 4 | risk |
 | uses opposing lanes to pass (open roads) | risk ≥ 0.5 | risk |
 | stops for red lights (open roads) | risk < 0.35 | risk |
