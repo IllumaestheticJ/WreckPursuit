@@ -414,6 +414,7 @@ fn challenge_race_result(hour: f32) {
     let before = cash(&s);
     let rep_before = s.run().unwrap().account().rep;
     let stake = street::level(ROSTER[1].0).bet_min;
+    let odds = s.street().unwrap().offer(s.sim(), s.run()).unwrap().odds;
     s.street_accept(fin, &[], stake).unwrap();
     s.run_ticks(street::COUNTDOWN_TICKS + 240);
     let z = state(&s, PLAYER).pos[2];
@@ -423,16 +424,18 @@ fn challenge_race_result(hour: f32) {
     let r = s.street().unwrap().result().cloned().expect("decided");
     assert_eq!(r.seq, 2);
     assert!(r.won, "{r:?}");
-    assert_eq!(r.net, stake);
-    assert_eq!(cash(&s), before + stake, "stake back plus theirs");
-    // The win climbs the career's rep ladder by the level's win_rep (a loss costs none).
-    let win_rep = street::level(ROSTER[1].0).win_rep;
-    assert_eq!(r.rep, win_rep);
-    assert_eq!(s.run().unwrap().account().rep, rep_before + win_rep);
+    // The stake back times the odds the card showed (level and car gap).
+    let paid = odds.payout(stake);
+    assert!(paid > stake, "{odds:?}");
+    assert_eq!(r.net, paid - stake);
+    assert_eq!(cash(&s), before - stake + paid, "stake back times the odds");
+    // The win climbs the career's rep ladder by the challenge's win_rep (a loss costs none).
+    assert_eq!(r.rep, odds.win_rep);
+    assert_eq!(s.run().unwrap().account().rep, rep_before + odds.win_rep);
     let ledger = s.run().unwrap().ledger();
     assert!(ledger
         .iter()
-        .any(|e| e.cash_delta == 2 * stake && e.cash_after == before + stake));
+        .any(|e| e.cash_delta == paid && e.cash_after == before - stake + paid));
 }
 
 #[test]
@@ -1275,6 +1278,8 @@ fn street_bets_settle_on_the_career() {
     challenge(&mut s, 1);
     let fin = finish_for(&s);
     let won = street::level(ROSTER[1].0).bet_min;
+    let odds = s.street().unwrap().offer(s.sim(), s.run()).unwrap().odds;
+    let paid = odds.payout(won);
     s.street_accept(fin, &[], won).unwrap();
     s.run_ticks(street::COUNTDOWN_TICKS + 240);
     let z = state(&s, PLAYER).pos[2];
@@ -1285,7 +1290,7 @@ fn street_bets_settle_on_the_career() {
     assert!(r.won, "{r:?}");
     assert_eq!(
         cash(&s),
-        cash0 - lost + won,
+        cash0 - lost - won + paid,
         "the run's account is the career's"
     );
 
@@ -1318,10 +1323,10 @@ fn street_bets_settle_on_the_career() {
     assert!(
         notes
             .iter()
-            .any(|(d, n)| *d == 2 * won && n.starts_with("bet:payout:street:")),
+            .any(|(d, n)| *d == paid && n.starts_with("bet:payout:street:")),
         "payout in the career ledger: {notes:?}"
     );
-    let win_rep = street::level(ROSTER[1].0).win_rep;
+    let win_rep = odds.win_rep;
     assert!(
         p.account.rep >= rep0 + win_rep,
         "rep {} (was {rep0})",
@@ -1331,5 +1336,5 @@ fn street_bets_settle_on_the_career() {
     assert!(p
         .ledger
         .iter()
-        .any(|e| e.seq >= start_seq && e.cash_delta == 2 * won));
+        .any(|e| e.seq >= start_seq && e.cash_delta == paid));
 }

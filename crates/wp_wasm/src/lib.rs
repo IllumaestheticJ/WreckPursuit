@@ -63,6 +63,7 @@ pub mod session;
 pub mod signals;
 pub mod siren_cue;
 pub mod street;
+pub mod street_odds;
 pub mod touge;
 pub mod weather;
 
