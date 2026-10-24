@@ -205,8 +205,20 @@ Owner: "street race bets don't go to career". Base `origin/main` `431232c5`.
   carries a tag, "quick play: not your career" (or "career cash"; a tooltip explains), and the
   result banner says "quick-play cash" / "career cash".
   `street_status_json` gained `career` (the session is a career run).
-- **e2e (street.mjs, +4):** main menu → Free drive with the career box on is a career run and
-  the bet slip says career cash; with it off, quick play and the slip says so.
+- **Rule: a bet placed while the career box is ticked lands in the career.** A quick-play
+  session with the box ticked (the page's opening free drive, or the menu with no usable career
+  car) takes **no** street bets: Race is disabled and the slip's win / lose line becomes "Career
+  is on: no bets in quick play" (tooltip: start a career run from the garage or the menu with a
+  career car, or untick career to bet practice cash; same height, so the touch layout keeps its
+  Decline button on screen)
+  (`StreetUi` gets a `careerTicked` callback; Enter / pad accept are refused too). Unticked:
+  practice betting as before. (The wasm `street_accept` itself still takes any session's bet;
+  the rule is the testbed's, as the career box is.)
+- **e2e (street.mjs, +7):** main menu → Free drive with the career box on and a career car is a
+  career run, the slip says career cash; box off: quick play, the slip says so, betting
+  allowed; box on but no career car: quick play and the bet is refused. The existing
+  quick-play race flows untick the box first (the touch check keeps it ticked: it only
+  declines).
 
 ## Contract change requests
 
