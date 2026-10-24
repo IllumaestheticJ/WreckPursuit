@@ -7,7 +7,9 @@
 // and a street race (race HUD); Esc pauses the sim and Esc resumes it; the menu is keyboard
 // navigable (pause → settings → units → back); a setting survives a reload; gamepad Start opens
 // the pause menu and the d-pad / B navigate it; Controls opens the rebinding panel and returns to
-// the menu; ?menu=1 opens the title screen with the developer panels off and starts a chase.
+// the menu; ?menu=1 opens the title screen with the developer panels off and starts a chase;
+// the title screen's Map picker (Port Vesper / + Ashpeak County) is remembered and decides where
+// Street races and Free drive start.
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -257,6 +259,45 @@ await frames(4);
 m = await menu();
 const sc = await page.evaluate(() => window.__wp.sim.scenario().name);
 check(m.screen === "closed" && !m.paused && sc === "night_run", `Enter starts the night run (${sc}, menu ${m.screen})`);
+
+// ----- 7. Map choice on the title screen (owner 2026-10-23: reach Ashpeak from the menu) -------
+await page.evaluate(() => localStorage.removeItem("wp.menu.map.v1"));
+await page.goto(`${URL}?menu=1`);
+await ready();
+await frames(3);
+const mapLabel = () => page.evaluate(() => document.querySelector("#gm-map b")?.textContent ?? "");
+check((await mapLabel()) === "Port Vesper", `the Map picker defaults to Port Vesper (${await mapLabel()})`);
+await page.focus("#gm-map");
+await press("ArrowRight");
+await frames(2);
+const note = await page.evaluate(() => document.querySelector(".wp-gm-map small")?.textContent ?? "");
+check((await mapLabel()) === "Port Vesper + Ashpeak County" && /large download/i.test(note), `Right picks Port Vesper + Ashpeak County with a large-download note ("${note}")`);
+check((await page.evaluate(() => localStorage.getItem("wp.menu.map.v1"))) === "ashpeak", "the map choice is stored");
+// Street races on Ashpeak: the picker lists the Ashpeak County races and Port Vesper's, not the grid's.
+await page.click("#gm-play-races");
+await frames(3);
+const ids = await page.evaluate(() => (window.__wp.raceView.cards ?? []).map((c) => c.id));
+check(ids.includes("crowfoot_ascent") && ids.includes("hollins_sprint") && !ids.includes("grid_highway_sprint"), `Street races on Ashpeak lists its races (${ids.join(", ")})`);
+await page.evaluate(() => window.__wp.raceView.closePicker());
+// Reload: the choice is remembered; Free drive starts on the Ashpeak map.
+await page.goto(`${URL}?menu=1`);
+await ready();
+await frames(3);
+check((await mapLabel()) === "Port Vesper + Ashpeak County", `the map choice survives a reload (${await mapLabel()})`);
+await page.click("#gm-play-free");
+await page.waitForFunction(() => window.__wp.sim.cityId() === "ashpeak", null, { timeout: 120000 }).catch(() => {});
+const city = await page.evaluate(() => window.__wp.sim.cityId());
+check(city === "ashpeak", `Free drive starts on the Ashpeak map (${city})`);
+// Back to Port Vesper: the picker lists no Ashpeak-only race.
+await page.evaluate(() => localStorage.setItem("wp.menu.map.v1", "vesper_v2"));
+await page.goto(`${URL}?menu=1`);
+await ready();
+await frames(3);
+await page.click("#gm-play-races");
+await frames(3);
+const vIds = await page.evaluate(() => (window.__wp.raceView.cards ?? []).map((c) => c.id));
+check(vIds.includes("hollins_sprint") && !vIds.includes("crowfoot_ascent"), `Street races on Port Vesper hides Ashpeak's races (${vIds.join(", ")})`);
+await page.evaluate(() => localStorage.removeItem("wp.menu.map.v1"));
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();

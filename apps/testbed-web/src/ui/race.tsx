@@ -26,6 +26,8 @@ export interface RaceCard {
   name: string;
   blurb: string;
   city: string;
+  /** Every city id it runs on (its own and the maps containing it, e.g. `ashpeak`). */
+  cities?: string[];
   kind: string;
   laps: number;
   legality: string;
@@ -250,7 +252,7 @@ function Picker(props: { cards: RaceCard[]; status: BetStatus; onStart: (id: str
                 </span>
               </div>
               <div class="wp-dim" style={{ fontSize: "0.85em", margin: "0.3em 0" }}>
-                {c.blurb} {c.city === "vesper_v2" ? "Port Vesper" : "Grid city"} · {(c.length_m / 1000).toFixed(1)} km · {fmtHour(c.time_of_day_h)}
+                {c.blurb} {CITY_LABEL[c.city] ?? c.city} · {(c.length_m / 1000).toFixed(1)} km · {fmtHour(c.time_of_day_h)}
                 {c.police > 1 ? " · police presence MAX" : ""}
                 {c.hot_meet ? " · hot meet: a patrol will come" : ""}
               </div>
@@ -498,6 +500,22 @@ function Results(props: { report: RaceReport; onAgain: () => void; onPicker: () 
       </Panel>
     </div>
   );
+}
+
+/** City names in the picker. */
+const CITY_LABEL: Record<string, string> = {
+  vesper_v2: "Port Vesper",
+  ashpeak: "Ashpeak County",
+  procedural_12x12: "Grid city",
+};
+
+/**
+ * The picker's races for the main menu's map: on `ashpeak` every race that runs there (Port
+ * Vesper's and Ashpeak County's); on any other map every race except the Ashpeak-only ones.
+ */
+export function racesForMap<C extends Pick<RaceCard, "city" | "cities">>(cards: C[], map: string): C[] {
+  if (map === "ashpeak") return cards.filter((c) => (c.cities ?? [c.city]).includes("ashpeak"));
+  return cards.filter((c) => c.city !== "ashpeak");
 }
 
 /** Mounts the race picker / HUD / results into `el`. */

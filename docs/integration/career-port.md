@@ -175,10 +175,9 @@ restarted there; rounds 1–2 are in main).
   also goes to the garage. Main-menu entries are unchanged (quick play stays outside the
   career).
 - **Map** (agreed with the ashpeak-port helper): career races and garage night runs / free
-  drives use the main menu's remembered map, key `wp.menu.map.v1` (`MAP_KEY` on
-  lead/ashpeak-port), accepted only for the menu maps `vesper_v2` / `ashpeak`. Read by a small
-  local `careerMap()` in testbed `main.ts` until lead/ashpeak-port lands; then it becomes
-  `loadMenuMap(MENU_MAPS)`, and that branch's `play()` drops `choice !== "garage"`.
+  drives use the main menu's remembered map (`loadMenuMap(MENU_MAPS)`, key `wp.menu.map.v1`);
+  the career race picker lists `racesForMap(…, citySel.value)` like the main one, and the
+  menu's `play()` now applies the map for the garage choice too (only touge stays off-map).
 - **e2e:** race.mjs (+5: garage → Street races → career race with the career car, buy-in off the
   career → results → Back to garage, settled; closing the picker returns), touge.mjs (+3:
   garage → Touge battles reads the career's tier, locked; closing returns). run.mjs and tune.mjs

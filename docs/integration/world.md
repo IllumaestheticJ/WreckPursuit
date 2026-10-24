@@ -1526,6 +1526,59 @@ on lead/round12 353744ec and on ws/world (debug and release: 1 go-around, contac
 failure opponent-pace saw on 0e84a9f7 predates a779ad57 (the fix and the re-aimed ≥ 1
 threshold are not in that commit), so it is not a regression. The margin is thin (exactly 1).
 
+## Lead / G: "collider mid-lane on Loop 9 near (-1303, 1341)" (2026-10-23)
+
+**Not reproduced; the point is on the junction paving the row 162 fix rebuilt.**
+- (-1303, 1341) is 8.9 m from node 234. There Loop 9's carriageways (roads 5 / 23) continue as
+  road 6 and the one-lane ramp road 341 branches off. The point is 13 m from the nearest lane
+  centre.
+- On ws/world and on main ee742a68, no static collider stands above the road surface within
+  60 m along any lane. The median barriers there are 3.35 m from the lane centres.
+- Loop 9 s95, `WP_PACE_SEED=15`, every static contact over 100 N·s logged: the rampart has no
+  contact near the point on either branch.
+
+**Found instead (ws/world only): the canal bridge launched cars.**
+- The PR #38 port lifts Loop 9 2.25 m over the canal (x -550..-450). Floors were pinned where
+  they held the profile up, so smoothing rounded each deck corner on one side only, and the final
+  clamp put the kink back: a 4.6 % grade break in 10 m.
+- At 59 m/s hakone_gt and rampart_50 left the ground and bottomed out (5 + 1 static hits on that
+  seed; none on main).
+- 44780509 / 99b21a36: floors are no longer pinned; each is lifted by what the smoothing takes
+  off it until the smoothed profile clears it. Worst break there is now 1.65 % in 10 m, and the
+  deck is 0.35 m higher.
+- Holding floors further out instead (the first try) lengthened the embankments, and a lot back
+  edge came out 2.0 cm off the drawn terrain (`sidewalk_lots`).
+- New unit test `a_deck_floor_rounds_off_within_the_curvature_limit` (fails on the old code).
+
+**Knock-on:**
+- Greyboxes regenerated (35aec98d): vesper_v2 10.45 MB glb / 13.93 MB b64; ashpeak 25.87 MB.
+- 49afdab6 [bless]: 8 goldens moved (routes over the lifted decks).
+- The Founders Cut police pair is re-seeded 54 → 60. Seed 54's control never captured: the
+  lead unit braked 40 m short of the parked racer, then turned across the Cut at walking pace.
+  The Cut's geometry is unchanged. Over seeds 50-63 the control captures only on 60.
+  - Police (FYI): with most seeds the lead unit's final approach to a car parked in the lay-by
+    stalls crosswise.
+
+**Gate:**
+
+| Step | Result |
+|---|---|
+| fmt, clippy, wasm | 0 |
+| `cargo test --workspace` | 0 |
+| scenarios | 129/129 |
+| pace scenarios | lantern s50 unchanged (G is on it; identical numbers) |
+| `just pace-loop9` | **out at skill 0.5**: 42/48 (want ≥ 44), mean 236.1 s; skill 0.95: 48/48, 234.8 s |
+
+**`pace-loop9` at skill 0.5:**
+- Same test with only `vesper.rs` back at a7af2d79: 47/48 at skill 0.5, 45/48 at 0.95.
+- Totals are about even (90 against 92 out of 96); skill 0.95 is better.
+- Four of the six cars that don't finish are on seed 4, all `Dnf(FinishWindow)`. The pack sits
+  behind civilians and racers: civ + veh losses are 130-140 s each, with no wall hits, rejoins or
+  resets.
+- That is the traffic-draw swing the test's notes already describe (±3 cars per seed at 23:00 /
+  density 2.0), not a road fault.
+- Left to the lead and opponent-pace (G is reworking pack queueing); I did not widen the gate.
+
 ## PR #38 port (lead, 2026-10-23): river, canal, bridges, landmarks, hideouts; rows 160 and 162
 Ported from `claude/beautiful-einstein-b1noth` onto round12 1da95294 (with Ashpeak): a1c11a27,
 6b753b84, 166ee01b, 122def2d and 5b49526a. 823f87a8 was skipped (already on round12), and

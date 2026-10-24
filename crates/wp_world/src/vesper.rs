@@ -1732,6 +1732,62 @@ fn profile(
     kmax: f32,
 ) -> Vec<f32> {
     let n = desired.len();
+    if floors.is_empty() {
+        return profile_pass(desired, ds, anchors, internal, &[], pins, grade, kmax);
+    }
+    // Floors (decks over water) are not pinned: pinning one side of each corner where the
+    // approach meets the deck height left it rounded on the other side only, and the final
+    // clamp put the kink back (a 4.6 % grade break in 10 m on Loop 9's canal bridge launched
+    // cars at 59 m/s). Instead nothing is pinned and each floor is lifted by whatever the
+    // smoothing still took off it, until the smoothed profile clears it: the curvature limit
+    // holds over the deck too. (Holding floors further out instead lengthens the
+    // embankments and lifts the lots beside them off the drawn terrain.)
+    let mut lift = vec![0.0f32; floors.len()];
+    let mut z = Vec::new();
+    for _ in 0..8 {
+        let held: Vec<(usize, usize, f32)> = floors
+            .iter()
+            .zip(&lift)
+            .map(|(&(i0, i1, f), &l)| (i0, i1, f + l))
+            .collect();
+        z = profile_pass(desired, ds, anchors, internal, &held, pins, grade, kmax);
+        let mut clear = true;
+        for (k, &(i0, i1, f)) in floors.iter().enumerate() {
+            let short = (i0..=i1.min(n - 1))
+                .map(|i| f - z[i])
+                .fold(0.0f32, f32::max);
+            if short > 0.002 {
+                lift[k] += short * 1.1;
+                clear = false;
+            }
+        }
+        if clear {
+            break;
+        }
+    }
+    // Safety: nothing inside a floor range ends up under it (millimetres at most).
+    for &(i0, i1, f) in floors {
+        for v in z.iter_mut().take(i1.min(n - 1) + 1).skip(i0) {
+            *v = v.max(f);
+        }
+    }
+    z
+}
+
+/// One pass of [`profile`]: cones, grade limit and smoothing with `floors` as minimum
+/// heights on the cones only (never pinned).
+#[allow(clippy::too_many_arguments)]
+fn profile_pass(
+    desired: &[f32],
+    ds: f32,
+    anchors: &[(usize, usize, f32)],
+    internal: &[(usize, usize, f32)],
+    floors: &[(usize, usize, f32)],
+    pins: (usize, usize),
+    grade: f32,
+    kmax: f32,
+) -> Vec<f32> {
+    let n = desired.len();
     let g = grade * ds;
     let mut fixed: Vec<Option<f32>> = vec![None; n];
     let all: Vec<(usize, usize, f32)> = anchors.iter().chain(internal).copied().collect();
@@ -1811,27 +1867,12 @@ fn profile(
             *p = true;
         }
     }
-    // A floor that holds the profile up (a deck over water) stays pinned where it does, so
-    // the approaches round off outside the deck.
-    for &(i0, i1, f) in floors {
-        for i in i0..=i1.min(n - 1) {
-            if z[i] <= f + 0.01 {
-                pin[i] = true;
-            }
-        }
-    }
     for _ in 0..passes {
         let prev = z.clone();
         for i in 1..n - 1 {
             if !pin[i] {
                 z[i] = 0.25 * prev[i - 1] + 0.5 * prev[i] + 0.25 * prev[i + 1];
             }
-        }
-    }
-    // Safety: nothing inside a floor range ends up under it.
-    for &(i0, i1, f) in floors {
-        for v in z.iter_mut().take(i1.min(n - 1) + 1).skip(i0) {
-            *v = v.max(f);
         }
     }
     z
@@ -5142,6 +5183,25 @@ mod tests {
         }
         // The road cuts through the wall but still rises over it.
         assert!(z[50] > 3.0 && z[50] < 30.0, "{}", z[50]);
+    }
+
+    #[test]
+    fn a_deck_floor_rounds_off_within_the_curvature_limit() {
+        // Loop 9's canal bridge: a 600 m flat road held 2.25 m up over a 90 m crossing. The
+        // floor used to be pinned, leaving a 4.6 % grade break in 10 m at each end.
+        let ds = 2.0;
+        let (grade, kmax) = (0.06, max_vertical_curvature(30.0));
+        let desired = vec![2.5f32; 301];
+        let anchors = [(0, 2, 2.5), (298, 300, 2.5)];
+        let floors = [(130, 175, 4.75)];
+        let z = profile(&desired, ds, &anchors, &[], &floors, (2, 2), grade, kmax);
+        for (i, v) in z.iter().enumerate().take(176).skip(130) {
+            assert!(*v >= 4.75 - 1e-4, "{v} under the floor at {i}");
+        }
+        for i in 1..300 {
+            let k = ((z[i + 1] - 2.0 * z[i] + z[i - 1]) / (ds * ds)).abs();
+            assert!(k <= 1.25 * kmax, "curvature {k} at {i} (limit {kmax})");
+        }
     }
 
     fn city() -> &'static (RoadNetwork, VesperReport) {

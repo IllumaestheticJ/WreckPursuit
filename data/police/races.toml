@@ -82,7 +82,6 @@ pit = true
 rams = true
 
 [loop9_circuit.speed]
-pursuit_cap_mps = 70.0
 pit_max_kmh = [0.0, 180.0, 200.0, 220.0, 220.0]
 speed_margin = 0.35
 

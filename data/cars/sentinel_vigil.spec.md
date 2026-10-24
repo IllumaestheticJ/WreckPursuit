@@ -4,11 +4,11 @@
 
 | Class | Archetype | Durability | Base price |
 |---|---|---|---|
-| PoliceInterceptor | 2010s American muscle-coupe pursuit car, 5.0 L DOHC V8, RWD, 2-door, pursuit package | 4 / 5 | 52,000 |
+| PoliceInterceptor | 2010s American muscle-coupe pursuit car, 5.2 L supercharged DOHC V8, RWD, 2-door, pursuit package | 4 / 5 | 52,000 |
 
 ## Design note
 
-The highway-patrol hammer, sent when nothing else can keep up: the muscle coupe's V8 and big brakes on performance tires, with a push bar on the nose. It runs with the modern sports cars to pursuit speed and brakes later than any other unit, but two doors, a heavy nose and rear drive make it a handful in the wet and useless for boxing in a truck.
+The highway-patrol hammer, sent when nothing else can keep up: the muscle coupe's supercharged V8 and big brakes on performance tires, with a push bar on the nose. It runs with the exotics on the straights and brakes later than any other unit, but two doors, a heavy nose and rear drive make it a handful in the wet and useless for boxing in a truck.
 
 ## How this car breaks
 
@@ -59,31 +59,30 @@ Frontal area A = 0.84·W·H = 2.22 m²; Cd = 0.36 → **CdA = 0.850 m²** + 0.05
 
 ## Engine
 
-5.0 L DOHC 32-valve V8, naturally aspirated, pursuit calibration (extra oil and transmission coolers). Same class engine as the Rampart 5.0 (2010s NA 5.0 DOHC V8, ~64 kW/L); the pursuit package changes cooling, not output.
+5.2 L DOHC 32-valve V8, supercharged, pursuit calibration (extra oil and transmission coolers). Class-typical 2010s 5.2 L supercharged DOHC V8 from the muscle coupe's top trim (~108 kW/L, ~560 kW at 7000 rpm, ~865 N·m from 4000). Pursuit tuning (owner, 2026-10-23): the NA 5.0 could not run down stock sports cars.
 
 | rpm | N·m | kW |
 |---|---|---|
-| 1000 | 350 | 36.7 |
-| 1500 | 395 | 62.0 |
-| 2000 | 430 | 90.1 |
-| 2500 | 460 | 120.4 |
-| 3000 | 485 | 152.4 |
-| 3500 | 505 | 185.1 |
-| 4000 | 522 | 218.7 |
-| 4250 | 529 | 235.4 |
-| 4750 | 525 | 261.1 |
-| 5250 | 515 | 283.1 |
-| 5750 | 500 | 301.1 |
-| 6250 | 482 | 315.5 |
-| 6750 | 452 | 319.5 |
-| 7000 | 435 | 318.9 |
-| 7400 | 395 | 306.1 |
+| 1000 | 450 | 47.1 |
+| 1500 | 560 | 88.0 |
+| 2000 | 680 | 142.4 |
+| 2500 | 780 | 204.2 |
+| 3000 | 830 | 260.8 |
+| 3500 | 855 | 313.4 |
+| 4000 | 865 | 362.3 |
+| 4500 | 865 | 407.6 |
+| 5000 | 855 | 447.7 |
+| 5500 | 840 | 483.8 |
+| 6000 | 820 | 515.2 |
+| 6500 | 800 | 544.5 |
+| 7000 | 765 | 560.8 |
+| 7400 | 700 | 542.4 |
 
-Peak **319 kW @ 6750 rpm**, **529 N·m @ 4250 rpm**. Idle 700 / redline 7000 / limiter 7400 rpm. Rotating inertia 0.22 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 10% of peak torque = 53 N·m. Power-to-weight 176 kW/t.
+Peak **561 kW @ 7000 rpm**, **865 N·m @ 4000 rpm**. Idle 700 / redline 7000 / limiter 7400 rpm. Rotating inertia 0.24 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 10% of peak torque = 86 N·m. Power-to-weight 309 kW/t.
 
 ## Drivetrain
 
-6-speed automatic with torque converter (pursuit packages are automatic-only), clutch-type rear LSD. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 60 N·m, power ramp 0.50, coast ramp 0.35. Torque converter: stall 2400 rpm, 1.9× at stall, couples 1:1 from 2800 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 850 N·m. Shift time 0.25 s.
+6-speed automatic with torque converter (pursuit packages are automatic-only), clutch-type rear LSD. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 60 N·m, power ramp 0.50, coast ramp 0.35. Torque converter: stall 2400 rpm, 1.9× at stall, couples 1:1 from 2800 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 1380 N·m. Shift time 0.25 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -129,7 +128,7 @@ ABS ceiling: caliper capacity 5456 / 1781 N·m exceeds 1.5 × the front lock tor
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 2309 N·m/wheel (capacity 1.80×), rear needs 830 N·m/wheel (capacity 1.64×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1496 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 4160 N·m front / 1360 N·m rear per wheel at full pedal. Handbrake 1430 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1496 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 4160 N·m front / 1360 N·m rear per wheel at full pedal. Handbrake 2120 N·m per rear wheel.
 
 ## Steering
 
@@ -141,7 +140,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| estimate | 5.7 s | 282 km/h | 36.3 m | 0.95 g | 601 |
+| sim | 5.7 s | 275 km/h | 38.2 m | 0.87 g | — |
+| estimate | 5.4 s | 341 km/h | 36.3 m | 0.95 g | 639 |
 
 ## Damage lattice (`data/lattices/sentinel_vigil.json`)
 

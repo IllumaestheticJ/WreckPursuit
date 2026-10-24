@@ -55,7 +55,7 @@ import { UiOverlay } from "./ui/overlay";
 import { MapOverlay } from "./ui/map";
 import { HudLayout } from "./ui/layout";
 import { DRIFT_LAB_W, DRIFT_LAB_W_CAR, DriftLabWPanel, driftLabWScenario } from "./drift_lab_w";
-import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu, type ControlDevice, type GameSettings, type PlayChoice } from "../../ui-kit/src/live";
+import { defaultGameSettings, hasStoredSettings, loadGameSettings, loadMenuMap, mountGameMenu, type ControlDevice, type GameSettings, type PlayChoice } from "../../ui-kit/src/live";
 import { gfxMode } from "./render/quality";
 import { RunEndView } from "./ui/runEnd";
 import { ModShop } from "./ui/modShop";
@@ -63,7 +63,7 @@ import { WorkshopMode } from "./workshop/mode";
 import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
 import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
-import { RaceView, type BetPick, type RaceFrame } from "./ui/race";
+import { RaceView, racesForMap, type BetPick, type RaceFrame } from "./ui/race";
 import { GarageVisitView } from "./ui/garageVisit";
 import { TougeView, type TougeChoice, type Wager } from "./ui/touge";
 import { RaceMarker, parseCourse } from "./race_marker";
@@ -86,6 +86,12 @@ import { StreetUi } from "./ui/street";
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
 /** Cities the selector offers (data/city/<id>.greybox.glb); the first is the default. */
 const CITY_IDS = ["vesper_v2", "ashpeak", "procedural_12x12"];
+/** Maps the game menu's main screen offers (the first is the default; owner 2026-10-23). The
+ * Ashpeak greybox is ~34 MB, so its entry says so. */
+const MENU_MAPS = [
+  { id: "vesper_v2", label: "Port Vesper" },
+  { id: "ashpeak", label: "Port Vesper + Ashpeak County", note: "Large download (~34 MB): the first load takes a while" },
+];
 const COLOURS = [0xd04a2a, 0x2a7fd0, 0x3fb950, 0xd0a92a, 0x9b59b6, 0x1abc9c];
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -458,11 +464,15 @@ async function main(): Promise<void> {
       }
     },
     freeDrive: () => startFreeDrive(undefined, undefined, true),
-    // From the career garage: priced for the career car and its damage mode.
+    // From the career garage: priced for the career car and its damage mode. Either way the
+    // picker lists the races of the chosen map (main menu "Map", or the panel's city box).
     list: () =>
-      careerPicker === "races"
-        ? sim.raceList(careerCar(), sim.careerView().mode)
-        : sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value),
+      racesForMap(
+        careerPicker === "races"
+          ? sim.raceList(careerCar(), sim.careerView().mode)
+          : sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value),
+        citySel.value,
+      ),
     betStatus: () => {
       if (careerPicker === "races") return careerBetStatus();
       try {
@@ -700,7 +710,8 @@ async function main(): Promise<void> {
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    sim.raceStart(id, car, mode, autopilot, quickTune(car));
+    // On the chosen map when the race runs there (a Port Vesper race on Ashpeak stays there).
+    sim.raceStart(id, car, mode, autopilot, quickTune(car), citySel.value);
     rebuildViews();
     applyAssistPreset(app.source);
     rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
@@ -749,14 +760,9 @@ async function main(): Promise<void> {
     const v = sim.careerView();
     return v.cars.find((c) => c.uid === v.active_car)?.def_id ?? DEFAULT_CAR;
   };
-  /** The main menu's remembered map (`wp.menu.map.v1`, lead/ashpeak-port's `MAP_KEY`; agreed
-   * with that branch), when it is a menu map: career races and garage runs start there (Ashpeak
-   * races show up on Ashpeak). Once lead/ashpeak-port lands this becomes
-   * `loadMenuMap(MENU_MAPS)` (same key, same accepted ids). */
-  const careerMap = (): string | null => {
-    const id = store.get("wp.menu.map.v1");
-    return id && ["vesper_v2", "ashpeak"].includes(id) ? id : null;
-  };
+  /** The main menu's remembered map (`loadMenuMap(MENU_MAPS)`, agreed with lead/ashpeak-port):
+   * career races and garage runs start there (Ashpeak races show up on Ashpeak). */
+  const careerMap = (): string | null => loadMenuMap(MENU_MAPS) || null;
   /** Career betting limits for the picker (`CareerProgress`: city bets need the Street tier). */
   const careerBetStatus = (): { max: number; lock: string | null } => {
     const p = sim.careerView().progress;
@@ -1602,8 +1608,12 @@ async function main(): Promise<void> {
     developerDefault: devDefault,
     countersteer: true,
     cameras: CAMERAS.filter((c) => c.mode !== "orbit").map((c) => ({ id: c.mode, label: c.label })),
+    maps: MENU_MAPS,
     host: {
-      play: (choice: PlayChoice) => {
+      play: (choice: PlayChoice, map: string) => {
+        // The main screen's map: night run, rainy night, street races, free drive and the
+        // career garage's runs start on it (the developer panel's city box follows).
+        if (map && CITY_IDS.includes(map) && choice !== "touge") citySel.value = map;
         // Quick play runs outside the career; the career lives behind Garage (whose own race /
         // touge entries run as career runs, row 167).
         careerPicker = null;

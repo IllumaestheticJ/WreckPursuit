@@ -2,7 +2,7 @@
   "id": "sentinel_wolfhound",
   "display_name": "Sentinel Wolfhound",
   "class": "PoliceInterceptor",
-  "analog_of": "2010s American AWD police pursuit sedan, 3.5 L twin-turbo V6",
+  "analog_of": "2010s American AWD police pursuit sedan, 3.5 L twin-turbo V6, pursuit tune",
   "body_size_m": [1.94, 5.05, 1.55],
   "mass_kg": 2048.9,
   "front_weight_frac": 0.56,
@@ -16,25 +16,25 @@
   "lift_rear": 0.1,
   "engine": {
     "torque_curve_nm": [
-      [800, 260],
-      [1200, 330],
-      [1600, 400],
-      [2000, 455],
-      [2500, 495],
-      [3000, 495],
-      [3500, 495],
-      [4000, 495],
-      [4500, 490],
-      [5000, 490],
-      [5500, 472],
-      [6000, 420],
-      [6300, 380]
+      [800, 300],
+      [1200, 430],
+      [1600, 570],
+      [2000, 660],
+      [2500, 710],
+      [3000, 720],
+      [3500, 720],
+      [4000, 720],
+      [4500, 720],
+      [5000, 715],
+      [5500, 700],
+      [6000, 660],
+      [6300, 610]
     ],
     "idle_rpm": 650.0,
     "redline_rpm": 6000.0,
     "rev_limit_rpm": 6300.0,
     "inertia_kgm2": 0.18,
-    "engine_brake_nm": 50.0
+    "engine_brake_nm": 72.0
   },
   "drivetrain": {
     "layout": {
@@ -49,7 +49,7 @@
     "reverse_ratio": 2.88,
     "diff_front": "Open",
     "diff_rear": "Open",
-    "clutch_max_nm": 790.0,
+    "clutch_max_nm": 1150.0,
     "shift_time_s": 0.3,
     "torque_converter": {
       "stall_rpm": 2600.0,
