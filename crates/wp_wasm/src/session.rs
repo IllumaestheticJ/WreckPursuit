@@ -870,6 +870,11 @@ impl Session {
                 return Err("this session has no economy run (no police)".into());
             }
             self.run = Some(run);
+            // A picker race charged its buy-in on the session's fresh account: charge the
+            // career's instead (a touge battle takes its wager at the first tick anyway).
+            if let (Some(race), Some(run)) = (&mut self.race, &mut self.run) {
+                race.reenter(run);
+            }
         }
         self.career = true;
         Ok(())

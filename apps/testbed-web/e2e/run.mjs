@@ -841,7 +841,7 @@ await shot("night_run_greybox_toggle.png");
   await page.click("#sc-garage");
   const opened = await page.waitForSelector(G, { timeout: 10000 }).then(() => true).catch(() => false);
   await page.click(`${G} button[role="tab"]:has-text("Dealer")`);
-  await page.click(`${G} tr[data-car="junkyard_beater"] td:last-child button`);
+  await page.click(`${G} tr[data-car="junkyard_beater"] td:nth-last-child(2) button`);
   const bought = await page.evaluate(() => window.__wp.careerApi.view());
   await shot("career_garage_bought.png");
   await page.click(`${G} button:has-text("Night run")`);
