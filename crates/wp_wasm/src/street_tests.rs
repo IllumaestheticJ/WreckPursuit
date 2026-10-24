@@ -1241,3 +1241,95 @@ fn career_time_shifts_line_up_with_the_street_racers_day_and_night() {
         assert!(samples > 100, "{shift:?}: {samples} samples");
     }
 }
+
+/// Playtest row 169: a street race driven in a career run (garage → free drive) settles on the
+/// career: a lost stake comes off the career's cash, a win pays even money and the level's rep,
+/// and both are in the career's ledger once the run is back in the garage.
+#[test]
+fn street_bets_settle_on_the_career() {
+    use crate::career::Career;
+    use wp_economy::Condition;
+    let econ = crate::garage::with_economy(|e| e.clone());
+    let mut c = Career::new(econ, DamageMode::Arcade);
+    c.profile_mut().account.cash = 60_000;
+    let uid = c.buy_car("junkyard_beater", Condition::Worn).unwrap();
+    c.set_active(uid).unwrap();
+    let mut sc = free_drive("ignored", DamageMode::Arcade, true);
+    sc.time_of_day_h = 12.0;
+    let mut s = c.start_run(sc).unwrap();
+    assert!(s.is_career() && s.street().is_some());
+    s.run_ticks(240 * 2);
+    let cash0 = cash(&s);
+    let rep0 = s.run().unwrap().account().rep;
+
+    // Lost: the racer wins while the player waits on the handbrake.
+    challenge(&mut s, 0);
+    let fin = finish_for(&s);
+    let lost = street::level(ROSTER[0].0).bet_min;
+    s.street_accept(fin, &[], lost).unwrap();
+    s.run_ticks(street::COUNTDOWN_TICKS + 2);
+    let r = race_to_result(&mut s, 180, |_, _| {});
+    assert!(!r.won, "{r:?}");
+
+    // Won: the player is at B first.
+    challenge(&mut s, 1);
+    let fin = finish_for(&s);
+    let won = street::level(ROSTER[1].0).bet_min;
+    s.street_accept(fin, &[], won).unwrap();
+    s.run_ticks(street::COUNTDOWN_TICKS + 240);
+    let z = state(&s, PLAYER).pos[2];
+    let ground = s.sim().world().map().ground_height(fin, Some(z));
+    s.place_logged(PLAYER, fin, 0.0, ground).unwrap();
+    s.run_ticks(4);
+    let r = s.street().unwrap().result().cloned().expect("decided");
+    assert!(r.won, "{r:?}");
+    assert_eq!(
+        cash(&s),
+        cash0 - lost + won,
+        "the run's account is the career's"
+    );
+
+    // Back in the garage: the career kept both bets and the rep.
+    let start_seq = c.profile().account.next_event_seq;
+    c.finish_run(&mut s).unwrap();
+    let p = c.profile();
+    let notes: Vec<(i64, String)> = p
+        .ledger
+        .iter()
+        .filter_map(|e| match &e.reason {
+            wp_economy::EventReason::Adjustment { note } if note.starts_with("bet:") => {
+                Some((e.cash_delta, note.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        notes
+            .iter()
+            .any(|(d, n)| *d == -lost && n.starts_with("bet:stake:street:")),
+        "lost stake in the career ledger: {notes:?}"
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|(d, n)| *d == -won && n.starts_with("bet:stake:street:")),
+        "won stake in the career ledger: {notes:?}"
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|(d, n)| *d == 2 * won && n.starts_with("bet:payout:street:")),
+        "payout in the career ledger: {notes:?}"
+    );
+    let win_rep = street::level(ROSTER[1].0).win_rep;
+    assert!(
+        p.account.rep >= rep0 + win_rep,
+        "rep {} (was {rep0})",
+        p.account.rep
+    );
+    // ... posted during this run.
+    assert!(p
+        .ledger
+        .iter()
+        .any(|e| e.seq >= start_seq && e.cash_delta == 2 * won));
+}

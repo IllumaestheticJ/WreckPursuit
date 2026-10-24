@@ -67,7 +67,7 @@
 // 50-70: escape story on 11 of 21, control on 20, both on 11 (50, 52, 54, 56-59, 61, 63, 65,
 // 68). Re-seeded 60 -> 58.
 //
-// After the road network centreline fix (playtest row 169) the AI captain finds spike-strip
+// After the road network centreline fix (playtest row 170) the AI captain finds spike-strip
 // sites (120 m+ sight) on the racer's route and the flat tyres stop him at 90% of it (captured
 // 99.7 s). This scenario is about covered-road line of sight, not tools, so `police_tools:
 // false` keeps the captain's own spikes and roadblocks out of it. Measured (seed 58): Escaped 132.5 s.

@@ -401,6 +401,7 @@ proptest! {
             location: wp_economy::CarLocation::Garage,
             insurance: None,
             purchase_price: Some(base_price as i64),
+            tires: Default::default(),
             tune: Default::default(),
             parts: None,
         };

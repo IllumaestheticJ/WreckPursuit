@@ -1802,7 +1802,7 @@ Proposed follow-ups: a cornering-limited intercept speed on hairpins (wp_police)
 - `pick_harlan_dirt_run.ron` regenerated (`WP_RACE_WRITE_SCENARIOS=1`, wp_wasm): presence 0.5.
 - **Queue cap (lead/round13 lantern_checkpoint):** racer 4 sat behind busted racer 3, parked in the lane, from about 70 s to 300 s with units nearby. The queue exemption kept it Running, so the race never ended. A racer now waits behind another racer for at most `QUEUE_MAX_WAIT_S` (15 s) without moving; after that the normal stop and pinned rules apply. lantern_checkpoint ends at 66 s and passes. (`race_picker::ashpeak_metro_circuit` fails on lead/round13 7538c828 too, with police off: 1 of 6 finish. Not police.)
 
-## Stuck patrol cars (playtest row 169)
+## Stuck patrol cars (playtest row 170)
 Patrol cars in the Vesper traffic soak froze for good: nose to nose with traffic, in parked
 cars, tangled after a turn. Two route-geometry causes (round 12's `stuck` module recovers
 cars once stuck; these stop them getting there):

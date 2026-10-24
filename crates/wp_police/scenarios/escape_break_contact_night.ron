@@ -12,7 +12,7 @@
 // Row 158 (2026-10-23): no session-start patrol in view of this already-wanted racer, and no
 // spawn on any road it can reach within 3 s: 5 escapes in 10 (2 on the same seeds just before),
 // so max 6. Row 157 (slower heat) re-aims it again.
-// Road network centreline fix (playtest row 169): 7 escapes in these 10 runs (main 3); over 30
+// Road network centreline fix (playtest row 170): 7 escapes in these 10 runs (main 3); over 30
 // runs (seeds 600-629) 19 escapes here vs 14 on main, no captures on either, so max 8. Night
 // racers break contact a little more often with units on the corrected graph: review with the
 // police balance.

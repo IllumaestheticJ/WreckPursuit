@@ -668,11 +668,14 @@ const NO_RUN_OFF_M: f32 = 5.0;
 /// (was 0.25): its softer, slower-answering car runs a little wider of its line, and on the
 /// narrow Hollins lanes (±1.45 m) that was the kerb (walls 2 → 124 at s50, 16 seeds).
 const EDGE_MARGIN_M: f32 = 0.5;
-/// A car pulling over (yielding, out of the race) that has not reached the kerb after this
-/// long stops short of it, as soon as it is clear of junctions and tight bends, s.
+/// A car pulling over (yielding, out of the race) that has not reached the kerb after rolling
+/// this long stops short of it, as soon as it is clear of junctions and tight bends, s.
 const PULL_OVER_MAX_S: f32 = 8.0;
-/// A car pulling over stops after this long, wherever it is (it always comes to a stop), s.
+/// A car pulling over stops after rolling this long, wherever it is, s.
 const PULL_OVER_HARD_MAX_S: f32 = 30.0;
+/// A car pulling over counts towards [`PULL_OVER_MAX_S`] / [`PULL_OVER_HARD_MAX_S`] only while
+/// rolling faster than this, m/s.
+const PULL_OVER_ROLLING_MPS: f32 = 1.0;
 /// Room kept to the kerb when pulled over (parked, yielding, out of the race), m.
 const PARK_EDGE_MARGIN_M: f32 = 0.25;
 /// Room kept to the edge of the lanes while passing, m (the pre-G racing margin).
@@ -2965,7 +2968,12 @@ fn decide_racer(
                 // stops wherever it is.
                 (off_kerb && r.pull_over_s < PULL_OVER_MAX_S) || near_junction || in_bend
             };
-        if pulling_over {
+        // Only time spent rolling counts: a car held where it stands (a unit parked in front
+        // of it, a queue) has not been failing to reach the kerb, and once the way clears it
+        // pulls over (Crowfoot ascent, police seed 3: a racer busted behind the unit that
+        // blocked it stopped mid-lane for good after 8 s, and the field behind it was caught
+        // there one by one).
+        if pulling_over && v > PULL_OVER_ROLLING_MPS {
             r.pull_over_s += dt;
         } else if !matches!(r.tactic, Tactic::Park | Tactic::Yield) {
             r.pull_over_s = 0.0;
