@@ -165,6 +165,7 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
         parked_cars: true,
         police_cars: true,
         covered_los: true,
+        police_tools: true,
         slow: false,
         panels: false,
         systems: None,
