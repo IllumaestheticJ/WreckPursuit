@@ -479,10 +479,20 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
         max_s: 150.0,
         ..Setup::default()
     };
-    let mut speeds = [0.0f32; 3];
-    let out = common::run(&setup, &wp_opponent::NoPolice, &mut |sim, _| {
+    // Per racer: the last race time it was moving faster than 1 m/s while busted. (Checked
+    // as an invariant, not at one moment: a busted car pulling over may still be rolling to
+    // its stopping place when the run ends, and police tweaks move that moment around.)
+    let mut moving_busted_at = [f32::NEG_INFINITY; 3];
+    let out = common::run(&setup, &wp_opponent::NoPolice, &mut |sim, field| {
+        let t = field.tick_count() as f32 * wp_contracts::PHYSICS_DT;
+        let st = field.standings();
         for (k, v) in sim.vehicles().iter().take(3).enumerate() {
-            speeds[k] = v.vehicle.state().speed_mps;
+            let busted = st
+                .iter()
+                .any(|s| s.entity == v.id && s.status == RacerStatus::Busted);
+            if busted && v.vehicle.state().speed_mps.abs() > 1.0 {
+                moving_busted_at[k] = t;
+            }
         }
     });
     let mut field = out.field;
@@ -519,13 +529,23 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
     for s in &st {
         match s.status {
             RacerStatus::Busted => {
-                // A booked car stays put.
+                // A booked car comes to a stop: it may roll on to a place clear of the lane,
+                // for at most its pull-over time (30 s of rolling), not for good.
                 let k = (s.entity.0 - 1) as usize;
+                let busted_at = events
+                    .iter()
+                    .find_map(|e| match e {
+                        OpponentEvent::Busted { entity, time_s } if *entity == s.entity => {
+                            Some(*time_s)
+                        }
+                        _ => None,
+                    })
+                    .expect("busted without its event");
                 assert!(
-                    speeds[k].abs() < 1.0,
-                    "busted {:?} still moving {:.1} m/s",
+                    moving_busted_at[k] <= busted_at + 40.0,
+                    "busted {:?} at {busted_at:.0} s still moving at {:.0} s: {info}",
                     s.entity,
-                    speeds[k]
+                    moving_busted_at[k]
                 );
             }
             RacerStatus::Fled | RacerStatus::Racing | RacerStatus::Finished { .. } => {}
