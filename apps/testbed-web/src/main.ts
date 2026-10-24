@@ -396,6 +396,14 @@ async function main(): Promise<void> {
     rebuildViews();
     const visit = sim.lotVisit();
     if (!visit) return;
+    // Every parked car in its factory paint (it keeps it once bought); yours in its own.
+    const stock = sim.careerLot(lotId);
+    for (const c of visit.cars) {
+      const paint = stock.cars.find((l) => l.slot === c.slot)?.paint;
+      if (paint !== undefined) app.views.get(c.entity)?.setPaint(paint);
+    }
+    const own = sim.careerView().cars.find((c) => c.active)?.paint;
+    if (visit.own_car !== null && own != null) app.views.get(visit.own_car)?.setPaint(own);
     lotView.show({
       stock: () => sim.careerLot(lotId),
       view: () => sim.careerView(),
@@ -677,7 +685,10 @@ async function main(): Promise<void> {
     const career = lookCar ?? (sim.careerRunActive() ? { uid: sim.careerView().active_car ?? -1, showcase: false } : null);
     if (!career) return;
     const car = sim.careerView().cars.find((c) => c.uid === career.uid);
-    if (car) app.views.get(app.player)?.setLook(car.mods.map((m) => m.id), career.showcase);
+    if (!car) return;
+    const view = app.views.get(app.player);
+    if (car.paint != null) view?.setPaint(car.paint);
+    view?.setLook(car.mods.map((m) => m.id), career.showcase);
   };
   const rebuildViews = () => {
     scene.warmLightVariants();

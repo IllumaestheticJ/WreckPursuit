@@ -98,7 +98,9 @@ function CarCard({ car, selected, onSelect }: { car: CarView; selected: boolean;
     <button type="button" class="wp-cg-card" aria-selected={selected} onClick={onSelect} data-testid={`car-${car.uid}`}>
       <div class="wp-spread">
         <b class="wp-upper">{car.name}</b>
-        <span class="wp-dim wp-mono">{words(car.class)}</span>
+        <span class="wp-dim wp-mono">
+          {car.rare && <Badge tone="info">rare</Badge>} {words(car.class)}
+        </span>
       </div>
       <Meter value={car.health} color={severityColor(1 - car.health)} label="Condition" />
       <div class="wp-row" style={{ gap: "0.3em", flexWrap: "wrap" }}>
@@ -495,7 +497,7 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
         ))}
       </div>
       <div class="wp-cg-detail">
-        <Panel title={car.name} tag={words(car.class)}>
+        <Panel title={car.name} tag={car.rare ? `RARE · ${words(car.class)}` : words(car.class)}>
           <div class="wp-cg-hero">
             <Stat label="Condition" value={pct(car.health)} tone={car.total_loss ? "danger" : car.health > 0.8 ? "ok" : "warn"} />
             <Stat label="Value" value={<Money value={car.value} />} />

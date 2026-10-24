@@ -68,6 +68,7 @@ pub use ledger::{
 };
 pub use lots::{
     Listing, ListingGrade, ListingWear, LotDef, LotKind, LotTables, RareVariant, TireTables,
+    FACTORY_PAINTS,
 };
 pub use mods::{ModCatalog, ModDef, ModEffect, ModSlot, ToolLoadout};
 pub use parts::{

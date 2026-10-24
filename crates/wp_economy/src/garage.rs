@@ -509,6 +509,8 @@ fn new_car(spec: &CarSpec, condition: Condition, paid: Money) -> OwnedCar {
         insurance: None,
         purchase_price: Some(paid),
         tires: Default::default(),
+        variant_name: None,
+        paint: None,
         tune: Default::default(),
         parts: None,
     }

@@ -149,6 +149,13 @@ pub struct OwnedCar {
     /// with new tyres.
     #[serde(default)]
     pub tires: TireState,
+    /// Rare variant name the car was sold as (lots' `rare_variants`, e.g. a time-attack
+    /// special); `None` for an ordinary car. Shown instead of the model name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant_name: Option<String>,
+    /// Factory paint (0xRRGGBB) the car was sold in; `None` = the renderer's default colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint: Option<u32>,
 }
 
 /// Condition of a car's four tyres (FL, FR, RL, RR).

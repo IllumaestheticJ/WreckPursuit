@@ -127,6 +127,8 @@ pub fn repair_quote_json(entity: u32, request_json: &str) -> Result<String, JsVa
                 insurance: None,
                 purchase_price: None,
                 tires: Default::default(),
+                variant_name: None,
+                paint: None,
                 tune: Default::default(),
                 parts: None,
             };
