@@ -779,6 +779,8 @@ impl Roamers {
             // Detects civilian hits (reported as `RoamEvent::HitCivilian`; the roamer then
             // plans a new leg instead of cooling down).
             civilian_contact_dq: true,
+            // Out of a race, street racers still drive round traffic.
+            ram_traffic: false,
             seed,
             corridor: CorridorOptions {
                 opposing: OpposingLanes::ForOvertaking,

@@ -417,3 +417,14 @@ dodge spikes". Design, results and how to re-train: `crates/wp_opponent/README.m
 - Ramming costs the field in stage 2 (more civilian hits); kept for bold drivers by owner
   request, see the README. `civilian_headway_scale` is hand-set back to 1.0 (stage 2's 1.15
   broke `wp_wasm` `a_racer_never_gives_up_after_a_spin_or_a_crash`).
+
+### Follow-up: older open racer PRs folded in (2026-10-25)
+- **#76** (`RaceConfig::ram_traffic`, unafraid of traffic): merged onto the trained racers.
+  Conflicts: `RaceConfig` keeps `learned` and `ram_traffic`; the police ram target is
+  `ram_police` in `decide_racer` (`ram` is #76's flag); with `ram_traffic` a police ram closes
+  at least as hard as a tag (`tag_closing`). Stage 2's `civilian_margin_scale` set to 1.0.
+- **#79** (wanted racers dodge and ram police): superseded. Its ramming duplicates
+  `ram_target`; its dodge (no queueing behind a police car, opposing lanes allowed) is what
+  `ram_traffic` already does for every non-racer, police included.
+- **#63** (bolder racers): superseded by #76 (traffic) and the training's ramming (police);
+  its stake fix is on main (R5).
