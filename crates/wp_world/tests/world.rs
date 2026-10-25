@@ -1350,7 +1350,8 @@ fn night_traffic_around_a_player_stays_at_the_curve() {
 }
 
 /// Street races through waypoints (owner row 151): `plan_route_via` runs through each
-/// waypoint in order, and with none it is `plan_route`.
+/// waypoint in order and ends at the finish. A pick stands for the whole road under it
+/// (owner, 2026-10-23), so the route passes on some lane of it: within [`ROAD_M`].
 #[test]
 fn route_via_waypoints_passes_them_in_order() {
     let w = world(TrafficConfig::default(), 12.0, 0.0);
@@ -1366,7 +1367,7 @@ fn route_via_waypoints_passes_them_in_order() {
         r.polyline
             .iter()
             .skip(from)
-            .position(|p| geom::dist(geom::xy(*p), geom::xy(q)) < 8.0)
+            .position(|p| geom::dist(geom::xy(*p), geom::xy(q)) < ROAD_M)
             .map(|i| i + from)
     };
     // Waypoints 300–600 m apart that the planner can chain (not every lane reaches every
@@ -1394,7 +1395,7 @@ fn route_via_waypoints_passes_them_in_order() {
         let ib = near(&r, *b, ia).expect("then the second");
         assert!(ia < ib);
         let d = geom::dist(geom::xy(*r.polyline.last().unwrap()), geom::xy(*f));
-        assert!(d < 8.0, "ends at the finish ({d} m)");
+        assert!(d < ROAD_M, "ends at the finish ({d} m)");
         checked += 1;
         if checked >= 5 {
             break;
@@ -1402,7 +1403,77 @@ fn route_via_waypoints_passes_them_in_order() {
     }
     assert!(checked >= 3, "only {checked} waypoint routes planned");
     let f = mids[mids.len() / 2];
-    let direct = w.plan_route(start, None, f).expect("direct route");
-    let same = w.plan_route_via(start, None, &[], f).expect("no waypoints");
-    assert_eq!(direct.segs, same.segs);
+    let direct = w.plan_route_via(start, None, &[], f).expect("no waypoints");
+    let d = geom::dist(geom::xy(*direct.polyline.last().unwrap()), geom::xy(f));
+    assert!(d < ROAD_M, "ends at the finish ({d} m)");
+}
+
+/// How far from a pick a route on another lane of its road may pass, m (a wide two-way road's
+/// far lane).
+const ROAD_M: f32 = 16.0;
+
+/// A waypoint stands for the whole road (owner, 2026-10-23: "if I do loop 9 it shouldn't
+/// matter, make the gate cover the whole road"): on Loop 9 a pick on any lane of either
+/// carriageway gives the same route along the near carriageway, not a trip round the loop.
+#[test]
+fn route_via_waypoint_on_either_loop9_carriageway() {
+    use wp_world::vesper::VesperConfig;
+    let w = World::vesper(
+        &VesperConfig::default(),
+        WorldConfig {
+            traffic: no_traffic(),
+            ..Default::default()
+        },
+    );
+    // Westbound on Loop 9's north side (the "Loop 9 sprint" grid's way), a waypoint 700 m on,
+    // the finish 1.2 km on.
+    let start = [306.0, 1413.0, 0.0];
+    let start = [
+        start[0],
+        start[1],
+        w.map().ground_height([306.0, 1413.0], None),
+    ];
+    let (wx, wy) = (-400.0f32, 1411.0f32);
+    let finish = [-900.0, 1410.0];
+    let finish = [finish[0], finish[1], w.map().ground_height(finish, None)];
+    // A pick on every Loop 9 lane at x = wx: both carriageways, every lane.
+    let mut picks: Vec<[f32; 2]> = Vec::new();
+    for l in w
+        .network()
+        .lanes
+        .iter()
+        .filter(|l| l.kind == LaneKind::Highway)
+    {
+        let pts = &l.polyline;
+        for k in 1..pts.len() {
+            let (a, b) = (pts[k - 1], pts[k]);
+            if (a[0] - wx) * (b[0] - wx) > 0.0 || (a[0] - b[0]).abs() < 1.0 {
+                continue;
+            }
+            let t = (wx - a[0]) / (b[0] - a[0]);
+            let y = a[1] + (b[1] - a[1]) * t;
+            let dir = geom::normalize([b[0] - a[0], b[1] - a[1]]);
+            if (y - wy).abs() < 150.0 && dir[0].abs() > 0.9 {
+                picks.push([wx, y]);
+            }
+        }
+    }
+    assert!(
+        picks.len() >= 6,
+        "Loop 9's six lanes at x = {wx}: {picks:?}"
+    );
+    let mut lens = Vec::new();
+    for p in &picks {
+        let r = w
+            .plan_route_via(start, Some([-1.0, 0.0]), &[*p], finish)
+            .unwrap_or_else(|| panic!("no route via {p:?}"));
+        lens.push(r.length_m);
+    }
+    let direct = geom::dist([start[0], start[1]], [finish[0], finish[1]]);
+    for (p, len) in picks.iter().zip(&lens) {
+        assert!(
+            *len < direct * 1.1,
+            "via {p:?}: {len:.0} m for {direct:.0} m straight (picks {picks:?}, lengths {lens:?})"
+        );
+    }
 }

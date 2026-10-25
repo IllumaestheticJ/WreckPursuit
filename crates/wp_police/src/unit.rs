@@ -412,6 +412,9 @@ pub struct Unit {
     /// Stuck detection and recovery (physical units, [`crate::stuck`]).
     #[serde(default)]
     pub unstick: crate::stuck::UnstickState,
+    /// Watch for a unit getting nowhere ([`crate::progress`]).
+    #[serde(default)]
+    pub progress: crate::progress::ProgressWatch,
     /// Which branch of `drive_input` produced the last input (debug: bench traces; 0 = the
     /// plain drive along the track).
     #[serde(skip)]
@@ -513,6 +516,7 @@ impl Unit {
             controller: None,
             avoid: AvoidState::default(),
             unstick: crate::stuck::UnstickState::default(),
+            progress: crate::progress::ProgressWatch::default(),
             branch: 0,
             pro_dbg: (0.0, false),
             turning_round: false,

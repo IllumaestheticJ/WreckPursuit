@@ -478,73 +478,94 @@ impl BarrierIndex {
     }
 }
 
-/// Render terrain: `coarse` is [`wp_world::surface::drawn_terrain`] (never above a road).
-/// Physics collides with the same surface off the roads (`wp_world::surface::collision_terrain`).
+/// Render terrain: [`wp_world::surface::drawn_terrain_mesh`], the coarse
+/// [`wp_world::surface::drawn_terrain`] grid (never above a road) with the cells where the solid
+/// road-band ground rises more than [`wp_world::surface::DRAWN_BAND_TOLERANCE_M`] above it drawn
+/// from the fine grid. Physics collides with `wp_world::surface::collision_terrain`, which this
+/// follows within that tolerance everywhere.
 fn render_terrain(
-    coarse: &Heightfield,
+    drawn: &wp_world::surface::DrawnTerrain,
     net: &RoadNetwork,
     ground: &mut [Prim],
     rock: &mut Prim,
     seabed: &mut Prim,
 ) {
-    let (cx, cy) = (coarse.nx, coarse.ny);
-    let z = &coarse.z;
-    let pos: Vec<V2> = (0..cy)
-        .flat_map(|j| (0..cx).map(move |i| (i, j)))
-        .map(|(i, j)| coarse.vertex_pos(i, j))
-        .collect();
     let zone_kind = |p: V2| {
         net.zones
             .iter()
             .find(|zn| geom::point_in_polygon(p, &zn.polygon))
             .map_or(DistrictKind::Suburb, |zn| zn.kind)
     };
-    // Smooth normals from central differences on the coarse grid.
-    let at = |i: u32, j: u32| z[(j.min(cy - 1) * cx + i.min(cx - 1)) as usize];
-    let step = coarse.cell_m;
-    let normal = |i: u32, j: u32| -> V3 {
+    // Smooth normals from central differences on a grid.
+    let normal = |g: &Heightfield, i: u32, j: u32| -> V3 {
+        let at = |i: u32, j: u32| g.z[(j.min(g.ny - 1) * g.nx + i.min(g.nx - 1)) as usize];
+        let step = g.cell_m;
         let dx = (at(i + 1, j) - at(i.saturating_sub(1), j)) / (2.0 * step);
         let dy = (at(i, j + 1) - at(i, j.saturating_sub(1))) / (2.0 * step);
         let l = (dx * dx + dy * dy + 1.0).sqrt();
         [-dx / l, -dy / l, 1.0 / l]
     };
-    // Per primitive, coarse vertex → local index (shared between the cells it touches).
     let n_prims = ground.len() + 2;
-    let mut local: Vec<Vec<u32>> = vec![vec![u32::MAX; (cx * cy) as usize]; n_prims];
-    for j in 0..cy - 1 {
-        for i in 0..cx - 1 {
-            let idx = |a: u32, b: u32| (b * cx + a) as usize;
-            let v = [idx(i, j), idx(i + 1, j), idx(i + 1, j + 1), idx(i, j + 1)];
-            let ij = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)];
-            let p: Vec<V3> = v.iter().map(|q| [pos[*q][0], pos[*q][1], z[*q]]).collect();
-            let centre = [(p[0][0] + p[2][0]) * 0.5, (p[0][1] + p[2][1]) * 0.5];
-            let zmax = p.iter().map(|q| q[2]).fold(f32::NEG_INFINITY, f32::max);
-            let zmin = p.iter().map(|q| q[2]).fold(f32::INFINITY, f32::min);
-            let span = geom::dist(geom::xy(p[0]), geom::xy(p[2]));
-            let which = if zmax < SEA_Z {
-                ground.len() + 1
-            } else if (zmax - zmin) / span > 0.45 {
-                ground.len()
-            } else {
-                zone_kind(centre) as usize
-            };
-            let prim: &mut Prim = if which == ground.len() + 1 {
-                &mut *seabed
-            } else if which == ground.len() {
-                &mut *rock
-            } else {
-                &mut ground[which]
-            };
-            let mut ids = [0u32; 4];
-            for c in 0..4 {
-                let slot = &mut local[which][v[c]];
-                if *slot == u32::MAX {
-                    *slot = prim.vert(p[c], normal(ij[c].0, ij[c].1));
-                }
-                ids[c] = *slot;
+    // Per primitive and grid (0 coarse, 1 fine), grid vertex → local index (shared between the
+    // cells it touches).
+    let (coarse, fine) = (&drawn.coarse, &drawn.fine);
+    let mut local: [Vec<Vec<u32>>; 2] = [
+        vec![vec![u32::MAX; (coarse.nx * coarse.ny) as usize]; n_prims],
+        vec![vec![u32::MAX; (fine.nx * fine.ny) as usize]; n_prims],
+    ];
+    let mut cell = |grid: usize, g: &Heightfield, i: u32, j: u32| {
+        let idx = |a: u32, b: u32| (b * g.nx + a) as usize;
+        let v = [idx(i, j), idx(i + 1, j), idx(i + 1, j + 1), idx(i, j + 1)];
+        let ij = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)];
+        let p: Vec<V3> = ij
+            .iter()
+            .zip(&v)
+            .map(|((a, b), q)| {
+                let xy = g.vertex_pos(*a, *b);
+                [xy[0], xy[1], g.z[*q]]
+            })
+            .collect();
+        let centre = [(p[0][0] + p[2][0]) * 0.5, (p[0][1] + p[2][1]) * 0.5];
+        let zmax = p.iter().map(|q| q[2]).fold(f32::NEG_INFINITY, f32::max);
+        let zmin = p.iter().map(|q| q[2]).fold(f32::INFINITY, f32::min);
+        let span = geom::dist(geom::xy(p[0]), geom::xy(p[2]));
+        let which = if zmax < SEA_Z {
+            ground.len() + 1
+        } else if (zmax - zmin) / span > 0.45 {
+            ground.len()
+        } else {
+            zone_kind(centre) as usize
+        };
+        let prim: &mut Prim = if which == ground.len() + 1 {
+            &mut *seabed
+        } else if which == ground.len() {
+            &mut *rock
+        } else {
+            &mut ground[which]
+        };
+        let mut ids = [0u32; 4];
+        for c in 0..4 {
+            let slot = &mut local[grid][which][v[c]];
+            if *slot == u32::MAX {
+                *slot = prim.vert(p[c], normal(g, ij[c].0, ij[c].1));
             }
-            prim.indices
-                .extend_from_slice(&[ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]]);
+            ids[c] = *slot;
+        }
+        prim.indices
+            .extend_from_slice(&[ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]]);
+    };
+    let k = drawn.k;
+    for j in 0..coarse.ny - 1 {
+        for i in 0..coarse.nx - 1 {
+            if drawn.is_refined(i, j) {
+                for fj in j * k..(j + 1) * k {
+                    for fi in i * k..(i + 1) * k {
+                        cell(1, fine, fi, fj);
+                    }
+                }
+            } else {
+                cell(0, coarse, i, j);
+            }
         }
     }
 }
@@ -720,8 +741,8 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let terrain = net.terrain.as_ref();
     match terrain {
         Some(t) => {
-            let coarse = wp_world::surface::drawn_terrain(map).expect("terrain");
-            render_terrain(&coarse, net, &mut ground, &mut rock, &mut seabed);
+            let drawn = wp_world::surface::drawn_terrain_mesh(map).expect("terrain");
+            render_terrain(&drawn, net, &mut ground, &mut rock, &mut seabed);
             let (lo, hi) = (t.origin, t.max_corner());
             let m = 400.0;
             // Only a city with seabed gets the sea (the grid's flat ground sits just under

@@ -1763,6 +1763,7 @@ Physics uses the smooth row-164 meshes. Tests:
 | Greybox | glb (MB) | b64 (MB) | Note |
 |---|---|---|---|
 | vesper_v2 | 10.44 | 13.92 | under the 15 MB preview cap; size check raised to 11 MB |
+| vesper_v2 (row 172) | 12.26 | 16.35 | road-band terrain drawn from the fine grid; the browser loads the parts (own 7.61 MB, shared 4.67 MB), size check raised to 12.5 MB |
 | procedural_12x12 | 3.02 | 4.02 | |
 | ashpeak | 25.86 | 34.48 | split for the preview by `tools/preview_build.sh` (b0269195) |
 
@@ -2179,3 +2180,63 @@ honks are blocked only while the player is chased, meaning a pursuit or a search
 also blocked them. Being wanted with no unit on the player now still allows a challenge, and
 an open offer only lapses once a pursuit starts. Police behaviour is unchanged. Test:
 `street_tests::wanted_can_challenge_but_not_while_chased`.
+
+### Follow-up: street-race picks stand for the whole road; clearing a start (2026-10-23)
+Owner: "the betting map gets confused on Loop 9 if I don't pick exactly the right lane — make
+the gate cover the whole road" and "in betting mode for free roam pause both cars and clear the
+area out for race start".
+- **Cause:** routes never change lanes mid-road, and Loop 9's three lanes per carriageway are
+  separate lane chains, so `plan_route_via` (which snapped a pick to one nearby lane) found a
+  pick on the "wrong" lane unreachable ("no road route through those waypoints") and a pick on
+  the far carriageway reachable only by lapping the loop (westbound from the north grid, a
+  waypoint 700 m on: 708 m on one lane, no route on two others, 4.9 km on the far side).
+- **`routes::plan_route_via`:** a pick (waypoint or finish) now stands for every lane abreast
+  of it along its road, both directions (`road_lanes_at`: within 22 m beyond the nearest lane,
+  parallel or opposite, same height ±4 m, not end-on across a junction). One bounded
+  multi-target A* (`paths_to_any`, gives up at 2× the quickest + 60 s) per pick; a waypoint
+  takes the lane quickest to reach plus quickest to leave for the next pick, the finish the
+  quickest to reach. With no waypoints the finish also covers the road now (no longer exactly
+  `plan_route`). Only street races call it.
+- **`Traffic::clear_near` / `World::clear_traffic_near` / `Sim::clear_traffic_near`:** despawn
+  every civilian car (wrecks too) within a radius now; physical ones lose their body at once.
+  New replay op `simcli::replay::OpKind::ClearTraffic { xy, radius_m }` (kind byte 8; older
+  replays read unchanged).
+- **`wp_wasm::street` (lead):** a waypoint gate counts on a line across the whole road
+  (`GATE_HALF_SPAN_M` 26 m either side, `GATE_DEPTH_M` 8 m deep) as well as the 20 m radius;
+  the player is held at a halt while an offer is open (the racer already waits), a honk with
+  the map closed calls it off; accepting logs `ClearTraffic` (80 m round the grid) before the
+  start moves.
+  Owner, same day: "the AI got away with winning without hitting all the waypoints": the
+  racer's finish (at B, along-route progress, or the end of its run) ignored the gates. Now the
+  racer passes the same gates in order (`racer_next_gate`); B counts for it only after all of
+  them, a run ended with one missed loses ("they missed a waypoint"), and at the time limit
+  each car's progress is capped at its next unpassed gate.
+- **Tests:** `world.rs` `route_via_waypoint_on_either_loop9_carriageway` (a pick on each of
+  Loop 9's six lanes routes along the near carriageway), `route_via_waypoints_passes_them_in_order`
+  (now: within the road); `street.rs` `a_gate_spans_the_whole_road`, `gates_count_in_order_and_cap_progress`; `street_tests.rs`
+  `betting_holds_both_cars_and_the_start_is_cleared`; replay round trip carries the new op.
+
+## Solid ground never stands above the drawn terrain (playtest row 172)
+**Cause.** Row 119's fix made physics collide with the drawn terrain everywhere except the road
+band (at-grade roads, junctions and bends: paved width + sidewalk + lot + skirt + half a cell),
+which keeps the fine 5 m heights the sidewalks, lots and skirts are laid on. The greybox drew the
+band with the coarse 10 m grid, each vertex lowered to the band's minimum within 10 m, and hid the
+step with curtain walls at the skirt feet, seen from the road side only. Where no sidewalk, lot or
+skirt was drawn (the half-cell margin, lot-less stretches, junction corners) and the slope was
+steep, solid ground stood up to 14.9 m above what was drawn: an invisible shelf (e.g. Port Vesper
+(-542, 239), hit by the drawn-colliders night run once police routes moved).
+**Fix.** `wp_world::surface::drawn_terrain_mesh` → `DrawnTerrain`: the coarse grid, with every
+coarse cell where any fine vertex on it has solid ground more than `DRAWN_BAND_TOLERANCE_M`
+(0.25 m) above the coarse surface drawn from the fine grid (the solid heights 5 cm down). A vertex
+a refined cell shares with a coarse one is within the tolerance (otherwise that cell is refined
+too) and is drawn at the coarse height, so the two resolutions meet without cracks. Port Vesper:
+13,290 of 103,700 coarse cells refined, terrain 207 k → 287 k triangles. Physics is unchanged (no
+goldens move). `city-import` draws it (`render_terrain`); greyboxes regenerated (`just city-v2`,
+`just city-ashpeak`, `gen-city --preset touge`).
+**Gate.** `tests/city_v2.rs::solid_ground_never_stands_above_the_drawn_terrain`: over the whole
+fine grid (vertices, cell centres, edge midpoints) solid ground is at most 0.25 m (+5 cm) above the
+drawn terrain (it was 14.9 m), and the drawn terrain, refined cells included, never rises above a
+road. `wp_wasm/tests/drawn_colliders.rs` (no hard contact more than 1 m from drawn geometry) passes
+on the regenerated greybox.
+**Not covered.** The touge passes' committed `road.bin` files do not match what `gen-city` writes
+today on main either; they are left as they are (only their greyboxes are regenerated).
