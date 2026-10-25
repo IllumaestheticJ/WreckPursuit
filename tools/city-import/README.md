@@ -23,8 +23,11 @@ Greybox: one primitive per material (16-bit index chunks): `asphalt`, `highway_c
 `wp_world::surface::junction_polygon`), `sidewalk` + `kerb` (exactly
 `wp_world::surface::sidewalk_mesh`, the triangles `wp_sim` collides with; vertices shared),
 `building` (prisms from `base_z_m`), `ground_<district>` (zone polygons on flat cities; on
-terrain cities a 10 m terrain mesh, each vertex the minimum of the fine heights around it so it
-never rises above a road, smooth normals), `rock`, `seabed`, `water` (sea plane at 0.25 m),
+terrain cities `wp_world::surface::drawn_terrain_mesh`: a 10 m terrain mesh, each vertex the
+minimum of the fine road-band heights around it so it never rises above a road, with the cells
+where the solid road-band ground stands more than `DRAWN_BAND_TOLERANCE_M` (0.25 m) above it
+drawn from the fine 5 m grid instead, so physics never collides with ground it doesn't draw;
+smooth normals), `rock`, `seabed`, `water` (sea plane at 0.25 m),
 `retaining_wall` (road edges above the ground) and `bridge` (deck sides, parapets, piers).
 Flat faces carry no normals (the testbed flat-shades them).
 Format: see `crates/wp_world/README.md`.

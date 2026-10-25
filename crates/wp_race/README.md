@@ -236,16 +236,19 @@ day (14:00) / night (23:30) × dry / rain × challenger / boss; its scenario nam
 `race_touge:<map>:<up|down>:<day|night>:<dry|rain>:<challenger|boss>` round-trips, and
 `race_def` / `plan_course` build a sanctioned single-file sprint (NPC ahead, 12 m gap, no
 traffic, no police). Every pass has a fixed challenger and boss (`ROSTER`).
-- **Rules:** `Boundary::check` flags a car through the wall line (a K-rail stretch) or fallen
-  well below the road; `TougeBattle::observe` decides the battle at once for the other car
-  (the car through is totaled). Otherwise the first across the line wins.
+- **Rules:** `Boundary::check_near` flags a car more than `BREACH_DROP_M` (4 m) below the road
+  beside it (`OffTheEdge`: over a drop, through a guard rail and down the slope) or more than
+  `wp_world::touge::COURSE_EXTENT_M` beyond the paved edge (`OffCourse`). Each car is judged on
+  the road within `TRACK_WINDOW_M` of where it last was, so dropping onto the leg below a
+  hairpin stack counts as falling off. `TougeBattle::observe` decides the battle at once for
+  the other car (the car that went off is totaled). Otherwise the first across the line wins.
 - **Gates (career API, `wp_economy::progression`):** racing a challenger needs
   `Feature::TougeRaces`, a boss `Feature::BossRaces`; side bets need `Feature::TougeBetting`
   (stake up to `max_bet(BetVenue::Touge)`), pink slips `Feature::PinkSlips`. `wager_menu` lists
   each line with the locked reason; `place` refuses a locked or oversized wager.
 - **Settlement (`settle`):** side bet via `settle_bet` (challenger 2.0×, boss 2.5×), the win
-  purse (challenger 3 500, boss 12 000) via `award_credits`, rep via `award_rep` (`boss:<map>` / `touge:<map>`; −100 extra for going through the
-  wall), and pink slips: the winner takes the loser's car **exactly as it finished**
+  purse (challenger 3 500, boss 12 000) via `award_credits`, rep via `award_rep` (`boss:<map>` / `touge:<map>`; −100 extra for going off the
+  mountain), and pink slips: the winner takes the loser's car **exactly as it finished**
   (`Economy::take_pink_slip_car` with the NPC's damage snapshot; `lose_pink_slip_car`).
 
 ## Tests

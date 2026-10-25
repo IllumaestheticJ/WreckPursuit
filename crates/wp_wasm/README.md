@@ -19,7 +19,7 @@ canonical `replay.bin` files that `simcli replay` verifies.
 | `career.rs` | the browser career (machine G): persistent account, garage actions, career runs with the career car's mods and saved lattice damage, `career_*` exports; tests in `career_tests.rs` (see `docs/integration/economy.md`) |
 | `lots.rs` | car lots in the career: lot stock / buy / tyres exports, and the **lot visit** session (`career_visit_lot`: today's stock parked in rows with its wear and tyres, the player's car at the gate, fences and fixtures per lot kind); tests in `lots_tests.rs` |
 | `garage_visit.rs` | garage visits (lead): the city's `Garage` POIs as repair shops (legit / crooked, district); stopping in one holds the car and offers the shop's `RepairAll`; detection in `Session::check_garage`, tests in `run_tests.rs` |
-| `touge.rs` | touge battles: scenario builder (locked weather, rep-gated wager), wall / K-rail breach → total loss, early decision, settlement on the run or career account, pink-slip car (economy snapshot + full lattice) into the career garage; `touge_*` exports; tests in `touge_tests.rs` |
+| `touge.rs` | touge battles: scenario builder (locked weather, rep-gated wager), off-the-mountain breach (drop, guard rail, corridor) → total loss, early decision, settlement on the run or career account, pink-slip car (economy snapshot + full lattice) into the career garage; `touge_*` exports; tests in `touge_tests.rs` |
 | `police.rs` / `garage.rs` / `audio.rs` | police read-outs + siren rule, live repair bill, audio director glue |
 | `data.rs` + `build.rs` | every file in `data/{cars,lattices,tires,materials,modes}` embedded at build time, also as a simcli `MemData` bundle |
 

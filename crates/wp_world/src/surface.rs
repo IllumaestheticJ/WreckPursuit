@@ -1845,12 +1845,135 @@ pub fn render_spacing(t: &Heightfield) -> f32 {
     t.cell_m * (TERRAIN_RENDER_M / t.cell_m - 1e-3).ceil().max(1.0)
 }
 
+/// Grid spacing the terrain of `map` is drawn (and collided off the roads) at: a touge pass
+/// (`crate::touge`, a small map) at its own resolution, so its roadside ditches, cut banks and
+/// drops are drawn as solid as they are; every other city at [`render_spacing`].
+pub fn drawn_spacing(map: &CityMap, t: &Heightfield) -> f32 {
+    if crate::touge::is_touge(&map.net.id) {
+        t.cell_m
+    } else {
+        render_spacing(t)
+    }
+}
+
 /// The terrain the greybox draws (`None` without terrain): `net.terrain` on a
 /// [`TERRAIN_RENDER_M`] grid ([`Heightfield::coarse_under`]), following the fine heights
 /// except where it must stay under the ground roads, sidewalks and lots are laid on.
 pub fn drawn_terrain(map: &CityMap) -> Option<Heightfield> {
     let t = map.net.terrain.as_ref()?;
-    Some(t.coarse_under(render_spacing(t), &road_band(map, t)))
+    Some(t.coarse_under(drawn_spacing(map, t), &road_band(map, t)))
+}
+
+/// Most the solid ground ([`collision_terrain`]) may stand above the drawn terrain
+/// ([`drawn_terrain_mesh`]) anywhere, m: drawn cells where the road band's fine heights rise
+/// further above the coarse drawn grid are drawn at the fine resolution instead.
+pub const DRAWN_BAND_TOLERANCE_M: f32 = 0.25;
+
+/// The terrain mesh the greybox draws: the coarse [`drawn_terrain`] grid, with every coarse cell
+/// where the solid road-band ground stands more than [`DRAWN_BAND_TOLERANCE_M`] above it drawn
+/// from the fine grid instead (playtest row 172: solid shelves up to 15 m above the drawn ground
+/// beside roads on steep slopes). See [`drawn_terrain_mesh`].
+#[derive(Debug, Clone)]
+pub struct DrawnTerrain {
+    /// The coarse grid ([`drawn_terrain`]).
+    pub coarse: Heightfield,
+    /// Drawn heights on the fine grid of `net.terrain` (only read inside refined cells): the
+    /// solid ground 5 cm down in the road band, the coarse surface elsewhere and on every
+    /// vertex a refined cell shares with a coarse one (so the two meet without cracks).
+    pub fine: Heightfield,
+    /// Fine cells per coarse cell along each axis.
+    pub k: u32,
+    /// Per coarse cell (`j * (coarse.nx - 1) + i`): drawn from the fine grid.
+    pub refined: Vec<bool>,
+}
+
+impl DrawnTerrain {
+    /// Whether coarse cell `(i, j)` is drawn from the fine grid.
+    pub fn is_refined(&self, i: u32, j: u32) -> bool {
+        self.refined[(j * (self.coarse.nx - 1) + i) as usize]
+    }
+
+    /// Height of the drawn terrain at `p` (on the triangles the greybox draws).
+    pub fn height_at(&self, p: V2) -> f32 {
+        let c = &self.coarse;
+        let fx = ((p[0] - c.origin[0]) / c.cell_m).clamp(0.0, (c.nx - 1) as f32);
+        let fy = ((p[1] - c.origin[1]) / c.cell_m).clamp(0.0, (c.ny - 1) as f32);
+        let i = (fx.floor() as u32).min(c.nx - 2);
+        let j = (fy.floor() as u32).min(c.ny - 2);
+        if self.is_refined(i, j) {
+            self.fine.height_on_triangles(p)
+        } else {
+            c.height_on_triangles(p)
+        }
+    }
+}
+
+/// The terrain the greybox draws, as [`DrawnTerrain`] (`None` without terrain). Coarse cells
+/// are refined where any fine vertex on them (edges and corners included) has solid ground more
+/// than [`DRAWN_BAND_TOLERANCE_M`] above the coarse surface, so a vertex a refined cell shares
+/// with an unrefined one is within the tolerance and is drawn at the coarse height. Off the road
+/// band the solid ground is the coarse surface itself, so drawn and solid then agree within the
+/// tolerance (plus the drawn ground's 5 cm) everywhere. A flat field draws coarse only.
+pub fn drawn_terrain_mesh(map: &CityMap) -> Option<DrawnTerrain> {
+    let t = map.net.terrain.as_ref()?;
+    let coarse = drawn_terrain(map)?;
+    let solid = collision_terrain(map)?;
+    let k = ((coarse.cell_m / t.cell_m).round() as u32).max(1);
+    let (cw, ch) = (coarse.nx - 1, coarse.ny - 1);
+    let flat = t.z.iter().all(|z| *z == t.z[0]);
+    // Solid ground above the coarse surface at every fine vertex.
+    let rise =
+        |fi: u32, fj: u32| solid.at(fi, fj) - coarse.height_on_triangles(t.vertex_pos(fi, fj));
+    let mut refined = vec![false; (cw * ch) as usize];
+    if !flat {
+        for j in 0..ch {
+            for i in 0..cw {
+                // A cell reaching past the fine grid (a remainder column) stays coarse.
+                if (i + 1) * k > t.nx - 1 || (j + 1) * k > t.ny - 1 {
+                    continue;
+                }
+                let high = (j * k..=(j + 1) * k).any(|fj| {
+                    (i * k..=(i + 1) * k).any(|fi| rise(fi, fj) > DRAWN_BAND_TOLERANCE_M)
+                });
+                refined[(j * cw + i) as usize] = high;
+            }
+        }
+    }
+    let is_ref = |i: i64, j: i64| {
+        i >= 0
+            && j >= 0
+            && (i as u32) < cw
+            && (j as u32) < ch
+            && refined[(j as u32 * cw + i as u32) as usize]
+    };
+    let mut fine = t.clone();
+    for fj in 0..t.ny {
+        for fi in 0..t.nx {
+            let p = t.vertex_pos(fi, fj);
+            // Coarse cells this fine vertex lies on (1, 2 or 4).
+            let (ci, cj) = ((fi / k) as i64, (fj / k) as i64);
+            let on_i: &[i64] = if fi % k == 0 { &[ci - 1, ci] } else { &[ci] };
+            let on_j: &[i64] = if fj % k == 0 { &[cj - 1, cj] } else { &[cj] };
+            let cells: Vec<(i64, i64)> = on_j
+                .iter()
+                .flat_map(|cj| on_i.iter().map(move |ci| (*ci, *cj)))
+                .filter(|(ci, cj)| *ci >= 0 && *cj >= 0 && (*ci as u32) < cw && (*cj as u32) < ch)
+                .collect();
+            let all_refined = !cells.is_empty() && cells.iter().all(|(ci, cj)| is_ref(*ci, *cj));
+            let c = coarse.height_on_triangles(p);
+            fine.z[(fj * t.nx + fi) as usize] = if all_refined && rise(fi, fj) > 0.0 {
+                solid.at(fi, fj) - 0.05
+            } else {
+                c
+            };
+        }
+    }
+    Some(DrawnTerrain {
+        coarse,
+        fine,
+        k,
+        refined,
+    })
 }
 
 /// The terrain physics collides with, on the fine grid of `net.terrain` (`None` without
@@ -1868,7 +1991,7 @@ pub fn collision_terrain(map: &CityMap) -> Option<Heightfield> {
         return Some(t.clone());
     }
     let keep = road_band(map, t);
-    let drawn = t.coarse_under(render_spacing(t), &keep);
+    let drawn = t.coarse_under(drawn_spacing(map, t), &keep);
     let mut out = t.clone();
     for j in 0..t.ny {
         for i in 0..t.nx {

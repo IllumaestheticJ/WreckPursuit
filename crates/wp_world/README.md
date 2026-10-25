@@ -404,26 +404,45 @@ so what you see is what you drive on (`tools/city-import/tests/surface_match.rs`
   leave (`wp_wasm::street`).
 
 ## Touge passes (`touge::generate`, `World::touge`, `gen-city --preset touge`)
-Four sealed mountain roads for one-on-one touge battles, specs in `data/touge/<id>.json`
-(embedded): Hollow Crown Pass (≈ 2.8 km, 280 m climb), Mistral Ridge (≈ 3.0 km, 200 m),
-Ashfall Grade (≈ 2.3 km, 260 m), Cedar Switchback (≈ 2.3 km, 210 m).
+Four mountain roads for one-on-one touge battles, specs in `data/touge/<id>.json` (embedded):
+Hollow Crown Pass (≈ 2.8 km, 280 m climb), Mistral Ridge (≈ 3.0 km, 200 m), Ashfall Grade
+(≈ 2.3 km, 260 m), Cedar Switchback (≈ 2.3 km, 210 m). The road is cut into a mountainside;
+there are no solid walls along it.
 - **Road:** a turtle path of straights and arcs (`legs`), sampled every 2 m; an elevation
   profile that flattens the hairpins and both ends; banking from curvature. One 1+1 lane road
   (`RoadClass::Collector` geometry, lanes tagged `LaneKind::Highway` so the surface code adds no
-  sidewalks, kerbs or guard rails), no traffic (one zone at density 0).
-- **Terrain:** coarse natural ground (16 m) resampled onto a 4 m heightfield, carved under the
-  road with a flat shelf, falling away as a cliff (`cliff_drop_m`) on the low side.
-- **Sealed:** `DecorKind::Fence` walls (0.5 × 1.2 m, solid colliders in `wp_sim`) along both
-  edges and across both ends, everywhere except the `krail` spans.
-- **K-rail spans:** on the outboard (cliff) edge the wall is replaced by loose K-rail props
-  (`PropKind::KRail`, 2 m × 0.6 m × 0.81 m, 600 kg): fixed until a car comes near, then
-  dynamic, so a car that hits them hard enough knocks them over the edge and follows them.
-  Whether a car went through is judged in `wp_race::touge::Boundary`.
+  sidewalks, kerbs or guard rails), no traffic (density 0).
+- **Mountain:** the least-squares plane through the road (the mountain's mean slope), bent to
+  the road heights near it, plus four octaves of value-noise relief (ridged at 150 m, down to
+  10 m lumps) that grows away from the road (`RELIEF_M`). 3 m heightfield, drawn and collided
+  at that resolution (`surface::drawn_spacing`: touge maps only; every other city keeps
+  `render_spacing`); `EDGE_CARVE_M` deeper under the paving near its edges and a cap on the
+  first ring of vertices off it keep every terrain triangle under the paved edge.
+- **Edges (`EdgeKind`, `TougeTrack::edges`):** the downhill side of each stretch (lower ground
+  25 m out, smoothed, runs ≥ 80 m) gets a **guard rail** (`PropKind::GuardRail`, 4 m W-beam
+  sections on a 2.5 m verge, then a 0.9:1 fill slope at least `cliff_drop_m` deep); the uphill
+  side a **cut bank** (1 m verge, then 1:1 up to the mountain, at least a 1.5–4.5 m berm). The
+  spec's `drops` spans are **open drops** on the downhill side (no rail, 1 m dirt verge, 1.4:1
+  fall). Bends tighter than 30 m or sharper than 60° get an 8 m **runoff** apron outside (a rail
+  at its back downhill, the bank behind it uphill). Kinds blend over ±12 m of road; between
+  stacked legs the grounds of both meet smoothly and never rise above another leg's paving or
+  undermine its verge (`LEG_CUT_SLOPE`). Runoff aprons and drops are dirt zones
+  (`DistrictKind::Industrial`, `surface_at` = dirt).
+- **Guard rails:** 4 m × 0.4 m × 0.8 m, 120 kg, the beam (local −X) towards the road. In
+  `wp_sim` they stay fixed while a car slides along them and break away only when a car closes
+  on their face faster than `GUARD_RAIL_BREAK_MPS` (6.5 m/s; `PropKind::breakaway_mps`), then a
+  car carries them along. Whether a car went off the mountain is judged in
+  `wp_race::touge::Boundary`.
+- **Forest:** pine trees (`DecorKind::PineTree`) on slopes under ~44°, patchy, clear of the
+  road by 15 m, density from the spec's `forest` (0–1), at most `MAX_TREES`.
+- **Ends:** `DecorKind::Fence` walls across both ends of the road.
 - **POIs:** `<name> base start`, `<name> summit finish`, `<name> summit start`,
   `<name> base finish` (60 m / 40 m in from the ends) for uphill and downhill courses.
-- Tests (`touge::tests`): every pass parses and validates; long, steep and sealed; the road never
-  comes near itself; terrain stays under the road and falls away behind the K-rails; generation
-  is deterministic.
+- Tests (`touge::tests`): every pass parses and validates; long and steep, rails over half the
+  downhill side, banks over half the uphill side, runoff and every spec drop built, never a fall
+  on both sides at once, dirt zones; hairpins have runoff outside; open drops never on the outside of a bend; the road never
+  comes near itself; terrain stays under the paving out to its edges, falls ≥ 4 m behind ≥ 80 % of rail, rises behind ≥ 80 %
+  of bank, rail verges level, ≥ 8 m drops; rails face the road; generation is deterministic.
 
 ## Traffic AI
 
