@@ -98,7 +98,7 @@ pub struct Hit {
 }
 
 /// Police tables from the overlay (`police/*.toml`), or the built-in ones when the data root
-/// has none, with `police_presence` applied like simcli does.
+/// has none, with `dense_patrols`, `police_tools` and `police_presence` applied like simcli does.
 pub fn police_config(data: &Overlay, sc: &simcli::Scenario) -> Result<PoliceConfig, String> {
     let names = ["heat", "presence", "pursuit", "tools"];
     let texts: Vec<Result<String, String>> = names
@@ -112,6 +112,14 @@ pub fn police_config(data: &Overlay, sc: &simcli::Scenario) -> Result<PoliceConf
     } else {
         PoliceConfig::builtin()
     };
+    if sc.dense_patrols {
+        cfg.presence.patrols = wp_police::config::dense_patrols();
+    }
+    if !sc.police_tools {
+        let u = &mut cfg.presence.unlocks;
+        u.spikes_level = u8::MAX;
+        u.roadblock_level = u8::MAX;
+    }
     if let Some(p) = sc.police_presence {
         let scale = |n: &mut u32| *n = (*n as f32 * p).round() as u32;
         let t = &mut cfg.presence.patrols;
