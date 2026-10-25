@@ -87,6 +87,12 @@ pub struct RaceConfig {
     /// On by default; free roam (`roam`) turns it off. Pair with
     /// `civilian_contact_dq: false` (as the race glue does) or racers DQ themselves.
     pub ram_traffic: bool,
+    /// Into a right-angle turn, shorten the steering look-ahead until the straight line to
+    /// the target stays on the road (racing pace into a junction turn otherwise cuts the
+    /// inside into the barrier: Loop 9 → Ashpeak highway, the Route 12 ramp). On by default;
+    /// free roam (`roam`) turns it off: roamers cruise through city junctions well under
+    /// racing pace and were tuned without it.
+    pub tight_turn_lookahead: bool,
 }
 
 impl Default for RaceConfig {
@@ -105,6 +111,7 @@ impl Default for RaceConfig {
             finish_m: None,
             learned: true,
             ram_traffic: true,
+            tight_turn_lookahead: true,
         }
     }
 }
@@ -793,6 +800,18 @@ fn tag_closing(v: f32) -> f32 {
     TAG_CLOSING_MPS * TAG_FULL_UNTIL_MPS / v.max(TAG_FULL_UNTIL_MPS)
 }
 
+/// The look-ahead is checked against the road ([`CHORD_SLACK_M`]) only with a bend tighter
+/// than this radius within it, m (a right-angle junction turn, not a sweeper or a lane).
+const CHORD_MAX_RADIUS_M: f32 = 30.0;
+/// Points checked along the straight line to the steering target ([`CHORD_SLACK_M`]).
+const CHORD_CHECKS: usize = 6;
+/// How far past the drivable band (car centre) the straight line to the steering target may
+/// pass before the look-ahead is shortened, m.
+const CHORD_SLACK_M: f32 = 0.5;
+/// Most times the look-ahead is cut (×0.75 each) for a chord that leaves the road.
+const CHORD_SHORTEN_STEPS: usize = 4;
+/// The look-ahead is never cut below this, m.
+const CHORD_MIN_LD_M: f32 = 6.0;
 /// Extra clearance of the whole-road line from the far edge of the opposing lanes, m.
 const WIDE_EDGE_EXTRA_M: f32 = 0.6;
 
@@ -2029,6 +2048,7 @@ impl Field {
             None => (&self.corridor, &self.lines[line_idx].1, &speed),
         };
         let draft = self.config.draft;
+        let tight_turns = self.config.tight_turn_lookahead;
         let ram = self.config.ram_traffic && flight.is_none();
         let finish_m = if flight.is_some() {
             None
@@ -2055,6 +2075,7 @@ impl Field {
             profile,
             wide,
             flight.is_some(),
+            tight_turns,
             obstacles,
             dt,
         );
@@ -2126,6 +2147,7 @@ fn decide_racer(
     profile: &SpeedProfile,
     wide: Option<(&RacingLine, &SpeedProfile)>,
     fleeing: bool,
+    tight_turns: bool,
     obstacles: &[Obstacle],
     dt: f32,
 ) {
@@ -3625,19 +3647,6 @@ fn decide_racer(
         if matches!(limit, SpeedLimit::Obstacle(_) | SpeedLimit::Signal) && v_target < v - 0.5 {
             ld = ld.min(1.5 + v * v / (2.0 * a_brk));
         }
-        let s_t = r.s + ld;
-        let (t_lo, t_hi) = if r.tactic == Tactic::Overtake {
-            pass_limits(s_t)
-        } else {
-            limits(s_t)
-        };
-        // Curvature feedforward: in a tight corner the car settles wide of a pure-pursuit
-        // target (tyre slip angles, steering response lag), by about κ·L²/8 (L = distance to
-        // the target; measured on the Lantern junction turns, ~1.3 m). Aim that much inside
-        // so the car holds the line instead of running out of the lane at the exit.
-        let l_t = s_t - r.s;
-        let k_mid = line.curvature[corridor.wrap(((r.s + 0.5 * l_t) / CORRIDOR_STEP_M) as isize)];
-        let inside = (k_mid * l_t * l_t / 8.0).clamp(-1.5, 1.5);
         // Trained aim correction: cancels the drift off the commanded line this car showed
         // here in training (`crate::learned`), racing on the race corridor only.
         let aim = match &r.learned {
@@ -3650,13 +3659,61 @@ fn decide_racer(
             }
             _ => 0.0,
         };
-        // The aim goes on after the clamp to the drivable band: where the line runs along
-        // the edge (Loop 9's sweepers: apex and exit on the outer lane) the car drifts inside
-        // it, and the target has to sit past the edge for the car to end up on it.
-        let n_t = (n_cmd + follow_w * (line_n(s_t) - line_n(r.s)) + inside)
-            .clamp(t_lo.min(n_cmd), t_hi.max(n_cmd))
-            + aim;
-        let mut target = corridor.point(s_t, n_t);
+        // The steering target `ld` ahead, in corridor terms and in the world.
+        let target_at = |ld: f32| {
+            let s_t = r.s + ld;
+            let (t_lo, t_hi) = if r.tactic == Tactic::Overtake {
+                pass_limits(s_t)
+            } else {
+                limits(s_t)
+            };
+            // Curvature feedforward: in a tight corner the car settles wide of a pure-pursuit
+            // target (tyre slip angles, steering response lag), by about κ·L²/8 (L = distance to
+            // the target; measured on the Lantern junction turns, ~1.3 m). Aim that much inside
+            // so the car holds the line instead of running out of the lane at the exit.
+            let l_t = s_t - r.s;
+            let k_mid =
+                line.curvature[corridor.wrap(((r.s + 0.5 * l_t) / CORRIDOR_STEP_M) as isize)];
+            let inside = (k_mid * l_t * l_t / 8.0).clamp(-1.5, 1.5);
+            // The aim goes on after the clamp to the drivable band: where the line runs along
+            // the edge (Loop 9's sweepers: apex and exit on the outer lane) the car drifts
+            // inside it, and the target has to sit past the edge for the car to end up on it.
+            let n_t = (n_cmd + follow_w * (line_n(s_t) - line_n(r.s)) + inside)
+                .clamp(t_lo.min(n_cmd), t_hi.max(n_cmd))
+                + aim;
+            corridor.point(s_t, n_t)
+        };
+        let pos_lag = geom::add(r.pos, geom::scale(r.vel, STEER_LAG_S));
+        // Into a sharp turn (a right angle at a junction) a target round the corner pulls the
+        // car across the inside before the turn: shorten the look-ahead until the straight line
+        // to it stays on the road (Loop 9 → Ashpeak highway, the Lantern Way turn onto the
+        // Route 12 ramp: every racer ran 2-5 m over the inside edge there, into the ramp's
+        // barrier, and the field queued behind the wedged cars until the race timed out).
+        let mut target = target_at(ld);
+        let sharp_ahead = (0..=(ld / CORRIDOR_STEP_M).ceil() as isize)
+            .any(|j| line.curvature[corridor.wrap(i_here + j)].abs() > 1.0 / CHORD_MAX_RADIUS_M);
+        if tight_turns && sharp_ahead && !clearing_line {
+            let window = (ld / CORRIDOR_STEP_M) as usize + 10;
+            let chord_on_road = |t: V3| {
+                (1..=CHORD_CHECKS).all(|j| {
+                    let f = j as f32 / (CHORD_CHECKS + 1) as f32;
+                    let p = [
+                        pos_lag[0] + (t[0] - pos_lag[0]) * f,
+                        pos_lag[1] + (t[1] - pos_lag[1]) * f,
+                    ];
+                    let cp = corridor.project(p, Some(r.hint), window);
+                    let (lo, hi) = to_limits(corridor.pass_bounds(cp.s));
+                    cp.n >= lo - CHORD_SLACK_M && cp.n <= hi + CHORD_SLACK_M
+                })
+            };
+            for _ in 0..CHORD_SHORTEN_STEPS {
+                if chord_on_road(target) || ld < CHORD_MIN_LD_M {
+                    break;
+                }
+                ld *= 0.75;
+                target = target_at(ld);
+            }
+        }
         // Clearing the finish line past the end of the corridor: straight on along its last
         // direction.
         if clearing_line && beyond + ld > 0.0 {
@@ -3669,7 +3726,6 @@ fn decide_racer(
             let past = (beyond + ld).max(0.0);
             target = [end[0] + t[0] * past, end[1] + t[1] * past, end[2]];
         }
-        let pos_lag = geom::add(r.pos, geom::scale(r.vel, STEER_LAG_S));
         let (sn, cs) = wp_math::sin_cos(r.yaw_rate * STEER_LAG_S);
         let fwd_lag = [r.fwd[0] * cs - r.fwd[1] * sn, r.fwd[0] * sn + r.fwd[1] * cs];
         let mut steer = r.ctrl.steer(pos_lag, fwd_lag, target);

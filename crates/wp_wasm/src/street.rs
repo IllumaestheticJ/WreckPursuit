@@ -2409,6 +2409,8 @@ fn roam_config(seed: u64) -> RaceConfig {
         civilian_contact_dq: false,
         // Out of a race, roamers still drive round traffic.
         ram_traffic: false,
+        // Cruising pace through junctions, as `wp_opponent::roam`.
+        tight_turn_lookahead: false,
         cooldown_speed_mps: 6.0,
         corridor: CorridorOptions {
             opposing: OpposingLanes::Never,
