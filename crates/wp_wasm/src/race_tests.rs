@@ -80,9 +80,9 @@ fn race_scenarios_name_the_race_and_put_the_player_last() {
             assert!((3..=5).contains(&c.drivers.len()), "{}", c.id);
         }
     }
-    // Illegal daytime pays more than a night street race of similar length.
+    // Illegal daytime pays more than a night street race of the same length.
     let by = |id: &str| cards.iter().find(|c| c.id == id).unwrap();
-    assert!(by("lantern_checkpoint").purse > by("hollins_sprint").purse);
+    assert!(by("loop9_day").purse > by("loop9_circuit").purse);
 }
 
 #[test]
@@ -274,7 +274,11 @@ fn a_capture_mid_race_is_a_dnf_and_hands_off_to_the_end_of_run_panel() {
 fn race_scenario_files_match_the_picker() {
     let dir =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/simcli/scenarios/race");
-    for def in wp_race::catalog::races() {
+    // Retired races too: their scenarios stay as regression tests.
+    for def in wp_race::catalog::races()
+        .into_iter()
+        .chain(wp_race::catalog::retired_races())
+    {
         let mut sc = race_scenario(&def, CAR, DamageMode::Arcade, false).unwrap();
         sc.duration_s = 10.0;
         sc.expect = vec![
@@ -350,20 +354,20 @@ fn bets_on_yourself_settle_through_the_career_economy() {
     let (max, lock) = s.bet_status();
     assert_eq!(max, 0);
     assert!(lock.is_some());
-    assert!(s.race_place_bet("win:player", 200).is_err());
+    assert!(s.race_place_bet("win:player", 200, None).is_err());
     s.debug_run_mut().unwrap().debug_set_rep(2_000);
     let (max, lock) = s.bet_status();
     assert!(max >= 200 && lock.is_none(), "{max} {lock:?}");
     // A racer only backs themselves.
-    assert!(s.race_place_bet("win:vic", 200).is_err());
+    assert!(s.race_place_bet("win:vic", 200, None).is_err());
     let cash0 = s.run().unwrap().account().cash;
-    let t = s.race_place_bet("h2h:player>tito", 200).unwrap();
+    let t = s.race_place_bet("h2h:player>tito", 200, None).unwrap();
     assert_eq!(t.outcome, "open");
     assert!(t.odds > 1.0 && t.paid > 200);
     assert_eq!(s.run().unwrap().account().cash, cash0 - 200);
     let (report, _) = run_to_final(&mut s, 150);
     // Bets close at the green light.
-    assert!(s.race_place_bet("win:player", 200).is_err());
+    assert!(s.race_place_bet("win:player", 200, None).is_err());
     assert_eq!(report.bets.len(), 1);
     let b = &report.bets[0];
     assert_ne!(b.outcome, "open");

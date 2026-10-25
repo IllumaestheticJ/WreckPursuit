@@ -326,7 +326,16 @@ impl Economy {
         body + money(s.mods_frac * mods)
     }
 
-    /// Price an arbitrary set of estimate lines for a car at a shop.
+    /// Economy markup on one line of damage: `1 + heavy_damage_markup × severity²` (prices.toml).
+    /// Scrapes stay cheap; crushed parts cost a lot more than the damage model's base price.
+    pub fn heavy_damage_factor(&self, severity: f32) -> f32 {
+        let s = severity.clamp(0.0, 1.0);
+        1.0 + self.prices.heavy_damage_markup * s * s
+    }
+
+    /// Price an arbitrary set of estimate lines for a car at a shop: the damage model's line
+    /// × mode `repair_cost_scale` × [`Self::heavy_damage_factor`], × `total_loss_markup` when
+    /// the car is written off.
     pub fn price_lines(
         &self,
         car: &OwnedCar,
@@ -336,13 +345,19 @@ impl Economy {
     ) -> (Vec<QuotedLine>, Money) {
         let rate = self.prices.class[&car.class].labour_per_hour;
         let mult = self.labour_multiplier(shop);
-        let scale = self.mode_table(mode).repair_cost_scale;
+        let scale = self.mode_table(mode).repair_cost_scale
+            * if car.damage.total_loss {
+                self.prices.total_loss_markup
+            } else {
+                1.0
+            };
         let mut gross = 0;
         let quoted = lines
             .iter()
             .map(|l| {
-                let parts = money(l.parts_cost * scale);
-                let labour = money(l.labour_hours * rate * mult * scale);
+                let heavy = self.heavy_damage_factor(l.severity);
+                let parts = money(l.parts_cost * scale * heavy);
+                let labour = money(l.labour_hours * rate * mult * scale * heavy);
                 gross += parts + labour;
                 QuotedLine {
                     item: l.item,

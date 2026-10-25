@@ -1,7 +1,7 @@
 //! Betting on picker races (`data/events/betting.toml`): the player backs themselves at odds.
 //! In the browser the stakes go through the one career wallet (`wp_economy` `place_bet`, venue
 //! `City`), the same wallet that takes the roaming street racers' head-to-head stakes (venue
-//! `Street`, even money, `wp_wasm::street`).
+//! `Street`, odds from the racer's level and car, `wp_wasm::street_odds`).
 //!
 //! A [`Market`] prices one race from its entrants' form ratings ([`crate::roster`]):
 //!
@@ -519,6 +519,20 @@ impl<R: Clone> Book<R> {
         selection: Selection,
         stake: Money,
     ) -> Result<&Ticket<R>, BetError> {
+        self.place_quoted(wallet, selection, stake, None)
+    }
+
+    /// [`Book::place`] at `quoted` odds, the price the bettor was shown when they signed up
+    /// (a picker card priced before the race was set up), instead of the market's current
+    /// one. The quote is held to the book's odds bounds and step; `None` takes the market's
+    /// price. The ticket keeps these odds through settlement.
+    pub fn place_quoted<W: BetWallet<Receipt = R>>(
+        &mut self,
+        wallet: &mut W,
+        selection: Selection,
+        stake: Money,
+        quoted: Option<Odds>,
+    ) -> Result<&Ticket<R>, BetError> {
         if !self.open || self.settled {
             return Err(BetError::Closed);
         }
@@ -532,6 +546,12 @@ impl<R: Clone> Book<R> {
             .odds(&selection)
             .ok_or_else(|| BetError::NotOffered(selection.label()))?;
         let rules = &self.market.rules;
+        let odds = quoted.map_or(odds, |q| {
+            let step = (rules.odds_step * 1000.0) as u32;
+            let lo = (rules.min_odds * 1000.0) as u32;
+            let hi = (rules.max_odds * 1000.0) as u32;
+            Odds((q.0.clamp(lo, hi) / step * step).max(lo))
+        });
         if self.tickets.len() as u32 >= rules.max_tickets {
             return Err(BetError::TooManyTickets {
                 max: rules.max_tickets,
@@ -640,6 +660,31 @@ impl<R: Clone> Book<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_quoted_price_is_kept_through_settlement() {
+        let mut book: Book<Money> = Book::for_player(market());
+        let mut w = CashWallet {
+            cash: 10_000,
+            cap: 5_000,
+        };
+        let sel = Selection::Win(PLAYER_KEY.into());
+        let market_odds = book.market.odds(&sel).unwrap();
+        let quote = Odds(market_odds.0 + 1_000);
+        let t = book.place_quoted(&mut w, sel, 500, Some(quote)).unwrap();
+        assert_eq!(t.odds, quote);
+        assert_eq!(t.potential, quote.payout(500));
+        // Off-step and out-of-bounds quotes are held to the book's rules.
+        let t = book
+            .place_quoted(
+                &mut w,
+                Selection::Podium(PLAYER_KEY.into()),
+                100,
+                Some(Odds(99_999)),
+            )
+            .unwrap();
+        assert_eq!(t.odds, Odds(30_000));
+    }
 
     fn entrant(key: &str, rating: i32) -> MarketEntrant {
         MarketEntrant {

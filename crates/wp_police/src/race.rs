@@ -301,6 +301,61 @@ pub struct RaceProfile {
     /// Spike strips over part of the course.
     #[serde(default)]
     pub spikes: Vec<SpikeSpec>,
+    /// Patrols on the course (0 = off, the normal city-wide patrols): pool units appear and
+    /// patrol only on roads of the course's own class within this distance of it (on a
+    /// divided road, only the carriageway running the racing direction), and responders and
+    /// reinforcements appear there first. Patrols already out elsewhere are retired out of
+    /// sight and replaced on the course. m.
+    #[serde(default)]
+    pub patrol_corridor_m: f32,
+    /// Helicopters the police may have up at once in this race, every time of day (unset =
+    /// the normal `presence.toml` count).
+    #[serde(default)]
+    pub helicopters: Option<u32>,
+    /// Ground unit cap for this race (unset = the normal `presence.toml` `max_ground_units`).
+    #[serde(default)]
+    pub max_ground_units: Option<u32>,
+    /// Wanted levels at which tools and tactics unlock in this race (unset = normal). A
+    /// tactic switched off in [`RaceTactics`] stays off.
+    #[serde(default)]
+    pub unlocks: RaceUnlocks,
+}
+
+/// Optional unlock level overrides for a race (wanted level 1..=5; unset = `presence.toml`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RaceUnlocks {
+    /// AI captain roadblocks.
+    #[serde(default)]
+    pub roadblock_level: Option<u8>,
+    /// AI captain spike strips.
+    #[serde(default)]
+    pub spikes_level: Option<u8>,
+    /// Helicopter support.
+    #[serde(default)]
+    pub helicopter_level: Option<u8>,
+    /// PIT manoeuvres.
+    #[serde(default)]
+    pub pit_level: Option<u8>,
+    /// Box-ins.
+    #[serde(default)]
+    pub boxin_level: Option<u8>,
+    /// Rolling blocks.
+    #[serde(default)]
+    pub rolling_block_level: Option<u8>,
+}
+
+impl RaceUnlocks {
+    fn levels(&self) -> [Option<u8>; 6] {
+        [
+            self.roadblock_level,
+            self.spikes_level,
+            self.helicopter_level,
+            self.pit_level,
+            self.boxin_level,
+            self.rolling_block_level,
+        ]
+    }
 }
 
 impl RaceProfile {
@@ -308,6 +363,30 @@ impl RaceProfile {
     /// overrides replace the chase values, reinforcement counts scale by `backup_scale`.
     /// Patrol counts (`presence`) are not touched here: the race's scenario scales them.
     pub fn apply(&self, cfg: &mut PoliceConfig) {
+        // Level overrides first: a tactic switched off below stays off.
+        let o = &self.unlocks;
+        let unlocks = &mut cfg.presence.unlocks;
+        for (v, lvl) in [
+            (o.roadblock_level, &mut unlocks.roadblock_level),
+            (o.spikes_level, &mut unlocks.spikes_level),
+            (o.pit_level, &mut unlocks.pit_level),
+            (o.boxin_level, &mut unlocks.boxin_level),
+            (o.rolling_block_level, &mut unlocks.rolling_block_level),
+            (o.helicopter_level, &mut cfg.presence.helicopter.min_level),
+        ] {
+            if let Some(v) = v {
+                *lvl = v;
+            }
+        }
+        if let Some(n) = self.helicopters {
+            let c = &mut cfg.presence.helicopter.count;
+            for v in [&mut c.dawn, &mut c.day, &mut c.dusk, &mut c.night] {
+                *v = n;
+            }
+        }
+        if let Some(n) = self.max_ground_units {
+            cfg.presence.max_ground_units = n;
+        }
         let t = &self.tactics;
         let unlocks = &mut cfg.presence.unlocks;
         if !t.roadblocks {
@@ -365,6 +444,18 @@ impl RaceProfile {
         }
         if !(self.backup_scale.is_finite() && self.backup_scale >= 0.0) {
             return Err(format!("{id}: backup_scale must be >= 0"));
+        }
+        if !(self.patrol_corridor_m.is_finite() && self.patrol_corridor_m >= 0.0) {
+            return Err(format!("{id}: patrol_corridor_m must be >= 0"));
+        }
+        if self
+            .unlocks
+            .levels()
+            .iter()
+            .flatten()
+            .any(|l| !(1..=5).contains(l))
+        {
+            return Err(format!("{id}: unlock levels must be 1..=5"));
         }
         let tools = !self.route_blocks.is_empty()
             || !self.side_blocks.is_empty()
@@ -550,6 +641,25 @@ pub struct RacePolice {
     pub stakeouts: Vec<Stakeout>,
     /// What was placed at the start.
     pub plan: RacePolicePlan,
+    /// Where patrols appear and patrol (profile `patrol_corridor_m`); `None` = city-wide.
+    pub corridor: Option<PatrolCorridor>,
+}
+
+/// The roads along a race course that its patrols keep to (see
+/// [`RaceProfile::patrol_corridor_m`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PatrolCorridor {
+    /// Road segments in the corridor, sorted by id.
+    pub segments: Vec<SegmentId>,
+    /// Their end nodes, sorted by id.
+    pub nodes: Vec<NodeId>,
+}
+
+impl PatrolCorridor {
+    /// Whether segment `s` is in the corridor.
+    pub fn has_segment(&self, s: SegmentId) -> bool {
+        self.segments.binary_search_by_key(&s.0, |x| x.0).is_ok()
+    }
 }
 
 /// A side road branching off the course.
@@ -679,12 +789,16 @@ impl PoliceSystem {
                 plan.stakeouts.len()
             ),
         ));
+        let corridor = (profile.patrol_corridor_m > 0.0)
+            .then(|| self.patrol_corridor(course, profile.patrol_corridor_m))
+            .filter(|c| !c.segments.is_empty());
         self.race = Some(RacePolice {
             race: race.to_string(),
             profile: profile.clone(),
             entrants: entrants.to_vec(),
             stakeouts,
             plan: plan.clone(),
+            corridor,
         });
         plan
     }
@@ -692,6 +806,53 @@ impl PoliceSystem {
     /// The race the police are working, if [`PoliceSystem::start_race`] was called.
     pub fn race_police(&self) -> Option<&RacePolice> {
         self.race.as_ref()
+    }
+
+    /// The race's patrol corridor, if its profile sets one.
+    pub(crate) fn race_corridor(&self) -> Option<&PatrolCorridor> {
+        self.race.as_ref().and_then(|r| r.corridor.as_ref())
+    }
+
+    /// The roads within `within_m` of `course` that are of a class the course itself runs on
+    /// (Loop 9: highway only, so no street under or beside it) and, when one-way, run the
+    /// racing direction (no units stuck on the far carriageway of a divided road).
+    fn patrol_corridor(&self, course: &RaceCourse, within_m: f32) -> PatrolCorridor {
+        const SAMPLE_M: f32 = 25.0;
+        const ONEWAY_MIN_COS: f32 = 0.5;
+        let total = course.length();
+        let mut classes = Vec::new();
+        let mut s = 0.0;
+        while s <= total {
+            let p = course.point_at(s);
+            if let Some(r) = self.graph.nearest_on_road(p) {
+                if r.dist_m < 2.0 * ROAD_HALF_WIDTH_M {
+                    classes.push(self.graph.segment(r.segment).class);
+                }
+            }
+            s += SAMPLE_M;
+        }
+        classes.sort();
+        classes.dedup();
+        let mut out = PatrolCorridor::default();
+        for (k, seg) in self.graph.segments.iter().enumerate() {
+            if !classes.contains(&seg.class) {
+                continue;
+            }
+            let (a, b) = (self.graph.node(seg.a).pos, self.graph.node(seg.b).pos);
+            let ((sa, da), (_, db)) = (course.project(a), course.project(b));
+            if da > within_m || db > within_m {
+                continue;
+            }
+            if seg.oneway && dot(normalize(sub(b, a)), course.dir_at(sa)) < ONEWAY_MIN_COS {
+                continue;
+            }
+            out.segments.push(SegmentId(k as u32));
+            out.nodes.push(seg.a);
+            out.nodes.push(seg.b);
+        }
+        out.nodes.sort_by_key(|n| n.0);
+        out.nodes.dedup();
+        out
     }
 
     /// Think step for the race: spring stakeouts that a racer passes.
@@ -1229,6 +1390,137 @@ mod tests {
         }
         assert!(u.pit_level <= 5, "PIT stays");
         assert!(cfg.pursuit.chase.pit_max_kmh[2] >= 180.0);
+    }
+
+    #[test]
+    fn loop9_day_is_the_heaviest_police_in_the_picker() {
+        let p = RaceProfiles::builtin();
+        let day = p.get("loop9_day").unwrap().clone();
+        for (id, other) in &p.profiles {
+            if id != "loop9_day" {
+                assert!(other.presence <= day.presence, "{id} has more patrols");
+            }
+        }
+        assert!(day.route_blocks.len() >= 2 && !day.spikes.is_empty());
+        assert!(day.stakeouts.len() >= 6);
+        let mut cfg = PoliceConfig::builtin();
+        day.apply(&mut cfg);
+        let h = &cfg.presence.helicopter;
+        assert_eq!(h.min_level, 1, "helicopter from the first wanted level");
+        assert!(h.count.day >= 2);
+        let u = &cfg.presence.unlocks;
+        assert!(u.roadblock_level <= 2 && u.spikes_level <= 3);
+        assert!(cfg.presence.max_ground_units > PoliceConfig::builtin().presence.max_ground_units);
+        // Backup doubled.
+        assert_eq!(cfg.presence.reinforcement.units_per_level[1], 8);
+    }
+
+    #[test]
+    fn switched_off_tactic_beats_an_unlock_override() {
+        let mut prof = RaceProfiles::builtin().get("loop9_day").unwrap().clone();
+        prof.tactics.helicopter = false;
+        let mut cfg = PoliceConfig::builtin();
+        prof.apply(&mut cfg);
+        assert_eq!(cfg.presence.helicopter.min_level, NEVER_LEVEL);
+        assert_eq!(cfg.presence.helicopter.count.day, 0);
+        prof.unlocks.spikes_level = Some(0);
+        assert!(prof.validate("x").is_err());
+    }
+
+    #[test]
+    fn every_loop9_race_keeps_its_patrols_on_the_highway() {
+        let p = RaceProfiles::builtin();
+        for id in ["loop9_circuit", "loop9_day", "loop9_ashpeak_highway"] {
+            assert!(p.get(id).unwrap().patrol_corridor_m > 0.0, "{id}");
+        }
+        // Other races keep the normal city-wide patrols.
+        assert_eq!(p.get("lantern_checkpoint").unwrap().patrol_corridor_m, 0.0);
+    }
+
+    /// A divided highway along y = 0 (eastbound carriageway at y = -6, westbound at +6, joined
+    /// at both ends), with a local street parallel to it at y = 80 and ramps down to it.
+    fn highway() -> RoadGraph {
+        let mut g = RoadGraph::new();
+        let east: Vec<NodeId> = (0..=8)
+            .map(|k| g.add_node([k as f32 * 200.0, -6.0], District::Core))
+            .collect();
+        let west: Vec<NodeId> = (0..=8)
+            .map(|k| g.add_node([(8 - k) as f32 * 200.0, 6.0], District::Core))
+            .collect();
+        let street: Vec<NodeId> = (0..=8)
+            .map(|k| g.add_node([k as f32 * 200.0, 80.0], District::Suburb))
+            .collect();
+        for w in east.windows(2) {
+            g.add_segment(w[0], w[1], 30.0, RoadClass::Highway, true);
+        }
+        for w in west.windows(2) {
+            g.add_segment(w[0], w[1], 30.0, RoadClass::Highway, true);
+        }
+        for w in street.windows(2) {
+            g.add_segment(w[0], w[1], 14.0, RoadClass::Local, false);
+        }
+        g.add_segment(east[8], west[0], 20.0, RoadClass::Highway, true);
+        g.add_segment(west[8], east[0], 20.0, RoadClass::Highway, true);
+        for k in [2, 6] {
+            g.add_segment(street[k], east[k], 14.0, RoadClass::Local, true);
+            g.add_segment(west[8 - k], street[k], 14.0, RoadClass::Local, true);
+        }
+        g
+    }
+
+    #[test]
+    fn loop9_patrols_appear_and_patrol_on_the_course_carriageway() {
+        let mut police =
+            PoliceSystem::with_city(PoliceConfig::builtin(), highway(), PoliceSetup::default());
+        let prof = RaceProfiles::builtin().get("loop9_day").unwrap().clone();
+        let mut prof = RaceProfile {
+            route_blocks: Vec::new(),
+            side_blocks: Vec::new(),
+            spikes: Vec::new(),
+            stakeouts: Vec::new(),
+            ..prof
+        };
+        prof.tool_lifetime_s = 0.0;
+        let c = RaceCourse::new(&[[0.0, -7.75], [1600.0, -7.75]]);
+        let racer = EntityId(1);
+        police.start_race("loop9_day", &prof, &c, &[racer]);
+        let corridor = police.race_corridor().unwrap().clone();
+        // Only the eastbound carriageway: not the far side, the street or the ramps.
+        assert_eq!(corridor.segments.len(), 8);
+        for s in &corridor.segments {
+            let seg = police.graph().segment(*s);
+            assert_eq!(seg.class, RoadClass::Highway);
+            assert!(police.graph().node(seg.a).pos[1] < 0.0);
+        }
+        // The racer far off the map: patrols warm up out of its sight.
+        let world = wp_world::World::flat(wp_contracts::TimeOfDay::from_hours(14.0), 1.0);
+        let far = [RacerView {
+            entity: racer,
+            pos: [800.0, -3000.0, 0.0],
+            vel: [0.0, 0.0, 0.0],
+        }];
+        let mut out = Vec::new();
+        for _ in 0..120 {
+            police.step(&world, &far, &[], 1.0 / 60.0, &mut out);
+        }
+        let pool: Vec<&crate::unit::Unit> = police
+            .units()
+            .iter()
+            .filter(|u| matches!(u.role, UnitRole::Pool(_)))
+            .collect();
+        assert!(!pool.is_empty(), "no patrols");
+        for u in pool {
+            let on = police.graph().nearest_on_road(u.body.pos).unwrap();
+            assert!(
+                corridor.has_segment(on.segment),
+                "patrol at {:?} off the course",
+                u.body.pos
+            );
+            assert!(u.body.heading[0] > 0.9, "facing the racing direction");
+            if let Assignment::Patrol { dest } = u.assignment {
+                assert!(corridor.nodes.contains(&dest), "patrols to {dest:?}");
+            }
+        }
     }
 
     #[test]

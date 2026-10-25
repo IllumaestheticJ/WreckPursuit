@@ -179,6 +179,7 @@ const MATERIAL_RGB: Record<string, number> = {
   interior: 0x2b2724,
   chrome: 0xd8dde2,
   carbon: 0x1c1d20,
+  carbonWeave: 0x343a42,
   caliper: 0x3a3c40,
   engine: 0x3b3d40,
   grille: 0x0d0e10,

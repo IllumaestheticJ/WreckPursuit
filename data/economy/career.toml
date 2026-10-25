@@ -77,4 +77,5 @@ Compact = "Unknown"
 Truck = "Unknown"
 Sport = "Known"
 Muscle = "Known"
-Exotic = "Feared"
+# Exotic is open from the start (owner call 2026-10-24): price is the only gate.
+Exotic = "Unknown"

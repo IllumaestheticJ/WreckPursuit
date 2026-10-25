@@ -56,6 +56,8 @@ impl Economy {
                 tune: Default::default(),
                 parts: None,
                 tires: Default::default(),
+                variant_name: None,
+                paint: None,
             });
             tx.note(
                 EventReason::PinkSlipWon { def_id },

@@ -705,6 +705,9 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let mut lot = Prim::new("lot", [0.50, 0.52, 0.44, 1.0]);
     let mut lot_skirt = Prim::new("lot_skirt", [0.50, 0.52, 0.44, 1.0]);
     let mut kerb = Prim::new("kerb", [0.70, 0.69, 0.66, 1.0]);
+    // Car parks (rest stop lots): pad over the sidewalk and lot, dropped kerb; the bay lines
+    // are road markings (the testbed draws them).
+    let mut car_park = Prim::new("car_park", [0.23, 0.23, 0.24, 1.0]);
     let mut buildings = Prim::new("building", [0.75, 0.74, 0.72, 1.0]);
     // Ashpeak County building kinds: red barns under dark metal roofs, galvanised silos,
     // glassy landmarks, concrete construction frames with orange safety bands.
@@ -796,6 +799,7 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     lot.mesh(&walks.lots);
     lot_skirt.mesh(&walks.skirts);
     kerb.mesh(&walks.kerbs);
+    car_park.mesh(&wp_world::car_park::pad_mesh(&map.car_parks));
     // Pavement between the ribbon ends (junctions, bends, dead ends): the very triangles
     // `wp_sim` collides with.
     let node_material = node_materials(map);
@@ -1012,6 +1016,7 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
         lot,
         lot_skirt,
         kerb,
+        car_park,
         buildings,
         roof,
         garage,

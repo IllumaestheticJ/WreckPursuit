@@ -40,7 +40,7 @@ fn every_port_vesper_race_has_a_spot_on_port_vesper_and_on_the_combined_map() {
         .into_iter()
         .filter(|r| r.city == RaceCity::Vesper)
         .collect();
-    assert!(vesper_races.len() >= 3);
+    assert_eq!(vesper_races.len(), 2, "Loop 9 night and day");
     for def in &vesper_races {
         let a = spot(&on_vesper, def.id);
         let b = spot(&on_ashpeak, def.id);

@@ -82,13 +82,15 @@ fn port_vesper_races_have_spots_on_both_maps() {
         assert!((sa.x - sb.x).abs() < 1.0 && (sa.y - sb.y).abs() < 1.0);
         assert!(sa.radius > 10.0);
     }
-    // The grid city's race is not on Port Vesper.
-    assert!(a.iter().all(|c| c.id != "grid_highway_sprint"));
+    // Retired races have no spot; the highway run's is on the combined map only.
+    assert!(a.iter().all(|c| c.id != "hollins_sprint"));
+    assert!(a.iter().all(|c| c.id != "loop9_ashpeak_highway"));
+    assert!(b.iter().any(|c| c.id == "loop9_ashpeak_highway"));
     let json = serde_json::to_string(&a).unwrap();
-    assert!(json.contains("\"heading\"") && json.contains("Hollins"));
+    assert!(json.contains("\"heading\"") && json.contains("Loop 9"));
 }
 
-/// Drive into the Hollins sprint's spot, honk while still outside and while moving (nothing),
+/// Drive into the Loop 9 night race's spot, honk while still outside and while moving (nothing),
 /// brake to a stop inside, honk: the race is requested once (a held horn does not retrigger)
 /// and starts on the same map with the player's car and mode.
 #[test]
@@ -98,9 +100,9 @@ fn honking_stopped_in_a_spot_starts_its_race_once() {
         let spot = s
             .race_spots()
             .iter()
-            .find(|p| p.race_id == "hollins_sprint")
+            .find(|p| p.race_id == "loop9_circuit")
             .cloned()
-            .expect("hollins spot");
+            .expect("loop 9 night spot");
         // Roll towards the spot along the race direction from 18 m short of it at 9 m/s.
         let (sn, cs) = wp_math::sin_cos(spot.heading_rad);
         let back = 18.0;
@@ -134,7 +136,7 @@ fn honking_stopped_in_a_spot_starts_its_race_once() {
         assert!(s.take_race_spot_honked().is_none());
         // A fresh press while stopped inside: exactly one request, even with the horn held.
         let hit = hold(&mut s, 240, true, 1.0);
-        assert_eq!(hit, vec!["hollins_sprint"], "{city}");
+        assert_eq!(hit, vec!["loop9_circuit"], "{city}");
         assert!(hold(&mut s, 30, true, 1.0).is_empty());
 
         // The testbed starts it like the picker: same map, player's car and mode.
@@ -150,7 +152,7 @@ fn honking_stopped_in_a_spot_starts_its_race_once() {
         )
         .unwrap();
         assert_eq!(sc.city, city_spec(city));
-        assert_eq!(race_for_scenario(&sc.name).unwrap().0.id, "hollins_sprint");
+        assert_eq!(race_for_scenario(&sc.name).unwrap().0.id, "loop9_circuit");
         let mut race = Session::new(sc, false).unwrap();
         assert!(race.race().is_some());
         // No spots during a race.
@@ -192,9 +194,9 @@ fn street_racer_in_reach_takes_the_honk_first() {
     let spot = s
         .race_spots()
         .iter()
-        .find(|p| p.race_id == "hollins_sprint")
+        .find(|p| p.race_id == "loop9_circuit")
         .cloned()
-        .expect("hollins spot");
+        .expect("loop 9 night spot");
     // Player stopped in the spot, right behind a roaming racer parked 9 m ahead (round 12:
     // a challenge only from right behind the racer).
     s.debug_sim_mut()
@@ -243,7 +245,7 @@ fn street_racer_in_reach_takes_the_honk_first() {
     s.street_decline();
     hold(&mut s, 5, false, 1.0);
     assert!(s.street().unwrap().in_reach(s.sim(), PLAYER).is_none());
-    assert_eq!(hold(&mut s, 5, true, 1.0), vec!["hollins_sprint"]);
+    assert_eq!(hold(&mut s, 5, true, 1.0), vec!["loop9_circuit"]);
 }
 
 /// Off-city free drive has no spots and a honk does nothing.
