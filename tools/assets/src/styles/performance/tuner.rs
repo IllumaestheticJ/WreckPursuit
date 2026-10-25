@@ -1,5 +1,7 @@
 //! Tuners / sport: `kestrel_ts` (rally sedan), `shiro_turbo` (FR drift coupe), `hakone_gt`
-//! (90s twin-turbo GT), `sperber_32` (German I6 sport sedan), `debug_coupe` (sport coupe).
+//! (90s twin-turbo GT), `sperber_32` (German I6 sport sedan), `debug_coupe` (sport coupe), plus
+//! `arashi_t4` (mid-90s AWD rally saloon, a variant of the kestrel style) and `talus_20t`
+//! (late-90s AWD rally saloon, its own body and kit).
 //!
 //! Genre cues (research §3): a big rear wing on tall stands (pedestal / swan-neck GT / hoop),
 //! a dropped stance with flush wheels and rear camber, aftermarket wheels, a body kit (wide
@@ -15,7 +17,8 @@ use crate::style::{
 };
 
 use super::kit::{
-    dkey, headlight_key, lkey, sided, taillight_key, top_band, Kit, Stand, Wing, SIDES,
+    dkey, headlight_key, indicator_front_key, indicator_rear_key, lkey, sided, taillight_key,
+    top_band, Kit, Seg, Stand, Wing, SIDES,
 };
 use super::{kit_detail, rgb, wheels};
 
@@ -76,6 +79,185 @@ pub fn kestrel(def: &VehicleDef) -> CarStyle {
     s
 }
 
+/// Mid-90s AWD rally-homologation saloon (`arashi_t4`): the [`kestrel`] family (bonnet scoop,
+/// box flares, pedestal wing, fog lamps, mud flaps) with a shorter roof, white paint, silver
+/// wheels and red calipers. Shares the kestrel body kit.
+pub fn arashi(def: &VehicleDef) -> CarStyle {
+    let mut s = kestrel(def);
+    s.body.roof_len_trim = 0.06;
+    s.body.windshield_rake_deg = Some(57.0);
+    s.body.nose_rake_deg = 16.0;
+    s.tints.retain(|t| t.0 != M::Paint);
+    s.tints.push((M::Paint, rgb(0xEDEDEA)));
+    s.wheel.rim_rgb = Some(rgb(0xC9CCD1));
+    s.underglow_rgb = None;
+    s.mechanical.caliper_rgb = Some(rgb(0xC81E1E));
+    s
+}
+
+/// Late-90s AWD rally-homologation four-door saloon (`talus_20t`). Its own body, not the
+/// kestrel's: an upright, boxy late-90s greenhouse with a taller roof and a steep rear screen,
+/// a near-vertical squared-off nose, a flat bonnet with twin vents (no scoop), round blistered
+/// arches over the wheels, and a tall square tail. Kit: quad round head lamps on a black
+/// panel, a big central intercooler mouth, a deck-wide hoop wing and a full-width black tail
+/// panel with slim lamps. Dark red paint, bronze six-spoke wheels, gold calipers.
+pub fn talus(def: &VehicleDef) -> CarStyle {
+    let mut s = CarStyle::with_body(BodyStyle {
+        nose_h: Some(0.72),
+        nose_rake_deg: 6.0,
+        nose_plan_round: 0.12,
+        tail_plan_round: 0.10,
+        hood_crown: 0.008,
+        hood_bulge_h: 0.0,
+        hood_bulge_w: 0.50,
+        hood_scoop: HoodScoop::Vents,
+        hood_scoop_h: 0.11,
+        windshield_rake_deg: Some(54.0),
+        a_pillar_rake_deg: 4.0,
+        rear_glass_rake_deg: Some(44.0),
+        tumblehome: Some(0.11),
+        roof_dz: 0.04,
+        roof_crown: 0.012,
+        roof_len_trim: 0.02,
+        belt_dz: 0.02,
+        crease_z: 0.42,
+        crease_depth: 0.008,
+        shoulder_round: 0.03,
+        haunch: 0.045,
+        front_haunch: 0.040,
+        flare: 0.015,
+        flare_shape: ArchShape::Round,
+        ride_dz: -0.025,
+        deck_drop: -0.02,
+        ducktail_h: 0.0,
+        tail_round: 0.10,
+        tail_drop: 0.03,
+        ..BodyStyle::preset(Silhouette::Notchback)
+    });
+    s.details.push(kit_detail(talus_kit));
+    wheels(
+        &mut s,
+        def,
+        RimKind::SixSpoke,
+        6,
+        0.68,
+        M::Metal,
+        CapKind::Centre,
+        (0.025, 0.012),
+        (0.0, 0.8),
+    );
+    let m = &mut s.mechanical;
+    m.engine = EngineKind::Inline4;
+    m.induction = Induction::Turbo;
+    m.front_suspension = SuspensionKind::Strut;
+    m.rear_suspension = SuspensionKind::Multilink;
+    m.caliper_rgb = Some(rgb(0xD4A017));
+    m.exhaust = ExhaustKind::Single;
+    m.exhaust_tip_r_m = 0.05;
+    s.tints.push((M::Paint, rgb(0x7A1418)));
+    s.wheel.rim_rgb = Some(rgb(0x8C6A3A));
+    s
+}
+
+fn talus_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
+    let mut k = Kit::new(ctx.profile, b);
+    let wn = k.wn();
+    let wt = k.wt();
+    let (nz0, nz1) = k.nose_z();
+    let (tz0, tz1) = k.tail_z();
+    let fb = BodyRegion::FrontBumper;
+
+    // --- Front: black lamp panel across the nose with quad round lamps and a slim slot
+    // grille between them, then a big square intercooler mouth in the bumper.
+    let (lz0, lz1) = (nz1 - 0.15, nz1 - 0.015);
+    let kp = dkey("lamp_panel_front", BodyRegion::Hood, M::Trim);
+    k.front_box(&kp, -(wn - 0.02), wn - 0.02, lz0, lz1, 0.008, 0.004);
+    let zl = 0.5 * (lz0 + lz1);
+    let r = (0.5 * (lz1 - lz0) - 0.012).min(0.06);
+    for sx in SIDES {
+        let bez = sided(
+            &dkey("headlamp_bezel_l", BodyRegion::FrontLeftFender, M::Chrome),
+            sx,
+        );
+        let x_out = wn - 0.06 - r;
+        for x in [x_out, x_out - 2.25 * r] {
+            k.round_lamp(&headlight_key(sx), true, sx * x, zl, r, 0.022, Some(&bez));
+        }
+        // Amber corner lens wrapping the outboard end of the lamp panel.
+        k.front_box(
+            &indicator_front_key(sx),
+            sx * (wn - 0.055),
+            sx * (wn - 0.005),
+            lz0 + 0.02,
+            lz1 - 0.02,
+            0.014,
+            0.006,
+        );
+    }
+    k.grille(
+        "grille",
+        BodyRegion::Hood,
+        0.26,
+        zl - 0.03,
+        zl + 0.03,
+        1,
+        M::Trim,
+        None,
+    );
+    let (zm0, zm1) = (nz0 + 0.07, nz0 + 0.29);
+    k.mesh_grille("lower_grille", fb, 0.30, zm0, zm1, 4, 7, M::Metal);
+    for sx in SIDES {
+        // Brake-cooling slots outboard of the mouth.
+        let ks = sided(&dkey("brake_duct_l", fb, M::Grille), sx);
+        k.front_box(
+            &ks,
+            sx * (wn - 0.20),
+            sx * (wn - 0.08),
+            zm0 + 0.02,
+            zm0 + 0.09,
+            0.004,
+            0.002,
+        );
+    }
+    k.splitter(M::Trim, 0.04, 0.12, 0.02, false);
+
+    // --- Rear: deck-wide hoop wing, full-width black tail panel with slim lamps.
+    k.hoop_wing(0.30, 0.22, 0.16, M::Paint);
+    let (pz0, pz1) = (tz1 - 0.13, tz1 - 0.025);
+    k.rear_panel(
+        "tail_panel",
+        BodyRegion::Trunk,
+        wt - 0.01,
+        pz0,
+        pz1,
+        M::Trim,
+    );
+    for sx in SIDES {
+        k.rear_cluster(
+            sx,
+            0.30,
+            wt - 0.03,
+            pz0 + 0.025,
+            pz1 - 0.02,
+            0.014,
+            0.005,
+            Seg::Outboard(0.10),
+            M::EmissiveAmber,
+        );
+    }
+    let kp = dkey("plate_recess", BodyRegion::Trunk, M::Trim);
+    k.rear_box(&kp, -0.22, 0.22, tz0 + 0.12, tz0 + 0.24, 0.004, 0.0);
+    let kv = dkey("rear_valance", BodyRegion::RearBumper, M::Trim);
+    k.rear_box(&kv, -0.40, 0.40, tz0 + 0.02, tz0 + 0.07, 0.010, 0.004);
+
+    k.skirts(M::Trim, 0.015, 0.05);
+    k.mirrors(0.08, 0.12, None);
+    k.fender_repeaters();
+    k.door_handles(M::Trim);
+    k.fuel_filler(-1.0, 0.10, M::Paint);
+    k.wipers();
+}
+
 fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
     let p = ctx.profile;
@@ -97,15 +279,16 @@ fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         Some(M::Trim),
     );
     for sx in SIDES {
-        let hk = headlight_key(sx);
-        k.front_box(
-            &hk,
-            sx * 0.34,
-            sx * (wn - 0.04),
+        // Rect lens with the amber turn signal in its inboard end, beside the grille.
+        k.front_cluster(
+            sx,
+            0.34,
+            wn - 0.04,
             nz1 - 0.13,
             nz1 - 0.02,
             0.02,
             0.012,
+            Seg::Inboard(0.08),
         );
         let kr = sided(
             &dkey(
@@ -139,7 +322,6 @@ fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         gurney: 0.0,
     });
     for sx in SIDES {
-        let tk = taillight_key(sx);
         let kh = sided(
             &dkey("taillight_housing_l", BodyRegion::RearLeftQuarter, M::Trim),
             sx,
@@ -147,14 +329,20 @@ fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         let (z0, z1) = (tz1 - 0.14, tz1 - 0.03);
         let (xa, xb) = (sx * 0.36, sx * (wt - 0.02));
         k.rear_box(&kh, xa, xb, z0, z1, 0.012, 0.006);
-        k.rear_box(
-            &tk,
-            xa - sx * 0.01,
-            xb + sx * 0.0,
+        // Amber inboard section of the lens, clear of the inner round element.
+        let r = 0.5 * (z1 - z0) - 0.02;
+        let x_round = 0.5 * (0.36 + wt - 0.02) - 0.09 - r;
+        let w_sig = (x_round - 0.012 - 0.35).clamp(0.04, 0.09);
+        k.rear_cluster(
+            sx,
+            0.35,
+            wt - 0.02,
             z0 + 0.012,
             z1 - 0.012,
             0.018,
             0.006,
+            Seg::Inboard(w_sig),
+            M::EmissiveAmber,
         );
         let kr = sided(
             &lkey(
@@ -165,7 +353,6 @@ fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             sx,
         );
         let xm = 0.5 * (xa + xb);
-        let r = 0.5 * (z1 - z0) - 0.02;
         for dx in [-0.09, 0.09] {
             k.round_lamp(&kr, false, xm + dx, 0.5 * (z0 + z1), r, 0.03, None);
         }
@@ -207,6 +394,7 @@ fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     );
     k.skirts(M::Paint, 0.025, 0.06);
     k.mirrors(0.10, 0.11, None);
+    k.fender_repeaters();
     k.door_handles(M::Trim);
     k.fuel_filler(1.0, 0.10, M::Paint);
     k.wipers();
@@ -283,7 +471,16 @@ fn shiro_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     // --- Front: angular lamps, big lower mouth, wide lip + fences + canards, tow hook.
     for sx in SIDES {
-        k.top_lamp(sx, yn - 0.20, yn - 0.03, 0.46, wn - 0.07, 0.025);
+        // Angular lens with an amber inboard segment.
+        k.top_lamp_split(
+            sx,
+            yn - 0.20,
+            yn - 0.03,
+            0.46,
+            wn - 0.07,
+            0.025,
+            Seg::Inboard(0.08),
+        );
         let kh = sided(
             &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
             sx,
@@ -389,7 +586,9 @@ fn shiro_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         let r = 0.5 * (z1 - z0) - 0.022;
         let zc = 0.5 * (z0 + z1);
         k.round_lamp(&tk, false, sx * (wt - 0.09), zc, r, 0.034, None);
-        k.round_lamp(&tk, false, sx * (wt - 0.09 - 2.3 * r), zc, r, 0.034, None);
+        // The inner round element of the cluster is the amber turn signal.
+        let ka = indicator_rear_key(sx, M::EmissiveAmber);
+        k.round_lamp(&ka, false, sx * (wt - 0.09 - 2.3 * r), zc, r, 0.034, None);
     }
     k.diffuser(M::Carbon, 0.50, 0.12, 3, 0.04);
 
@@ -425,6 +624,7 @@ fn shiro_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
     }
     k.mirrors(0.10, 0.10, Some(M::Carbon));
+    k.fender_repeaters();
     k.door_handles(M::Trim);
     k.fuel_filler(1.0, 0.10, M::Carbon);
     k.wipers();
@@ -497,7 +697,16 @@ fn hakone_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     // --- Front: triple projector lamps on the nose top, big rounded central mouth.
     for sx in SIDES {
-        k.top_lamp(sx, yn - 0.20, yn - 0.03, 0.44, wn - 0.07, 0.025);
+        // Lens with an amber inboard segment above the projectors.
+        k.top_lamp_split(
+            sx,
+            yn - 0.20,
+            yn - 0.03,
+            0.44,
+            wn - 0.07,
+            0.025,
+            Seg::Inboard(0.08),
+        );
         let kp = sided(
             &lkey(
                 "headlamp_projector_l",
@@ -541,16 +750,6 @@ fn hakone_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             zm0 + 0.10,
             0.006,
             0.0,
-        );
-        let ka = sided(&lkey("indicator_front_l", fb, M::EmissiveAmber), sx);
-        k.front_box(
-            &ka,
-            sx * (wn - 0.24),
-            sx * (wn - 0.10),
-            zm0 + 0.12,
-            zm0 + 0.16,
-            0.014,
-            0.004,
         );
     }
     k.splitter(M::Trim, 0.03, 0.14, 0.02, false);
@@ -597,9 +796,11 @@ fn hakone_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             &dkey("taillight_ring_l", BodyRegion::RearLeftQuarter, M::Chrome),
             sx,
         );
-        for x in [wt - 0.12, wt - 0.12 - 2.45 * r] {
-            k.round_lamp(&tk, false, sx * x, zc, r, 0.03, Some(&kr));
-        }
+        k.round_lamp(&tk, false, sx * (wt - 0.12), zc, r, 0.03, Some(&kr));
+        // The inner round lamp of each pair is the amber turn signal.
+        let ka = indicator_rear_key(sx, M::EmissiveAmber);
+        let xi = wt - 0.12 - 2.45 * r;
+        k.round_lamp(&ka, false, sx * xi, zc, r, 0.03, Some(&kr));
     }
     let kg = dkey("tail_garnish", BodyRegion::Trunk, M::Chrome);
     k.rear_box(&kg, -0.22, 0.22, zc - 0.012, zc + 0.012, 0.016, 0.004);
@@ -607,6 +808,7 @@ fn hakone_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.rear_box(&kv, -0.55, 0.55, tz0 + 0.02, tz0 + 0.08, 0.012, 0.004);
 
     k.mirrors(0.12, 0.11, None);
+    k.fender_repeaters();
     k.door_handles(M::Trim);
     k.fuel_filler(-1.0, 0.11, M::Paint);
     k.wipers();
@@ -731,6 +933,17 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         for x in [0.42, (wn - 0.10).max(0.53)] {
             k.round_lamp(&hk, true, sx * x, nz1 - 0.075, r, 0.024, None);
         }
+        // Amber turn-signal strip in the inboard end of the housing, 2 mm proud of it.
+        let ka = indicator_front_key(sx);
+        k.front_box(
+            &ka,
+            sx * 0.33,
+            sx * (0.42 - r - 0.006),
+            nz1 - 0.12,
+            nz1 - 0.03,
+            0.012,
+            0.006,
+        );
         let kd = sided(&dkey("side_duct_l", fb, M::Grille), sx);
         k.front_box(
             &kd,
@@ -790,15 +1003,18 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
         let (z0, z1) = (tz1 - 0.15, tz1 - 0.03);
         k.rear_box(&kh, sx * 0.34, sx * (wt + 0.005), z0, z1, 0.012, 0.006);
-        // L: a bar along the top plus a leg down the outer end.
-        k.rear_box(
-            &tk,
-            sx * 0.36,
-            sx * (wt - 0.01),
+        // L: a bar along the top (its inboard end the amber turn signal) plus a leg down the
+        // outer end.
+        k.rear_cluster(
+            sx,
+            0.36,
+            wt - 0.01,
             z1 - 0.05,
             z1 - 0.012,
             0.026,
             0.006,
+            Seg::Inboard(0.10),
+            M::EmissiveAmber,
         );
         k.rear_box(
             &tk,
@@ -858,6 +1074,7 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     k.skirts(M::Paint, 0.02, 0.05);
     k.mirrors(0.10, 0.11, Some(M::Carbon));
+    k.mirror_repeaters(0.10, 0.11, true);
     k.door_handles(M::Chrome);
     k.fuel_filler(1.0, 0.10, M::Paint);
     k.wipers();
@@ -924,7 +1141,16 @@ fn debug_coupe_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let fb = BodyRegion::FrontBumper;
 
     for sx in SIDES {
-        k.top_lamp(sx, yn - 0.17, yn - 0.03, 0.48, wn - 0.07, 0.022);
+        // LED lens with an amber inboard segment.
+        k.top_lamp_split(
+            sx,
+            yn - 0.17,
+            yn - 0.03,
+            0.48,
+            wn - 0.07,
+            0.022,
+            Seg::Inboard(0.08),
+        );
         let drl = sided(
             &lkey("drl_l", BodyRegion::FrontLeftFender, M::Headlight),
             sx,
@@ -998,15 +1224,17 @@ fn debug_coupe_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let kb = lkey("taillight_bar", BodyRegion::Trunk, M::Taillight);
     k.rear_box(&kb, -wt + 0.30, wt - 0.30, z - 0.016, z + 0.016, 0.022, 0.0);
     for sx in SIDES {
-        let tk = taillight_key(sx);
-        k.rear_box(
-            &tk,
-            sx * (wt - 0.32),
-            sx * (wt - 0.02),
+        // Thick bar end with an amber inboard section over the bar's end.
+        k.rear_cluster(
+            sx,
+            wt - 0.32,
+            wt - 0.02,
             z - 0.045,
             z + 0.035,
             0.026,
             0.008,
+            Seg::Inboard(0.08),
+            M::EmissiveAmber,
         );
         let kh = sided(
             &dkey("taillight_housing_l", BodyRegion::RearLeftQuarter, M::Trim),
@@ -1025,6 +1253,7 @@ fn debug_coupe_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.diffuser(M::Carbon, 0.55, 0.14, 3, 0.05);
     k.skirts(M::Carbon, 0.03, 0.05);
     k.mirrors(0.10, 0.11, Some(M::Carbon));
+    k.mirror_repeaters(0.10, 0.11, true);
     k.door_handles(M::Trim);
     k.fuel_filler(1.0, 0.10, M::Paint);
     k.wipers();

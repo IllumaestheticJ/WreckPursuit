@@ -6,6 +6,9 @@
 //!   (body motion); above [`DAMPER_KNEE_MPS`] the force grows at [`DAMPER_HIGH_SPEED_RATIO`] of
 //!   it, like a real valve blowing off, so a kerb or pothole hit (strut speeds of several m/s)
 //!   does not slam the body with tens of kN.
+//! - **Anti-dive / anti-lift** ([`ANTI_DIVE_FRONT`], [`ANTI_LIFT_REAR`]; playtest row 92): the
+//!   links carry part of the braking load transfer, so the nose dives about 1–2° under a 1 g
+//!   stop like a road car instead of riding towards the bump stops.
 //! - The bump stop is **progressive** (its rate grows by the data rate every
 //!   [`BUMP_STOP_PROGRESSION_M`] of squash) and gives back only [`BUMP_STOP_REBOUND_FRACTION`]
 //!   of its force while extending (rubber hysteresis), so bottoming out soaks up energy
@@ -24,6 +27,31 @@ pub const BUMP_STOP_PROGRESSION_M: f32 = 0.02;
 pub const BUMP_STOP_REBOUND_FRACTION: f32 = 0.4;
 /// Extension speed over which the bump-stop hysteresis blends in, m/s.
 const BUMP_STOP_HYSTERESIS_MPS: f32 = 0.05;
+
+/// Anti-dive of the front suspension geometry: share of the braking pitch load transfer on the
+/// front axle carried by the links instead of the springs (playtest row 92, "headlights clip
+/// into the ground under braking"). Road cars run about 0.2–0.6.
+/// Default for every car until `SuspensionDef` carries it (contract change request in
+/// `docs/integration/brake-dive.md`).
+pub const ANTI_DIVE_FRONT: f32 = 0.7;
+/// Anti-lift of the rear geometry under braking, same meaning (anti-squat under drive is not
+/// modelled).
+pub const ANTI_LIFT_REAR: f32 = 0.6;
+
+/// Jacking factor of one corner: the link force on the chassis at the wheel, along the
+/// strut, is `factor × fx` (fx = the braking part of the tyre's longitudinal force, + =
+/// forward). The tyre feels it too (its normal load is spring + link force), so the axle loads
+/// still shift by the full `m·a·h / L`; only the springs (and with them pitch) see less of it.
+///
+/// Front: a braking force (fx < 0) pushes the body up; rear: it pulls the body down.
+pub fn anti_pitch_factor(front: bool, cg_height_m: f32, wheelbase_m: f32) -> f32 {
+    let h_over_l = cg_height_m / wheelbase_m.max(0.5);
+    if front {
+        -ANTI_DIVE_FRONT * h_over_l
+    } else {
+        ANTI_LIFT_REAR * h_over_l
+    }
+}
 
 /// Static compression (from full droop) that supports `corner_load_n` at rest, m, clamped to
 /// the travel.

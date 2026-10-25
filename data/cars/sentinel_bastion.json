@@ -2,7 +2,7 @@
   "id": "sentinel_bastion",
   "display_name": "Sentinel Bastion",
   "class": "PoliceSuv",
-  "analog_of": "2010s American full-size police SUV, 5.3 L pushrod V8, body-on-frame, RWD",
+  "analog_of": "2010s American full-size police SUV, 6.2 L pushrod V8, body-on-frame, RWD",
   "body_size_m": [2.04, 5.18, 1.89],
   "mass_kg": 2638.5,
   "front_weight_frac": 0.53,
@@ -16,24 +16,24 @@
   "lift_rear": 0.15,
   "engine": {
     "torque_curve_nm": [
-      [800, 360],
-      [1200, 400],
-      [1600, 440],
-      [2000, 465],
-      [2500, 485],
-      [3000, 500],
-      [3500, 512],
-      [4100, 519],
-      [4500, 510],
-      [5000, 485],
-      [5600, 452],
-      [6000, 410]
+      [800, 420],
+      [1200, 480],
+      [1600, 540],
+      [2000, 580],
+      [2500, 610],
+      [3000, 630],
+      [3500, 640],
+      [4100, 645],
+      [4500, 635],
+      [5000, 610],
+      [5600, 570],
+      [6000, 530]
     ],
     "idle_rpm": 600.0,
     "redline_rpm": 5800.0,
     "rev_limit_rpm": 6000.0,
     "inertia_kgm2": 0.25,
-    "engine_brake_nm": 62.0
+    "engine_brake_nm": 77.0
   },
   "drivetrain": {
     "layout": "Rwd",
@@ -42,7 +42,7 @@
     "reverse_ratio": 3.06,
     "diff_front": "Open",
     "diff_rear": "Open",
-    "clutch_max_nm": 830.0,
+    "clutch_max_nm": 1030.0,
     "shift_time_s": 0.3,
     "torque_converter": {
       "stall_rpm": 2200.0,
@@ -107,8 +107,8 @@
   "suspension": [
     {
       "spring_n_per_m": 40900.0,
-      "damper_bump_ns_per_m": 3500.0,
-      "damper_rebound_ns_per_m": 7010.0,
+      "damper_bump_ns_per_m": 4550.0,
+      "damper_rebound_ns_per_m": 12620.0,
       "travel_m": 0.22,
       "preload_m": 0.03,
       "arb_n_per_m": 29000.0,
@@ -116,8 +116,8 @@
     },
     {
       "spring_n_per_m": 40900.0,
-      "damper_bump_ns_per_m": 3500.0,
-      "damper_rebound_ns_per_m": 7010.0,
+      "damper_bump_ns_per_m": 4550.0,
+      "damper_rebound_ns_per_m": 12620.0,
       "travel_m": 0.22,
       "preload_m": 0.03,
       "arb_n_per_m": 29000.0,
@@ -125,8 +125,8 @@
     },
     {
       "spring_n_per_m": 41000.0,
-      "damper_bump_ns_per_m": 3250.0,
-      "damper_rebound_ns_per_m": 6500.0,
+      "damper_bump_ns_per_m": 4220.0,
+      "damper_rebound_ns_per_m": 13000.0,
       "travel_m": 0.24,
       "preload_m": 0.03,
       "arb_n_per_m": 900.0,
@@ -134,8 +134,8 @@
     },
     {
       "spring_n_per_m": 41000.0,
-      "damper_bump_ns_per_m": 3250.0,
-      "damper_rebound_ns_per_m": 6500.0,
+      "damper_bump_ns_per_m": 4220.0,
+      "damper_rebound_ns_per_m": 13000.0,
       "travel_m": 0.24,
       "preload_m": 0.03,
       "arb_n_per_m": 900.0,

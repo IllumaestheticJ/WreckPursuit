@@ -62,19 +62,22 @@ fn rwd_coupe_metrics() {
         "skidpad {:?}",
         r.skidpad_50m
     );
-    assert!(r.skidpad_50m.understeer_deg_per_g > 0.0);
+    // Re-ranged (unify, 2026-10-21): owner-chosen balance (row 126); revisit after the owner's ×0.45 / 0.50 / 0.55 A/B. The owner's soft step-14
+    // RWD rear: −0.75 deg/g on the skidpad; limit −1.0.
+    assert!(r.skidpad_50m.understeer_deg_per_g > -1.0);
     assert!(
         (35.0..=48.0).contains(&r.braking_100_0_m),
         "braking {}",
         r.braking_100_0_m
     );
-    let onset = r
-        .power_oversteer_throttle_40m
-        .expect("RWD coupe must power-oversteer");
-    // 0.82 in 2nd with the rev-matched automatic. The old box measured 0.52 because it held
-    // first to 4,500 rpm and then dumped the clutch at the limiter mid-corner (a shift shock,
-    // not power oversteer).
-    assert!(onset < 0.9, "power oversteer onset at {onset}");
+    // Re-ranged (unify, 2026-10-21): owner-chosen balance (row 126). With the step-14 front
+    // cornering stiffness × 0.6 the fronts slide with the rears, so the onset metric (rear slip
+    // angle 2° past the front's) may never trigger although the car rotates on power
+    // (curvature ratio 1.8, checked below). When it does trigger it must come early.
+    // (Was: 0.82 in 2nd with the rev-matched automatic; the old box measured 0.52.)
+    if let Some(onset) = r.power_oversteer_throttle_40m {
+        assert!(onset < 0.9, "power oversteer onset at {onset}");
+    }
     assert!(
         r.power_on_curvature_ratio_40m > 1.0,
         "RWD should rotate on power"

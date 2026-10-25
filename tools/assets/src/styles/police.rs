@@ -8,7 +8,7 @@
 //! | `sentinel_warden` | "old sedan", boxy 80s | twin rotators (L-80s), 2 spotlights | `pvpd_bw_classic` |
 //! | `sentinel_wolfhound` | "patrol", AWD pursuit sedan | low LED, full width | `pvpd_highway` tan / umber + gold |
 //! | `sentinel_bastion` | "SUV" | wide LED, set forward | `pvpd_suv` white + navy + cyan band |
-//! | `sentinel_harrier` | "sports patrol", muscle coupe | slicktop (hidden LEDs) | `pvpd_pursuit` diagonal split |
+//! | `sentinel_vigil` | "sports patrol", muscle coupe | slicktop (hidden LEDs) | `pvpd_pursuit` diagonal split |
 //!
 //! Equipment (light bars, push bars, spotlights, antennas, hidden LEDs, partitions, spoilers,
 //! unit-number decal carriers) lives in [`kit`]; each item is a [`Shape::Custom`] detail that
@@ -34,7 +34,7 @@ pub fn style(def: &VehicleDef) -> Option<CarStyle> {
         "sentinel_warden" => warden(),
         "sentinel_wolfhound" => wolfhound(),
         "sentinel_bastion" => bastion(),
-        "sentinel_harrier" => harrier(),
+        "sentinel_vigil" => vigil(),
         _ => return None,
     };
     add_kit(&mut s, &kit::kit(&def.id));
@@ -204,7 +204,7 @@ fn bastion() -> CarStyle {
 }
 
 /// §1.5 "sports patrol": modern muscle-coupe pursuit car, slicktop.
-fn harrier() -> CarStyle {
+fn vigil() -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         nose_h: Some(0.66),
         nose_rake_deg: 12.0,
@@ -435,7 +435,7 @@ mod tests {
         "sentinel_warden",
         "sentinel_wolfhound",
         "sentinel_bastion",
-        "sentinel_harrier",
+        "sentinel_vigil",
     ];
 
     fn mesh(id: &str) -> crate::mesh::CarMesh {
@@ -494,7 +494,7 @@ mod tests {
 
     #[test]
     fn slicktop_has_no_roof_bar_and_rotator_has_domes() {
-        assert!(!mesh("sentinel_harrier")
+        assert!(!mesh("sentinel_vigil")
             .parts
             .iter()
             .any(|p| p.name.starts_with("lightbar")));

@@ -109,10 +109,16 @@ impl Obstacle {
         }
     }
 
-    fn speed(&self) -> f32 {
+    pub(crate) fn speed(&self) -> f32 {
         dot(self.vel, self.vel).sqrt()
     }
 }
+
+/// A unit without lights queued this long behind a stopped vehicle near a junction (no
+/// passing there, as in a red-light queue) passes it anyway: the car it waits for may be
+/// waiting for it (Hollins: a racer parked after fleeing, the field queued behind the police
+/// car, nobody moving), s.
+pub const QUEUE_DEADLOCK_S: f32 = 12.0;
 
 /// Per-unit avoidance state.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -144,6 +150,10 @@ pub struct AvoidState {
     /// Time spent blocked by a stopped civilian or parked car with lights on (push-through).
     #[serde(default)]
     pub push_wait_s: f32,
+    /// Seconds a unit without lights has queued behind a stopped vehicle near a junction (it
+    /// may not pass there); after [`QUEUE_DEADLOCK_S`] it passes anyway.
+    #[serde(default)]
+    pub queue_s: f32,
 }
 
 /// What a unit is waiting behind (for views and debugging).
@@ -171,6 +181,7 @@ impl Default for AvoidState {
             blocked_by: None,
             wall: crate::walls::WallFeel::default(),
             push_wait_s: 0.0,
+            queue_s: 0.0,
         }
     }
 }
@@ -208,6 +219,10 @@ pub struct JunctionAhead {
     /// The track turns there (more than ~30°).
     #[serde(default)]
     pub turn: bool,
+    /// Which way it turns there: -1 left, 0 straight on, 1 right (the unit's turn signal,
+    /// [`crate::unit::Unit::turn_signal`]; presentation only).
+    #[serde(default)]
+    pub turn_dir: i8,
 }
 
 /// The nearest vehicle in a lane corridor.
@@ -471,6 +486,9 @@ pub(crate) fn update(
         st.blocked_s = 0.0;
         return offset;
     }
+    if blocker.is_none() {
+        st.queue_s = 0.0;
+    }
     let stuck = blocker.filter(|b| {
         b.speed_mps < cfg.stopped_mps
             && b.gap_m < cfg.pass_gap_m
@@ -485,8 +503,13 @@ pub(crate) fn update(
         .junction
         .is_some_and(|j| j.s - me.track_s < (b.far_s - me.track_s) + cfg.no_pass_near_junction_m);
     if !siren && near_junction {
-        st.blocked_s = 0.0;
-        return offset;
+        st.queue_s += dt;
+        if st.queue_s < QUEUE_DEADLOCK_S {
+            st.blocked_s = 0.0;
+            return offset;
+        }
+    } else {
+        st.queue_s = 0.0;
     }
     st.blocked_s += dt;
     let wait = if me.chase {
@@ -841,6 +864,7 @@ mod tests {
             s: 60.0,
             light: Some(Light::Stop),
             turn: false,
+            turn_dir: 0,
         });
         // Patrol stops before the line at a red, and holds once there.
         let far = junction_speed(red, 0.0, 10.0, false, &c);
@@ -855,12 +879,14 @@ mod tests {
             s: 60.0,
             light: Some(Light::Go),
             turn: false,
+            turn_dir: 0,
         });
         assert!(junction_speed(green, 50.0, 10.0, false, &c).is_infinite());
         let plain = Some(JunctionAhead {
             s: 60.0,
             light: None,
             turn: false,
+            turn_dir: 0,
         });
         let v = junction_speed(plain, 60.0 - c.junction_slow_m, 10.0, false, &c);
         assert!((v - c.yield_mps).abs() < 1e-3, "{v}");
@@ -878,6 +904,7 @@ mod tests {
                 s: 20.0,
                 light: Some(Light::Stop),
                 turn: false,
+                turn_dir: 0,
             }),
             ..AvoidState::default()
         };
@@ -905,6 +932,7 @@ mod tests {
             s: 30.0,
             light: None,
             turn: false,
+            turn_dir: 0,
         };
         let plain = Some(junction);
         let m = me(10.0, [1.75, 10.0]);
@@ -973,6 +1001,7 @@ mod tests {
             s: 60.0,
             light: Some(Light::Stop),
             turn: false,
+            turn_dir: 0,
         });
         let at = 60.0 - c.junction_slow_m;
         assert!((chase_junction_speed(red, at, &c) - c.chase_red_mps).abs() < 1e-3);
@@ -981,6 +1010,7 @@ mod tests {
             s: 60.0,
             light: None,
             turn: true,
+            turn_dir: 1,
         });
         assert!((chase_junction_speed(turn, at, &c) - c.chase_turn_mps).abs() < 1e-3);
         assert!(chase_junction_speed(None, 0.0, &c).is_infinite());

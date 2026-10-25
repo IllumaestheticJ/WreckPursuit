@@ -40,8 +40,14 @@ pub struct EngineLayers {
 }
 
 impl EngineLayers {
-    /// Resolve a pack's layers for an engine with `idle_rpm` and `redline_rpm`.
-    pub fn resolve(pack: &SamplePack, idle_rpm: f32, redline_rpm: f32) -> Self {
+    /// Resolve a pack's layers for `engine` (cylinders / layout: [`RpmAnchor::FiringHz`]) with
+    /// `idle_rpm` and `redline_rpm`.
+    pub fn resolve(
+        pack: &SamplePack,
+        engine: &EngineAudioDef,
+        idle_rpm: f32,
+        redline_rpm: f32,
+    ) -> Self {
         let mut layers: Vec<ResolvedLayer> = pack
             .engine_layers
             .iter()
@@ -53,6 +59,7 @@ impl EngineLayers {
                     RpmAnchor::Idle => idle_rpm,
                     RpmAnchor::Rpm(r) => r,
                     RpmAnchor::RedlineFrac(f) => f * redline_rpm,
+                    RpmAnchor::FiringHz(hz) => engine.rpm_at_firing_hz(hz),
                 }
                 .max(1.0),
                 throttle: l.throttle,
@@ -156,6 +163,10 @@ pub struct EngineAudioState {
     pub rpm_rate: f32,
     /// `prev_rpm` holds a real sample (false before the first frame).
     pub primed: bool,
+    /// Gear seen last frame, when the caller reports one.
+    pub last_gear: Option<i8>,
+    /// Time left on the upshift cue started by a gear change under throttle, s.
+    pub upshift_left_s: f32,
 }
 
 /// What the engine model reads for one vehicle this frame.
@@ -167,6 +178,10 @@ pub struct EngineInput {
     pub pedal: f32,
     /// Throttle reaching the engine 0..=1 (after TCS and the gearbox's shift cut); drives load.
     pub applied: f32,
+    /// Current gear (`VehicleState::gear`), if the caller has it. An upshift under throttle
+    /// starts a short shift cue even when the rpm falls too slowly for the rpm-rate cue (a
+    /// converter automatic with no torque cut). `None`: rpm-rate cues only.
+    pub gear: Option<i8>,
 }
 
 /// What the engine model wants to play this frame (gains before spatialisation).
@@ -254,6 +269,15 @@ pub fn update_engine(
     }
     st.prev_rpm = rpm;
     st.primed = true;
+    // Gear-change cue: an upshift under throttle holds the dip for `upshift_cue_s`.
+    if let (Some(g), Some(last)) = (input.gear, st.last_gear) {
+        if g > last && last >= 1 && pedal > 0.5 {
+            st.upshift_left_s = mix.upshift_cue_s;
+        }
+    }
+    st.last_gear = input.gear.or(st.last_gear);
+    let upshift = if st.upshift_left_s > 0.0 { 1.0 } else { 0.0 };
+    st.upshift_left_s = (st.upshift_left_s - dt).max(0.0);
     // A rev-match's rpm jump is the ratio step times the rpm, so a low-rpm downshift rises
     // slower in rpm/s for the same shift: the rising (blip) side is judged as if at
     // `blip_ref_rpm` (never weaker than the plain rate, at most 2.5× stronger).
@@ -268,7 +292,12 @@ pub fn update_engine(
             .max(mix.shift_rate_onset_rpm_s + 1.0),
         rate,
     );
-    let (target, shift) = if st.rpm_rate < 0.0 {
+    let (target, shift) = if st.rpm_rate < 0.0 || upshift > 0.0 {
+        let cue = if st.rpm_rate < 0.0 {
+            cue.max(upshift)
+        } else {
+            upshift
+        };
         let dip = cue * applied;
         (applied * (1.0 - mix.shift_dip_depth * cue), -dip)
     } else {
@@ -443,7 +472,7 @@ mod tests {
 
     #[test]
     fn layers_sorted_and_resolved() {
-        let l = EngineLayers::resolve(&pack(), 800.0, 7000.0);
+        let l = EngineLayers::resolve(&pack(), &test_def(false), 800.0, 7000.0);
         let roots: Vec<f32> = l.layers.iter().map(|x| x.root_rpm).collect();
         assert!(roots.windows(2).all(|w| w[0] <= w[1]));
         assert_eq!(l.layers[0].cue, "idle");
@@ -452,7 +481,7 @@ mod tests {
 
     #[test]
     fn weights_are_energy_preserving() {
-        let l = EngineLayers::resolve(&pack(), 800.0, 7000.0);
+        let l = EngineLayers::resolve(&pack(), &test_def(false), 800.0, 7000.0);
         for rpm in [500.0, 800.0, 1500.0, 3000.0, 4500.0, 6500.0, 9000.0] {
             for load in [0.0, 0.3, 1.0] {
                 let e: f32 = l.weights(rpm, load).iter().map(|w| w * w).sum();
@@ -462,8 +491,59 @@ mod tests {
     }
 
     #[test]
+    fn firing_hz_anchor_roots_at_the_cars_firing_frequency() {
+        let mut p = pack();
+        p.engine_layers[3].anchor = RpmAnchor::FiringHz(87.2);
+        // Inline-4: 87.2 Hz = 2,616 rpm; a V8 fires twice as often per rev: 1,308 rpm.
+        let i4 = EngineLayers::resolve(&p, &test_def(false), 800.0, 7000.0);
+        let mid = |l: &EngineLayers| {
+            l.layers
+                .iter()
+                .find(|x| x.cue == "mid_on")
+                .unwrap()
+                .root_rpm
+        };
+        assert!((mid(&i4) - 2616.0).abs() < 0.5, "{}", mid(&i4));
+        let v8 = EngineAudioDef {
+            cylinders: 8,
+            layout: crate::data::EngineLayout::V,
+            ..test_def(false)
+        };
+        let l8 = EngineLayers::resolve(&p, &v8, 800.0, 7000.0);
+        assert!((mid(&l8) - 1308.0).abs() < 0.5, "{}", mid(&l8));
+        // Played at rpm / root, the loop sounds at the car's firing frequency at any rpm.
+        for rpm in [1000.0f32, 2616.0, 5000.0] {
+            let hz = 87.2 * rpm / mid(&l8);
+            assert!((hz / v8.firing_hz(rpm) - 1.0).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn layers_do_not_churn_along_an_rpm_sweep() {
+        // Each layer fades in and out at most once over a monotone sweep (no flicker between
+        // neighbours), on and off throttle and mixed.
+        let l = EngineLayers::resolve(&pack(), &test_def(false), 800.0, 7000.0);
+        for load in [0.0, 0.5, 1.0] {
+            let mut on_runs = vec![0u32; l.layers.len()];
+            let mut was = vec![false; l.layers.len()];
+            let mut rpm = 500.0;
+            while rpm < 9000.0 {
+                for (i, w) in l.weights(rpm, load).iter().enumerate() {
+                    let on = *w > 1e-3;
+                    if on && !was[i] {
+                        on_runs[i] += 1;
+                    }
+                    was[i] = on;
+                }
+                rpm += 5.0;
+            }
+            assert!(on_runs.iter().all(|n| *n <= 1), "load {load}: {on_runs:?}");
+        }
+    }
+
+    #[test]
     fn crossfade_is_mid_between_roots() {
-        let l = EngineLayers::resolve(&pack(), 800.0, 7000.0);
+        let l = EngineLayers::resolve(&pack(), &test_def(false), 800.0, 7000.0);
         // Halfway between low_on (2100) and mid_on (3850): equal weights.
         let w = l.weights(2975.0, 1.0);
         let lo = l.layers.iter().position(|x| x.cue == "low_on").unwrap();
@@ -476,6 +556,7 @@ mod tests {
             rpm,
             pedal: throttle,
             applied: throttle,
+            gear: None,
         }
     }
 
@@ -501,8 +582,9 @@ mod tests {
             shift_dip_depth: 0.6,
             blip_load: 0.8,
             blip_ref_rpm: 4000.0,
+            upshift_cue_s: 0.15,
             lod_two_layer_m: 40.0,
-            second_layer_cull_scale: 1.0e-4,
+            second_layer_cull_scale: 0.25,
             physical_max_others: 6,
             physical_radius_m: 60.0,
         }
@@ -547,7 +629,7 @@ mod tests {
         applied: impl Fn(usize) -> f32,
     ) -> Vec<EngineOutput> {
         let (def, limits) = (test_def(false), test_limits());
-        let layers = EngineLayers::resolve(&pack(), 800.0, 7000.0);
+        let layers = EngineLayers::resolve(&pack(), &test_def(false), 800.0, 7000.0);
         let mut rng = Rng::new(3);
         (0..frames)
             .map(|i| {
@@ -561,12 +643,60 @@ mod tests {
                         rpm: rpm(i),
                         pedal: 1.0,
                         applied: applied(i),
+                        gear: None,
                     },
                     1.0 / 60.0,
                     &mut rng,
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn upshift_with_a_slow_rpm_fall_still_dips_when_the_gear_is_known() {
+        // A converter shift without a torque cut, flat out: rpm 6000 -> 5000 over 0.6 s
+        // (1,667 rpm/s, under the rpm-rate cue's onset), gear 3 -> 4 at frame 60.
+        let (def, limits) = (test_def(false), test_limits());
+        let layers = EngineLayers::resolve(&pack(), &test_def(false), 800.0, 7000.0);
+        let run = |with_gear: bool| {
+            let mut st = EngineAudioState::default();
+            let mut rng = Rng::new(3);
+            (0..120)
+                .map(|i| {
+                    let rpm = if i < 60 {
+                        6000.0
+                    } else {
+                        6000.0 - (i.min(96) - 60) as f32 * 1000.0 / 36.0
+                    };
+                    let gear = if i < 60 { 3 } else { 4 };
+                    update_engine(
+                        &mut st,
+                        &test_mix(),
+                        &def,
+                        limits,
+                        &layers,
+                        EngineInput {
+                            rpm,
+                            pedal: 1.0,
+                            applied: 1.0,
+                            gear: with_gear.then_some(gear),
+                        },
+                        1.0 / 60.0,
+                        &mut rng,
+                    )
+                    .load
+                })
+                .collect::<Vec<f32>>()
+        };
+        let (plain, cued) = (run(false), run(true));
+        let low = |v: &[f32]| v[60..80].iter().copied().fold(1.0, f32::min);
+        assert!(
+            low(&plain) > 0.95,
+            "no rpm-rate cue at this rate: {}",
+            low(&plain)
+        );
+        assert!(low(&cued) < 0.8, "gear-change cue dips to {}", low(&cued));
+        assert!(cued[119] > 0.95, "re-rises to {}", cued[119]);
     }
 
     #[test]
@@ -674,7 +804,7 @@ mod tests {
     #[test]
     fn blowoff_on_lift_under_boost() {
         let (mix, def, limits) = (test_mix(), test_def(true), test_limits());
-        let layers = EngineLayers::resolve(&pack(), 800.0, 7000.0);
+        let layers = EngineLayers::resolve(&pack(), &test_def(false), 800.0, 7000.0);
         let mut st = EngineAudioState::default();
         let mut rng = Rng::new(1);
         let dt = 1.0 / 60.0;

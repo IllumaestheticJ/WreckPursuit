@@ -50,6 +50,9 @@ priority_max_reduction = 0.3
 # Reinforcements spawn like responders ([response] window, out of sight); if no hidden spot
 # is in that window: the nearest node at least this far from the racer, out of its sight.
 spawn_min_distance_m = 350.0
+# Row 84: while a racer is lost (Searching) this many more units per level L1..L5 come to the
+# last known position (spawned out of sight around it and its likely exits).
+search_extra_units = [1, 2, 2, 3, 3]
 
 # Reinforcement spawn delay (uniformly sampled), s: the time a unit that wasn't nearby takes to
 # get into the area. Short by day, longer at night.
@@ -109,7 +112,9 @@ suburb = 450.0
 industrial = 500.0
 
 [helicopter]
-min_level = 3
+# Owner decision (playtest row 156, 2026-10-23): roadblocks from wanted level 3, spike strips
+# from 4, the helicopter from 5.
+min_level = 5
 [helicopter.count]
 dawn = 1
 day = 1
@@ -128,7 +133,7 @@ night = 0.25
 
 # Wanted level (1..=5) at which tools / tactics unlock.
 [unlocks]
-spikes_level = 2
+spikes_level = 4
 roadblock_level = 3
 pit_level = 2
 boxin_level = 1

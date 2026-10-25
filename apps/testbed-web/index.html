@@ -8,6 +8,8 @@
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color: #ddd; font: 12px/1.35 monospace; }
       #overlay { position: fixed; inset: 0; pointer-events: none; }
+      /* Garage workshop: only its own overlay over the 3D bay (src/workshop). */
+      body.wp-workshop #overlay > :not(#ui-workshop) { display: none !important; }
       .panel { background: rgba(0, 0, 0, 0.6); padding: 6px 8px; border-radius: 4px; pointer-events: auto; }
       .hidden { display: none !important; }
       .left-col { position: absolute; top: 8px; left: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
@@ -48,6 +50,15 @@
       #radio-strip.empty { visibility: hidden; }
       #radio-strip .radio-line { background: rgba(8, 12, 18, 0.72); border-left: 3px solid currentColor; padding: 2px 8px; color: #eef2f6; text-shadow: 0 1px 2px #000; border-radius: 2px; transition: opacity 0.3s; }
       #radio-strip .radio-cs { font: 700 11px/1 ui-monospace, monospace; letter-spacing: 0.06em; margin-right: 6px; }
+      /* Row 144 priority tiers: 1-2 highlighted, 3 urgent, 4-5 dimmed. */
+      #radio-strip .radio-icon { font-style: normal; margin-right: 6px; }
+      #radio-strip .radio-line.tier-1 { font-weight: 700; background: rgba(70, 48, 0, 0.85); border-left-width: 5px; box-shadow: 0 0 0 1px rgba(255, 204, 0, 0.7); }
+      #radio-strip .radio-line.tier-1 .radio-icon { color: #ffcc00; }
+      #radio-strip .radio-line.tier-2 { font-weight: 700; background: rgba(10, 30, 70, 0.82); border-left-width: 5px; }
+      #radio-strip .radio-line.tier-2 .radio-icon { color: #64b5f6; }
+      #radio-strip .radio-line.tier-3 { background: rgba(90, 8, 8, 0.82); color: #fff; font-style: italic; text-transform: uppercase; letter-spacing: 0.02em; }
+      #radio-strip .radio-line.tier-3 .radio-icon { color: #ff5252; font-style: normal; }
+      #radio-strip .radio-line.tier-4, #radio-strip .radio-line.tier-5 { opacity: 0.62; }
       #ui-chase .wp-hud-alerts li[data-ch="dispatch"], #ui-chase .wp-hud-alerts li[data-ch="unit"] { display: none; }
       .feed { max-width: 360px; max-height: 22vh; overflow: auto; font-size: 11px; }
       .comps, .regions { white-space: pre; max-height: 30vh; overflow: auto; }
@@ -83,6 +94,17 @@
       #sc-result .pass { color: #2ecc40; }
       #sc-result .fail { color: #ff4136; }
       #sc-result .pending { color: #aaa; }
+      .mod-shop { position: absolute; top: 8px; right: 8px; width: 340px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto; z-index: 4; background: rgba(0, 0, 0, 0.85); }
+      .mod-shop-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+      .mod-shop-head b { flex: 1; color: #fff; }
+      .mod-shop button { font: 11px monospace; background: #222; color: #ddd; border: 1px solid #555; border-radius: 3px; padding: 1px 5px; margin: 1px 2px 1px 0; cursor: pointer; }
+      .mod-shop button:hover { background: #333; }
+      .mod-shop button.mod.shows { border-color: #7a6a20; }
+      .mod-shop button.mod.on { background: #2a6; border-color: #2a6; color: #fff; }
+      .mod-shop-fitted { margin: 2px 0 4px; }
+      .mod-shop-status.bad { color: #ff8060; margin-bottom: 4px; }
+      .mod-slot { margin: 4px 0; }
+      .mod-slot-name { color: #ffdc00; }
       /* Races (workstream 15): picker, HUD, countdown, results (src/ui/race.tsx). */
       .wp-race-picker { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; pointer-events: auto; z-index: 80; }
       .wp-race-cards { display: grid; gap: 0.6em; }
@@ -95,6 +117,19 @@
       .wp-race-countdown { position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%); font: 900 96px/1 system-ui, sans-serif; color: #ffd23f; text-shadow: 0 4px 12px #000; pointer-events: none; }
       .wp-race-go { color: #2ee59d; }
       .wp-race-results { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100vw - 32px)); max-height: 85vh; overflow: auto; pointer-events: auto; z-index: 75; }
+      #photo-panel { position: fixed; top: 8px; right: 8px; width: 300px; max-height: calc(100vh - 16px); overflow: auto; z-index: 10; }
+      #photo-panel .row { margin: 4px 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+      #photo-panel button, #photo-panel select { font: 11px monospace; background: #222; color: #ddd; border: 1px solid #555; border-radius: 3px; padding: 1px 5px; }
+      #photo-panel button:hover { background: #333; }
+      #photo-panel button.on { background: #2a6; color: #fff; border-color: #2a6; }
+      #photo-panel .ph-presets { display: flex; flex-wrap: wrap; gap: 3px; margin: 5px 0; }
+      #photo-panel .ph-grid label { display: grid; grid-template-columns: 96px 1fr 40px; align-items: center; }
+      #photo-panel .ph-grid input { width: 100%; accent-color: #2a6; }
+      #photo-panel .ph-grid output { text-align: right; color: #aaa; }
+      #photo-panel .ph-status { min-height: 1.35em; color: #9fd; }
+      #photo-chip { position: fixed; top: 8px; right: 8px; z-index: 10; font: 12px monospace; background: rgba(0, 0, 0, 0.6); color: #ddd; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; }
+      #photo-panel .ph-letterbox { vertical-align: middle; margin: 0 2px 0 0; }
+      @media (max-width: 520px) { #photo-panel { left: 8px; width: auto; max-height: 45vh; top: auto; bottom: 8px; } }
       #error { position: absolute; top: 40%; left: 50%; transform: translateX(-50%); color: #f66; white-space: pre; }
     </style>
   </head>
@@ -106,42 +141,49 @@
           speed <input id="sc-speed" type="number" min="5" max="250" step="5" value="56" /> km/h
           <button id="sc-run">run</button>
           <button id="sc-free">free drive</button>
-          <button id="sc-chase" title="city at night (map below), police, traffic, you start speeding">city chase</button>
-          <button id="sc-roam" title="free drive in the selected city with AI street racers roaming its highways, touge, dirt roads, downtown and countryside (?roam=N for N racers)">free roam</button>
-          <button id="sc-chase-rain" title="the city chase in a night downpour on a soaked road">rainy night</button>
-          <label title="free drive / city chase use your career car, its damage and mods, and the result goes into the career"><input type="checkbox" id="career" checked />career</label>
+          <button id="sc-chase" title="city at night (map below), police, traffic, you start speeding">night run</button>
+          <button id="sc-chase-rain" title="the night run in a night downpour on a soaked road">rainy night</button>
+          <label title="free drive / night run use your career car, its damage and mods, and the result goes into the career"><input type="checkbox" id="career" checked />career</label>
           <button id="controls-open" title="rebind keyboard and gamepad controls (F9)">controls</button>
           <button id="sc-garage" title="your career: cars, repairs, mods, dealer, impound (ends a career run)">garage</button>
-          <button id="sc-races" title="street races with AI racers (Port Vesper and the grid city)">races</button>
-          <button id="sc-drift" title="drift lab: open asphalt pad, two 90° corners and a long sweeper, day, no traffic; live slide-assist tuning (F8)">drift lab</button>
-          <button id="sc-tune" title="show / hide the drift lab tuning panel (F8)">tune</button>
+          <button id="sc-races" title="street races with AI racers">races</button>
+          <button id="photo" title="pause, free camera, filters, save or copy the image (also from replays)">📷 photo (F7)</button>
+          <button id="sc-touge" title="touge battles on four sealed mountain passes: challenger or boss, uphill / downhill, day / night, dry / rain; side bets and pink slips unlock with rep">touge</button>
         </div>
         <div class="row">
           mode <select id="mode"><option>Arcade</option><option>Simulation</option><option>Extreme</option></select>
           car <select id="car"></select>
+          <button id="mods-btn" title="install mods on this car: wheels, tires, aero, body kits, cages… (you see them on the car)">mods</button>
           <label title="free drive in the selected city with traffic"><input type="checkbox" id="city" />city</label>
-          <select id="city-map" title="city for free drive and city chase">
-            <option value="vesper_v2">Port Vesper v2 (hills, curves)</option>
-            <option value="ashpeak">Port Vesper + Ashpeak County</option>
-            <option value="procedural_12x12">grid 12×12 (flat)</option>
+          <select id="city-map" title="map for free drive, night run and races: the world (Port Vesper + Ashpeak County, one connected map) or the flat test grid">
+            <option value="ashpeak">world (Port Vesper + Ashpeak County)</option>
+            <option value="procedural_12x12">test grid 12×12 (flat)</option>
           </select>
+          spawn <select id="spawn" title="city in the world where night run, rainy night, free drive and free roam start"></select>
           style <select id="style" title="art style: greybox (debug) or low-poly dark (docs/art/STYLE_DECISION.md)"></select>
           weather <select id="weather" title="restarts the session with this weather (the scenario's own weather on 'scenario')"><option value="auto">scenario</option></select>
           bench <button class="bench" data-n="1">1</button><button class="bench" data-n="8">8</button><button class="bench" data-n="24">24</button>
           <span id="bench-out" class="dim"></span>
         </div>
+        <div class="row" id="tune-row" title="free car tune for the selected car outside the career (career runs use the tune saved in the garage); 3 = stock, applies from the next start">
+          car tune
+        </div>
         <div class="row" id="preset-row" title="one click: damage mode + assists together (GDD §6); any box below can still be changed">
           preset
           <button class="preset" data-p="Rookie" aria-pressed="false" title="Arcade damage, every assist on">Rookie</button>
-          <button class="preset" data-p="Street" aria-pressed="false" title="Arcade damage, ABS + TCS">Street</button>
-          <button class="preset" data-p="Sim" aria-pressed="false" title="Simulation damage, assists off, manual gears">Sim</button>
+          <button class="preset" data-p="Street" aria-pressed="false" title="Arcade damage, ABS Full + TCS Half">Street</button>
+          <button class="preset" data-p="Sim" aria-pressed="false" title="Simulation damage, ABS Half, TCS off, ESC off, manual gears">Sim</button>
           <span id="preset-state" class="dim"></span>
         </div>
         <div class="row hidden" id="car-stats"></div>
         <div class="row" id="assist-row">
           assists
-          <label><input type="checkbox" data-a="abs" />ABS</label>
-          <label><input type="checkbox" data-a="tcs" />TCS</label>
+          <label title="anti-lock brakes. Off: wheels lock. Half: short lock-ups, still steers. Full: no lock-ups"
+            >ABS <select data-a="abs" class="assist-level"><option>Off</option><option>Half</option><option>Full</option></select></label
+          >
+          <label title="traction control. Off: the throttle you press (raw). Half: some wheelspin and smoke to slide with. Full: barely any wheelspin"
+            >TCS <select data-a="tcs" class="assist-level"><option>Off</option><option>Half</option><option>Full</option></select></label
+          >
           <label><input type="checkbox" data-a="esc" />ESC</label>
           <label><input type="checkbox" data-a="auto_gears" />auto gears</label>
           <label title="automatic: the car works the clutch (launch, stall prevention, shifts). manual: your clutch control is used directly; bind it in the controls panel (F9)">clutch <select id="clutch-mode"><option value="auto">automatic</option><option value="manual">manual</option></select></label>
@@ -171,6 +213,7 @@
         <div class="row dim" id="rp-status">no replay loaded</div>
         <div id="sc-result"></div>
       </div>
+      <div id="mod-shop"></div>
       <div id="error"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>

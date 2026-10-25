@@ -60,8 +60,10 @@ pub struct DamageSnapshot {
     /// Opaque lattice state from `wp_damage` (node positions, plastic strain, broken beams).
     /// Empty = pristine lattice. The economy never interprets it.
     pub lattice_state: Vec<u8>,
-    /// Some of this damage was sustained while wanted (insurance will not pay for it).
-    pub sustained_while_wanted: bool,
+    /// Some of this damage was outstanding when the car was captured by the police (insurance
+    /// will not pay for it). Damage taken while wanted is covered as long as the car got away.
+    #[serde(default)]
+    pub sustained_before_capture: bool,
 }
 
 impl DamageSnapshot {
@@ -73,7 +75,7 @@ impl DamageSnapshot {
             handling: HandlingEffects::NEUTRAL,
             outstanding: RepairEstimate::default(),
             lattice_state: Vec::new(),
-            sustained_while_wanted: false,
+            sustained_before_capture: false,
         }
     }
 
@@ -135,6 +137,55 @@ pub struct OwnedCar {
     /// older than profile version 2, which are valued as the cheapest dealer price of the model.
     #[serde(default)]
     pub purchase_price: Option<Money>,
+    /// The free tune ([`crate::Economy::set_tune`]); stock unless the player changed it.
+    #[serde(default, skip_serializing_if = "crate::CarTune::is_stock")]
+    pub tune: crate::CarTune,
+    /// What is fitted in each workshop slot ([`crate::parts`]). `None` = never opened in the
+    /// workshop: the parts are derived from `mods` (stock everywhere else).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parts: Option<crate::parts::CarParts>,
+    /// Tyres (FL, FR, RL, RR). Worn by driving and replaced on their own
+    /// ([`crate::Economy::replace_tires`]): a repair never fixes tyres. Saves without it load
+    /// with new tyres.
+    #[serde(default)]
+    pub tires: TireState,
+    /// Rare variant name the car was sold as (lots' `rare_variants`, e.g. a time-attack
+    /// special); `None` for an ordinary car. Shown instead of the model name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant_name: Option<String>,
+    /// Factory paint (0xRRGGBB) the car was sold in; `None` = the renderer's default colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint: Option<u32>,
+}
+
+/// Condition of a car's four tyres (FL, FR, RL, RR).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TireState {
+    /// Tread left 0 (bald) ..= 1 (new).
+    pub tread: [f32; 4],
+    /// Flat (spike strips, junkyard).
+    pub flat: [bool; 4],
+}
+
+impl Default for TireState {
+    /// Four new tyres.
+    fn default() -> Self {
+        Self {
+            tread: [1.0; 4],
+            flat: [false; 4],
+        }
+    }
+}
+
+impl TireState {
+    /// Tyres that need replacing: flat, or tread below `bald_below`.
+    pub fn worn_out(&self, bald_below: f32) -> [bool; 4] {
+        let mut out = [false; 4];
+        for (w, o) in out.iter_mut().enumerate() {
+            *o = self.flat[w] || self.tread[w] < bald_below;
+        }
+        out
+    }
 }
 
 impl OwnedCar {
@@ -257,6 +308,20 @@ pub struct PlayerAccount {
     pub next_car_uid: u32,
     /// Sequence number of the next event.
     pub next_event_seq: u64,
+    /// Career progression bookkeeping (peak tier for one-off rewards, last tier seen); see
+    /// [`crate::progression`]. Saves without it start at `Unknown`.
+    #[serde(default)]
+    pub career: crate::progression::CareerState,
+    /// Loose parts in the garage workshop ([`crate::parts`]).
+    #[serde(default)]
+    pub inventory: Vec<crate::parts::LoosePart>,
+    /// Next loose part uid to allocate (uids start at 1).
+    #[serde(default = "first_part_uid")]
+    pub next_part_uid: u32,
+}
+
+fn first_part_uid() -> u32 {
+    1
 }
 
 /// The durable account id for a ledger key. The ledger is keyed by `PlayerId` and both carry
@@ -293,6 +358,9 @@ impl PlayerAccount {
             day: 0,
             next_car_uid: 1,
             next_event_seq: 0,
+            career: crate::progression::CareerState::default(),
+            inventory: Vec::new(),
+            next_part_uid: 1,
         }
     }
 
@@ -377,7 +445,7 @@ pub enum EventReason {
         /// Amount covered by the insurer.
         covered: Money,
     },
-    /// Insurance refused a claim (damage sustained while wanted).
+    /// Insurance refused a claim (damage outstanding at a capture).
     InsuranceClaimDenied,
     /// Player chose to drive the car damaged.
     DriveDamaged,

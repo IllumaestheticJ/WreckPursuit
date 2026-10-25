@@ -117,24 +117,19 @@ fn queries_respect_grade_separation_and_terrain() {
     let w = world(1, 0.0);
     let map = w.map();
     // Route 40 West passes under the Loop near x = -1517, y = 91 (probe the inner
-    // carriageway, 7 m east of the median).
-    let p = [-1510.0, 92.0];
+    // carriageway, 7 m east of the median; 1.5 m off Route 40's painted centreline, which
+    // `surface_at` reports as `PaintedLine` since round 12).
+    let p = [-1510.0, 90.5];
     let low = map.ground_height(p, Some(-100.0));
     let high = map.ground_height(p, Some(1000.0));
     assert!(high - low > 6.5, "deck {high} over road {low}");
-    // The lower road is asphalt (the probe sits on its painted centre line), the deck above
-    // it highway concrete.
-    let under = map.surface_at([p[0], p[1], low]);
-    assert!(
-        matches!(under, SurfaceType::Asphalt | SurfaceType::PaintedLine),
-        "{under:?}"
-    );
+    // The lower road is asphalt, the deck above it highway concrete.
+    assert_eq!(map.surface_at([p[0], p[1], low]), SurfaceType::Asphalt);
     assert_eq!(map.surface_at([p[0], p[1], high]), SurfaceType::Concrete);
     // Off-road ground height comes from the terrain.
     let knob = map.ground_height([-1000.0, 1000.0], None);
     assert!(knob > 80.0, "Hollins Knob at {knob} m");
 }
-
 /// The drawn terrain (`surface::drawn_terrain`, the greybox and off-road physics) never rises
 /// above a paved road, and off the roads it follows the heightfield instead of sinking to the
 /// lowest ground nearby (playtest: dips drawn 1-2 m deep behind lots).
@@ -187,21 +182,87 @@ fn drawn_terrain_stays_under_roads_and_follows_the_ground() {
     );
     assert!(gaps.len() > 100_000);
     // Measured: p50 0.05 (the 5 cm offset), p95 0.19, p99 0.51 m; the old "lowest ground
-    // within 10 m" mesh had ~10 % of these samples more than 1 m low (up to 10.7 m).
+    // within 10 m" mesh had ~10 % of these samples more than 1 m low (up to 10.7 m). Round 12:
+    // p95 0.23, p99 0.70. With the Vesper River and Calder Canal (PR #38 port; their steep
+    // banks): p95 0.25, p99 0.78.
     assert!(q(0.95) < 0.3, "p95 {}", q(0.95));
-    assert!(q(0.99) < 0.75, "p99 {}", q(0.99));
+    assert!(q(0.99) < 0.85, "p99 {}", q(0.99));
 }
 
-/// The procedural grid's terrain is a flat field under the streets (so its viaduct is a
-/// bridge): physics collides with it unchanged, and it stays flat (wp_sim tells the grid by
-/// its flat terrain and keeps its buildings non-solid there).
+/// A flat terrain field (main gives the procedural grid one under its viaduct) is collided
+/// with unchanged, so it stays uniform: wp_sim tells a flat city by its terrain.
 #[test]
-fn flat_grid_collides_with_its_raw_terrain() {
-    let world = World::procedural(
-        &wp_world::procgen::ProcGenConfig::default(),
-        WorldConfig::default(),
+fn flat_terrain_collides_unchanged() {
+    let mut net = wp_world::procgen::generate(&wp_world::procgen::ProcGenConfig::default());
+    let (lo, hi) = (net.bounds_min, net.bounds_max);
+    net.terrain = Some(wp_world::terrain::Heightfield::flat(
+        [lo[0] - 50.0, lo[1] - 50.0],
+        [hi[0] + 50.0, hi[1] + 50.0],
+        10.0,
+        -0.12,
+    ));
+    let map = wp_world::CityMap::new(net);
+    assert_eq!(map.ground.as_deref(), map.net.terrain.as_ref());
+}
+
+/// The contract road network's centrelines are the roads' own centres: 1.75 m to the right of
+/// a two-way road's centreline (the police lane offset), in either direction of travel, is a
+/// driving lane going that way. They used to follow the road's first lane, which put units
+/// one way into the parking lane and the other way onto the centre line, head-on with traffic
+/// (stuck police on curved roads).
+#[test]
+fn road_network_centrelines_offset_into_the_right_lane() {
+    use wp_contracts::RoadNetworkQuery;
+    use wp_world::geom;
+    use wp_world::map::SegKind;
+    let map = wp_world::CityMap::new(net().clone());
+    let idx = wp_world::RoadNetworkIndex::new(&map);
+    let (mut checked, mut wrong) = (0, Vec::new());
+    for e in 0..idx.edge_count() {
+        let info = idx.edge(e);
+        if info.lanes_ab == 0 || info.lanes_ba == 0 {
+            continue;
+        }
+        let pl: Vec<[f32; 3]> = idx
+            .edge_polyline(e)
+            .iter()
+            .map(|p| [p[0], p[1], 0.0])
+            .collect();
+        let cum = geom::cumulative(&pl);
+        let len = cum[cum.len() - 1];
+        // Mid-road samples (junction areas have connectors, not lanes).
+        let mut s = 25.0;
+        while s < len - 25.0 {
+            let (p, d) = geom::point_at(&pl, &cum, s);
+            for dir in [1.0f32, -1.0] {
+                let fwd = geom::scale(d, dir);
+                let q = geom::add(geom::xy(p), geom::scale(geom::right_of(fwd), 1.75));
+                let lane = map
+                    .segs
+                    .iter()
+                    .filter(|sg| matches!(sg.kind, SegKind::Lane { .. }) && sg.drivable)
+                    .min_by(|a, b| a.project(q).dist.total_cmp(&b.project(q).dist));
+                if let Some(sg) = lane {
+                    let pr = sg.project(q);
+                    let (_, ld) = sg.point_at(pr.s.clamp(0.0, sg.length));
+                    checked += 1;
+                    if geom::dot(ld, fwd) < 0.5 || pr.dist > 1.75 {
+                        wrong.push((e, s, dir, pr.dist));
+                    }
+                }
+            }
+            s += 40.0;
+        }
+    }
+    println!(
+        "{checked} samples, {} off their lane: {:?}",
+        wrong.len(),
+        &wrong[..wrong.len().min(5)]
     );
-    let map = world.map();
-    let raw = map.net.terrain.as_ref().expect("the grid has flat terrain");
-    assert_eq!(map.ground.as_ref(), Some(raw));
+    assert!(checked > 200, "{checked}");
+    assert!(
+        wrong.len() * 50 <= checked,
+        "{} of {checked} samples off their lane",
+        wrong.len()
+    );
 }

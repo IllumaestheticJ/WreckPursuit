@@ -121,20 +121,26 @@ pub fn repair_quote_json(entity: u32, request_json: &str) -> Result<String, JsVa
                     handling: v.damage.handling_effects(),
                     outstanding: estimate.clone(),
                     lattice_state: Vec::new(),
-                    sustained_while_wanted: req.wanted != WantedLevel::None,
+                    sustained_before_capture: false,
                 },
                 location: CarLocation::Garage,
                 insurance: None,
                 purchase_price: None,
+                tires: Default::default(),
+                variant_name: None,
+                paint: None,
+                tune: Default::default(),
+                parts: None,
             };
-            // A throwaway account holding just this car (cash only pays an optional premium).
+            // A throwaway account holding just this car, insured as asked (a preview: the
+            // policy is set, not bought, so a damaged car can still be priced as insured).
+            let mut car = car;
+            if let Some(tier) = &req.insurance {
+                car.insurance = Some(econ.policy(&car, tier, 0).map_err(|e| e.to_string())?);
+            }
             let mut acct = PlayerAccount::empty(PlayerId(1));
             acct.cash = 1_000_000;
             acct.garage.push(car);
-            if let Some(tier) = &req.insurance {
-                econ.buy_insurance(&mut acct, CarUid(1), tier)
-                    .map_err(|e| e.to_string())?;
-            }
             let shop = ShopContext {
                 district: wp_economy::district_from_key(&req.district)
                     .ok_or_else(|| format!("unknown district {:?}", req.district))?,

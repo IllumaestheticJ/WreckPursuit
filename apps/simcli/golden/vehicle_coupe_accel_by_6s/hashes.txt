@@ -1,7 +1,7 @@
-# simcli hashes scenario=vehicle_coupe_accel_by_6s systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
-240 d94daabeeb10b609
-480 17af6d4639d5b313
-720 633cba952f5e3ee0
-960 e5c56e809fcc8662
-1200 1924a5ec9ac2891c
-1440 57f11321699ee41e
+# simcli hashes scenario=vehicle_coupe_accel_by_6s systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 fecb838212202651
+480 2d24ab4abc8e1b24
+720 6248c3ae73faa48b
+960 3583ded000e11e4a
+1200 c81a55cc44b8e013
+1440 1146f04899100b99

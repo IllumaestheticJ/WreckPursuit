@@ -1,0 +1,81 @@
+# Career progression: reputation tiers, what each tier unlocks, betting limits.
+# Owned by the career workstream (wp_economy::progression). Read by wp_race (city betting),
+# the touge workstream (touge betting, pink slips, boss races) and the testbed garage.
+#
+# Rep scale (stakes.toml): a night-time win is ~170 rep, a clean win ~200, a capture costs
+# 50-600. The scripted mid-skill racer (3 races a night) makes ~250 rep a night, reaching
+# Street in ~2 nights, Known in ~8, Respected in ~20, Feared in ~40 and Legend in ~80; boss and
+# touge wins on top shorten that (see tests/progression.rs::tier_pacing).
+#
+# Tiers are decided by *current* rep, so a bad night (capture, DNFs) can drop you a tier and
+# lock its features again. The one-off `reward` credits are paid the first time a tier is
+# reached (tracked by the account's peak tier), never twice.
+#
+# max_bet: the largest single stake at this tier (0 = no betting). A stake is also capped at
+# `max_bet_cash_frac` of the cash on hand, and betting is blocked while in debt.
+
+max_bet_cash_frac = 0.5
+
+[[tiers]]
+tier = "Unknown"
+name = "Unknown"
+min_rep = 0
+reward = 0
+max_bet = 0
+
+[[tiers]]
+tier = "Street"
+name = "Street Racer"
+min_rep = 500
+reward = 2000
+max_bet = 1000
+
+[[tiers]]
+tier = "Known"
+name = "Known Name"
+min_rep = 2000
+reward = 5000
+max_bet = 3000
+
+[[tiers]]
+tier = "Respected"
+name = "Respected"
+min_rep = 5000
+reward = 12000
+max_bet = 8000
+
+[[tiers]]
+tier = "Feared"
+name = "Feared"
+min_rep = 10000
+reward = 25000
+max_bet = 20000
+
+[[tiers]]
+tier = "Legend"
+name = "Street Legend"
+min_rep = 20000
+reward = 50000
+max_bet = 60000
+
+# Lowest tier at which each feature is open.
+[unlocks]
+city_races = "Unknown"
+city_betting = "Street"
+touge_races = "Known"
+touge_betting = "Respected"
+boss_races = "Respected"
+pink_slips = "Feared"
+# Head-to-head bets with the roaming street racers (honk to challenge). Open from the start
+# (round12 player flow); the racer's level sets the stake range, cash is the only other cap.
+street_betting = "Unknown"
+
+# Lowest tier at which the dealer sells each class. Police classes are never for sale.
+[class_unlocks]
+Beater = "Unknown"
+Compact = "Unknown"
+Truck = "Unknown"
+Sport = "Known"
+Muscle = "Known"
+# Exotic is open from the start (owner call 2026-10-24): price is the only gate.
+Exotic = "Unknown"

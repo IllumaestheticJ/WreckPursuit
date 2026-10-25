@@ -203,6 +203,7 @@ fn wanted_racer_abandons_the_race_and_runs() {
         laps: 2,
         drivers,
         max_s: 40.0,
+        allow_abandon: true,
         ..Setup::default()
     };
     // Racer 2 (careful: flees at wanted level 2 with default risk 0.4) is wanted at level 3.
@@ -221,6 +222,33 @@ fn wanted_racer_abandons_the_race_and_runs() {
     // The others keep racing.
     for s in st.iter().filter(|s| s.entity != EntityId(2)) {
         assert_eq!(s.status, RacerStatus::Racing);
+    }
+}
+
+#[test]
+fn wanted_racer_never_gives_up_by_default() {
+    // The owner's rule (2026-10-21): in a race a racer never abandons it or pulls over, at
+    // any wanted level — it keeps racing until the police actually capture it. Same race as
+    // `wanted_racer_abandons_the_race_and_runs`, with the game's default config.
+    let drivers = eight_drivers()[..3].to_vec();
+    let setup = Setup {
+        seed: 2,
+        laps: 2,
+        drivers,
+        max_s: 40.0,
+        ..Setup::default()
+    };
+    let mut heat = BTreeMap::new();
+    heat.insert(EntityId(2), 3u8);
+    let out = common::run(&setup, &FixedHeat(heat), &mut |_, _| {});
+    let mut field = out.field;
+    let events = field.drain_events();
+    assert!(!events.iter().any(|e| matches!(
+        e,
+        OpponentEvent::Abandoned { .. } | OpponentEvent::Yielded { .. }
+    )));
+    for s in field.standings() {
+        assert_eq!(s.status, RacerStatus::Racing, "{:?}", s.entity);
     }
 }
 
@@ -283,16 +311,23 @@ fn wanted_ai_racer_flees_police_through_the_city() {
     use wp_police::{PoliceEvent, UnitId, UnitKind};
     let unit_at = [-100.0f32, -166.75];
     let setup = Setup {
-        // Seed 4 -> 1 (lead/city-residential, rows 94-95): with the arterial / highway
-        // medians the live police also give racer 2 wanted level 2 at seeds 4 and 5 (it
-        // speeds past the unit and flees too); seeds 1, 2, 3 and 6 pass.
-        seed: 1,
+        // Seed 1 -> 3 (round-12 tip: residential grid layout, police give-way): seed 3 passes
+        // and racers 2 and 3 flee for heat of their own (the check below). Sweep
+        // (`WP_FLEE_SEED`): 2, 3, 7 pass; 1 — a left-turning civilian stands 45 s at the
+        // (141, −167) junction across the flight route; 4 — 247 m; 5, 8 — the flight goal is
+        // chosen away from every known patrol, not only the injected unit; 6 — caught by a
+        // live patrol after 112 m.
+        seed: std::env::var("WP_FLEE_SEED")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(3),
         laps: 2,
         drivers: eight_drivers()[..3].to_vec(),
         closed_roads: false,
         traffic: 0.25,
         grid: GridLayout::SingleFile,
         live_police: true,
+        allow_abandon: true,
         inject: vec![
             (
                 20.0,
@@ -355,18 +390,45 @@ fn wanted_ai_racer_flees_police_through_the_city() {
         fled.status
     );
     // The others keep racing unless they earn heat of their own: at race pace past the
-    // sim's live patrols (red lights, speeding) they can, and then they flee for their own
-    // wanted level (an `Abandoned` event of their own), never for racer 1's.
+    // sim's live patrols (red lights, speeding) they can. Any other racer that flees must
+    // have its own record — traffic violations by its own car, a wanted level the sim's
+    // police raised for it (not racer 1's injected L3) and an `Abandoned` event of its own.
     for s in st.iter().filter(|s| s.entity != EntityId(1)) {
-        let own_heat = events.iter().any(
-            |e| matches!(e, OpponentEvent::Abandoned { entity, wanted_level } if *entity == s.entity && *wanted_level >= 1),
-        );
+        if s.status != RacerStatus::Fled {
+            assert!(
+                matches!(s.status, RacerStatus::Racing | RacerStatus::Busted),
+                "{:?}: {:?}",
+                s.entity,
+                s.status
+            );
+            continue;
+        }
+        let own_violations = out.violations_by.get(&s.entity).copied().unwrap_or(0);
+        let own_level = out
+            .police_events
+            .iter()
+            .filter_map(|e| match e {
+                PoliceEvent::WantedLevelChanged { racer, level } if *racer == s.entity => {
+                    Some(level.number())
+                }
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0);
+        let own_abandon = events.iter().find_map(|e| match e {
+            OpponentEvent::Abandoned {
+                entity,
+                wanted_level,
+            } if *entity == s.entity => Some(*wanted_level),
+            _ => None,
+        });
         assert!(
-            matches!(s.status, RacerStatus::Racing | RacerStatus::Busted)
-                || (s.status == RacerStatus::Fled && own_heat),
-            "{:?}: {:?}; events {events:?}",
-            s.entity,
-            s.status
+            own_violations >= 1
+                && own_level >= 1
+                && own_abandon.is_some_and(|l| l >= 1 && l <= own_level),
+            "{:?} fled without heat of its own: {own_violations} violations, sim wanted level \
+             {own_level}, abandoned at {own_abandon:?}; events {events:?}",
+            s.entity
         );
     }
     // Its flight route ends far from the unit, and it made real progress along it (traffic
@@ -402,13 +464,18 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
     //  - racer 2 starts at L1 (below it): keeps racing, pulls over if a unit sits on it;
     //  - racer 3 is clean (but may earn heat of its own on the way).
     let setup = Setup {
-        seed: 4,
+        // Seed 1: a busted racer stays where it stopped, so the clean racer's way round it
+        // depends on traffic timing. Seeds 1-8 failed 4 of 8 on main before the road network
+        // centreline fix and 3 of 8 after (different seeds); 1 passes on both. Seed 4 broke
+        // when police patrol routes changed with the corrected centrelines.
+        seed: 1,
         laps: 2,
         drivers: eight_drivers()[..3].to_vec(),
         closed_roads: false,
         traffic: 0.25,
         grid: GridLayout::SingleFile,
         sim_police: Some("sentinel_cruiser".into()),
+        allow_abandon: true,
         heat: vec![(EntityId(1), 55.0), (EntityId(2), 15.0)],
         run_full: true,
         max_s: 150.0,

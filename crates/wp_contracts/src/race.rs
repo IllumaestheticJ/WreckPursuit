@@ -194,6 +194,10 @@ pub enum DnfReason {
     Disconnected,
     /// Abandoned the race to run from the police (AI entrants).
     Fled,
+    /// Made no course progress for the judge's stuck limit while every other racer still
+    /// running was stuck too, so the judge ended the race (a safety net against a race that
+    /// can never finish, e.g. boxed in by standing cars; not a racer giving up).
+    Stuck,
 }
 
 /// Why a racer was disqualified (ranked below every finisher and every DNF).

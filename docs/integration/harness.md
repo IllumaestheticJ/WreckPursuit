@@ -6,6 +6,8 @@
   `tools/wasm-determinism`, `tools/ci`, `.github/workflows/`, the test surface of `wp_sim`
 - **Contract version built against:** 0.3.0
 
+- **Entity `mods`:** scenario entities can drive modified cars (`EntitySpec::mods`, `data::load_modded_car`) — added by the mod-visuals work, see `docs/integration/mod-visuals.md`.
+
 ## Exposes
 
 ### Hooks added to `wp_sim` (test surface only — no game logic)
@@ -711,115 +713,6 @@ soft-constraint plasticity and parry's `TriMesh::compute_pseudo_normals` call th
 non-FMA variant per CPU. The vehicle scenarios above don't depend on it (the forced non-FMA run
 matched), and native == wasm holds, but if a future cross-machine mismatch involves joints or
 trimesh setup, look there first.
-
-## Merge of `main` into `ws/harness` (2026-10-21, PR #17)
-
-Owner instruction: resolve the conflicts on `ws/harness` and **keep main's highway layout**
-(grid viaduct with diamond ramps, Loop 9 as a divided highway with interchanges).
-
-**Layout.** Main's procgen / Vesper road plans win. Round 12's road surfaces (node patches,
-sidewalks, residential courts, decor, covered roads) are laid on top of them. Where the two
-clashed:
-- **Highway shoulders** (`wp_world::builder`): round 12's generic 3 m highway shoulder is not
-  added to the paved width of roads that set their own (`RoadSpec::shoulder_left_m` /
-  `shoulder_right_m`: main's carriageways and ramps). Without this, every carriageway was 3 m
-  wider each side and the median barrier sat inside the opposite carriageway. Junction
-  setbacks keep the generic shoulder, so main's spine-end junctions stay at 30 m (with 20 m,
-  three-lane turns collided in `tests/blocked.rs`).
-- **Hollins Tunnel**: one tube over both Loop 9 carriageways. The centreline runs midway
-  between them and the half width reaches the far paved edges. Per-carriageway tubes 14 m apart
-  overlapped, and the backfill over one buried the other.
-- **Founders Cut**: 105 m (was 250 m), north portal at (419.5, 1110). Its 7 m dip had pulled the
-  Uptown diamond's inner terminal down to z 16.3, so main's bridge over Loop 9 needed a 19.5 %
-  grade. The Uptown Connector now matches main (10.0 %, crest 0.18 g). The design floor in
-  `covered_roads_block_sight_in_and_out` moved from 200 m to 100 m; the road between the
-  junctions is only 377 m long and has to fit both 7 m ramps.
-- **Grid ramp terminals**: `TERMINAL_X_M` 22 → 21 m. Round 12's 3 m arterial median widened the
-  grid junctions (radius 9 → 10.5 m), so the block between a terminal and the next junction fell
-  to 12 m, below `default_city_shape`'s two-car minimum.
-- **Freeway merges / diverges** (radius-0 junctions) in `surface::nodes`: they are paved the way
-  main paves them (the carriageways run through; only the ramp's taper connectors are added).
-  They are flagged `overlapping_ends` (the ramp ribbon lies on the carriageway at its own bank,
-  up to 13 cm off on Loop 9's 6 % sweepers) and are not counted against the cap. Ends that only
-  touch (two carriageways sharing the median edge) no longer count as overlapping. A highway
-  kerb corner sharper than 75° is filleted instead of left as a sharp point.
-- **Deck rails** (`surface::rail_piece`, used by physics and the greybox): a ramp edge leaving
-  the carriageway gets its rail from where it leaves the carriageway's paving. Before, a 6 m
-  rail piece stood across the outer lane at every grid viaduct merge.
-- **Flat terrain**: main gave the grid a flat heightfield. `RoadNetwork::relief()` (terrain with
-  relief only) now decides round 12's lot width, wedges and slope support, so the grid keeps
-  its 9 m flat-city lots.
-- **Traffic LOD**: on demotion a car keeps up to a lane width of lateral offset (was ±1.5 m), so
-  a car demoted mid lane change on main's 3.7 m highway lanes carries on into the lane
-  instead of jumping 1.6 m.
-
-**Other merges.**
-- Road format v5 (main's `median_barrier` after round 12's v4).
-- Police: round 12's stuck-recovery phases plus main's pro driver (`pro_input`, used while the
-  siren is on).
-- Race: main's "leaving the route is never a DQ". The AI entrants' corridor gets a fixed
-  `AI_CORRIDOR_MARGIN_M`.
-- Steering: round 12's self-aligning steering is kept (the owner removed the yaw gyro), and
-  main's high-speed catch fix (4a4efba1) is **ported** onto it (owner call): the highway catch
-  (`steering::highway_catch`, a held key aims at the front axle's travel at 60 → 110 km/h, kept
-  on to straight and latched for the key held through a catch, snapshot format 9) and full
-  alignment of released keys at highway speed. Snap-back after a 150 km/h catch 4-8°
-  (keyboard and gamepad), lane change at 140 km/h 4-5° (was up to a spin). Details in
-  `crates/wp_vehicle/README.md`.
-- Police: expectations moved by main's maps re-measured (owner call), with reasons, in
-  `docs/integration/police.md`; `pro_input` no longer overwrites `planned_speed` (a blocked
-  siren unit never pushed).
-- Re-aimed on main's layout: race picker (Loop 9 vertex, grid sprint 1112 m), police race finish
-  (y = -300), off-route sprint inputs, pace lock-in (`docs/integration/opponent-pace.md`), the
-  Vesper e2e port loop, sidewalk mounts, siren yields, sideswipes, tunnel POIs (measured from the
-  portals). `wp_sim` sidewalk lot drives: -3.5 cm (a new residential verge case dips 3.0-3.2 cm).
-- Test expectations adjusted for main's layout: `city_v2` accepts the painted centre line under
-  the Route 40 West probe; `spawns_respect_sightline_and_active_area` waits 12 s (was 10 s) so
-  cars can finish a ramp-terminal junction before the old area must be empty.
-- Regenerated with the tools (`just city`, `just city-v2`, `just car-stats`); goldens
-  re-blessed in a `[bless]` commit.
-
-### Second merge of `main` (2026-10-21): detailed car models, freeway paint, ambush, fleets
-
-Main moved on while PR #17 was open (detailed car models, freeway paint, drawn / collision
-terrain, police ambush, multi-model traffic and police fleets). Merged again with the same rules.
-- **Car meshes**: main's new generator (format 2, `builder` / styles / wheels / mechanical) wins;
-  round 12's crumple binding is ported onto it as **mesh format 3** (= format 2 + `fold` on hood,
-  trunk, front-fender and rear-quarter panels; rigid parts never fold). Round 12's lens skinning
-  (head / tail lights crush with the end of the car) applies to the four head / tail lenses,
-  which now sit in `FrameFront` / `FrameRear` (`skin::is_lens`); main's other lamps (DRLs,
-  indicators, markers, fog lamps, light bars on lids) skin to their own region. Meshes
-  regenerated with `gen-car-mesh`. `lights_sit_outside_the_shell` re-aimed: it samples each lens's
-  outward faces instead of its bounding box (main's lamp housings / projectors / push bars cover
-  parts of the box on purpose; worst case 2 of 4 faces visible).
-- **Terrain**: main's `drawn_terrain` / `collision_terrain` replace the greybox's own coarse
-  terrain; round 12's surface meshes stay. One sidewalk width constant (`SIDEWALK_W_M`).
-- **Police**: main's ambush (`Intercept { ambush }`) next to round 12's backup / responder
-  spawns; round 12's backup and searching intercepts are plain (`ambush: false`).
-- **Traffic**: main's `cars: Vec<…>` models; round 12's blocked-car manoeuvres use the agent's
-  own model shape.
-- **Police, after the merge**: round 12's immediate backup (`call_backup`) also waits ahead of a
-  moving racer where it can get there first (`ambush_route`), as main's committed reinforcements
-  do. Main's `spawned_reinforcements_wait_ahead_facing_the_racers_way` used an empty patrol table
-  to force spawns, which since round 12 means a city without police; it now keeps one industrial
-  patrol and checks the spawned (`Reinforcement`) ambushers. A unit stopped head-on by a stopped
-  racer gets its unstick step after `HELD_CHASE_S` (3 s) instead of `HELD_AFTER_S` (20 s): on
-  Hollins Drive a responder and the AI field waited for each other for good (`hollins_hill_sprint`
-  1 of 4 finished; before the merge already 2 cars lost ~50 s there; now 4 of 4, 67-89 s).
-- **Main's new cars under round 12's rules**: `fulmine_v10`'s dual-clutch shift re-based 0.06 →
-  0.18 s (row 97, like `lindwurm_4t`) and round 12's damper ride rules applied to it, `sentinel_warden`
-  and `sentinel_harrier` (`build_roster.py`); recorded engine / world audio packs for all three.
-- **Audio**: `engine.second_layer_cull_scale` 0.25 → 1e-4. At 0.25 a near car's second layer
-  still beat a quiet traffic car's only layer at 130 m (the crowd test with main's roster), which
-  broke the documented "every main layer before anyone's second".
-- **wasm / testbed**: both APIs kept. `traffic_draw()` / `police_draw()` records gain a `model`
-  field (11 floats) and `session_car_models()` lists every traffic / police model
-  (`traffic`, `police`: `string[]`), so round 12's LOD fleet draws main's mixed fleets.
-- Regenerated with the tools: car meshes, `just city`, `just city-v2`, spec sheet
-  (`collect_results.py` + `specsheet.py`). `data/panels/junkyard_beater.json` is stale against
-  `gen-panels --check` on round 12 already (its car file was retuned there); left as it was.
-  `sentinel_harrier` fails the offset-40 % barrier expectation on main too.
-
 ## Lead helper note (2026-10-21): fuzz "below ground" failures were spawn-in-wall cases
 
 CI's fuzz job failed on `main` with `carN: below ground (z ≈ -0.50 m)` (seed 457 case 33, seed

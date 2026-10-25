@@ -3,8 +3,164 @@
 - **Workstream / prompt:** 09 — car roster data
 - **Branch:** `ws/cars`
 - **Crates / folders owned:** `data/cars/` (roster files); vehicle-models wave 1: multi-model hooks in `wp_sim::{police_link,traffic_link}`, `wp_world::{lib,traffic}`, `wp_wasm`, `apps/simcli/src/run.rs`, `data/lattices/` (roster car files, not the generator), `tools/specsheet/`; round 8: `data/tires/` edits the lead assigned to H (`PaintedLine`, `treaded`)
-- **Contract version built against:** 0.3.0
+- **Contract version built against:** 0.4.0 (wave 3)
 
+## Wave 3 (2026-10-23, owner request) — 4 supercars, 3 race cars, 2 rally-raid / pre-runner
+
+Owner request: "add 4 more highly detailed supercars, 3 dedicated race cars, and 2 rally raid /
+pre-runner style vehicles". Full pipeline per car: `roster_inputs.py` entry → VehicleDef, spec
+sheet (every derivation), lattice; sim validation (metrics + 8-barrier sweep, both modes);
+smoke-sim determinism (both modes, identical hashes); audio def; panel spec; procedural mesh with
+a per-car body kit (`tools/assets/src/styles/performance/{supercar,race,offroad}.rs`) and a
+mechanical-spec row; menu stats (`data/stats/cars.json`); AI capability row
+(`wp_opponent::capability_table`). Contract **0.4.0**, no contract change.
+
+| Id | Class | Mass (sim) | Power | 0-100 sim | Vmax sim | 100-0 | Skidpad | Barriers | Dur. | Price |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `halberd_40` | Exotic | 1488 kg | 513 kW (4.0 TT flat-plane V8) | 4.16 s | 347 km/h | 33.3 m | 1.16 g | 8/8 | 3 | 125 000 |
+| `ombra_v12` | Exotic | 1692 kg | 517 kW (6.5 NA V12) | 3.46 s | 348 km/h | 35.6 m | 0.99 g | 8/8 | 3 | 124 000 |
+| `ostwind_6t` | Exotic | 1690 kg | 470 kW (3.8 TT flat-six, rear-engine) | 3.76 s | 340 km/h | 36.1 m | 0.96 g | 8/8 | 4 | 110 000 |
+| `kagero_hx` | Exotic | 1833 kg | 418 kW (3.5 TT V6 + electric, combined) | 3.93 s | 326 km/h | 36.2 m | 0.96 g | 8/8 | 3 | 100 000 |
+| `morrigan_55` | Exotic (race) | 1288 kg | 425 kW (5.5 NA V8, restricted) | 4.28 s | 291 km/h | 32.1 m | 1.21 g | 8/8 | 3 | 120 000 |
+| `nyx_proto` | Exotic (race) | 977 kg | 419 kW (4.2 NA V8, restricted) | 4.00 s | 311 km/h | 31.9 m | 1.37 g | 7/8 | 3 | 125 000 |
+| `merlo_20t` | Exotic (race) | 1238 kg | 252 kW (2.0 T I4, FWD) | 5.17 s | 241 km/h | 34.4 m | 1.10 g | 8/8 | 4 | 100 000 |
+| `mesquite_pr` | Truck | 2759 kg | 317 kW (6.2 NA V8) | 8.14 s | 197 km/h | 46.9 m | 0.66 g | 8/8 | 5 | 32 000 |
+| `erg_hamada` | Truck | 2113 kg | 308 kW (5.0 NA V8, restricted) | 6.21 s | 201 km/h | 44.1 m | 0.66 g | 8/8 | 5 | 32 000 |
+
+- **Supercars** — each with a different drive/gearbox so they play differently: Halberd = RWD
+  on factory track tyres (`semi_slick`), dual-clutch, active wing (`downforce` 0.10 / 0.25);
+  Ombra = AWD 25 % front, single-clutch automated manual (0.22 s shifts); Ostwind = rear engine
+  (61 % rear weight, mid-engine lattice + `nose_scale` 1.8 for its front luggage-bay crush
+  zone), AWD 30 % front; Kagero = hybrid, electric torque folded into a flat crank-equivalent
+  curve, AWD 35 % front.
+- **Race cars** — sequential boxes (0.15 s), plated LSDs, `semi_slick` as the stand-in for
+  slicks, wings (`downforce` 0.40 / 0.85 GT, 0.60 / 0.80 prototype + −0.9 / −1.1 body lift,
+  0.05 / 0.25 touring), roll cage / carbon cell (`cell_scale` 1.6 / 1.8 / 1.6). Filed as
+  **Exotic**: in Sport, `wp_economy`'s purse caps the touring car near 54 000, where its
+  slick-tyre class index (682) beats the 120 000 Lucciola (619) and fails
+  `pricier_cars_are_not_slower`. The class index saturates at 999 for Halberd / Morrigan / Nyx.
+- **Off-road** — Mesquite: ladder frame, steel tube bumpers, 0.33 / 0.35 m travel, 1.15 / 1.35 Hz,
+  RWD + locker (stiff clutch LSD), converter automatic. Erg: tube spaceframe (`ladder_frame` +
+  `cell_scale` 1.8 on the `suv` lattice), fixed 50/50 4WD, plated diffs both ends, 0.35 m travel,
+  300 L fuel cell (112 kg at half). Both priced at the Truck-band ceiling the front-hit/purse
+  test allows (32 000, same as the Hauler).
+- **Sim misses** (explained in `VALIDATION.md`): 0-100 for Halberd, Ostwind, Kagero, Morrigan,
+  Nyx and 100-0 for Ombra, Ostwind, Kagero — shared cause A (TCS-on launch, ABS cycle), plus
+  race gearing for the race cars. **Barrier miss:** Nyx frontal 56 km/h crush ≈ 1.3-1.4 m (band
+  0.35-1.3; total loss, cabin intact) — see the request below.
+- **Ostwind drivetrain:** `AwdOnDemand { base_front_split: 0.10, max_rear_split: 0.50 }` never
+  closed at launch (4.85 s); the type is built for front-biased cars. Fixed `Awd 0.30` instead.
+- **Fixed in passing:** `collect_results.py` still checked barriers against the `sim` rows after
+  contract v0.4.0 renamed the old Simulation to `extreme`, so *every* car showed 5-6 barrier
+  FAILs; it now reads `extreme` (and compares "Arcade milder" against `sim`). The roster is
+  back to its pre-v0.4.0 matrix (only the known Wolfhound/Vigil offset near-misses).
+- **Free-roam haunts not changed:** adding the new cars to `wp_opponent::roam::haunt_cars` would
+  reshuffle the stock roaming roster and move race goldens, so it is left to the opponent
+  owner. Suggested: Highway + `halberd_40`, `ombra_v12`; Touge + `ostwind_6t`, `kagero_hx`;
+  Dirt + `erg_hamada`, `mesquite_pr`; Downtown + `merlo_20t`. The race cars want a track/event
+  haunt rather than street haunts.
+- **Menu stat bars** saturate (1.0) for the race cars' cornering and the supercars' top speed
+  (`data/stats/cars.json` scales 0.55-1.05 g, 140-310 km/h); UI owner may want wider scales.
+
+### Changes outside my folders (wave 3)
+
+- `crates/wp_wasm/src/race_spots_tests.rs` (testbed): `city_chase_in` → `night_run_in`. Main
+  did not compile its tests after merging #50 (Ashpeak) and #51 (City chase → Night run rename).
+- `crates/wp_vehicle/tests/gearbox.rs` (02): the fast-shift whitelist gains the seven new
+  dual-clutch / automated-manual / sequential ids (0.15-0.22 s, inside its 0.12-0.25 band).
+- `crates/wp_opponent/src/capability_table.rs` (generated, `WP_WRITE_CAPS=1`), `data/stats/cars.json`
+  (generated, `simcli car-stats`), `data/audio/cars/*` (one def per new car; V12 uses the procedural V8 pack,
+  flat-six the I6 pack — no V12 / flat pack yet).
+- `tools/assets` (R): `mechanical/spec.rs` rows, `styles/performance/{supercar,race,offroad}.rs`,
+  dispatch in `styles/performance/mod.rs`, panels + meshes for the new ids only, and a new
+  `tools/assets/mesh_shots.mjs` (rest-pose PNGs of a mesh, no testbed / wasm build needed).
+
+### Models (wave 3)
+
+Per-car body kits in `tools/assets/src/styles/performance/{supercar,race,offroad}.rs` (lamps
+with a distinct tail pattern per car, intakes, vents, louvres, splitters, wings, diffusers,
+number panels / stripes as plain colour patches, tube bumpers, light bars, chase rack, spare
+wheels, sand ladders, window nets, …). Hero tier, all under the 20k budget: halberd_40 18,586, ombra_v12 18,670, ostwind_6t 17,148, kagero_hx 17,626, morrigan_55 19,136, nyx_proto 18,388, merlo_20t 18,156, mesquite_pr 19,527, erg_hamada 18,536 tris.
+Kit-helper gaps found (worked around locally): no dome/blister or tube helper, `louvres` /
+`wing` / `diffuser` / `splitter` use fixed part names (once per car), `top_stripe` density is
+not settable, `mud_flaps` is all-four only. `Tips::HighCentre` draws four touching tips in a row
+(also on `fulmine_v10`); `nyx_proto` uses `Centre`, `halberd_40` `QuadHigh`. The pre-runner's
+bumper light bar and exo-bumper pods are detail parts in lamp materials (the four-lens test
+counts light parts per end), so they may not switch on with the head/tail lamps.
+
+After the round-12 merge: every kit emits turn signals as lamp-cluster segments (playtest row
+136 contract) — Mesquite and Erg as segments of their own lamps, Ombra in its lamp housing,
+the rest via the new shared `Kit::signals_beside_lamps` (amber lens beside each head / tail
+lamp, under the outboard end of full-width light bars, inboard on the nose top for set-back
+lamps). Mid LODs (round 12) generated for all nine; `mesquite_pr` sits at 6 498 of the 6 500
+mid budget (5-sided tubes, simpler spare wheel and bypass reservoirs).
+
+### New requests (wave 3)
+
+| # | To | Request |
+|---|---|---|
+| 10 | lead (contract) | `VehicleClass::Race` (race-built cars: own purse, market band, no traffic use) and `VehicleClass::Offroad` (or reuse a `Van`/`Civilian` split, request 9) so the rally-raid car and pre-runner are not priced and bracketed like the Hauler. |
+| 11 | 02 (tires) | A `race_slick` compound (lat D ≈ 1.45-1.55, wet ≈ 0.35, no tread): the three race cars run `semi_slick` as a stand-in. A sand/dune-biased `desert_at` would suit the two off-roaders. |
+| 12 | 03 (damage) | A flat sports-prototype profile in `lattice_gen` (cab-forward tub, low nose cone): `nyx_proto` uses the mid-engine coupe lattice and its 1 m nose folds past the 56 km/h crush band. |
+| 13 | 08 (economy) | An Exotic purse tier for class-index ≥ 800 (repeat of the Fulmine request) — the wave-3 supercars are compressed to 100 000-125 000 for the same front-hit/purse reason. |
+| 14 | 13 (audio) | V12 and flat-six engine packs (Ombra uses `engine_proc_v8`, Ostwind `engine_proc_i6`); an electric whine layer for the hybrid Kagero. |
+
+## Four new cars (2026-10-20)
+
+Request: a 90s hot hatch, a 70s muscle sedan, an AWD rally saloon and a delivery van. Full
+pipeline for each (inputs in `roster_inputs.py` → car JSON + spec sheet + lattice; audio def;
+`gen-panels` + `gen-car-mesh` panel spec and mesh; validated, smoke-simmed). Picked to sit
+next to the existing cars without copying them:
+
+| Id | Name | Class | Archetype | vs. the existing car | Price | Dur. |
+|---|---|---|---|---|---|---|
+| `stoat_16v` | Stoat 16V | Compact | early-90s FF 2.0 16V NA hot hatch | Vireo is a peaky 1.6; this one is torquey, shorter, lift-off happy | 9 500 | 2 |
+| `bulwark_400` | Bulwark 400 | Muscle | early-70s 6.6 L HO V8 four-door sedan, clutch-LSD live axle, early radials | Ironside is a 7.2 L coupe on bias-plies, open diff | 26 000 | 4 |
+| `arashi_t4` | Arashi T4 | Sport | mid-90s AWD 2.0 T rally-homologation saloon, 40/60 permanent AWD, rear LSD | Lindwurm is front-biased on-demand AWD; first roster car on fixed-split `Awd` | 32 000 | 3 |
+| `satchel_20` | Satchel 2.0 | Truck | 2000s FWD 2.0 I4 high-roof panel van, unibody | Drayman is a RWD V8 body-on-frame van | 20 000 | 3 |
+
+**Sim results** (`collect_results.py`; all in their class bands, all 8 barrier tests pass for
+all four):
+
+| car | 0-100 s (band) | skidpad g (band) | 100-0 m (band) | Vmax km/h |
+|---|---|---|---|---|
+| stoat_16v | 8.8 (7.8-9.0) | 0.85 (0.82-0.90) | 38.9 (38-44) | 204 |
+| bulwark_400 | 7.9 (7.5-9.0) | 0.72 (0.70-0.80) | 43.3 (42-52) | 201 |
+| arashi_t4 | 5.4 (4.8-5.8) | 0.97 (0.88-0.97) | 36.3 (35-39) | 248 |
+| satchel_20 | 18.5 (15-19) | 0.68 (0.66-0.76) | 45.3 (44-52) | 146 |
+
+Pursuit (`pursuit_probe.py --chase`): the cruiser catches the Stoat (11.0 s, +10 % margin) and
+the Satchel (13.2 s) like the other slow cars; it does not catch the Arashi or the Bulwark on a
+straight (same `wp_police` cap issue as the Ironside/Kestrel, see round 6b).
+
+Design decisions worth knowing:
+- **Bulwark tires and power.** It started as a mid-70s 156 kW sedan on `vintage_bias`; that gave
+  class index 227 at a Muscle-band price and failed `wp_economy`'s `pricier_cars_are_not_slower`
+  (cheaper hot hatches have a higher index), and 0.61 g on the skidpad (the Ironside's known
+  `vintage_bias` gap). Fixed in the car rather than in G's test: early-70s high-output tune
+  (205 kW net) on optional radials (`street`). Index 332 at 26 000, all three bands met.
+- **Satchel price** 20 000: `market.toml`'s Truck band floor (12 000) applies to Worn (× 0.6),
+  so a Truck cannot list below 20 000. Cheap vans want a lower floor or a `Van` class (see below).
+- **Bulwark rear 40 km/h**: the 70s tank sits behind the axle as on the Ironside, but behind a
+  1.38 m rear overhang (Ironside 1.25 m); a 40 km/h rear hit crushes 0.38 m and does not reach
+  it, so the "rear fuel tank failed" barrier expectation stays Ironside-only.
+
+Tool changes (my folder only): `build_roster.py`'s live-axle component tweak is now a lattice
+flag `live_axle=True` instead of `id == "ironside_440"` (Ironside output byte-identical); every
+existing car's generated JSON, spec sheet, lattice, panel spec and mesh is unchanged.
+`specsheet.py` has the four targets.
+
+Known gaps:
+- gen-lattice's `hatch` profile has four doors, so the three-door Stoat gets rear door panels.
+  Same for the Vireo; a `--doors 2` option for B.
+- `tools/tuning-dash/presets/mode_hits_to_total_loss.yaml` (tuning-dash) lists cars by hand and
+  does not include the four new ones yet.
+
+| To | Request |
+|---|---|
+| lead | A `Van` class (repeat of round 6b): the Satchel and Drayman are `Truck` today and the Truck price band forces a 20 000 minimum on a cheap FWD van. |
+| 03 damage (B) | `gen-lattice --doors 2` for three-door hatches (Stoat, Vireo). |
+| tuning-dash | Add `stoat_16v`, `bulwark_400`, `arashi_t4`, `satchel_20` to `mode_hits_to_total_loss`. |
 ## Lead helper note (`lead/handling-balance`, playtest row 28) — no car data changed
 
 "All cars understeer too much" was the keyboard/gamepad steering mapping and ESC, not car
@@ -281,7 +437,79 @@ the same binary and the old beater files swapped back in: identical result.
 | 02 vehicle (A) + 08 economy (G) | An **`aged_radial`** compound for old, hardened radials (the beater; later traffic/props). `vintage_bias` stands in today but is a 70s bias-ply (half the cornering stiffness, lazy). Proposal: street's shape with lateral `d` 0.82, `e` −0.5 (earlier, louder fall-off), longitudinal `d` 0.95, relaxation 0.40 m, rolling resistance 0.014, wet 0.55, paint 0.93 (peak slips computed from the curves). It needs a `market.tire_grip` row too (`wp_economy`'s `every_tire_file_has_a_grip_factor`), which is why I did not add the file. I switch the beater with one line in `roster_inputs.py` once it exists. |
 | 08 economy (G) | A **3-speed automatic** option for the beater (the brief's "4-speed manual / 3-speed auto"): a gearbox-swap mod, or a second def `junkyard_beater_auto` if you prefer a used-market variant. Data for it: ratios 2.84 / 1.60 / 1.00, final 3.70, torque converter stall 2200 rpm ×2.0, couples 2600 rpm, shift 0.6 s — I add the def on request. |
 | 19 design docs (P) | `FEATURE_BACKLOG.md` B06 can be closed. |
+## Round 9: four new cars (2026-10-20)
 
+Full pipeline for each (inputs in `roster_inputs.py` → car JSON + spec sheet + lattice, audio def,
+panel spec + mesh from `car-assets`, sim-validated, smoke-simmed). Existing 17 cars regenerate
+byte-identical and their `validation_results.json` entries are unchanged.
+
+| Id | Name | Class | Archetype | Price | Dur. | Sim 0-100 / skidpad / 100-0 / Vmax | In band? |
+|---|---|---|---|---|---|---|---|
+| `marten_20` | Marten 2.0 | Compact | early-90s European FF hot hatch, 2.0 16V NA (112 kW, 1114 kg) | 9 500 | 2 | 8.6 s / 0.86 g / 38.0 m / 206 | all ✓ |
+| `brigand_400` | Brigand 400 | Muscle | mid-70s American full-size four-door, 6.6 L V8 net 176 kW, 3-speed auto, LSD live axle, 1990 kg | 23 500 | 4 | 9.8 s / 0.60 g / 55.0 m / 197 | skidpad low (0.66-0.76), same `vintage_bias` cause as the Ironside |
+| `talus_20t` | Talus 2.0T | Sport | late-90s rally-homologation saloon, 2.0 T 206 kW, permanent AWD 45/55, front + rear LSD, 1386 kg | 38 000 | 3 | 5.2 s / 0.93 g / 37.2 m / 240 | all ✓ |
+| `tumbril_20` | Tumbril 2.0 | Truck | 2000s European FWD high-roof panel van, 2.0 petrol I4 85 kW, unibody, 1845 kg | 20 000 | 3 | 17.7 s / 0.68 g / 45.0 m / 142 | all ✓ |
+
+Barrier sweep: 8/8 for all four (see the two rule changes below). Nameplate check: 81 files, 0
+problems. `smoke_sim.py`: 21 cars × 2 modes deterministic.
+
+Pursuit (`pursuit_probe.py --chase`, Arcade, day cap): the Sentinel Cruiser catches the
+Marten (11.0 s with the +10 % margin / 7.8 s cap only), the Brigand (11.0 / 7.3 s) and the
+Tumbril (13.1 / 4.9 s; it never reaches 144 km/h). The Talus (0-144 km/h 9.97 s) escapes both
+the Cruiser and the Wolfhound (10.63 s), like the other sport cars.
+
+Checks (round 9): `cargo fmt --check`, `cargo build --target wasm32-unknown-unknown -p wp_wasm`,
+`cargo test --release` for wp_contracts, wp_damage, car-assets, wp_audio, wp_economy, simcli and
+wp_wasm: all pass.
+
+How they differ from the existing cars:
+- **Marten vs Vireo** (both 90s FF hatches): broad 2.0 torque from 3000 rpm instead of the
+  Vireo's high-rev cam step; quicker (8.6 vs 9.4 s) and pricier (9 500 vs 7 500), softer front /
+  stiffer rear bar (front roll share 0.45) for lift-off rotation.
+- **Brigand vs Ironside** (both 70s): four-door, 300 kg heavier, 40 kW less, and a clutch LSD
+  instead of an open diff. Slower, cheaper, the "getaway sedan".
+- **Talus vs Lindwurm / Kestrel** (AWD sport): the first **fixed-split** `Awd` car on the roster
+  (permanent 45/55 split, both axles always driven, LSDs front and rear), short gearing, 0.15 m
+  rally ride height, 0.9 handbrake for handbrake turns.
+- **Tumbril vs Drayman** (both vans): FWD unibody instead of RWD body-on-frame V8; much slower,
+  700 kg lighter, softer in every direction (no frame rails under the cargo box).
+
+### Changes to the tools (round 9)
+
+- `build_roster.py`: the Ironside-only live-axle adjustment (rear suspension / wheel mounts fail
+  early) is now the lattice flag `leaf_hangers=True`, set on the Ironside and the Brigand. The
+  Ironside's lattice is byte-identical.
+- `collect_results.py`: the rear-40 expectation "rear fuel tank failed" now applies to every
+  `era == "70s"` car (the builder already puts every 70s car's tank behind the axle), not only
+  the Ironside.
+- `collect_results.py`: the side (T-bone) 40 km/h "struck-side suspension failed" expectation
+  now exempts `profile == "van"` as well as body-on-frame. Measured reason: the barrier's striker
+  footprint is centred on the front door (`yc ± 0.92 m`) and ends at y = 1.19 m on the Tumbril,
+  while its front wheel arch starts at 1.27 m (front axle under the cab, 0.80 m overhang). The
+  Drayman's footprint ends 0.28 m short of its arch too. Cabin intrusion and health match the
+  Drayman (0.22 m / 0.75 vs 0.19 m / 0.74).
+
+### Changes outside my crates (round 9)
+
+- `crates/wp_economy/tests/roster_prices.rs`: added `brigand_400` to `KNOWN` in
+  `pricier_cars_are_not_slower` (test-only, next to `ironside_440`). The Muscle band floor
+  (14 000) means the Worn price (0.6 ×) needs a base of ≥ 23 334, and at 23 500 its class index
+  (245) is below the cheaper hatches'. That is the slow-classic-muscle case the Ironside already
+  sits in; 08 decides whether the Muscle band floor should drop for 70s cars instead.
+- `data/audio/cars/<id>.json` ×4 (13 audio): procedural packs, same fields as the existing cars
+  (I4 for the Marten/Talus/Tumbril, the Talus with `turbo: true`; cross-plane V8 for the Brigand).
+- `data/panels/<id>.json` and `data/panels/meshes/<id>.json` ×4 (R): generated by
+  `gen-panels` / `gen-car-mesh`, no hand edits; no existing panel file changed.
+
+### Known gaps / requests (round 9)
+
+| To | Item |
+|---|---|
+| 03 damage (B) | No three-door option in `gen-lattice`: the Marten is a typical three-door hot hatch, but the `hatch` profile makes four doors (the panel spec and mesh follow it). The prose avoids claiming three doors. A `--doors 2` option for `hatch` would fix it. |
+| 02 vehicle (A) + 14 | Brigand skidpad 0.60 g joins the Ironside (0.62) under the `vintage_bias` re-tune. |
+| 08 economy (G) | Muscle band floor vs 70s cars (above). Add the Marten and Talus to `career.rs::twenty_nights_on_roster_cars` if you want them in the career sweep (I did not touch it). |
+| 19 design docs | `docs/design/CARS_LORE.md` has no entries for the four new cars. |
+| lead | Still no `Van` class, so the Tumbril is `Truck` like the Drayman. |
 ## Vehicle-models wave 1: roster agent (2026-10-21)
 
 Plan: `docs/design/vehicles/PLAN.md` (roster row). Three new cars and multi-model police /
@@ -293,12 +521,12 @@ traffic selection.
 |---|---|---|---|---|---|---|---|---|---|
 | `fulmine_v10` | Exotic | 1634 kg | 449 kW (5.2 NA V10, 8250 rpm) | 3.59 s (3.5) | 337 km/h | 34.9 m | 0.95 g | 3 | 125 000 |
 | `sentinel_warden` | PoliceCruiser | 1873 kg | 155 kW (5.7 TBI pushrod V8) | 8.80 s (8.6) | 202 km/h | 40.1 m | 0.81 g | 4 | 26 000 (not for sale) |
-| `sentinel_harrier` | PoliceInterceptor | 1813 kg | 319 kW (5.0 DOHC V8) | 5.74 s (5.7) | 275 km/h | 38.2 m | 0.87 g | 4 | 52 000 (not for sale) |
+| `sentinel_vigil` | PoliceInterceptor | 1813 kg | 319 kW (5.0 DOHC V8) | 5.74 s (5.7) | 275 km/h | 38.2 m | 0.87 g | 4 | 52 000 (not for sale) |
 
 - Dimensions follow the wave-1 research (`research_performance.md` §2, `research_police.md`
   §1): Fulmine 1.95 × 4.46 × 1.17, wheelbase 2.65, 245/35R20 (loaded r 0.330) / 305/30R21
   (0.347); Warden 1.98 × 5.40 × 1.43, wb 2.90, front overhang 1.05, 225/70R15, durability 4;
-  Harrier 1.93 × 4.82 × 1.37, wb 2.75, 275/40R20 square. Harrier kept durability 4 (research
+  Vigil 1.93 × 4.82 × 1.37, wb 2.75, 275/40R20 square. Vigil kept durability 4 (research
   says 3) because it carries the reinforced push bar + doubled bumper beam like the other
   pursuit units.
 - Fulmine: fixed `Awd { front_split: 0.30 }`, 7-speed dual-clutch (0.06 s shifts), clutch
@@ -307,7 +535,7 @@ traffic selection.
 - Warden: body-on-frame sedan = gen-lattice `cruiser` profile + `ladder_frame` (new
   `TRUCK_RAIL_SCALE["sedan"] = 1.15`, a perimeter frame lighter than a truck ladder), 80s
   passenger cell (hss × 0.65), drum rears, police package like the cruiser.
-- Barrier matrix: all pass except Harrier `offset 40% 56 km/h` (struck-side corner intact,
+- Barrier matrix: all pass except Vigil `offset 40% 56 km/h` (struck-side corner intact,
   total loss) — the same known result as the Wolfhound (push-bar front spreads the offset load).
 - Market: prices come from the car files (`wp_economy` market); the Fulmine sits in the
   Exotic band (60 000-320 000) in every condition, its impound base fee is 2.0 % of value, its
@@ -318,7 +546,7 @@ traffic selection.
   scale with value, so 230 000 gave 2.73. **Request to 08 (economy):** a separate purse tier
   for class-index ≥ 800 cars (or a value-scaled Exotic purse) so the Fulmine can be priced at
   ~230 000; then change `price` in `roster_inputs.py`.
-- Audio: `data/audio/cars/{fulmine_v10,sentinel_warden,sentinel_harrier}.json` (audio's
+- Audio: `data/audio/cars/{fulmine_v10,sentinel_warden,sentinel_vigil}.json` (audio's
   folder; `wp_audio` requires one per car). V10 uses the V8 pack (no V10 pack yet), 10
   cylinders, even firing.
 - Panels / meshes: `gen-panels` + `gen-car-mesh` for the three ids only.
@@ -376,7 +604,7 @@ impl Sim   { pub fn set_traffic_cars(&mut self, Vec<LoadedCar>); pub fn traffic_
 
 - New scenario field `car_mix: bool` (default false, omitted when false — existing scenarios,
   goldens and replays unchanged). True: police fleet `simcli::run::CAR_MIX_POLICE` (warden 1–2,
-  cruiser 1–2, bastion 2–3, wolfhound 3–5, harrier 4–5, limits from VALIDATION.md; cruiser on
+  cruiser 1–2, bastion 2–3, wolfhound 3–5, vigil 4–5, limits from VALIDATION.md; cruiser on
   `pursuit.toml` defaults) and traffic `CAR_MIX_TRAFFIC` (index → id: 0 `debug_sedan`,
   1 `junkyard_beater`, 2 `tansy_13`, 3 `furrow_24`, 4 `hauler_1500`, 5 `drayman_cargo`,
   6 `vireo_xs`).
@@ -387,7 +615,7 @@ impl Sim   { pub fn set_traffic_cars(&mut self, Vec<LoadedCar>); pub fn traffic_
   `AG` / `PU` offsets in `layout.ts`, `sim.trafficModels()` / `sim.policeModels()`; e2e
   divisors updated. Rendering of the models is wave 2's job.
 - With heat at L0–L1 only warden/cruiser patrol; bastion appears from L2, wolfhound from L3,
-  harrier at L4–L5, so all five show up as a chase escalates.
+  vigil at L4–L5, so all five show up as a chase escalates.
 
 ### Changes outside my crates (this round)
 
@@ -639,6 +867,7 @@ Decisions are in "Lead feedback" below; status updated here.
 | 7 | `BodyRegion::Accessory` (push bar) | applied in v0.3.0; push bars on the three police cars use it since round 8 |
 | 8 | `fuel_capacity_l` | applied in v0.2.0; set on all 17 cars |
 | 9 | `VehicleClass::Van` (and/or a `Civilian` flag) — the cargo van and the compact pickup are traffic cars filed as `Truck`; economy/race class brackets and traffic selection should not treat them like the Hauler. | **new (round 6b)** |
+| 10 | `VehicleClass::Race` + `VehicleClass::Offroad` — race cars are filed as `Exotic`, the rally-raid car and pre-runner as `Truck` (wave 3). | **new (wave 3)** |
 
 Non-contract data request: `data/materials/uhss.json` (03) — 2010s cabins still use gen-lattice's HSS.
 
@@ -862,3 +1091,10 @@ has radiator / rack thresholds ×1.5). **Request (optional, H's call):** `sentin
 driveshaft `intrusion_fail_m` 0.10 → ~0.14 (and `intrusion_total_m` to match). The 0.6 m cabin
 case from round 12b is covered: Arcade's limit is now 0.78 m. Measure with
 `WP_KINDS=mixed,wall-angle WP_SPEEDS=100 cargo run --release -p simcli --example damage_toughness -- arcade sentinel_cruiser hakone_gt`.
+## Police power package (lead, 2026-10-23) — owner: "cop cars get smoked by a stock Hakone GT"
+Engines changed in `roster_inputs.py` for all five police cars (cruiser 6.2 L supercharged V8
+390 kW, wolfhound 3.5 TT pursuit tune 415 kW, vigil (ex-harrier) 5.2 L supercharged V8 561 kW, warden
+7.4 L big-block 217 kW, bastion 6.2 L V8 334 kW); gearing, chassis, brakes, lattices and prices
+unchanged. Measured before → after and the matching `wp_police` change (no pursuit speed cap)
+in `police.md`. H: please review the curves and the shared engine/audio assets (displacements
+changed in `analog_of`).

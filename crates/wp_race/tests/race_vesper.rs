@@ -67,10 +67,23 @@ fn run_hill_sprint() -> HillRace {
     let ids = built.ids;
     let route = hollins_route(&sim);
     let route_m = route.length_m;
-    let course = course_from_route(&route, 3.0);
+    let mut course = course_from_route(&route, 3.0);
+    // Street-race gates, as the picker lays them out (lane-wide gates missed a racer passing
+    // in the opposing lane at the first checkpoint on candidate G).
+    wp_race::catalog::widen_street_gates(&mut course);
 
     let data = RaceData::embedded();
     let kind = RaceKind::Sprint;
+    // The grid inside the lanes, as the picker lays it out (its right column would start on
+    // the verge of this one-lane-each-way street).
+    let rules = data.rules.for_kind(kind);
+    wp_race::catalog::fit_grid_to_road(
+        sim.world(),
+        &mut course,
+        rules.kind_rules.grid,
+        rules.kind_rules.max_racers as usize,
+        sc.entities.len(),
+    );
     let mut judge = RaceJudge::new(EventId(16), data.rules.for_kind(kind), course.clone());
     let mut entrants = Vec::new();
     for (spec, id) in sc.entities.iter().zip(&ids) {
@@ -103,7 +116,8 @@ fn run_hill_sprint() -> HillRace {
         });
     }
     let race = wp_race::bridge::CityRace { route, course };
-    let mut ai = AiEntrants::new(sim.world(), &race, kind, false, &entrants, 16);
+    let mut ai =
+        AiEntrants::new(sim.world(), &race, kind, false, &entrants, 16).expect("a drivable route");
     let green_tick = judge.start(sim.tick()).unwrap();
 
     let heat = EventHeat::new();

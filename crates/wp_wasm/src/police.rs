@@ -201,6 +201,21 @@ pub fn siren_on(sim: &wp_sim::Sim, v: &wp_sim::SimVehicle) -> bool {
     }
 }
 
+/// Turn signal of a sim vehicle bound to a police unit: -1 left, 0 off, 1 right
+/// (`wp_police::unit::Unit::turn_signal`); always off while its lights run (see [`siren_on`]).
+/// Presentation only.
+pub fn turn_signal(sim: &wp_sim::Sim, v: &wp_sim::SimVehicle) -> i8 {
+    let Some(unit) = v.police_unit else {
+        return 0;
+    };
+    sim.police()
+        .units()
+        .iter()
+        .find(|u| u.id == unit)
+        .filter(|u| !assignment_has_siren(&u.assignment))
+        .map_or(0, |u| u.turn_signal())
+}
+
 /// Assignments that run with lights and siren.
 pub fn assignment_has_siren(a: &Assignment) -> bool {
     matches!(
@@ -272,6 +287,35 @@ pub fn units(
     out
 }
 
+/// Floats per helicopter in [`helicopters`].
+pub const HELO_STRIDE: usize = 8;
+
+/// Helicopters tracking a racer, 8 floats each: `[x, y, z, aim_x, aim_y, aim_z,
+/// cone_half_angle_rad, flags]`, flags 1 = has visual on its target. The aim point is where its
+/// spotlight points (the racer, or where it was last seen). Like [`units`], the helicopter's
+/// altitude is drawn above the ground under it; the aim point is on the road surface nearest the
+/// racer's height (the lower road under an overpass, not the deck).
+pub fn helicopters(p: &PoliceSystem, ground: &dyn Fn([f32; 2], Option<f32>) -> f32) -> Vec<f32> {
+    let mut out = Vec::new();
+    for h in p.helicopters() {
+        let xy = [h.pos[0], h.pos[1]];
+        let aim = [h.spotlight_target[0], h.spotlight_target[1]];
+        let z = ground(xy, None) + h.pos[2];
+        let aim_z = ground(aim, Some(h.spotlight_target[2]));
+        out.extend_from_slice(&[
+            xy[0],
+            xy[1],
+            z,
+            aim[0],
+            aim[1],
+            aim_z,
+            h.cone_half_angle_rad,
+            h.has_visual as u32 as f32,
+        ]);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,6 +354,7 @@ mod tests {
             terrain: None,
             covered: vec![],
             decor: vec![],
+            features: Default::default(),
         }
     }
 
@@ -327,15 +372,15 @@ mod tests {
     #[test]
     fn unit_homed_at_an_ashpeak_station_is_a_county_unit() {
         let vesper_station = [200.0, 300.0];
-        let harlan_station = [-3300.0, 150.0];
+        let harnell_station = [-3300.0, 150.0];
         let net = net_with_stations(
             wp_world::ashpeak::CITY_ID,
-            &[vesper_station, harlan_station],
+            &[vesper_station, harnell_station],
         );
         let a = Agencies::of(Some(&net));
         // Spawned at the county station: county; at the city station: PVPD.
-        let county = unit_at(harlan_station);
-        assert_eq!(county.spawn_pos, harlan_station);
+        let county = unit_at(harnell_station);
+        assert_eq!(county.spawn_pos, harnell_station);
         assert_eq!(a.flag(&county), FLAG_COUNTY);
         assert_eq!(a.flag(&unit_at(vesper_station)), 0);
         // Inside Port Vesper but nearer the county station (west edge): homed in the county.
@@ -343,7 +388,7 @@ mod tests {
         // Outside Port Vesper but nearest the city station: a PVPD unit.
         assert!(!a.county([200.0, 1800.0]));
         // The flag follows the spawn point, not where the unit drives later.
-        let mut moved = unit_at(harlan_station);
+        let mut moved = unit_at(harnell_station);
         moved.body.pos = vesper_station;
         assert_eq!(a.flag(&moved), FLAG_COUNTY);
     }
@@ -373,6 +418,7 @@ mod tests {
         assert_eq!(s.status, "Clear");
         assert_eq!(s.heat_in_level, 0.0);
         assert!(units(&p, &|_| 0.0, &|_| -1.0, &Agencies::default()).is_empty());
+        assert!(helicopters(&p, &|_, _| 0.0).is_empty());
         assert_eq!(s.last_outcome, None);
         assert_eq!(s.outcome_age_s, None);
     }

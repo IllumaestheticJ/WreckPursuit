@@ -25,7 +25,7 @@
 //!   radius of a player or active race route become `wp_vehicle` instances driven by a
 //!   pure-pursuit + PID controller; promotion/demotion copy pose and speed.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::{
@@ -38,31 +38,131 @@ use wp_vehicle::{TireDb, Vehicle};
 use crate::density::{f_distance, f_time};
 use crate::drive::{DriveController, DriveGains};
 use crate::geom::{self, Obb, V2, V3};
-use crate::map::{CityMap, SegId, SegKind, NO_SEG};
+use crate::map::{CityMap, SegId, SegKind, Segment, NO_SEG};
 use crate::network::{IntersectionControl, LaneKind, TurnKind, ZoneId};
 
 mod blocked;
 pub use blocked::Wait;
 use blocked::{Manoeuvre, ObsRef};
+mod jam;
 pub mod siren;
 use siren::SirenRel;
+#[cfg(test)]
+mod signal_tests;
 pub use siren::{SirenYield, YieldPhase};
 
 /// Civilian car length used for spacing and overlap tests, m.
 pub const CAR_LENGTH_M: f32 = 4.5;
 /// Civilian car width, m.
 pub const CAR_WIDTH_M: f32 = 1.9;
+
+/// Look-ahead for an emergency stop on a tracked vehicle's collision course, s.
+const EMERGENCY_HORIZON_S: f32 = 2.5;
+/// Side clearance under which a closest approach counts as a hit for the emergency stop, m
+/// (on top of both cars' half widths).
+const EMERGENCY_SIDE_MARGIN_M: f32 = 0.4;
 /// Traffic AI update period (60 Hz), s.
 pub const TRAFFIC_DT: f32 = 1.0 / 60.0;
 /// Physics ticks per traffic step (240 Hz / 60 Hz).
 pub const TICKS_PER_TRAFFIC_STEP: u64 = 4;
 /// A discretionary lane change is indicated at least this long before it starts, s.
+/// Lane changes are re-checked every 0.5 s, so this is the next check choosing the same change.
+/// Kept at 0.5 s: 1.5 s cut lane changes by a third (traffic_bench) and would move the goldens; the
+/// indicator then stays on through the lateral move ([`LANE_CHANGE_SIGNAL_OFF_M`]), about
+/// 3 s in all.
 pub const LANE_CHANGE_SIGNAL_S: f32 = 0.5;
+/// A junction turn is indicated this long before the end of the lane (at the current speed), s.
+pub const TURN_SIGNAL_LEAD_S: f32 = 3.0;
+/// Shortest distance before the end of the lane at which a junction turn is indicated, m.
+pub const TURN_SIGNAL_MIN_M: f32 = 30.0;
+/// Longest distance before the end of the lane at which a junction turn is indicated, m.
+pub const TURN_SIGNAL_MAX_M: f32 = 50.0;
+/// After a lane change the indicator stays on until the car is this close to its new lane
+/// centre, m.
+pub const LANE_CHANGE_SIGNAL_OFF_M: f32 = 0.3;
+
+/// Distance before the end of the lane at which a car doing `speed_mps` switches on its
+/// indicator for a junction turn: [`TURN_SIGNAL_LEAD_S`] of travel, clamped to
+/// [`TURN_SIGNAL_MIN_M`]..[`TURN_SIGNAL_MAX_M`], m.
+pub fn turn_signal_lead_m(speed_mps: f32) -> f32 {
+    (speed_mps * TURN_SIGNAL_LEAD_S).clamp(TURN_SIGNAL_MIN_M, TURN_SIGNAL_MAX_M)
+}
+
+/// Indicator for a junction turn (-1 left, 0 none, 1 right; right-hand traffic: a U-turn
+/// indicates left).
+fn turn_indicator(turn: TurnKind) -> i8 {
+    match turn {
+        TurnKind::Left | TurnKind::UTurn => -1,
+        TurnKind::Right => 1,
+        TurnKind::Straight => 0,
+    }
+}
 
 /// Sightline radius while filling the area before the first tick ([`Traffic::populate`]), m.
 /// Nobody has seen the city yet, so the start state keeps cars this close (the live rule,
 /// `TrafficConfig::sight_radius_m`, is wider so cars never pop in or out in plain view).
 pub const POPULATE_SIGHT_RADIUS_M: f32 = 150.0;
+
+/// A driver who has stood at its stop line this long (outside red) books its turn
+/// ([`Traffic::book_for_waiting`]), s.
+pub const BOOK_AFTER_S: f32 = 20.0;
+/// A booking not used within this long lapses, s.
+pub const BOOK_MAX_S: f32 = 10.0;
+/// After a booking lapsed, no new one for this long, s.
+pub const BOOK_RETRY_S: f32 = 30.0;
+/// A booking may also be made while the exit has no room yet (the car starves behind a short
+/// block that cars from the other approaches keep filling); it then waits for room at most
+/// this long before it lapses, s.
+pub const BOOK_ROOM_MAX_S: f32 = 40.0;
+/// An all-way-stop driver who stopped first but has not gone after this long (outside red, no
+/// permit) no longer has the right of way over the others, s.
+pub const ALLWAY_STALE_S: f32 = 8.0;
+/// A tracked vehicle in a junction faster than this sweeps through it (crossing movements wait);
+/// slower (a police car shunting at a scene) it only blocks the paths it stands in, m/s.
+pub const TV_SWEEP_MPS: f32 = 2.5;
+/// Two civilians touching again within this many traffic steps (2 s) of separating are
+/// still one collision in [`TrafficStats::civilian_collisions`] (cars that bump, part and
+/// bump again counted twice).
+pub const RETOUCH_STEPS: u64 = 120;
+/// With the physical cap full, a kinematic car this close to a player takes the place of the
+/// physical car farthest from any player ([`TrafficConfig::max_physical`]), m.
+pub const PLAYER_PRIORITY_RADIUS_M: f32 = 40.0;
+/// ... if that one is at least this much farther from the player, m (no swapping back and
+/// forth between two cars at nearly the same distance).
+pub const PLAYER_PRIORITY_MARGIN_M: f32 = 10.0;
+/// A kinematic car in a U-turn or reverse (LOD-locked) this close to a player gives the
+/// manoeuvre up and is promoted, so the player can hit it, m.
+pub const LOCKED_PROMOTE_M: f32 = 20.0;
+/// A wreck closer than this to a car's path (on top of both half widths) is in its way, m.
+pub const WRECK_PATH_MARGIN_M: f32 = 0.3;
+/// A unit beside a car that is merging back after a siren yield counts as standing (the car
+/// creeps on past it along the kerb) below this speed, m/s; a moving one is waited for.
+pub const BESIDE_STANDING_MPS: f32 = 1.0;
+/// ... and only with at least this much room between the two bodies' sides, m.
+pub const BESIDE_CLEAR_M: f32 = 0.5;
+/// A driver held at its stop line by a siren unit heading for the junction goes anyway after
+/// this long (the unit is milling about a scene rather than coming through), s.
+pub const SIREN_JUNCTION_HOLD_MAX_S: f32 = 8.0;
+
+/// A physical traffic car whose velocity changes by at least this much in one physics tick
+/// from collision impulses has had a hard impact: the driver stops, puts the hazards on and
+/// stays put (disabled, like a dead engine), m/s. 18 km/h: a parking-lot nudge or a
+/// scrape along the side drives on; a rear-ender, a T-bone or a wall at town speed does not.
+pub const HARD_IMPACT_DV_MPS: f32 = 5.0;
+
+/// A wreck further than this from its lane's centre line is off the road (sidewalk, lot) and
+/// not an obstacle in the lane, m.
+pub const OFF_LANE_WRECK_M: f32 = 3.5;
+
+/// No spawn behind a (nearly) stopped car closer than this ahead (spawning into a queue), m.
+pub const SPAWN_QUEUE_LOOK_M: f32 = 60.0;
+/// Spawning stops on a lane holding one car per this many metres at the daytime peak (more
+/// metres per car as the time-of-day factor drops), m.
+pub const SPAWN_LANE_SPACING_M: f32 = 20.0;
+
+/// A car stopped at its stop line without a permit for longer than this (outside red lights) is
+/// not counted as arriving at the junction by the drivers who would yield to it, s.
+pub const STALE_ARRIVAL_S: f32 = 4.0;
 
 /// Upper bound on how much [`Traffic`] raises the density target of the out-of-sight part of
 /// the active area, to make up for the part in a player's view that cannot be spawned into.
@@ -405,6 +505,9 @@ pub struct TrafficConfig {
     pub detect_collisions: bool,
     /// Agents stopped longer than this (and unseen) are recycled, s.
     pub stuck_timeout_s: f32,
+    /// Unseen agents that have stood still this long outside a red light are recycled, s
+    /// (`traffic::jam`, owner row 85).
+    pub jam_recycle_s: f32,
 }
 
 impl Default for TrafficConfig {
@@ -426,6 +529,7 @@ impl Default for TrafficConfig {
             density_scale: 1.0,
             detect_collisions: false,
             stuck_timeout_s: 120.0,
+            jam_recycle_s: 30.0,
         }
     }
 }
@@ -439,7 +543,8 @@ pub struct TrafficStats {
     pub despawned: u64,
     /// Agents recycled because they were stuck.
     pub stuck_recycled: u64,
-    /// New civilian–civilian overlap pairs (only with `detect_collisions`).
+    /// New civilian–civilian overlap pairs (only with `detect_collisions`); a pair touching
+    /// again within [`RETOUCH_STEPS`] of separating is not counted again.
     pub civilian_collisions: u64,
     /// Of those, pairs involving an aggressive driver.
     pub collisions_involving_aggressive: u64,
@@ -483,6 +588,22 @@ pub struct TrafficStats {
     pub siren_lane_changes: u64,
     /// First 64 new overlap pairs: `(traffic step, agent a, agent b)`.
     pub collision_log: Vec<(u64, AgentId, AgentId)>,
+    /// Longest any agent has stood still outside a red / amber light and away from a standing
+    /// scene (a tracked vehicle stopped for 20 s: a capture, a parked player), s (jam
+    /// diagnostics, owner row 85; see `traffic::jam`).
+    #[serde(default)]
+    pub max_stop_s: f32,
+    /// Longest queue of stopped cars back from a stop line (followed back through junctions),
+    /// sampled once a second.
+    #[serde(default)]
+    pub max_queue: u32,
+    /// Times a car stood inside a junction box for more than 5 s.
+    #[serde(default)]
+    pub box_stops: u64,
+    /// Unseen agents recycled because they stood still outside a red light for
+    /// `TrafficConfig::jam_recycle_s` (not counted in `stuck_recycled`).
+    #[serde(default)]
+    pub jam_recycled: u64,
 }
 
 /// Near-LOD state.
@@ -530,12 +651,37 @@ pub struct Agent {
     start_wait_s: f32,
     ghost: Option<(SegId, f32)>,
     stuck_s: f32,
+    /// Stopped time outside red lights (jam diagnostics, `traffic::jam`), s.
+    jam_s: f32,
+    /// No forced (blocked-lane) lane change before this traffic step (set when one stalled).
+    lc_block_until: u64,
+    /// No junction permit before this traffic step (set when one was given up for an
+    /// obstruction).
+    permit_block_until: u64,
+    /// Time its current booking has held ([`Traffic::book_for_waiting`]), s.
+    booked_s: f32,
+    /// No booking before this traffic step.
+    book_block_until: u64,
+    /// Time its booking has waited for room on the exit, s.
+    book_room_s: f32,
+    /// Time held at the stop line by a siren unit heading for the junction, s
+    /// ([`SIREN_JUNCTION_HOLD_MAX_S`]).
+    siren_hold_s: f32,
+    /// Stopped time inside a junction connector, s.
+    box_s: f32,
+    /// Stopped time for the jam metric: like `jam_s`, also held near a standing scene, s.
+    metric_stop_s: f32,
+    /// Time the current manoeuvre has not moved, s.
+    man_still_s: f32,
     /// Currently braking hard for a hazard.
     pub emergency: bool,
     /// Currently yielding to a siren.
     pub yielding: bool,
     /// Disabled (wrecked or lost control): stopped with hazard lights.
     pub disabled: bool,
+    /// Edging around a tracked vehicle parked in the junction box this step
+    /// ([`blocked::BOX_SQUEEZE_S`]); it does not back out meanwhile.
+    box_squeeze: bool,
     /// Visual variant for the renderer.
     pub variant: u8,
     /// LOD.
@@ -568,6 +714,13 @@ pub struct Agent {
     pub siren_reaction_s: f32,
     /// Wants a lane change out of a siren unit's lane (multi-lane roads): `Some(to the right)`.
     siren_lc: Option<bool>,
+    /// Connector whose turn is being indicated (`NONE` = none). Latched once the car is within
+    /// [`turn_signal_lead_m`] of the lane end, so the indicator does not go off again when the
+    /// car slows down in the queue. View-only: not in the state hash, never read by the AI.
+    turn_latch: SegId,
+    /// Lateral move of the last lane change still being indicated (-1 left, 1 right, 0 none);
+    /// cleared once the car is centred in its new lane. View-only like `turn_latch`.
+    lc_signal: i8,
 }
 
 /// Renderer / netcode view of an agent.
@@ -680,6 +833,9 @@ pub struct Traffic {
     poses: Vec<Pose>,
     reservations: Vec<u32>,
     tv_block: Vec<bool>,
+    /// The tracked vehicle / hazard behind `tv_block` is moving (> 1 m/s): it will sweep
+    /// through, so crossing paths are held too. A stationary one blocks only its own path.
+    tv_block_moving: Vec<bool>,
     tv_block_list: Vec<SegId>,
     zone_samples: Vec<Vec<Sample>>,
     zone_bbox: Vec<(V2, V2)>,
@@ -687,6 +843,11 @@ pub struct Traffic {
     stats: TrafficStats,
     lod_changes: Vec<LodChange>,
     overlaps: BTreeSet<(u32, u32)>,
+    /// Pairs that stopped overlapping recently, with the traffic step it ended: a re-touch
+    /// within [`RETOUCH_STEPS`] is the same incident, not a new collision.
+    overlap_ended: BTreeMap<(u32, u32), u64>,
+    /// Indices of wrecked agents this step (`Traffic::leader` checks them by position).
+    wrecks: Vec<u32>,
     /// Car models for physical agents; agent `id` uses `cars[traffic_model_index(id, len)]`.
     cars: Vec<(VehicleDef, TireDb)>,
     /// Seed for per-driver values derived from the id (patience).
@@ -700,6 +861,9 @@ pub struct Traffic {
     blocked_lanes: std::collections::BTreeMap<SegId, u64>,
     /// How long each tracked vehicle has been stationary, s (by entity id).
     tracked_still: std::collections::BTreeMap<u32, f32>,
+    /// Tracked vehicles that have stood still for [`jam::SCENE_STILL_S`] (a pursuit scene, a
+    /// parked player): positions, for the jam metric.
+    scenes: Vec<V2>,
     /// Inside [`Traffic::populate`]: the sightline rule uses [`POPULATE_SIGHT_RADIUS_M`].
     populating: bool,
 }
@@ -738,6 +902,29 @@ fn idm(v: f32, v0: f32, gap: f32, v_lead: f32, p: &DriverParams) -> f32 {
 
 /// Unit forward (XY) of a chassis quaternion `[x, y, z, w]` (chassis +Y rotated).
 pub use crate::drive::forward_of;
+
+/// The nearest tracked vehicle ahead of arc length `s` on lane segment `seg` that stands in the
+/// lane (centre within half the lane width + 0.5 m of the centreline, same level): its arc
+/// length and its speed along the lane.
+fn tracked_ahead_in_lane(
+    tracked: &[TrackedVehicle],
+    seg: &Segment,
+    s: f32,
+    width: f32,
+) -> Option<(f32, f32)> {
+    tracked
+        .iter()
+        .filter_map(|t| {
+            let pr = seg.project(geom::xy(t.pos));
+            let (p, tan) = seg.point_at(pr.s);
+            ((t.pos[2] - p[2]).abs() < 4.0
+                && pr.dist < width * 0.5 + 0.5
+                && pr.s > s
+                && pr.s < seg.length)
+                .then(|| (pr.s, geom::dot(geom::xy(t.vel), tan).max(0.0)))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+}
 
 /// A stopped car within 40 m ahead of `s` in `list`.
 fn list_has_stopped_ahead(list: &[Entry], s: f32) -> bool {
@@ -838,6 +1025,7 @@ impl Traffic {
             poses: Vec::new(),
             reservations: vec![NONE; nseg],
             tv_block: vec![false; nseg],
+            tv_block_moving: vec![false; nseg],
             tv_block_list: Vec::new(),
             zone_samples,
             zone_bbox,
@@ -845,12 +1033,15 @@ impl Traffic {
             stats: TrafficStats::default(),
             lod_changes: Vec::new(),
             overlaps: BTreeSet::new(),
+            overlap_ended: BTreeMap::new(),
+            wrecks: Vec::new(),
             cars: Vec::new(),
             seed,
             opposite,
             road_lanes,
             blocked_lanes: Default::default(),
             tracked_still: Default::default(),
+            scenes: Vec::new(),
             populating: false,
         }
     }
@@ -877,6 +1068,12 @@ impl Traffic {
     /// fewer than two models are set).
     pub fn model_of(&self, id: AgentId) -> usize {
         traffic_model_index(id, self.cars.len())
+    }
+
+    /// The car model agent `id` drives once physical ([`Traffic::model_of`]); `None` while no
+    /// physical traffic model is set.
+    fn car_of(&self, id: AgentId) -> Option<&(VehicleDef, TireDb)> {
+        self.cars.get(self.model_of(id))
     }
 
     /// All agents, ordered by id.
@@ -925,24 +1122,44 @@ impl Traffic {
         }
     }
 
+    /// Report a collision that changed physical agent `agent`'s velocity by `dv_mps` this
+    /// tick; at or above [`HARD_IMPACT_DV_MPS`] the car is disabled (stops with hazard lights
+    /// and stays stopped). Returns whether this report disabled it.
+    pub fn report_impact(&mut self, agent: AgentId, dv_mps: f32) -> bool {
+        if dv_mps < HARD_IMPACT_DV_MPS {
+            return false;
+        }
+        match self.agents.iter_mut().find(|a| a.id == agent) {
+            Some(a) if a.physical.is_some() && !a.disabled => {
+                a.disabled = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Renderer view of every agent.
     pub fn views<'a>(&'a self, map: &'a CityMap) -> impl Iterator<Item = AgentView> + 'a {
         self.agents.iter().map(move |a| {
             let (p, f) = self.pose_of(map, a);
             let mut turn_signal = 0i8;
-            if a.plan[0] != NONE && !map.seg(a.seg).is_connector() {
+            if let SegKind::Connector { turn, .. } = map.seg(a.seg).kind {
+                // Keep indicating through the junction until on the exit lane.
+                turn_signal = turn_indicator(turn);
+            } else if a.plan[0] != NONE && a.plan[0] == a.turn_latch {
                 if let SegKind::Connector { turn, .. } = map.seg(a.plan[0]).kind {
-                    if map.seg(a.seg).length - a.s < 40.0 {
-                        turn_signal = match turn {
-                            TurnKind::Left | TurnKind::UTurn => -1,
-                            TurnKind::Right => 1,
-                            TurnKind::Straight => 0,
-                        };
-                    }
+                    turn_signal = turn_indicator(turn);
                 }
             }
-            if a.ghost.is_some() {
-                turn_signal = if a.lat < 0.0 { 1 } else { -1 };
+            if a.ghost.is_some() || a.lc_signal != 0 {
+                // Lane change under way: indicate until centred in the new lane.
+                turn_signal = if a.lc_signal != 0 {
+                    a.lc_signal
+                } else if a.lat < 0.0 {
+                    1
+                } else {
+                    -1
+                };
             } else if let Some((to_right, _)) = a.pending_lc {
                 turn_signal = if to_right { 1 } else { -1 };
             }
@@ -956,6 +1173,10 @@ impl Traffic {
                 _ => {}
             }
             let mut hazard_lights = a.disabled || a.emergency;
+            if a.disabled {
+                // A wreck shows hazards only.
+                turn_signal = 0;
+            }
             if let Some(m) = &a.manoeuvre {
                 match m.signal() {
                     Some(s) => turn_signal = s,
@@ -1048,13 +1269,22 @@ impl Traffic {
         self.expire_blocked_lanes();
         self.sync_physical(map, inp);
         self.rebuild_lists(map);
+        self.rebuild_reservations(map);
+        self.sample_queues(map);
         self.compute_poses(map);
+        self.wrecks.clear();
+        for (j, a) in self.agents.iter().enumerate() {
+            if a.disabled && !a.despawn {
+                self.wrecks.push(j as u32);
+            }
+        }
         self.compute_tv_blocks(map, inp.tracked, inp.hazards);
         self.decide(map, inp);
         self.resolve_blocks(map, inp);
         self.lane_changes(map, inp);
         self.drive_physical(map, inp);
         self.integrate(map, inp, dt);
+        self.update_signals(map);
         self.spawn_timer += dt;
         if self.spawn_timer >= SPAWN_PERIOD_S {
             self.spawn_timer -= SPAWN_PERIOD_S;
@@ -1067,6 +1297,144 @@ impl Traffic {
             self.detect_collisions();
         }
         self.remove_despawned();
+    }
+
+    /// Rebuild the junction reservations from what the agents hold now: a connector is reserved
+    /// by the car driving through it, or (taking precedence) by the car holding a permit for it.
+    /// Done every step so a reservation can never outlive its holder (owner row 85: reservations
+    /// left behind by despawned, re-routed or turned-around cars held crossing traffic for
+    /// minutes).
+    fn rebuild_reservations(&mut self, map: &CityMap) {
+        self.reservations.fill(NONE);
+        for a in &self.agents {
+            if a.despawn {
+                continue;
+            }
+            if map.seg(a.seg).is_connector() {
+                self.reservations[a.seg as usize] = a.id;
+            }
+        }
+        for a in &self.agents {
+            if !a.despawn && a.permit != NONE {
+                self.reservations[a.permit as usize] = a.id;
+            }
+        }
+        self.book_for_waiting(map);
+    }
+
+    /// Turn-taking for drivers who have waited [`BOOK_AFTER_S`] at their stop line (a minor
+    /// road onto a busy arterial, a box that never empties): the longest-waiting driver books its
+    /// connector, so nobody gets a permit into a movement crossing it until it has gone. A
+    /// booking is never granted next to a crossing booking (no deadlock between bookings), and
+    /// only while there is room on the exit (owner row 85).
+    fn book_for_waiting(&mut self, map: &CityMap) {
+        let now = self.step_count;
+        let mut cands: Vec<(f32, u32, usize, bool, bool)> = Vec::new();
+        for (i, a) in self.agents.iter().enumerate() {
+            if a.despawn
+                || a.permit != NONE
+                || a.v >= 0.5
+                || a.jam_s < BOOK_AFTER_S
+                || now < a.book_block_until
+                || now < a.permit_block_until
+            {
+                continue;
+            }
+            let sg = map.seg(a.seg);
+            let c = a.plan[0];
+            if sg.is_connector() || c == NONE || !map.seg(c).is_connector() {
+                continue;
+            }
+            // Its own path must be free of tracked vehicles: a booking it cannot use would only
+            // hold the crossing traffic.
+            if self.tv_block[c as usize] {
+                continue;
+            }
+            if sg.length - a.s > CAR_LENGTH_M + 4.0 {
+                continue;
+            }
+            // Not against its own red / amber: the booking would lapse before the green (and
+            // meanwhile hold the crossing traffic that has it).
+            let red = sg
+                .lane()
+                .and_then(|l| map.lane_signal(l))
+                .is_some_and(|(st, _)| matches!(st, SignalState::Red | SignalState::Yellow));
+            if red {
+                continue;
+            }
+            // No room on the exit: still book (the room that comes free is then its, not the
+            // other approaches'), unless a wreck holds the exit.
+            let tgt = map.seg(c).next[0];
+            let room = !self.lists[tgt as usize]
+                .first()
+                .is_some_and(|e| e.v < 3.0 && e.s - HALF_L < CAR_LENGTH_M + 2.0);
+            if !room && self.exit_wrecked(map, c) {
+                continue;
+            }
+            // Waiting for room behind a red-light queue always ends; only other holds count
+            // against `BOOK_ROOM_MAX_S`.
+            let exit_red = map
+                .seg(tgt)
+                .lane()
+                .and_then(|l| map.lane_signal(l))
+                .is_some_and(|(st, _)| matches!(st, SignalState::Red | SignalState::Yellow));
+            cands.push((a.jam_s, a.id, i, room, exit_red));
+        }
+        if cands.is_empty() {
+            return;
+        }
+        cands.sort_by(|x, y| y.0.total_cmp(&x.0).then(x.1.cmp(&y.1)));
+        let mut booked: Vec<SegId> = Vec::new();
+        for (_, id, i, room, exit_red) in cands {
+            let c = self.agents[i].plan[0];
+            if self.reservations[c as usize] != NONE {
+                continue;
+            }
+            let cs = map.seg(c);
+            if cs.conflicts.iter().any(|x| booked.contains(x)) {
+                continue;
+            }
+            self.reservations[c as usize] = id;
+            booked.push(c);
+            // A booking not turned into a permit within `BOOK_MAX_S` of room on the exit (or
+            // `BOOK_ROOM_MAX_S` waiting for room) lapses (something else holds the car), with no
+            // new booking for `BOOK_RETRY_S`.
+            let a = &mut self.agents[i];
+            if room {
+                a.booked_s += TRAFFIC_DT;
+            } else if !exit_red {
+                a.book_room_s += TRAFFIC_DT;
+            }
+            if a.booked_s > BOOK_MAX_S || a.book_room_s > BOOK_ROOM_MAX_S {
+                a.booked_s = 0.0;
+                a.book_room_s = 0.0;
+                a.book_block_until = now + (BOOK_RETRY_S / TRAFFIC_DT) as u64;
+            }
+        }
+    }
+
+    /// Update the view-only indicator state (`Agent::turn_latch`, `Agent::lc_signal`) after
+    /// the agents moved. Never feeds back into the driving decisions.
+    fn update_signals(&mut self, map: &CityMap) {
+        for a in &mut self.agents {
+            let seg = map.seg(a.seg);
+            if seg.is_connector() {
+                // Kept while in the junction (the view reads the connector's own turn).
+            } else if a.plan[0] != NONE && map.seg(a.plan[0]).is_connector() {
+                if a.turn_latch != a.plan[0] {
+                    a.turn_latch = if seg.length - a.s < turn_signal_lead_m(a.v) {
+                        a.plan[0]
+                    } else {
+                        NONE
+                    };
+                }
+            } else {
+                a.turn_latch = NONE;
+            }
+            if a.lc_signal != 0 && a.ghost.is_none() && a.lat.abs() < LANE_CHANGE_SIGNAL_OFF_M {
+                a.lc_signal = 0;
+            }
+        }
     }
 
     fn remove_despawned(&mut self) {
@@ -1217,13 +1585,21 @@ impl Traffic {
     fn compute_tv_blocks(&mut self, map: &CityMap, tracked: &[TrackedVehicle], hazards: &[Hazard]) {
         for &s in &self.tv_block_list {
             self.tv_block[s as usize] = false;
+            self.tv_block_moving[s as usize] = false;
         }
         self.tv_block_list.clear();
-        let obstacles = tracked.iter().map(|t| (geom::xy(t.pos), 3.0)).chain(
-            hazards
-                .iter()
-                .map(|h| (geom::xy(h.pos), h.radius_m + CAR_WIDTH_M * 0.5 + 0.2)),
-        );
+        let obstacles = tracked
+            .iter()
+            .map(|t| {
+                let moving =
+                    t.vel[0] * t.vel[0] + t.vel[1] * t.vel[1] > TV_SWEEP_MPS * TV_SWEEP_MPS;
+                (geom::xy(t.pos), 3.0, moving)
+            })
+            .chain(
+                hazards
+                    .iter()
+                    .map(|h| (geom::xy(h.pos), h.radius_m + CAR_WIDTH_M * 0.5 + 0.2, false)),
+            );
         // A car reversing out of a blocked lane holds the connector it backs through.
         for a in &self.agents {
             if let Some(c) = a.manoeuvre.as_deref().and_then(|m| m.holds_connector()) {
@@ -1231,21 +1607,23 @@ impl Traffic {
                     self.tv_block[c as usize] = true;
                     self.tv_block_list.push(c);
                 }
+                self.tv_block_moving[c as usize] = true;
             }
         }
-        for (q, reach) in obstacles {
+        for (q, reach, moving) in obstacles {
             if map.intersection_at(q).is_none() {
                 continue;
             }
             for &sid in map.segs_near(q) {
                 let sg = map.seg(sid);
-                if !sg.is_connector() {
+                if !sg.is_connector() || sg.project(q).dist >= reach {
                     continue;
                 }
-                if sg.project(q).dist < reach && !self.tv_block[sid as usize] {
+                if !self.tv_block[sid as usize] {
                     self.tv_block[sid as usize] = true;
                     self.tv_block_list.push(sid);
                 }
+                self.tv_block_moving[sid as usize] |= moving;
             }
         }
     }
@@ -1297,12 +1675,77 @@ impl Traffic {
     /// Nearest car ahead: `(gap, speed, agent index)`. Entries on the own segment at or before
     /// `skip_own` (a cluster being passed) are ignored.
     fn leader(&self, map: &CityMap, i: usize, skip_own: f32) -> (f32, f32, Option<u32>) {
+        let found = self.leader_in_lists(map, i, skip_own);
+        match self.wreck_in_path(map, i) {
+            Some((g, j)) if g < found.0 => (g, 0.0, Some(j)),
+            _ => found,
+        }
+    }
+
+    /// A wreck lying across agent `i`'s path (its segment and the next two of its plan) by
+    /// position, whatever segment it is filed under: a wreck shoved over from the next lane or
+    /// junction path is in the way too, and was hit by car after car (owner row 85,
+    /// pursuit melee). Gap to it and its index.
+    fn wreck_in_path(&self, map: &CityMap, i: usize) -> Option<(f32, u32)> {
+        if self.wrecks.is_empty() {
+            return None;
+        }
+        let a = &self.agents[i];
+        let q = self.poses[i].p;
+        let mut best: Option<(f32, u32)> = None;
+        for &j in &self.wrecks {
+            if j as usize == i {
+                continue;
+            }
+            let wp = self.poses[j as usize];
+            if (wp.p[2] - q[2]).abs() > 3.0 || geom::dist(geom::xy(wp.p), geom::xy(q)) > 80.0 {
+                continue;
+            }
+            let w = geom::xy(wp.p);
+            let mut base = -a.s;
+            for sg_id in [a.seg, a.plan[0], a.plan[1]] {
+                if sg_id == NONE {
+                    break;
+                }
+                let sg = map.seg(sg_id);
+                let pr = sg.project(w);
+                if pr.s > 0.0 && pr.s < sg.length {
+                    let (_, t) = sg.point_at(pr.s);
+                    // Half-width of the wreck across this path, as it lies.
+                    let ext = HALF_L * geom::dot(wp.f, geom::right_of(t)).abs()
+                        + CAR_WIDTH_M * 0.5 * geom::dot(wp.f, t).abs();
+                    if pr.dist < CAR_WIDTH_M * 0.5 + ext + WRECK_PATH_MARGIN_M {
+                        let along = base + pr.s;
+                        if along > 0.0 {
+                            // Its half-length along the path, as it lies.
+                            let len = HALF_L * geom::dot(wp.f, t).abs()
+                                + CAR_WIDTH_M * 0.5 * geom::dot(wp.f, geom::right_of(t)).abs();
+                            let g = along - HALF_L - len;
+                            if best.is_none_or(|b| g < b.0) {
+                                best = Some((g, j));
+                            }
+                        }
+                        break;
+                    }
+                }
+                base += sg.length;
+            }
+        }
+        best
+    }
+
+    fn leader_in_lists(&self, map: &CityMap, i: usize, skip_own: f32) -> (f32, f32, Option<u32>) {
         let a = &self.agents[i];
         let seg = map.seg(a.seg);
         let l = &self.lists[a.seg as usize];
         let mut best: Option<(f32, f32, u32)> = None;
+        // A wreck shoved well off its lane (onto the sidewalk, a lot) is not in the way.
+        let off_lane = |j: u32| {
+            let o = &self.agents[j as usize];
+            o.disabled && o.lat.abs() > OFF_LANE_WRECK_M
+        };
         for e in &l[self.list_pos[i] as usize + 1..] {
-            if e.agent as usize != i && e.s > skip_own {
+            if e.agent as usize != i && e.s > skip_own && !off_lane(e.agent) {
                 best = Some((e.s - a.s - CAR_LENGTH_M, e.v, e.agent));
                 break;
             }
@@ -1332,7 +1775,7 @@ impl Traffic {
             let ns = map.seg(nx);
             let mut cand: Option<(f32, f32, u32)> = self.lists[nx as usize]
                 .iter()
-                .find(|e| e.agent as usize != i)
+                .find(|e| e.agent as usize != i && !off_lane(e.agent))
                 .map(|e| (e.s, e.v, e.agent));
             if k == 0 && ns.is_connector() {
                 for &(sib, div) in &ns.siblings {
@@ -1398,6 +1841,13 @@ impl Traffic {
             if e.ghost || a.plan[0] != conn {
                 continue;
             }
+            // A car that has stood at its line without a permit for a while is held by
+            // something else (a blocked path, a jam ahead): it is not about to come through,
+            // and yielding to it would deadlock (owner row 85). Reservations keep the box
+            // safe if it does get its permit.
+            if a.permit != conn && a.v < 0.5 && a.jam_s > STALE_ARRIVAL_S {
+                continue;
+            }
             if stopping && a.permit != conn {
                 let d = (fseg.length - a.s - HALF_L - 0.5).max(0.1);
                 if a.v * a.v / (2.0 * d) <= a.params.comfort_decel {
@@ -1436,6 +1886,54 @@ impl Traffic {
         best
     }
 
+    /// Whether a conflicting movement of `conn` starts at a Priority junction's minor approach
+    /// whose front car has stood at the line for [`STARVE_AFTER_S`], is headed into that
+    /// movement and could go if the box were clear (room beyond it, no tracked vehicle in it).
+    fn starved_minor_conflict(&self, map: &CityMap, conn: SegId) -> bool {
+        map.seg(conn).conflicts.iter().any(|&c| {
+            let SegKind::Connector { from, .. } = map.seg(c).kind else {
+                return false;
+            };
+            if !matches!(
+                map.lane_control(from),
+                Some((IntersectionControl::Priority, ap, _)) if !ap.major
+            ) || self.tv_block[c as usize]
+            {
+                return false;
+            }
+            let Some(e) = self.lists[from as usize].iter().rev().find(|e| !e.ghost) else {
+                return false;
+            };
+            let j = e.agent as usize;
+            let o = &self.agents[j];
+            let d_line = map.seg(from).length - o.s - HALF_L;
+            if o.plan[0] != c || o.v >= 0.5 || d_line > 3.5 || self.stopped_for(j) < STARVE_AFTER_S
+            {
+                return false;
+            }
+            let target = map.seg(c).next[0];
+            match self.lists[target as usize].first() {
+                Some(t) => t.v >= 3.0 || t.s - HALF_L >= CAR_LENGTH_M + 2.0,
+                None => true,
+            }
+        })
+    }
+
+    /// Whether the front car on the lane feeding `conn` stands without a permit for it: the
+    /// cars behind it cannot come through before it does.
+    fn lane_holds_for(&self, map: &CityMap, conn: SegId) -> bool {
+        let SegKind::Connector { from, .. } = map.seg(conn).kind else {
+            return false;
+        };
+        match self.lists[from as usize].iter().rev().find(|e| !e.ghost) {
+            Some(e) => {
+                let o = &self.agents[e.agent as usize];
+                o.v < 0.5 && o.permit != conn
+            }
+            None => false,
+        }
+    }
+
     fn stopped_for(&self, i: usize) -> f32 {
         self.agents[i]
             .stopped_since
@@ -1465,6 +1963,11 @@ impl Traffic {
             let f = &self.agents[e.agent as usize];
             let d_line = map.seg(inc.lane).length - f.s - HALF_L;
             let Some(ft) = f.stopped_since else { continue };
+            // First to stop but not going: held by something else (a blocked exit, a police
+            // car in its path); waiting for it would deadlock the junction (owner row 85).
+            if f.permit == NONE && f.jam_s > ALLWAY_STALE_S {
+                continue;
+            }
             if d_line < 4.0
                 && (ft < my_t || (ft == my_t && f.id < a.id))
                 && conflicts.contains(&f.plan[0])
@@ -1480,7 +1983,16 @@ impl Traffic {
         let a = &self.agents[i];
         let p = &a.params;
         let v = a.v;
-        if siren || self.tv_block[conn as usize] || !self.is_front(i) {
+        if siren {
+            return false;
+        }
+        if self.step_count < a.permit_block_until {
+            return false;
+        }
+        if self.tv_block[conn as usize] {
+            return false;
+        }
+        if !self.is_front(i) {
             return false;
         }
         let request = (v * v / (2.0 * 2.5) + 10.0).max(v * 2.5).max(6.0);
@@ -1556,6 +2068,17 @@ impl Traffic {
             }
             Some((IntersectionControl::Priority, ap, _)) => {
                 if ap.major {
+                    // Courtesy (lead, jam_pursuit_vesper): in a slow major-road stream that
+                    // keeps the box occupied, a car that can stop comfortably holds at its line
+                    // for a minor-road car that has waited long.
+                    let merging = map.net.intersections[ap.intersection as usize].radius_m <= 0.0;
+                    if !merging
+                        && v <= COURTESY_MAX_V
+                        && need <= p.comfort_decel
+                        && self.starved_minor_conflict(map, conn)
+                    {
+                        return false;
+                    }
                     2
                 } else {
                     // A freeway on-ramp (minor approach at a radius-0 merge junction) merges on
@@ -1571,11 +2094,26 @@ impl Traffic {
         };
         let cs = map.seg(conn);
         for &c in &cs.conflicts {
-            let r = self.reservations[c as usize];
-            if !self.lists[c as usize].is_empty()
-                || (r != NONE && r != a.id)
-                || self.tv_block[c as usize]
+            let mut r = self.reservations[c as usize];
+            // A wreck standing in a crossing path blocks only the paths it stands in (owner
+            // row 85: a wrecked civilian in one arm held the whole junction).
+            let wreck_clear = |e: &Entry| {
+                let o = &self.agents[e.agent as usize];
+                o.disabled && cs.project(geom::xy(self.poses[e.agent as usize].p)).dist > 3.0
+            };
+            let occupied = self.lists[c as usize].iter().any(|e| !wreck_clear(e));
+            if r != NONE
+                && !occupied
+                && self.lists[c as usize]
+                    .iter()
+                    .any(|e| self.agents[e.agent as usize].id == r && wreck_clear(e))
             {
+                r = NONE;
+            }
+            // A stationary tracked vehicle in a crossing path blocks only the cars whose own
+            // path it stands in (`tv_block[conn]` above): a police car parked in one arm of the
+            // junction must not hold every crossing movement (owner row 85).
+            if occupied || (r != NONE && r != a.id) || self.tv_block_moving[c as usize] {
                 return false;
             }
         }
@@ -1588,9 +2126,18 @@ impl Traffic {
                 return false;
             }
         }
-        // Yield to higher-ranked conflicting movements.
-        for &c in &cs.conflicts {
-            if self.rank_of(map, c) > my_rank && self.arrival_time(map, c) < p.gap_accept_s {
+        // Yield to higher-ranked conflicting movements (not once it has booked its turn).
+        let booked = self.reservations[conn as usize] == a.id;
+        let gap_s = if my_rank == 0 {
+            starved_gap_s(p.gap_accept_s, self.stopped_for(i))
+        } else {
+            p.gap_accept_s
+        };
+        for &c in cs.conflicts.iter().filter(|_| !booked) {
+            if self.rank_of(map, c) > my_rank
+                && !(gap_s < p.gap_accept_s && self.lane_holds_for(map, c))
+                && self.arrival_time(map, c) < gap_s
+            {
                 return false;
             }
         }
@@ -1645,6 +2192,7 @@ impl Traffic {
                 v0 = v0.min(blocked::PASS_MPS);
             }
             let mut lat_target = 0.0f32;
+            let mut box_squeeze = false;
             let mut acc = f32::INFINITY;
             let mut emergency = false;
             // What caps the acceleration (for the blocked-vehicle logic).
@@ -1662,6 +2210,7 @@ impl Traffic {
             let mut oncoming = false;
             let mut near = false;
             let mut jsiren = false;
+            let mut siren_hold = a.siren_hold_s;
             // The unit this driver yields to has stopped behind it (waiting for room).
             let mut unit_waiting = false;
             let mut siren_lc = None;
@@ -1722,6 +2271,15 @@ impl Traffic {
                         .iter()
                         .any(|t| siren::heads_for_junction(t, geom::xy(lp), lp[2]));
                 }
+                // Held at the line by a unit that never comes through: go after a while.
+                if jsiren && v < 0.5 {
+                    siren_hold += TRAFFIC_DT;
+                    if siren_hold > SIREN_JUNCTION_HOLD_MAX_S {
+                        jsiren = false;
+                    }
+                } else if !jsiren {
+                    siren_hold = 0.0;
+                }
                 let lane = seg.lane().map(|l| &map.net.lanes[l as usize]);
                 let half_w = lane.map_or(1.75, |l| l.width_m * 0.5);
                 let can_pull = !seg.is_connector() && pass.is_none();
@@ -1756,7 +2314,7 @@ impl Traffic {
                                 // a physical car only moves sideways while rolling) with the
                                 // unit standing behind: each waits for the other, so give up
                                 // after a while, as a car waiting at the kerb does.
-                                sy.stall_s = if speed_u < 0.5 && v < 0.3 {
+                                sy.stall_s = if speed_u < siren::MOVING_MPS && v < 0.3 {
                                     sy.stall_s + TRAFFIC_DT
                                 } else {
                                     0.0
@@ -1775,7 +2333,7 @@ impl Traffic {
                                 sy.timer_s = 0.0;
                                 // A unit that just stands there behind (it stopped for something
                                 // else): give up on it after a while.
-                                sy.stall_s = if speed_u < 0.5 {
+                                sy.stall_s = if speed_u < siren::MOVING_MPS {
                                     sy.stall_s + TRAFFIC_DT
                                 } else {
                                     0.0
@@ -1856,12 +2414,40 @@ impl Traffic {
                             .is_some_and(|e| {
                                 e.v > 1.0 && a.s - e.s - CAR_LENGTH_M < 4.0 + 1.5 * e.v
                             });
-                        if closing {
+                        // Not while a unit stands beside it: moving back to the lane centre
+                        // would swing into it (it gave up on a unit stopped alongside).
+                        // `Some(pass)` for a unit beside the car: `pass` when every such unit
+                        // stands with room to creep past it.
+                        let beside = inp
+                            .tracked
+                            .iter()
+                            .filter(|t| {
+                                let r = geom::sub(geom::xy(t.pos), q);
+                                let long = geom::dot(r, pose.f);
+                                (t.pos[2] - pose.p[2]).abs() < 4.0
+                                    && long > -CAR_LENGTH_M - 1.0
+                                    && long < CAR_LENGTH_M + 1.0
+                                    && geom::dot(r, right).abs() < CAR_WIDTH_M + 1.2
+                            })
+                            .map(|t| {
+                                let lat_gap = geom::dot(geom::sub(geom::xy(t.pos), q), right).abs();
+                                geom::len(geom::xy(t.vel)) < BESIDE_STANDING_MPS
+                                    && lat_gap >= CAR_WIDTH_M + BESIDE_CLEAR_M
+                            })
+                            .reduce(|x, y| x && y);
+                        let at_kerb = (a.lat - sy.side * kerb).abs() < 0.2;
+                        if closing || (beside.is_some() && !(beside == Some(true) && at_kerb)) {
                             lat_target = sy.side * kerb;
                             acc = acc.min(siren::approach_speed(v, 0.0, max_decel, p.max_accel));
+                        } else if beside.is_some() {
+                            // A unit standing alongside (a scene): creep on along the kerb and
+                            // merge back past it instead of waiting for it (owner row 85).
+                            lat_target = sy.side * kerb;
+                            v0 = v0.min(5.0);
                         }
+                        let beside = beside.is_some();
                         v0 = v0.min(8.0);
-                        if !closing && a.lat.abs() < 0.2 {
+                        if !closing && !beside && a.lat.abs() < 0.2 {
                             sy = SirenYield {
                                 stall_s: sy.stall_s,
                                 ..SirenYield::default()
@@ -2007,14 +2593,48 @@ impl Traffic {
                 };
                 let ext = 2.25 * geom::dot(tf, right).abs() + 0.95 * geom::dot(tf, pose.f).abs();
                 let is_obs = pass.is_some_and(|b| b.obs == ObsRef::Tracked(t.entity.0));
+                let still = geom::dot(tv, tv) < 0.25;
+                // In the junction box behind a vehicle parked there: edge around it on the side
+                // with the smaller shift, rather than wait for it to leave; held, past the box
+                // too, until the body is past it.
+                let clear = CAR_WIDTH_M * 0.5 + ext + blocked::BOX_SQUEEZE_MARGIN_M;
+                if still
+                    && (seg.is_connector() || a.box_squeeze)
+                    && long > -CAR_LENGTH_M
+                    && long < 20.0
+                    && latd.abs() < clear + 0.3
+                    && self.tracked_still_s(t.entity.0) >= blocked::BOX_SQUEEZE_S
+                {
+                    let shift = if latd >= 0.0 {
+                        latd - clear
+                    } else {
+                        latd + clear
+                    };
+                    if shift.abs() <= blocked::BOX_SQUEEZE_MAX_M {
+                        box_squeeze = true;
+                        lat_target = a.lat + shift;
+                        v0 = v0.min(blocked::BOX_SQUEEZE_MPS);
+                        // Creep up to it while sliding over (a physical car only steers aside
+                        // while rolling) until the body is clear of it.
+                        if long > 0.0 && latd.abs() < clear - 0.1 {
+                            let g = long - CAR_LENGTH_M - 0.5;
+                            cap(
+                                &mut acc,
+                                &mut bind,
+                                idm(v, v0, g, 0.0, &p),
+                                Bind::Tracked(k, Wait::Line, g),
+                            );
+                        }
+                        continue;
+                    }
+                }
                 if long > 0.0
                     && long < 80.0
                     && latd.abs() < CAR_WIDTH_M * 0.5 + ext + 0.3
                     && !is_obs
                 {
-                    let still = geom::dot(tv, tv) < 0.25;
                     let cls = if still {
-                        self.classify_tracked(map, i, long)
+                        self.classify_tracked(map, i, long, self.tracked_still_s(t.entity.0))
                     } else {
                         Wait::Queue
                     };
@@ -2034,11 +2654,19 @@ impl Traffic {
                 let w = geom::sub(tv, pose.vel);
                 let ww = geom::dot(w, w);
                 // A siren unit coming past a car that has pulled over / slowed for it is expected.
+                // Only a real collision course counts: at the closest approach the two bodies
+                // overlap side to side (a car passing in the next lane or coming the other way
+                // in the opposite lane is ~3.3 m over and is ignored; owner: traffic must not
+                // "freak out and slam the brakes" when the player gets near).
                 if ww > 25.0 && long > -2.0 && !(t.siren && (sy.active() || oncoming)) {
                     let ts = -geom::dot(r, w) / ww;
-                    if ts > 0.0 && ts < 3.0 {
-                        let miss = geom::len(geom::add(r, geom::scale(w, ts)));
-                        if miss < 3.0 {
+                    if ts > 0.0 && ts < EMERGENCY_HORIZON_S {
+                        let m = geom::add(r, geom::scale(w, ts));
+                        let side = geom::dot(m, right).abs();
+                        let along = geom::dot(m, pose.f).abs();
+                        if side < CAR_WIDTH_M * 0.5 + ext + EMERGENCY_SIDE_MARGIN_M
+                            && along < CAR_LENGTH_M
+                        {
                             emergency = true;
                         }
                     }
@@ -2106,7 +2734,21 @@ impl Traffic {
                     let sig = map.lane_signal(a.seg);
                     let st = sig.map(|x| x.0);
                     let reaches = sig.is_some_and(|x| d_line / v.max(0.1) < x.1 + 0.5);
+                    // A left-turner waiting at the line with its permit (the "sneaker") goes
+                    // when the oncoming traffic stops at amber / red: standing still it "can
+                    // stop" at any decel, so the stopping check below revoked the permit the
+                    // step after it was given and it sat out the next cycle too (owner row 85,
+                    // short greens on main's grid).
+                    let sneaker = matches!(
+                        map.seg(next).kind,
+                        SegKind::Connector {
+                            turn: TurnKind::Left,
+                            ..
+                        }
+                    ) && d_line < 3.5
+                        && v < 3.0;
                     let limit = match st {
+                        _ if sneaker => 0.0,
                         Some(SignalState::Yellow) if p.yellow_runner => 0.0,
                         Some(SignalState::Yellow) if reaches => p.amber_decel,
                         Some(SignalState::Yellow) => p.comfort_decel,
@@ -2125,7 +2767,11 @@ impl Traffic {
                     // and conflicting movements would see the junction free (a left-turner
                     // and an oncoming car met in the box, grid 1+1 blocked-lane test).
                     let stale = self.reservations[next as usize] != a.id || !self.is_front(i);
+                    // Stopped well short of the line (queued behind someone): a permit it cannot
+                    // use only holds the crossing traffic.
+                    let parked = v < 0.5 && d_line > 6.0;
                     if stale
+                        || parked
                         || (limit > 0.0 && need <= limit)
                         || (hold && need <= 5.0)
                         || (self.tv_block[next as usize] && need <= 8.0)
@@ -2216,6 +2862,26 @@ impl Traffic {
                 }
                 Bind::Hazard(c, r, g) => (Wait::Obstructed, 1e3, ObsRef::Hazard(c, r), g),
             };
+            // Held at the line because a tracked vehicle stands in its path through the
+            // junction (a pursuit scene in the box), outside red: after a while that is an
+            // obstruction, so the queue behind turns around / backs out and the lane is marked
+            // blocked for the cars upstream (owner row 85).
+            // Same for a wreck standing just past the junction on its exit (the box rule
+            // holds it for room that never comes).
+            let box_blocked = cls == Wait::Line
+                && !seg.is_connector()
+                && !siren
+                && a.plan[0] != NONE
+                && ((self.tv_block[a.plan[0] as usize]
+                    && !self.tv_block_moving[a.plan[0] as usize])
+                    || self.exit_wrecked(map, a.plan[0]))
+                && seg.length - a.s < CAR_LENGTH_M + 4.0
+                && a.jam_s > blocked::TRACKED_AT_LINE_S;
+            let (cls, still) = if box_blocked {
+                (Wait::Obstructed, a.jam_s)
+            } else {
+                (cls, still)
+            };
             let leader_manoeuvring = matches!(bind, Bind::Leader(Some(j), _)
                 if self.agents[j as usize].manoeuvre.is_some());
 
@@ -2228,6 +2894,7 @@ impl Traffic {
             a.emergency = emergency;
             a.yielding = siren;
             a.siren = sy;
+            a.siren_hold_s = siren_hold;
             a.siren_lc = siren_lc;
             if yield_started {
                 self.stats.siren_yields += 1;
@@ -2235,10 +2902,14 @@ impl Traffic {
             a.start_wait_s = start_wait;
             a.acc = acc.clamp(-9.0, p.max_accel);
             a.lat_target = lat_target;
+            a.box_squeeze = box_squeeze;
             a.wait = if v < 0.5 { cls } else { Wait::Free };
             a.blocked_s = if cls == Wait::Obstructed && v < 0.5 {
                 a.blocked_s + TRAFFIC_DT
-            } else if cls == Wait::Obstructed || leader_manoeuvring {
+            } else if cls == Wait::Obstructed || leader_manoeuvring || v < 0.5 {
+                // Held, not reset, while it stands: the class flickers for a step now and then
+                // (a level-of-detail switch, a siren yield, the leader's class) and a reset
+                // kept the driver from ever giving up on the obstruction (owner row 85).
                 a.blocked_s
             } else {
                 0.0
@@ -2357,7 +3028,10 @@ impl Traffic {
             // Not before the whole body has left the junction box: a change started at the lane
             // start sweeps the tail across cars still turning through the junction.
             if blocked
-                && (a.s < CAR_LENGTH_M || d_end < 15.0 || (a.yielding && a.siren_lc.is_none()))
+                && (self.step_count < a.lc_block_until
+                    || a.s < CAR_LENGTH_M
+                    || d_end < 15.0
+                    || (a.yielding && a.siren_lc.is_none()))
             {
                 continue;
             }
@@ -2425,6 +3099,16 @@ impl Traffic {
                         continue;
                     }
                 }
+                // A tracked vehicle (police, the player) ahead in the target lane is a leader
+                // there too: the civilians' lists do not hold it, and a change into the lane
+                // of a car standing 25 m ahead at 15 m/s went unbraked (the car only counts as
+                // its leader once the bodies overlap sideways).
+                let tracked_lead = tracked_ahead_in_lane(inp.tracked, cs, s2, cl.width_m);
+                if let Some((ts, _)) = tracked_lead {
+                    if ts - s2 - CAR_LENGTH_M < p.min_gap_m + 1.0 {
+                        continue;
+                    }
+                }
                 let (a_n, a_n2) = match fol {
                     Some(e) => {
                         if s2 - e.s - CAR_LENGTH_M < 2.0 {
@@ -2444,10 +3128,13 @@ impl Traffic {
                     }
                     None => (0.0, 0.0),
                 };
-                let a_c2 = match lead {
+                let mut a_c2 = match lead {
                     Some(e) => idm(a.v, v0, e.s - s2 - CAR_LENGTH_M, e.v, &p),
                     None => idm(a.v, v0, f32::INFINITY, 0.0, &p),
                 };
+                if let Some((ts, tv)) = tracked_lead {
+                    a_c2 = a_c2.min(idm(a.v, v0, ts - s2 - CAR_LENGTH_M, tv, &p));
+                }
                 let bias = if to_right {
                     p.keep_right_bias
                 } else {
@@ -2506,6 +3193,7 @@ impl Traffic {
                 a.ghost = Some((old_seg, old_s));
                 a.plan = [plan0, plan1];
                 a.last_lane_change = t;
+                a.lc_signal = if to_right { 1 } else { -1 };
                 a.stopped_since = None;
                 a.came_from = NONE;
                 a.blocked_s = 0.0;
@@ -2522,6 +3210,18 @@ impl Traffic {
     // ------------------------------------------------------------------------------------
 
     fn choose_next(&mut self, map: &CityMap, lane: SegId, closed: &[bool]) -> SegId {
+        self.choose_next_avoiding(map, lane, closed, false)
+    }
+
+    /// [`Traffic::choose_next`]; with `avoid_tv_block`, connectors a tracked vehicle stands in
+    /// are skipped too, and `NONE` is returned when nothing else is left.
+    fn choose_next_avoiding(
+        &mut self,
+        map: &CityMap,
+        lane: SegId,
+        closed: &[bool],
+        avoid_tv_block: bool,
+    ) -> SegId {
         let seg = map.seg(lane);
         let mut total = 0.0f32;
         let mut cands: [(SegId, f32); 16] = [(NONE, 0.0); 16];
@@ -2532,6 +3232,7 @@ impl Traffic {
             if !cs.drivable
                 || closed.get(to as usize).copied().unwrap_or(false)
                 || self.lane_blocked(to)
+                || (avoid_tv_block && (self.tv_block[c as usize] || self.exit_wrecked(map, c)))
             {
                 continue;
             }
@@ -2554,6 +3255,9 @@ impl Traffic {
             }
         }
         if n == 0 {
+            if avoid_tv_block {
+                return NONE;
+            }
             return seg
                 .next
                 .iter()
@@ -2702,6 +3406,7 @@ impl Traffic {
         } else {
             a.stuck_s = 0.0;
         }
+        self.update_jam_time(map, i, dt);
     }
 
     // ------------------------------------------------------------------------------------
@@ -2762,11 +3467,20 @@ impl Traffic {
     }
 
     fn promote(&mut self, map: &CityMap, i: usize) {
+        // Promoted at its manoeuvre pose (if any); a physical car drives it out of a U-turn or
+        // reverse as an ordinary car from there.
+        let (p, f) = self.pose_of(map, &self.agents[i]);
+        if self.agents[i].manoeuvre.is_some() {
+            let a = &mut self.agents[i];
+            a.manoeuvre = None;
+            a.lat_target = 0.0;
+            a.retry_s = 5.0;
+            a.blocked_s = 0.0;
+        }
         let a = &self.agents[i];
         let Some((def, tires)) = self.cars.get(traffic_model_index(a.id, self.cars.len())) else {
             return;
         };
-        let (p, f) = self.pose_of(map, a);
         let yaw = geom::yaw_of(f);
         let mut vehicle = Vehicle::new(def, tires, p, yaw);
         vehicle.set_pose_and_speed(p, yaw, a.v);
@@ -2792,12 +3506,13 @@ impl Traffic {
         let a = &mut self.agents[i];
         if let Some(pa) = a.physical.take() {
             let st = pa.vehicle.state();
-            let sg = map.seg(a.seg);
-            let pr = sg.project(geom::xy(st.pos));
-            a.s = pr.s.clamp(0.0, sg.length);
-            // Up to a lane width off: a car demoted mid lane change carries on into the lane.
-            let reach = sg.width.max(1.5);
-            a.lat = pr.lateral.clamp(-reach, reach);
+            let seg = map.seg(a.seg);
+            let pr = seg.project(geom::xy(st.pos));
+            a.s = pr.s.clamp(0.0, seg.length);
+            // Up to a lane width off: a car demoted mid lane change (3.7 m highway lanes on
+            // main's grid viaduct) keeps its place and eases back like a kinematic lane change.
+            let w = seg.width.max(1.5);
+            a.lat = pr.lateral.clamp(-w, w);
             a.lat_target = 0.0;
             a.v = st.speed_mps.max(0.0);
         }
@@ -2819,12 +3534,27 @@ impl Traffic {
             best
         };
         let mut cands: Vec<(f32, u32)> = Vec::new();
+        // Physical agents that may be demoted, with their distance (cap shrink, below).
+        let mut kept: Vec<(f32, u32)> = Vec::new();
         let mut physical = 0usize;
         for i in 0..self.agents.len() {
             let d = near(geom::xy(self.poses[i].p));
             if self.lod_locked(i) {
                 if self.agents[i].physical.is_some() {
                     physical += 1;
+                    continue;
+                }
+                // A kinematic car turning around or reversing has no collider: with a player
+                // about to hit it, it gives the manoeuvre up and takes a body where it stands
+                // (it is promoted at its manoeuvre pose below; owner row 149).
+                let dp = inp
+                    .tracked
+                    .iter()
+                    .filter(|t| t.player)
+                    .map(|t| geom::dist(geom::xy(self.poses[i].p), geom::xy(t.pos)))
+                    .fold(f32::INFINITY, f32::min);
+                if dp < LOCKED_PROMOTE_M && !self.cars.is_empty() {
+                    cands.push((d, i as u32));
                 }
                 continue;
             }
@@ -2840,18 +3570,68 @@ impl Traffic {
                     self.demote(map, i);
                 } else {
                     physical += 1;
+                    if !a.disabled {
+                        kept.push((d, i as u32));
+                    }
                 }
             } else if d < r && !self.cars.is_empty() {
                 cands.push((d, i as u32));
             }
         }
+        // `max_physical` can shrink (wp_sim caps it at the vehicle slots it has left, row 149):
+        // the farthest physical cars over the cap demote, so none is physical without a body.
+        if physical > self.config.max_physical {
+            kept.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+            for &(_, i) in kept.iter().take(physical - self.config.max_physical) {
+                self.demote(map, i as usize);
+                physical -= 1;
+            }
+        }
         cands.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-        for (_, i) in cands {
+        let mut left = Vec::new();
+        for (d, i) in cands {
             if physical >= self.config.max_physical {
-                break;
+                left.push((d, i));
+                continue;
             }
             self.promote(map, i as usize);
             physical += 1;
+        }
+        // Cap full: a car close to a player still gets a body, in place of the physical car
+        // farthest from any player (owner row 149, "can't hit traffic cars": with street racers
+        // the cap filled with cars along their routes and the cars right in front of the player
+        // stayed kinematic, without a collider).
+        let player_d = |q: V2| -> f32 {
+            inp.tracked
+                .iter()
+                .filter(|t| t.player)
+                .map(|t| geom::dist(q, geom::xy(t.pos)))
+                .fold(f32::INFINITY, f32::min)
+        };
+        let mut near_player: Vec<(f32, u32)> = left
+            .into_iter()
+            .map(|(_, i)| (player_d(geom::xy(self.poses[i as usize].p)), i))
+            .filter(|(d, _)| *d < PLAYER_PRIORITY_RADIUS_M)
+            .collect();
+        if near_player.is_empty() {
+            return;
+        }
+        near_player.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        let mut evictable: Vec<(f32, u32)> = (0..self.agents.len())
+            .filter(|&j| {
+                let a = &self.agents[j];
+                a.physical.is_some() && !a.disabled && !self.lod_locked(j)
+            })
+            .map(|j| (player_d(geom::xy(self.poses[j].p)), j as u32))
+            .collect();
+        // Farthest first.
+        evictable.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        for ((d, i), (de, j)) in near_player.into_iter().zip(evictable) {
+            if de < d + PLAYER_PRIORITY_MARGIN_M {
+                break;
+            }
+            self.demote(map, j as usize);
+            self.promote(map, i as usize);
         }
     }
 
@@ -3065,7 +3845,11 @@ impl Traffic {
             let in_connector = map.seg(a.seg).is_connector() || a.permit != NONE;
             let outside = !global && !focus.iter().any(|f| geom::dist(*f, q) < ar + 60.0);
             let closed = inp.closed.get(a.seg as usize).copied().unwrap_or(false);
-            let stuck = a.stuck_s > self.config.stuck_timeout_s;
+            // Stuck: stopped for the timeout, or standing still outside a red light (a jam, a
+            // wreck, a car behind a parked police car) for `jam_recycle_s` (owner row 85).
+            let timed_out = a.stuck_s > self.config.stuck_timeout_s;
+            let jammed = a.jam_s > self.config.jam_recycle_s;
+            let stuck = timed_out || jammed;
             let surplus = agent_zone[i].is_some_and(|z| {
                 let z = z as usize;
                 let (t, c) = (targets[z], counts[z] as f32);
@@ -3073,9 +3857,12 @@ impl Traffic {
                 !removed_in_zone[z]
                     && ((kind_c[k] > kind_t[k] * 1.04 + 1.0 && c > t + 0.5) || c > t * 1.5 + 3.0)
             });
-            if (outside || closed || stuck || surplus) && !in_connector {
-                if stuck {
+            // A car stuck inside a junction box goes too (it is what holds the box).
+            if (outside || closed || stuck || surplus) && (!in_connector || stuck) {
+                if timed_out {
                     self.stats.stuck_recycled += 1;
+                } else if jammed {
+                    self.stats.jam_recycled += 1;
                 }
                 if let Some(z) = agent_zone[i] {
                     counts[z as usize] -= 1;
@@ -3153,6 +3940,16 @@ impl Traffic {
             if gap_a < 12.0 {
                 continue;
             }
+            // Never into a queue: not behind a stopped car (owner row 85).
+            if ahead.is_some_and(|e| e.v < jam::STOPPED_MPS * 2.0 && gap_a < SPAWN_QUEUE_LOOK_M) {
+                continue;
+            }
+            // Per-lane density cap, scaled with the time of day like the zone targets.
+            let f = f_time(map.time, map.net.zones[z].kind).max(0.2);
+            let cap = (seg.length * f / SPAWN_LANE_SPACING_M).floor().max(1.0) as usize;
+            if list.iter().filter(|e| !e.ghost).count() >= cap {
+                continue;
+            }
             if let Some(e) = behind {
                 if s - e.s - CAR_LENGTH_M < 12.0 + e.v * 1.6 {
                     continue;
@@ -3214,6 +4011,17 @@ impl Traffic {
                 start_wait_s: 0.0,
                 ghost: None,
                 stuck_s: 0.0,
+                jam_s: 0.0,
+                box_s: 0.0,
+                metric_stop_s: 0.0,
+                man_still_s: 0.0,
+                box_squeeze: false,
+                siren_hold_s: 0.0,
+                lc_block_until: 0,
+                permit_block_until: 0,
+                booked_s: 0.0,
+                book_block_until: 0,
+                book_room_s: 0.0,
                 emergency: false,
                 yielding: false,
                 disabled: false,
@@ -3229,6 +4037,8 @@ impl Traffic {
                 siren: SirenYield::default(),
                 siren_reaction_s: siren::reaction_s(self.seed, id, personality),
                 siren_lc: None,
+                turn_latch: NONE,
+                lc_signal: 0,
                 retry_s: 0.0,
                 go_around: false,
                 manoeuvre: None,
@@ -3320,8 +4130,16 @@ impl Traffic {
                 }
             }
         }
+        let step = self.step_count;
+        for pair in &self.overlaps {
+            if !now.contains(pair) {
+                self.overlap_ended.insert(*pair, step);
+            }
+        }
+        self.overlap_ended
+            .retain(|_, ended| step - *ended <= RETOUCH_STEPS);
         for pair in &now {
-            if !self.overlaps.contains(pair) {
+            if !self.overlaps.contains(pair) && !self.overlap_ended.contains_key(pair) {
                 self.stats.civilian_collisions += 1;
                 if self.stats.collision_log.len() < 64 {
                     self.stats
@@ -3369,4 +4187,44 @@ mod model_tests {
     }
 
     const PINNED: [usize; 8] = [2, 4, 2, 6, 3, 3, 2, 4];
+}
+
+/// A minor-road car at a Priority junction that has stood at its line this long starts to
+/// accept shorter gaps in the major-road stream (lead, jam_pursuit_vesper: a car waited 50 s
+/// for a gap in a steady stream slowed by police yielding).
+pub(crate) const STARVE_AFTER_S: f32 = 25.0;
+/// Fastest a major-road car may be going to hold at its line for a starved minor-road car
+/// (courtesy happens in slow streams; free-flowing traffic has gaps).
+pub(crate) const COURTESY_MAX_V: f32 = 10.0;
+/// Seconds over which the accepted gap shrinks from the driver's own to [`STARVE_GAP_S`].
+pub(crate) const STARVE_RAMP_S: f32 = 10.0;
+/// Shortest gap a starved minor-road car accepts (the box and crossing paths must still be
+/// clear and unreserved).
+pub(crate) const STARVE_GAP_S: f32 = 2.5;
+
+/// Gap a minor-road car accepts after `stopped_s` at its line.
+pub(crate) fn starved_gap_s(gap_accept_s: f32, stopped_s: f32) -> f32 {
+    let t = ((stopped_s - STARVE_AFTER_S) / STARVE_RAMP_S).clamp(0.0, 1.0);
+    let floor = STARVE_GAP_S.min(gap_accept_s);
+    gap_accept_s + (floor - gap_accept_s) * t
+}
+
+#[cfg(test)]
+mod starve_tests {
+    use super::*;
+
+    #[test]
+    fn starved_minor_road_cars_accept_shorter_gaps_after_a_long_wait() {
+        assert_eq!(starved_gap_s(4.5, 0.0), 4.5);
+        assert_eq!(starved_gap_s(4.5, STARVE_AFTER_S), 4.5);
+        let mid = starved_gap_s(4.5, STARVE_AFTER_S + STARVE_RAMP_S / 2.0);
+        assert!((mid - 3.5).abs() < 1e-4, "{mid}");
+        assert_eq!(
+            starved_gap_s(4.5, STARVE_AFTER_S + STARVE_RAMP_S),
+            STARVE_GAP_S
+        );
+        assert_eq!(starved_gap_s(4.5, 1000.0), STARVE_GAP_S);
+        // A driver who already takes short gaps keeps their own.
+        assert_eq!(starved_gap_s(2.0, 1000.0), 2.0);
+    }
 }

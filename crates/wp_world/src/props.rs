@@ -8,9 +8,9 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 use wp_math::Rng;
 
-use crate::geom::{self, V3};
+use crate::geom::{self, V2, V3};
 use crate::map::CityMap;
-use crate::network::{DistrictKind, LaneKind};
+use crate::network::{DecorKind, DistrictKind, LaneKind, PoiKind};
 
 /// Kind of static prop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -19,6 +19,9 @@ pub enum PropKind {
     ParkedCar,
     /// A traffic cone (light, knockable).
     Cone,
+    /// A precast concrete K-rail section (touge outboard barrier: heavy, shoved aside by a hard
+    /// hit).
+    KRail,
 }
 
 /// A static prop.
@@ -112,12 +115,10 @@ impl ParkingTable {
 /// (everything except the lane-end clearance, which the caller applies along the lane).
 fn parking_allowed(map: &CityMap, t: &ParkingTable, p: V3) -> bool {
     let q = geom::xy(p);
-    if map
-        .net
-        .pois
-        .iter()
-        .any(|poi| geom::dist(geom::xy(poi.pos), q) < t.poi_clear_m)
-    {
+    // A rest stop is a place to park (its site sits on the parking road's travel lane).
+    if map.net.pois.iter().any(|poi| {
+        poi.kind != PoiKind::RestStop && geom::dist(geom::xy(poi.pos), q) < t.poi_clear_m
+    }) {
         return false;
     }
     if map.covered_at(p).is_some() {
@@ -140,6 +141,46 @@ fn parking_allowed(map: &CityMap, t: &ParkingTable, p: V3) -> bool {
     true
 }
 
+/// Whether a parked car at `p` facing `f` keeps clear of the solid street and yard furniture
+/// (fences, hedges, tree trunks): residential lots put fences right at the lot line, and on
+/// main's re-laid Port Vesper streets a driveway car stood in a fence's end (lead/main-sync).
+pub(crate) fn clear_of_decor(map: &CityMap, p: V2, f: V2) -> bool {
+    let car = geom::Obb {
+        c: p,
+        f,
+        hl: 2.25 + 0.1,
+        hw: 0.95 + 0.1,
+    };
+    !map.net.decor.iter().any(|d| {
+        let (hl, hw) = match d.kind {
+            DecorKind::Driveway => return false,
+            DecorKind::StreetTree | DecorKind::YardTree | DecorKind::PineTree => {
+                (crate::residential::TRUNK_R_M, crate::residential::TRUNK_R_M)
+            }
+            // Solid boxes, as `wp_sim::physics::decor_collider` builds them (Ashpeak County
+            // adds cranes, barriers, site fences, hay bales and billboards).
+            DecorKind::Hedge
+            | DecorKind::Fence
+            | DecorKind::Crane
+            | DecorKind::JerseyBarrier
+            | DecorKind::SiteFence
+            | DecorKind::HayBale
+            | DecorKind::Billboard => (d.size[1] * 0.5, d.size[0] * 0.5),
+        };
+        let c = [d.pos[0], d.pos[1]];
+        geom::dist(c, p) < hl + 3.0
+            && geom::obb_overlap(
+                &car,
+                &geom::Obb {
+                    c,
+                    f: geom::dir_of_yaw(d.yaw),
+                    hl,
+                    hw,
+                },
+            )
+    })
+}
+
 /// Parked cars along the parking lanes under the built-in [`ParkingTable`], deterministic for
 /// a seed.
 pub fn parked_cars(map: &CityMap, seed: u64) -> Vec<StaticProp> {
@@ -152,10 +193,19 @@ pub fn parked_cars_with(map: &CityMap, table: &ParkingTable, seed: u64) -> Vec<S
     let mut rng = Rng::new(seed ^ 0x9A2C_ED00);
     let mut out = Vec::new();
     let half = table.car_length_m * 0.5;
+    // Rest stops (their site's road): a cluster always starts, so each has a few cars.
+    let rest_roads: Vec<u32> = map
+        .net
+        .pois
+        .iter()
+        .filter(|p| p.kind == PoiKind::RestStop)
+        .filter_map(|p| p.lane.map(|l| map.net.lanes[l as usize].road))
+        .collect();
     for (i, l) in map.net.lanes.iter().enumerate() {
         if l.kind != LaneKind::Parking || l.speed_limit_mps > table.max_speed_mps {
             continue;
         }
+        let rest = rest_roads.contains(&l.road);
         let seg = &map.segs[i];
         let lo = table.junction_clear_m + half;
         let hi = seg.length - table.junction_clear_m - half;
@@ -169,7 +219,7 @@ pub fn parked_cars_with(map: &CityMap, table: &ParkingTable, seed: u64) -> Vec<S
         while s <= hi {
             let (p, _) = seg.point_at(s);
             let d = table.district(map.district_at(geom::xy(p)));
-            if !rng.chance(d.start * scale) {
+            if !rest && !rng.chance(d.start * scale) {
                 s += table.slot_m;
                 continue;
             }
@@ -179,7 +229,10 @@ pub fn parked_cars_with(map: &CityMap, table: &ParkingTable, seed: u64) -> Vec<S
                     break;
                 }
                 let (p, tan) = seg.point_at(s);
-                if parking_allowed(map, table, p) {
+                if parking_allowed(map, table, p)
+                    && clear_of_decor(map, geom::xy(p), tan)
+                    && !at_car_park_mouths(map, i, geom::xy(p))
+                {
                     out.push(StaticProp {
                         kind: PropKind::ParkedCar,
                         pos: [p[0], p[1], p[2] + 0.75],
@@ -197,6 +250,48 @@ pub fn parked_cars_with(map: &CityMap, table: &ParkingTable, seed: u64) -> Vec<S
                 table.car_length_m
                     * rng.range_f32(table.gap_car_lengths[0], table.gap_car_lengths[1])
             };
+        }
+    }
+    out
+}
+
+/// A kerbside car on parking lane `lane` at `q` would stand in front of a car park's bays
+/// (across its dropped kerb, give or take a car length).
+fn at_car_park_mouths(map: &CityMap, lane: usize, q: V2) -> bool {
+    map.car_parks.iter().any(|c| {
+        if c.parking_lane as usize != lane {
+            return false;
+        }
+        let (u, _) = c.frame(q);
+        u > c.ramp_m.0 - 3.0 && u < c.ramp_m.1 + 3.0
+    })
+}
+
+/// Share of car park bays with a parked car in them.
+pub const CAR_PARK_OCCUPANCY: f32 = 0.35;
+
+/// Parked cars in the car parks' bays ([`crate::car_park`]): about [`CAR_PARK_OCCUPANCY`] of
+/// the bays, never more than half of a lot (the night's racers park in the rest), nose-in.
+/// Deterministic for a seed (a stream of its own, so the kerbside cars do not move). Nose-in
+/// in neighbouring bays they stand closer than kerbside cars ever do; `World::new` adds them
+/// after the kerbside and driveway cars.
+pub fn car_park_cars(map: &CityMap, seed: u64) -> Vec<StaticProp> {
+    let mut rng = Rng::new(seed ^ 0xCA2B_A7E5);
+    let mut out = Vec::new();
+    for park in map.car_parks.iter() {
+        let cap = park.bays.len() / 2;
+        let mut n = 0;
+        for b in &park.bays {
+            if n < cap && rng.chance(CAR_PARK_OCCUPANCY) {
+                n += 1;
+                out.push(StaticProp {
+                    kind: PropKind::ParkedCar,
+                    pos: [b.pos[0], b.pos[1], b.pos[2] + 0.75],
+                    yaw: b.heading_rad,
+                    half_extents: [0.95, 2.25, 0.75],
+                    mass_kg: 1400.0,
+                });
+            }
         }
     }
     out
@@ -357,7 +452,8 @@ mod tests {
         }
         for c in &cars {
             let q = geom::xy(c.pos);
-            for poi in &map.net.pois {
+            // Rest stops are places to park (row 153).
+            for poi in map.net.pois.iter().filter(|p| p.kind != PoiKind::RestStop) {
                 assert!(geom::dist(geom::xy(poi.pos), q) >= t.poi_clear_m, "{poi:?}");
             }
             assert!(map

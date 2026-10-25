@@ -14,7 +14,7 @@ Plain Python 3 (standard library only, 3.9+). Nothing here is reachable from the
 | `nameplate_check.py` | Fails if a real maker/model/badge/trademarked tech name appears in roster files. Denylist stored as hashes. |
 | `smoke_sim.py` | Spawns every roster car in `wp_sim` via `simcli` (scenario format v2) in both damage modes, twice, and checks the state hashes match. |
 | `pursuit_probe.py` | Police pursuit numbers through `simcli`: every car's 0-100 / 0-cap / 80-144 km/h times and a straight-line chase model against the cruiser (`--chase`, with `wp_police`'s speed cap and target margin). |
-| `ram_probe/` (crate `ram-probe`) | `ram-probe [car…]`: repeated rams (frontal / offset by the car, side / rear taken) on **one** damage model in both modes — health after each ram, the ram that drops it below `wp_police`'s disengage health (0.4) and the first total-loss ram. `vmax-trace`: `wp_vehicle`'s top-speed run stopped before the rig's 10 km ground slab ends (the metric's own run falls off the world on slow cars); `collect_results.py` takes Vmax from it. |
+| `ram_probe/` (crate `ram-probe`) | `ram-probe [car…]`: repeated rams (frontal / offset by the car, side / rear taken) on **one** damage model in both modes — health after each ram, the ram that drops it below `wp_police`'s disengage health (0.4) and the first total-loss ram. `vmax-trace`: `wp_vehicle`'s top-speed run stopped before the rig's 10 km ground slab ends (the metric's own run falls off the world on slow cars); `collect_results.py` takes Vmax from it. | Barrier checks read the `extreme` rows (contract v0.4.0 renamed the old Simulation to Extreme); "Arcade milder" compares with `sim` (the old Arcade). |
 
 ## Typical loop
 
@@ -55,6 +55,11 @@ Never hand-edit the generated files; the next build overwrites them.
   at 1.5 × the front lock torque on the car's own tire (rear scaled with it) because
   `wp_vehicle`'s ABS cannot modulate an oversized caliper — remove once it can.
 - Steering lock from kerb-to-kerb turning circle (mean road-wheel angle `atan(L/R_rear)`).
+- Optional per-car knobs (wave 3): `downforce=(front, rear)` → `aero_downforce_coeffs` (wings,
+  splitters; on top of the body's `lift`), with `downforce_why`; lattice `cell_scale` multiplies
+  every passenger-cell beam section (roll cage, carbon tub, tube spaceframe) with `cell_why`;
+  lattice `nose_scale` multiplies the front-rail sections (crash nose / crash boxes) with
+  `nose_why`. Each is written into the spec sheet. Era `2020s` = the 2010s HSS cell.
 - Engine braking = 10-12 % of peak torque; clutch capacity 1.35-1.6 × peak torque.
 - Stock shift time (`shift_time_s`, owner playtest row 97, 2026-10-20): manual sports 0.42-0.45 s,
   manual economy / hot hatch 0.45-0.50, muscle manual 0.50, light-truck manual 0.65, beater
@@ -98,5 +103,5 @@ failure.
 
 ## Perf
 
-Building all 14 cars (including 14 gen-lattice runs) takes ≈ 0.8 s; `collect_results.py`
-≈ 15 s; `specsheet.py` < 1 s. Roster lattices: 244-304 nodes and 1539-1988 beams per car.
+Building all 21 cars (including 21 gen-lattice runs) takes ≈ 1 s; `collect_results.py`
+≈ 15 s; `specsheet.py` < 1 s. Roster lattices: 244-332 nodes and 1536-2138 beams per car.

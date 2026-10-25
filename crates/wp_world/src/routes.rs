@@ -273,6 +273,87 @@ pub fn plan_route(
     Some(build_route(map, segs, a.1, b.1, false))
 }
 
+/// Lane-legal open route from `start` through the waypoints `via` in order to `finish`
+/// (start snapped to a lane agreeing with `start_heading` if given). Each waypoint goes onto
+/// the lane under it heading on towards the next point if there is one, else the lane under it
+/// either way, else the nearest lane; of those the first the route can reach (and, for a
+/// waypoint, leave again towards the next point) is kept, and a parallel lane of the road
+/// being driven is kept as it is. A waypoint behind the car on its lane goes round the block.
+/// `None` when a leg has no route. With no waypoints this is [`plan_route`]. Street races
+/// through player-picked waypoints (lead, owner row 151).
+pub fn plan_route_via(
+    map: &CityMap,
+    start: V3,
+    start_heading: Option<V2>,
+    via: &[V2],
+    finish: V3,
+) -> Option<Route> {
+    if via.is_empty() {
+        return plan_route(map, start, start_heading, finish);
+    }
+    let first = nearest_lane(map, start, start_heading)?;
+    let goal = nearest_lane(map, finish, None)?;
+    let mut segs: Vec<SegId> = Vec::new();
+    let mut cur = first;
+    let mut prev = geom::xy(start);
+    let mut z = start[2];
+    for (i, w) in via.iter().enumerate() {
+        z = map.ground_height(*w, Some(z));
+        let p = [w[0], w[1], z];
+        let after = via.get(i + 1).copied().unwrap_or(geom::xy(finish));
+        let heading = geom::normalize(geom::sub(after, prev));
+        let mut cands: Vec<(SegId, f32)> = Vec::new();
+        for l in [
+            map.locate(p, Some(heading), 2.0, true, false),
+            map.locate(p, None, 2.0, true, false),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            cands.push((l.seg, l.s));
+        }
+        cands.extend(nearest_lane(map, p, None));
+        let last = i + 1 == via.len();
+        let mut picked = None;
+        for c in cands {
+            let next = same_lane_group(map, cur, c, p);
+            // The last waypoint must also lead on to B (not every lane reaches every other).
+            if last && leg(map, next, goal).is_none() {
+                continue;
+            }
+            if let Some(part) = leg(map, cur, next) {
+                picked = Some((next, part));
+                break;
+            }
+        }
+        let (next, mut part) = picked?;
+        if !segs.is_empty() {
+            part.remove(0);
+        }
+        segs.extend(part);
+        cur = next;
+        prev = *w;
+    }
+    let mut part = leg(map, cur, goal)?;
+    part.remove(0);
+    segs.extend(part);
+    Some(build_route(map, segs, first.1, goal.1, false))
+}
+
+/// Path from lane position `cur` to `next` (round the block when `next` is behind `cur` on the
+/// same lane), starting with `cur.0`.
+fn leg(map: &CityMap, cur: (SegId, f32), next: (SegId, f32)) -> Option<Vec<SegId>> {
+    if cur.0 == next.0 && next.1 < cur.1 {
+        let s = map.seg(cur.0);
+        let round = *s.next.first()?;
+        let mut p = vec![cur.0];
+        p.extend(shortest_path(map, (round, 0.0), next)?);
+        Some(p)
+    } else {
+        shortest_path(map, cur, next)
+    }
+}
+
 /// Route between two POIs (indices into the network's POI list); starts facing the POI
 /// heading.
 pub fn plan_route_between_pois(

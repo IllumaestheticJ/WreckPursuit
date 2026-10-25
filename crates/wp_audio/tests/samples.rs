@@ -155,10 +155,30 @@ fn recorded_packs_have_a_procedural_fallback_and_cars_use_them() {
     }
     for car in lib.cars.values() {
         for pack in [&car.engine_pack, &car.world_pack] {
+            let recorded = pack.ends_with("_rec") || pack.contains("_rec_");
+            // The one exception (owner decision on 0.12.36, "generated sound now"): a car whose
+            // recorded engine twin would pitch a loop above MAX_RECORDED_PITCH at redline uses
+            // the procedural twin until a recording covers its rev range.
+            let sped_up_exception = pack == &car.engine_pack
+                && recorded_twin_top_pitch(&lib, &car.id, pack)
+                    .is_some_and(|p| p > MAX_RECORDED_PITCH);
             assert!(
-                pack.ends_with("_rec") || pack.contains("_rec_"),
+                recorded || sped_up_exception,
                 "cars/{}: {pack} is not a recorded pack",
                 car.id
+            );
+        }
+        // Police sirens play recordings too (owner: "sirens seem unrealistic — use real
+        // sounds"); the synth is only their fallback.
+        if let Some(siren) = &car.siren {
+            assert!(
+                lib.packs[&siren.pack]
+                    .cues
+                    .values()
+                    .any(|c| matches!(c.source, CueSource::Samples { .. })),
+                "cars/{}: siren pack {} plays no recordings",
+                car.id,
+                siren.pack
             );
         }
     }
@@ -211,4 +231,219 @@ fn gear_change_plays_the_recorded_shift_clunk_once() {
         vec![0, 0, 0, 1, 0, 0],
         "one clunk on the frame the gear changes"
     );
+}
+
+/// Playtest "engine sounds are bad": recorded layers were rooted at the car's idle or at a
+/// fraction of its redline, so the six and V8 loops played 15-47 semitones under the car's
+/// firing frequency and two crossfading loops sounded at pitches up to ~2 octaves apart. Every
+/// recorded layer is now anchored at its loop's measured firing frequency: through the real
+/// director, each audible layer's pitch × its anchor frequency is the car's firing frequency, so
+/// crossfading loops share one pitch.
+#[test]
+fn recorded_engine_layers_follow_the_cars_firing_frequency() {
+    use wp_audio::data::RpmAnchor;
+    use wp_audio::types::slot;
+    use wp_audio::{
+        AudioCommand, AudioDirector, AudioFrame, DriverKind, Listener, VehicleAudioInput,
+    };
+    use wp_contracts::{load_car, EntityId, VehicleState};
+    let lib = AudioLibrary::embedded().unwrap();
+    // Every recorded layer is anchored by its firing frequency (also enforced by validate()).
+    for p in lib.packs.values() {
+        for l in &p.engine_layers {
+            let recorded = matches!(p.cues[&l.cue].source, CueSource::Samples { .. });
+            assert!(
+                !recorded || matches!(l.anchor, RpmAnchor::FiringHz(_)),
+                "packs/{}: recorded layer {} anchored by {:?}",
+                p.id,
+                l.cue,
+                l.anchor
+            );
+        }
+    }
+    let mut checked = 0;
+    for (id, def) in &lib.cars {
+        let pack = &lib.packs[&def.engine_pack];
+        let car = load_car(audio_dir().join(format!("../cars/{id}.json"))).expect("car loads");
+        let e = &car.def.engine;
+        let mut dir = AudioDirector::new(lib.clone(), 5);
+        dir.register_car(&car);
+        let mut rpm = e.idle_rpm;
+        let mut tick = 0u64;
+        while rpm <= e.rev_limit_rpm {
+            for throttle in [1.0f32, 0.0] {
+                let s = VehicleState {
+                    rot: [0.0, 0.0, 0.0, 1.0],
+                    engine_rpm: rpm,
+                    gear: 3,
+                    ..Default::default()
+                };
+                let inputs = [VehicleAudioInput {
+                    entity: EntityId(1),
+                    car_id: id,
+                    state: &s,
+                    throttle,
+                    throttle_applied: Some(throttle),
+                    horn: false,
+                    siren: false,
+                    road_rumble: 0.0,
+                    kind: DriverKind::Player,
+                }];
+                // A few frames so load settles; then read every layer's commanded pitch.
+                let mut pitch = std::collections::BTreeMap::new();
+                for _ in 0..20 {
+                    tick += 4;
+                    for c in dir.update(&AudioFrame {
+                        tick,
+                        listener: Listener::default(),
+                        focus: Some(EntityId(1)),
+                        vehicles: &inputs,
+                        events: &[],
+                    }) {
+                        match c {
+                            AudioCommand::Play { voice, params, .. }
+                            | AudioCommand::Set { voice, params }
+                                if (slot::ENGINE_LAYER..slot::ENGINE_LIMITER)
+                                    .contains(&voice.slot) =>
+                            {
+                                pitch.insert(
+                                    voice.slot - slot::ENGINE_LAYER,
+                                    (params.pitch, params.gain),
+                                );
+                            }
+                            AudioCommand::Stop { voice, .. } => {
+                                pitch.remove(&(voice.slot.wrapping_sub(slot::ENGINE_LAYER)));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                let want = def.engine.firing_hz(rpm);
+                let lead = pitch.values().map(|v| v.1).fold(0.0f32, f32::max);
+                for (i, (p, gain)) in &pitch {
+                    let l = &pack.engine_layers[*i as usize];
+                    let RpmAnchor::FiringHz(hz) = l.anchor else {
+                        continue;
+                    };
+                    if !(0.26..=3.99).contains(p) {
+                        continue; // clamped (never in a road car's range, see below)
+                    }
+                    let err = (p * hz / want).ln().abs() * 1200.0 / std::f32::consts::LN_2;
+                    assert!(
+                        err < 5.0,
+                        "{id} at {rpm} rpm: {} plays {:.1} Hz, the car fires at {want:.1} Hz",
+                        l.cue,
+                        p * hz
+                    );
+                    // The leading loop is never stretched beyond what the rev range needs.
+                    assert!(
+                        *gain < lead || (0.5..=3.6).contains(p),
+                        "{id} at {rpm} rpm: {} at {p:.2}x",
+                        l.cue
+                    );
+                    checked += 1;
+                }
+            }
+            rpm += 400.0;
+        }
+    }
+    assert!(checked > 500, "only {checked} layer pitches checked");
+}
+
+/// `validate()` rejects a recorded engine layer rooted by the car's idle / redline / a fixed rpm.
+#[test]
+fn validate_rejects_recorded_layers_without_a_firing_frequency() {
+    use wp_audio::data::RpmAnchor;
+    let mut lib = AudioLibrary::embedded().unwrap();
+    assert!(lib.validate().is_empty(), "{:?}", lib.validate());
+    for bad in [
+        RpmAnchor::Idle,
+        RpmAnchor::RedlineFrac(0.5),
+        RpmAnchor::Rpm(3000.0),
+        RpmAnchor::FiringHz(0.0),
+    ] {
+        let pack = lib.packs.get_mut("engine_rec_v8").unwrap();
+        let keep = pack.engine_layers[1].anchor;
+        pack.engine_layers[1].anchor = bad;
+        let errs = lib.validate();
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("engine_rec_v8") && e.contains("FiringHz")),
+            "{bad:?}: {errs:?}"
+        );
+        lib.packs.get_mut("engine_rec_v8").unwrap().engine_layers[1].anchor = keep;
+    }
+}
+
+/// Highest playback-rate ratio a recorded engine layer may reach within a car's rev range before
+/// it sounds sped up ("singing", owner feedback on preview 0.12.34).
+const MAX_RECORDED_PITCH: f32 = 1.6;
+
+/// Idle and redline rpm of a car (`data/cars/<id>.json`).
+fn car_rpm(car_id: &str) -> (f32, f32) {
+    let path = audio_dir().join(format!("../cars/{car_id}.json"));
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let e = &v["engine"];
+    (
+        e["idle_rpm"].as_f64().unwrap() as f32,
+        e["redline_rpm"].as_f64().unwrap() as f32,
+    )
+}
+
+/// Playback-rate ratio of `pack`'s highest recorded layer at the car's redline.
+fn top_pitch(lib: &AudioLibrary, car_id: &str, pack: &str) -> Option<f32> {
+    let p = lib.packs.get(pack)?;
+    let (idle, redline) = car_rpm(car_id);
+    let layers =
+        wp_audio::engine::EngineLayers::resolve(p, &lib.cars[car_id].engine, idle, redline);
+    let top = layers
+        .layers
+        .iter()
+        .map(|l| l.root_rpm)
+        .fold(0.0f32, f32::max);
+    (top > 0.0).then(|| redline / top)
+}
+
+/// For a car on a procedural engine pack `engine_proc_*`, the top layer pitch its recorded twin
+/// (`engine_rec_*`; `engine_rec_turbo` for a turbo inline-4) would reach at redline. `None` if
+/// there is no twin.
+fn recorded_twin_top_pitch(lib: &AudioLibrary, car_id: &str, pack: &str) -> Option<f32> {
+    let kind = pack.strip_prefix("engine_proc_")?;
+    let twin = if kind == "i4" && lib.cars[car_id].engine.turbo {
+        "engine_rec_turbo".to_string()
+    } else {
+        format!("engine_rec_{kind}")
+    };
+    top_pitch(lib, car_id, &twin)
+}
+
+#[test]
+fn engines_play_recordings_exactly_when_they_are_not_sped_up() {
+    // Owner on 0.12.34: "police car audio pitch is wrong, some of it sounds like it's singing";
+    // decision on 0.12.36: "generated sound now" for every car whose recording would be sped up.
+    // Recorded engine pack ⇔ its top loop stays ≤ MAX_RECORDED_PITCH at redline.
+    let lib = AudioLibrary::load_dir(audio_dir()).unwrap();
+    for car in lib.cars.values() {
+        let pack = &lib.packs[&car.engine_pack];
+        let recorded = pack
+            .cues
+            .values()
+            .any(|c| matches!(c.source, CueSource::Samples { .. }));
+        if recorded {
+            let ratio = top_pitch(&lib, &car.id, &car.engine_pack).unwrap();
+            assert!(
+                ratio <= MAX_RECORDED_PITCH,
+                "cars/{}: {} pitches its top loop {ratio:.2}x at redline (max {MAX_RECORDED_PITCH}): use the procedural twin",
+                car.id,
+                car.engine_pack
+            );
+        } else if let Some(ratio) = recorded_twin_top_pitch(&lib, &car.id, &car.engine_pack) {
+            assert!(
+                ratio > MAX_RECORDED_PITCH,
+                "cars/{}: its recorded twin fits ({ratio:.2}x ≤ {MAX_RECORDED_PITCH}); use the recording",
+                car.id
+            );
+        }
+    }
 }

@@ -328,6 +328,14 @@ pub struct DriveCommand {
 /// Right-hand lane offset from the road centreline, m.
 pub const LANE_OFFSET_M: f32 = 1.75;
 
+/// A patrol car indicates this far before a junction where its route turns, m (≈ 3 s at a
+/// 13 m/s patrol, like traffic).
+pub const TURN_SIGNAL_BEFORE_M: f32 = 40.0;
+/// ...and keeps indicating until this far past the junction centre, m.
+pub const TURN_SIGNAL_EXIT_M: f32 = 8.0;
+/// Within this of the end of a pass it indicates back in (right), m.
+pub const PASS_RETURN_SIGNAL_M: f32 = 10.0;
+
 impl DriveCommand {
     /// Stand still.
     pub fn stop() -> Self {
@@ -390,6 +398,10 @@ pub struct Unit {
     pub pit_ready: SimTime,
     /// Whether this unit ever pursued (for statistics).
     pub engaged: bool,
+    /// Whether it ever had a job (call, pursuit, intercept, tool): only then does "resuming
+    /// patrol" go out on the radio.
+    #[serde(default)]
+    pub had_job: bool,
     /// Steering geometry of the unit's car.
     pub geometry: SteerGeometry,
     /// `wp_world`'s shared driving controller (pure pursuit + PID), created on first use.
@@ -403,6 +415,25 @@ pub struct Unit {
     /// Watch for a unit getting nowhere ([`crate::progress`]).
     #[serde(default)]
     pub progress: crate::progress::ProgressWatch,
+    /// Which branch of `drive_input` produced the last input (debug: bench traces; 0 = the
+    /// plain drive along the track).
+    #[serde(skip)]
+    pub branch: u8,
+    /// The pro driver's planned speed and whether it was reversing out, last tick (debug).
+    #[serde(skip)]
+    pub pro_dbg: (f32, bool),
+    /// The pro driver was turning round last tick (debug: bench turn-round audit).
+    #[serde(skip)]
+    pub turning_round: bool,
+    /// How long this unit has stood still while on an active job (row 86 audit), s.
+    #[serde(skip)]
+    pub active_stop_s: f32,
+    /// Since when the sim has reported this unit on its side or roof (row 75), if it is.
+    #[serde(default)]
+    pub flipped_since: Option<SimTime>,
+    /// Branch and blocker when that stop began (row 86 audit).
+    #[serde(skip)]
+    pub active_stop_why: (u8, u8),
     /// Road route a pursuer is following to the racer (out of its sight), if any.
     #[serde(default)]
     pub chase_route: Option<ChaseRoute>,
@@ -480,11 +511,18 @@ impl Unit {
             captain_hold_until: SimTime::ZERO,
             pit_ready: SimTime::ZERO,
             engaged: false,
+            had_job: false,
             geometry: SteerGeometry::default(),
             controller: None,
             avoid: AvoidState::default(),
             unstick: crate::stuck::UnstickState::default(),
             progress: crate::progress::ProgressWatch::default(),
+            branch: 0,
+            pro_dbg: (0.0, false),
+            turning_round: false,
+            active_stop_s: 0.0,
+            flipped_since: None,
+            active_stop_why: (0, 0),
             chase_route: None,
             quiet: false,
             vel: [0.0, 0.0],
@@ -503,6 +541,35 @@ impl Unit {
         })
     }
 
+    /// Turn signal for the renderer: -1 left, 0 off, 1 right (ported from the unmerged
+    /// `claude/happy-knuth-g39ogc`, owner playtest 2026-10-21). Off with lights and siren on
+    /// and for helicopters. Otherwise the unit indicates [`TURN_SIGNAL_BEFORE_M`] before a
+    /// junction where its route turns (until [`TURN_SIGNAL_EXIT_M`] past it), pulling out to
+    /// pass a stopped vehicle (left) and pulling back in at the end of the pass (right).
+    /// Presentation only: nothing in the sim reads it.
+    pub fn turn_signal(&self) -> i8 {
+        if self.kind != UnitKind::Car || self.cmd.siren || !self.cmd.track.is_drivable() {
+            return 0;
+        }
+        if self.avoid.pass_offset_m.is_some() {
+            return if self.avoid.pass_until_s - self.track_s < PASS_RETURN_SIGNAL_M {
+                1
+            } else {
+                -1
+            };
+        }
+        match self.avoid.junction {
+            Some(j)
+                if j.turn_dir != 0
+                    && (-TURN_SIGNAL_EXIT_M..TURN_SIGNAL_BEFORE_M)
+                        .contains(&(j.s - self.track_s)) =>
+            {
+                j.turn_dir
+            }
+            _ => 0,
+        }
+    }
+
     /// Available for a new job (not busy with a tool, not out of service).
     pub fn available(&self) -> bool {
         !self.wrecked
@@ -515,7 +582,14 @@ impl Unit {
     }
 
     /// Set a new drive command and reset track progress.
-    pub fn set_command(&mut self, cmd: DriveCommand) {
+    pub fn set_command(&mut self, mut cmd: DriveCommand) {
+        // A car driven by physics cannot turn on the spot: without lights (lane driving, see
+        // `PoliceSystem::unit_input`) give it junction corners it can drive at its lane
+        // offset. The pro driver rounds its own line with lights on; internally driven units
+        // follow the track exactly.
+        if !self.internal && !cmd.siren {
+            cmd.track = Track::new(round_junction_corners(&cmd.track.pts, TURN_RADIUS_M));
+        }
         let (s, lat) = cmd.track.project(self.body.pos, 0.0, f32::INFINITY);
         self.track_s = s;
         self.on_track = lat < 2.0;
@@ -595,6 +669,90 @@ pub fn lane_point(track: &Track, s: f32, offset_m: f32) -> [f32; 2] {
     }
     let d = normalize(sub(track.point_at(s + 1.0), track.point_at(s - 1.0)));
     add(p, scale([d[1], -d[0]], offset_m))
+}
+
+/// Radius of the arcs [`round_junction_corners`] puts into route corners, m (centreline). With the
+/// lane offset on the inside of a right turn the car still drives about 8 m, inside its
+/// turning circle at junction speeds.
+pub const TURN_RADIUS_M: f32 = 10.0;
+
+/// Corners turning less than this (cos of the angle, ~25°) are left as they are.
+const ROUND_MIN_TURN_COS: f32 = 0.9;
+/// Corners turning more than this (cos, ~150°) are U-turns, handled by the turn-around logic.
+const ROUND_MAX_TURN_COS: f32 = -0.85;
+/// Arc length between the points of a rounded corner, m.
+const ROUND_STEP_M: f32 = 1.5;
+
+/// Route points with every junction corner replaced by a circular arc of `radius_m` (smaller
+/// where the legs are too short), tangent to both legs. A route through node centres turns on
+/// the spot, and a unit following it at a lane offset swings wide by its turning radius: into
+/// the oncoming lane on a right turn, into the parking lane on a left turn. Gentle bends and
+/// U-turns are left as they are.
+pub fn round_junction_corners(points: &[[f32; 2]], radius_m: f32) -> Vec<[f32; 2]> {
+    let t = Track::new(points.to_vec());
+    let n = t.pts.len();
+    if n < 3 {
+        return t.pts;
+    }
+    // Corners to round: (index, direction in, direction out, cos, sin of the turn).
+    type Corner = (usize, [f32; 2], [f32; 2], f32, f32);
+    let corners: Vec<Corner> = (1..n - 1)
+        .filter_map(|i| {
+            let a = normalize(sub(t.pts[i], t.pts[i - 1]));
+            let b = normalize(sub(t.pts[i + 1], t.pts[i]));
+            let c = dot(a, b);
+            (ROUND_MAX_TURN_COS..=ROUND_MIN_TURN_COS)
+                .contains(&c)
+                .then(|| (i, a, b, c, cross(a, b)))
+        })
+        .collect();
+    let mut out = vec![t.pts[0]];
+    // Arc length up to which the track has been emitted.
+    let mut done_s = 0.0;
+    let mut next_point = 1;
+    for (k, &(i, a, b, c, sn)) in corners.iter().enumerate() {
+        // Tangent length r · tan(θ / 2), at most half the way to the next corner (or the end)
+        // and not back past the previous arc.
+        let tan_half = sn.abs() / (1.0 + c);
+        let next_s = corners.get(k + 1).map_or(t.length(), |nc| t.cum[nc.0]);
+        let d = (radius_m * tan_half)
+            .min(0.5 * (next_s - t.cum[i]))
+            .min(t.cum[i] - done_s);
+        // Points before the arc.
+        while next_point < i && t.cum[next_point] < t.cum[i] - d {
+            out.push(t.pts[next_point]);
+            next_point += 1;
+        }
+        next_point = next_point.max(i + 1);
+        if d < 0.5 {
+            out.push(t.pts[i]);
+            done_s = t.cum[i];
+            continue;
+        }
+        let r = d / tan_half;
+        let p_in = sub(t.pts[i], scale(a, d));
+        let side = if sn > 0.0 { 1.0 } else { -1.0 };
+        let centre = add(p_in, scale([-a[1] * side, a[0] * side], r));
+        let theta = wp_math::atan2(sn, c);
+        let steps = ((theta.abs() * r / ROUND_STEP_M).ceil() as u32).max(2);
+        out.push(p_in);
+        let arm = sub(p_in, centre);
+        for j in 1..steps {
+            let (s_, c_) = sin_cos(theta * j as f32 / steps as f32);
+            out.push(add(
+                centre,
+                [arm[0] * c_ - arm[1] * s_, arm[0] * s_ + arm[1] * c_],
+            ));
+        }
+        out.push(add(t.pts[i], scale(b, d)));
+        done_s = t.cum[i] + d;
+        // Points the arc replaced.
+        while next_point < n - 1 && t.cum[next_point] <= done_s {
+            next_point += 1;
+        }
+    }
+    out.extend_from_slice(&t.pts[next_point..]);
+    Track::new(out).pts
 }
 
 /// Planned speed for a unit: corner planning plus a crawl while the unit faces away from its
@@ -680,8 +838,7 @@ pub fn step_ground(
         .expect("controller created above")
         .steer(b.pos, b.heading, [target[0], target[1], 0.0]);
     // Target behind: pure pursuit degenerates (lateral offset → 0), so turn at full lock.
-    let turning_round = dot(b.heading, to) < 0.0;
-    if turning_round {
+    if dot(b.heading, to) < 0.0 {
         steer = if cross(b.heading, to) >= 0.0 {
             -1.0
         } else {
@@ -693,7 +850,9 @@ pub fn step_ground(
     let curvature = sd / cd.max(1e-3) / geom.wheelbase_m.max(0.5);
     let mut a_lat = b.speed * b.speed * curvature;
     let grip = dynm.grip_g * GRAVITY_MPS2 * grip_scale;
-    if a_lat.abs() > grip {
+    // Over the grip: the car understeers and runs wide of its line.
+    let understeer = a_lat.abs() > grip;
+    if understeer {
         a_lat = a_lat.signum() * grip;
     }
     let yaw_rate = if b.speed > 0.5 {
@@ -717,10 +876,11 @@ pub fn step_ground(
     let ds = b.speed * dt;
     b.pos = add(b.pos, scale(b.heading, ds));
 
-    // Ran wide: hit the kerb / building.
-    // Behind the start of the track or turning round toward a target behind (a full-lock
-    // circle is wider than the crash offset) is not running wide.
-    if u.on_track && s > 1.0 && !turning_round && lateral > dynm.crash_offset_m && b.speed > 5.0 {
+    // Ran wide: hit the kerb / building. Only while over the grip: off the line within it is
+    // the track's geometry (main's ramp terminals and viaduct ends, where a 5 m/s unit was
+    // "crashing" over and over at the same corner), not running wide.
+    // Behind the start of the track (turning around) is not running wide.
+    if u.on_track && understeer && s > 1.0 && lateral > dynm.crash_offset_m && b.speed > 5.0 {
         let impact = b.speed * 0.6;
         u.health -= dynm.crash_health_per_kmps2.get(env.mode) * impact * impact / 1000.0;
         rep.crashed = true;
@@ -801,6 +961,54 @@ impl Default for SteerGeometry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Smallest radius of the circle through three consecutive points along `pts`.
+    fn min_radius(pts: &[[f32; 2]]) -> f32 {
+        pts.windows(3)
+            .map(|w| {
+                let (a, b, c) = (dist(w[0], w[1]), dist(w[1], w[2]), dist(w[0], w[2]));
+                let area2 = cross(sub(w[1], w[0]), sub(w[2], w[0])).abs();
+                if area2 < 1e-4 {
+                    f32::INFINITY
+                } else {
+                    a * b * c / (2.0 * area2)
+                }
+            })
+            .fold(f32::INFINITY, f32::min)
+    }
+
+    #[test]
+    fn junction_corners_become_drivable_arcs() {
+        // North along x = 0 in 6 m steps, right turn at the junction centre (0, 60), east.
+        let mut pts: Vec<[f32; 2]> = (0..=10).map(|k| [0.0, k as f32 * 6.0]).collect();
+        pts.extend((1..=10).map(|k| [k as f32 * 6.0, 60.0]));
+        let round = round_junction_corners(&pts, TURN_RADIUS_M);
+        assert_eq!(round[0], pts[0]);
+        assert_eq!(*round.last().unwrap(), *pts.last().unwrap());
+        // The centreline bends at the turn radius, not on the spot...
+        let r = min_radius(&round);
+        assert!((r - TURN_RADIUS_M).abs() < 0.5, "centreline radius {r}");
+        // ...and so does the lane a unit drives, 1.75 m to the right (the inside of the turn).
+        let t = Track::new(round);
+        let lane: Vec<[f32; 2]> = (0..=(t.length() as u32 / 3))
+            .map(|s| lane_point(&t, s as f32 * 3.0, 1.75))
+            .collect();
+        let r_lane = min_radius(&lane);
+        assert!(r_lane > TURN_RADIUS_M - 2.5, "lane radius {r_lane}");
+        // The lane path never strays into the oncoming lane (y > 60) after the turn.
+        assert!(
+            lane.iter().all(|p| p[0] < 1.0 || p[1] < 60.0 - 1.0),
+            "swung wide"
+        );
+    }
+
+    #[test]
+    fn gentle_bends_and_u_turns_stay() {
+        let bend = vec![[0.0, 0.0], [0.0, 10.0], [2.0, 20.0], [4.0, 30.0]];
+        assert_eq!(round_junction_corners(&bend, TURN_RADIUS_M), bend);
+        let u_turn = vec![[0.0, 0.0], [0.0, 30.0], [0.5, 0.0]];
+        assert_eq!(round_junction_corners(&u_turn, TURN_RADIUS_M), u_turn);
+    }
     use crate::config::PoliceConfig;
 
     fn l_track() -> Track {
@@ -868,5 +1076,48 @@ mod tests {
             assert!(!r.crashed, "crashed at tick {i} pos {:?}", u.body.pos);
         }
         assert!(u.body.pos[0] > 150.0, "{:?}", u.body.pos);
+    }
+
+    #[test]
+    fn turn_signals_before_turns_and_passes_but_not_with_lights() {
+        let mut u = Unit::new(
+            UnitId(1),
+            UnitKind::Car,
+            UnitRole::Reinforcement,
+            [0.0, 0.0],
+            [0.0, 1.0],
+            1.0,
+        );
+        u.set_command(DriveCommand {
+            track: l_track(),
+            speed_mps: 10.0,
+            cornering_g: 0.4,
+            siren: false,
+            lane_offset_m: LANE_OFFSET_M,
+        });
+        u.avoid.junction = Some(crate::avoid::JunctionAhead {
+            s: 200.0,
+            light: None,
+            turn: true,
+            turn_dir: 1,
+        });
+        u.track_s = 100.0;
+        assert_eq!(u.turn_signal(), 0, "too far before the junction");
+        u.track_s = 170.0;
+        assert_eq!(u.turn_signal(), 1);
+        u.track_s = 205.0;
+        assert_eq!(u.turn_signal(), 1, "still in the junction");
+        u.track_s = 215.0;
+        assert_eq!(u.turn_signal(), 0, "through it");
+        // Passing: left while pulling out, right while pulling back in.
+        u.track_s = 50.0;
+        u.avoid.pass_offset_m = Some(-1.75);
+        u.avoid.pass_until_s = 80.0;
+        assert_eq!(u.turn_signal(), -1);
+        u.track_s = 75.0;
+        assert_eq!(u.turn_signal(), 1);
+        // Lights on: no indicators.
+        u.cmd.siren = true;
+        assert_eq!(u.turn_signal(), 0);
     }
 }

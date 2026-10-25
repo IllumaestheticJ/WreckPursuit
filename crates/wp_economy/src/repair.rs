@@ -116,7 +116,7 @@ pub struct RepairQuote {
     pub gross: Money,
     /// Paid by insurance.
     pub insurance_covers: Money,
-    /// Insurance refused (damage sustained while wanted).
+    /// Insurance refused (damage outstanding when the car was captured).
     pub claim_denied: bool,
     /// Paid by the player.
     pub player_pays: Money,
@@ -155,7 +155,8 @@ pub struct DamageReport {
     pub estimate: RepairEstimate,
     /// Opaque lattice state to restore next session.
     pub lattice_state: Vec<u8>,
-    /// The car was wanted at some point during the session.
+    /// The car was wanted at some point during the session. Informational: insurance covers
+    /// damage taken while wanted; only a capture denies the claim.
     pub wanted_during_session: bool,
     /// The car had to be towed off the street (charged as a penalty).
     pub towed: bool,
@@ -325,7 +326,16 @@ impl Economy {
         body + money(s.mods_frac * mods)
     }
 
-    /// Price an arbitrary set of estimate lines for a car at a shop.
+    /// Economy markup on one line of damage: `1 + heavy_damage_markup × severity²` (prices.toml).
+    /// Scrapes stay cheap; crushed parts cost a lot more than the damage model's base price.
+    pub fn heavy_damage_factor(&self, severity: f32) -> f32 {
+        let s = severity.clamp(0.0, 1.0);
+        1.0 + self.prices.heavy_damage_markup * s * s
+    }
+
+    /// Price an arbitrary set of estimate lines for a car at a shop: the damage model's line
+    /// × mode `repair_cost_scale` × [`Self::heavy_damage_factor`], × `total_loss_markup` when
+    /// the car is written off.
     pub fn price_lines(
         &self,
         car: &OwnedCar,
@@ -335,13 +345,19 @@ impl Economy {
     ) -> (Vec<QuotedLine>, Money) {
         let rate = self.prices.class[&car.class].labour_per_hour;
         let mult = self.labour_multiplier(shop);
-        let scale = self.mode_table(mode).repair_cost_scale;
+        let scale = self.mode_table(mode).repair_cost_scale
+            * if car.damage.total_loss {
+                self.prices.total_loss_markup
+            } else {
+                1.0
+            };
         let mut gross = 0;
         let quoted = lines
             .iter()
             .map(|l| {
-                let parts = money(l.parts_cost * scale);
-                let labour = money(l.labour_hours * rate * mult * scale);
+                let heavy = self.heavy_damage_factor(l.severity);
+                let parts = money(l.parts_cost * scale * heavy);
+                let labour = money(l.labour_hours * rate * mult * scale * heavy);
                 gross += parts + labour;
                 QuotedLine {
                     item: l.item,
@@ -411,7 +427,7 @@ impl Economy {
         let mut covers = 0;
         let mut denied = false;
         if let (Some(pol), true) = (&c.insurance, gross > 0) {
-            if c.damage.sustained_while_wanted {
+            if c.damage.sustained_before_capture {
                 denied = true;
             } else {
                 covers = money(pol.coverage * (gross - pol.deductible).max(0) as f32);
@@ -515,6 +531,7 @@ impl Economy {
             }
             let items: Vec<RepairItem> = quote.lines.iter().map(|l| l.item).collect();
             let c = tx.car_mut(car)?;
+            self.rebuild_repaired(c, &items);
             let before = c.damage.outstanding.total;
             c.damage
                 .outstanding
@@ -549,16 +566,21 @@ impl Economy {
             let some = Some(report.car);
             let class = {
                 let c = tx.car_mut(report.car)?;
-                let was_wanted =
-                    c.damage.sustained_while_wanted && !report.estimate.lines.is_empty();
+                let before = std::mem::take(&mut c.damage.outstanding.lines);
+                // A capture flag survives as long as there is unrepaired damage; being wanted
+                // without being caught does not affect insurance.
+                let was_captured =
+                    c.damage.sustained_before_capture && !report.estimate.lines.is_empty();
                 c.damage = DamageSnapshot {
                     health: report.health.clamp(0.0, 1.0),
                     total_loss: report.total_loss,
                     handling: report.handling,
                     outstanding: report.estimate.clone(),
                     lattice_state: report.lattice_state.clone(),
-                    sustained_while_wanted: was_wanted || report.wanted_during_session,
+                    sustained_before_capture: was_captured,
                 };
+                self.strip_empty_slot_lines(c);
+                self.wear_from_damage(c, &before);
                 c.class
             };
             tx.note(

@@ -82,9 +82,12 @@ fn shifts_are_rev_matched_and_the_torque_gap_is_short() {
     let mut gear = rig.state().gear;
     let (mut gap, mut longest_gap) = (0usize, 0usize);
     let mut checked = 0;
-    // Full throttle to ~180 km/h (4 upshifts), then brake hard (downshifts).
+    // Full throttle to ~180 km/h (4 upshifts), then brake hard (downshifts). 18 s of throttle
+    // (was 17; physics lead 2026-10-23): with 17 s the 4→5 upshift came 0.35 s after the
+    // window on the pre-G handling and just missed it with candidate G, which is 0.08 s
+    // slower to 143 km/h (shifts 3.56 / 6.49 / 10.86 s vs 3.54 / 6.45 / 10.78 s).
     for i in 0..(24.0 * 240.0) as usize {
-        let input = if i < 17 * 240 {
+        let input = if i < 18 * 240 {
             throttle(1.0)
         } else {
             VehicleInput {
@@ -95,7 +98,7 @@ fn shifts_are_rev_matched_and_the_torque_gap_is_short() {
         rig.step(&input, &a);
         let s = rig.state();
         let tel = rig.vehicle.telemetry();
-        if i < 17 * 240 {
+        if i < 18 * 240 {
             let drive: f32 = tel.fx.iter().sum();
             gap = if drive <= 0.0 { gap + 1 } else { 0 };
             longest_gap = longest_gap.max(gap);
@@ -158,8 +161,9 @@ fn kickdown_on_full_throttle() {
 fn street_cars_shift_at_believable_stock_speeds() {
     // Owner playtest row 97 (2026-10-20): stock shifts were "a little too fast"; mods make
     // them faster (`drivetrain.shift_time_scale`, ×0.28 fully modded). Stock street cars with
-    // a clutch gearbox take 0.35-0.55 s, a dual-clutch (lindwurm_4t and fulmine_v10, 0.18 s)
-    // 0.12-0.25 s;
+    // a clutch gearbox take 0.35-0.55 s, a dual-clutch (lindwurm_4t 0.18 s, fulmine_v10 0.15 s,
+    // the wave-3 supercars 0.18 s), automated manual (ombra_v12, 0.22 s) or race sequential
+    // (morrigan_55, nyx_proto, merlo_20t, 0.15 s) 0.12-0.25 s;
     // torque-converter cars, trucks and the beater are exempt. The lead's debug cars keep
     // their old values.
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/cars");
@@ -180,7 +184,18 @@ fn street_cars_shift_at_believable_stock_speeds() {
         if !street || d.torque_converter.is_some() || c.def.id.starts_with("debug_") {
             continue;
         }
-        let dual_clutch = matches!(c.def.id.as_str(), "lindwurm_4t" | "fulmine_v10");
+        let dual_clutch = matches!(
+            c.def.id.as_str(),
+            "lindwurm_4t"
+                | "fulmine_v10"
+                | "halberd_40"
+                | "ombra_v12"
+                | "ostwind_6t"
+                | "kagero_hx"
+                | "morrigan_55"
+                | "nyx_proto"
+                | "merlo_20t"
+        );
         let band = if dual_clutch {
             0.12..=0.25
         } else {

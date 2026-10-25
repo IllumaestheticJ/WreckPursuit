@@ -1,0 +1,30 @@
+// Row 80 / 89 check (round 12c): the escape_break_contact racer at 02:00. Police now see as far
+// at night (260 m) as the racer sees them and a witness pursues at once, but a racer that breaks
+// line of sight still gets away (before round 12c no unit even spotted it in 3 runs; now one
+// pursuit, escaped). A fast racer (2.6x the limit, 0.95 g corners) out-corners capped pursuers,
+// breaks line of sight behind buildings and escapes after escape_time(level, Night).
+// Escapes are rare here: over 10 runs 2 escape before backup ambushes (PR #33, port 2026-10-21:
+// backup waits ahead on the racer's path while police see it), 1 with them; the rest are still
+// in pursuit at 300 s, none captured. 3 runs were a coin flip, so 10 runs, at least one escape.
+// Rows 131/133 (2026-10-21): roadblock and spike cars no longer pop in where the racer sees them
+// (25 such spawns over these 10 runs before, 0 now; they appear once their spot is hidden), and
+// the chases diverge: 4 escapes in 10 (3 with the cars appearing at once), so max 4.
+// Row 158 (2026-10-23): no session-start patrol in view of this already-wanted racer, and no
+// spawn on any road it can reach within 3 s: 5 escapes in 10 (2 on the same seeds just before),
+// so max 6. Row 157 (slower heat) re-aims it again.
+// Road network centreline fix (playtest row 170): 7 escapes in these 10 runs (main 3); over 30
+// runs (seeds 600-629) 19 escapes here vs 14 on main, no captures on either, so max 8. Night
+// racers break contact a little more often with units on the corrected graph: review with the
+// police balance.
+(
+    name: "police_escape_break_contact_night",
+    seed: 600,
+    time_of_day_h: 2.0,
+    duration_s: 300.0,
+    runs: 10,
+    stop_after_first_pursuit: true,
+    racers: [(district: Core, speed_factor: 2.6, cornering_g: 0.95, initial_heat: 15.0, violations: false, stay_in_district: false)],
+    expect: [
+        (metric: "escapes", min: 1.0, max: 8.0),
+    ],
+)

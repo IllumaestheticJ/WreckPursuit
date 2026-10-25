@@ -22,6 +22,8 @@
 //! - [`walls`]: static feelers against building footprints and tunnel walls.
 //! - [`tools`]: roadblocks, spike strips, radar detector and scanner queries.
 //! - [`captain`]: captain commands, validation and the captain view.
+//! - [`race`]: race-specific police profiles (`data/police/races.toml`): doctrine and
+//!   pre-scripted roadblocks, spike strips and stakeouts per race.
 //! - [`radio`]: radio pacing (one transmission at a time, gaps by wanted level).
 //! - [`chatter`]: unit-to-unit callouts with call signs and street-name places (row 79).
 //! - [`events`]: re-exports of the contract `PoliceEvent` (`SimEvent::Police`).
@@ -41,6 +43,7 @@ pub mod heat;
 pub mod pro;
 pub mod progress;
 pub mod pursuit;
+pub mod race;
 pub mod radio;
 pub mod scenario;
 pub mod stuck;
@@ -108,7 +111,10 @@ pub struct PoliceSetup {
     /// Drive AI units with the built-in kinematic driver (true until `wp_sim` gives units
     /// physical bodies and calls [`PoliceSystem::sync_unit`]).
     pub internal_driving: bool,
-    /// Simulate background traffic hazards for internally driven units.
+    /// Simulate background traffic hazards for internally driven units: a statistical
+    /// stand-in (random near misses and collisions) for headless runs with **no real
+    /// traffic**. Off by default; leave it off when `wp_world` traffic is simulated and
+    /// reported with [`PoliceSystem::set_obstacles`], or units pay for traffic twice.
     pub hazards: bool,
 }
 
@@ -118,7 +124,7 @@ impl Default for PoliceSetup {
             seed: 0x0090_11CE,
             mode: DamageMode::Arcade,
             internal_driving: true,
-            hazards: true,
+            hazards: false,
         }
     }
 }
@@ -164,6 +170,24 @@ pub struct CallRecord {
     pub spawned: bool,
 }
 
+/// An active unit standing still (row 86 audit, `PoliceStats::active_stops`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ActiveStop {
+    /// Unit.
+    pub unit: UnitId,
+    /// When it stopped.
+    pub at: SimTime,
+    /// How long it stood, s.
+    pub stood_s: f32,
+    /// Where, m.
+    pub pos: [f32; 2],
+    /// What held it when it stopped (diagnosis): its `drive_input` branch, and what capped its
+    /// speed (0 nothing, 1 a vehicle, 2 a police unit, 3 kinematic traffic, 4 its racer).
+    pub branch: u8,
+    /// See `branch`.
+    pub blocked_by: u8,
+}
+
 /// One ground unit appearing after the session start, for statistics: how close to (and
 /// whether in sight of) a racer it popped in.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -180,6 +204,14 @@ pub struct SpawnRecord {
     pub nearest_racer_m: f32,
     /// Some racer had line of sight to it.
     pub in_sight: bool,
+    /// Seconds after it appeared that some racer first had line of sight to the spot it
+    /// appeared at, within [`dispatch::ROUTE_VIEW_S`] (row 131's pop-in audit: hidden when it
+    /// appeared, in plain view a moment later). `None`: not seen in that window.
+    #[serde(default)]
+    pub seen_after_s: Option<f32>,
+    /// It appeared on the far carriageway of a pursued racer's divided road (row 140 audit).
+    #[serde(default)]
+    pub far_carriageway: bool,
 }
 
 /// How a unit's trip to a reckless-driving call ended.
@@ -254,6 +286,9 @@ pub struct PoliceStats {
     pub pursuits: Vec<PursuitRecord>,
     /// Reinforcement request → unit committed, s.
     pub reinforcement_delays_s: Vec<f32>,
+    /// Per pursuit: pursuit start → the first backup unit committed, s.
+    #[serde(default)]
+    pub first_backup_delays_s: Vec<f32>,
     /// Units that ever pursued.
     pub units_engaged: u32,
     /// Units total-lost without racer contact.
@@ -270,6 +305,13 @@ pub struct PoliceStats {
     pub spikes: u32,
     /// Spike hits.
     pub spike_hits: u32,
+    /// Spike strips requested but given up without a strip (row 165: no car could be beside it
+    /// in time without appearing in a racer's view, or the pursuit ended).
+    #[serde(default)]
+    pub spikes_given_up: u32,
+    /// Spike cars that appeared out of view and drove in to their post (row 165).
+    #[serde(default)]
+    pub spike_drive_ins: u32,
     /// PIT attempts.
     pub pit_attempts: u32,
     /// Helicopter launches.
@@ -287,7 +329,7 @@ pub struct PoliceStats {
     /// Built-in driver: ran wide and crashed.
     pub run_wide_crashes: u32,
     /// Built-in driver: near misses, traffic collisions and run-wide crashes by units while
-    /// pursuing or intercepting (what the risk budget and pursuit caps govern).
+    /// pursuing or intercepting (what the risk budget governs).
     pub pursuit_harm: u32,
     /// Built-in driver: seconds pursuing / intercepting units spent cornering above
     /// `pursuit.risk.lateral_g`, summed over units.
@@ -301,8 +343,22 @@ pub struct PoliceStats {
     pub redispatches: u32,
     /// Blatant speeding right past a unit, recognised at once (`heat.blatant`).
     pub blatant: u32,
+    /// Pursuits started by the unit that witnessed the violation making the racer wanted
+    /// (row 80).
+    #[serde(default)]
+    pub witnessed_pursuits: u32,
+    /// Speeding violations clocked by a unit's radar ([`config::RadarConfig`]).
+    #[serde(default)]
+    pub radar_clocks: u32,
+    /// Resets in place (owner row 78): un-wrecked units that stood stuck and snapped to a clear
+    /// spot in their lane ([`stuck::RESET_ACTIVE_S`]).
+    #[serde(default)]
+    pub resets: Vec<ResetRecord>,
     /// Turn-round reverse swings by physical units (target behind them).
     pub swings: u32,
+    /// Chasing units that routed around a traffic jam they stood in (row 86).
+    #[serde(default)]
+    pub jam_reroutes: u32,
     /// Units that gave up turning round after [`stuck::MAX_TURNS`] tries on one spot: their
     /// call was handed back (siren off) and they despawn out of sight.
     #[serde(default)]
@@ -311,11 +367,25 @@ pub struct PoliceStats {
     /// out of every racer's sight ([`progress`]).
     #[serde(default)]
     pub no_progress_despawns: u32,
+    /// Units backing out of the way of a slow racer they weren't after
+    /// ([`stuck::GIVE_WAY_S`]).
+    #[serde(default)]
+    pub give_ways: u32,
+    /// Units that gave up, stood still [`stuck::DEADLOCK_VANISH_S`] next to a racer and were
+    /// despawned in view to break the deadlock.
+    #[serde(default)]
+    pub deadlock_despawns: u32,
     /// Ground units spawned after the session start (pool refills, responders,
     /// reinforcements, tool units).
     pub spawns: Vec<SpawnRecord>,
     /// Physical units that got stuck, why, and what was done ([`stuck`]).
     pub stuck: Vec<stuck::StuckRecord>,
+    /// Row 86 audit: an active unit (pursuit, intercept, response) standing still with no
+    /// reason to (not arresting, not waiting in an ambush, not blocking a junction) for more
+    /// than [`dispatch::ACTIVE_STOP_S`]: one entry per episode, when it started moving again
+    /// or its job ended.
+    #[serde(default)]
+    pub active_stops: Vec<ActiveStop>,
     /// Physical units touching static geometry (walls, buildings, rails, parked props): one
     /// entry per contact episode (owner playtest row 66).
     #[serde(default)]
@@ -337,6 +407,40 @@ pub struct PoliceStats {
     pub responses: Vec<ResponseRecord>,
 }
 
+/// One reset in place ([`PoliceStats::resets`]).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ResetRecord {
+    /// Unit.
+    pub unit: UnitId,
+    /// When.
+    pub at: SimTime,
+    /// Where it stood, m.
+    pub from: [f32; 2],
+    /// Where it was placed, m.
+    pub to: [f32; 2],
+    /// On a pursuit or search at the time.
+    pub active: bool,
+    /// A racer could see it (the reset waited [`stuck::RESET_VIEW_DELAY_S`]).
+    pub in_view: bool,
+}
+
+/// A unit placed somewhere new by the police system (reset in place, row 78). `wp_sim` moves
+/// the unit's car there, upright, and makes it a ghost for `ghost_s`
+/// ([`PoliceSystem::take_unit_resets`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnitReset {
+    /// Unit.
+    pub unit: UnitId,
+    /// Its vehicle (`None`: driven headless, already moved).
+    pub entity: Option<EntityId>,
+    /// New position, m.
+    pub pos: [f32; 2],
+    /// New heading (XY unit vector).
+    pub heading: [f32; 2],
+    /// No-collision window, s.
+    pub ghost_s: f32,
+}
+
 /// Captain bookkeeping (human or AI).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct CaptainState {
@@ -356,8 +460,20 @@ pub(crate) struct RacerObs {
     pub(crate) witnessed: bool,
     /// Closest ground unit with line of sight within recognition range.
     pub(crate) spotter: Option<UnitId>,
+    /// Its distance, m (recognition takes longer further out).
+    pub(crate) spotter_m: f32,
+    /// Closest ground unit with line of sight within witness range (it starts the pursuit when
+    /// a violation it sees makes the racer wanted, row 80).
+    pub(crate) witness: Option<UnitId>,
     /// Nearest ground unit distance, m.
     pub(crate) nearest_unit_m: f32,
+    /// Nearest ground unit chasing this racer, m.
+    pub(crate) nearest_chaser_m: f32,
+    /// Nearest ground unit / chaser that is not standing in the racer's lane in front of it
+    /// (row 168: [`crate::heat::RuleInputs::blocked_ahead_only`]), m.
+    pub(crate) nearest_unit_free_m: f32,
+    /// See `nearest_unit_free_m`, m.
+    pub(crate) nearest_chaser_free_m: f32,
 }
 
 /// Police state for one instance.
@@ -377,19 +493,51 @@ pub struct PoliceSystem {
     pub(crate) racers: BTreeMap<EntityId, RacerRecord>,
     pub(crate) obs: BTreeMap<EntityId, RacerObs>,
     pub(crate) recognition_s: BTreeMap<EntityId, f32>,
+    /// Seconds each racer has been speeding in a unit's sight (radar hold).
+    pub(crate) radar_over: BTreeMap<EntityId, f32>,
+    /// When each racer last had a unit sent to wait ahead of it (see
+    /// [`dispatch::AMBUSH_EVERY_S`]).
+    pub(crate) last_ambush: BTreeMap<EntityId, SimTime>,
+    /// The pursuit start each racer's first backup was logged for (see
+    /// `PoliceStats::first_backup_delays_s`).
+    pub(crate) first_backup: BTreeMap<EntityId, SimTime>,
+    /// Units booking a racer they captured, until when (see `pursuit::ARREST_BUSY_S`).
+    pub(crate) arresting: BTreeMap<UnitId, SimTime>,
     pub(crate) trails: BTreeMap<EntityId, unit::Track>,
     pub(crate) prev_pos: BTreeMap<EntityId, [f32; 2]>,
     /// Racer velocity reported on the previous step, m/s: how the racer came into this tick's
     /// contacts (by the time a contact is reported, the hit has already changed its velocity).
     pub(crate) prev_vel: BTreeMap<EntityId, [f32; 3]>,
+    /// Each racer's direction of travel when it last moved faster than 1 m/s (unit vector):
+    /// which way a stopped racer faces (row 168, queues).
+    pub(crate) racer_dir: BTreeMap<EntityId, [f32; 2]>,
+    /// How long each racer has waited behind another racer without moving, s (row 168: the
+    /// queue exemption lasts at most `pursuit::QUEUE_MAX_WAIT_S`).
+    pub(crate) queue_wait_s: BTreeMap<EntityId, f32>,
     pub(crate) units: Vec<Unit>,
     pub(crate) next_unit: u32,
     pub(crate) incidents: Vec<Incident>,
     pub(crate) next_incident: u32,
     pub(crate) reinforcements: Vec<dispatch::ReinforcementRequest>,
     pub(crate) helo_requests: Vec<dispatch::HeloRequest>,
+    /// Per tracking helicopter: whether it has visual on its target (radio bookkeeping).
+    pub(crate) helo_sight: BTreeMap<UnitId, dispatch::HeloSight>,
     pub(crate) roadblocks: Vec<Roadblock>,
     pub(crate) spikes: Vec<SpikeStrip>,
+    /// Tool cars waiting for their spot to leave every racer's view (row 131).
+    pub(crate) tool_cars: Vec<dispatch::PendingToolCar>,
+    /// Spike strips on their way: each laid only together with its car (row 165).
+    pub(crate) spike_runs: Vec<dispatch::SpikeRun>,
+    /// Spike strips decided this step, for the radio's "spikes N metres ahead" line (said at
+    /// the decision; the strip itself is laid when its car stands at its post, row 165).
+    pub(crate) spikes_decided: Vec<(ToolId, EntityId)>,
+    /// Spike strips already announced at their decision (their later `SpikesPlaced` is not
+    /// announced again).
+    pub(crate) spikes_announced: BTreeSet<ToolId>,
+    /// Indices into `stats.spawns` still watched for being seen soon after (pop-in audit).
+    pub(crate) spawn_watch: Vec<usize>,
+    /// Elevated road decks (race stakeouts park on the deck, not under it).
+    pub(crate) decks: Vec<race::DeckFoot>,
     pub(crate) next_tool: u32,
     pub(crate) punctures: BTreeMap<EntityId, Puncture>,
     pub(crate) radio: VecDeque<RadioLine>,
@@ -422,8 +570,12 @@ pub struct PoliceSystem {
     pub(crate) feelers: bool,
     /// Covered roads (tunnels): a racer lost inside one is searched for at its portals.
     pub(crate) covers: Vec<walls::CoverSpan>,
+    /// Resets in place not yet taken by `wp_sim` ([`PoliceSystem::take_unit_resets`]).
+    pub(crate) resets: Vec<UnitReset>,
     /// Drivable room for the pro driver's racing line (lead P8).
     pub(crate) room: pro::RoadRoom,
+    /// The race being policed ([`PoliceSystem::start_race`]), if any.
+    pub(crate) race: Option<race::RacePolice>,
 }
 
 impl Default for PoliceSystem {
@@ -450,6 +602,20 @@ impl PoliceSystem {
     pub fn for_world(cfg: PoliceConfig, world: &wp_world::World, setup: PoliceSetup) -> Self {
         let mut p = Self::with_city(cfg, RoadGraph::from_city(world.map()), setup);
         chatter::attach_world(&mut p, world);
+        p.set_decks(
+            world
+                .map()
+                .decks()
+                .iter()
+                .map(|d| race::DeckFoot {
+                    a: [d.a[0], d.a[1]],
+                    b: [d.b[0], d.b[1]],
+                    z: [d.a[2], d.b[2]],
+                    left_m: d.left_m,
+                    right_m: d.right_m,
+                })
+                .collect(),
+        );
         p.set_props(
             world
                 .static_props()
@@ -529,24 +695,37 @@ impl PoliceSystem {
             phase: DayPhase::Day,
             warmed_up: false,
             racers: BTreeMap::new(),
+            last_ambush: BTreeMap::new(),
+            first_backup: BTreeMap::new(),
+            arresting: BTreeMap::new(),
             obs: BTreeMap::new(),
             recognition_s: BTreeMap::new(),
+            radar_over: BTreeMap::new(),
             trails: BTreeMap::new(),
             prev_pos: BTreeMap::new(),
             prev_vel: BTreeMap::new(),
+            racer_dir: BTreeMap::new(),
+            queue_wait_s: BTreeMap::new(),
             units: Vec::new(),
             next_unit: 1,
             incidents: Vec::new(),
             next_incident: 1,
             reinforcements: Vec::new(),
             helo_requests: Vec::new(),
+            helo_sight: BTreeMap::new(),
             roadblocks: Vec::new(),
+            tool_cars: Vec::new(),
+            spike_runs: Vec::new(),
+            spikes_decided: Vec::new(),
+            spikes_announced: BTreeSet::new(),
+            spawn_watch: Vec::new(),
+            decks: Vec::new(),
             spikes: Vec::new(),
             next_tool: 1,
             punctures: BTreeMap::new(),
             radio: VecDeque::new(),
             radio_director: radio::RadioDirector::new(),
-            chatter: chatter::Chatter::default(),
+            chatter: chatter::Chatter::new(setup.seed),
             captain: CaptainState {
                 human: false,
                 priority: None,
@@ -567,6 +746,8 @@ impl PoliceSystem {
             walls: std::sync::Arc::new(walls::WallIndex::default()),
             feelers: true,
             covers: Vec::new(),
+            resets: Vec::new(),
+            race: None,
         }
     }
 
@@ -590,6 +771,8 @@ impl PoliceSystem {
         self.process_events(world, events);
         self.rebuild_obstacles();
         self.drive_units(world, dt);
+        // Row 165: every tick, not only at think rate: no strip outlives its unit's leash.
+        self.lift_unmanned_spikes();
         self.think_accum += dt;
         let thought = self.think_accum >= 1.0 / self.cfg.pursuit.think_hz;
         if thought {
@@ -614,6 +797,19 @@ impl PoliceSystem {
             self.prev_vel.insert(r.entity, rec.vel);
             rec.pos = r.pos;
             rec.vel = r.vel;
+            let sp = (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt();
+            if sp > 1.0 {
+                let d = [r.vel[0] / sp, r.vel[1] / sp];
+                // Backing out of a queue flips the velocity at once; a turn sweeps round
+                // through the angles in between. Keep the facing through a reversal.
+                let flipped = self
+                    .racer_dir
+                    .get(&r.entity)
+                    .is_some_and(|o| o[0] * d[0] + o[1] * d[1] < -0.5);
+                if !flipped {
+                    self.racer_dir.insert(r.entity, d);
+                }
+            }
             let p = xy(r.pos);
             // Spike strips.
             if let Some(prev) = self.prev_pos.get(&r.entity).copied() {
@@ -750,6 +946,12 @@ impl PoliceSystem {
         self.radio_director.stats()
     }
 
+    /// Tier of the radio transmission on air now (`None`: the channel is free). The channel
+    /// counts as busy for a line's estimated length plus the silence after it.
+    pub fn radio_on_air(&self) -> Option<radio::RadioTier> {
+        self.radio_director.on_air(self.now)
+    }
+
     // -----------------------------------------------------------------------------------------
     // Public queries
     // -----------------------------------------------------------------------------------------
@@ -847,6 +1049,12 @@ impl PoliceSystem {
     /// All units, ascending by id.
     pub fn units(&self) -> &[Unit] {
         &self.units
+    }
+
+    /// Units reset in place since the last call (row 78), in reset order. `wp_sim` places each
+    /// unit's car at the new pose and makes it a ghost for `ghost_s`.
+    pub fn take_unit_resets(&mut self) -> Vec<UnitReset> {
+        std::mem::take(&mut self.resets)
     }
 
     /// Open incidents.
@@ -959,6 +1167,36 @@ impl PoliceSystem {
     /// Roadblocks in place.
     pub fn roadblocks(&self) -> &[Roadblock] {
         &self.roadblocks
+    }
+
+    /// Elevated road decks of the city ([`PoliceSystem::for_world`] sets them from the map):
+    /// race stakeouts on a viaduct park on the deck, not on the ground under it.
+    pub fn set_decks(&mut self, decks: Vec<race::DeckFoot>) {
+        self.decks = decks;
+    }
+
+    /// Spots `(position, heading)` of tool `tool`'s cars not parked yet: roadblock cars waiting
+    /// while their spot is in a racer's view (row 131), each appearing once it is hidden, and a
+    /// spike strip's car post while the strip is on its way (row 165: laid only when its car
+    /// stands there).
+    pub fn tool_cars_waiting(&self, tool: ToolId) -> Vec<([f32; 2], [f32; 2])> {
+        self.tool_cars
+            .iter()
+            .filter(|c| c.tool == tool)
+            .map(|c| (c.pos, c.heading))
+            .chain(
+                self.spike_runs
+                    .iter()
+                    .filter(|r| r.strip.id == tool)
+                    .map(|r| (r.post, r.heading)),
+            )
+            .collect()
+    }
+
+    /// Spike strips requested but not on the road yet: each waits for its car, which appears
+    /// at its post out of view or drives in to it, and is laid only then (row 165).
+    pub fn spike_strips_pending(&self) -> Vec<&SpikeStrip> {
+        self.spike_runs.iter().map(|r| &r.strip).collect()
     }
 
     /// Spike strips in place (line colliders).
@@ -1168,6 +1406,23 @@ impl PoliceSystem {
         }
     }
 
+    /// Report how upright an externally driven unit is (row 75): `up_z` is the world Z of the
+    /// chassis up axis (1 upright, 0 on its side, -1 on its roof), after
+    /// [`PoliceSystem::sync_unit`]. A unit on its side or roof for
+    /// [`stuck::FLIPPED_RESET_S`] is reset upright in its lane (once no racer sees it).
+    /// Optional: without it a unit counts as upright.
+    pub fn sync_unit_upright(&mut self, unit: UnitId, up_z: f32) {
+        let now = self.now;
+        if let Some(i) = self.unit_index(unit) {
+            let u = &mut self.units[i];
+            if up_z < stuck::FLIPPED_UP_Z {
+                u.flipped_since.get_or_insert(now);
+            } else {
+                u.flipped_since = None;
+            }
+        }
+    }
+
     /// Add a player-driven chase unit. It receives [`UnitOrder`] suggestions, never control.
     pub fn add_player_unit(
         &mut self,
@@ -1238,19 +1493,51 @@ impl PoliceSystem {
         }
     }
 
-    /// Driver input for an externally driven AI unit from its [`pro::ProDriver`] (lead P8):
-    /// with lights on a racing line inside its own-direction lanes, a grip-limit speed profile
-    /// (road grip from [`PoliceSystem::sync_unit_feel`], damage, the car's
-    /// [`pro::CarLimits`]), late braking and slide control, on `wp_world`'s shared pure-pursuit
-    /// and PID controller; patrol keeps its lane and gentle corner budget. Call once per physics
-    /// tick with that tick's `dt`, after [`PoliceSystem::sync_unit`]. `None` for player units
-    /// and unknown ids.
+    /// Whether another car is closing on unit `i` and would reach it within
+    /// [`TURN_LOOK_S`] (with `ahead_only`, one in front of it; with `racers_only`, a racer: a pursuer turns round for its racer at once
+    /// past other traffic, but not across a racer's path — Loop 9: a pursuer U-turned in front of
+    /// the oncoming racer it had just been given, which hit it and left the corridor; DQ). A unit
+    /// doesn't start turning across the road then (opponent-pace: units
+    /// turning round on the Hollins hairpin, just after the race leader passed, ended up across
+    /// both lanes in front of the next racer).
+    fn traffic_closing(&self, i: usize, racers_only: bool, ahead_only: bool) -> bool {
+        let u = &self.units[i];
+        let (entity, pos, heading) = (u.entity, u.body.pos, u.body.heading);
+        self.obstacles.iter().any(|o| {
+            // Other police cars coordinate among themselves (converging on an arrest they
+            // would hold each other up for good).
+            if o.ghost || o.unit.is_some() || (o.entity.is_some() && o.entity == entity) {
+                return false;
+            }
+            if racers_only && !o.entity.is_some_and(|e| self.racers.contains_key(&e)) {
+                return false;
+            }
+            let r = graph::sub(o.pos, pos);
+            if ahead_only && graph::dot(r, heading) <= 0.0 {
+                return false;
+            }
+            let d2 = graph::dot(r, r);
+            if !(1e-4..=TURN_LOOK_M * TURN_LOOK_M).contains(&d2) {
+                return false;
+            }
+            // Closing speed along the line between them, times the distance: c·d.
+            let cd = -graph::dot(r, o.vel);
+            cd > TURN_LOOK_MIN_MPS * d2.sqrt() && d2 < cd * TURN_LOOK_S
+        })
+    }
+
+    /// Driver input for an externally driven AI unit. Round 12's manoeuvres come first
+    /// (turn-round U-turn / reverse swing, give-way, push-through, back-out, holds, stuck
+    /// detection); the plain drive along the track is, with lights on, the unit's
+    /// [`pro::ProDriver`] (lead P8: racing line inside its own-direction lanes, grip-limit
+    /// speed profile with road grip from [`PoliceSystem::sync_unit_feel`], damage and the car's
+    /// [`pro::CarLimits`], late braking, slide control) and, with lights off, the lane and
+    /// gentle corner budget on `wp_world`'s shared pure-pursuit and PID controller. Call once
+    /// per physics tick with that tick's `dt`, after [`PoliceSystem::sync_unit`]. `None` for
+    /// player units and unknown ids.
     pub fn unit_input(&mut self, unit: UnitId, dt: f32) -> Option<VehicleInput> {
         let i = self.unit_index(unit)?;
-        let (accel, brake) = (
-            self.cfg.pursuit.unit.accel_mps2,
-            self.cfg.pursuit.unit.brake_mps2,
-        );
+        let brake = self.cfg.pursuit.unit.brake_mps2;
         let u = &mut self.units[i];
         if u.player.is_some() {
             return None;
@@ -1271,8 +1558,31 @@ impl PoliceSystem {
         }
         let (s, _) = u.cmd.track.project_ahead(u.body.pos, u.track_s, 3.0, 40.0);
         u.track_s = s;
+        match u.unstick.stand_at {
+            Some(p) if graph::dist(p, u.body.pos) < stuck::STAND_M => u.unstick.stand_s += dt,
+            _ => {
+                u.unstick.stand_at = Some(u.body.pos);
+                u.unstick.stand_s = 0.0;
+            }
+        }
         let offset = self.update_avoid(i, dt);
+        Some(self.drive_input(i, offset, dt))
+    }
+
+    /// Driver input for unit `i` (round 12 + lead P8): the round-12 manoeuvres first (U-turn,
+    /// reverse swing, give-way, push-through, back-out, holds, stuck detection); then, for the
+    /// plain drive along the track, with lights on the [`pro::ProDriver`] (racing line in the
+    /// own-direction lanes, grip-limit speed profile, late braking, slide control) and with
+    /// lights off pure pursuit on the lane at `offset` with PID pedals toward the think-rate
+    /// corner plan (`planned_speed`, `patrol_cornering_g`) and comfortable braking.
+    fn drive_input(&mut self, i: usize, offset: f32, dt: f32) -> VehicleInput {
+        let (accel, brake) = (
+            self.cfg.pursuit.unit.accel_mps2,
+            self.cfg.pursuit.unit.brake_mps2,
+        );
         let u = &mut self.units[i];
+        let v = u.body.speed;
+        let s = u.track_s;
         let look = u.controller().lookahead(v);
         // Static feelers (row 66): away from a wall at the side, slow for one ahead.
         let offset = offset + u.avoid.wall.shift_m;
@@ -1308,15 +1618,25 @@ impl PoliceSystem {
                 } else {
                     0.0
                 };
-                return Some(VehicleInput {
+                // Up to the U-turn speed briskly (0.5 throttle crept round at ≈ 3 m/s: a
+                // half circle took 5 s, owner "don't turn around fast enough"), then hold it.
+                let throttle = if fast {
+                    0.0
+                } else if v < stuck::UTURN_MPS - 1.0 {
+                    UTURN_THROTTLE
+                } else {
+                    UTURN_HOLD_THROTTLE
+                };
+                self.units[i].branch = 1;
+                return VehicleInput {
                     steer,
-                    throttle: if fast { 0.0 } else { 0.5 },
+                    throttle,
                     brake: if fast { 0.5 } else { 0.0 },
                     handbrake,
                     siren: siren_out,
                     headlights: true,
                     ..Default::default()
-                });
+                };
             }
             u.unstick.phase = stuck::Phase::Drive;
             u.unstick.swing_ready = now.plus(stuck::SWING_COOLDOWN_S);
@@ -1326,19 +1646,98 @@ impl PoliceSystem {
             if facing < stuck::SWING_DONE_COS && now < until && !disabled {
                 // In reverse the pedals swap: brake drives backwards, throttle brakes.
                 let (throttle, brake) = reverse_pedals(v, 1.0, SWING_REVERSE_MAX_MPS);
-                return Some(VehicleInput {
+                self.units[i].branch = 2;
+                return VehicleInput {
                     steer,
                     throttle,
                     brake,
                     siren: siren_out,
                     headlights: true,
                     ..Default::default()
-                });
+                };
             }
             u.unstick.phase = stuck::Phase::Drive;
             u.unstick.swing_ready = now.plus(stuck::SWING_COOLDOWN_S);
             u.unstick.slow_s = 0.0;
         }
+        let chasing = matches!(
+            u.assignment,
+            Assignment::Pursue { .. } | Assignment::Intercept { .. }
+        );
+        // Its way lies behind it and a car is closing: don't arc across the road in front of
+        // it (Loop 9: a unit given a racer to chase turned across the road at walking pace into
+        // the oncoming field). Hold straight in its lane until they have passed.
+        // Its target coming straight at it (in front, closing head-on): wait in its lane for it
+        // to go by, then turn round from a standstill, instead of driving at it and having to
+        // brake from speed before turning (wp_sim police_passby).
+        let target_head_on = u.assignment.target().is_some_and(|e| {
+            self.racers.get(&e).is_some_and(|r| {
+                let d = graph::sub([r.pos[0], r.pos[1]], pos);
+                let rv = [r.vel[0], r.vel[1]];
+                graph::dot(d, heading) > 0.0
+                    && graph::dot(rv, heading) < -HEAD_ON_MPS
+                    && graph::dot(d, d) < TURN_LOOK_M * TURN_LOOK_M
+            })
+        });
+        // Waiting for it head-on while standing in its line (a single-carriageway hairpin,
+        // Hollins): pull aside out of the line at a crawl instead of stalling in front of it,
+        // so it can pass (and the field behind it is not stopped by a parked police car).
+        let aside = if target_head_on {
+            u.assignment
+                .target()
+                .and_then(|e| self.racers.get(&e))
+                .and_then(|r| {
+                    let rv = [r.vel[0], r.vel[1]];
+                    let rd = graph::normalize(rv);
+                    let off = graph::cross(rd, graph::sub(pos, [r.pos[0], r.pos[1]]));
+                    (off.abs() < HEAD_ON_PATH_M).then(|| {
+                        // Further out on the side it already leans to (its right when dead on).
+                        let side = if off.abs() > 0.3 {
+                            off.signum()
+                        } else {
+                            graph::cross(rd, graph::perp_left(heading)).signum()
+                        };
+                        let out = graph::scale(graph::perp_left(rd), side * HEAD_ON_PATH_M);
+                        graph::add(graph::add(pos, graph::scale(heading, 6.0)), out)
+                    })
+                })
+        } else {
+            None
+        };
+        if let (Some(to), false) = (aside, disabled) {
+            let left = graph::cross(heading, graph::sub(to, pos)) > 0.0;
+            let (throttle, brake) = if v < HEAD_ON_ASIDE_MPS {
+                (0.3, 0.0)
+            } else {
+                (0.0, 0.4)
+            };
+            self.units[i].branch = 3;
+            return VehicleInput {
+                steer: if left { -1.0 } else { 1.0 },
+                throttle,
+                brake,
+                siren: siren_out,
+                headlights: true,
+                ..Default::default()
+            };
+        }
+        if (target_head_on || facing < stuck::SWING_BEHIND_COS)
+            && !disabled
+            && matches!(u.unstick.phase, stuck::Phase::Drive)
+            && (target_head_on || self.traffic_closing(i, chasing, true))
+        {
+            let (throttle, brake, handbrake) = hold_pedals(v);
+            self.units[i].branch = 4;
+            return VehicleInput {
+                throttle,
+                brake,
+                handbrake,
+                siren: siren_out,
+                headlights: true,
+                ..Default::default()
+            };
+        }
+        let u = &mut self.units[i];
         // Lights on only (pursuit, intercept, response): a patrol turns round like traffic.
         let swing_wanted = matches!(u.unstick.phase, stuck::Phase::Drive)
             && siren
@@ -1348,7 +1747,8 @@ impl PoliceSystem {
             && v < stuck::SWING_MAX_MPS
             && now >= u.unstick.swing_ready
             && u.unstick.may_turn(now)
-            && graph::dist(pos, [target[0], target[1]]) > 6.0;
+            && graph::dist(pos, [target[0], target[1]]) > 6.0
+            && !self.traffic_closing(i, chasing, false);
         // Room for the turning circle (row 66: full-lock turns on narrow streets hit buildings):
         // forward round a centre on the target's side, backwards round one on the other side.
         let left_t = graph::cross(heading, to_t) > 0.0;
@@ -1376,15 +1776,19 @@ impl PoliceSystem {
             } else {
                 stuck::SWING_COOLDOWN_S
             });
-            return Some(VehicleInput {
+            self.units[i].branch = 5;
+            return VehicleInput {
                 brake: 0.8,
                 siren: siren_out,
                 headlights: true,
                 ..Default::default()
-            });
+            };
         }
-        if swing_wanted && v >= stuck::UTURN_MIN_MPS {
-            // Still rolling: U-turn forward, full lock toward the target's side.
+        if swing_wanted && (v >= stuck::UTURN_MIN_MPS || fwd_room) {
+            // Still rolling, or standing with room for the turning circle: U-turn forward, full
+            // lock toward the target's side. (From a standstill reverse takes about a second to
+            // engage and a full-lock reverse arc turns slowly; with the round-12 tyre side-force
+            // floor a parked cop's three-point turn missed wp_sim police_passby's 4 s bound.)
             let left = left_t;
             let steer = if left { -1.0 } else { 1.0 };
             let u = &mut self.units[i];
@@ -1395,14 +1799,15 @@ impl PoliceSystem {
             };
             u.unstick.note_turn(pos, now);
             self.stats.swings += 1;
-            return Some(VehicleInput {
+            self.units[i].branch = 6;
+            return VehicleInput {
                 steer,
                 brake: 0.5,
                 handbrake: 1.0,
                 siren: siren_out,
                 headlights: true,
                 ..Default::default()
-            });
+            };
         }
         if swing_wanted && back_room && self.room_behind(i, 6.0) {
             // Reversing with right lock swings the nose left, and the other way round.
@@ -1415,13 +1820,14 @@ impl PoliceSystem {
             };
             u.unstick.note_turn(pos, now);
             self.stats.swings += 1;
-            return Some(VehicleInput {
+            self.units[i].branch = 7;
+            return VehicleInput {
                 steer,
                 brake: 1.0,
                 siren: siren_out,
                 headlights: true,
                 ..Default::default()
-            });
+            };
         }
         let u = &mut self.units[i];
         // Un-sticking ([`stuck`]): back out first; otherwise watch for no progress.
@@ -1436,24 +1842,133 @@ impl PoliceSystem {
                 // Brake held at a standstill engages reverse; in reverse the pedals swap, so
                 // the brake pedal drives backwards.
                 let (throttle, brake) = reverse_pedals(v, 0.6, REVERSE_MAX_MPS);
-                return Some(VehicleInput {
+                self.units[i].branch = 8;
+                return VehicleInput {
                     steer,
                     throttle,
                     brake,
                     siren: siren_out,
                     headlights: true,
                     ..Default::default()
-                });
+                };
             }
             u.unstick.phase = stuck::Phase::Drive;
             u.unstick.slow_s = 0.0;
         }
+        // Give way (opponent-pace): standing blocked by a slow racer it isn't after, back out
+        // of its way, swinging the nose back along the lane, then wait there (avoid still
+        // holds it) so the racer can get past. Counts as a turn-round try.
+        // Gave way: wait for that racer to get past (it is still in front and close).
+        if let Some((e, until)) = u.unstick.give_way_to {
+            let waiting = now < until
+                && !disabled
+                && self.racers.get(&e).is_some_and(|r| {
+                    let d = graph::sub([r.pos[0], r.pos[1]], pos);
+                    graph::dot(d, heading) > 0.0
+                        && graph::dot(d, d) < stuck::GIVE_WAY_HOLD_M * stuck::GIVE_WAY_HOLD_M
+                });
+            if waiting {
+                let (throttle, brake, handbrake) = hold_pedals(v);
+                self.units[i].branch = 9;
+                return VehicleInput {
+                    throttle,
+                    brake,
+                    handbrake,
+                    siren: siren_out,
+                    headlights: true,
+                    ..Default::default()
+                };
+            }
+            self.units[i].unstick.give_way_to = None;
+        }
+        let u = &mut self.units[i];
+        // The slow racer it is in the way of: the one blocking it, or (blocked by anything)
+        // one standing close by, the two of them stuck round the same car (Hollins hairpin).
+        let after = |e: EntityId| {
+            matches!(
+                u.assignment,
+                Assignment::Pursue { target, .. } | Assignment::Intercept { target, .. }
+                    if target == e
+            )
+        };
+        let slow = stuck::GIVE_WAY_RACER_MPS * stuck::GIVE_WAY_RACER_MPS;
+        let near = stuck::GIVE_WAY_NEAR_M * stuck::GIVE_WAY_NEAR_M;
+        let give_way_racer = match u.avoid.blocked_by {
+            Some(avoid::BlockedBy::Vehicle(e))
+                if self.racers.get(&e).is_some_and(|r| {
+                    !after(e) && r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1] < slow
+                }) =>
+            {
+                Some(e)
+            }
+            Some(_) => self
+                .racers
+                .iter()
+                .filter(|(e, r)| {
+                    let d = graph::sub([r.pos[0], r.pos[1]], pos);
+                    !after(**e)
+                        && graph::dot(d, d) < near
+                        && r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1] < slow
+                })
+                .map(|(e, _)| *e)
+                .next(),
+            None => None,
+        };
+        let racer_block = give_way_racer.is_some();
+        let u = &mut self.units[i];
+        if racer_block && v.abs() < 0.5 && !disabled {
+            u.unstick.give_way_s += dt;
+        } else {
+            u.unstick.give_way_s = 0.0;
+        }
+        if u.unstick.give_way_s >= stuck::GIVE_WAY_S
+            && u.unstick.may_turn(now)
+            && self.room_behind(i, stuck::GIVE_WAY_M)
+        {
+            let u = &mut self.units[i];
+            u.unstick.give_way_s = 0.0;
+            u.unstick.note_turn(pos, now);
+            if let Some(e) = give_way_racer {
+                u.unstick.give_way_to = Some((
+                    e,
+                    now.plus(2.0 * stuck::REVERSE_MAX_S + stuck::GIVE_WAY_HOLD_S),
+                ));
+            }
+            // Straight back: make room in front (steering round near a hairpin swung it
+            // across the road).
+            let steer = 0.0;
+            u.unstick.phase = stuck::Phase::Reverse {
+                from: pos,
+                dist_m: stuck::GIVE_WAY_M,
+                until: now.plus(2.0 * stuck::REVERSE_MAX_S),
+                steer,
+            };
+            self.stats.give_ways += 1;
+            self.units[i].branch = 10;
+            return VehicleInput {
+                steer,
+                brake: 1.0,
+                siren: siren_out,
+                headlights: true,
+                ..Default::default()
+            };
+        }
+        let u = &mut self.units[i];
         // Push-through (row 61): with lights on, blocked by a stopped civilian or parked car
         // it can't pass, shove it aside at low speed; if that doesn't move it, un-stick.
         let av = self.cfg.pursuit.avoid.clone();
+        // Never shove a racer or another unit: a push that started on traffic ends when the
+        // car in front turns out to be one (PR #60 port: a cruiser on Patrol kept shoving a
+        // captured, held player car down the road with the stronger engine).
+        let shoving_racer_or_unit = match u.avoid.blocked_by {
+            Some(avoid::BlockedBy::Vehicle(e)) => self.racers.contains_key(&e),
+            Some(avoid::BlockedBy::Unit(_)) => true,
+            _ => false,
+        };
+        let u = &mut self.units[i];
         if let stuck::Phase::Push { from, until } = u.unstick.phase {
             let moved = graph::dist(pos, from);
-            if moved < PUSH_DONE_M && now < until && !disabled {
+            if moved < PUSH_DONE_M && now < until && !disabled && !shoving_racer_or_unit {
                 // Straight ahead, a little left (nudging the blocker to the kerb): a shove,
                 // not a turn (steering for the track swung units across the road).
                 let tgt = graph::add(
@@ -1464,19 +1979,20 @@ impl PoliceSystem {
                 let steer = ctl.steer(pos, heading, [tgt[0], tgt[1], 0.0]);
                 let acc = (av.push_mps - v).clamp(-brake, accel);
                 let (throttle, brake) = ctl.pedals(v, acc, dt, false);
-                return Some(VehicleInput {
+                self.units[i].branch = 11;
+                return VehicleInput {
                     steer,
                     throttle,
                     brake,
                     siren: siren_out,
                     headlights: true,
                     ..Default::default()
-                });
+                };
             }
             u.unstick.phase = stuck::Phase::Drive;
             u.unstick.push_ready = now.plus(av.push_cooldown_s);
             u.avoid.push_wait_s = 0.0;
-            if moved < av.push_min_progress_m && !disabled {
+            if moved < av.push_min_progress_m && !disabled && !shoving_racer_or_unit {
                 // Didn't budge: back out / re-route / respawn like any stuck unit.
                 self.on_stuck(i, true);
             }
@@ -1532,17 +2048,6 @@ impl PoliceSystem {
             Some(avoid::BlockedBy::Vehicle(e)) => self.racers.contains_key(&e),
             _ => false,
         };
-        // A stopped racer right in front: on a narrow road an AI racer waits for the unit just
-        // as the unit waits for it, so neither would ever move. Treated like two chase units
-        // nose to nose (`HELD_CHASE_S`), not like a dead car (`HELD_AFTER_S`).
-        let stopped_racer_ahead = match u.avoid.blocked_by {
-            Some(avoid::BlockedBy::Vehicle(e)) => self.racers.get(&e).is_some_and(|r| {
-                let rel = graph::sub([r.pos[0], r.pos[1]], pos);
-                graph::dot(rel, heading) > 0.0
-                    && (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt() < stuck::SLOW_MPS
-            }),
-            _ => false,
-        };
         let u = &mut self.units[i];
         if hold && !disabled && behind_racer_or_unit && !red_ahead && v.abs() < stuck::SLOW_MPS {
             u.unstick.held_s += dt;
@@ -1550,54 +2055,63 @@ impl PoliceSystem {
             u.unstick.held_s = 0.0;
         }
         u.unstick.progress(pos);
-        let input = if siren {
-            self.pro_input(i, dt)
+        self.units[i].branch = 0;
+        let (steer, mut throttle, mut brake) = if siren {
+            self.pro_drive(i, offset, disabled, dt)
         } else {
             let u = &mut self.units[i];
-            let ctl = u.controller();
-            let steer = ctl.steer(pos, heading, [target[0], target[1], 0.0]);
-            let (mut throttle, mut brake) = ctl.pedals(v, acc, dt, disabled);
-            let mut handbrake = 0.0;
-            if hold {
-                // The shared controller releases the brake below its hold speed; right behind
-                // another vehicle or at a stop line the unit must not creep forwards either.
-                throttle = 0.0;
-                (brake, handbrake) = standstill_hold(v, brake.max(1.0));
-            }
             // The pro driver picks up from here when the lights go on.
             u.pro = None;
-            VehicleInput {
-                steer,
-                throttle,
-                brake,
-                handbrake,
-                ..Default::default()
-            }
+            let ctl = u.controller();
+            let steer = ctl.steer(pos, heading, [target[0], target[1], 0.0]);
+            let (throttle, brake) = ctl.pedals(v, acc, dt, disabled);
+            (steer, throttle, brake)
         };
         let u = &mut self.units[i];
-        if input.steer.abs() > 0.1 {
-            u.unstick.last_steer = input.steer;
+        if steer.abs() > 0.1 {
+            u.unstick.last_steer = steer;
         }
         if u.unstick.slow_s >= stuck::STUCK_AFTER_S {
             self.on_stuck(i, false);
         } else if u.unstick.held_s >= stuck::HELD_AFTER_S
-            || ((chasing || stopped_racer_ahead) && u.unstick.held_s >= stuck::HELD_CHASE_S)
+            || (chasing && u.unstick.held_s >= stuck::HELD_CHASE_S)
         {
             self.on_stuck(i, true);
         }
-        Some(VehicleInput {
+        let mut handbrake = 0.0;
+        if hold {
+            // The shared controller releases the brake below its hold speed; right behind
+            // another vehicle or at a stop line the unit must not creep forwards either.
+            throttle = 0.0;
+            (brake, handbrake) = standstill_hold(v, brake.max(1.0));
+        }
+        // Still rolling backwards after a reverse manoeuvre: the gearbox is in reverse, where
+        // the brake pedal drives backwards (`body.speed` is unsigned, so the pedals above
+        // would brake). Stop on the handbrake; at a standstill the throttle selects first
+        // again (from claude/beautiful-hopper-sfuta0: a unit ran backwards at 22 m/s).
+        let u = &self.units[i];
+        if graph::dot(u.vel, heading) < -ROLLING_BACK_MPS {
+            throttle = 0.0;
+            brake = 0.0;
+            handbrake = 1.0;
+        }
+        VehicleInput {
+            steer,
+            throttle,
+            brake,
+            handbrake,
             siren: siren_out,
             headlights: true,
-            ..input
-        })
+            ..Default::default()
+        }
     }
 
-    /// Lights-on driving (lead P8): the unit's [`pro::ProDriver`] on a racing line inside its
-    /// own-direction lanes (the lane while traffic is close ahead), a grip-limit speed profile
-    /// (road grip from [`PoliceSystem::sync_unit_feel`], damage, the car's
-    /// [`pro::CarLimits`]), late braking and slide control. The stuck recovery phases of
-    /// [`PoliceSystem::unit_input`] take over before this is asked.
-    fn pro_input(&mut self, i: usize, dt: f32) -> VehicleInput {
+    /// The plain drive of a lights-on unit by its [`pro::ProDriver`] (lead P8): steer, throttle,
+    /// brake. The speed it is asked for is the command capped by obstacle awareness and the
+    /// static feelers; a pass or a wall shift is driven as an exact offset. The pro driver's
+    /// own stuck reverse is off: round 12's un-sticking (`stuck`) owns that, and two recovery
+    /// loops fought each other.
+    fn pro_drive(&mut self, i: usize, offset: f32, disabled: bool, dt: f32) -> (f32, f32, f32) {
         // Traffic close ahead: keep to the lane (obstacle awareness looks along the lane), no
         // racing line through other cars' lanes.
         let traffic_ahead = self.traffic_near_line(i);
@@ -1611,8 +2125,9 @@ impl PoliceSystem {
             .speed_mps
             .min(u.avoid.limit_mps)
             .min(u.avoid.wall.limit_mps);
-        let hold = u.avoid.limit_mps <= 0.0;
-        let disabled = u.wrecked || u.assignment == Assignment::OutOfService;
+        let shift = u.avoid.wall.shift_m;
+        let off = offset + shift;
+        let exact = u.avoid.pass_offset_m.is_some() || (off - u.cmd.lane_offset_m).abs() > 0.05;
         let ctx = pro::DriveCtx {
             pos: u.body.pos,
             heading: u.body.heading,
@@ -1630,31 +2145,23 @@ impl PoliceSystem {
             // response drives at the grip limit.
             cornering_cap_g: (u.cmd.cornering_g < full_g - 1e-3).then_some(u.cmd.cornering_g),
             braking_cap_mps2: None,
-            // Static feelers (row 66): away from a wall at the side.
-            lane_offset_m: u.cmd.lane_offset_m + u.avoid.wall.shift_m,
-            pass_offset_m: u.avoid.pass_offset_m,
-            racing_line: !traffic_ahead,
+            lane_offset_m: u.cmd.lane_offset_m,
+            pass_offset_m: exact.then_some(off),
+            racing_line: !traffic_ahead && !exact,
             disabled,
         };
         let (geometry, limits) = (u.geometry, u.limits.unwrap_or(pro_cfg.default_limits));
-        let driver = u
-            .pro
-            .get_or_insert_with(|| pro::ProDriver::new(pro_cfg.clone(), limits, geometry, v));
+        let driver = u.pro.get_or_insert_with(|| {
+            let mut params = pro_cfg.clone();
+            params.stuck_s = f32::INFINITY;
+            pro::ProDriver::new(params, limits, geometry, v)
+        });
         let out = driver.drive(&ctx, &u.cmd.track, room, dt);
-        // `planned_speed` stays the think-rate corner plan: the push and stuck recovery read
-        // it as "wants to move", and the pro plan behind a blocker is 0 (a blocked unit never
-        // pushed).
-        let mut input = out.input;
-        if hold && !out.reversing {
-            // The shared controller releases the brake below its hold speed; right behind
-            // another vehicle or at a stop line the unit must not creep forwards either.
-            input.throttle = 0.0;
-            (input.brake, input.handbrake) = standstill_hold(v, input.brake.max(1.0));
-        } else if disabled && v <= 1.0 {
-            (input.brake, input.handbrake) = standstill_hold(v, input.brake);
-        }
-        input.steer = (input.steer - u.effects.steer_pull).clamp(-1.0, 1.0);
-        input
+        u.pro_dbg = (out.planned_mps, out.reversing);
+        u.turning_round = out.turning_round;
+        let input = out.input;
+        let steer = (input.steer - u.effects.steer_pull).clamp(-1.0, 1.0);
+        (steer, input.throttle, input.brake)
     }
 
     /// Whether another vehicle is close ahead of unit `i` near its road (within
@@ -1743,23 +2250,33 @@ impl PoliceSystem {
         self.radio.iter()
     }
 
-    /// Helicopters on station.
+    /// Priority tier of the latest logged radio line spoken by `unit` with this `text` (row
+    /// 144). The contract's `PoliceEvent::Radio` carries no tier yet; bridges (audio, the
+    /// browser strip) look it up here. `None` if it is no longer in the log.
+    pub fn radio_tier_of(&self, unit: Option<UnitId>, text: &str) -> Option<radio::RadioTier> {
+        self.radio
+            .iter()
+            .rev()
+            .find(|l| l.unit == unit && l.text == text)
+            .map(|l| l.tier)
+    }
+
+    /// Helicopters on station (tracking a racer).
     pub fn helicopters(&self) -> Vec<HeloView> {
         self.units
             .iter()
             .filter_map(|u| match (u.kind, &u.assignment) {
                 (UnitKind::Helicopter, Assignment::HeloTrack { target }) => {
-                    let aim = self
-                        .racers
-                        .get(target)
-                        .and_then(|r| r.last_known)
-                        .unwrap_or(u.body.pos);
+                    let r = self.racers.get(target);
+                    let aim = r.and_then(|r| r.last_known).unwrap_or(u.body.pos);
+                    let aim_z = r.map_or(0.0, |r| r.pos[2]);
                     Some(HeloView {
                         unit: u.id,
                         pos: [u.body.pos[0], u.body.pos[1], u.body.alt_m],
-                        spotlight_target: [aim[0], aim[1], 0.0],
+                        spotlight_target: [aim[0], aim[1], aim_z],
                         cone_half_angle_rad: self.cfg.tools.helicopter.spotlight_half_angle_rad,
                         target: *target,
+                        has_visual: self.helo_sight.get(&u.id).is_some_and(|s| s.visual),
                     })
                 }
                 _ => None,
@@ -1788,6 +2305,10 @@ impl PoliceSystem {
         h.write_u32(self.roadblocks.len() as u32);
         h.write_u32(self.spikes.len() as u32);
         h.write_u64(self.stats.pursuits.len() as u64);
+        if let Some(r) = &self.race {
+            h.write_bytes(r.race.as_bytes());
+            h.write_u32(r.stakeouts.iter().filter(|s| s.sprung).count() as u32);
+        }
         h.finish()
     }
 }
@@ -1821,6 +2342,14 @@ const BACKWARDS_MPS: f32 = 1.0;
 const REVERSE_MAX_MPS: f32 = 3.0;
 
 /// Fastest a unit reverses in a three-point turn (slower and the turn doesn't come round in
+/// A target racer coming at a unit faster than this (along the unit's heading) is head-on, m/s.
+const HEAD_ON_MPS: f32 = 5.0;
+/// A car closing on a unit this soon stops it from starting a turn-round, s.
+const TURN_LOOK_S: f32 = 4.0;
+/// ... looking this far, m.
+const TURN_LOOK_M: f32 = 80.0;
+/// ... and closing at least this fast, m/s.
+const TURN_LOOK_MIN_MPS: f32 = 2.0;
 /// its time), m/s.
 const SWING_REVERSE_MAX_MPS: f32 = 5.0;
 
@@ -1836,6 +2365,31 @@ fn reverse_pedals(v: f32, pedal: f32, max_mps: f32) -> (f32, f32) {
     }
 }
 
+/// Throttle, brake and handbrake that bring a car to a stop and keep it there, whichever way
+/// it is rolling: rolling backwards it is in reverse, where the pedals swap (the brake drives
+/// it backwards, the throttle brakes), so it brakes with the throttle.
+fn hold_pedals(v: f32) -> (f32, f32, f32) {
+    if v < -1.0 {
+        (0.6, 0.0, 0.0)
+    } else if v > 1.0 {
+        (0.0, 1.0, 0.0)
+    } else {
+        (0.0, STANDSTILL_BRAKE, 1.0)
+    }
+}
+
+/// A unit closer than this to the line of its target coming at it head-on pulls aside, m.
+const HEAD_ON_PATH_M: f32 = 6.0;
+/// ... at this crawl, m/s.
+const HEAD_ON_ASIDE_MPS: f32 = 2.5;
+
+/// Throttle at full lock in a forward U-turn below [`stuck::UTURN_MPS`] − 1 m/s.
+const UTURN_THROTTLE: f32 = 0.9;
+/// ... and from there up to [`stuck::UTURN_MPS`].
+const UTURN_HOLD_THROTTLE: f32 = 0.35;
+/// Rolling backwards faster than this outside a reverse manoeuvre, a physical unit stops on
+/// the handbrake, m/s.
+const ROLLING_BACK_MPS: f32 = 0.3;
 /// Pedal held at a standstill (below `wp_vehicle`'s auto-reverse threshold of 0.5).
 const STANDSTILL_BRAKE: f32 = 0.4;
 
@@ -1853,6 +2407,12 @@ fn standstill_hold(v: f32, brake: f32) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn traffic_hazard_stand_in_is_opt_in() {
+        // Real traffic is the norm (wp_sim); the statistical stand-in must be asked for.
+        assert!(!PoliceSetup::default().hazards);
+    }
 
     #[test]
     fn no_city_still_tracks_heat() {

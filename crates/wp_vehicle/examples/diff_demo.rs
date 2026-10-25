@@ -29,7 +29,7 @@ fn car(id: &str) -> LoadedCar {
 
 fn row(label: &str, c: &LoadedCar, extras: VehicleExtras) {
     let no_tcs = AssistProfile {
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         ..metric_assists()
     };
     let help = AssistProfile {

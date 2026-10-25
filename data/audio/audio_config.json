@@ -49,7 +49,7 @@
     "blip_load": 0.8,
     "blip_ref_rpm": 4000.0,
     "lod_two_layer_m": 40.0,
-    "second_layer_cull_scale": 0.0001,
+    "second_layer_cull_scale": 0.25,
     "physical_max_others": 6,
     "physical_radius_m": 60.0
   },
@@ -135,7 +135,9 @@
       "junction": "Phaser",
       "blocked": "Yelp",
       "two_tone": false,
-      "min_hold_s": 1.2,
+      "min_hold_s": 3.0,
+      "junction_burst_s": 2.5,
+      "junction_cooldown_s": 10.0,
       "pitch_spread": 0.015,
       "tempo_spread": 0.05,
       "whoop_gain": 0.9,
@@ -187,5 +189,24 @@
     "duck_fade_s": 0.15,
     "restore_fade_s": 0.8,
     "interrupt_at": "Pursuit"
+  },
+  "master": {
+    "bus_gain_db": {
+      "Engine": -6.0,
+      "World": -6.0,
+      "Police": -6.0,
+      "Ui": -6.0,
+      "Music": -6.0
+    },
+    "compressor": {
+      "threshold_db": -8.0,
+      "knee_db": 6.0,
+      "ratio": 4.0,
+      "attack_s": 0.003,
+      "release_s": 0.3
+    },
+    "trim_db": 0.0,
+    "clip_knee": 0.7,
+    "clip_ceiling": 0.89
   }
 }

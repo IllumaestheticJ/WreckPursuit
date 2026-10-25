@@ -55,6 +55,7 @@ impl DriverProfile {
     pub fn params(&self) -> DriverParams {
         let p = self.clamped();
         let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
+        let traffic_risk = p.risk.max(0.7 * (1.0 - p.skill));
         DriverParams {
             usage: Usage {
                 lateral: lerp(0.60, 0.95, p.skill),
@@ -72,8 +73,9 @@ impl DriverProfile {
             side_by_side_s: lerp(0.5, 3.0, p.aggression),
             defends: p.aggression >= 0.3,
             overtake_patience_s: lerp(2.5, 0.6, p.aggression),
-            civilian_margin_m: lerp(1.0, 0.6, p.risk),
-            civilian_headway_s: lerp(1.6, 0.9, p.risk),
+            traffic_risk,
+            civilian_margin_m: lerp(1.0, 0.6, traffic_risk),
+            civilian_headway_s: lerp(1.6, 0.9, traffic_risk),
             flee_wanted_level: 1 + (3.0 * p.risk + 0.5) as u8,
             perception_ahead_m: lerp(60.0, 130.0, p.awareness),
             mirror_range_m: lerp(12.0, 45.0, p.awareness),
@@ -110,9 +112,14 @@ pub struct DriverParams {
     pub defends: bool,
     /// Time stuck behind a slower car before an overtake is considered, s (aggression).
     pub overtake_patience_s: f32,
-    /// Lateral clearance to civilians, m (risk).
+    /// Risk taken in traffic: the opposing lanes to pass, the gaps accepted beside civilians
+    /// (`risk`, raised for weak drivers: `max(risk, 0.7 · (1 − skill))` — a beginner drives
+    /// wild, a skilled driver as carefully as the personality says). Police-related choices
+    /// (running, red lights) keep the personality's own `risk`.
+    pub traffic_risk: f32,
+    /// Lateral clearance to civilians, m (traffic risk).
     pub civilian_margin_m: f32,
-    /// Time gap to civilians ahead, s (risk).
+    /// Time gap to civilians ahead, s (traffic risk).
     pub civilian_headway_s: f32,
     /// Wanted level at which the driver abandons the race and runs (risk).
     pub flee_wanted_level: u8,

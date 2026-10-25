@@ -99,7 +99,9 @@ export class CityTiles {
       // Instanced meshes (trees, driveways, hedges, fences: glTF EXT_mesh_gpu_instancing)
       // are split by instance position instead.
       if ((m as THREE.InstancedMesh).isInstancedMesh) {
-        this.splitInstances(m as THREE.InstancedMesh, tileM * (INSTANCE_TILE_M / CITY_TILE_M));
+        // At least INSTANCE_TILE_M, never more than the city tile (the touch profile's 640 m
+        // city tiles keep 640 m instance tiles: bigger ones cost far more triangles than draws).
+        this.splitInstances(m as THREE.InstancedMesh, Math.max(INSTANCE_TILE_M, tileM));
         continue;
       }
       const parts = splitGeometry(m.geometry, tileM);

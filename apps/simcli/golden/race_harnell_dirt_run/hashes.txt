@@ -1,0 +1,11 @@
+# simcli hashes scenario=race_harnell_dirt_run systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 57b1b23abcc3f47f
+480 11806acbdc023aed
+720 94c20db720bddb71
+960 fb18dd67f3e3102e
+1200 6591db03eb36a62b
+1440 4a462d936c798884
+1680 92b968557ad70fe3
+1920 873ce733c43b2314
+2160 3966340a41dae607
+2400 33e250cb6022a26e

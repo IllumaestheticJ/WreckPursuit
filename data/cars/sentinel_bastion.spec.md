@@ -4,7 +4,7 @@
 
 | Class | Archetype | Durability | Base price |
 |---|---|---|---|
-| PoliceSuv | 2010s American full-size police SUV, 5.3 L pushrod V8, body-on-frame, RWD | 5 / 5 | 48,000 |
+| PoliceSuv | 2010s American full-size police SUV, 6.2 L pushrod V8, body-on-frame, RWD | 5 / 5 | 48,000 |
 
 ## Design note
 
@@ -59,28 +59,28 @@ Frontal area A = 0.82·W·H = 3.16 m²; Cd = 0.42 → **CdA = 1.378 m²** + 0.05
 
 ## Engine
 
-5.3 L OHV pushrod V8, naturally aspirated, police calibration. Same class engine as the Hauler (2010s 5.3 L truck V8).
+6.2 L OHV pushrod V8, naturally aspirated, direct injection, police calibration. Class-typical 2010s 6.2 L direct-injection truck V8 (~54 kW/L, ~334 kW at 5600 rpm, ~645 N·m at 4100). Pursuit tuning (owner, 2026-10-23): replaces the Hauler's 5.3 L so the SUV keeps up with the rest of the fleet.
 
 | rpm | N·m | kW |
 |---|---|---|
-| 800 | 360 | 30.2 |
-| 1200 | 400 | 50.3 |
-| 1600 | 440 | 73.7 |
-| 2000 | 465 | 97.4 |
-| 2500 | 485 | 127.0 |
-| 3000 | 500 | 157.1 |
-| 3500 | 512 | 187.7 |
-| 4100 | 519 | 222.8 |
-| 4500 | 510 | 240.3 |
-| 5000 | 485 | 253.9 |
-| 5600 | 452 | 265.1 |
-| 6000 | 410 | 257.6 |
+| 800 | 420 | 35.2 |
+| 1200 | 480 | 60.3 |
+| 1600 | 540 | 90.5 |
+| 2000 | 580 | 121.5 |
+| 2500 | 610 | 159.7 |
+| 3000 | 630 | 197.9 |
+| 3500 | 640 | 234.6 |
+| 4100 | 645 | 276.9 |
+| 4500 | 635 | 299.2 |
+| 5000 | 610 | 319.4 |
+| 5600 | 570 | 334.3 |
+| 6000 | 530 | 333.0 |
 
-Peak **265 kW @ 5600 rpm**, **519 N·m @ 4100 rpm**. Idle 600 / redline 5800 / limiter 6000 rpm. Rotating inertia 0.25 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 12% of peak torque = 62 N·m. Power-to-weight 100 kW/t.
+Peak **334 kW @ 5650 rpm**, **645 N·m @ 4100 rpm**. Idle 600 / redline 5800 / limiter 6000 rpm. Rotating inertia 0.25 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 12% of peak torque = 77 N·m. Power-to-weight 127 kW/t.
 
 ## Drivetrain
 
-6-speed automatic with torque converter, open rear diff. Layout **RWD**; front diff: open; rear diff: open. Torque converter: stall 2200 rpm, 2.0× at stall, couples 1:1 from 2600 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 830 N·m. Shift time 0.30 s.
+6-speed automatic with torque converter, open rear diff. Layout **RWD**; front diff: open; rear diff: open. Torque converter: stall 2200 rpm, 2.0× at stall, couples 1:1 from 2600 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 1030 N·m. Shift time 0.30 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -137,7 +137,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
 | sim | 8.0 s | 214 km/h | 43.5 m | 0.75 g | — |
-| estimate | 7.6 s | 224 km/h | 40.2 m | 0.81 g | 472 |
+| estimate | 6.3 s | 235 km/h | 40.2 m | 0.81 g | 524 |
 
 ## Damage lattice (`data/lattices/sentinel_bastion.json`)
 

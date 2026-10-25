@@ -8,8 +8,16 @@
 // builds) and checks them: `finishers` (every car finishes), `best_ratio` (best time over
 // that car's ideal time: its speed profile at 100 % of its measured limits; at most today's
 // + 0.05, never under 0.97), `race_time_s` per car (today's time −15 % .. +15 %, +20 % at
-// skill 0.50). Re-measured 2026-10-21 on ws/harness, after lead/city-residential; re-measure
-// and widen only with a reason (docs/integration/opponent-pace.md, Re-lock 2026-10-21).
+// skill 0.50). Measured 2026-10-20 on lead/opponent-pace; re-measured the same day on the
+// round-12 tip (today's grids, residential grid city, police give-way; reasons in
+// docs/integration/opponent-pace.md). Re-locked 2026-10-21 on ws/police 3bccc796 + ws/harness +
+// lead/round12 (one-version handling); reasons in docs/integration/opponent-pace.md. Re-measure and widen only with a reason.
+// Re-locked 2026-10-23 by the rule: the judged finish moved 60 m short of the Knob lot
+// (lead-approved layout change; the rest of the road is the AI run-off), 941 m instead of
+// 1001 m, so every time is about 3-4 s shorter. Reasons in docs/integration/opponent-pace.md.
+// 2026-10-23 (D, PR #38 port): spawns re-synced from the regenerated race pick file (the
+// Hollins Ascent grid moved across the Hollins Gorge Bridge; Loop 9's by millimetres). Ranges
+// unchanged: every time is inside them.
 (
     name: "opponent_pace_hollins_sprint_s50",
     seed: 16,
@@ -29,32 +37,32 @@
         (
             id: "player",
             car: "lindwurm_4t",
-            pos: (-424.6047, 879.35706, 22.403357),
-            yaw: 1.4438996,
+            pos: (-558.9696, 888.5032, 33.084213),
+            yaw: 1.0645496,
             driver: scripted,
             inputs: [],
         ),
         (
             id: "ai_mara",
             car: "hakone_gt",
-            pos: (-437.14102, 875.9159, 22.403357),
-            yaw: 1.4438996,
+            pos: (-579.9593, 900.14075, 33.084213),
+            yaw: 1.0645496,
             driver: scripted,
             inputs: [],
         ),
         (
             id: "ai_vic",
             car: "kestrel_ts",
-            pos: (-432.54037, 880.3695, 22.403357),
-            yaw: 1.4438996,
+            pos: (-572.96277, 896.26154, 33.084213),
+            yaw: 1.0645496,
             driver: scripted,
             inputs: [],
         ),
         (
             id: "ai_juno",
             car: "shiro_turbo",
-            pos: (-429.20535, 874.90344, 22.403357),
-            yaw: 1.4438996,
+            pos: (-565.9662, 892.3824, 33.084213),
+            yaw: 1.0645496,
             driver: scripted,
             inputs: [],
         ),
@@ -74,10 +82,10 @@
     ],
     expect_pending: [
         metric(name: "finishers", min: 4, max: 4),
-        metric(name: "best_ratio", min: 0.97, max: 1.20),
-        metric(name: "race_time_s", entity: "ai_mara", min: 54.1, max: 76.4),
-        metric(name: "race_time_s", entity: "ai_vic", min: 58.4, max: 82.6),
-        metric(name: "race_time_s", entity: "ai_juno", min: 55.4, max: 78.4),
-        metric(name: "race_time_s", entity: "player", min: 59.0, max: 83.4),
+        metric(name: "best_ratio", min: 0.97, max: 1.19),
+        metric(name: "race_time_s", entity: "ai_mara", min: 52.4, max: 74.0),
+        metric(name: "race_time_s", entity: "ai_vic", min: 54.8, max: 77.4),
+        metric(name: "race_time_s", entity: "ai_juno", min: 55.9, max: 78.9),
+        metric(name: "race_time_s", entity: "player", min: 56.8, max: 80.2),
     ],
 )

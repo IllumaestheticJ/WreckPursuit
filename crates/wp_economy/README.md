@@ -76,12 +76,42 @@ the fee and returns the car with exactly the damage it went in with, to be repai
 | `session` | `EconomySession`: the end-of-run glue for `wp_sim` (sim events + damage reports → `RunResult`) |
 | `payouts` | purses, buy-ins, clean bonus, rep, bounty while wanted, debt rules, pink slips, informants |
 | `mods` | `ModDef`/`ModEffect`, catalog validation, install/uninstall rules, `apply_mods` → modified `VehicleDef` + `LatticeDef` |
+| `lots` | dealerships / used lots / junkyards: `LotTables`, daily `lot_stock`, `Listing` + `ListingWear`, `buy_listing`, tyres (`replace_tires`, `tire_effects`, `wear_tires`) |
 | `garage` | accounts, buy/sell, floor car, install/uninstall, `preview`, valuation, insurance |
 | `estimate` | performance estimator (0–100, top speed, grip, braking) and the class index |
 | `career` | scripted multi-night career used for tuning (the 20-night scenario) |
 
-Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json` (16 packs,
-106 mods). The damage mode tables in `data/modes/` are read (not owned) for `repair_cost_scale`.
+Data: `data/economy/{prices,stakes,consequences,market,lots}.toml`, `data/mods/*.json` (16 packs,
+157 mods). The damage mode tables in `data/modes/` are read (not owned) for `repair_cost_scale`.
+
+## Free car tune
+
+`OwnedCar::tune` holds the car's four-slider tune (`CarTune`, 1..=5, 3 = stock;
+`docs/integration/tune.md`). `Economy::set_tune` is free and writes no ledger line; the car must
+be in the garage (like mod work). The field is `#[serde(default)]` and skipped when stock, so
+career saves keep version 2. Tests: `cargo test -p wp_economy --test tune`.
+
+## Garage workshop (`parts`)
+
+Parts on a car: `data/economy/parts.toml` lists the slots (front bumper, radiator, the four
+wheels...), the mod lines each takes and the removal order. Taking a part off puts it in
+`PlayerAccount::inventory`; fitting takes it back; the car's `mods` are rebuilt from its fitted
+parts, so the mod tree, preview and the sim need no change. Condition comes from the damage
+snapshot. The engine is an **assembly**: 16 internals (`parent = "engine"`) come out with it,
+or one by one in order, or on the engine stand (`strip_part` / `build_part`) once it is out.
+Engine damage wears the internals by their `damage_share`; replacing the worn ones rebuilds the
+engine yourself (the shop rebuild resets all wear). `clear_way` takes off whatever is in the
+way of a slot in one go; `mechanic_install` pays the mechanic to swap a part (inventory or
+bought now) and put everything back, selling or keeping the old one. Details and wasm exports:
+`docs/integration/garage.md`.
+
+```rust
+let (part, _) = econ.remove_part(&mut acct, car, "front_bumper")?;
+let (new, ev) = econ.buy_part(&mut acct, car, "radiator", Some("cooling_radiator_1"), mode)?;
+let (fit, _) = econ.fit_part(&mut acct, car, "radiator", new[0], mode)?; // fit.restore → lattice
+let view = econ.workshop(&acct, car, mode)?;
+let (job, _) = econ.mechanic_install(&mut acct, car, "radiator", &PartSource::Buy(None), true, mode)?;
+```
 
 ## Economy design
 
@@ -122,7 +152,9 @@ Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json
   charge normal rates but report cars at wanted level 2+ (`EventReason::ShopReported`).
 - Towing (flat by class) is a penalty charged when the sim reports the car was towed.
 - Insurance (`basic` 50 % / `full` 80 % after deductible, premium per day as a fraction of value)
-  does not pay for damage sustained while wanted and is voided by a capture while wanted. An
+  pays regardless of pursuit status (damage taken while wanted is covered if you get away). Only
+  getting caught matters: a capture voids the policy, and damage outstanding at the capture is
+  never paid, even by a policy bought afterwards. An
   unaffordable premium lapses the policy (it never creates debt).
 
 ### Getting caught
@@ -154,6 +186,49 @@ Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json
   reports a wanted car raises the carried heat to that level's threshold (browser career).
 - A new career starts with 4 500: a worn beater (1 800) leaves room for three busted L1 nights
   in it (≈ 740 each); `tests/browser_career.rs` keeps that true.
+
+### Car lots (`lots`, `data/economy/lots.toml`)
+Where cars come from in the career: **dealerships** (tiers 1–3: budget, mainstream, prestige),
+**used car lots** (a bargain lot and a certified one) and **junkyards** (two yards).
+- `Economy::lot_stock(lot, day, roster)` is a pure function of (lot id, day, roster): a
+  `wp_math::Rng` seeded from the lot id and the day fills `slots` spaces with chance
+  `fill_chance` each, from the roster models whose class and base price the lot carries.
+  Every lot restocks daily and never shows every model every day; dealerships show each model
+  at most once. Each slot forks its own RNG, so one space's roll never shifts another's.
+- Dealership cars are new (`market_price(New) × price_scale`, health 1, new tyres).
+- Used cars roll a condition in the lot's band and get wear to match (`ListingWear`): dents on
+  up to seven panels, tired components (never below 0.35: they run), worn tyres. Price =
+  `market_price(Used) × price_scale × (0.55 + 0.5 × condition)`.
+- Junkyard cars roll a lower band, can go below 0.35 on any component, lose bolt-on panels
+  (`missing_part_chance` each), do not run with `non_running_chance` (failed engine), get bald
+  or flat tyres, and are priced at `price_frac` of the base price (×0.75 if dead). Their
+  mechanical state is `hidden` until bought. With `rare_chance` a space holds a **rare
+  variant** (`[[rare_variants]]`: a roster model with mods installed as found).
+- `buy_listing` pays the asking price (`CarPurchased`) and adds the car with the listing's mods
+  and tyres; `purchase_price` = the asking price, so resale never beats what was paid. The
+  damage system turns the wear into lattice damage (browser: `DamageModel::apply_preowned_wear`),
+  after which repairs work as for crash damage.
+
+### Tyres
+`OwnedCar::tires` (`TireState`: tread 0..1 and flat, per wheel; old saves load with new tyres).
+**A repair never fixes tyres** — `RepairAll` and `RepairSelected` only cover estimate lines,
+and tyres are not on the estimate. `replace_tires(car, wheels)` fits new ones at
+`[tires] price_per_tire` by class (not mode-scaled: tyres are not damage); it is posted as an
+`Adjustment` ("tires replaced: N") until the contract has a reason for it (request #8).
+`tire_effects` gives the sim a grip multiplier per wheel (`bald_grip` at 0 tread → 1.0 new) and
+a deflation (1 = flat); `wear_tires` takes `wear_per_hour × hours driven` off and keeps
+spike-strip flats.
+
+### Career progression (`progression`, `data/economy/career.toml`)
+Credits are cash; rep is `PlayerAccount::rep`. On top sits a tier ladder decided by *current*
+rep: Unknown (0) → Street (500) → Known (2 000) → Respected (5 000) → Feared (10 000) → Legend
+(20 000). Tiers gate features (city betting at Street, touge at Known, touge betting and boss
+races at Respected, pink slips at Feared) and dealer classes (Sport / Muscle at Known; Exotic is
+open from the start, so only its price holds it back). The first time a tier is reached its bonus is paid once (`career.peak_tier`); a capture
+can drop you a tier and close what it opened. Bets are capped per tier and at 50 % of cash, and
+refused in debt. The scripted mid-skill racer makes ~250 rep a night: Street after ~2 nights,
+Known ~8, Respected ~20, Feared ~40 (`tests/progression.rs::tier_pacing`). API and ledger notes:
+`docs/integration/career-progression.md`.
 
 ### Payouts
 `winner purse = max(min, per_km × km) × class × day phase × mode × wanted`; places 1–4 get
@@ -187,8 +262,21 @@ same line at an equal or higher tier, so upgrading a prerequisite never strands 
 - `Cosmetic { kind, value }` — no gameplay effect, except body-kit pieces produce
   `DetachableRequest`s (existing group if the lattice has one, otherwise a request for prompt
   03's `gen-lattice`).
+- `Cosmetic` mods (and every other mod that can be seen) are drawn by the testbed from
+  `data/cosmetics/visuals.json`; `tests/visuals.rs` keeps that table in step with the catalog.
 - `Tool { kind, tier }` — radar detector, scanner, run-flat, reinforced cooling, fake plates,
   nitrous → `ToolLoadout`.
+
+**What a build looks like** (`visuals`, `Economy::build_visuals`): every mod that changes
+something you could see on a real car says so, and a build resolves to `BuildVisuals` — the parts
+to draw (`PartKind` + style + the body regions it is mounted on, so the renderer binds it to that
+region's lattice nodes: it dents, swings and detaches with that panel), per-wheel tire width /
+radius / compound from the *modified* `VehicleDef`, and the ride-height change. Parts come from
+`Cosmetic` effects and `wheels.tire_id` automatically, and from a mod's optional
+`"visuals": [{"part": "RearWing", "style": "gt"}]` list for parts whose effects are numbers
+(aero, brake kits, cages, bars, exhaust, intercooler, supercharger, carbon panels). Styles are
+validated at load; a test fails if any mod in a visible slot (wheels, tires, aero, body, hood,
+roof, paint, vinyls) draws nothing. The browser draws them in `apps/testbed-web/src/render/mod_parts.ts`.
 
 Every durability mod documents its trade-off in `tradeoff` (e.g. roll cage: +28 kg high in the
 cabin, raises the CG; reinforced front bumper: +20 kg in the nose, more understeer).
@@ -202,6 +290,8 @@ debug coupe = 559 (B). Monotone in power and in lower mass (property-tested).
 | Lever | File | Feel target |
 |---|---|---|
 | `labour_hours_per_item`, `region_parts`, `component_parts`, `class.*.parts_scale` | prices.toml | bumper scrape < one buy-in; medium front hit ≈ one race win in Sim (half in Arcade); full wreck ≈ 2× value in Sim (≥ 60 % hard floor) |
+| `respray_base` | prices.toml | paint shop respray (× class `parts_scale`): a few hundred on a beater, thousands on an exotic |
+| `heavy_damage_markup`, `total_loss_markup` | prices.toml | scrapes stay cheap; crushed parts cost up to 1.75×; rebuilding a write-off costs 1.4× more, so a wreck is usually a scrap |
 | `data/modes/*.toml repair_cost_scale` | (workstream 03) | Arcade repairs half of Sim |
 | `shop.*`, `district_labour` | prices.toml | crooked = convenience tax; legit = risk of a report |
 | `race_types.*`, `race_kinds.*`, `legality.*`, `day_phase.*`, `class_purse`, `mode_purse` | stakes.toml | Compact 9 km night sprint win ≈ 2 800; mid-skill nets ≈ 3 000 / night before repairs |
@@ -239,6 +329,14 @@ the purse); pound base fee 1–8 % of value; every price × condition inside its
 (`roster_prices_sit_inside_their_class_bands`); the floor car file matches `market.toml`; a car
 costing ≥ 25 % more than another street car is not slower (`pricier_cars_are_not_slower`,
 known outliers `hakone_gt` and `ironside_440`, sent to 09).
+
+2026-10-24 (player feedback: wrecks were too cheap to fix): every billed line is now
+× `1 + heavy_damage_markup × severity²` and a total loss × `total_loss_markup` (prices.toml,
+applied in `Economy::price_lines`; 0.75 and 1.4). A full Shiro Turbo wreck went 0.91 → 2.2× its value, a
+medium front hit 0.59 → 0.75× a win (Arcade), a bumper scrape +5 %. The asserted front-hit
+bands moved to 0.4–1.3× a win in Simulation and 0.5–1.5× in Arcade, and the Extreme career
+median floor to 0.5× the start (it lands near 0.6×). The table above predates
+this; rerun the test with `--nocapture` for current numbers.
 
 Changes this round: class bands widened (Compact min 9 000 → 4 000, Sport 25 000 → 12 000,
 Muscle 22 000 → 14 000, Exotic 90 000 → 60 000, Truck 15 000 → 12 000) because they were
@@ -366,3 +464,7 @@ Browser numbers not measured yet (expect ~2× native).
   validated by typed loaders with `deny_unknown_fields` and completeness checks.
 - CI runs without `--features native`, so the SQLite tests only run locally until CI adds that
   line (requested).
+- Career ledger entries (tier bonuses, bets, extra rep) are `Adjustment`s with `career:` /
+  `bet:` notes until the contract has typed reasons (`career-progression.md`, request #1). Tier
+  rewards are paid when the caller runs `update_progression` (the browser career does it at the
+  end of every run and night; the server path does not call it yet).

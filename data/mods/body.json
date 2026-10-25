@@ -12,6 +12,17 @@
     {"id": "body_hood_vented", "name": "Vented Hood", "slot": "Hood", "line": "hood_style", "tier": 1, "price": 900, "effects": [{"Cosmetic": {"kind": "HoodStyle", "value": "vented"}}], "tradeoff": "Cosmetic."},
     {"id": "body_hood_scoop", "name": "Scooped Hood", "slot": "Hood", "line": "hood_style", "tier": 2, "price": 1100, "effects": [{"Cosmetic": {"kind": "HoodStyle", "value": "scoop"}}], "tradeoff": "Cosmetic."},
     {"id": "body_roof_scoop", "name": "Roof Scoop", "slot": "Roof", "line": "roof_style", "tier": 1, "price": 500, "effects": [{"Cosmetic": {"kind": "RoofStyle", "value": "scoop"}}], "tradeoff": "Cosmetic."},
-    {"id": "body_roof_rack", "name": "Roof Rack", "slot": "Roof", "line": "roof_style", "tier": 2, "price": 400, "effects": [{"Cosmetic": {"kind": "RoofStyle", "value": "rack"}}], "tradeoff": "Cosmetic."}
+    {"id": "body_roof_rack", "name": "Roof Rack", "slot": "Roof", "line": "roof_style", "tier": 2, "price": 400, "effects": [{"Cosmetic": {"kind": "RoofStyle", "value": "rack"}}], "tradeoff": "Cosmetic."},
+    {"id": "body_lights_xenon", "name": "Cool-White Headlights", "slot": "BodyFront", "line": "lights", "tier": 1, "price": 350, "effects": [{"Cosmetic": {"kind": "Lights", "value": "xenon"}}], "tradeoff": "Cosmetic."},
+    {"id": "body_lights_amber", "name": "Amber Headlights", "slot": "BodyFront", "line": "lights", "tier": 1, "price": 300, "effects": [{"Cosmetic": {"kind": "Lights", "value": "amber"}}], "tradeoff": "Cosmetic."},
+    {"id": "body_lights_halo", "name": "Halo Ring Headlights", "slot": "BodyFront", "line": "lights", "tier": 2, "price": 700, "effects": [{"Cosmetic": {"kind": "Lights", "value": "halo"}}], "tradeoff": "Cosmetic."},
+    {"id": "body_roof_led_bar", "name": "Roof LED Bar", "slot": "Roof", "line": "roof_style", "tier": 3, "price": 650, "effects": [{"Cosmetic": {"kind": "RoofStyle", "value": "led_bar"}}, {"Vehicle": {"param": "body.drag_scale", "op": "Mul", "value": 1.01}}], "tradeoff": "A little drag; lights up the road at night (flavour)."},
+    {"id": "body_fog_lights", "name": "Round Fog Lights", "slot": "BodyFront", "line": "fog_lights", "tier": 1, "price": 400, "effects": [{"Cosmetic": {"kind": "FogLights", "value": "round"}}], "tradeoff": "Cosmetic."},
+    {"id": "body_fog_led", "name": "LED Fog Pods", "slot": "BodyFront", "line": "fog_lights", "tier": 2, "price": 650, "effects": [{"Cosmetic": {"kind": "FogLights", "value": "led_pods"}}], "tradeoff": "Cosmetic."},
+    {"id": "body_underglow_blue", "name": "Underglow (Blue)", "slot": "BodySides", "line": "underglow", "tier": 1, "price": 500, "effects": [{"Cosmetic": {"kind": "Underglow", "value": "blue"}}], "tradeoff": "Cosmetic; visible from a block away at night (flavour)."},
+    {"id": "body_underglow_green", "name": "Underglow (Green)", "slot": "BodySides", "line": "underglow", "tier": 1, "price": 500, "effects": [{"Cosmetic": {"kind": "Underglow", "value": "green"}}], "tradeoff": "Cosmetic; visible from a block away at night (flavour)."},
+    {"id": "body_underglow_purple", "name": "Underglow (Purple)", "slot": "BodySides", "line": "underglow", "tier": 1, "price": 500, "effects": [{"Cosmetic": {"kind": "Underglow", "value": "purple"}}], "tradeoff": "Cosmetic; visible from a block away at night (flavour)."},
+    {"id": "body_underglow_red", "name": "Underglow (Red)", "slot": "BodySides", "line": "underglow", "tier": 1, "price": 500, "effects": [{"Cosmetic": {"kind": "Underglow", "value": "red"}}], "tradeoff": "Cosmetic; visible from a block away at night (flavour)."},
+    {"id": "body_mud_flaps", "name": "Mud Flaps", "slot": "BodySides", "line": "mud_flaps", "tier": 1, "price": 200, "effects": [{"Cosmetic": {"kind": "MudFlaps", "value": "rally"}}], "tradeoff": "Cosmetic."}
   ]
 }

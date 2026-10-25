@@ -1,16 +1,16 @@
-//! Harlan Flats: farmland west of Port Vesper (and the north-west farm valley beyond the
+//! Harnell Flats: farmland west of Port Vesper (and the north-west farm valley beyond the
 //! range).
 //!
-//! - **Harlan Road** carries Route 40 West on from Port Vesper's west edge
-//!   ([`plan::R40W_END`]) over the Sable River, through the village of **Harlan Crossing**
-//!   ([`plan::HARLAN_CROSSING`]) to Pell Road in the far west. Two asphalt links (also named
-//!   Harlan Road) join it to the Route 12 interchange terminals ([`plan::INTERCHANGES`]).
+//! - **Harnell Road** carries Route 40 West on from Port Vesper's west edge
+//!   ([`plan::R40W_END`]) over the Sable River, through the village of **Harnell Crossing**
+//!   ([`plan::HARNELL_CROSSING`]) to Pell Road in the far west. Two asphalt links (also named
+//!   Harnell Road) join it to the Route 12 interchange terminals ([`plan::INTERCHANGES`]).
 //! - **Grange Road** (north–south through the village) and **Millbrook Road** (north–south
 //!   east of the river; it crosses Route 12 on a bridge) are the other county roads.
 //! - **Section-line gravel roads** ([`RoadMaterial::Gravel`]) in a loose grid, **dirt field
 //!   tracks** ([`RoadMaterial::Dirt`]) looping along field edges, the **Sable Ford Track**
 //!   across the river and the **Coyote Hollow Trail**, a twisty dirt rally trail along the
-//!   western edge (the start of the Harlan Farm Run).
+//!   western edge (the start of the Harnell Farm Run).
 //! - **Farmsteads** along the gravel roads: farmhouse, red barn, silos, sheds, a fenced yard,
 //!   a wind-break tree row and hay bales on the fields beyond.
 //! - **North-west valley**: Cold Spring Road west from the Ashpeak West interchange with its
@@ -21,8 +21,8 @@ use super::plan;
 
 // ---- Road styles ----------------------------------------------------------------------------
 
-/// Harlan Road out in the country: two-lane asphalt county road, 55 mph.
-const HARLAN: Style = Style {
+/// Harnell Road out in the country: two-lane asphalt county road, 55 mph.
+const HARNELL: Style = Style {
     class: RoadClass::Collector,
     fwd: 1,
     bwd: 1,
@@ -35,14 +35,14 @@ const HARLAN: Style = Style {
 /// Other county roads (Grange, Millbrook, Cold Spring, the interchange links): 50 mph.
 const COUNTY: Style = Style {
     speed: 22.352, // 50 mph
-    ..HARLAN
+    ..HARNELL
 };
-/// Harlan Road and Grange Road through the village: 35 mph, kerbside parking.
+/// Harnell Road and Grange Road through the village: 35 mph, kerbside parking.
 const VILLAGE_MAIN: Style = Style {
     speed: 15.6464, // 35 mph
     parking: true,
     bank_max: 0.0,
-    ..HARLAN
+    ..HARNELL
 };
 /// Village side streets.
 const VILLAGE: Style = Style {
@@ -76,11 +76,11 @@ const DIRT: Style = Style {
 
 // ---- Names ----------------------------------------------------------------------------------
 
-/// Harlan Road (also the interchange links).
-pub(crate) const HARLAN_ROAD: &str = "Harlan Road";
-/// County road north–south through Harlan Crossing.
+/// Harnell Road (also the interchange links).
+pub(crate) const HARNELL_ROAD: &str = "Harnell Road";
+/// County road north–south through Harnell Crossing.
 pub(crate) const GRANGE_ROAD: &str = "Grange Road";
-/// County road north–south east of the Sable River (gravel south of Harlan Road).
+/// County road north–south east of the Sable River (gravel south of Harnell Road).
 pub(crate) const MILLBROOK_ROAD: &str = "Millbrook Road";
 /// County road west from the Ashpeak West interchange.
 pub(crate) const COLD_SPRING_ROAD: &str = "Cold Spring Road";
@@ -91,18 +91,18 @@ pub(crate) const FORD_TRACK: &str = "Sable Ford Track";
 
 // ---- Areas ----------------------------------------------------------------------------------
 
-/// Harlan Crossing village (generic street-front buildings allowed), m.
+/// Harnell Crossing village (generic street-front buildings allowed), m.
 const VILLAGE_LO: V2 = [-3640.0, -180.0];
-/// Harlan Crossing village, upper corner, m.
+/// Harnell Crossing village, upper corner, m.
 const VILLAGE_HI: V2 = [-2980.0, 480.0];
 /// Village grid columns (Grange Road is the middle one), m.
 const VX: [f32; 5] = [-3560.0, -3430.0, -3300.0, -3170.0, -3040.0];
-/// Village grid rows (Harlan Road is the middle one), m.
+/// Village grid rows (Harnell Road is the middle one), m.
 const VY: [f32; 5] = [-110.0, 20.0, 150.0, 280.0, 410.0];
 /// The rally trail's north end (on Pell Road), m.
 const TRAIL_START: V2 = [-4300.0, 1700.0];
 
-/// Southern farmland (Harlan Flats proper).
+/// Southern farmland (Harnell Flats proper).
 fn in_flats(p: V2) -> bool {
     p[0] < plan::FARMS_EAST_X && p[1] < plan::RANGE_SOUTH_Y && p[1] > plan::LO[1]
 }
@@ -211,11 +211,11 @@ pub(super) fn layout(g: &mut Gen) {
             .copied()
             .expect("planned interchange")
     };
-    let harlan_ic = ic("Harlan Road");
+    let harnell_ic = ic("Harnell Road");
     let west_ic = ic("Ashpeak West");
 
-    // ---- Harlan Road: Route 40 West's dead end → Harlan Crossing → Pell Road ------------
-    let mut harlan = vec![
+    // ---- Harnell Road: Route 40 West's dead end → Harnell Crossing → Pell Road ------------
+    let mut harnell = vec![
         J(plan::R40W_END),
         S([-1820.0, 82.0]),
         J([-2050.0, 105.0]), // Millbrook Road
@@ -223,14 +223,14 @@ pub(super) fn layout(g: &mut Gen) {
         S([-2480.0, 190.0]), // over the Sable River
         J([-2780.0, 175.0]), // link to the interchange / Coulter Road
     ];
-    harlan.extend(VX.iter().rev().map(|x| J([*x, VY[2]])));
-    harlan.extend([
-        J([-3700.0, 168.0]), // Harlan Feed & Tractor
+    harnell.extend(VX.iter().rev().map(|x| J([*x, VY[2]])));
+    harnell.extend([
+        J([-3700.0, 168.0]), // Harnell Feed & Tractor
         J([-3800.0, 182.0]), // Tolliver Road
         S([-4050.0, 215.0]),
         J([-4300.0, 230.0]), // Pell Road
     ]);
-    way(g, &harlan, 8.0, &county_or_village(HARLAN), HARLAN_ROAD);
+    way(g, &harnell, 8.0, &county_or_village(HARNELL), HARNELL_ROAD);
     // Links to the Route 12 interchange terminals.
     way(
         g,
@@ -239,18 +239,18 @@ pub(super) fn layout(g: &mut Gen) {
             S([-2765.0, 450.0]),
             J([-2740.0, 700.0]), // Wexler Road
             S([-2700.0, 900.0]),
-            J(harlan_ic.a),
+            J(harnell_ic.a),
         ],
         8.0,
         &fixed(COUNTY),
-        HARLAN_ROAD,
+        HARNELL_ROAD,
     );
     way(
         g,
-        &[J(harlan_ic.b), S([-2200.0, 1060.0]), J([-2072.0, 1062.0])],
+        &[J(harnell_ic.b), S([-2200.0, 1060.0]), J([-2072.0, 1062.0])],
         8.0,
         &fixed(COUNTY),
-        HARLAN_ROAD,
+        HARNELL_ROAD,
     );
 
     // ---- County roads north–south -----------------------------------------------------
@@ -270,7 +270,7 @@ pub(super) fn layout(g: &mut Gen) {
         J([-3320.0, 1700.0]), // Ridgefoot Road
     ]);
     way(g, &grange, 8.0, &county_or_village(COUNTY), GRANGE_ROAD);
-    // Millbrook Road: gravel south of Harlan Road, asphalt north of it (over Route 12).
+    // Millbrook Road: gravel south of Harnell Road, asphalt north of it (over Route 12).
     way(
         g,
         &[
@@ -599,7 +599,7 @@ pub(super) fn layout(g: &mut Gen) {
     trail.push(J([-4300.0, -350.0]));
     way(g, &trail, 5.0, &dirt, RALLY_TRAIL);
 
-    // ---- Harlan Crossing: the village grid around Harlan Road × Grange Road --------------
+    // ---- Harnell Crossing: the village grid around Harnell Road × Grange Road --------------
     let names_row = [
         "Elm Street",
         "Mill Street",
@@ -898,7 +898,7 @@ fn village_landmarks(site: &mut Site) -> (Vec<Building>, Vec<Decor>) {
     let n = [0.0, 1.0];
     let flat = RoofShape::Flat;
     let gable = RoofShape::Gable;
-    // Harlan Community Church: a gabled nave and its steeple, on Church Street's block.
+    // Harnell Community Church: a gabled nave and its steeple, on Church Street's block.
     let specs: [(Vec<V2>, f32, BuildingKind, RoofShape, f32); 12] = [
         (
             rect_fp([-3365.0, 205.0], n, 14.0, 7.5),
@@ -914,7 +914,7 @@ fn village_landmarks(site: &mut Site) -> (Vec<Building>, Vec<Decor>) {
             flat,
             0.0,
         ),
-        // Harlan Grain Elevator: a row of tall bins and the head house, east of the village.
+        // Harnell Grain Elevator: a row of tall bins and the head house, east of the village.
         (
             round_fp([-2985.0, 245.0], 5.5),
             34.0,
@@ -950,7 +950,7 @@ fn village_landmarks(site: &mut Site) -> (Vec<Building>, Vec<Decor>) {
             flat,
             0.0,
         ),
-        // Harlan County Sheriff.
+        // Ashpeak Sheriff Harnell Substation.
         (
             rect_fp([-3495.0, 90.0], e, 14.0, 9.0),
             7.0,
@@ -958,7 +958,7 @@ fn village_landmarks(site: &mut Site) -> (Vec<Building>, Vec<Decor>) {
             flat,
             0.0,
         ),
-        // Harlan Feed & Tractor: big store shed and a machinery shed.
+        // Harnell Feed & Tractor: big store shed and a machinery shed.
         (
             rect_fp([-3700.0, 110.0], e, 18.0, 11.0),
             7.5,
@@ -1043,15 +1043,15 @@ pub(super) fn extra_buildings(site: &mut Site) -> (Vec<Building>, Vec<Decor>) {
 /// Points of interest.
 pub(super) fn pois(site: &mut Site) -> Vec<Poi> {
     let mut out = Vec::new();
-    // The Harlan Farm Run: pole on the rally trail's first stretch, facing down the trail.
+    // The Harnell Farm Run: pole on the rally trail's first stretch, facing down the trail.
     if let Some(r) = site.road_named(RALLY_TRAIL, TRAIL_START, 20.0) {
         out.extend(site.lane_poi(PoiKind::RaceStartGrid, plan::POI_FARM_RUN, r, 30.0, true));
     }
-    // Harlan Crossing: westbound on Harlan Road at the village's east edge.
-    if let Some(r) = site.road_named(HARLAN_ROAD, [VX[4] - 10.0, VY[2]], 15.0) {
+    // Harnell Crossing: westbound on Harnell Road at the village's east edge.
+    if let Some(r) = site.road_named(HARNELL_ROAD, [VX[4] - 10.0, VY[2]], 15.0) {
         out.extend(site.lane_poi(
             PoiKind::RaceStartGrid,
-            plan::POI_HARLAN_CROSSING,
+            plan::POI_HARNELL_CROSSING,
             r,
             10.0,
             true,
@@ -1060,10 +1060,10 @@ pub(super) fn pois(site: &mut Site) -> Vec<Poi> {
     for (kind, name, p) in [
         (
             PoiKind::PoliceStation,
-            "Harlan County Sheriff",
+            "Ashpeak Sheriff Harnell Substation",
             [-3495.0, 120.0],
         ),
-        (PoiKind::Garage, "Harlan Feed & Tractor", [-3700.0, 140.0]),
+        (PoiKind::Garage, "Harnell Feed & Tractor", [-3700.0, 140.0]),
         (
             PoiKind::SafehouseCandidate,
             "Old Mill Barn",
@@ -1098,16 +1098,16 @@ mod tests {
     }
 
     #[test]
-    fn harlan_road_joins_route_40_the_village_and_the_interchange() {
+    fn harnell_road_joins_route_40_the_village_and_the_interchange() {
         let (net, rep) = city();
         assert_eq!(rep.skipped_roads, 0);
-        // Graph of Harlan Road's pieces (nodes joined by its lanes).
+        // Graph of Harnell Road's pieces (nodes joined by its lanes).
         let mut adj: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
         for l in &net.lanes {
-            // Terminal b joins Harlan Road through Millbrook Road (the freeways' crossroad
-            // between the terminals is also named Harlan Road).
+            // Terminal b joins Harnell Road through Millbrook Road (the freeways' crossroad
+            // between the terminals is also named Harnell Road).
             let name = rep.road_names[l.road as usize];
-            if name == HARLAN_ROAD || name == MILLBROOK_ROAD {
+            if name == HARNELL_ROAD || name == MILLBROOK_ROAD {
                 adj.entry(l.from_node).or_default().push(l.to_node);
             }
         }
@@ -1116,7 +1116,7 @@ mod tests {
                 .filter(|n| adj.contains_key(n))
                 .find(|n| geom::dist(geom::xy(net.nodes[*n as usize].pos), p) < reach)
         };
-        let start = node_at(plan::R40W_END, 2.0).expect("Harlan Road at Route 40 West");
+        let start = node_at(plan::R40W_END, 2.0).expect("Harnell Road at Route 40 West");
         let mut seen = std::collections::BTreeSet::from([start]);
         let mut stack = vec![start];
         while let Some(n) = stack.pop() {
@@ -1128,16 +1128,16 @@ mod tests {
         }
         let ic = plan::INTERCHANGES
             .iter()
-            .find(|i| i.name == "Harlan Road")
+            .find(|i| i.name == "Harnell Road")
             .unwrap();
         for (what, p, reach) in [
             ("terminal a", ic.a, 2.0),
             ("terminal b", ic.b, 2.0),
-            ("Harlan Crossing", plan::HARLAN_CROSSING, 100.0),
+            ("Harnell Crossing", plan::HARNELL_CROSSING, 100.0),
             ("Pell Road", [-4300.0, 230.0], 2.0),
         ] {
-            let n = node_at(p, reach).unwrap_or_else(|| panic!("no Harlan Road node at {what}"));
-            assert!(seen.contains(&n), "{what} not reached along Harlan Road");
+            let n = node_at(p, reach).unwrap_or_else(|| panic!("no Harnell Road node at {what}"));
+            assert!(seen.contains(&n), "{what} not reached along Harnell Road");
         }
     }
 
@@ -1276,12 +1276,12 @@ mod tests {
         let run = poi(plan::POI_FARM_RUN, PoiKind::RaceStartGrid);
         let lane = &net.lanes[run.lane.unwrap() as usize];
         assert_eq!(rep.road_names[lane.road as usize], RALLY_TRAIL);
-        let village = poi(plan::POI_HARLAN_CROSSING, PoiKind::RaceStartGrid);
+        let village = poi(plan::POI_HARNELL_CROSSING, PoiKind::RaceStartGrid);
         let lane = &net.lanes[village.lane.unwrap() as usize];
-        assert_eq!(rep.road_names[lane.road as usize], HARLAN_ROAD);
-        assert!(geom::dist(geom::xy(village.pos), plan::HARLAN_CROSSING) < 300.0);
-        poi("Harlan County Sheriff", PoiKind::PoliceStation);
-        poi("Harlan Feed & Tractor", PoiKind::Garage);
+        assert_eq!(rep.road_names[lane.road as usize], HARNELL_ROAD);
+        assert!(geom::dist(geom::xy(village.pos), plan::HARNELL_CROSSING) < 300.0);
+        poi("Ashpeak Sheriff Harnell Substation", PoiKind::PoliceStation);
+        poi("Harnell Feed & Tractor", PoiKind::Garage);
         poi("Old Mill Barn", PoiKind::SafehouseCandidate);
     }
 

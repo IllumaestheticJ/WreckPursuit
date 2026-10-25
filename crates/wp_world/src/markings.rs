@@ -436,6 +436,9 @@ pub fn marking_mesh(map: &CityMap) -> MarkingMesh {
     for g in &map.paint.gores {
         g.paint(map, &mut out.white);
     }
+    // Car park bay lines (drawn only: the pad reports asphalt, see `crate::car_park`).
+    out.white
+        .append(&crate::car_park::paint_mesh(&map.car_parks));
     out
 }
 
@@ -1490,7 +1493,8 @@ mod tests {
         let vesper = CityMap::new(crate::vesper::generate(
             &crate::vesper::VesperConfig::default(),
         ));
-        for (name, map, ramps) in [("grid", &grid, 4), ("vesper", &vesper, 22)] {
+        // Vesper: 22 interchange ramps + 2 per rest stop (row 153).
+        for (name, map, ramps) in [("grid", &grid, 4), ("vesper", &vesper, 28)] {
             // One dotted stretch and one gore per ramp.
             let ramp_lanes = lanes_where(map, |_, l| {
                 l.kind == LaneKind::Highway && map.paint.road_lanes[l.road as usize] == 1

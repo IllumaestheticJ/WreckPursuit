@@ -4,6 +4,20 @@
     {"id": "vinyl_stripes", "name": "Racing Stripes", "slot": "Vinyls", "line": "vinyl", "tier": 1, "price": 300, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "stripes"}}], "tradeoff": "Cosmetic; makes the car easier to describe to the police (flavour)."},
     {"id": "vinyl_flames", "name": "Flames", "slot": "Vinyls", "line": "vinyl", "tier": 2, "price": 500, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "flames"}}], "tradeoff": "Cosmetic."},
     {"id": "vinyl_tribal", "name": "Tribal", "slot": "Vinyls", "line": "vinyl", "tier": 3, "price": 500, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "tribal"}}], "tradeoff": "Cosmetic."},
-    {"id": "vinyl_sponsor", "name": "Fake Sponsor Livery", "slot": "Vinyls", "line": "vinyl", "tier": 4, "price": 800, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "sponsor_generic"}}], "tradeoff": "Cosmetic; invented sponsors only."}
+    {"id": "vinyl_sponsor", "name": "Fake Sponsor Livery", "slot": "Vinyls", "line": "vinyl", "tier": 4, "price": 800, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "sponsor_generic"}}], "tradeoff": "Cosmetic; invented sponsors only."},
+    {"id": "vinyl_side_slash", "name": "Side Slash", "slot": "Vinyls", "line": "vinyl", "tier": 1, "price": 350, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "side_slash"}}], "tradeoff": "Cosmetic; a bold diagonal is easy to spot from a helicopter (flavour)."},
+    {"id": "vinyl_pinstripe", "name": "Pinstripe", "slot": "Vinyls", "line": "vinyl", "tier": 1, "price": 250, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "pinstripe"}}], "tradeoff": "Cosmetic."},
+    {"id": "vinyl_race_number", "name": "Race Number", "slot": "Vinyls", "line": "vinyl", "tier": 1, "price": 300, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "race_number"}}], "tradeoff": "Cosmetic; a number on the door is exactly what witnesses remember (flavour)."},
+    {"id": "vinyl_checker", "name": "Checker Fade", "slot": "Vinyls", "line": "vinyl", "tier": 2, "price": 450, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "checker"}}], "tradeoff": "Cosmetic."},
+    {"id": "vinyl_lightning", "name": "Lightning Bolt", "slot": "Vinyls", "line": "vinyl", "tier": 2, "price": 450, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "lightning"}}], "tradeoff": "Cosmetic."},
+    {"id": "vinyl_splatter", "name": "Paint Splatter", "slot": "Vinyls", "line": "vinyl", "tier": 2, "price": 400, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "splatter"}}], "tradeoff": "Cosmetic."},
+    {"id": "vinyl_hazard", "name": "Hazard Stripes", "slot": "Vinyls", "line": "vinyl", "tier": 2, "price": 400, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "hazard"}}], "tradeoff": "Cosmetic."},
+    {"id": "vinyl_shark_mouth", "name": "Shark Mouth", "slot": "Vinyls", "line": "vinyl", "tier": 2, "price": 500, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "shark_mouth"}}], "tradeoff": "Cosmetic."},
+    {"id": "vinyl_retro_bands", "name": "Retro Bands", "slot": "Vinyls", "line": "vinyl", "tier": 2, "price": 450, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "retro_bands"}}], "tradeoff": "Cosmetic."},
+    {"id": "vinyl_camo_urban", "name": "Urban Camo", "slot": "Vinyls", "line": "vinyl", "tier": 3, "price": 650, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "camo_urban"}}], "tradeoff": "Cosmetic; does not actually hide you (flavour)."},
+    {"id": "vinyl_camo_digital", "name": "Digital Camo", "slot": "Vinyls", "line": "vinyl", "tier": 3, "price": 700, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "camo_digital"}}], "tradeoff": "Cosmetic."},
+    {"id": "vinyl_sunset_fade", "name": "Sunset Fade", "slot": "Vinyls", "line": "vinyl", "tier": 3, "price": 750, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "sunset_fade"}}], "tradeoff": "Cosmetic."},
+    {"id": "vinyl_circuit", "name": "Circuit Board", "slot": "Vinyls", "line": "vinyl", "tier": 3, "price": 650, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "circuit"}}], "tradeoff": "Cosmetic."},
+    {"id": "vinyl_skull_trail", "name": "Skull Trail", "slot": "Vinyls", "line": "vinyl", "tier": 3, "price": 600, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "skull_trail"}}], "tradeoff": "Cosmetic."}
   ]
 }

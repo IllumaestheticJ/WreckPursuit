@@ -5,9 +5,16 @@
 //!
 //! Lines come from `wp_police::PoliceEvent::Radio { unit, text }` (decoded from
 //! `SimEvent::Police` by the director) or [`crate::AudioDirector::push_radio_line`]. The
-//! police payload has no priority yet (request A-2): the director uses Dispatch for dispatch
-//! lines, Pursuit while any pursuit is active, Routine otherwise. The listener's tier is set by
-//! the caller (the item lives with the player's gadgets).
+//! police payload has no priority yet (request A-2): the caller passes each line's police
+//! priority tier ([`RadioLine::tier`], `wp_police::RadioTier::number`, owner playtest row 144)
+//! through [`crate::AudioDirector::set_police_radio_tiers`], and the director maps it to a
+//! [`RadioPriority`] ([`priority_for_tier`]). Without a tier it falls back to Dispatch for
+//! dispatch lines, Pursuit while any pursuit is active, Routine otherwise. The listener's tier
+//! is set by the caller (the item lives with the player's gadgets).
+//!
+//! Row 144: tier 1 lines (roadblock / spikes / helicopter warnings) skip the scanner delay, so
+//! they are heard in the same frame as the tool appears on the map; "Radio: Important only"
+//! ([`Scanner::set_important_only`]) drops tiers 4–5.
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::PHYSICS_DT;
@@ -108,6 +115,23 @@ pub struct RadioLine {
     pub priority: RadioPriority,
     /// Tick the police system emitted it.
     pub emitted_tick: u64,
+    /// Police priority tier (row 144): 1 = actionable … 5 = routine, 0 = unknown.
+    #[serde(default)]
+    pub tier: u8,
+}
+
+/// Scanner priority for a police tier (row 144): 1 actionable → Urgent (cuts anything),
+/// 2 escalation → Pursuit (cuts tiers 3–5 at the default `interrupt_at`), 3 impact →
+/// Dispatch, 4 investigation → Routine, 5 routine → Chatter. `None` for an unknown tier.
+pub fn priority_for_tier(tier: u8) -> Option<RadioPriority> {
+    Some(match tier {
+        1 => RadioPriority::Urgent,
+        2 => RadioPriority::Pursuit,
+        3 => RadioPriority::Dispatch,
+        4 => RadioPriority::Routine,
+        5 => RadioPriority::Chatter,
+        _ => return None,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -131,7 +155,9 @@ pub struct Scanner {
     queue: Vec<Queued>,
     speaking: Option<Speaking>,
     next_seq: u32,
-    /// Lines dropped (no scanner, overflow, stale) — debug counter.
+    /// "Radio: Important only" (row 144): tiers 4–5 are not heard.
+    important_only: bool,
+    /// Lines dropped (no scanner, overflow, stale, filtered) — debug counter.
     pub dropped: u32,
 }
 
@@ -142,6 +168,7 @@ impl Default for Scanner {
             queue: Vec::new(),
             speaking: None,
             next_seq: 1,
+            important_only: false,
             dropped: 0,
         }
     }
@@ -174,6 +201,17 @@ impl Scanner {
         self.tier = tier;
     }
 
+    /// "Radio: Important only" (true) or "All" (false, the default): with it on, lines of
+    /// police tiers 4–5 (investigation, routine) are dropped as they arrive.
+    pub fn set_important_only(&mut self, on: bool) {
+        self.important_only = on;
+    }
+
+    /// Whether only tiers 1–3 are heard.
+    pub fn important_only(&self) -> bool {
+        self.important_only
+    }
+
     /// Number of queued (not yet spoken) lines.
     pub fn queued(&self) -> usize {
         self.queue.len()
@@ -185,6 +223,12 @@ impl Scanner {
             self.dropped += 1;
             return;
         };
+        if self.important_only && line.tier >= 4 {
+            self.dropped += 1;
+            return;
+        }
+        // Row 144: actionable warnings are useless late; they skip the scanner delay.
+        let delay = if line.tier == 1 { 0.0 } else { delay };
         let release_tick = line.emitted_tick + ticks(delay);
         self.queue.push(Queued {
             seq: self.next_seq,
@@ -265,6 +309,7 @@ impl Scanner {
             unit: q.line.unit,
             text: q.line.text.clone(),
             priority: q.line.priority,
+            tier: q.line.tier,
             duration_s,
             voice_pitch: unit_pitch(q.line.unit),
         });
@@ -316,6 +361,7 @@ mod tests {
             text: text.into(),
             priority: p,
             emitted_tick: tick,
+            tier: 0,
         }
     }
 
@@ -346,6 +392,57 @@ mod tests {
             s.update(&c, release, &mut out);
             assert_eq!(says(&out).len(), 1, "{tier:?} on time");
         }
+    }
+
+    #[test]
+    fn tier_one_skips_the_scanner_delay_and_cuts_in() {
+        // Row 144 (owner): a roadblock warning is heard in the frame it is emitted, with any
+        // scanner, at the same time as the tool appears on the map.
+        for tier in [ScannerTier::Basic, ScannerTier::Pro, ScannerTier::Elite] {
+            let c = cfg();
+            let mut s = Scanner::default();
+            s.set_tier(tier);
+            let mut out = Vec::new();
+            s.push(
+                &c,
+                line(
+                    "a long routine line on the air now",
+                    RadioPriority::Chatter,
+                    0,
+                ),
+            );
+            s.update(&c, ticks(10.0), &mut out);
+            assert_eq!(says(&out).len(), 1);
+            let at = ticks(10.5);
+            let mut warn = line("roadblock 400 metres ahead", RadioPriority::Urgent, at);
+            warn.tier = 1;
+            s.push(&c, warn);
+            out.clear();
+            s.update(&c, at, &mut out);
+            assert_eq!(says(&out), vec!["roadblock 400 metres ahead"], "{tier:?}");
+            assert!(out
+                .iter()
+                .any(|c| matches!(c, AudioCommand::RadioSay { tier: 1, .. })));
+        }
+    }
+
+    #[test]
+    fn important_only_drops_tiers_four_and_five() {
+        let c = cfg();
+        let mut s = Scanner::default();
+        s.set_tier(ScannerTier::Elite);
+        s.set_important_only(true);
+        for (k, t) in [(1u8, 1u8), (2, 3), (3, 4), (4, 5), (5, 0)] {
+            let mut l = line(&format!("line {k}"), RadioPriority::Routine, 0);
+            l.tier = t;
+            s.push(&c, l);
+        }
+        // Tiers 4 and 5 dropped; unknown (0) kept.
+        assert_eq!(s.queued(), 3);
+        assert_eq!(s.dropped, 2);
+        assert_eq!(priority_for_tier(1), Some(RadioPriority::Urgent));
+        assert_eq!(priority_for_tier(5), Some(RadioPriority::Chatter));
+        assert_eq!(priority_for_tier(0), None);
     }
 
     #[test]

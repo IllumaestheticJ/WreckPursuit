@@ -10,6 +10,18 @@ export type RepairItem = { Region: string } | { Component: string } | { Detached
 /** `wp_economy::RepairOption` serde form. */
 export type RepairOption = "RepairAll" | "Scrap" | { RepairSelected: RepairItem[] };
 
+/** `wp_economy::CarTune` (= `wp_vehicle::CarTune`): the free tune, each slider 1..=5, 3 = stock. */
+export interface CarTune {
+  /** 1 soft … 5 stiff. */
+  suspension: number;
+  /** 1 short … 5 long. */
+  gearing: number;
+  /** 1 open … 3 stock … 5 locked. */
+  diff: number;
+  /** 1 rear … 5 front. */
+  brake_balance: number;
+}
+
 /** `career::StatsView`. */
 export interface StatsView {
   class_index: number;
@@ -66,7 +78,14 @@ export interface RepairLineView {
 export interface CarView {
   uid: number;
   def_id: string;
+  /** The variant's name for a rare variant. */
   name: string;
+  /** Bought as a rare variant. */
+  rare: boolean;
+  /** Body colour 0xRRGGBB (its own paint, else a factory colour fixed by its uid). */
+  paint: number;
+  /** What a respray at the paint shop costs. */
+  respray_fee: number;
   class: string;
   active: boolean;
   location: "Garage" | "Impound";
@@ -79,13 +98,85 @@ export interface CarView {
   paid: number;
   scrap_value: number;
   mods: { id: string; name: string; slot: string }[];
+  /** The free tune, applied when the next run spawns the car. */
+  tune: CarTune;
   insurance: string | null;
   premium_per_day: number | null;
   repair_all: RepairQuote | null;
   repair_lines: RepairLineView[];
   impound: ImpoundStatus | null;
   stats: StatsView | null;
-  damage_while_wanted: boolean;
+  /** Some outstanding damage dates from a police capture: insurance will not pay for it. */
+  damage_before_capture: boolean;
+  /** Tyres: a repair never fixes them; replace them here. */
+  tires: TireView;
+}
+
+/** `career::TireView` (FL, FR, RL, RR). */
+export interface TireView {
+  tread: number[];
+  flat: boolean[];
+  worn_out: boolean[];
+  grip: number[];
+  price_each: number;
+}
+
+export type LotKind = "Dealership" | "UsedLot" | "Junkyard";
+export type ListingGrade = "New" | "Used" | "Junk";
+
+/** `career::LotSummary`. */
+export interface LotSummary {
+  id: string;
+  name: string;
+  kind: LotKind;
+  tier: number;
+  district: string;
+  classes: string[];
+  in_stock: number;
+  from_price: number | null;
+}
+
+/** `career::ListingView`: junkyards hide `condition`, `runs`, `tired_parts` (`null`). */
+export interface ListingView {
+  slot: number;
+  def_id: string;
+  name: string;
+  class: string;
+  grade: ListingGrade;
+  price: number;
+  rare: boolean;
+  /** Factory paint 0xRRGGBB (the car keeps it once bought). */
+  paint: number;
+  mods: string[];
+  condition: number | null;
+  /** Repair All at a legit residential shop, tyres excluded. */
+  est_repairs: number | null;
+  runs: boolean | null;
+  tired_parts: [string, number][] | null;
+  missing: string[];
+  dents: string[];
+  tread: number[];
+  flat: boolean[];
+  stats: StatsView | null;
+  sold: boolean;
+  /** Rep tier needed for this class (`null`: never for sale). */
+  unlock_tier: RepTier | null;
+  /** Below `unlock_tier`: can be looked at, not bought. */
+  locked: boolean;
+}
+
+/** `career::LotStockView`. */
+export interface LotStockView {
+  lot: LotSummary;
+  day: number;
+  cars: ListingView[];
+}
+
+/** `lots::LotVisit`: which sim entity is which parking space. */
+export interface LotVisit {
+  lot: string;
+  own_car: number | null;
+  cars: { entity: number; slot: number }[];
 }
 
 /** `career::DealerCar`. */
@@ -98,6 +189,43 @@ export interface DealerCar {
   price_used: number;
   price_worn: number;
   stats: StatsView;
+  /** Rep tier at which the dealer sells this class. */
+  unlock_tier: RepTier;
+  /** The player's tier is below `unlock_tier`. */
+  locked: boolean;
+}
+
+/** `wp_economy::RepTier`, lowest first. */
+export type RepTier = "Unknown" | "Street" | "Known" | "Respected" | "Feared" | "Legend";
+
+/** `wp_economy::Feature`. */
+export type CareerFeature = "city_races" | "city_betting" | "touge_races" | "touge_betting" | "boss_races" | "pink_slips" | "street_betting";
+
+/** `wp_economy::CareerProgress`: the rep ladder. */
+export interface CareerProgress {
+  tier: RepTier;
+  tier_name: string;
+  rep: number;
+  credits: number;
+  peak_tier: RepTier;
+  next: { tier: RepTier; name: string; min_rep: number; rep_needed: number; reward: number } | null;
+  /** 0–1 from this tier's start to the next. */
+  tier_fraction: number;
+  features: { feature: CareerFeature; unlocked: boolean; needs: RepTier; needed_rep: number }[];
+  classes: { class: string; unlocked: boolean; needs: RepTier }[];
+  max_bet_city: number;
+  max_bet_touge: number;
+  max_bet_street: number;
+}
+
+/** `wp_economy::ProgressUpdate`: what a run changed on the ladder. */
+export interface ProgressUpdate {
+  before: RepTier;
+  after: RepTier;
+  first_reached: RepTier[];
+  reward: number;
+  unlocked: CareerFeature[];
+  relocked: CareerFeature[];
 }
 
 /** `wp_wasm::run::LedgerLine`. */
@@ -141,10 +269,13 @@ export interface CareerView {
   start_blocker: string | null;
   cars: CarView[];
   dealer: DealerCar[];
+  /** Dealerships, used lots and junkyards with today's counts. */
+  lots: LotSummary[];
   floor_car: [string, number] | null;
   insurance: { id: string; premium_per_day_frac: number; coverage: number; deductible: number }[];
   districts: { id: string; labour: number }[];
   stats: CareerStats;
+  progress: CareerProgress;
   captures: number;
   escapes: number;
   ledger: LedgerLine[];
@@ -188,6 +319,7 @@ export interface RunClose {
   carried_heat: number;
   cash: number;
   ledger: LedgerLine[];
+  progress: ProgressUpdate;
 }
 
 /** Which run the garage starts. */
@@ -205,13 +337,185 @@ export interface CareerApi {
   setActive(uid: number): CareerView;
   install(uid: number, modId: string): CareerView;
   uninstall(uid: number, modId: string): CareerView;
+  /** Set the car's free tune (no money). */
+  setTune(uid: number, tune: CarTune): CareerView;
   repair(uid: number, req: ShopRequest): CareerView;
   release(uid: number): CareerView;
   insure(uid: number, tier: string): CareerView;
   nextNight(): CareerView;
+  /** Today's stock of a lot. */
+  lot(lotId: string): LotStockView;
+  /** Drive to the lot: leaves the garage and loads the lot itself. */
+  visitLot(lotId: string): void;
+  /** Buy the car in a lot space. */
+  buyListing(lotId: string, slot: number): CareerView;
+  /** Replace tyres (FL, FR, RL, RR); repairs never fix tyres. */
+  replaceTires(uid: number, wheels: boolean[]): CareerView;
   newCareer(mode: DamageMode): CareerView;
   exportSave(): void;
   importSave(text: string): CareerView;
   startRun(kind: RunKind): void;
+  /** Open the street-race picker as a career run (buy-in, purse, bets and rep on the career;
+   * back to the garage after). Optional: hosts without races hide the button (row 167). */
+  races?(): void;
+  /** Open the touge picker as a career run (locked battles and wagers show the rep tier they
+   * need; back to the garage after). Optional like `races`. */
+  touge?(): void;
+  /** Open the 3D garage workshop on car `uid` (optional: hosts without one hide the button). */
+  workshop?(uid: number): void;
   close(): void;
+}
+
+// ----- garage workshop (crates/wp_economy/src/parts.rs, wp_wasm career_workshop_json) --------
+
+/** `wp_economy::PartGroup`. */
+export type PartGroup =
+  | "Body" | "Glass" | "Aero" | "Cooling" | "Engine" | "Electronics" | "Drivetrain" | "Fuel"
+  | "Wheels" | "Brakes" | "Suspension" | "Steering" | "Protection" | "Interior";
+
+/** A part as the workshop shows it (`PartView`). */
+export interface PartView {
+  grade: string | null;
+  name: string;
+  tier: number;
+  condition: number;
+}
+
+/** One slot of the car (`SlotView`). */
+export interface SlotView {
+  id: string;
+  name: string;
+  group: PartGroup;
+  kind: string;
+  /** Assembly slot it lives inside (engine internals: "engine"), or null. */
+  parent: string | null;
+  /** Slot of the part it bolts onto (it comes off and goes on with that part), or null. */
+  mount?: string | null;
+  /** Fitted slots whose parts come off with this one (parts bolted onto it). */
+  takes_along?: string[];
+  fitted: PartView | null;
+  required: boolean;
+  /** Fitted slots in the way (empty = the slot can be worked on). */
+  blocked_by: string[];
+  /** Why the fitted part cannot come off now (null = it can). */
+  remove_blocker: string | null;
+  /** Every fitted slot that has to come off first, in removal order (nested ones too). */
+  in_the_way: string[];
+  /** What the mechanic charges to swap the part in this slot. */
+  mechanic_fee: number;
+}
+
+/** A loose part (`LoosePart`). */
+export interface LoosePart {
+  uid: number;
+  kind: string;
+  grade: string | null;
+  model: string | null;
+  condition: number;
+  damage: unknown[];
+  value: number;
+  /** Parts inside a loose assembly (an engine's internals) or bolted onto a loose part (a
+   * bumper's splitter); `kind` is their slot. */
+  contents?: LoosePart[];
+}
+
+/** An empty slot of a loose engine a part can go into (`StandFit`). */
+export interface StandFit {
+  assembly: number;
+  slot: string;
+}
+
+/** A loose engine on the engine stand (`StandView`). */
+export interface StandView {
+  uid: number;
+  name: string;
+  /** Assembly slot id ("engine"). */
+  slot: string;
+  /** Its internals, in table order. */
+  slots: SlotView[];
+  /** Names of internals it is missing. */
+  missing: string[];
+}
+
+/** A loose part with where it fits on this car (`InventoryView`). */
+export interface InventoryView {
+  part: LoosePart;
+  name: string;
+  fits: string[];
+  /** Empty slots of loose engines on the stand that take it. */
+  stand_fits: StandFit[];
+  reason: string | null;
+  sale_price: number;
+}
+
+/** One line of the parts catalog (`CatalogEntry`). */
+export interface CatalogEntry {
+  kind: string;
+  slot_name: string;
+  group: PartGroup;
+  grade: string | null;
+  name: string;
+  tier: number;
+  price: number;
+  count: number;
+  reason: string | null;
+  /** What the mechanic charges to fit it (the whole set for a set). */
+  install_fee: number;
+}
+
+/** `career_workshop_json` (`WorkshopScreen`). */
+export interface WorkshopScreen {
+  car: number;
+  slots: SlotView[];
+  /** Names of empty required slots. */
+  missing: string[];
+  upgrades: string[];
+  inventory: InventoryView[];
+  /** Loose engines in the inventory, as the engine stand shows them. */
+  stands: StandView[];
+  /** Engine torque left after worn parts (1 = nothing lost). */
+  torque_factor: number;
+  catalog: CatalogEntry[];
+  cash: number;
+  def_id: string;
+}
+
+/** What the workshop screen calls; every call returns the new screen (throws on refusal). */
+export type { PaintShopApi } from "./PaintShop";
+import type { PaintShopApi } from "./PaintShop";
+
+export interface WorkshopApi {
+  screen(): WorkshopScreen;
+  remove(slot: string): WorkshopScreen;
+  fit(slot: string, part: number): WorkshopScreen;
+  buy(kind: string, grade: string | null): WorkshopScreen;
+  sell(part: number): WorkshopScreen;
+  /** Engine stand: take the part in `slot` out of loose engine `assembly`. */
+  strip(assembly: number, slot: string): WorkshopScreen;
+  /** Engine stand: put inventory part `part` into `slot` of loose engine `assembly`. */
+  build(assembly: number, slot: string, part: number): WorkshopScreen;
+  /** Do it yourself: take off everything in the way of `slot`. */
+  clearWay(slot: string): WorkshopScreen;
+  /** Pay the mechanic to fit a part in `slot` (from the inventory, or bought now). */
+  mechanic(slot: string, source: MechanicSource, sellOld: boolean): MechanicResult;
+  /** The paint shop (colours, vinyls, cosmetic parts); absent where there is none. */
+  paintShop?: PaintShopApi;
+}
+
+/** Where the part the mechanic fits comes from. */
+export type MechanicSource = { part: number } | { buy: string | null };
+
+/** `MechanicJob`: what a mechanic job cost and what happened to the old parts. */
+export interface MechanicJob {
+  fee: number;
+  bought: number;
+  sold: number;
+  kept: number[];
+  touched: number;
+}
+
+/** `career_mechanic_install`. */
+export interface MechanicResult {
+  job: MechanicJob;
+  workshop: WorkshopScreen;
 }

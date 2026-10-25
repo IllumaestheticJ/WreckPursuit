@@ -64,8 +64,12 @@ fn traces() -> &'static Vec<Trace> {
                 let c = engine_trace::car(car);
                 let def = &lib.cars[car];
                 let e = &c.def.engine;
-                let layers =
-                    EngineLayers::resolve(&lib.packs[&def.engine_pack], e.idle_rpm, e.redline_rpm);
+                let layers = EngineLayers::resolve(
+                    &lib.packs[&def.engine_pack],
+                    &def.engine,
+                    e.idle_rpm,
+                    e.redline_rpm,
+                );
                 Trace {
                     car,
                     frames: engine_trace::run(car, &engine_trace::standard_script(), None),
@@ -375,11 +379,21 @@ fn part_throttle_is_on_load_and_overrun_is_off_load() {
 fn every_layer_is_audible_in_its_band() {
     for tr in traces() {
         for (s, (root, side)) in &tr.layers {
+            // The top layer of its set has nothing above it: it may stretch to the rev limit
+            // (recorded V8 / six packs: their highest loop fires like a ~5,000 rpm inline-4,
+            // so it plays up to ~3x near a V8's redline to keep the pitch right).
+            let top = tr
+                .layers
+                .values()
+                .filter(|(_, o)| *o == *side || *o == ThrottleSide::Both)
+                .all(|(r, _)| r <= root);
+            let max_rate: f32 = if top { 3.2 } else { 2.2 };
             let mut best: f32 = 0.0;
             for f in &tr.frames {
                 let Some(v) = f.voices.get(s) else { continue };
                 best = best.max(v.gain);
-                // When a layer leads, it is played near its root (samples stretch ≤ ~1 octave).
+                // When a layer leads, it is played near its root (samples stretch ≤ ~1 octave,
+                // the top layer up to 3.2x).
                 let lead = f
                     .voices
                     .iter()
@@ -388,7 +402,7 @@ fn every_layer_is_audible_in_its_band() {
                 if lead && v.gain > 0.1 {
                     let r = f.rpm / root;
                     assert!(
-                        (0.45..=2.2).contains(&r),
+                        (0.45..=max_rate).contains(&r),
                         "{} t={:.2}: layer {s:#x} ({side:?}, root {root}) leads at {} rpm",
                         tr.car,
                         f.t,
@@ -396,8 +410,18 @@ fn every_layer_is_audible_in_its_band() {
                     );
                 }
             }
+            // Only layers whose band the drive visits (on its throttle side, near its root):
+            // the V8's low off-throttle loop roots at ~1,300 rpm, below every overrun here.
+            let visited = tr.frames.iter().any(|f| {
+                let side_ok = match side {
+                    ThrottleSide::On => f.pedal > 0.3,
+                    ThrottleSide::Off => f.pedal < 0.05,
+                    ThrottleSide::Both => true,
+                };
+                side_ok && (0.8..=1.25).contains(&(f.rpm / root))
+            });
             assert!(
-                best >= 0.15,
+                !visited || best >= 0.15,
                 "{}: layer {s:#x} ({side:?}, root {root}) never louder than {best:.3}",
                 tr.car
             );

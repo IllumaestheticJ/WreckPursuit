@@ -3,12 +3,16 @@
 //! City data tools (workstream 05, native only — never reachable from `wp_wasm`):
 //! - [`osm`]: OpenStreetMap `.osm.pbf` → `wp_world` road network.
 //! - [`glb`]: greybox mesh (`.greybox.glb`) for the testbed and art blockouts.
+//! - [`dedup`]: which parts of the `ashpeak` greybox the shared `vesper_v2` greybox draws.
+//! - [`parts`]: the `vesper_v2` / `ashpeak` greyboxes as parts (Port Vesper ships once).
 //! - binaries `city-import` (OSM) and `gen-city` (procedural fallback).
 
 #![warn(missing_docs)]
 
+pub mod dedup;
 pub mod glb;
 pub mod osm;
+pub mod parts;
 
 use std::path::Path;
 
@@ -98,15 +102,20 @@ mod tests {
             fresh == shipped,
             "vesper_v2.greybox.glb is stale: run `just city-v2`"
         );
-        let b64 = std::fs::read_to_string(dir.join("vesper_v2.greybox.b64.txt")).unwrap();
+        // The browser reads the parts (`parts`, tests/greybox_parts.rs), not a monolithic
+        // .b64.txt.
         assert!(
-            b64 == base64(&shipped),
-            "vesper_v2.greybox.b64.txt does not match the .glb"
+            !dir.join("vesper_v2.greybox.b64.txt").exists(),
+            "vesper_v2.greybox.b64.txt is shipped again: the parts replace it (`just city-v2`)"
         );
         assert!(
             // 7.5 MB before the residential lots (rows 94–95: houses with pitched roofs,
-            // garages, grass verges; trees, driveways, hedges and fences are instanced).
-            shipped.len() < 10_000_000,
+            // garages, grass verges; trees, driveways, hedges and fences are instanced);
+            // 10.04 MB with the Loop 9 rest stops (row 153: six ramps, three parking roads);
+            // 10.54 MB with PR #38's river, canal, bridges, landmarks and canopies and the
+            // highway edge barriers (row 160). The base64 preview is 14.05 MB, under the
+            // 15 MB preview cap.
+            shipped.len() < 11_000_000,
             "greybox grew to {} bytes",
             shipped.len()
         );
@@ -136,10 +145,9 @@ mod tests {
             fresh == shipped,
             "ashpeak.greybox.glb is stale: run `just city-ashpeak`"
         );
-        let b64 = std::fs::read_to_string(dir.join("ashpeak.greybox.b64.txt")).unwrap();
         assert!(
-            b64 == base64(&shipped),
-            "ashpeak.greybox.b64.txt does not match the .glb"
+            !dir.join("ashpeak.greybox.b64.txt").exists(),
+            "ashpeak.greybox.b64.txt is shipped again: the parts replace it (`just city-ashpeak`)"
         );
         // About four times Port Vesper's area on a 16 m drawn ground (24.9 MB at first).
         assert!(

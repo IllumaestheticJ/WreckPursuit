@@ -125,16 +125,17 @@ fn presence_matches_table_for_every_phase() {
                 "{d:?} at {hour}h"
             );
         }
-        // Every pool unit is patrolling and says so on the radio.
+        // Every pool unit is patrolling. A first patrol is not "resuming" anything, so the
+        // start of the shift is quiet on the radio (13 such lines held the channel ≈ 25 s).
         assert!(h
             .police
             .units()
             .iter()
             .all(|u| matches!(u.assignment, Assignment::Patrol { .. })));
-        assert!(h
+        assert!(!h
             .events
             .iter()
-            .any(|e| matches!(e, PoliceEvent::Radio { .. })));
+            .any(|e| matches!(e, PoliceEvent::Radio { text, .. } if text.contains("patrol"))));
     }
 }
 
@@ -176,9 +177,9 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
         })
         .unwrap_err();
     assert!(matches!(err, CaptainError::Locked { .. }), "{err:?}");
-    // Raise heat: spikes unlock, a second request hits the cooldown.
-    h.police.set_heat(RACER, 45.0);
-    assert!(h.police.wanted_level(RACER) >= WantedLevel::L2);
+    // Raise heat: spikes unlock (level 4, owner row 156), a second request hits the cooldown.
+    h.police.set_heat(RACER, 75.0);
+    assert!(h.police.wanted_level(RACER) >= WantedLevel::L4);
     // A valid site (straight approach ≥ 120 m) comes up as the racer drives on.
     let mut r = Err(CaptainError::Budget);
     for _ in 0..40 {
@@ -193,8 +194,24 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
         assert!(matches!(r, Err(CaptainError::Site(_))), "{r:?}");
     }
     assert!(r.is_ok(), "{r:?}");
-    let strip = h.police.spike_strips()[0].clone();
-    assert!(strip.site.sight_m >= 120.0);
+    // Row 165: nothing on the road yet; the strip waits for its car (spike run).
+    assert!(h.police.spike_strips().is_empty());
+    let pending = h.police.spike_strips_pending()[0].clone();
+    assert!(pending.site.sight_m >= 120.0);
+    assert_eq!(h.police.tool_cars_waiting(pending.id).len(), 1);
+    // It goes down only with its car beside it: the car appears at a hidden post or drives in.
+    let mut strip = None;
+    for _ in 0..200 {
+        h.run(0.05, &[]);
+        for s in h.police.spike_strips() {
+            spike_unit(&h, s);
+        }
+        if let Some(s) = h.police.spike_strips().iter().find(|s| s.id == pending.id) {
+            strip = Some(s.clone());
+            break;
+        }
+    }
+    let strip = strip.expect("requested strip never laid with its car");
     // Sites remember D's road id; a captain can name roads by it.
     assert!(h.police.graph().segment(strip.site.segment).edge.is_some());
     let err = h
@@ -208,18 +225,24 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
         matches!(err, CaptainError::Cooldown { .. } | CaptainError::Budget),
         "{err:?}"
     );
-    // Drive over the strip: wheels flagged, deflation ramps over 5 s.
+    // Drive over the strip: wheels flagged, deflation ramps over `deflate_s` (1 s, row 132).
     let ahead = strip.site.ahead_m;
-    h.run(ahead / h.speed + 1.0, &[]);
-    assert!(
+    let hit = |h: &Harness| {
         h.events
             .iter()
-            .any(|e| matches!(e, PoliceEvent::SpikeHit { vehicle, .. } if *vehicle == RACER)),
-        "no spike hit"
-    );
+            .any(|e| matches!(e, PoliceEvent::SpikeHit { vehicle, .. } if *vehicle == RACER))
+    };
+    for _ in 0..((ahead / h.speed + 2.0) / 0.05) as u32 {
+        if hit(&h) {
+            break;
+        }
+        h.run(0.05, &[]);
+    }
+    assert!(hit(&h), "no spike hit");
+    h.run(0.4, &[]);
     let p1 = h.police.tire_puncture(RACER);
     assert!(p1.iter().any(|x| *x > 0.0 && *x < 1.0), "{p1:?}");
-    h.run(6.0, &[]);
+    h.run(2.0, &[]);
     assert!(h.police.tire_puncture(RACER).contains(&1.0));
     // Captain view reflects the chase.
     let v = h.police.captain_view();
@@ -269,7 +292,9 @@ fn roadblocks_respect_sight_and_highway_rules() {
             RoadClass::Highway,
             "roadblock on a highway at L5"
         );
-        assert!(rb.units.len() >= 2 && rb.units.len() <= 3);
+        // Cars spawned, or waiting for their spot to leave the racer's view (row 131).
+        let cars = rb.units.len() + h.police.tool_cars_waiting(rb.id).len();
+        assert!((2..=3).contains(&cars), "{cars} roadblock cars");
         assert!(!rb.barriers.is_empty());
     }
     assert!(!h.police.static_colliders().is_empty() || h.police.roadblocks().is_empty());
@@ -821,7 +846,9 @@ fn assault_counts_once_per_episode_and_not_for_police_contact_tactics() {
     };
     h.run(PHYSICS_DT, &[ram]);
     assert_eq!(h.police.stats().assaults, 2, "a second unit rammed");
-    assert!(h.police.racer(RACER).unwrap().heat >= heat + 19.0);
+    // The assault's heat from data/police/heat.toml (10 since row 157), less rounding.
+    let assault = PoliceConfig::builtin().heat.heat.assault.heat;
+    assert!(h.police.racer(RACER).unwrap().heat >= heat + assault - 1.0);
 }
 
 /// Reckless driving nobody saw, as `wp_world` reports it: a speeding violation at the racer.
@@ -928,7 +955,17 @@ fn unit_cap_holds_responders_back() {
     cfg.presence.response.max_units_by_level = [0; 6];
     let mut h = Harness::with_config(23.0, 11, DamageMode::Arcade, cfg);
     h.run(0.5, &[]);
+    // Pursuit tools (a spike-strip unit) may deploy once the chase starts (since round 12c
+    // the 380 m day sight finds the racer during this drive); they are not responders.
+    let cars = |h: &Harness| {
+        h.police
+            .units()
+            .iter()
+            .filter(|u| u.role != wp_police::UnitRole::Tool)
+            .count()
+    };
     let alive = h.police.units().len();
+    assert_eq!(cars(&h), alive);
     drive_reported(&mut h, 20.0);
     let st = h.police.stats();
     assert!(!st.calls.is_empty());
@@ -939,7 +976,7 @@ fn unit_cap_holds_responders_back() {
         "{:?}",
         st.spawns
     );
-    assert!(h.police.units().len() <= alive);
+    assert!(cars(&h) <= alive);
     // An existing unit was sent (the call goes out with it).
     assert!(
         h.events.iter().any(|e| matches!(
@@ -1034,6 +1071,164 @@ fn stuck_unit_backs_out_reroutes_and_respawns_out_of_sight() {
     assert!(reversed, "never backed out");
     let gone = gone_at.expect("stuck unit never despawned");
     assert!(gone < 12.0, "despawned at {gone} s");
+}
+
+/// Row 75: a physical unit the sim reports on its roof (chassis up axis pointing down) is
+/// reset upright in its lane within a few seconds once no racer sees it, damage kept.
+#[test]
+fn unit_on_its_roof_is_reset_upright() {
+    let mut h = Harness::new(12.0, 7);
+    h.run(1.0, &[]);
+    let racer = h.racer_view();
+    let rp = [racer.pos[0], racer.pos[1]];
+    let unit = h
+        .police
+        .units()
+        .iter()
+        .filter(|u| u.kind == UnitKind::Car && dist(u.body.pos, rp) > 400.0)
+        .max_by(|a, b| dist(a.body.pos, rp).total_cmp(&dist(b.body.pos, rp)))
+        .expect("a patrol far from the racer");
+    let (id, pos, heading) = (unit.id, unit.body.pos, unit.body.heading);
+    let entity = EntityId(951);
+    h.police
+        .bind_unit_entity(id, entity, SteerGeometry::default());
+    let mut taken = Vec::new();
+    for _ in 0..(6.0 / PHYSICS_DT) as u32 {
+        if !h.police.stats().resets.iter().any(|r| r.unit == id) {
+            // On its roof where it lies until it is reset.
+            h.police.sync_unit(
+                id,
+                UnitSync {
+                    pos: [pos[0], pos[1], 0.5],
+                    vel: [0.0; 3],
+                    heading,
+                    health: 0.7,
+                    effects: HandlingEffects::NEUTRAL,
+                },
+            );
+            h.police.sync_unit_upright(id, -1.0);
+        } else {
+            h.police.sync_unit_upright(id, 1.0);
+        }
+        let _ = h.police.unit_input(id, PHYSICS_DT);
+        let mut out = Vec::new();
+        h.police
+            .step(&h.world, &[h.racer_view()], &[], PHYSICS_DT, &mut out);
+        taken.extend(h.police.take_unit_resets());
+    }
+    let rec = *h
+        .police
+        .stats()
+        .resets
+        .iter()
+        .find(|r| r.unit == id)
+        .unwrap_or_else(|| {
+            panic!(
+                "never reset: {:?}",
+                h.police.units().iter().find(|u| u.id == id)
+            )
+        });
+    let at = rec.at.secs() - 1.0;
+    assert!(at <= 3.0, "reset {at} s after it rolled over");
+    assert!(!rec.in_view, "{rec:?}");
+    assert!(dist(rec.to, pos) <= 15.0, "{rec:?}");
+    assert!(
+        taken
+            .iter()
+            .any(|r| r.unit == id && r.entity == Some(entity)),
+        "wp_sim was told"
+    );
+    let u = h.police.units().iter().find(|u| u.id == id).unwrap();
+    assert!(
+        !u.wrecked && (u.health - 0.7).abs() < 1e-3,
+        "damage kept, not written off"
+    );
+}
+
+/// Reset in place (owner row 78): an un-wrecked unit that stands stuck while it wants to
+/// drive (here behind a car stopped across the road) is put on a clear spot in its lane within
+/// 15 m, keeps its damage, and `wp_sim` is told to place its car there as a ghost for a
+/// second.
+#[test]
+fn stuck_unit_resets_in_place_within_15_m() {
+    let mut h = Harness::new(12.0, 7);
+    // Logging only: no back-out / re-route / give-up despawn, so the reset is what frees it.
+    h.police.set_unstick_recovery(false);
+    h.run(1.0, &[]);
+    let racer = h.racer_view();
+    let rp = [racer.pos[0], racer.pos[1]];
+    let unit = h
+        .police
+        .units()
+        .iter()
+        .filter(|u| u.kind == UnitKind::Car && dist(u.body.pos, rp) > 400.0)
+        .max_by(|a, b| dist(a.body.pos, rp).total_cmp(&dist(b.body.pos, rp)))
+        .expect("a patrol far from the racer");
+    let (id, pos, heading) = (unit.id, unit.body.pos, unit.body.heading);
+    let entity = EntityId(950);
+    h.police
+        .bind_unit_entity(id, entity, SteerGeometry::default());
+    let mut taken = Vec::new();
+    for _ in 0..(25.0 / PHYSICS_DT) as u32 {
+        if !h.police.stats().resets.iter().any(|r| r.unit == id) {
+            // Pinned until it is reset: the body never moves, whatever the input.
+            h.police.sync_unit(
+                id,
+                UnitSync {
+                    pos: [pos[0], pos[1], 0.5],
+                    vel: [0.0; 3],
+                    heading,
+                    health: 0.8,
+                    effects: HandlingEffects::NEUTRAL,
+                },
+            );
+        }
+        let r = h.racer_view();
+        h.police.set_obstacles(&[
+            // Stopped across the road 5 m ahead (no way past).
+            wp_police::ObstacleView {
+                half_length_m: 6.0,
+                ..wp_police::ObstacleView::car(
+                    Some(EntityId(960)),
+                    [pos[0] + heading[0] * 5.0, pos[1] + heading[1] * 5.0, 0.5],
+                    [0.0; 3],
+                    [-heading[1], heading[0]],
+                )
+            },
+            wp_police::ObstacleView::car(Some(RACER), r.pos, r.vel, [0.0, 1.0]),
+        ]);
+        let _ = h.police.unit_input(id, PHYSICS_DT);
+        let mut out = Vec::new();
+        h.police
+            .step(&h.world, &[h.racer_view()], &[], PHYSICS_DT, &mut out);
+        taken.extend(h.police.take_unit_resets());
+    }
+    let rec = *h
+        .police
+        .stats()
+        .resets
+        .iter()
+        .find(|r| r.unit == id)
+        .unwrap_or_else(|| {
+            panic!(
+                "never reset: {:?}",
+                h.police.units().iter().find(|u| u.id == id)
+            )
+        });
+    let at = rec.at.secs() - 1.0;
+    assert!((14.0..=20.0).contains(&at), "reset {at} s after it stuck");
+    assert!(!rec.active && !rec.in_view, "{rec:?}");
+    assert!(dist(rec.to, pos) <= 15.0, "{rec:?}");
+    let r = taken
+        .iter()
+        .find(|r| r.unit == id)
+        .expect("wp_sim was told");
+    assert_eq!(r.entity, Some(entity));
+    assert_eq!(r.pos, rec.to);
+    assert!((r.ghost_s - 1.0).abs() < 1e-6);
+    // Damage kept: health is whatever the car reports, untouched by the reset.
+    let u = h.police.units().iter().find(|u| u.id == id).unwrap();
+    assert!((u.health - 0.8).abs() < 1e-6);
 }
 
 /// Units on `RACER` (pursuing or intercepting ground cars).
@@ -1139,28 +1334,8 @@ fn contact_tactics_escalate_with_the_wanted_level() {
 #[test]
 fn blocked_siren_unit_pushes_the_blocker_then_backs_out() {
     let av = PoliceConfig::builtin().pursuit.avoid;
-    // Seed 7 -> 8 after merging main's highway layout: at seed 7 a second pursuer queued 2.4 m
-    // behind the blocked unit (no room, so the failed push ended in a reroute, not a reverse).
-    // Seeds 5, 8, 9 and 11 pass; at 3 and 13 the unit never pushes. The unit is picked with room
-    // behind it at the start.
-    let mut h = pursued_at(12.0, 8, 40.0);
-    let id = *units_on_racer(&h)
-        .iter()
-        .find(|id| {
-            let me = h.police.units().iter().find(|u| u.id == **id).unwrap();
-            h.police.units().iter().all(|o| {
-                o.id == me.id || {
-                    let rel = [
-                        o.body.pos[0] - me.body.pos[0],
-                        o.body.pos[1] - me.body.pos[1],
-                    ];
-                    let along = rel[0] * me.body.heading[0] + rel[1] * me.body.heading[1];
-                    let lat = (rel[1] * me.body.heading[0] - rel[0] * me.body.heading[1]).abs();
-                    !(along < 0.0 && along > -15.0 && lat < 3.0)
-                }
-            })
-        })
-        .expect("a pursuer with room behind it");
+    let mut h = pursued_at(12.0, 7, 40.0);
+    let id = units_on_racer(&h)[0];
     let entity = EntityId(951);
     h.police
         .bind_unit_entity(id, entity, SteerGeometry::default());
@@ -1174,6 +1349,24 @@ fn blocked_siren_unit_pushes_the_blocker_then_backs_out() {
     let mut reversed = false;
     for tick in 0..(8.0 / PHYSICS_DT) as u32 {
         let t = tick as f32 * PHYSICS_DT;
+        // Other units stay out of it: on main's rebuilt grid (#19-#27) a backup unit drove up
+        // 2 m behind the pinned one and left it no room to back out. This test is about the
+        // push and the back-out logic, not a queue of police cars.
+        if tick % 240 == 0 {
+            let others: Vec<_> = h
+                .police
+                .units()
+                .iter()
+                .filter(|u| u.id != id && u.kind == UnitKind::Car)
+                .map(|u| u.id)
+                .collect();
+            for o in others {
+                let _ = h.police.captain_command(CaptainCommand::AssignUnit {
+                    unit: o,
+                    order: wp_contracts::UnitOrder::Disengage,
+                });
+            }
+        }
         h.police.sync_unit(
             id,
             UnitSync {
@@ -1256,6 +1449,9 @@ fn ambush_chase(
     let pu = h
         .police
         .add_player_unit(PlayerId(1), EntityId(900), [p[0], p[1], 0.0], d);
+    // Wanted once the session-start patrols are out (row 158: none is placed in view of a
+    // racer who is already wanted).
+    h.run(0.5, &[]);
     h.police.set_heat(RACER, 80.0);
     let mut ambushers = std::collections::BTreeMap::new();
     let mut joined_facing = std::collections::BTreeMap::new();
@@ -1302,35 +1498,25 @@ fn ambush_chase(
 
 #[test]
 fn spawned_reinforcements_wait_ahead_facing_the_racers_way() {
-    // One patrol, in the industrial district (the chase runs through the core): reinforcements
-    // have to be spawned. (Main used an empty patrol table; since round 12 that means a city
-    // without police, `PoliceSystem::unit_cap` 0.)
+    // Almost no patrol pool: reinforcements have to be spawned. (One industrial patrol: on
+    // ws/police a config with no patrols at all means no police, `unit_cap` 0.)
     let mut cfg = PoliceConfig::builtin();
-    let none = wp_police::config::PhaseTable {
-        dawn: 0,
-        day: 0,
-        dusk: 0,
-        night: 0,
+    let n = |k| wp_police::config::PhaseTable {
+        dawn: k,
+        day: k,
+        dusk: k,
+        night: k,
     };
     cfg.presence.patrols = wp_police::config::DistrictTable {
-        core: none,
-        suburb: none,
-        industrial: wp_police::config::PhaseTable { day: 1, ..none },
+        core: n(0),
+        suburb: n(0),
+        industrial: n(1),
     };
     let (ambushers, joined_facing) = ambush_chase(cfg);
-    let spawned: Vec<_> = ambushers
-        .iter()
-        .filter(|(_, r)| matches!(r, wp_police::unit::UnitRole::Reinforcement))
-        .map(|(id, _)| *id)
-        .collect();
     assert!(
-        !spawned.is_empty(),
-        "no reinforcement was spawned to wait ahead: {ambushers:?}"
+        !ambushers.is_empty(),
+        "no reinforcement was spawned to wait ahead"
     );
-    let joined_facing: std::collections::BTreeMap<_, _> = joined_facing
-        .into_iter()
-        .filter(|(id, _)| spawned.contains(id))
-        .collect();
     assert!(!joined_facing.is_empty(), "no ambusher joined the chase");
     // Joined pointing the racer's way: no turn-around behind it.
     assert!(
@@ -1358,5 +1544,283 @@ fn nearby_patrols_sent_as_backup_also_wait_ahead() {
     assert!(
         joined_facing.values().all(|c| *c > 0.5),
         "heading·racer dir at join: {joined_facing:?}"
+    );
+}
+
+/// Row 86: a unit on a pursuit held at a standstill behind a civilian queue filling the road
+/// (both lanes and the shoulder) routes around it within a few seconds instead of waiting.
+#[test]
+fn chasing_unit_stuck_in_a_civilian_queue_routes_around_it() {
+    let mut h = pursued_at(12.0, 7, 40.0);
+    let id = units_on_racer(&h)[0];
+    h.police
+        .bind_unit_entity(id, EntityId(951), SteerGeometry::default());
+    let u = h.police.units().iter().find(|u| u.id == id).unwrap();
+    let (pos, heading) = (u.body.pos, u.body.heading);
+    let left = [-heading[1], heading[0]];
+    // A queue across the whole road: own lane, other lane, right shoulder.
+    let queue: Vec<[f32; 3]> = [0.0f32, 3.5, -3.5]
+        .iter()
+        .map(|lat| {
+            [
+                pos[0] + heading[0] * 6.0 + left[0] * lat,
+                pos[1] + heading[1] * 6.0 + left[1] * lat,
+                0.5,
+            ]
+        })
+        .collect();
+    let heat0 = h.police.racer(RACER).unwrap().heat;
+    for tick in 0..(6.0 / PHYSICS_DT) as u32 {
+        if tick % 240 == 0 {
+            // Other units stay out of it (this test is about the one in the queue).
+            let others: Vec<_> = h
+                .police
+                .units()
+                .iter()
+                .filter(|u| u.id != id && u.kind == UnitKind::Car)
+                .map(|u| u.id)
+                .collect();
+            for o in others {
+                let _ = h.police.captain_command(CaptainCommand::AssignUnit {
+                    unit: o,
+                    order: wp_contracts::UnitOrder::Disengage,
+                });
+            }
+        }
+        h.police.sync_unit(
+            id,
+            UnitSync {
+                pos: [pos[0], pos[1], 0.5],
+                vel: [0.0; 3],
+                heading,
+                health: 1.0,
+                effects: HandlingEffects::NEUTRAL,
+            },
+        );
+        let r = h.racer_view();
+        let mut obs: Vec<wp_police::ObstacleView> = queue
+            .iter()
+            .enumerate()
+            .map(|(k, p)| {
+                wp_police::ObstacleView::car(Some(EntityId(990 + k as u32)), *p, [0.0; 3], heading)
+            })
+            .collect();
+        obs.push(wp_police::ObstacleView::car(
+            Some(RACER),
+            r.pos,
+            r.vel,
+            [0.0, 1.0],
+        ));
+        h.police.set_obstacles(&obs);
+        let _ = h.police.unit_input(id, PHYSICS_DT);
+        let mut out = Vec::new();
+        h.police.set_heat(RACER, heat0);
+        h.police.step(&h.world, &[r], &[], PHYSICS_DT, &mut out);
+    }
+    assert!(
+        h.police.stats().jam_reroutes >= 1,
+        "the unit waited in the queue for 6 s without routing around it"
+    );
+}
+
+/// Row 131: a fast racer on a long road, wanted (backup and responders spawning): no police
+/// car appears where the racer can see it now or within the next 3 s of its travel. Seeds
+/// 1, 7 and 14 each had 1-4 such spawns before the route look-ahead (`ROUTE_VIEW_S`).
+#[test]
+fn no_unit_spawns_in_a_fast_racers_view_now_or_3_s_ahead() {
+    for seed in [1, 7, 14] {
+        spawns_out_of_view(seed);
+    }
+}
+
+fn spawns_out_of_view(seed: u64) {
+    let mut h = Harness::new(12.0, seed);
+    h.speed = 40.0;
+    h.s = 40.0;
+    h.run(1.0, &[]);
+    h.police.set_heat(RACER, 85.0);
+    let mut seen = 0;
+    let mut checked = 0;
+    for _ in 0..(120.0 / 0.25) as u32 {
+        let before = h.police.stats().spawns.len();
+        h.run(0.25, &[]);
+        let spawns: Vec<_> = h.police.stats().spawns[before..].to_vec();
+        for sp in spawns {
+            checked += 1;
+            // Where the racer was when the unit appeared (spawns land inside the 0.25 s step).
+            let s_then = h.s - h.speed * h.police.now().since(sp.at);
+            for k in 0..=6 {
+                let ahead = s_then + h.speed * 0.5 * k as f32;
+                if ahead > h.path.length() {
+                    break;
+                }
+                let p = h.path.point_at(ahead).unwrap();
+                let world_los = wp_contracts::WorldQuery::line_of_sight(
+                    &h.world,
+                    [p[0], p[1], 1.3],
+                    [sp.pos[0], sp.pos[1], 1.0],
+                );
+                if h.police.graph().line_of_sight([p[0], p[1]], sp.pos) && world_los {
+                    seen += 1;
+                    break;
+                }
+            }
+        }
+        // Keep it wanted and moving (heat decays out of sight).
+        h.police.set_heat(RACER, 85.0);
+    }
+    assert!(checked >= 3, "seed {seed}: only {checked} units spawned");
+    assert_eq!(
+        seen, 0,
+        "seed {seed}: {seen} of {checked} spawns in the racer's view within 3 s"
+    );
+}
+
+// --- PR #54 (ported onto round12): spike strips only exist while their unit is beside them.
+
+/// The spike unit beside `strip` (asserts there is one, manning that strip at its post).
+fn spike_unit(h: &Harness, strip: &wp_police::SpikeStrip) -> wp_police::UnitId {
+    let uid = strip.unit.expect("strip without a unit");
+    let u = h.police.units().iter().find(|u| u.id == uid).unwrap();
+    assert!(matches!(u.assignment, Assignment::SpikeAt { tool, .. } if tool == strip.id));
+    let post = strip.post.expect("strip without a post");
+    assert!(dist(u.body.pos, post) <= wp_police::dispatch::SPIKE_UNIT_LEASH_M);
+    uid
+}
+
+/// Every spike strip, scenario-placed ones too, comes with a police unit beside it, and is
+/// lifted the moment that unit is wrecked.
+#[test]
+fn spike_strip_never_lies_without_its_unit() {
+    let mut h = Harness::new(12.0, 11);
+    h.run(1.0, &[]);
+    let p = h.racer_view().pos;
+    let tool = h
+        .police
+        .place_spikes_at(RACER, [p[0], p[1] + 80.0], [0.0, 1.0]);
+    let strip = h.police.spike_strips()[0].clone();
+    assert_eq!(strip.id, tool);
+    let uid = spike_unit(&h, &strip);
+    // Parked: it stays put and so does the strip.
+    h.run(2.0, &[]);
+    assert_eq!(h.police.spike_strips().len(), 1);
+    // Wrecked (total loss): the strip goes with it.
+    h.police
+        .bind_unit_entity(uid, EntityId(902), SteerGeometry::default());
+    let pos = h
+        .police
+        .units()
+        .iter()
+        .find(|u| u.id == uid)
+        .unwrap()
+        .body
+        .pos;
+    h.police.sync_unit(
+        uid,
+        UnitSync {
+            pos: [pos[0], pos[1], 0.0],
+            vel: [0.0; 3],
+            heading: strip.site.dir,
+            health: 0.0,
+            effects: HandlingEffects::NEUTRAL,
+        },
+    );
+    h.run(0.5, &[]);
+    assert!(h.police.spike_strips().is_empty());
+    assert!(h
+        .events
+        .iter()
+        .any(|e| matches!(e, PoliceEvent::ToolRemoved { tool: t } if *t == tool)));
+}
+
+/// A spike unit shoved away from its post takes the strip with it.
+#[test]
+fn spike_strip_lifted_when_its_unit_leaves_the_post() {
+    let mut h = Harness::new(12.0, 12);
+    h.run(1.0, &[]);
+    let p = h.racer_view().pos;
+    h.police
+        .place_spikes_at(RACER, [p[0], p[1] + 80.0], [0.0, 1.0]);
+    let strip = h.police.spike_strips()[0].clone();
+    let uid = spike_unit(&h, &strip);
+    h.police
+        .bind_unit_entity(uid, EntityId(903), SteerGeometry::default());
+    h.police.sync_unit(
+        uid,
+        UnitSync {
+            pos: [strip.site.pos[0] + 60.0, strip.site.pos[1], 0.0],
+            vel: [0.0; 3],
+            heading: strip.site.dir,
+            health: 1.0,
+            effects: HandlingEffects::NEUTRAL,
+        },
+    );
+    h.run(0.5, &[]);
+    assert!(h.police.spike_strips().is_empty());
+}
+
+/// A host that cannot give a spike unit a car withdraws it; the strip goes too.
+#[test]
+fn unbodied_spike_unit_is_withdrawn_with_its_strip() {
+    let mut h = Harness::new(12.0, 13);
+    h.run(1.0, &[]);
+    let p = h.racer_view().pos;
+    h.police
+        .place_spikes_at(RACER, [p[0], p[1] + 80.0], [0.0, 1.0]);
+    let strip = h.police.spike_strips()[0].clone();
+    let uid = spike_unit(&h, &strip);
+    assert!(h.police.withdraw_unbodied_spike_unit(uid));
+    assert!(h.police.spike_strips().is_empty());
+    assert!(h.police.units().iter().all(|u| u.id != uid));
+    // Other units are not touched.
+    let other = h
+        .police
+        .units()
+        .iter()
+        .find(|u| u.kind == UnitKind::Car)
+        .map(|u| u.id);
+    if let Some(other) = other {
+        assert!(!h.police.withdraw_unbodied_spike_unit(other));
+    }
+}
+
+/// Row 165 measurement: a racer driving its road (the harness's straight-most path) at chase
+/// speed with the AI captain on it. Its strips are laid only with their car beside it (here
+/// every spike car's post is in view, so each drives in from out of sight); across seeds,
+/// count how often a strip ends up in front of the racer and hits it within 40 s.
+#[test]
+fn ai_spikes_hit_a_racer_that_keeps_its_road() {
+    let mut hits = 0;
+    for seed in 1..=12u64 {
+        let mut h = Harness::new(12.0, 100 + seed);
+        h.speed = 30.0;
+        h.run(1.0, &[]);
+        h.police.begin_pursuit(RACER);
+        let mut hit = false;
+        for _ in 0..160 {
+            h.police.set_heat(RACER, 75.0);
+            h.run(0.25, &[]);
+            for s in h.police.spike_strips() {
+                spike_unit(&h, s);
+            }
+            if h.events
+                .iter()
+                .any(|e| matches!(e, PoliceEvent::SpikeHit { vehicle, .. } if *vehicle == RACER))
+            {
+                hit = true;
+                break;
+            }
+        }
+        hits += hit as u32;
+        let st = h.police.stats();
+        eprintln!(
+            "seed {seed}: hit {hit}; strips requested {}, drive-ins {}, given up {}",
+            st.spikes, st.spike_drive_ins, st.spikes_given_up
+        );
+    }
+    eprintln!("racer keeping its road: {hits} / 12 hit");
+    assert!(
+        hits >= 6,
+        "only {hits} / 12 seeds hit a racer keeping its road"
     );
 }

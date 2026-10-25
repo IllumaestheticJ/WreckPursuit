@@ -1,16 +1,17 @@
-// Owner playtest row 24 at night: 23:00, 12x12 grid city, no traffic or parked cars. Patrol
-// unit 3 drives south down x = -276.8 (slowing to 5-8 m/s after the junction at y = 165). The
-// racer (no heat) cruises north in its own lane at 30 km/h from 1 s and steers left (-0.4) at
-// 11.3 s: a side-to-side swipe at 12.0 s (about 2,500 N·s, contact normal sideways). The steer is
-// centred in a window that hits the cruiser (11.2-11.4 s x steer 0.3-0.5 all pass; the old
-// 11.4 s x 0.3 sat on the edge and missed by 1 m after the round-12 vehicle/diff changes). At
-// night a pursuit otherwise needs a wanted racer within 40 m for 4 s; the hit unit recognises
-// the racer at once instead, so wanted L2 and the pursuit start in the contact's tick. Without
-// the fix this run has no police event for the racer at all. Re-aim with
+// Owner playtest row 24 at night: 23:00, 12x12 grid city, no traffic or parked cars. Re-aimed
+// 2026-10-21 for main's rebuilt grid (divided viaduct at x = 0, ramp terminals at x = ±22; no
+// unit passes the old x = -276.8 aim any more): patrol unit 2 drives north up x = -163.25. The
+// racer (no heat) starts at (-164.9, 95) facing south, just over the centreline, cruises at
+// 30 km/h from 1 s and meets it at 8.7 s: a front-corner clip (10 kN·s, 12 m/s closing) then a
+// flank scrape. At night a pursuit otherwise needs a wanted racer within 40 m for 4 s; the hit
+// unit recognises the racer at once instead, so wanted L2 and the pursuit start in the
+// contact's tick. Without the fix this run has no police event for the racer at all; 0.3 m
+// further right the unit dodges and there is no contact. Re-aim with
 // `examples/probe_police.rs` if police spawning changes.
-// Re-aimed for main's highway layout (merge into ws/harness): unit 1 now turns east onto
-// y = 53.3 and the racer comes the other way along y = 56.75 from x = -15, steering left (-0.3)
-// at 11.3 s into its flank (x = -11 … -17 and steer -0.25 … -0.35 pass, -19 misses).
+// Re-aimed for the road network centreline fix (playtest row 170): unit 2's patrol now comes
+// up x = -163.25 about 270 m further south, so the racer starts at (-164.9, -190) on the same
+// road: contact at 8.70 s (9.9 kN·s, 11.5 m/s closing), pursuit in the same tick. Starts at
+// y = -185 … -230 hit it (contact 8.9 … 6.1 s); -180 hits too late for the 9.1 s limit.
 (
     name: "police_sideswipe_patrol_night",
     seed: 24,
@@ -25,22 +26,19 @@
         (
             id: "racer",
             car: "debug_sedan",
-            pos: (-15.0, 56.75, 0.0),
-            yaw: 1.5708,
+            pos: (-164.9, -190.0, 0.0),
+            yaw: 3.1416,
             driver: cruise(target_mps: 8.33, from_s: 1.0),
-            inputs: [
-                (t_s: 11.3, input: (steer: -0.3)),
-                (t_s: 12.1, input: ()),
-            ],
+            inputs: [],
         ),
     ],
-    duration_s: 14.0,
+    duration_s: 11.0,
     hash_every: 24,
     expect: [
-        speed_at(entity: "racer", t_s: 11.0, min: 7.5, max: 9.0),
+        speed_at(entity: "racer", t_s: 5.5, min: 7.5, max: 9.0),
         event_count(event: "Contact", entity: "racer", min: 1, max: 40),
-        // Wanted-level change and pursuit within 1.1 s of the 12.0 s contact.
-        police_event_before(kind: 2, t_s: 13.1),
-        pursuit_started_before(t_s: 13.1),
+        // Wanted-level change and pursuit within 0.4 s of the 8.7 s contact.
+        police_event_before(kind: 2, t_s: 9.1),
+        pursuit_started_before(t_s: 9.1),
     ],
 )

@@ -21,7 +21,7 @@
 use wp_contracts::{BodyRegion, VehicleDef};
 
 use crate::builder::{Builder, PartKey, Patch, PatchBand};
-use crate::mesh::{MaterialSlot, PartKind};
+use crate::mesh::{indicator_front_key, indicator_rear_key, MaterialSlot, PartKind};
 use crate::profile::BodyProfile;
 use crate::style::{
     ArchShape, BodyStyle, CaliperKind, CapKind, CarStyle, Detail, DetailCtx, EngineKind,
@@ -40,6 +40,8 @@ pub fn style(def: &VehicleDef) -> Option<CarStyle> {
         "furrow_24" => Some(furrow_24()),
         "hauler_1500" => Some(hauler_1500()),
         "drayman_cargo" => Some(drayman_cargo()),
+        "satchel_20" => Some(euro_panel_van(false)),
+        "tumbril_20" => Some(euro_panel_van(true)),
         _ => None,
     }
 }
@@ -271,6 +273,37 @@ fn drayman_cargo() -> CarStyle {
     s
 }
 
+/// 2000s European FWD high-roof panel van (`satchel_20`, `tumbril_20`): the [`drayman_cargo`]
+/// van kit on a lower, more raked nose with a transverse I4, strut front and torsion-beam
+/// rear. `tumbril` gets a slightly steeper screen and longer rear overhang.
+fn euro_panel_van(tumbril: bool) -> CarStyle {
+    let body = BodyStyle {
+        nose_h: Some(0.95),
+        nose_rake_deg: if tumbril { 26.0 } else { 30.0 },
+        nose_plan_round: 0.26,
+        tail_plan_round: 0.06,
+        hood_crown: 0.03,
+        windshield_rake_deg: Some(if tumbril { 44.0 } else { 40.0 }),
+        tumblehome: Some(0.08),
+        crease_z: 0.55,
+        crease_depth: 0.008,
+        flare: 0.01,
+        stance_pitch_deg: 0.1,
+        overhang_trim: (0.0, if tumbril { 0.05 } else { 0.02 }),
+        ..BodyStyle::preset(Silhouette::Van)
+    };
+    let mut s = with_kit(body, van_kit);
+    s.wheel.rim = RimKind::Steel;
+    s.wheel.spokes = 0;
+    s.wheel.cap = CapKind::Small;
+    s.wheel.lugs = 5;
+    s.mechanical.engine = EngineKind::Inline4;
+    s.mechanical.front_suspension = SuspensionKind::Strut;
+    s.mechanical.rear_suspension = SuspensionKind::TorsionBeam;
+    s.mechanical.exhaust = ExhaustKind::Single;
+    s
+}
+
 // =======================================================================================
 // Trim kits (one per car)
 // =======================================================================================
@@ -281,13 +314,14 @@ fn sedan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let p = ctx.profile;
     let zn = p.belt(p.y_nose);
     let wf = p.half_width(p.y_nose);
-    // Lamps: slim, wide, swept to the corner.
+    // Lamps: slim, wide, swept to the corner; the corner end of the lens is the amber turn
+    // signal.
     reshape_pair(b, p, "headlight", |t, p, k| {
-        front_box(
+        lens_front(
             t,
             k,
             p,
-            -(wf - 0.01),
+            -(wf - 0.115),
             -0.42,
             zn - 0.10,
             zn - 0.025,
@@ -295,20 +329,37 @@ fn sedan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.03,
         );
     });
+    reshape_indicators(b, p, true, M::EmissiveAmber, |t, p, k| {
+        lens_front(
+            t,
+            k,
+            p,
+            -(wf - 0.01),
+            -(wf - 0.11),
+            zn - 0.10,
+            zn - 0.025,
+            0.012,
+            0.03,
+        );
+    });
+    // Tail lamps with an amber inboard section.
     let zt = p.belt(p.y_tail);
     let wt = p.half_width(p.y_tail);
     reshape_pair(b, p, "taillight", |t, p, k| {
-        rear_box(
+        lens_rear(
             t,
             k,
             p,
             -(wt - 0.005),
-            -0.40,
+            -0.495,
             zt - 0.14,
             zt - 0.03,
             0.012,
             0.03,
         );
+    });
+    reshape_indicators(b, p, false, M::EmissiveAmber, |t, p, k| {
+        lens_rear(t, k, p, -0.49, -0.40, zt - 0.14, zt - 0.03, 0.012, 0.03);
     });
     // Grille: upper slot between the lamps, wide lower intake, fog lamps.
     let g = key("grille_upper", R::FrontBumper, M::Grille);
@@ -345,21 +396,12 @@ fn beater_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let wf = p.half_width(p.y_nose);
     let (l0, l1) = (zn - 0.16, zn - 0.02);
     reshape_pair(b, p, "headlight", |t, p, k| {
-        front_box(t, k, p, -(wf - 0.12), -0.37, l0, l1, 0.008, 0.03);
+        lens_front(t, k, p, -(wf - 0.12), -0.37, l0, l1, 0.008, 0.03);
     });
-    let amber = light("corner_lamp_l", R::FrontLeftFender, M::EmissiveAmber);
-    front_box(
-        b,
-        &amber,
-        p,
-        -(wf - 0.005),
-        -(wf - 0.11),
-        l0,
-        l1,
-        0.008,
-        0.03,
-    );
-    mirror(b, &amber);
+    // The amber corner lamp beside each sealed beam is its turn signal (same bezel).
+    reshape_indicators(b, p, true, M::EmissiveAmber, |t, p, k| {
+        lens_front(t, k, p, -(wf - 0.005), -(wf - 0.11), l0, l1, 0.008, 0.03);
+    });
     // Lamp bezels (chrome) around head + corner lamps.
     let bez = key("lamp_bezel_l", R::FrontLeftFender, M::Chrome);
     front_box(
@@ -381,19 +423,22 @@ fn beater_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     plate_front(b, p, 0.30);
     let zt = p.belt(p.y_tail);
     let wt = p.half_width(p.y_tail);
-    // Full-width tail band: lamps outboard, dark garnish between them.
+    // Full-width tail band: lamps outboard (amber inboard section), dark garnish between.
     reshape_pair(b, p, "taillight", |t, p, k| {
-        rear_box(
+        lens_rear(
             t,
             k,
             p,
             -(wt - 0.01),
-            -0.22,
+            -0.325,
             zt - 0.17,
             zt - 0.04,
             0.01,
             0.03,
         );
+    });
+    reshape_indicators(b, p, false, M::EmissiveAmber, |t, p, k| {
+        lens_rear(t, k, p, -0.32, -0.22, zt - 0.17, zt - 0.04, 0.01, 0.03);
     });
     let gar = key("tail_garnish", R::Trunk, M::Trim);
     rear_box(b, &gar, p, -0.22, 0.22, zt - 0.15, zt - 0.06, 0.008, 0.03);
@@ -443,44 +488,45 @@ fn supermini_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let zn = p.belt(p.y_nose);
     let wf = p.half_width(p.y_nose);
     reshape_pair(b, p, "headlight", |t, p, k| {
-        front_box(
+        lens_front(
             t,
             k,
             p,
             -(wf - 0.005),
             -0.30,
             zn - 0.12,
-            zn - 0.03,
+            zn - 0.045,
             0.012,
             0.035,
         );
-        // Teardrop tail: a narrower box sweeping up the fender corner.
-        front_box(
+    });
+    // Teardrop tail of the lamp = the amber turn signal: a narrower box sweeping up toward the
+    // fender corner, same face. It stops 1 cm short of the corner: its flat face is a chord of
+    // the rounded plan, and past the corner the bumper wrap would cover it
+    // (`lights_sit_outside_the_shell`).
+    reshape_indicators(b, p, true, M::EmissiveAmber, |t, p, k| {
+        lens_front(
             t,
             k,
             p,
-            -(wf + 0.01),
+            -(wf - 0.01),
             -(wf - 0.10),
-            zn - 0.05,
+            zn - 0.04,
             zn + 0.0,
-            0.006,
+            0.012,
             0.05,
         );
     });
     let zt = p.belt(p.y_tail);
     let wt = p.half_width(p.y_tail);
+    // Tall tail lamps: red top and bottom, an amber band between them.
+    let (tx0, tx1) = (-(wt - 0.005), -(wt - 0.17));
     reshape_pair(b, p, "taillight", |t, p, k| {
-        rear_box(
-            t,
-            k,
-            p,
-            -(wt - 0.005),
-            -(wt - 0.17),
-            zt - 0.22,
-            zt + 0.06,
-            0.012,
-            0.03,
-        );
+        lens_rear(t, k, p, tx0, tx1, zt - 0.22, zt - 0.095, 0.012, 0.03);
+        lens_rear(t, k, p, tx0, tx1, zt - 0.025, zt + 0.06, 0.012, 0.03);
+    });
+    reshape_indicators(b, p, false, M::EmissiveAmber, |t, p, k| {
+        lens_rear(t, k, p, tx0, tx1, zt - 0.09, zt - 0.03, 0.012, 0.03);
     });
     let slot = key("grille_upper", R::FrontBumper, M::Grille);
     front_box(b, &slot, p, -0.24, 0.24, zn - 0.10, zn - 0.05, 0.006, 0.03);
@@ -526,21 +572,12 @@ fn compact_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let wf = p.half_width(p.y_nose);
     let (l0, l1) = (zn - 0.17, zn - 0.03);
     reshape_pair(b, p, "headlight", |t, p, k| {
-        front_box(t, k, p, -(wf - 0.10), -0.45, l0, l1, 0.008, 0.03);
+        lens_front(t, k, p, -(wf - 0.10), -0.45, l0, l1, 0.008, 0.03);
     });
-    let amber = light("corner_lamp_l", R::FrontLeftFender, M::EmissiveAmber);
-    front_box(
-        b,
-        &amber,
-        p,
-        -(wf - 0.003),
-        -(wf - 0.09),
-        l0,
-        l1,
-        0.008,
-        0.03,
-    );
-    mirror(b, &amber);
+    // The amber corner lamp beside each square lamp is its turn signal.
+    reshape_indicators(b, p, true, M::EmissiveAmber, |t, p, k| {
+        lens_front(t, k, p, -(wf - 0.003), -(wf - 0.09), l0, l1, 0.008, 0.03);
+    });
     grille(b, p, 0.43, l0 - 0.01, l1 + 0.01, 2, M::Chrome);
     bumper(b, p, true, 0.42, 0.60, 0.09, M::Chrome, None);
     let val = key("valance", R::FrontBumper, M::Trim);
@@ -548,18 +585,13 @@ fn compact_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     plate_front(b, p, 0.44);
     let zt = p.belt(p.y_tail);
     let wt = p.half_width(p.y_tail);
+    // Vertical tail lamps; their top section is the red-on-red turn signal.
+    let (tx0, tx1) = (-(wt - 0.005), -(wt - 0.11));
     reshape_pair(b, p, "taillight", |t, p, k| {
-        rear_box(
-            t,
-            k,
-            p,
-            -(wt - 0.005),
-            -(wt - 0.11),
-            zt - 0.36,
-            zt - 0.06,
-            0.012,
-            0.03,
-        );
+        lens_rear(t, k, p, tx0, tx1, zt - 0.36, zt - 0.155, 0.012, 0.03);
+    });
+    reshape_indicators(b, p, false, M::Taillight, |t, p, k| {
+        lens_rear(t, k, p, tx0, tx1, zt - 0.15, zt - 0.06, 0.012, 0.03);
     });
     tailgate_handle(b, p, zt - 0.10);
     step_bumper(b, p, 0.38, 0.54, 0.13, M::Chrome, false);
@@ -580,8 +612,12 @@ fn fullsize_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let zn = p.belt(p.y_nose);
     let wf = p.half_width(p.y_nose);
     let (l0, l1) = (zn - 0.20, zn - 0.03);
+    // Tall lamps with an amber strip along the bottom of the lens.
     reshape_pair(b, p, "headlight", |t, p, k| {
-        front_box(t, k, p, -(wf - 0.01), -0.64, l0, l1, 0.012, 0.03);
+        lens_front(t, k, p, -(wf - 0.01), -0.64, l0 + 0.05, l1, 0.012, 0.03);
+    });
+    reshape_indicators(b, p, true, M::EmissiveAmber, |t, p, k| {
+        lens_front(t, k, p, -(wf - 0.01), -0.64, l0, l0 + 0.045, 0.012, 0.03);
     });
     grille(b, p, 0.62, l0 - 0.10, l1 + 0.0, 2, M::Chrome);
     // Lower grille in the bumper.
@@ -596,18 +632,13 @@ fn fullsize_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     plate_front(b, p, 0.42);
     let zt = p.belt(p.y_tail);
     let wt = p.half_width(p.y_tail);
+    // Tall tail lamps; their top section is the red-on-red turn signal.
+    let (tx0, tx1) = (-(wt - 0.005), -(wt - 0.12));
     reshape_pair(b, p, "taillight", |t, p, k| {
-        rear_box(
-            t,
-            k,
-            p,
-            -(wt - 0.005),
-            -(wt - 0.12),
-            zt - 0.42,
-            zt - 0.04,
-            0.012,
-            0.03,
-        );
+        lens_rear(t, k, p, tx0, tx1, zt - 0.42, zt - 0.165, 0.012, 0.03);
+    });
+    reshape_indicators(b, p, false, M::Taillight, |t, p, k| {
+        lens_rear(t, k, p, tx0, tx1, zt - 0.16, zt - 0.04, 0.012, 0.03);
     });
     tailgate_handle(b, p, zt - 0.10);
     step_bumper(b, p, 0.42, 0.62, 0.14, M::Chrome, true);
@@ -645,26 +676,25 @@ fn van_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let zn = p.belt(p.y_nose);
     let wf = p.half_width(p.y_nose);
     let (l0, l1) = (zn - 0.20, zn - 0.03);
+    // Lamps with a vertical amber strip in the outer end of the lens.
     reshape_pair(b, p, "headlight", |t, p, k| {
-        front_box(t, k, p, -(wf - 0.01), -0.53, l0, l1, 0.012, 0.03);
+        lens_front(t, k, p, -(wf - 0.095), -0.53, l0, l1, 0.012, 0.03);
+    });
+    reshape_indicators(b, p, true, M::EmissiveAmber, |t, p, k| {
+        lens_front(t, k, p, -(wf - 0.01), -(wf - 0.09), l0, l1, 0.012, 0.03);
     });
     grille(b, p, 0.51, l0, l1 - 0.02, 3, M::Trim);
     bumper(b, p, true, 0.40, 0.66, 0.08, M::Trim, None);
     plate_front(b, p, 0.42);
     let zt = p.top(p.y_tail + 0.05);
     let wt = p.half_width(p.y_tail);
+    // Tall tail lamps with the amber turn signal as their bottom section.
+    let (tx0, tx1) = (-(wt - 0.005), -(wt - 0.10));
     reshape_pair(b, p, "taillight", |t, p, k| {
-        rear_box(
-            t,
-            k,
-            p,
-            -(wt - 0.005),
-            -(wt - 0.10),
-            0.95,
-            1.40,
-            0.012,
-            0.03,
-        );
+        lens_rear(t, k, p, tx0, tx1, 1.065, 1.40, 0.012, 0.03);
+    });
+    reshape_indicators(b, p, false, M::EmissiveAmber, |t, p, k| {
+        lens_rear(t, k, p, tx0, tx1, 0.95, 1.06, 0.012, 0.03);
     });
     // Barn doors: centre seam, hinges, handle.
     let seam = key("barn_seam", R::Trunk, M::Trim);
@@ -792,6 +822,12 @@ fn end_y(p: &BodyProfile, x: f32, front: bool) -> f32 {
 /// Emit a hexahedron from 8 corners indexed by bits (1 = +x side, 2 = +y side, 4 = +z side);
 /// faces are oriented away from its centroid.
 fn hexa(b: &mut Builder, k: &PartKey, c: [[f32; 3]; 8]) {
+    hexa_open(b, k, c, None);
+}
+
+/// [`hexa`] without face `skip` (index into its face list: 0 / 1 = −x / +x, 2 / 3 = −y / +y,
+/// 4 / 5 = −z / +z), for a face that is always hidden inside the body.
+fn hexa_open(b: &mut Builder, k: &PartKey, c: [[f32; 3]; 8], skip: Option<usize>) {
     let mut ctr = [0.0f32; 3];
     for q in &c {
         for i in 0..3 {
@@ -806,7 +842,10 @@ fn hexa(b: &mut Builder, k: &PartKey, c: [[f32; 3]; 8]) {
         [0, 2, 3, 1],
         [4, 5, 7, 6],
     ];
-    for f in faces {
+    for (i, f) in faces.into_iter().enumerate() {
+        if skip == Some(i) {
+            continue;
+        }
         let q = [c[f[0]], c[f[1]], c[f[2]], c[f[3]]];
         let mut m = [0.0f32; 3];
         for v in &q {
@@ -832,14 +871,36 @@ fn front_box(
     out: f32,
     inn: f32,
 ) {
+    hexa(b, k, front_corners(p, [x0, x1, z0, z1], out, inn));
+}
+
+/// Corners of a [`front_box`] over `[x0, x1, z0, z1]`.
+fn front_corners(p: &BodyProfile, r: [f32; 4], out: f32, inn: f32) -> [[f32; 3]; 8] {
     let mut c = [[0.0f32; 3]; 8];
     for (i, q) in c.iter_mut().enumerate() {
-        let x = if i & 1 == 0 { x0 } else { x1 };
+        let x = if i & 1 == 0 { r[0] } else { r[1] };
         let y = nose_y(p, x) + if i & 2 == 0 { -inn } else { out };
-        let z = if i & 4 == 0 { z0 } else { z1 };
+        let z = if i & 4 == 0 { r[2] } else { r[3] };
         *q = [x, y, z];
     }
-    hexa(b, k, c);
+    c
+}
+
+/// Lamp lens on the front face: a [`front_box`] without its back face (sunk `inn` into the
+/// body, never seen). Head lamps and the turn-signal segments cut out of them use it.
+#[allow(clippy::too_many_arguments)]
+fn lens_front(
+    b: &mut Builder,
+    k: &PartKey,
+    p: &BodyProfile,
+    x0: f32,
+    x1: f32,
+    z0: f32,
+    z1: f32,
+    out: f32,
+    inn: f32,
+) {
+    hexa_open(b, k, front_corners(p, [x0, x1, z0, z1], out, inn), Some(2));
 }
 
 /// Box on the rear face (as [`front_box`], `out` = further back).
@@ -855,14 +916,35 @@ fn rear_box(
     out: f32,
     inn: f32,
 ) {
+    hexa(b, k, rear_corners(p, [x0, x1, z0, z1], out, inn));
+}
+
+/// Corners of a [`rear_box`] over `[x0, x1, z0, z1]`.
+fn rear_corners(p: &BodyProfile, r: [f32; 4], out: f32, inn: f32) -> [[f32; 3]; 8] {
     let mut c = [[0.0f32; 3]; 8];
     for (i, q) in c.iter_mut().enumerate() {
-        let x = if i & 1 == 0 { x0 } else { x1 };
+        let x = if i & 1 == 0 { r[0] } else { r[1] };
         let y = tail_y(p, x) + if i & 2 == 0 { -out } else { inn };
-        let z = if i & 4 == 0 { z0 } else { z1 };
+        let z = if i & 4 == 0 { r[2] } else { r[3] };
         *q = [x, y, z];
     }
-    hexa(b, k, c);
+    c
+}
+
+/// Lamp lens on the rear face: a [`rear_box`] without its back face (inside the body).
+#[allow(clippy::too_many_arguments)]
+fn lens_rear(
+    b: &mut Builder,
+    k: &PartKey,
+    p: &BodyProfile,
+    x0: f32,
+    x1: f32,
+    z0: f32,
+    z1: f32,
+    out: f32,
+    inn: f32,
+) {
+    hexa_open(b, k, rear_corners(p, [x0, x1, z0, z1], out, inn), Some(3));
 }
 
 /// Box on the LEFT side surface over `y0..y1`, `z0..z1`, `out` proud, `inn` sunk.
@@ -968,6 +1050,40 @@ fn side_strip(
             },
         );
         mirror(b, &k);
+    }
+}
+
+/// Replace the foundation's turn-signal lenses of the front (`front`) or rear end with what
+/// `f` emits for the LEFT one into the key it is given (the right is its mirror image). The
+/// lens is a segment of that end's lamp cluster (same face and depth as the lamp's
+/// [`front_box`] / [`rear_box`]); `mat` is `EmissiveAmber`, or `Taillight` for a red-on-red
+/// rear signal.
+fn reshape_indicators(
+    b: &mut Builder,
+    p: &BodyProfile,
+    front: bool,
+    mat: MaterialSlot,
+    f: impl Fn(&mut Builder, &BodyProfile, &PartKey),
+) {
+    let (kl, kr) = if front {
+        (indicator_front_key(false), indicator_front_key(true))
+    } else {
+        (
+            indicator_rear_key(false, mat),
+            indicator_rear_key(true, mat),
+        )
+    };
+    let mut t = Builder::new();
+    f(&mut t, p, &kl);
+    t.mirror_part(&kl.name, &kr);
+    for k in [&kl, &kr] {
+        b.remove_part(&k.name);
+        let (pos, uv, idx) = t
+            .geometry(&k.name)
+            .map(|(a, u, i)| (a.to_vec(), u.to_vec(), i.to_vec()))
+            .unwrap_or_default();
+        b.part(k);
+        b.set_geometry(&k.name, pos, uv, idx);
     }
 }
 

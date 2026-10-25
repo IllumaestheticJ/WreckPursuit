@@ -17,22 +17,24 @@
 import type { ComponentChildren } from "preact";
 import { Fragment, render } from "preact";
 import { keyAction, PadNav, stepIndex, type NavAction } from "./nav";
-import { DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type GameSettings, type SettingsStorage, type Volumes } from "./settings";
+import { ASSIST_LEVELS, DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type AssistLevel, type GameSettings, type RadioFilter, type SettingsStorage, type Volumes } from "./settings";
 import { CONTROL_DEVICES, CONTROL_RANGES, defaultDeviceControls, type ControlDevice, type DeviceControls, type InputProbe } from "./controls";
 import { paintInputBars } from "./bars";
+import { loadMenuMap, saveMenuMap, type MenuMap } from "./maps";
 import "../ui/theme.css";
 import "./menu.css";
 
 /** What the main menu can start. */
-export type PlayChoice = "chase" | "chaseRain" | "races" | "free" | "garage";
+export type PlayChoice = "chase" | "chaseRain" | "races" | "touge" | "free" | "garage";
 
 /** Which screen is showing ("closed" = none). */
 export type MenuScreen = "closed" | "main" | "pause" | "settings";
 
 /** What the host does for the menu. */
 export interface GameMenuHost {
-  /** Main menu choice: start that session (the menu has already closed). */
-  play(choice: PlayChoice): void;
+  /** Main menu choice: start that session (the menu has already closed). `map` is the
+   * main screen's map id (`GameMenuOptions.maps`; "" when the host lists none). */
+  play(choice: PlayChoice, map: string): void;
   /** Pause → Restart: the same session again (the menu has already closed). */
   restart(): void;
   /** Pause → Garage (career). The menu has already closed. */
@@ -68,6 +70,12 @@ export interface GameMenuOptions {
   developerDefault?: boolean;
   /** Storage for persistence (default localStorage; null = none). */
   storage?: SettingsStorage | null;
+  /** Maps the main screen offers (a "Map" picker when there are two or more; the first is the
+   * default). Night run, rainy night, street races and free drive start on the chosen one. */
+  maps?: MenuMap[];
+  /** Label of the main screen's map picker (default "Map"; the testbed says "Spawn in": its
+   * entries are the cities of one world). */
+  mapLabel?: string;
 }
 
 /** Element that Left / Right adjust (cycle buttons, toggles). */
@@ -81,6 +89,8 @@ export class GameMenu {
   screen: MenuScreen = "closed";
   /** The controls panel is open on top (the menu is hidden meanwhile). */
   suspended = false;
+  /** The main screen's map id (remembered per browser; "" without `maps`). */
+  map: string;
   private settingsFrom: "main" | "pause" = "pause";
   private readonly root: HTMLElement;
   private readonly pad = new PadNav();
@@ -99,6 +109,7 @@ export class GameMenu {
     private readonly opts: GameMenuOptions,
   ) {
     this.settings = opts.settings;
+    this.map = loadMenuMap(opts.maps ?? [], opts.storage === undefined ? undefined : opts.storage);
     this.countersteer = !!opts.countersteer;
     this.root = document.createElement("div");
     this.root.id = "wp-game-menu";
@@ -176,6 +187,14 @@ export class GameMenu {
   /** Change settings from outside (e.g. the developer panel's assist boxes); applies + saves. */
   update(patch: Partial<GameSettings>): void {
     this.change({ ...this.settings, ...patch });
+  }
+
+  /** Choose the main screen's map (remembered per browser). */
+  setMap(id: string): void {
+    if (!(this.opts.maps ?? []).some((m) => m.id === id) || id === this.map) return;
+    this.map = id;
+    saveMenuMap(id, this.opts.storage === undefined ? undefined : this.opts.storage);
+    this.draw();
   }
 
   /** Remove from the page. */
@@ -363,7 +382,11 @@ export class GameMenu {
     if (this.screen === "main") {
       body = (
         <MainScreen
-          play={(c) => this.act(() => h.play(c))}
+          maps={this.opts.maps ?? []}
+          mapLabel={this.opts.mapLabel ?? "Map"}
+          map={this.map}
+          setMap={(id) => this.setMap(id)}
+          play={(c) => this.act(() => h.play(c, this.map))}
           settings={() => this.openSettings("main")}
           controls={() => this.controls()}
         />
@@ -466,18 +489,27 @@ function Brand(props: { kicker: string }) {
 }
 
 const PLAY: { id: PlayChoice; label: string; hint: string }[] = [
-  { id: "chase", label: "City chase", hint: "Night in Port Vesper. You're speeding; the police will come." },
+  { id: "chase", label: "Night run", hint: "Night in the city. You're speeding; the police will come." },
   { id: "chaseRain", label: "Rainy night", hint: "Same chase on a soaked road" },
   { id: "races", label: "Street races", hint: "Races against AI drivers" },
+  { id: "touge", label: "Touge battles", hint: "One-on-one down sealed mountain passes. Bets and pink slips with rep" },
   { id: "free", label: "Free drive", hint: "Explore the city with traffic" },
   { id: "garage", label: "Garage", hint: "Your career: cars, repairs, mods" },
 ];
 
-function MainScreen(props: { play: (c: PlayChoice) => void; settings: () => void; controls: () => void }) {
+function MainScreen(props: { maps: MenuMap[]; mapLabel: string; map: string; setMap: (id: string) => void; play: (c: PlayChoice) => void; settings: () => void; controls: () => void }) {
+  const cur = props.maps.find((m) => m.id === props.map);
   return (
     <div class="wp-gm-card wp-gm-main" role="dialog" aria-label="Main menu">
       <Brand kicker="// PORT VESPER · NIGHT SHIFT" />
       <p class="wp-gm-tag">Street racing, soft-body crashes and police chases in a living city.</p>
+      {props.maps.length > 1 && (
+        <div class="wp-gm-map">
+          <Row label={props.mapLabel} hint={cur?.note ?? `Night run, rainy night, street races and free drive start here`}>
+            <Cycle id="gm-map" label={props.mapLabel} value={props.map} options={props.maps.map((m) => ({ id: m.id, label: m.label }))} onChange={props.setMap} />
+          </Row>
+        </div>
+      )}
       <nav class="wp-gm-list" aria-label="Main menu">
         {PLAY.map((p, i) => (
           <Item key={p.id} id={`gm-play-${p.id}`} label={p.label} hint={p.hint} primary={i === 0} onClick={() => props.play(p.id)} />
@@ -543,6 +575,23 @@ function Row(props: { label: string; hint?: string; children: ComponentChildren 
     </div>
   );
 }
+
+/** Off / Half / Full choices for the TCS and ABS rows (reference game levels). */
+const LEVEL_OPTIONS = ASSIST_LEVELS.map((l) => ({ id: l, label: l }));
+const RADIO_FILTER_OPTIONS: { id: RadioFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "important", label: "Important only" },
+];
+const TCS_HINT: Record<AssistLevel, string> = {
+  Off: "The throttle you press: wheelspin is yours",
+  Half: "Lets the wheels spin a little (slides, smoke)",
+  Full: "Barely any wheelspin",
+};
+const ABS_HINT: Record<AssistLevel, string> = {
+  Off: "Wheels lock under hard braking",
+  Half: "Short lock-ups, still steers",
+  Full: "No lock-ups, shortest stops",
+};
 
 /** A value picked from a list: click / Enter / Right = next, Left = previous. */
 function Cycle<T extends string | number>(props: { id: string; label: string; value: T; options: { id: T; label: string }[]; onChange: (v: T) => void }) {
@@ -633,7 +682,7 @@ function SettingsScreen(props: {
   setTestInput: (on: boolean) => void;
 }) {
   const { s, change } = props;
-  const assist = (k: keyof GameSettings["assists"], v: boolean | number) => change({ ...s, assists: { ...s.assists, [k]: v } });
+  const assist = (k: keyof GameSettings["assists"], v: boolean | number | AssistLevel) => change({ ...s, assists: { ...s.assists, [k]: v } });
   const cams = [{ id: "", label: "Default" }, ...props.cameras];
   return (
     <div class="wp-gm-card wp-gm-settings" role="dialog" aria-label="Settings">
@@ -674,12 +723,15 @@ function SettingsScreen(props: {
         <Row label="Police radio voice" hint={s.radioVoice ? "Units and dispatch speak their lines" : "Squelch and text only"}>
           <Toggle id="gm-radio-voice" label="Police radio voice" value={s.radioVoice} onChange={(radioVoice) => change({ ...s, radioVoice })} />
         </Row>
-        <h3>Assists</h3>
-        <Row label="ABS" hint="Anti-lock brakes">
-          <Toggle id="gm-abs" label="ABS" value={s.assists.abs} onChange={(v) => assist("abs", v)} />
+        <Row label="Radio" hint={s.radioFilter === "important" ? "Warnings, heat changes and crashes only" : "Every transmission"}>
+          <Cycle id="gm-radio-filter" label="Radio" value={s.radioFilter} options={RADIO_FILTER_OPTIONS} onChange={(radioFilter) => change({ ...s, radioFilter })} />
         </Row>
-        <Row label="Traction control">
-          <Toggle id="gm-tcs" label="Traction control" value={s.assists.tcs} onChange={(v) => assist("tcs", v)} />
+        <h3>Assists</h3>
+        <Row label="ABS" hint={ABS_HINT[s.assists.abs]}>
+          <Cycle id="gm-abs" label="ABS" value={s.assists.abs} options={LEVEL_OPTIONS} onChange={(v) => assist("abs", v)} />
+        </Row>
+        <Row label="Traction control" hint={TCS_HINT[s.assists.tcs]}>
+          <Cycle id="gm-tcs" label="Traction control" value={s.assists.tcs} options={LEVEL_OPTIONS} onChange={(v) => assist("tcs", v)} />
         </Row>
         <Row label="Stability control">
           <Toggle id="gm-esc" label="Stability control" value={s.assists.esc} onChange={(v) => assist("esc", v)} />
@@ -690,7 +742,7 @@ function SettingsScreen(props: {
         <Row label="Steering help" hint="Less steering lock at speed">
           <Toggle id="gm-steer" label="Steering help" value={s.assists.steerHelp} onChange={(v) => assist("steerHelp", v)} />
         </Row>
-        <Row label="Countersteer help" hint={props.countersteer ? "Catches slides for you" : "Coming soon (needs a vehicle update)"}>
+        <Row label="Countersteer help" hint={props.countersteer ? "Hands off in a slide: the wheels follow it (up to 30 % lock)" : "Coming soon (needs a vehicle update)"}>
           <Slider id="gm-cstr" label="Countersteer help" value={s.assists.countersteer} disabled={!props.countersteer} onChange={(v) => assist("countersteer", v)} />
         </Row>
         <ControlsSection

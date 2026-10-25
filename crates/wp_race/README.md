@@ -151,11 +151,102 @@ longer stop from 25 m/s; `tests/cargo_physics.rs`).
 `race_spots(world)` puts a meet spot (radius `SPOT_RADIUS_M` = 12 m, ±4 m height window) at the
 pole position of every catalog race that runs on the world's city (`catalog::races_on`; Port
 Vesper's races run on `vesper_v2` and on the combined `ashpeak` map, `RaceCity::hosts`). A race
-whose course does not plan gets no spot. `HonkTrigger::update(horn, pos, speed, spots)` fires once
-per horn press (rising edge) when the car is inside a spot and slower than `HONK_MAX_SPEED_MPS`
-(3 m/s); a held horn never retriggers. The browser session runs it (`wp_wasm::race_spots`).
-Ashpeak County's races (`RaceCity::Ashpeak`) need the district roads; their course test
-(`tests/race_spots.rs`) is `#[ignore]`d until the districts are merged.
+whose course does not plan gets no spot. `honk_spot(spots, pos, speed)` is the spot a honk starts:
+the one the car stands in, slower than `HONK_MAX_SPEED_MPS` (3 m/s). The horn edge belongs to the
+browser session's one challenge system (round 12 street racers: a racer within honking range
+takes a honk first; `wp_wasm::session`, `wp_wasm::race_spots`); the race's money is the picker's
+existing stake (advertised buy-in / purse).
+Ashpeak County's races (`RaceCity::Ashpeak`) run on the combined `ashpeak` map only
+(`tests/race_spots.rs`).
+
+### The regulars (`roster`, `racers.toml`)
+
+Twelve named regulars make up the city's picker-race scene (not the roaming street racers
+of `wp_wasm::street`, who have their own levels and names). Each has a stable id, name and
+nickname, a car (`data/cars`, analog names), a home turf, a course **specialty** (hill,
+highway, downtown, mixed), a **tier** (the licence tier at which they start turning up at
+scheduled meets: rookies at once, Nina "Static" Castellanos only for elite players), a
+`wp_opponent::DriverProfile` and a starting **form rating** (Elo-like, 1000 = mid-pack).
+Every AI driver in the picker is one of them (`catalog::AiDriverDef::id`; a test checks the
+picker and the file agree on name, car, style and profile, and that every regular races
+somewhere).
+
+`RosterState` is the save-game side: starts, wins, podiums, DNFs, peak rating and the last
+five results per racer, the player included (`PLAYER_KEY`). `record_race` updates them from a
+judged result with a multi-player Elo step (every pair of racers is one game; K = 32 spread
+over the field; a DNF loses to every finisher, two DNFs draw). Ratings are integers and
+`pow10` is built from `+ − × ÷` only, so every target agrees. `field_for_event` fills a
+scheduled meet with regulars (tier-gated, weighted towards locals and towards ratings near the
+player's), and `resolve_offscreen` draws a Plackett–Luce finishing order for races nobody
+watched, so the regulars' records keep moving while the player is elsewhere.
+
+### Betting (`betting`, `betting.toml`)
+
+A `Market` prices one race from its entrants' ratings (form + a specialty bonus of 60 on a
+matching course + a car adjustment for the player's car against the field's median class
+index):
+
+| Market | Probability | Margin |
+|---|---|---|
+| Win | Plackett–Luce `sᵢ / Σs`, `s = 10^(rating/400)` | 15 % |
+| Podium (fields of 4+) | exact Plackett–Luce over every ordered top three | 12 % |
+| Head-to-head | `sᵢ / (sᵢ + sⱼ)` | 6 % |
+
+Offered odds `1 / (p · (1 + margin))`, rounded down to 0.05, clamped to 1.05–30.0, stored as
+integer thousandths so payouts are exact. A `Book` takes tickets until the green light, then
+settles them from the result (win / top three / finished ahead; a finisher beats any DNF; a
+head-to-head where neither finishes, or a ticket on a racer who never started, is void) or
+refunds everything (`void_all`). **A racer in the race may only back themselves** (win,
+podium, or a head-to-head with themselves as the pick), so nobody can profit from throwing a
+race. Money moves only through `BetWallet`; the career economy decides whether and how much
+the player may bet (`wp_economy::Economy::max_bet / place_bet / settle_bet`, rep tier caps in
+`data/economy/career.toml`). A 2 000-race simulation checks the book keeps its edge.
+
+### Picker races (`catalog`)
+
+Owner, 2026-10-24: the picker (`catalog::races()`, and so every meet spot and race card) offers
+only the Loop 9 races.
+
+| Id | Where | Kind | Terrain | Hour | Length | Field |
+|---|---|---|---|---|---|---|
+| `loop9_circuit` (Loop 9 night) | Port Vesper | Circuit ×1 | highway | 23:00 | 10.1 km | Vic, Mara, Dez, Juno, Tito |
+| `loop9_day` (Loop 9 day) | Port Vesper | Circuit ×1 (illegal daytime) | highway | 14:00 | 10.1 km | Vic, Mara, Dez, Juno, Tito |
+| `loop9_ashpeak_highway` | Ashpeak map | Circuit ×1 | highway | 00:30 | 17.9 km | Vic, Mara, Dez, Juno, Tito |
+
+The highway run is one lap of Loop 9's east side, Route 7 (Talon Tunnel, Silver Gorge), the
+Crosstown Expressway, Route 12 over the Grizzly Grade and back onto Loop 9 at Lantern Way:
+highway lanes all the way. Loop 9 day runs the same lap from a grid on the south side, so
+its meet spot is not the night race's. (The highway polygon's points sit on the lanes the ramps feed, because the
+planner does not change lanes.)
+
+**Retired races** (`catalog::retired_races()`): `hollins_sprint`, `lantern_checkpoint`,
+`grid_highway_sprint`, the Ashpeak County races (`crowfoot_ascent`, `crowfoot_descent`,
+`harnell_dirt_run`, `ashpeak_downtown_checkpoint`, `route7_tunnel_sprint`,
+`grizzly_grade_sprint`, `waterfront_drag`, `ashpeak_metro_circuit`) and PR #47's city races
+(`harbor_dash`, `tunnel_run`, `hollins_descent`, `offramp_sprint`, `grid_arterial_sprint`).
+They are offered nowhere in the game, but `catalog::race(id)` and `race_for_scenario` still
+find them, so their `pick_<id>.ron` scenarios, goldens and `tests/race_picker.rs` runs stay as
+regression tests (and the browser's `?race=<id>` debug link still starts one).
+
+`catalog::betting_market(def, roster, state, rules, car_adjust)` prices any of them.
+### Touge battles (`touge`, `data/events/touge.toml`)
+
+One-on-one sprints on the four `wp_world::touge` passes. `TougeSetup` = pass × uphill/downhill ×
+day (14:00) / night (23:30) × dry / rain × challenger / boss; its scenario name
+`race_touge:<map>:<up|down>:<day|night>:<dry|rain>:<challenger|boss>` round-trips, and
+`race_def` / `plan_course` build a sanctioned single-file sprint (NPC ahead, 12 m gap, no
+traffic, no police). Every pass has a fixed challenger and boss (`ROSTER`).
+- **Rules:** `Boundary::check` flags a car through the wall line (a K-rail stretch) or fallen
+  well below the road; `TougeBattle::observe` decides the battle at once for the other car
+  (the car through is totaled). Otherwise the first across the line wins.
+- **Gates (career API, `wp_economy::progression`):** racing a challenger needs
+  `Feature::TougeRaces`, a boss `Feature::BossRaces`; side bets need `Feature::TougeBetting`
+  (stake up to `max_bet(BetVenue::Touge)`), pink slips `Feature::PinkSlips`. `wager_menu` lists
+  each line with the locked reason; `place` refuses a locked or oversized wager.
+- **Settlement (`settle`):** side bet via `settle_bet` (challenger 2.0×, boss 2.5×), the win
+  purse (challenger 3 500, boss 12 000) via `award_credits`, rep via `award_rep` (`boss:<map>` / `touge:<map>`; −100 extra for going through the
+  wall), and pink slips: the winner takes the loser's car **exactly as it finished**
+  (`Economy::take_pink_slip_car` with the NPC's damage snapshot; `lose_pink_slip_car`).
 
 ## Tests
 
@@ -182,8 +273,13 @@ cargo run --release -p wp_race --example judge_bench
   to the Knob Observatory Lot; at least three finish, nobody is wrecked; deterministic.
 - `tests/race_picker.rs` — every race of the browser's picker (`catalog`), raced to the finish
   from `apps/simcli/scenarios/race/pick_<id>.ron` with AI in every seat and the browser's glue
-  (`live::LiveRace`, meet report, stake heat); expectation ranges per race (winner time,
+  (`live::LiveRace`, meet report, stake heat, the tow of busted AI cars 6 s after capture via
+  `StepOut::impound`); expectation ranges per race (winner time,
   finishers, no wrecks, patrol + heat for the illegal daytime run); deterministic.
+- `src/roster.rs`, `src/betting.rs` unit tests — roster data, Elo updates (upsets, DNFs, form,
+  save round-trip), deterministic `pow10`, meet fields (tiers, locals), off-screen results;
+  market consistency (win sums to 1, podium to 3, implied > 1), odds rounding, the
+  back-yourself rule, stake limits, settlement and voids, long-run house edge.
 - `tests/cargo_physics.rs` — Delivery cargo slows the car in the real `wp_sim` loop.
 - `tests/determinism_lint.rs` — runs `tools/lint-determinism` over `wp_race/src`.
 
@@ -220,6 +316,11 @@ police budget (0.5 ms/frame).
 - Picker races (`catalog` + `live`) run in the browser session (`wp_wasm::race`); see
   `docs/integration/race.md` → Step 2 for the browser-side gaps (reset to the grid slot, no
   closures for street races, simcli replay of a race replay drifts).
+- Betting in the browser covers bets on yourself in picker races. Spectator betting on
+  NPC-only races (`Book::new(market, None)` + `resolve_offscreen`) and filling scheduled meets
+  with `field_for_event` have their APIs and tests but no caller yet (the server / meet UI).
+- Roster records live in the browser (localStorage `wp.roster.v1`); a server keeps them per
+  world, not per player (not wired yet).
 - AI entrants (`entrants`) are wired in tests and the browser; `wp_net`'s server must spawn them at
   `ScheduledEvent::spawn_s` and call `AiEntrants::tick` / `report_to` (request to F).
   simcli cannot drive them in a standalone scenario run yet (requests to I and N).

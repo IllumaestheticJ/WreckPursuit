@@ -8,7 +8,7 @@ an invented lighthouse inside a ring.
 
 ### Geometry (`tools/assets/src/styles/police.rs`, `styles/police/kit.rs`)
 - There are five body styles keyed by car id. Each has a `LiveryHint` (scheme id + colour tokens),
-  a `WheelStyle` and plain black calipers. The harrier has blue calipers.
+  a `WheelStyle` and plain black calipers. The vigil has blue calipers.
 
 | Car | Version | Bar | Equipment | Wheels | Tris |
 |---|---|---|---|---|---|
@@ -16,7 +16,7 @@ an invented lighthouse inside a ring.
 | `sentinel_warden` | "old sedan", boxy 80s | twin rotators (2 domes per side, chrome reflectors, clear takedown box, chrome gutter clamps) | rubber bumper guards, **two** chrome A-pillar spotlights, 2 whips, chrome rub strip (one piece per panel, cut at the arches), box arches, nose-up stance | DogDish, tall sidewall | 12082 |
 | `sentinel_wolfhound` | "patrol" | LED 1.35 m | push bar with LED cubes, black spotlight, 4 pucks, visor bar, rear-window bar (red/amber/blue), decklid lip | Steel black | 11597 |
 | `sentinel_bastion` | "SUV" | LED 1.37 m, set forward | heavy 4-upright push bar with LED cubes, tow hooks, 4 pucks, rear-window bar | Steel 6-lug + centre cap | 11705 |
-| `sentinel_harrier` | "sports patrol" | **slicktop** | PIT bumper, visor bar, grille LEDs, rear-window bar, pedestal wing with a red/blue LED strip, carbon splitter, hood vents | SplitSpoke black alloy, blue calipers | 10743 |
+| `sentinel_vigil` | "sports patrol" | **slicktop** | PIT bumper, visor bar, grille LEDs, rear-window bar, pedestal wing with a red/blue LED strip, carbon splitter, hood vents | SplitSpoke black alloy, blue calipers | 10743 |
 
 - Every car also has a partition (solid lower panel, polycarbonate pane, bars) and unit-number
   decal carriers. The carriers are `decal_unit_l/_r` (rear quarter, or front fender on the
@@ -29,7 +29,7 @@ an invented lighthouse inside a ring.
   itself on the styled profile: roof top, windshield and rear-glass lines, door stations,
   arches.
 - `cargo test -p car-assets --lib police` checks that all five cars have a style, livery, decals
-  and partition, are within budget, have split lenses, and that the harrier has no roof bar
+  and partition, are within budget, have split lenses, and that the vigil has no roof bar
   while the warden has domes.
 
 ### Livery (`apps/testbed-web/src/render/livery.ts`)
@@ -52,7 +52,7 @@ an invented lighthouse inside a ring.
   right, the top (aerial numbers read from behind, glyph tops toward the front) and the rear.
 - Unit numbers come from a hash of the entity id (sim cars) or the `unit_id` (non-sim units):
   `C-12` (cruiser), `C-40..59` (warden), `L-L1` (wolfhound), `S-B3` (bastion), `C-H1`
-  (harrier). The roof uses the same string without the hyphen. `applyUnitDecals` re-maps each
+  (vigil). The roof uses the same string without the hyphen. `applyUnitDecals` re-maps each
   decal carrier's UVs from its rest box and gives it a small cached per-string texture.
 - The font is the system condensed stack (`Arial Narrow`, `Roboto Condensed`, …) plus an extra
   squeeze. No font download.
@@ -98,7 +98,7 @@ an invented lighthouse inside a ring.
 ## Screenshots
 Saved to `/tmp/claude-0/-home-user/1061d6c1-01ae-51aa-aaa0-b18f6899236a/scratchpad/`:
 - `police_<car>_{left,right,rear,top,night}.png`, for car = cruiser, warden, wolfhound, bastion,
-  harrier.
+  vigil.
 - `shots/police_units_{day,night}{,_b}.png` (non-sim units view).
 
 They come from a dev (unoptimised) wasm build of this branch.
@@ -119,7 +119,7 @@ They come from a dev (unoptimised) wasm build of this branch.
    cleaner.
 5. Decal materials do not follow the paint opacity fade in the lattice view (minor).
 6. Reduced flashing is URL-only (`?flash=slow`). It is worth adding as a settings toggle.
-7. Doctrine: the harrier call sign `<P>-H<n>` (Hotel) is new, as proposed in
+7. Doctrine: the vigil call sign `<P>-H<n>` (Hotel) is new, as proposed in
    `research_police.md` §1.5. It needs a row in `POLICE_DOCTRINE.md` §8.1.
 8. Wheels: the styles set `RimKind::Steel` / `DogDish` / `SplitSpoke`, `CapKind` and lug counts.
    They render as the foundation star rim until the mechanical agent's `wheels.rs` lands. Dog-dish

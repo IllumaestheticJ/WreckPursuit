@@ -6,6 +6,9 @@
 - **Contract version built against:** 0.3.0
 
 Design write-up, tuning levers and measured numbers: `crates/wp_economy/README.md`.
+Career progression (rep tiers, unlocks, betting wallet): `docs/integration/career-progression.md`.
+
+- **Mod visuals:** `wp_economy::visuals` (what a build looks like, `ModDef::visuals`) — see `docs/integration/mod-visuals.md`.
 
 ## Exposes
 
@@ -31,6 +34,10 @@ the run ends.
 | `career_quote_json(uid, req)`, `career_repair(uid, req)` | `req = { option?: RepairAll / {RepairSelected:[items]} / Scrap, district?: DistrictId, shop?: Legit/Crooked }`; the stored lattice is repaired with `DamageSim::apply_repair` (full repair = pristine body); a legit shop reporting a wanted car raises carried heat |
 | `career_release(uid)`, `career_next_night()` | pound release; a night without driving (auction countdown, premiums) |
 | `career_insure(uid, tier)` | `"basic"`, `"full"`, `""` = drop the policy |
+| `career_lot_json(lot)` | `LotStockView`: today's stock of a dealership / used lot / junkyard by space (`sold` today flagged); junkyard listings hide `condition`, `est_repairs`, `runs`, `tired_parts`. `CareerView.lots` lists every lot with today's count and cheapest price |
+| `career_buy_listing(lot, slot)` | pays, adds the car with the listing's mods + tyres and puts its wear on the lattice (`apply_preowned_wear`), marks the space sold until the lot restocks tomorrow (`CareerProfile::lot_sales`) |
+| `career_replace_tires(uid, "[fl,fr,rl,rr]")` | tyres are the one thing a repair never fixes |
+| `career_visit_lot(lot)`, `lot_visit_json()` | load the lot itself (ends a career run first): today's unsold stock parked in rows with its wear, the active car (if usable) at the gate, fences / fixtures by lot kind; `lot_visit_json` maps entities to spaces (`null` once another session is installed) |
 
 Rules: each finished run is a night; capture / wreck clears heat; a free end carries heat × 0.5
 (≤ 45, < 5 forgotten); bounty, rep, debt and the pound clock live in the account. Career runs
@@ -39,7 +46,7 @@ keep the career's damage mode (`set_damage_mode` is refused). Lattice blobs are
 
 Testbed (`apps/testbed-web`): `garage` button and a `career` box (on by default) in the
 controls: with it, **free drive** and **city chase** start career runs; the car selector and
-`window.__wp.startFreeDrive(car, …)` / `startCityChase(car, …)` stay sandbox runs. Saved to
+`window.__wp.startFreeDrive(car, …)` / `startNightRun(car, …)` stay sandbox runs. Saved to
 `localStorage["wp.career.v1"]` (try/catch everywhere; an unreadable save is kept under
 `wp.career.v1.unreadable`) after every garage action, every settlement and every 20 s of a run;
 export / import as a file from the garage. The end-of-run panel gets a **Garage** button on
@@ -110,7 +117,7 @@ capture), `CarImpounded/CarSeized/CarDestroyed` (despawn / do not spawn that car
 | Call | Notes |
 |---|---|
 | `price_table(class, car_value)` / `price_table_for(&OwnedCar)` | contract `PriceTable` to pass to `DamageSim::repair_estimate` |
-| `record_damage(&mut acct, &DamageReport)` | end of session: health, total_loss, handling, estimate, lattice blob, `wanted_during_session`, `towed` (towing is a penalty) |
+| `record_damage(&mut acct, &DamageReport)` | end of session: health, total_loss, handling, estimate, lattice blob, `wanted_during_session` (informational; insurance only cares about captures), `towed` (towing is a penalty) |
 | `quote_repair(&acct, car, &RepairOption, &ShopContext, mode) -> RepairQuote` | `RepairAll`, `RepairSelected(items)`, `DriveDamaged`, `Scrap`; district + crooked/legit labour; insurance. `ShopContext.district: DistrictId` (round 8); `district_from_key(&str)` parses names and the old keys (`default` → Residential, `Docks` → Port, `Hills` → Suburb) |
 | `repair(...) -> RepairOrder` | the damage system must apply the order to the stored lattice and send a fresh `DamageReport` (`towed: false`) |
 | `repair::reference_estimate(&PriceTable, scale, &[(RepairItem, severity)])` | formula stand-in for `wp_damage` |
@@ -200,6 +207,7 @@ per seed). `apps/simcli` (workstream 10) may wrap it as an economy scenario.
 | 4 | `DamageSim::{save_state() -> Vec<u8>, restore_state(&[u8]), apply_repair(&[RepairItem], full: bool)}` | `DriveDamaged` must carry the lattice across sessions; partial repairs must restore only the paid items | 03, 08, 12 | accepted → v0.3.0 (03 implements) |
 | 5 | Move `WantedLevel` from `wp_police` into `wp_contracts` | economy, net and police all key tables by it; today `wp_economy` depends on `wp_police` just for this enum | 06, 07, 08 | **done in v0.2.0**; `wp_economy` now uses `wp_contracts::WantedLevel` and no longer depends on `wp_police` |
 | 6 | Optional: `DistrictId` type in contracts (prompt 05 ids) | repair labour is keyed by district name strings (`prices.toml [district_labour]`) | 05, 08 | `DistrictId` in v0.3.0. **Round 8: economy side done** — `[district_labour]` is keyed by every `DistrictId`, the ledger's `ShopReported` carries a `DistrictId`, and the contract string is its variant name (`"Core"`, `"Port"`, ..). **Lead:** `EconomyReason::ShopReported.district` can become `DistrictId` (same JSON for every value the economy emits); then I drop `district_key` / the parse in `from_contract`. |
+| 8 | `EconomyReason::TiresReplaced { count: u8 }` (car lots, 2026-10-23) | tyres are bought on their own (a repair never fixes them); today the economy posts them as `Adjustment { note: "tires replaced: N" }` | 08, 04 UI ledger | proposed |
 | 7 | Ledger keyed by `AccountId` (round 8 item 3) | the contract event already says `account: AccountId` | 08, 18 meta, 07 net | **Not cheap, proposed for a coordinated step.** `PlayerAccount.player` / `EconomyEvent.player` / `AccountStore::{load, events_since}(PlayerId)` are used by `apps/meta` (two `AccountStore` impls, routes, client, auth, and the JSON stored in its `econ_accounts` / event tables and served by its HTTP API) and `wp_net`'s server. Plan: rename the fields to `account: AccountId` with `#[serde(alias = "player")]` (old JSON still loads), switch the trait to `AccountId`, and fix meta + net in the same commit (mechanical: `PlayerId(x)` → `AccountId(x)`). Needs O's (meta) and F's (net) OK since it touches their crates; until then the additive accessors above give everyone the durable id. |
 
 ### Typed `EconomyEvent` for v0.3.0 — final variant list (request #1, with 07's NET-4)
@@ -314,7 +322,25 @@ table (lead may move them).
 | `handle_capture` | cloud container, release | 0.2 µs | — | not per-frame |
 | 20-night career (60 races) | cloud container, release | 168 µs | — | — |
 
+**Car lots (2026-10-23), minimal glue outside my crates:**
+- `crates/wp_damage` (03): new `src/wear.rs` — `PreownedWear` + `DamageModel::apply_preowned_wear`
+  (lot wear onto the lattice) and `refresh_effects` (effects / health of a never-stepped garage
+  model, so a dead engine reads as dead); `snapshot.rs`: `after_bulk_change` is `pub(crate)`.
+- `crates/wp_sim` (lead): `Sim::set_tire_condition(entity, grip, deflation)` applied on top of
+  damage effects each tick (career tyres; like mods, not in replays).
+- `crates/wp_net` (07): `tires: Default::default()` in the one `OwnedCar` literal.
+- `crates/wp_wasm` (04): new `src/lots.rs` + `src/lots_tests.rs`; `career.rs`: lot stock / buy /
+  tyres / listing views, tyre grip into career runs, tyre wear and spike flats at run end,
+  `store_damage` refreshes effects; `lib.rs` module lines.
+- `apps/ui-kit` (UI): garage "Car lots" tab (replaces the Dealer tab), Tyres panel, new
+  `garage/LotVisit.tsx` overlay; `apps/testbed-web`: `main.ts` (visit flow, input off on a lot,
+  orbit camera on the picked car), `wasm/sim.ts` wrappers.
+
 ## Known gaps
+- Car lots: the lot visit is its own flat-ground location, not a spot on the city map; rare
+  variants are parked with the stock body (their mods apply once bought); the old
+  `career_buy_car` (any model, any condition) stays exported for tests but the garage buys from
+  the lots now.
 - Lattice blobs and partial repairs wait on `DamageSim::{save_state, restore_state, apply_repair}`
   (v0.3.0). Real estimates come from `wp_damage` once the sim calls `record_damage`;
   `reference_estimate` now prices with exactly `wp_damage`'s formula for tests and the career.

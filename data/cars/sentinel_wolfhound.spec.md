@@ -4,11 +4,11 @@
 
 | Class | Archetype | Durability | Base price |
 |---|---|---|---|
-| PoliceInterceptor | 2010s American AWD police pursuit sedan, 3.5 L twin-turbo V6 | 4 / 5 | 45,000 |
+| PoliceInterceptor | 2010s American AWD police pursuit sedan, 3.5 L twin-turbo V6, pursuit tune | 4 / 5 | 45,000 |
 
 ## Design note
 
-The pursuit specialist. AWD and a twin-turbo V6 give it launch traction and mid-range punch to stay on a sports car's bumper in the city, and it is stable at speed. Heavy and tall, so it cannot match a real sports car through fast corners — it wins by never letting the gap open.
+The pursuit specialist. AWD and a hard-tuned twin-turbo V6 give it launch traction and the mid-range punch to stay on a sports car's bumper, and it is stable at well over 300 km/h. Heavy and tall, so it cannot match a real sports car through fast corners — it wins by never letting the gap open.
 
 ## How this car breaks
 
@@ -59,29 +59,29 @@ Frontal area A = 0.84·W·H = 2.53 m²; Cd = 0.33 → **CdA = 0.884 m²** + 0.05
 
 ## Engine
 
-3.5 L DOHC V6, twin turbo, direct injection. Class-typical 2010s 3.5 TT V6 (~78 kW/L), boost plateau from 2500 rpm per fleet spec-class data and owner dynos.
+3.5 L DOHC V6, twin turbo, direct injection, pursuit tune (larger turbos, raised boost). High-output tune of the class 2010s 3.5 TT V6 (~118 kW/L, ~415 kW at 6000 rpm, 720 N·m plateau from 3000 rpm) per performance-trim spec-class data and owner dynos. Pursuit tuning (owner, 2026-10-23): the stock 272 kW tune was outrun by stock sports cars.
 
 | rpm | N·m | kW |
 |---|---|---|
-| 800 | 260 | 21.8 |
-| 1200 | 330 | 41.5 |
-| 1600 | 400 | 67.0 |
-| 2000 | 455 | 95.3 |
-| 2500 | 495 | 129.6 |
-| 3000 | 495 | 155.5 |
-| 3500 | 495 | 181.4 |
-| 4000 | 495 | 207.3 |
-| 4500 | 490 | 230.9 |
-| 5000 | 490 | 256.6 |
-| 5500 | 472 | 271.9 |
-| 6000 | 420 | 263.9 |
-| 6300 | 380 | 250.7 |
+| 800 | 300 | 25.1 |
+| 1200 | 430 | 54.0 |
+| 1600 | 570 | 95.5 |
+| 2000 | 660 | 138.2 |
+| 2500 | 710 | 185.9 |
+| 3000 | 720 | 226.2 |
+| 3500 | 720 | 263.9 |
+| 4000 | 720 | 301.6 |
+| 4500 | 720 | 339.3 |
+| 5000 | 715 | 374.4 |
+| 5500 | 700 | 403.2 |
+| 6000 | 660 | 414.7 |
+| 6300 | 610 | 402.4 |
 
-Peak **272 kW @ 5500 rpm**, **495 N·m @ 2500 rpm**. Idle 650 / redline 6000 / limiter 6300 rpm. Rotating inertia 0.18 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 10% of peak torque = 50 N·m. Power-to-weight 133 kW/t.
+Peak **415 kW @ 6000 rpm**, **720 N·m @ 3000 rpm**. Idle 650 / redline 6000 / limiter 6300 rpm. Rotating inertia 0.18 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 10% of peak torque = 72 N·m. Power-to-weight 202 kW/t.
 
 ## Drivetrain
 
-6-speed automatic with torque converter, on-demand AWD tuned for launches (90 % front until the fronts slip 2 %, then up to 50 % rear), open diffs. Layout **on-demand AWD, 90 % front with the coupling open, up to 50 % rear once the fronts out-spin the rears by 2 %**; front diff: open; rear diff: open. Torque converter: stall 2600 rpm, 1.9× at stall, couples 1:1 from 3000 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 790 N·m. Shift time 0.30 s.
+6-speed automatic with torque converter, on-demand AWD tuned for launches (90 % front until the fronts slip 2 %, then up to 50 % rear), open diffs. Layout **on-demand AWD, 90 % front with the coupling open, up to 50 % rear once the fronts out-spin the rears by 2 %**; front diff: open; rear diff: open. Torque converter: stall 2600 rpm, 1.9× at stall, couples 1:1 from 3000 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 1150 N·m. Shift time 0.30 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -140,7 +140,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
 | sim | 5.9 s | 244 km/h | 39.5 m | 0.87 g | — |
-| estimate | 6.1 s | 255 km/h | 38.1 m | 0.91 g | 558 |
+| estimate | 4.7 s | 291 km/h | 38.1 m | 0.91 g | 665 |
 
 ## Damage lattice (`data/lattices/sentinel_wolfhound.json`)
 

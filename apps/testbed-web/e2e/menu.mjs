@@ -3,11 +3,13 @@
 // Env: CHROMIUM=/path/to/chrome, MENU_SHOTS=dir to write menu_*.png and layout_*.png.
 //
 // Checks: no HUD element overlaps another (bounding boxes) at 1280×720, 1366×768 and 1920×1080,
-// developer panels shown and hidden, in a rainy city chase (pursuit banner, weather line, feed)
+// developer panels shown and hidden, in a rainy night run (pursuit banner, weather line, feed)
 // and a street race (race HUD); Esc pauses the sim and Esc resumes it; the menu is keyboard
 // navigable (pause → settings → units → back); a setting survives a reload; gamepad Start opens
 // the pause menu and the d-pad / B navigate it; Controls opens the rebinding panel and returns to
-// the menu; ?menu=1 opens the title screen with the developer panels off and starts a chase.
+// the menu; ?menu=1 opens the title screen with the developer panels off and starts a chase;
+// the title screen's Map picker (Port Vesper / + Ashpeak County) is remembered and decides where
+// Street races and Free drive start.
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -156,8 +158,8 @@ check(m.screen === "pause" && m.visible && m.paused && tp2 === tp, `Esc opens th
 check(m.focus === "gm-resume", `Resume has the focus (${m.focus})`);
 await shot("menu_pause.png");
 // Driving keys do nothing while it is open.
-await page.keyboard.down("KeyC");
-await page.keyboard.up("KeyC");
+await page.keyboard.down("F3");
+await page.keyboard.up("F3");
 const camBefore = await page.evaluate(() => window.__wp.rig.mode);
 await press("Escape");
 m = await menu();
@@ -187,6 +189,22 @@ const v0 = await page.evaluate(() => window.__wpAudio.mix().master);
 await press("ArrowLeft", 2);
 const v1 = await page.evaluate(() => [window.__wp.menu.settings.volumes.master, window.__wpAudio.mix().master]);
 check(Math.abs(v1[0] - (v0 - 0.1)) < 1e-6 && v1[1] === v1[0], `← lowers the master volume and it reaches the audio mix (${v0} → ${v1.join(" / ")})`);
+// TCS / ABS are Off / Half / Full cycles (owner rows 104/105): clicking TCS steps Off → Half and
+// reaches the sim; the HUD tag shows the level.
+const tcs0 = await page.evaluate(() => window.__wp.menu.settings.assists.tcs);
+await page.click("#gm-tcs");
+const tcs1 = await page.evaluate(() => ({ menu: window.__wp.menu.settings.assists.tcs, sim: window.__wp.sim.assists(window.__wp.app.player).tcs, sel: document.querySelector('#assist-row select[data-a="tcs"]')?.value }));
+check(tcs0 === "Off" && tcs1.menu === "Half" && tcs1.sim === "Half" && tcs1.sel === "Half", `TCS Off → Half in the menu reaches the sim and the assist row (${tcs0} → ${JSON.stringify(tcs1)})`);
+await page.click("#gm-abs");
+const abs1 = await page.evaluate(() => ({ menu: window.__wp.menu.settings.assists.abs, sim: window.__wp.sim.assists(window.__wp.app.player).abs }));
+check(abs1.menu === "Off" && abs1.sim === "Off", `ABS Full → Off (cycles round) (${JSON.stringify(abs1)})`);
+await page.click("#gm-abs");
+await page.click("#gm-tcs");
+await page.click("#gm-tcs");
+const back = await page.evaluate(() => [window.__wp.menu.settings.assists.abs, window.__wp.menu.settings.assists.tcs]);
+check(back[0] === "Half" && back[1] === "Off", `cycles step through every level (${back})`);
+// Park the mouse: a pointer left over the menu would take the focus of whatever renders there.
+await page.mouse.move(0, 0);
 const cstr = await page.evaluate(() => document.getElementById("gm-cstr")?.disabled);
 check(cstr === false, "countersteer slider enabled (wasm set_countersteer, owner row 57)");
 await shot("menu_settings.png");
@@ -233,14 +251,54 @@ await ready();
 await frames(3);
 m = await menu();
 const player = await page.evaluate(() => ({ player: document.body.classList.contains("wp-player"), devPanel: getComputedStyle(document.getElementById("controls")).display }));
-check(m.screen === "main" && m.visible && m.paused && m.focus === "gm-play-chase", `?menu=1 opens the main menu, paused, City chase focused (${m.screen}, ${m.focus})`);
+check(m.screen === "main" && m.visible && m.paused && m.focus === "gm-play-chase", `?menu=1 opens the main menu, paused, Night run focused (${m.screen}, ${m.focus})`);
 check(player.player && player.devPanel === "none", `developer panels off by default there (${JSON.stringify(player)})`);
 await shot("menu_main.png");
 await press("Enter");
 await frames(4);
 m = await menu();
 const sc = await page.evaluate(() => window.__wp.sim.scenario().name);
-check(m.screen === "closed" && !m.paused && sc === "city_chase", `Enter starts the city chase (${sc}, menu ${m.screen})`);
+check(m.screen === "closed" && !m.paused && sc === "night_run", `Enter starts the night run (${sc}, menu ${m.screen})`);
+
+// ----- 7. Spawn choice on the title screen (owner 2026-10-25: one world, pick the city) -------
+await page.evaluate(() => localStorage.removeItem("wp.menu.map.v1"));
+await page.goto(`${URL}?menu=1`);
+await ready();
+await frames(3);
+const mapLabel = () => page.evaluate(() => document.querySelector("#gm-map b")?.textContent ?? "");
+check((await mapLabel()) === "Port Vesper", `the Spawn picker defaults to Port Vesper (${await mapLabel()})`);
+await page.focus("#gm-map");
+await press("ArrowRight");
+await frames(2);
+const note = await page.evaluate(() => document.querySelector(".wp-gm-map small")?.textContent ?? "");
+check((await mapLabel()) === "Ashpeak City" && /connected world/i.test(note), `Right picks Ashpeak City, noting the one connected world ("${note}")`);
+check((await page.evaluate(() => localStorage.getItem("wp.menu.map.v1"))) === "ashpeak_city", "the spawn choice is stored");
+// Street races take place in the world from any spawn: Port Vesper's and Ashpeak County's races are listed.
+await page.click("#gm-play-races");
+await frames(3);
+const ids = await page.evaluate(() => (window.__wp.raceView.cards ?? []).map((c) => c.id));
+check(ids.includes("loop9_circuit") && (ids.includes("crowfoot_ascent") || ids.includes("loop9_ashpeak_highway")), `Street races lists the world's races (${ids.join(", ")})`);
+await page.evaluate(() => window.__wp.raceView.closePicker());
+// Reload: the choice is remembered; Free drive starts in the world, downtown Ashpeak City.
+await page.goto(`${URL}?menu=1`);
+await ready();
+await frames(3);
+check((await mapLabel()) === "Ashpeak City", `the spawn choice survives a reload (${await mapLabel()})`);
+await page.click("#gm-play-free");
+await page.waitForFunction(() => window.__wp.sim.cityId() === "ashpeak", null, { timeout: 120000 }).catch(() => {});
+const city = await page.evaluate(() => window.__wp.sim.cityId());
+const at = await page.evaluate(() => window.__wp.sim.scenario().entities[0].pos);
+check(city === "ashpeak" && at[1] > 3650, `Free drive starts in the world in Ashpeak City (${city}, ${at})`);
+// Harnell Crossing: the night run starts in the village west of Port Vesper.
+await page.evaluate(() => localStorage.setItem("wp.menu.map.v1", "harnell_crossing"));
+await page.goto(`${URL}?menu=1`);
+await ready();
+await frames(3);
+await page.click("#gm-play-chase");
+await page.waitForFunction(() => window.__wp.sim.cityId() === "ashpeak", null, { timeout: 120000 }).catch(() => {});
+const hAt = await page.evaluate(() => window.__wp.sim.scenario().entities[0].pos);
+check(hAt[0] < -2500, `the night run starts in Harnell Crossing (${hAt})`);
+await page.evaluate(() => localStorage.removeItem("wp.menu.map.v1"));
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();

@@ -18,6 +18,11 @@ track_f, track_r, body (w, l, h), fuel_l (tank, L), clearance, front_overhang (f
 scale on the box formula), cd, area_k (frontal area = area_k·w·h), extra_cda (lightbar etc.),
 lift (front, rear Cl·A), engine{...}, trans{...}, tires{...}, susp{...}, align{...},
 brakes{...}, steer{...}, price, durability, note, breaks, sources, lattice{...}.
+
+lattice{...}: mass_frac, bumper ('plastic' | 'steel'), hood ('steel' | 'aluminum'), pushbar, and
+the optional flags ladder_frame (body-on-frame), cargo_box (van: cabin ends at the seat
+partition), live_axle (leaf-sprung live rear axle: weak rear suspension mounts and wheels),
+police_package{...}.
 """
 
 DRIVER_KG = 75.0  # one driver
@@ -412,7 +417,7 @@ CARS = [
         sources=["manufacturer spec-class data for early-70s big-block intermediates (mass, dimensions, axle ratios)",
                  "period net-rating class and modern owner dyno averages for 7.2 L big-blocks",
                  "engineering tables (bias-ply-equivalent tire radius, drum brake factor, ride frequency)"],
-        lattice=dict(mass_frac=0.24, bumper="steel", hood="steel", pushbar=False),
+        lattice=dict(mass_frac=0.24, bumper="steel", hood="steel", pushbar=False, live_axle=True),
     ),
     # ------------------------------------------------------------------ 7
     dict(
@@ -674,7 +679,7 @@ CARS = [
         id="sentinel_cruiser",
         display_name="Sentinel Cruiser",
         cls="PoliceCruiser",
-        analog_of="2010s American full-size RWD police sedan, 5.7 L pushrod V8, pursuit package",
+        analog_of="2010s American full-size RWD police sedan, 6.2 L supercharged pushrod V8, pursuit package",
         era="2010s",
         profile="sedan",
         curb_kg=2000.0,
@@ -694,15 +699,16 @@ CARS = [
         extra_cda=0.05,
         lift=(0.10, 0.12),
         engine=dict(
-            desc="5.7 L OHV 16-valve V8, naturally aspirated, pursuit calibration (no cylinder deactivation)",
-            curve=[(800, 400), (1200, 440), (1600, 470), (2000, 490), (2500, 505), (3000, 515),
-                   (3500, 525), (4000, 533), (4400, 535), (4800, 528), (5200, 505), (5600, 470),
-                   (5900, 440)],
-            idle=600, redline=5800, limit=5900, inertia=0.24, brake_frac=0.10,
-            why=("Class-typical 2010s 5.7 L pushrod police V8 (~48 kW/L, 276 kW at 5200 rpm, "
-                 "~535 N·m at 4400) per fleet spec-class data and owner dynos. Pursuit tuning "
-                 "(round 6b): the V6 cruiser could not catch the traffic sedan to the 144 km/h "
-                 "pursuit cap; the V8 package is the period-correct fix."),
+            desc="6.2 L OHV 16-valve V8, supercharged, pursuit calibration (no cylinder deactivation)",
+            curve=[(800, 430), (1200, 520), (1600, 590), (2000, 640), (2500, 675), (3000, 695),
+                   (3500, 705), (4000, 705), (4500, 695), (5000, 680), (5500, 660), (6000, 620),
+                   (6200, 595)],
+            idle=600, redline=6000, limit=6200, inertia=0.24, brake_frac=0.10,
+            why=("Class-typical 2010s 6.2 L supercharged pushrod V8 (~63 kW/L, ~390 kW at 6000 "
+                 "rpm, ~705 N·m from 3500) per spec-class data and owner dynos. Pursuit tuning "
+                 "(owner, 2026-10-23: police were outrun by a stock Hakone GT): the old 5.7 L "
+                 "package (276 kW) is replaced so the everyday unit out-accelerates and "
+                 "out-runs the stock sports cars."),
         ),
         trans=dict(
             desc="5-speed automatic with torque converter, mild rear LSD (pursuit package, V8 final drive)",
@@ -724,10 +730,10 @@ CARS = [
         price=30000,
         durability=5,
         note=("The everyday patrol car: rear-drive, heavy and planted, with pursuit-rated tires, "
-              "big brakes and the V8 pursuit package. It gets to pursuit speed before anything "
-              "ordinary (traffic, beaters, hatches, trucks, old muscle, FF sport sedans) but "
-              "not before a modern sports car or exotic — those are the interceptor's job. "
-              "Boxing in, PIT manoeuvres and the push bar do the rest."),
+              "big brakes and a supercharged V8 pursuit package. On the straights it runs down "
+              "anything ordinary and every stock sports car; only the exotics stay ahead, and "
+              "those are the interceptor's job. Boxing in, PIT manoeuvres and the push bar do "
+              "the rest."),
         breaks=("Modern full-size unibody with UHSS cabin, plus a reinforced push bar bolted "
                 "through to the front rails: nose-to-tail shunts at pursuit speed mostly bend the "
                 "bar and the bumper cover before the radiator. Hard enough hits rip the bar off, "
@@ -749,7 +755,7 @@ CARS = [
         id="sentinel_wolfhound",
         display_name="Sentinel Wolfhound",
         cls="PoliceInterceptor",
-        analog_of="2010s American AWD police pursuit sedan, 3.5 L twin-turbo V6",
+        analog_of="2010s American AWD police pursuit sedan, 3.5 L twin-turbo V6, pursuit tune",
         era="2010s",
         profile="sedan",
         curb_kg=2000.0,
@@ -769,12 +775,15 @@ CARS = [
         extra_cda=0.05,
         lift=(0.08, 0.10),
         engine=dict(
-            desc="3.5 L DOHC V6, twin turbo, direct injection",
-            curve=[(800, 260), (1200, 330), (1600, 400), (2000, 455), (2500, 495), (3000, 495),
-                   (3500, 495), (4000, 495), (4500, 490), (5000, 490), (5500, 472), (6000, 420),
-                   (6300, 380)],
+            desc="3.5 L DOHC V6, twin turbo, direct injection, pursuit tune (larger turbos, raised boost)",
+            curve=[(800, 300), (1200, 430), (1600, 570), (2000, 660), (2500, 710), (3000, 720),
+                   (3500, 720), (4000, 720), (4500, 720), (5000, 715), (5500, 700), (6000, 660),
+                   (6300, 610)],
             idle=650, redline=6000, limit=6300, inertia=0.18, brake_frac=0.10,
-            why="Class-typical 2010s 3.5 TT V6 (~78 kW/L), boost plateau from 2500 rpm per fleet spec-class data and owner dynos.",
+            why=("High-output tune of the class 2010s 3.5 TT V6 (~118 kW/L, ~415 kW at 6000 rpm, "
+                 "720 N·m plateau from 3000 rpm) per performance-trim spec-class data and owner "
+                 "dynos. Pursuit tuning (owner, 2026-10-23): the stock 272 kW tune was outrun by "
+                 "stock sports cars."),
         ),
         trans=dict(
             desc="6-speed automatic with torque converter, on-demand AWD tuned for launches (90 % front until the fronts slip 2 %, then up to 50 % rear), open diffs",
@@ -795,9 +804,9 @@ CARS = [
         steer=dict(ratio=15.5, turn_circle_m=12.2, ackermann=0.6, rack_speed=1.4),
         price=45000,
         durability=4,
-        note=("The pursuit specialist. AWD and a twin-turbo V6 give it launch traction and "
-              "mid-range punch to stay on a sports car's bumper in the city, and it is stable at "
-              "speed. Heavy and tall, so it cannot match a real sports car through fast corners "
+        note=("The pursuit specialist. AWD and a hard-tuned twin-turbo V6 give it launch "
+              "traction and the mid-range punch to stay on a sports car's bumper, and it is "
+              "stable at well over 300 km/h. Heavy and tall, so it cannot match a real sports car through fast corners "
               "— it wins by never letting the gap open."),
         breaks=("Same reinforced police front as the cruiser (push bar through to the rails) on a "
                 "modern UHSS cell. AWD hardware under the floor means sill and centre-tunnel hits "
@@ -812,7 +821,7 @@ CARS = [
         id="sentinel_bastion",
         display_name="Sentinel Bastion",
         cls="PoliceSuv",
-        analog_of="2010s American full-size police SUV, 5.3 L pushrod V8, body-on-frame, RWD",
+        analog_of="2010s American full-size police SUV, 6.2 L pushrod V8, body-on-frame, RWD",
         era="2010s",
         profile="suv",
         curb_kg=2600.0,
@@ -832,11 +841,13 @@ CARS = [
         extra_cda=0.05,
         lift=(0.20, 0.15),
         engine=dict(
-            desc="5.3 L OHV pushrod V8, naturally aspirated, police calibration",
-            curve=[(800, 360), (1200, 400), (1600, 440), (2000, 465), (2500, 485), (3000, 500),
-                   (3500, 512), (4100, 519), (4500, 510), (5000, 485), (5600, 452), (6000, 410)],
+            desc="6.2 L OHV pushrod V8, naturally aspirated, direct injection, police calibration",
+            curve=[(800, 420), (1200, 480), (1600, 540), (2000, 580), (2500, 610), (3000, 630),
+                   (3500, 640), (4100, 645), (4500, 635), (5000, 610), (5600, 570), (6000, 530)],
             idle=600, redline=5800, limit=6000, inertia=0.25, brake_frac=0.12,
-            why="Same class engine as the Hauler (2010s 5.3 L truck V8).",
+            why=("Class-typical 2010s 6.2 L direct-injection truck V8 (~54 kW/L, ~334 kW at "
+                 "5600 rpm, ~645 N·m at 4100). Pursuit tuning (owner, 2026-10-23): replaces the "
+                 "Hauler's 5.3 L so the SUV keeps up with the rest of the fleet."),
         ),
         trans=dict(
             desc="6-speed automatic with torque converter, open rear diff",
@@ -1129,6 +1140,527 @@ CARS = [
                  "engineering tables (truck tire radius, leaf-spring ride frequency, disc/drum brake hydraulics)"],
         lattice=dict(mass_frac=0.22, bumper="steel", hood="steel", pushbar=False, ladder_frame=True),
     ),
+    # ------------------------------------------------------------------ 18
+    dict(
+        id="stoat_16v",
+        display_name="Stoat 16V",
+        cls="Compact",
+        analog_of="early-90s European FF hot hatch, 2.0 L 16-valve naturally aspirated I4, three-door",
+        era="90s",
+        profile="hatch",
+        curb_kg=1090.0,
+        fuel_l=55,
+        front_frac=0.62,
+        wheelbase=2.475,
+        track_f=1.43,
+        track_r=1.41,
+        body=(1.695, 4.05, 1.40),
+        clearance=0.13,
+        front_overhang=0.82,
+        cg=0.50,
+        cg_why="short three-door hatch with an upright greenhouse; class band 0.45-0.52 m, upper end like the other 90s hatch",
+        inertia_k=(0.80, 0.90, 0.92),
+        cd=0.34,
+        area_k=0.84,
+        extra_cda=0.0,
+        lift=(0.10, 0.12),
+        engine=dict(
+            desc="2.0 L DOHC 16-valve I4, naturally aspirated, multi-point injection",
+            curve=[(1000, 120), (1500, 135), (2000, 150), (2500, 160), (3000, 168), (3500, 174),
+                   (4000, 178), (4500, 181), (5000, 180), (5500, 176), (6000, 170), (6500, 158),
+                   (6800, 145), (7000, 135)],
+            idle=850, redline=6800, limit=7000, inertia=0.12, brake_frac=0.12,
+            why="Class-typical early-90s 2.0 L 16-valve hot-hatch four (~53 kW/L, ~107 kW at 6000 rpm, ~181 N·m at 4500): broad, flat mid-range rather than the high-rev cam step of the 1.6.",
+        ),
+        trans=dict(
+            desc="5-speed manual, open front differential",
+            layout="Fwd",
+            gears=[3.27, 2.13, 1.46, 1.13, 0.89], final=3.94, reverse=3.30, shift=0.25,
+            diff_f="Open", diff_r="Open", clutch_factor=1.4,
+        ),
+        tires=dict(front="205/50R15", rear="205/50R15", compound="street", unsprung=(19.0, 16.0)),
+        susp=dict(hz=(1.50, 1.65), zeta=0.30, travel=(0.16, 0.17), roll_grad_deg_g=3.2,
+                  roll_front_share=0.45, bump_stop=150000.0, preload=0.02),
+        align=dict(camber_deg=(-0.7, -1.0), toe_deg=(0.0, 0.15), caster_deg=3.5),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=256, pistons_mm=[54], pad_mu=0.38),
+            rear=dict(kind="disc", d_mm=247, pistons_mm=[34], pad_mu=0.38),
+            bar=P_MODERN, handbrake_frac=0.9,
+        ),
+        steer=dict(ratio=16.0, turn_circle_m=10.4, ackermann=0.7, rack_speed=1.5),
+        price=9500,
+        durability=2,
+        note=("The other kind of 90s hot hatch: torquey instead of peaky. Shorter and wider-"
+              "tracked for its length than the Vireo, it pulls cleanly from 2500 rpm and "
+              "turns in hard, and the short wheelbase plus a rear bar make it lift-off "
+              "happy — trail the brakes into a corner and the tail comes round to meet you."),
+        breaks=("Light early-90s unibody with a short nose: there is very little crumple zone "
+                "ahead of the transverse engine, so the radiator and cooling pack go early in "
+                "any frontal. Long, heavy three-door doors and thin B-pillars make a T-bone "
+                "nasty. Plastic bumpers and a steel hood are cheap to replace."),
+        sources=["manufacturer spec-class data for early-90s 2.0 L FF hot hatches (mass, dimensions, gearing)",
+                 "owner chassis-dyno averages for 2.0 L 16-valve naturally aspirated fours",
+                 "engineering tables (tire radius, ride frequency, caliper hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=False),
+    ),
+    # ------------------------------------------------------------------ 19
+    dict(
+        id="bulwark_400",
+        display_name="Bulwark 400",
+        cls="Muscle",
+        analog_of="early-70s American full-size four-door muscle sedan, 6.6 L high-output pushrod V8, live rear axle",
+        era="70s",
+        profile="sedan",
+        curb_kg=1880.0,
+        fuel_l=95,
+        front_frac=0.56,
+        wheelbase=3.07,
+        track_f=1.60,
+        track_r=1.58,
+        body=(2.00, 5.50, 1.38),
+        clearance=0.15,
+        front_overhang=1.05,
+        cg=0.56,
+        cg_why="cast-iron V8, perimeter frame-height floor and a bench-seat driving position on a long, soft body; above the sedan band, like the 70s coupe",
+        inertia_k=(0.80, 0.95, 0.97),
+        cd=0.50,
+        area_k=0.84,
+        extra_cda=0.0,
+        lift=(0.15, 0.18),
+        engine=dict(
+            desc="6.6 L OHV pushrod V8, high-output heads and cam, 4-barrel carburettor, dual exhaust (net rating)",
+            curve=[(800, 350), (1200, 410), (1600, 450), (2000, 480), (2400, 500), (2800, 508),
+                   (3200, 505), (3600, 492), (4000, 470), (4400, 438), (4800, 398), (5000, 375),
+                   (5300, 340)],
+            idle=700, redline=5000, limit=5300, inertia=0.28, brake_frac=0.12,
+            why="Net (installed) output class for early-70s high-output 6.6 L four-barrel V8s (~205 kW at 4400 rpm, ~508 N·m at 2800), i.e. well below the period gross ratings; a small-bore, longer-revving engine than the 7.2 L big-block, with less torque at the bottom.",
+        ),
+        trans=dict(
+            desc="3-speed automatic with torque converter, clutch-type limited-slip live rear axle",
+            layout="Rwd",
+            gears=[2.48, 1.48, 1.00], final=3.23, reverse=2.08, shift=0.40,
+            torque_converter=dict(stall_rpm=2000, ratio=2.1, coupling_rpm=2600),
+            diff_f="Open", diff_r=dict(preload=60.0, power=0.35, coast=0.20), clutch_factor=1.5,
+        ),
+        tires=dict(front="225/70R15", rear="225/70R15", compound="street", unsprung=(32.0, 48.0)),
+        susp=dict(hz=(1.05, 1.15), zeta=0.22, travel=(0.20, 0.22), roll_grad_deg_g=6.5,
+                  roll_front_share=0.60, bump_stop=120000.0, preload=0.03),
+        align=dict(camber_deg=(0.25, 0.0), toe_deg=(0.1, 0.0), caster_deg=2.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=298, pistons_mm=[79], pad_mu=0.30),
+            rear=dict(kind="drum", d_mm=279, wheel_cyl_mm=23.8, brake_factor=1.8),
+            bar=P_70S, handbrake_frac=0.8,
+        ),
+        steer=dict(ratio=18.5, turn_circle_m=13.4, ackermann=0.8, rack_speed=1.0),
+        price=26000,
+        durability=4,
+        note=("The family car with a grudge. Two tonnes of four-door land yacht on a lazy "
+              "three-speed, but the torque arrives early and the limited-slip axle "
+              "and the optional steel-belted radials (where the coupe keeps its bias-plies) put it down, so it lights up both rear tires on demand and holds a slide like a "
+              "barge holds a course. Soft, slow steering and period brakes mean every move "
+              "needs planning — and nothing in traffic wants to argue with it."),
+        breaks=("Thick mild-steel panels and chrome battering-ram bumpers on a long nose: low-"
+                "speed hits barely mark it, and the long front overhang gives more crush room "
+                "than the coupe. The cabin is still a 70s mild-steel cell with no real crumple "
+                "management, four doors means four soft spots in a T-bone, the leaf-sprung "
+                "live axle tears its hangers out in a rear hit. The tank sits behind the axle "
+                "under the trunk floor like the coupe's, but behind a longer rear overhang: a "
+                "40 km/h rear hit stops short of it."),
+        sources=["manufacturer spec-class data for early-70s full-size sedans (mass, dimensions, axle ratios)",
+                 "period net-rating class and modern owner dyno averages for high-output 6.6 L four-barrel V8s",
+                 "engineering tables (tire radius, drum brake factor, ride frequency)"],
+        lattice=dict(mass_frac=0.24, bumper="steel", hood="steel", pushbar=False, live_axle=True),
+    ),
+    # ------------------------------------------------------------------ 20
+    dict(
+        id="arashi_t4",
+        display_name="Arashi T4",
+        cls="Sport",
+        analog_of="mid-90s Japanese AWD rally-homologation saloon, 2.0 L turbocharged I4, permanent AWD with centre differential",
+        era="90s",
+        profile="sedan",
+        curb_kg=1260.0,
+        fuel_l=60,
+        front_frac=0.59,
+        wheelbase=2.51,
+        track_f=1.50,
+        track_r=1.50,
+        body=(1.69, 4.33, 1.42),
+        clearance=0.15,
+        front_overhang=0.88,
+        cg=0.50,
+        cg_why="compact saloon on rally-height suspension with AWD hardware under the floor; middle of the 0.45-0.52 m sedan band",
+        inertia_k=(0.80, 0.90, 0.92),
+        cd=0.35,
+        area_k=0.84,
+        extra_cda=0.0,
+        lift=(0.06, 0.04),
+        engine=dict(
+            desc="2.0 L DOHC I4, single turbo, intercooled, homologation spec",
+            curve=[(1000, 140), (1500, 170), (2000, 220), (2500, 290), (3000, 330), (3500, 340),
+                   (4000, 340), (4500, 335), (5000, 325), (5500, 315), (6000, 300), (6500, 280),
+                   (7000, 250), (7200, 235)],
+            idle=850, redline=7000, limit=7200, inertia=0.13, brake_frac=0.10,
+            why="Class-typical mid-90s homologation 2.0 T (~95 kW/L, ~191 kW at 6500 rpm, ~340 N·m at 3500-4000): a big turbo with real lag below 2500 rpm and a top end that keeps pulling.",
+        ),
+        trans=dict(
+            desc="5-speed close-ratio manual, permanent AWD (centre differential, 40 % front), open front, clutch LSD rear",
+            layout=("Awd", 0.40),
+            gears=[3.17, 1.88, 1.30, 0.97, 0.74], final=4.11, reverse=3.30, shift=0.22,
+            diff_f="Open", diff_r=dict(preload=50.0, power=0.35, coast=0.15), clutch_factor=1.4,
+        ),
+        tires=dict(front="205/50R16", rear="205/50R16", compound="sport", unsprung=(21.0, 20.0)),
+        susp=dict(hz=(1.70, 1.80), zeta=0.30, travel=(0.18, 0.19), roll_grad_deg_g=2.6,
+                  roll_front_share=0.52, bump_stop=160000.0, preload=0.02),
+        align=dict(camber_deg=(-0.8, -1.0), toe_deg=(0.0, 0.15), caster_deg=4.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=294, pistons_mm=[40, 44], pad_mu=0.42),
+            rear=dict(kind="disc", d_mm=290, pistons_mm=[38], pad_mu=0.40),
+            bar=P_MODERN, handbrake_frac=0.8,
+        ),
+        steer=dict(ratio=13.5, turn_circle_m=10.8, ackermann=0.6, rack_speed=1.7),
+        price=32000,
+        durability=3,
+        note=("A stage car with number plates. Permanent all-wheel drive with a rear-biased "
+              "split and a rear limited-slip means it launches like the modern AWD hatch but "
+              "rotates on the throttle like a rear-driver — keep the turbo spooled above "
+              "3000 rpm and steer it with your right foot. Long-travel suspension shrugs off "
+              "kerbs and rough city roads that unsettle the low sports cars."),
+        breaks=("Seam-welded 90s HSS shell with an aluminium hood and plastic bumpers: the nose "
+                "crumples readily and the front-mounted intercooler is the first casualty of any "
+                "frontal. The cabin is decent for its era but not the modern cells; the prop "
+                "shaft and centre diff under the floor make sill and kerb strikes expensive."),
+        sources=["manufacturer spec-class data for mid-90s AWD 2.0 T homologation saloons",
+                 "owner dyno averages for 90s 2.0 L turbo I4s on stock boost",
+                 "engineering tables (tire radius, ride frequency, opposed-caliper hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="aluminum", pushbar=False),
+    ),
+    # ------------------------------------------------------------------ 21 (traffic)
+    dict(
+        id="satchel_20",
+        display_name="Satchel 2.0",
+        cls="Truck",
+        analog_of="2000s European FWD high-roof panel van, 2.0 L petrol I4, transverse engine, unibody",
+        era="2000s",
+        profile="van",
+        curb_kg=1850.0,
+        fuel_l=80,
+        front_frac=0.58,
+        wheelbase=3.00,
+        track_f=1.62,
+        track_r=1.63,
+        body=(1.90, 4.85, 2.25),
+        clearance=0.17,
+        front_overhang=0.85,
+        cg=0.75,
+        cg_why="empty high-roof van: 2.25 m box on a car-style floor, mass low but the body tall; top of the 0.65-0.75 m truck band",
+        inertia_k=(0.85, 0.95, 0.97),
+        cd=0.37,
+        area_k=0.88,
+        extra_cda=0.0,
+        lift=(0.12, 0.10),
+        engine=dict(
+            desc="2.0 L SOHC 8-valve I4, multi-point injection, commercial calibration",
+            curve=[(800, 120), (1200, 140), (1600, 155), (2000, 165), (2500, 172), (3000, 176),
+                   (3500, 176), (4000, 173), (4500, 168), (5000, 160), (5500, 148), (6000, 130)],
+            idle=750, redline=5800, limit=6000, inertia=0.15, brake_frac=0.12,
+            why="Class-typical 2000s 2.0 L petrol van engine (~42 kW/L, ~85 kW at 5000-5500 rpm, ~176 N·m at 3000-3500) per manufacturer spec-class data: tuned for low-rev pull under load.",
+        ),
+        trans=dict(
+            desc="5-speed manual, open front differential, short final drive for payload",
+            layout="Fwd",
+            gears=[3.73, 2.05, 1.32, 0.97, 0.76], final=4.53, reverse=3.55, shift=0.35,
+            diff_f="Open", diff_r="Open", clutch_factor=1.4,
+        ),
+        tires=dict(front="215/65R16", rear="215/65R16", compound="street", unsprung=(24.0, 30.0)),
+        susp=dict(hz=(1.25, 1.50), zeta=0.27, travel=(0.18, 0.20), roll_grad_deg_g=5.0,
+                  roll_front_share=0.65, bump_stop=250000.0, preload=0.03),
+        align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.0, 0.1), caster_deg=3.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=300, pistons_mm=[60], pad_mu=0.40),
+            rear=dict(kind="drum", d_mm=254, wheel_cyl_mm=22.2, brake_factor=1.8),
+            bar=P_MODERN, handbrake_frac=1.0,
+        ),
+        steer=dict(ratio=17.5, turn_circle_m=11.9, ackermann=0.7, rack_speed=1.2),
+        price=20000,
+        durability=3,
+        note=("The parcel van on every corner: front-drive, tall and gutless, with a short "
+              "first gear for pulling away loaded and not much after that. Empty it is light "
+              "at the back, so it understeers safely until a sudden lift lets the rear step "
+              "out — and the slab sides catch every crosswind and every shove."),
+        breaks=("Car-style unibody rather than a frame: the short nose crumples like a hatchback's "
+                "and the transverse engine and radiator go early in a frontal. The cargo box "
+                "behind the bulkhead is thin sheet on light hoops, so side and rear hits dent "
+                "it deeply without reaching the cab. The tall body and high CG tip it in hard "
+                "swerves."),
+        sources=["manufacturer spec-class data for 2000s European medium panel vans (petrol)",
+                 "road-test figures for the class (0-100, braking, skidpad, empty)",
+                 "engineering tables (van tire radius, ride frequency, disc/drum brake hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=False, cargo_box=True),
+    ),
+    # ------------------------------------------------------------------ 18 (round 9)
+    dict(
+        id="marten_20",
+        display_name="Marten 2.0",
+        cls="Compact",
+        analog_of="early-90s European FF hot hatch, 2.0 L 16-valve naturally aspirated I4",
+        era="90s",
+        profile="hatch",
+        curb_kg=1060.0,
+        fuel_l=55,
+        front_frac=0.62,
+        wheelbase=2.47,
+        track_f=1.43,
+        track_r=1.42,
+        body=(1.70, 4.05, 1.40),
+        clearance=0.13,
+        front_overhang=0.85,
+        cg=0.49,
+        cg_why="small hatch, lowered sport suspension; sedan band 0.45-0.52 m, just below the Vireo's tall greenhouse",
+        inertia_k=(0.80, 0.90, 0.92),
+        cd=0.34,
+        area_k=0.84,
+        extra_cda=0.0,
+        lift=(0.10, 0.12),
+        engine=dict(
+            desc="2.0 L DOHC 16-valve I4, naturally aspirated, multi-point injection",
+            curve=[(1000, 120), (1500, 135), (2000, 148), (2500, 158), (3000, 166), (3500, 172),
+                   (4000, 177), (4600, 180), (5000, 179), (5500, 177), (6000, 175), (6500, 165),
+                   (6800, 152), (7100, 135)],
+            idle=850, redline=6800, limit=7100, inertia=0.12, brake_frac=0.12,
+            why="Class-typical early-90s European 2.0 16-valve (~55 kW/L, 110 kW at 6000 rpm, ~180 N·m at 4600) per manufacturer spec-class data; a broad, flat curve rather than the Vireo's cam-step.",
+        ),
+        trans=dict(
+            desc="5-speed close-ratio manual, open front differential",
+            layout="Fwd",
+            gears=[3.45, 2.13, 1.48, 1.12, 0.89], final=3.94, reverse=3.39, shift=0.25,
+            diff_f="Open", diff_r="Open", clutch_factor=1.4,
+        ),
+        tires=dict(front="195/50R15", rear="195/50R15", compound="street", unsprung=(18.0, 16.0)),
+        susp=dict(hz=(1.60, 1.75), zeta=0.30, travel=(0.15, 0.16), roll_grad_deg_g=2.8,
+                  roll_front_share=0.45, bump_stop=150000.0, preload=0.02),
+        align=dict(camber_deg=(-0.8, -1.0), toe_deg=(0.0, 0.15), caster_deg=3.5),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=280, pistons_mm=[54], pad_mu=0.38),
+            rear=dict(kind="disc", d_mm=245, pistons_mm=[34], pad_mu=0.38),
+            bar=P_MODERN, handbrake_frac=0.9,
+        ),
+        steer=dict(ratio=15.5, turn_circle_m=10.4, ackermann=0.7, rack_speed=1.5),
+        price=9500,
+        durability=2,
+        note=("The original-recipe hot hatch: a big, torquey 2.0 in a small hatch shell. "
+              "Where the Vireo needs revs, the Marten pulls from 3000 rpm in any gear, so it is "
+              "quicker away from junctions and easier to drive fast — at the cost of torque steer "
+              "under full throttle in the low gears. A soft front and a stiff rear bar make it "
+              "tuck in and rotate on a lift; leave the throttle planted and it understeers."),
+        breaks=("90s unibody with short crumple rails: a moderate nose hit reaches the radiator "
+                "and the transverse engine quickly, and in Simulation one committed frontal at "
+                "speed ends it. The doors have no real intrusion beams, so side hits reach the "
+                "cabin early. Plastic bumpers and a steel hood crumple at parking speeds, but "
+                "every panel is cheap and bolts back on."),
+        sources=["manufacturer spec-class data for early-90s European 2.0 L FF hot hatches (mass, dimensions, gearing)",
+                 "road-test figures for the class (0-100, braking, skidpad)",
+                 "engineering tables (tire radius, ride frequency, caliper hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=False),
+    ),
+    # ------------------------------------------------------------------ 19 (round 9)
+    dict(
+        id="brigand_400",
+        display_name="Brigand 400",
+        cls="Muscle",
+        analog_of="mid-70s American full-size four-door sedan, 6.6 L pushrod V8, 4-barrel, live rear axle",
+        era="70s",
+        profile="sedan",
+        curb_kg=1950.0,
+        fuel_l=95,
+        front_frac=0.56,
+        wheelbase=3.07,
+        track_f=1.60,
+        track_r=1.60,
+        body=(2.02, 5.55, 1.38),
+        clearance=0.15,
+        front_overhang=1.05,
+        cg=0.56,
+        cg_why="tall cast-iron V8 and a soft, high-riding body on a long frame; above the sedan band, like the Ironside",
+        inertia_k=(0.80, 0.95, 0.97),
+        cd=0.50,
+        area_k=0.84,
+        extra_cda=0.0,
+        lift=(0.15, 0.18),
+        engine=dict(
+            desc="6.6 L OHV pushrod V8, 4-barrel carburettor, high-output calibration (net rating)",
+            curve=[(800, 330), (1200, 390), (1600, 430), (2000, 455), (2400, 470), (2800, 475),
+                   (3200, 470), (3600, 450), (4000, 420), (4400, 380), (4800, 330), (5100, 290)],
+            idle=600, redline=4800, limit=5100, inertia=0.32, brake_frac=0.12,
+            why="Net (installed) output class for mid-70s 6.6 L big-sedan V8s in high-output tune (~26 kW/L, 175 kW at 4400 rpm, ~475 N·m at 2800); emissions-era cam and compression keep the top end short, per period net ratings and owner dynos.",
+        ),
+        trans=dict(
+            desc="3-speed automatic with torque converter, clutch-type limited-slip live rear axle (period option)",
+            layout="Rwd",
+            gears=[2.46, 1.46, 1.00], final=3.08, reverse=2.20, shift=0.40,
+            torque_converter=dict(stall_rpm=2000, ratio=2.1, coupling_rpm=2600),
+            diff_f="Open", diff_r=dict(preload=60.0, power=0.40, coast=0.20), clutch_factor=1.5,
+        ),
+        tires=dict(front="225/75R15", rear="225/75R15", compound="vintage_bias", unsprung=(32.0, 50.0)),
+        susp=dict(hz=(1.15, 1.25), zeta=0.23, travel=(0.20, 0.22), roll_grad_deg_g=6.5,
+                  roll_front_share=0.70, bump_stop=120000.0, preload=0.03),
+        align=dict(camber_deg=(0.25, 0.0), toe_deg=(0.1, 0.0), caster_deg=2.5),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=298, pistons_mm=[76], pad_mu=0.30),
+            rear=dict(kind="drum", d_mm=279, wheel_cyl_mm=23.8, brake_factor=1.8),
+            bar=P_70S, handbrake_frac=0.8,
+        ),
+        steer=dict(ratio=19.5, turn_circle_m=13.2, ackermann=0.8, rack_speed=1.0),
+        price=23500,
+        durability=4,
+        note=("The four-door land yacht with a big V8: the getaway car of every 70s crime film. "
+              "Two tonnes, a lazy three-speed and a limited-slip axle mean it lays two black "
+              "lines off the line and keeps pulling to 160 km/h, but the soft springs, slow "
+              "steering and period brakes make every corner a negotiation. Slower than the "
+              "Ironside, heavier, cheaper, and it carries four."),
+        breaks=("Heavy mild-steel body on a long frame-like unibody with chrome steel bumpers: "
+                "it barges through light traffic and shrugs off parking knocks. But there is no "
+                "real crumple zone and the pillars are mild steel, so a hard frontal goes into "
+                "the cabin (Simulation lethality is high). Leaf-spring hangers tear out in rear "
+                "hits, and the period fuel tank behind the axle makes a hard rear-ender a fire "
+                "risk, as on the Ironside."),
+        sources=["manufacturer spec-class data for mid-70s full-size American sedans (mass, dimensions, axle ratios)",
+                 "period net-rating class and owner dynos for 6.6 L big-sedan V8s",
+                 "engineering tables (bias-ply-equivalent tire radius, drum brake factor, ride frequency)"],
+        lattice=dict(mass_frac=0.24, bumper="steel", hood="steel", pushbar=False, leaf_hangers=True),
+    ),
+    # ------------------------------------------------------------------ 20 (round 9)
+    dict(
+        id="talus_20t",
+        display_name="Talus 2.0T",
+        cls="Sport",
+        analog_of="late-90s Japanese rally-homologation four-door saloon, 2.0 L turbocharged I4, permanent AWD with front and rear LSDs",
+        era="90s",
+        profile="sedan",
+        curb_kg=1330.0,
+        fuel_l=50,
+        front_frac=0.60,
+        wheelbase=2.51,
+        track_f=1.51,
+        track_r=1.50,
+        body=(1.77, 4.35, 1.42),
+        clearance=0.15,
+        front_overhang=0.90,
+        cg=0.50,
+        cg_why="compact saloon on rally-height suspension (0.15 m clearance) with a transverse turbo four; mid sedan band",
+        inertia_k=(0.80, 0.90, 0.92),
+        cd=0.34,
+        area_k=0.84,
+        extra_cda=0.0,
+        lift=(0.04, 0.02),
+        engine=dict(
+            desc="2.0 L DOHC 16-valve I4, single turbo, intercooled, transverse",
+            curve=[(1000, 150), (1500, 190), (2000, 250), (2500, 330), (3000, 373), (3500, 373),
+                   (4000, 368), (4500, 360), (5000, 350), (5500, 335), (6000, 318), (6500, 303),
+                   (7000, 270), (7300, 245)],
+            idle=850, redline=7000, limit=7300, inertia=0.13, brake_frac=0.11,
+            why="Class-typical late-90s rally-homologation 2.0 T (~103 kW/L, 206 kW at 6500 rpm, ~373 N·m at 3000) per manufacturer spec-class data and owner dynos; the period's voluntary power cap shows as the flat top end.",
+        ),
+        trans=dict(
+            desc="5-speed close-ratio manual, permanent AWD with a fixed 45/55 centre split (viscous-locked centre diff), helical-style front LSD (modelled as clutch LSD), clutch-type rear LSD",
+            layout=("Awd", 0.45),
+            gears=[2.79, 1.95, 1.41, 1.03, 0.76], final=4.53, reverse=3.42, shift=0.22,
+            diff_f=dict(preload=30.0, power=0.25, coast=0.10),
+            diff_r=dict(preload=80.0, power=0.50, coast=0.30), clutch_factor=1.45,
+        ),
+        tires=dict(front="225/45R17", rear="225/45R17", compound="sport", unsprung=(22.0, 22.0)),
+        susp=dict(hz=(1.70, 1.80), zeta=0.30, travel=(0.17, 0.18), roll_grad_deg_g=2.5,
+                  roll_front_share=0.55, bump_stop=160000.0, preload=0.02),
+        align=dict(camber_deg=(-0.8, -1.2), toe_deg=(0.0, 0.15), caster_deg=4.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=320, pistons_mm=[40, 40], pad_mu=0.42),
+            rear=dict(kind="disc", d_mm=300, pistons_mm=[36], pad_mu=0.40),
+            bar=P_MODERN, handbrake_frac=0.9,
+        ),
+        steer=dict(ratio=13.5, turn_circle_m=11.0, ackermann=0.6, rack_speed=1.7),
+        price=38000,
+        durability=3,
+        note=("A stage car with number plates. Short gearing, a hard-hitting turbo and permanent "
+              "four-wheel drive with locking diffs at both ends make it the fastest thing in the "
+              "roster out of a slow corner, in the wet, or over a kerb. Long-travel suspension "
+              "soaks up broken city roads that unsettle the low sports cars. It understeers on "
+              "a trailing throttle; brake late, flick it, and drive it out on the power."),
+        breaks=("Late-90s HSS cell, no stronger than any saloon of its era. The big "
+                "front-mounted intercooler and radiator sit right behind a thin bumper, so nose "
+                "hits overheat it early. The centre and rear diffs and the "
+                "prop shaft run under the floor — heavy sill or kerb strikes can take out drive "
+                "to the rear. The aluminium hood folds rather than dents."),
+        sources=["manufacturer spec-class data for late-90s rally-homologation AWD 2.0 T saloons",
+                 "owner dyno averages for 2.0 L turbo I4s at the period power cap",
+                 "engineering tables (tire radius, ride frequency, opposed-piston caliper hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="aluminum", pushbar=False),
+    ),
+    # ------------------------------------------------------------------ 21 (round 9, traffic)
+    dict(
+        id="tumbril_20",
+        display_name="Tumbril 2.0",
+        cls="Truck",
+        analog_of="2000s European FWD high-roof panel van, 2.0 L petrol I4, unibody, sliding side door",
+        era="2000s",
+        profile="van",
+        curb_kg=1800.0,
+        fuel_l=80,
+        front_frac=0.60,
+        wheelbase=3.20,
+        track_f=1.62,
+        track_r=1.62,
+        body=(1.92, 4.90, 2.30),
+        clearance=0.17,
+        front_overhang=0.80,
+        cg=0.80,
+        cg_why="empty high-roof panel van (2.30 m) with no frame under it; the mass is higher than on the body-on-frame Drayman, above the 0.65-0.75 m truck band",
+        inertia_k=(0.85, 0.95, 0.97),
+        cd=0.40,
+        area_k=0.88,
+        extra_cda=0.0,
+        lift=(0.12, 0.10),
+        engine=dict(
+            desc="2.0 L DOHC 16-valve I4, petrol, port injection, van calibration",
+            curve=[(800, 125), (1200, 140), (1600, 152), (2000, 162), (2500, 170), (3000, 176),
+                   (3500, 180), (4000, 178), (4500, 170), (5000, 160), (5500, 148), (6000, 128),
+                   (6200, 118)],
+            idle=750, redline=6000, limit=6200, inertia=0.14, brake_frac=0.12,
+            why="Class-typical 2000s 2.0 L petrol van engine (~43 kW/L, 85 kW at 5500 rpm, ~180 N·m at 3500), tuned for low-end pull, per manufacturer spec-class data.",
+        ),
+        trans=dict(
+            desc="5-speed manual with short load gearing, open front differential",
+            layout="Fwd",
+            gears=[3.73, 2.05, 1.32, 0.97, 0.76], final=4.43, reverse=3.55, shift=0.30,
+            diff_f="Open", diff_r="Open", clutch_factor=1.4,
+        ),
+        tires=dict(front="215/65R16", rear="215/65R16", compound="street", unsprung=(24.0, 30.0)),
+        susp=dict(hz=(1.40, 1.70), zeta=0.27, travel=(0.18, 0.20), roll_grad_deg_g=5.5,
+                  roll_front_share=0.62, bump_stop=250000.0, preload=0.03),
+        align=dict(camber_deg=(-0.5, 0.0), toe_deg=(0.1, 0.0), caster_deg=3.5),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=300, pistons_mm=[60], pad_mu=0.40),
+            rear=dict(kind="drum", d_mm=254, wheel_cyl_mm=20.6, brake_factor=1.8),
+            bar=P_MODERN, handbrake_frac=1.0,
+        ),
+        steer=dict(ratio=17.5, turn_circle_m=12.0, ackermann=0.7, rack_speed=1.1),
+        price=20000,
+        durability=3,
+        note=("The parcel van on every block: front-drive, tall and slab-sided, with a little "
+              "petrol four geared short for stop-start rounds. It is slow everywhere and a "
+              "crosswind on wheels above 120 km/h, leans hard and understeers safely, and its "
+              "high-sprung empty rear goes light under hard braking. Smaller, lighter and much "
+              "slower than the Drayman — a moving wall rather than a rival."),
+        breaks=("Unibody van: no frame rails under the cargo box, so it is softer than the "
+                "Drayman in every direction. The short nose holds the transverse engine and "
+                "radiator right behind a plastic bumper; frontals reach the cab early. The "
+                "cargo box behind the bulkhead is thin sheet on light hoops — side and rear hits "
+                "dent it deeply without touching the cab, and the tall flat sides tip it in a "
+                "hard swerve or a hit at the wheels."),
+        sources=["manufacturer spec-class data for 2000s European high-roof panel vans (petrol)",
+                 "road-test figures for the class (0-100, braking, skidpad, empty)",
+                 "engineering tables (tire radius, ride frequency, disc/drum brake hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=False, cargo_box=True),
+    ),
 
     # ------------------------------------------------------------------ 18 (supercar)
     dict(
@@ -1167,7 +1699,7 @@ CARS = [
         trans=dict(
             desc="7-speed dual-clutch, permanent AWD (fixed 30 % front split, centre coupling modelled as a fixed split), open front diff, clutch-type rear LSD",
             layout=("Awd", 0.30),
-            gears=[3.13, 2.19, 1.68, 1.34, 1.10, 0.92, 0.79], final=4.11, reverse=2.90, shift=0.18,
+            gears=[3.13, 2.19, 1.68, 1.34, 1.10, 0.92, 0.79], final=4.11, reverse=2.90, shift=0.15,
             diff_f="Open", diff_r=dict(preload=60.0, power=0.45, coast=0.30), clutch_factor=1.4,
         ),
         tires=dict(front="245/35R20", rear="305/30R21", compound="sport", unsprung=(22.0, 26.0)),
@@ -1203,7 +1735,7 @@ CARS = [
         id="sentinel_warden",
         display_name="Sentinel Warden",
         cls="PoliceCruiser",
-        analog_of="late-80s American full-size body-on-frame RWD police sedan, 5.7 L pushrod V8 police package, 4-speed automatic, boxy three-box body",
+        analog_of="late-80s American full-size body-on-frame RWD police sedan, 7.4 L big-block V8 police package, 4-speed automatic, boxy three-box body",
         era="80s",
         profile="sedan",
         curb_kg=1830.0,
@@ -1223,14 +1755,15 @@ CARS = [
         extra_cda=0.05,
         lift=(0.12, 0.14),
         engine=dict(
-            desc="5.7 L OHV 16-valve V8, throttle-body injection, police package (performance cam, dual exhaust, high-flow intake)",
-            curve=[(800, 290), (1200, 340), (1600, 380), (2000, 400), (2400, 410), (2800, 412),
-                   (3200, 405), (3600, 392), (4000, 370), (4400, 330), (4800, 290), (5000, 265),
-                   (5200, 240)],
-            idle=600, redline=5000, limit=5200, inertia=0.26, brake_frac=0.12,
-            why=("Class-typical late-80s 5.7 L throttle-body police V8 (~27 kW/L, ~155 kW at "
-                 "4000 rpm, ~412 N·m at 2800) per fleet spec-class data and period road tests: "
-                 "all low-end torque, nothing above 4500 rpm."),
+            desc="7.4 L OHV 16-valve big-block V8, port injection, police package (performance cam, dual exhaust, high-flow intake)",
+            curve=[(800, 380), (1200, 450), (1600, 500), (2000, 530), (2400, 545), (2800, 550),
+                   (3200, 545), (3600, 530), (4000, 505), (4400, 470), (4800, 425), (5000, 400),
+                   (5200, 370)],
+            idle=600, redline=5000, limit=5200, inertia=0.30, brake_frac=0.12,
+            why=("Class-typical big-block police V8 (~29 kW/L, ~215 kW at 4400 rpm, ~550 N·m at "
+                 "2800) per fleet spec-class data and period road tests: a wall of low-end "
+                 "torque, nothing above 4500 rpm. Pursuit tuning (owner, 2026-10-23): replaces "
+                 "the 155 kW 5.7 L so the old unit is no longer left standing."),
         ),
         trans=dict(
             desc="4-speed automatic with overdrive and lock-up torque converter, clutch-type rear LSD (police option) on a coil-sprung live axle",
@@ -1253,8 +1786,8 @@ CARS = [
         durability=4,
         note=("The old workhorse still in service: a long, soft, boxy V8 sedan that leans, "
               "floats and squats like a boat, with drum rear brakes that fade after a few hard "
-              "stops. It has the low-end shove to close on ordinary traffic and nothing for a "
-              "sports car beyond 120 km/h — but it is a full-length steel frame on wheels, and "
+              "stops. The big-block has the low-end shove to close on anything ordinary and to "
+              "hang on to a sports car to highway speed — but it is a full-length steel frame on wheels, and "
               "nobody wants it in their door."),
         breaks=("Body-on-frame: a perimeter steel frame runs bumper to bumper under a separate "
                 "body, with steel bumpers and a bolted push bar, so it shrugs off shunts that "
@@ -1274,10 +1807,10 @@ CARS = [
     ),
     # ------------------------------------------------------------------ 20 (police, pursuit coupe)
     dict(
-        id="sentinel_harrier",
-        display_name="Sentinel Harrier",
+        id="sentinel_vigil",
+        display_name="Sentinel Vigil",
         cls="PoliceInterceptor",
-        analog_of="2010s American muscle-coupe pursuit car, 5.0 L DOHC V8, RWD, 2-door, pursuit package",
+        analog_of="2010s American muscle-coupe pursuit car, 5.2 L supercharged DOHC V8, RWD, 2-door, pursuit package",
         era="2010s",
         profile="coupe",
         curb_kg=1760.0,
@@ -1297,12 +1830,14 @@ CARS = [
         extra_cda=0.05,
         lift=(0.08, 0.10),
         engine=dict(
-            desc="5.0 L DOHC 32-valve V8, naturally aspirated, pursuit calibration (extra oil and transmission coolers)",
-            curve=[(1000, 350), (1500, 395), (2000, 430), (2500, 460), (3000, 485), (3500, 505),
-                   (4000, 522), (4250, 529), (4750, 525), (5250, 515), (5750, 500), (6250, 482),
-                   (6750, 452), (7000, 435), (7400, 395)],
-            idle=700, redline=7000, limit=7400, inertia=0.22, brake_frac=0.10,
-            why="Same class engine as the Rampart 5.0 (2010s NA 5.0 DOHC V8, ~64 kW/L); the pursuit package changes cooling, not output.",
+            desc="5.2 L DOHC 32-valve V8, supercharged, pursuit calibration (extra oil and transmission coolers)",
+            curve=[(1000, 450), (1500, 560), (2000, 680), (2500, 780), (3000, 830), (3500, 855),
+                   (4000, 865), (4500, 865), (5000, 855), (5500, 840), (6000, 820), (6500, 800),
+                   (7000, 765), (7400, 700)],
+            idle=700, redline=7000, limit=7400, inertia=0.24, brake_frac=0.10,
+            why=("Class-typical 2010s 5.2 L supercharged DOHC V8 from the muscle coupe's top "
+                 "trim (~108 kW/L, ~560 kW at 7000 rpm, ~865 N·m from 4000). Pursuit tuning "
+                 "(owner, 2026-10-23): the NA 5.0 could not run down stock sports cars."),
         ),
         trans=dict(
             desc="6-speed automatic with torque converter (pursuit packages are automatic-only), clutch-type rear LSD",
@@ -1324,8 +1859,8 @@ CARS = [
         price=52000,
         durability=4,
         note=("The highway-patrol hammer, sent when nothing else can keep up: the muscle "
-              "coupe's V8 and big brakes on performance tires, with a push bar on the nose. It "
-              "runs with the modern sports cars to pursuit speed and brakes later than any "
+              "coupe's supercharged V8 and big brakes on performance tires, with a push bar on "
+              "the nose. It runs with the exotics on the straights and brakes later than any "
               "other unit, but two doors, a heavy nose and rear drive make it a handful in the "
               "wet and useless for boxing in a truck."),
         breaks=("Modern UHSS coupe cell with long crumple rails, plus a reinforced push bar and "
@@ -1337,5 +1872,650 @@ CARS = [
                  "engineering tables (tire radius, ride frequency, multi-piston caliper hydraulics)"],
         lattice=dict(mass_frac=0.22, bumper="plastic", hood="aluminum", pushbar=True,
                      reinforce_bumper_beam=True),
+    ),
+    # ================================================================== wave 3 (2026-10-23)
+    # Four supercars, three dedicated race cars, two rally-raid / pre-runner trucks.
+    # Optional keys used only here: `downforce` (+ `downforce_why`) → aero_downforce_coeffs;
+    # lattice `cell_scale` (+ `cell_why`) → roll cage / composite survival cell.
+    # ------------------------------------------------------------------ supercar 1
+    dict(
+        id="halberd_40",
+        display_name="Halberd 40",
+        cls="Exotic",
+        analog_of="2020s British mid-engine supercar, 4.0 L twin-turbo flat-plane V8, carbon-fibre tub, RWD, 7-speed dual-clutch, active rear wing",
+        era="2020s",
+        profile="mr",
+        curb_kg=1440.0,
+        fuel_l=72,
+        front_frac=0.42,
+        wheelbase=2.67,
+        track_f=1.67,
+        track_r=1.62,
+        body=(1.93, 4.54, 1.20),
+        clearance=0.11,
+        front_overhang=0.98,
+        cg=0.40,
+        cg_why="carbon tub with the seats on the floor, dry-sumped V8 low behind them and a light glass canopy; lowest road-car CG in the roster",
+        inertia_k=(0.76, 0.74, 0.74),
+        cd=0.38,
+        area_k=0.82,
+        extra_cda=0.0,
+        lift=(-0.10, -0.22),
+        downforce=(0.10, 0.25),
+        downforce_why="active rear wing at its road-speed angle plus a front splitter and underbody venturis; air-brake mode not modelled",
+        engine=dict(
+            desc="4.0 L DOHC 32-valve flat-plane-crank V8, twin twin-scroll turbos, dry sump, intercooled, plateau 3500-5000 rpm",
+            curve=[(1000, 350), (1500, 480), (2000, 620), (2500, 740), (3000, 790), (3500, 800),
+                   (4000, 800), (4500, 800), (5000, 800), (5500, 790), (6000, 770), (6500, 740),
+                   (7000, 700), (7500, 640), (8100, 560)],
+            idle=950, redline=8000, limit=8100, inertia=0.14, brake_frac=0.10,
+            why=("Class-typical 2020s 4.0 TT V8 supercar (~128 kW/L, ~513 kW at 7000 rpm, 800 N·m "
+                 "plateau) per manufacturer spec-class data and owner dyno sheets; the flat-plane "
+                 "crank revs freely, so the torque falls off late and steeply past 7000."),
+        ),
+        trans=dict(
+            desc="7-speed dual-clutch transaxle, clutch-type rear LSD standing in for the brake-based torque vectoring",
+            layout="Rwd",
+            gears=[3.98, 2.61, 1.91, 1.48, 1.17, 0.94, 0.76], final=3.31, reverse=3.10, shift=0.18,
+            diff_f="Open", diff_r=dict(preload=50.0, power=0.40, coast=0.25), clutch_factor=1.4,
+        ),
+        tires=dict(front="245/35R19", rear="305/30R20", compound="semi_slick", unsprung=(20.0, 24.0)),
+        susp=dict(hz=(2.00, 2.20), zeta=0.32, travel=(0.11, 0.12), roll_grad_deg_g=1.4,
+                  roll_front_share=0.52, bump_stop=200000.0, preload=0.02),
+        align=dict(camber_deg=(-1.4, -1.8), toe_deg=(0.0, 0.2), caster_deg=6.5),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=390, pistons_mm=[38, 36, 34], pad_mu=0.46),
+            rear=dict(kind="disc", d_mm=380, pistons_mm=[36, 32], pad_mu=0.44),
+            bar=P_MODERN, handbrake_frac=0.5,
+        ),
+        steer=dict(ratio=13.5, turn_circle_m=12.0, ackermann=0.5, rack_speed=1.8),
+        price=125000,
+        durability=3,
+        note=("The modern weapon. Lighter than the V10 by almost 200 kg and with far more torque, "
+              "it is the hardest-accelerating rear-drive car in the city — and rear drive is the "
+              "catch: on its factory track tyres it lights them up in third on a damp road. The active wing glues the "
+              "rear down at speed, so it is calm and stable flat-out on the highway and nervous "
+              "at 60 km/h on a roundabout. Hydraulic-feeling steering, quick rack, no slack."),
+        breaks=("Carbon-fibre tub with aluminium crash structures bolted front and rear. The tub "
+                "itself is close to indestructible at street speeds, but everything bolted to it "
+                "is sacrificial: the front crash box and radiators fold early, the rear subframe "
+                "carries the V8, turbos and gearbox, so a rear hit kills drive. Carbon panels "
+                "crack and shed rather than dent; the dihedral doors pop open in side hits."),
+        sources=["manufacturer spec-class data for 2020s mid-engine twin-turbo V8 supercars",
+                 "owner dyno sheets for 4.0 L flat-plane twin-turbo V8s",
+                 "road-test figures for the class (0-100, 100-0, skidpad)",
+                 "engineering tables (tire radius, ride frequency, carbon-ceramic multi-piston caliper hydraulics)"],
+        lattice=dict(mass_frac=0.20, bumper="plastic", hood="aluminum", pushbar=False,
+                     cell_scale=1.25, cell_why="Carbon-fibre monocoque tub (stiffer than an HSS cell)"),
+    ),
+    # ------------------------------------------------------------------ supercar 2
+    dict(
+        id="ombra_v12",
+        display_name="Ombra V12",
+        cls="Exotic",
+        analog_of="2010s Italian mid-engine flagship supercar, 6.5 L naturally aspirated V12, permanent AWD, 7-speed single-clutch automated manual, scissor doors",
+        era="2010s",
+        profile="mr",
+        curb_kg=1650.0,
+        fuel_l=90,
+        front_frac=0.43,
+        wheelbase=2.70,
+        track_f=1.72,
+        track_r=1.68,
+        body=(2.03, 4.78, 1.14),
+        clearance=0.11,
+        front_overhang=1.05,
+        cg=0.43,
+        cg_why="long V12 sits low behind the cabin but the front diff, prop shaft and 90 L tank add height over the RWD supercars; widest, lowest body in the roster",
+        inertia_k=(0.78, 0.76, 0.76),
+        cd=0.37,
+        area_k=0.82,
+        extra_cda=0.0,
+        lift=(-0.06, -0.14),
+        engine=dict(
+            desc="6.5 L DOHC 48-valve 60° V12, naturally aspirated, dry sump, variable intake and exhaust cam phasing",
+            curve=[(1000, 330), (2000, 450), (3000, 540), (4000, 610), (4500, 640), (5000, 670),
+                   (5500, 690), (6000, 688), (6500, 680), (7000, 665), (7500, 645), (8000, 615),
+                   (8250, 598), (8500, 570), (8700, 535)],
+            idle=1000, redline=8500, limit=8700, inertia=0.18, brake_frac=0.10,
+            why=("Class-typical 2010s NA 6.5 V12 flagship (~79 kW/L, ~516 kW at 8250 rpm, 690 N·m "
+                 "at 5500) per manufacturer spec-class data and owner dyno sheets; a long, flat "
+                 "torque curve with a big crank and flywheel (highest engine inertia of the "
+                 "supercars)."),
+        ),
+        trans=dict(
+            desc="7-speed single-clutch automated manual (robotised, hydraulic actuation; the slowest shift of the supercars), permanent AWD with a viscous-type centre coupling modelled as a fixed 25 % front split, clutch-type rear LSD",
+            layout=("Awd", 0.25),
+            gears=[3.91, 2.44, 1.81, 1.46, 1.19, 0.97, 0.83], final=3.42, reverse=2.90, shift=0.22,
+            diff_f="Open", diff_r=dict(preload=60.0, power=0.45, coast=0.30), clutch_factor=1.4,
+        ),
+        tires=dict(front="255/30R20", rear="355/25R21", compound="sport", unsprung=(24.0, 28.0)),
+        susp=dict(hz=(1.95, 2.15), zeta=0.32, travel=(0.11, 0.12), roll_grad_deg_g=1.5,
+                  roll_front_share=0.52, bump_stop=200000.0, preload=0.02),
+        align=dict(camber_deg=(-1.3, -1.7), toe_deg=(0.0, 0.2), caster_deg=7.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=400, pistons_mm=[40, 38, 34], pad_mu=0.45),
+            rear=dict(kind="disc", d_mm=380, pistons_mm=[38, 34], pad_mu=0.43),
+            bar=P_MODERN, handbrake_frac=0.5,
+        ),
+        steer=dict(ratio=14.5, turn_circle_m=12.5, ackermann=0.5, rack_speed=1.6),
+        price=124000,
+        durability=3,
+        note=("The theatre car. A screaming twelve, scissor doors and a body wider than a "
+              "delivery van make it the loudest thing in any race. The automated manual thumps "
+              "every shift and costs a few tenths against the dual-clutch cars, but the AWD "
+              "launch and the V12's top end keep it on terms with anything on a long road. "
+              "Heavy and wide in traffic: it does not like tight gaps."),
+        breaks=("Carbon tub with aluminium front and rear subframes. The very long rear deck "
+                "carries the V12 and gearbox on the rear subframe, so rear hits kill drive; the "
+                "nose holds the front diff and twin radiators in a short crush zone. The scissor "
+                "doors hinge at the A-pillar base and tear off in side hits. Wide carbon "
+                "bodywork shatters on any contact and is ruinous to replace."),
+        sources=["manufacturer spec-class data for 2010s mid-engine NA V12 flagships",
+                 "owner dyno sheets for 6.5 L NA V12s",
+                 "road-test figures for the class (0-100, 100-0, skidpad)",
+                 "engineering tables (tire radius, ride frequency, carbon-ceramic multi-piston caliper hydraulics)"],
+        lattice=dict(mass_frac=0.20, bumper="plastic", hood="aluminum", pushbar=False,
+                     cell_scale=1.20, cell_why="Carbon-fibre monocoque tub (stiffer than an HSS cell)"),
+    ),
+    # ------------------------------------------------------------------ supercar 3
+    dict(
+        id="ostwind_6t",
+        display_name="Ostwind 6T",
+        cls="Exotic",
+        analog_of="2020s German rear-engine sports car flagship, 3.8 L twin-turbo flat-six, rear-biased AWD, 8-speed dual-clutch",
+        era="2020s",
+        profile="mr",
+        curb_kg=1640.0,
+        fuel_l=67,
+        front_frac=0.39,
+        wheelbase=2.45,
+        track_f=1.59,
+        track_r=1.56,
+        body=(1.90, 4.54, 1.30),
+        clearance=0.12,
+        front_overhang=0.97,
+        cg=0.45,
+        cg_why="flat-six hung behind the rear axle sits low, but the 2+2 cabin and taller roof put the CG above the mid-engine cars",
+        inertia_k=(0.82, 0.90, 0.88),
+        cd=0.33,
+        area_k=0.84,
+        extra_cda=0.0,
+        lift=(-0.04, -0.10),
+        downforce=(0.04, 0.10),
+        downforce_why="adaptive front lip and extending rear spoiler at its performance setting",
+        engine=dict(
+            desc="3.8 L DOHC 24-valve horizontally opposed six, twin variable-geometry turbos, intercooled",
+            curve=[(1000, 320), (1500, 480), (2000, 650), (2500, 800), (3000, 800), (3500, 800),
+                   (4000, 800), (4500, 790), (5000, 770), (5500, 745), (6000, 715), (6500, 690),
+                   (7000, 640), (7200, 610)],
+            idle=900, redline=7000, limit=7200, inertia=0.13, brake_frac=0.10,
+            why=("Class-typical 2020s 3.8 TT flat-six (~124 kW/L, ~470 kW at 6500-7000 rpm, 800 N·m "
+                 "from 2500) per manufacturer spec-class data and owner dyno sheets; variable-"
+                 "geometry turbos give the earliest full torque of the supercars."),
+        ),
+        trans=dict(
+            desc="8-speed dual-clutch, rear-biased AWD (multi-plate front coupling modelled as a fixed 30 % front split: `AwdOnDemand` is built for front-biased cars and never closed at launch, 4.85 s 0-100 measured), clutch-type rear LSD",
+            layout=("Awd", 0.30),
+            gears=[4.89, 3.17, 2.15, 1.56, 1.18, 0.94, 0.76, 0.61], final=3.39, reverse=4.32, shift=0.18,
+            diff_f="Open", diff_r=dict(preload=60.0, power=0.45, coast=0.30), clutch_factor=1.4,
+        ),
+        tires=dict(front="255/35R20", rear="315/30R21", compound="sport", unsprung=(22.0, 26.0)),
+        susp=dict(hz=(2.05, 2.15), zeta=0.32, travel=(0.12, 0.13), roll_grad_deg_g=1.5,
+                  roll_front_share=0.56, bump_stop=200000.0, preload=0.02),
+        align=dict(camber_deg=(-1.5, -1.8), toe_deg=(0.0, 0.25), caster_deg=8.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=420, pistons_mm=[40, 36, 32], pad_mu=0.46),
+            rear=dict(kind="disc", d_mm=410, pistons_mm=[40, 36], pad_mu=0.45),
+            bar=P_MODERN, handbrake_frac=0.5,
+        ),
+        steer=dict(ratio=13.0, turn_circle_m=10.8, ackermann=0.6, rack_speed=1.8),
+        price=110000,
+        durability=4,
+        note=("The everyday missile. All its weight sits over the rear wheels, so it launches "
+              "like nothing else in the city and the short wheelbase lets it dart through "
+              "traffic, but lift off mid-corner and the tail swings like a pendulum. The front "
+              "coupling sends a third of the drive forward, enough to launch it cleanly but not "
+              "enough to stop the tail stepping out. Built to be driven every day: the toughest of the supercars."),
+        breaks=("Steel-and-aluminium unibody with a proper engine lid, not a tub — more crumple "
+                "length up front (the luggage bay) than the mid-engine cars, so nose hits are "
+                "cheap. The engine and gearbox hang behind the rear axle on the rear subframe, "
+                "right where a rear-ender lands: one firm rear hit stops it dead. The rear-"
+                "engine layout is approximated with the mid-engine lattice (engine just behind "
+                "the cabin). Durability class 4: at strength 1.0 the short-wheelbase nose crushed "
+                "1.61 m at 56 km/h (band 0.35-1.3); a daily-driver unibody with a front luggage "
+                "bay is a proper modern crash structure."),
+        sources=["manufacturer spec-class data for 2020s rear-engine flat-six flagships",
+                 "owner dyno sheets for 3.8 L twin-turbo flat-sixes",
+                 "road-test figures for the class (0-100, 100-0, skidpad)",
+                 "engineering tables (tire radius, ride frequency, carbon-ceramic multi-piston caliper hydraulics)"],
+        lattice=dict(mass_frac=0.21, bumper="plastic", hood="aluminum", pushbar=False,
+                     nose_scale=1.8, nose_why="Front luggage bay framed by steel crash rails (rear-engine car: the nose is a full crumple zone)"),
+    ),
+    # ------------------------------------------------------------------ supercar 4
+    dict(
+        id="kagero_hx",
+        display_name="Kagero HX",
+        cls="Exotic",
+        analog_of="2010s Japanese mid-engine hybrid supercar, 3.5 L twin-turbo V6 plus electric front axle (modelled as fixed AWD split), 9-speed dual-clutch",
+        era="2010s",
+        profile="mr",
+        curb_kg=1780.0,
+        fuel_l=59,
+        front_frac=0.42,
+        wheelbase=2.63,
+        track_f=1.665,
+        track_r=1.63,
+        body=(1.94, 4.49, 1.21),
+        clearance=0.11,
+        front_overhang=0.98,
+        cg=0.41,
+        cg_why="heavy, but the traction battery sits in the floor tunnel and the V6 is dry-sumped low behind the cabin",
+        inertia_k=(0.78, 0.76, 0.76),
+        cd=0.34,
+        area_k=0.83,
+        extra_cda=0.0,
+        lift=(-0.05, -0.12),
+        engine=dict(
+            desc="3.5 L DOHC 24-valve 75° V6, twin turbos, dry sump, plus a direct-drive motor between engine and gearbox; curve is the combined crank-equivalent output",
+            curve=[(1000, 520), (1500, 600), (2000, 640), (2500, 646), (3000, 646), (3500, 646),
+                   (4000, 646), (4500, 640), (5000, 630), (5500, 620), (6000, 610), (6500, 600),
+                   (7000, 570), (7400, 535), (7600, 510)],
+            idle=900, redline=7400, limit=7600, inertia=0.14, brake_frac=0.10,
+            why=("Class-typical 2010s hybrid supercar: 3.5 TT V6 (~370 kW) plus ~110 kW of electric "
+                 "assist, ~418 kW combined at 7000 rpm, 646 N·m from 2500. Electric torque fills "
+                 "the bottom end before the turbos spool, so the curve is nearly flat from 1500 — "
+                 "no turbo lag. The front-axle motors are folded into the fixed AWD split."),
+        ),
+        trans=dict(
+            desc="9-speed dual-clutch, through-the-road hybrid AWD (twin front motors modelled as a fixed 35 % front split with a mild front LSD for their torque vectoring), clutch-type rear LSD",
+            layout=("Awd", 0.35),
+            gears=[3.84, 2.86, 2.20, 1.73, 1.37, 1.10, 0.89, 0.72, 0.61], final=3.45, reverse=2.90, shift=0.18,
+            diff_f=dict(preload=30.0, power=0.30, coast=0.10), diff_r=dict(preload=50.0, power=0.40, coast=0.25),
+            clutch_factor=1.45,
+        ),
+        tires=dict(front="245/35R19", rear="295/30R20", compound="sport", unsprung=(22.0, 24.0)),
+        susp=dict(hz=(1.85, 2.05), zeta=0.30, travel=(0.12, 0.13), roll_grad_deg_g=1.6,
+                  roll_front_share=0.53, bump_stop=200000.0, preload=0.02),
+        align=dict(camber_deg=(-1.2, -1.6), toe_deg=(0.0, 0.2), caster_deg=7.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=390, pistons_mm=[38, 36, 34], pad_mu=0.45),
+            rear=dict(kind="disc", d_mm=360, pistons_mm=[36, 32], pad_mu=0.43),
+            bar=P_MODERN, handbrake_frac=0.5,
+        ),
+        steer=dict(ratio=14.0, turn_circle_m=11.8, ackermann=0.5, rack_speed=1.7),
+        price=100000,
+        durability=3,
+        note=("The quiet assassin. Heaviest of the supercars and the least powerful on paper, "
+              "but the electric torque hits from walking pace and the front motors pull it out "
+              "of corners, so it is the easiest supercar to drive fast and the best in the wet. "
+              "It runs out of breath on a long highway against the V8 and V12. The nine-speed "
+              "gearbox never leaves it off-boost."),
+        breaks=("Aluminium spaceframe with a carbon floor and composite panels. The traction "
+                "battery in the tunnel is protected by the sills; side hits that reach it count "
+                "as fuel-tank damage. The V6, motor and gearbox live on the rear subframe (rear "
+                "hits kill drive) and the front motors share the nose with the radiators, so a "
+                "firm frontal costs drive too."),
+        sources=["manufacturer spec-class data for 2010s mid-engine hybrid supercars",
+                 "owner dyno sheets (combined output) for 3.5 L twin-turbo hybrid V6s",
+                 "road-test figures for the class (0-100, 100-0, skidpad)",
+                 "engineering tables (tire radius, ride frequency, carbon-ceramic multi-piston caliper hydraulics)"],
+        lattice=dict(mass_frac=0.20, bumper="plastic", hood="aluminum", pushbar=False),
+    ),
+    # ------------------------------------------------------------------ race car 1
+    dict(
+        id="morrigan_55",
+        display_name="Morrigan 5.5",
+        cls="Exotic",
+        analog_of="2010s front-mid-engine GT endurance race car, 5.5 L naturally aspirated pushrod V8 (air-restricted), RWD, 6-speed sequential rear transaxle, carbon bodywork, full roll cage",
+        era="2010s",
+        profile="coupe",
+        curb_kg=1250.0,
+        fuel_l=100,
+        front_frac=0.48,
+        wheelbase=2.71,
+        track_f=1.70,
+        track_r=1.68,
+        body=(2.05, 4.65, 1.18),
+        clearance=0.07,
+        front_overhang=1.05,
+        cg=0.36,
+        cg_why="race ride height (70 mm), V8 set back behind the front axle, driver seat moved inboard and down, no interior; ballast placed low",
+        inertia_k=(0.78, 0.82, 0.82),
+        cd=0.45,
+        area_k=0.85,
+        extra_cda=0.0,
+        lift=(-0.40, -0.50),
+        downforce=(0.40, 0.85),
+        downforce_why="carbon front splitter with dive planes, flat floor with rear diffuser and a swan-neck rear wing at a medium-downforce endurance setting",
+        engine=dict(
+            desc="5.5 L OHV 16-valve V8, naturally aspirated through two series air restrictors, dry sump, race calibration",
+            curve=[(1000, 380), (2000, 500), (3000, 580), (3500, 615), (4000, 640), (4500, 655),
+                   (5000, 660), (5500, 655), (6000, 640), (6500, 615), (7000, 580), (7300, 550),
+                   (7500, 520)],
+            idle=1500, redline=7300, limit=7500, inertia=0.12, brake_frac=0.12,
+            why=("Class-typical GT endurance V8 under its air restrictors (~425 kW at 7000 rpm, 660 "
+                 "N·m at 5000) per series homologation data; restrictors flatten the top end. "
+                 "Light flywheel and race cams: high idle, sharp throttle."),
+        ),
+        trans=dict(
+            desc="6-speed paddle-shift sequential rear transaxle (dog engagement, flat-shift ignition cut), plated rear LSD, carbon multi-plate clutch",
+            layout="Rwd",
+            gears=[2.90, 2.07, 1.62, 1.32, 1.11, 0.96], final=3.42, reverse=2.80, shift=0.15,
+            diff_f="Open", diff_r=dict(preload=120.0, power=0.55, coast=0.40), clutch_factor=1.6,
+        ),
+        tires=dict(front="305/37R18", rear="325/40R18", compound="semi_slick", unsprung=(24.0, 26.0)),
+        susp=dict(hz=(2.60, 2.80), zeta=0.35, travel=(0.07, 0.08), roll_grad_deg_g=0.8,
+                  roll_front_share=0.55, bump_stop=300000.0, preload=0.02),
+        align=dict(camber_deg=(-3.0, -2.0), toe_deg=(-0.10, 0.15), caster_deg=7.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=380, pistons_mm=[44, 40, 36], pad_mu=0.52),
+            rear=dict(kind="disc", d_mm=355, pistons_mm=[40, 36], pad_mu=0.50),
+            bar=P_MODERN, handbrake_frac=0.5,
+        ),
+        steer=dict(ratio=11.5, turn_circle_m=13.0, ackermann=0.3, rack_speed=2.2),
+        price=120000,
+        durability=3,
+        note=("A real race car let loose in the city. On slick-like rubber, with a wing the size "
+              "of a door and a sequential box that bangs through gears, it corners and brakes "
+              "like nothing on the street — once it is up to speed. Below 80 km/h the aero does "
+              "nothing and the stiff suspension skips over kerbs and manhole covers; the steering "
+              "lock is poor and the tall first gear hates junction starts. Loud, low, unmissable."),
+        breaks=("Production-derived steel shell with a welded multi-point roll cage tying the "
+                "pillars, sills and strut towers together: the cabin survives hits that write off "
+                "the road supercars. Everything outside it is lightweight carbon and fibreglass — "
+                "splitter, wings, doors and bumpers shatter or fly off on contact, and the front "
+                "crash structure is short. Low ride height means kerb strikes damage the floor."),
+        sources=["series homologation sheets for 2010s front-engine GT endurance cars (minimum weight, restrictors, dimensions)",
+                 "team-published dyno and aero balance figures for restricted 5.5 L GT V8s",
+                 "on-board telemetry figures for the class (braking g, cornering g)",
+                 "engineering tables (tire radius, ride frequency, race caliper hydraulics)"],
+        lattice=dict(mass_frac=0.18, bumper="plastic", hood="aluminum", pushbar=False,
+                     cell_scale=1.6, cell_why="Welded multi-point roll cage tied to the pillars and sills"),
+    ),
+    # ------------------------------------------------------------------ race car 2
+    dict(
+        id="nyx_proto",
+        display_name="Nyx Proto",
+        cls="Exotic",
+        analog_of="2010s closed-cockpit endurance sports prototype, 4.2 L naturally aspirated V8 (air-restricted), RWD, 6-speed sequential, carbon monocoque, very high downforce",
+        era="2010s",
+        profile="mr",
+        curb_kg=930.0,
+        fuel_l=75,
+        front_frac=0.45,
+        wheelbase=3.00,
+        track_f=1.62,
+        track_r=1.58,
+        body=(1.90, 4.65, 1.05),
+        clearance=0.06,
+        front_overhang=1.00,
+        cg=0.30,
+        cg_why="purpose-built prototype: driver lying almost flat on the floor of the tub, engine as a stressed member at hub height, 60 mm ride height",
+        inertia_k=(0.70, 0.72, 0.72),
+        cd=0.52,
+        area_k=0.80,
+        extra_cda=0.0,
+        lift=(-0.90, -1.10),
+        downforce=(0.60, 0.80),
+        downforce_why="full-width front splitter and tunnels, venturi floor with a long diffuser, twin-element rear wing at the high-downforce sprint setting",
+        engine=dict(
+            desc="4.2 L DOHC 32-valve 90° V8, naturally aspirated through an air restrictor, dry sump, stressed member",
+            curve=[(1500, 360), (2500, 420), (3500, 465), (4500, 495), (5500, 510), (6000, 515),
+                   (6500, 515), (7000, 510), (7500, 500), (8000, 490), (8500, 470), (9000, 445),
+                   (9200, 430), (9400, 400)],
+            idle=1800, redline=9200, limit=9400, inertia=0.10, brake_frac=0.14,
+            why=("Class-typical spec prototype V8 under its restrictor (~420 kW at 9000 rpm, 515 N·m "
+                 "at 6000-6500) per series technical regulations and engine-supplier data. Tiny "
+                 "flywheel, highest revs and strongest engine braking in the roster."),
+        ),
+        trans=dict(
+            desc="6-speed paddle-shift sequential (pneumatic, flat-shift), plated rear LSD, carbon multi-plate clutch",
+            layout="Rwd",
+            gears=[3.00, 2.20, 1.75, 1.45, 1.24, 1.08], final=3.30, reverse=2.80, shift=0.15,
+            diff_f="Open", diff_r=dict(preload=100.0, power=0.50, coast=0.40), clutch_factor=1.6,
+        ),
+        tires=dict(front="305/37R18", rear="325/40R18", compound="semi_slick", unsprung=(20.0, 22.0)),
+        susp=dict(hz=(3.00, 3.20), zeta=0.35, travel=(0.06, 0.06), roll_grad_deg_g=0.6,
+                  roll_front_share=0.55, bump_stop=350000.0, preload=0.02),
+        align=dict(camber_deg=(-3.2, -2.2), toe_deg=(-0.10, 0.20), caster_deg=6.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=380, pistons_mm=[41, 38, 36], pad_mu=0.55),
+            rear=dict(kind="disc", d_mm=355, pistons_mm=[38, 36], pad_mu=0.52),
+            bar=P_MODERN, handbrake_frac=0.5,
+        ),
+        steer=dict(ratio=10.5, turn_circle_m=14.0, ackermann=0.3, rack_speed=2.4),
+        price=125000,
+        durability=3,
+        note=("The fastest thing on four wheels in the game and the least suited to a city. "
+              "Under a tonne, with downforce that would hold it to a ceiling at 250 km/h, it "
+              "stops and turns at speeds nothing else can follow — on a smooth, wide road. On "
+              "city streets the 60 mm ride height grounds on every crest, the steering lock "
+              "makes U-turns a three-point affair and visibility out of the cockpit is poor."),
+        breaks=("Carbon-fibre survival cell that will shrug off a hit at almost any speed — and "
+                "almost nothing else. The nose is a crushable carbon cone, the floor, wings and "
+                "bodywork are thin composite that shatters on contact, the engine and gearbox are "
+                "stressed members behind the tub so rear hits break the car in two, and the "
+                "suspension wishbones snap rather than bend. Durability class 3 (not 2) with a "
+                "reinforced nose: at strength 0.9 the 56 km/h frontal crushed 1.91 m (band "
+                "0.35-1.3); now ≈ 1.3-1.4 m, a known miss — the generator has no flat "
+                "prototype profile and the whole 1 m nose cone is sacrificial by design."),
+        sources=["series technical regulations for 2010s closed-cockpit spec prototypes (minimum weight, dimensions, restrictor)",
+                 "engine-supplier data for restricted 4.2 L prototype V8s",
+                 "on-board telemetry figures for the class (braking g, cornering g, top speed)",
+                 "engineering tables (tire radius, ride frequency, carbon brake hydraulics)"],
+        lattice=dict(mass_frac=0.20, bumper="plastic", hood="aluminum", pushbar=False,
+                     cell_scale=1.8, cell_why="Carbon-fibre survival cell (prototype monocoque, roll hoop and side-intrusion panels)",
+                     nose_scale=1.8, nose_why="Homologated crash nose (carbon impact structure ahead of the tub)"),
+    ),
+    # ------------------------------------------------------------------ race car 3
+    dict(
+        id="merlo_20t",
+        display_name="Merlo 2.0T",
+        cls="Exotic",
+        analog_of="2010s European touring-car racer, 2.0 L turbocharged I4, FWD, 6-speed sequential, plated front LSD, full roll cage, four-door sedan body",
+        era="2010s",
+        profile="sedan",
+        curb_kg=1200.0,
+        fuel_l=100,
+        front_frac=0.63,
+        wheelbase=2.68,
+        track_f=1.60,
+        track_r=1.58,
+        body=(1.95, 4.50, 1.38),
+        clearance=0.08,
+        front_overhang=0.95,
+        cg=0.45,
+        cg_why="production sedan shell lowered to race ride height, engine tilted back and down, seat moved inboard, ballast low; still a tall body over the race cars",
+        inertia_k=(0.80, 0.88, 0.90),
+        cd=0.38,
+        area_k=0.84,
+        extra_cda=0.0,
+        lift=(0.00, -0.10),
+        downforce=(0.05, 0.25),
+        downforce_why="front splitter and a homologated single-element rear wing (small: touring-car aero is limited by the rules)",
+        engine=dict(
+            desc="2.0 L DOHC 16-valve I4, single turbo with anti-lag, intercooled, homologated boost limit",
+            curve=[(1000, 180), (1500, 260), (2000, 360), (2500, 420), (3000, 420), (3500, 420),
+                   (4000, 420), (4500, 420), (5000, 415), (5500, 405), (6000, 395), (6500, 370),
+                   (7000, 335), (7200, 310)],
+            idle=1200, redline=7000, limit=7200, inertia=0.10, brake_frac=0.12,
+            why=("Class-typical touring-car 2.0 T under its boost cap (~252 kW at 6500 rpm, 420 N·m "
+                 "plateau) per series homologation data; the cap makes the plateau dead flat from "
+                 "2500 to 4500."),
+        ),
+        trans=dict(
+            desc="6-speed paddle-shift sequential (dog engagement), plated front LSD, sintered race clutch",
+            layout="Fwd",
+            gears=[2.92, 2.06, 1.67, 1.40, 1.20, 1.05], final=3.35, reverse=2.80, shift=0.15,
+            diff_f=dict(preload=80.0, power=0.60, coast=0.35), diff_r="Open", clutch_factor=1.6,
+        ),
+        tires=dict(front="255/40R18", rear="255/40R18", compound="semi_slick", unsprung=(20.0, 18.0)),
+        susp=dict(hz=(2.40, 2.60), zeta=0.33, travel=(0.08, 0.09), roll_grad_deg_g=1.2,
+                  roll_front_share=0.45, bump_stop=250000.0, preload=0.02),
+        align=dict(camber_deg=(-3.5, -2.0), toe_deg=(0.0, -0.10), caster_deg=7.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=380, pistons_mm=[36, 32, 30], pad_mu=0.52),
+            rear=dict(kind="disc", d_mm=278, pistons_mm=[36], pad_mu=0.45),
+            bar=P_MODERN, handbrake_frac=0.8,
+        ),
+        steer=dict(ratio=12.0, turn_circle_m=11.5, ackermann=0.5, rack_speed=2.0),
+        price=100000,
+        durability=4,
+        note=("Built to bang doors. Front drive, a stiff rear and a plated diff make it dive "
+              "into corners on the brakes and claw out on the power; lift off and the rear "
+              "steps out on cue. Slow in a straight line next to the supercars, but it brakes "
+              "later than the road supercars and shrugs off the contact that ends their night. "
+              "The cheapest way into a race-built car."),
+        breaks=("A production steel shell with a welded roll cage, seam welding and a steel "
+                "bumper beam behind the plastic: the toughest race car in the roster, designed "
+                "for contact. Splitter, wing and plastic bumpers break off on the first touch "
+                "and are cheap; the transverse engine sits right behind the radiator, so hard "
+                "frontals still end it."),
+        sources=["series homologation sheets for 2010s FWD touring-car racers (minimum weight, boost limit, dimensions)",
+                 "team-published dyno figures for homologated 2.0 L turbo engines",
+                 "on-board telemetry figures for the class (braking g, cornering g)",
+                 "engineering tables (tire radius, ride frequency, race caliper hydraulics)"],
+        lattice=dict(mass_frac=0.20, bumper="plastic", hood="aluminum", pushbar=False,
+                     cell_scale=1.6, cell_why="Welded multi-point roll cage tied to the pillars and sills"),
+    ),
+    # ------------------------------------------------------------------ pre-runner
+    dict(
+        id="mesquite_pr",
+        display_name="Mesquite PR",
+        cls="Truck",
+        analog_of="2010s American full-size pre-runner pickup, 6.2 L naturally aspirated V8, RWD, 6-speed automatic, long-travel coilover-and-bypass suspension, widened fenders, 35-inch all-terrain tires",
+        era="2010s",
+        profile="truck",
+        curb_kg=2720.0,
+        fuel_l=98,
+        front_frac=0.56,
+        wheelbase=3.71,
+        track_f=1.86,
+        track_r=1.86,
+        body=(2.19, 5.89, 1.99),
+        clearance=0.29,
+        front_overhang=0.98,
+        cg=0.80,
+        cg_why="lifted full-size pickup on 35-inch tires with long-travel suspension; class band 0.65-0.75 m plus the lift",
+        inertia_k=(0.95, 0.97, 0.97),
+        cd=0.50,
+        area_k=0.86,
+        extra_cda=0.05,
+        lift=(0.12, 0.10),
+        engine=dict(
+            desc="6.2 L SOHC 16-valve V8, naturally aspirated, two-valve heads, high-flow intake and exhaust",
+            curve=[(1000, 420), (1500, 480), (2000, 520), (2500, 550), (3000, 570), (3500, 580),
+                   (4000, 588), (4500, 580), (5000, 565), (5500, 540), (6000, 505), (6250, 470)],
+            idle=650, redline=6000, limit=6250, inertia=0.24, brake_frac=0.10,
+            why=("Class-typical 2010s 6.2 L truck V8 (~51 kW/L, ~317 kW at 6000 rpm, 588 N·m at 4000) "
+                 "per manufacturer spec-class data and owner dyno averages; big displacement, "
+                 "flat torque, heavy rotating assembly."),
+        ),
+        trans=dict(
+            desc="6-speed automatic with torque converter, electronic locking rear differential modelled as a stiff clutch LSD",
+            layout="Rwd",
+            gears=[4.17, 2.34, 1.52, 1.14, 0.87, 0.69], final=4.10, reverse=3.40, shift=0.35,
+            torque_converter=dict(stall_rpm=2300, ratio=2.0, coupling_rpm=2700),
+            diff_f="Open", diff_r=dict(preload=80.0, power=0.50, coast=0.30), clutch_factor=1.6,
+        ),
+        tires=dict(front="315/70R17", rear="315/70R17", compound="all_terrain", unsprung=(55.0, 65.0)),
+        susp=dict(hz=(1.15, 1.35), zeta=0.35, travel=(0.33, 0.35), roll_grad_deg_g=6.0,
+                  roll_front_share=0.55, bump_stop=120000.0, preload=0.03),
+        align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.10, 0.0), caster_deg=5.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=345, pistons_mm=[54, 54], pad_mu=0.40),
+            rear=dict(kind="disc", d_mm=336, pistons_mm=[54], pad_mu=0.38),
+            bar=P_MODERN, handbrake_frac=0.8,
+        ),
+        steer=dict(ratio=17.0, turn_circle_m=14.5, ackermann=0.8, rack_speed=1.3),
+        price=32000,
+        durability=5,
+        note=("Built to fly across the desert at 150 km/h, it treats a city as a set of jumps. "
+              "A foot of suspension travel soaks up kerbs, medians and staircases that would "
+              "break any other car, and the V8 and locker push it through dirt lots and parks "
+              "where the supercars cannot follow. On tarmac it rolls like a ship, the tall "
+              "all-terrains give up early and it takes a long time to stop."),
+        breaks=("Fully boxed ladder frame with steel tube bumpers front and rear: it bulldozes "
+                "traffic and barely notices. The long-travel front end is its soft spot — the "
+                "wide wishbones and bypass shocks stick out past the body, so offset hits fold a "
+                "front corner. The bed and composite fender flares crumple and shed cheaply."),
+        sources=["manufacturer spec-class data for 2010s full-size off-road performance pickups",
+                 "owner dyno averages for 6.2 L SOHC truck V8s",
+                 "off-road builder data for long-travel suspension kits (travel, spring rates, bypass damping)",
+                 "engineering tables (tire radius, ride frequency, twin-piston caliper hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="steel", hood="aluminum", pushbar=False,
+                     ladder_frame=True),
+    ),
+    # ------------------------------------------------------------------ rally raid
+    dict(
+        id="erg_hamada",
+        display_name="Erg Hamada",
+        cls="Truck",
+        analog_of="2020s desert rally-raid prototype, 5.0 L naturally aspirated V8 (air-restricted), permanent 4WD, 6-speed sequential, tubular spaceframe with composite body, 37-inch tires, twin dampers per corner",
+        era="2020s",
+        profile="suv",
+        curb_kg=2150.0,
+        fuel_l=300,
+        front_frac=0.52,
+        wheelbase=3.00,
+        track_f=2.10,
+        track_r=2.10,
+        body=(2.30, 4.60, 1.95),
+        clearance=0.32,
+        front_overhang=0.85,
+        cg=0.70,
+        cg_why="huge ground clearance, but the V8 is set back behind the front axle, the crew sit low in the frame and the 300 L fuel cell lies flat behind them",
+        inertia_k=(0.88, 0.85, 0.85),
+        cd=0.55,
+        area_k=0.82,
+        extra_cda=0.0,
+        lift=(0.15, 0.15),
+        engine=dict(
+            desc="5.0 L DOHC 32-valve V8, naturally aspirated through an air restrictor, dry sump, desert air filtration",
+            curve=[(1000, 400), (1500, 450), (2000, 490), (2500, 520), (3000, 545), (3500, 560),
+                   (4000, 560), (4500, 555), (5000, 540), (5500, 520), (6000, 490), (6300, 465),
+                   (6500, 440)],
+            idle=900, redline=6300, limit=6500, inertia=0.18, brake_frac=0.12,
+            why=("Class-typical rally-raid prototype V8 under its air restrictor (~308 kW at 6000 rpm, "
+                 "560 N·m at 3500-4000) per series technical regulations; the restrictor caps the "
+                 "top end, the long-runner intake fattens the middle."),
+        ),
+        trans=dict(
+            desc="6-speed sequential (dog engagement), permanent 4WD with a fixed 50/50 split (no centre diff by the rules), plated LSDs front and rear",
+            layout=("Awd", 0.50),
+            gears=[3.31, 2.31, 1.73, 1.38, 1.13, 0.95], final=4.30, reverse=3.00, shift=0.15,
+            diff_f=dict(preload=100.0, power=0.50, coast=0.40), diff_r=dict(preload=100.0, power=0.50, coast=0.40),
+            clutch_factor=1.6,
+        ),
+        tires=dict(front="325/80R17", rear="325/80R17", compound="all_terrain", unsprung=(70.0, 70.0)),
+        susp=dict(hz=(1.10, 1.20), zeta=0.40, travel=(0.35, 0.35), roll_grad_deg_g=5.0,
+                  roll_front_share=0.52, bump_stop=150000.0, preload=0.03),
+        align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.10, 0.0), caster_deg=6.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=362, pistons_mm=[40, 38, 36], pad_mu=0.48),
+            rear=dict(kind="disc", d_mm=340, pistons_mm=[40, 36], pad_mu=0.46),
+            bar=P_MODERN, handbrake_frac=0.9,
+        ),
+        steer=dict(ratio=14.0, turn_circle_m=13.0, ackermann=0.6, rack_speed=1.8),
+        price=32000,
+        durability=5,
+        note=("A desert racer that survived a fortnight of dunes and wants more. Permanent "
+              "four-wheel drive, locked-up diffs and 35 cm of travel make it unstoppable off the "
+              "road and absurdly fast across rough ground; it lands jumps that would break the "
+              "pre-runner. On smooth tarmac it is wide, tall and draggy, the restrictor caps it "
+              "well below supercar speeds, and the locked drivetrain scrubs in tight turns."),
+        breaks=("Chromoly tubular spaceframe with an integral roll cage — the strongest cell in "
+                "the roster — under thin composite panels that shatter and fall off. The long-"
+                "travel wishbones and twin dampers hang outside the body and break in offset "
+                "hits; the spare wheels in the rear bay soak up rear impacts. Durability class "
+                "5: it keeps driving with half its bodywork gone."),
+        sources=["series technical regulations for 2020s rally-raid prototypes (minimum weight, track, restrictor, travel)",
+                 "team-published engine and suspension data for restricted 5.0 L V8 rally-raid cars",
+                 "stage telemetry figures for the class (top speed, braking)",
+                 "engineering tables (tire radius, ride frequency, multi-piston caliper hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="aluminum", pushbar=False,
+                     ladder_frame=True,
+                     cell_scale=1.8, cell_why="Chromoly tubular spaceframe with integral roll cage"),
     ),
 ]

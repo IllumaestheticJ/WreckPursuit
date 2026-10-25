@@ -1,11 +1,11 @@
-# simcli hashes scenario=cars_beater_hard_turn systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
-240 5c01e310c9d6726b
-480 f61b46c286e9b16b
-720 2ce45cdbac6486e5
-960 45c0267eea3e79b5
-1200 3816850bcdff37c2
-1440 b4da10b6dada6499
-1680 13813c69ee2897f0
-1920 cba2f4c8f8f7e8c1
-2160 65d5f22ea62221e8
-2400 eb2742d79f8e28d1
+# simcli hashes scenario=cars_beater_hard_turn systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 dca2505fbdc98630
+480 de16e7557a64be8f
+720 967676dd45049f8a
+960 98f6edc96f9599be
+1200 5470dee99754ad37
+1440 4d134cad33d8ef40
+1680 3132eb72a8128c53
+1920 7bb1136522fbe259
+2160 9cbbcebd8a335874
+2400 f393d4d1ea7b9423

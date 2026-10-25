@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::events::UnitId;
 use crate::graph::{dist, SegmentId};
 use crate::time::SimTime;
+use wp_contracts::EntityId;
 
 /// A unit planning to go faster than this wants to move, m/s.
 pub const WANT_MPS: f32 = 1.5;
@@ -68,8 +69,13 @@ pub const REVERSE_MAX_S: f32 = 3.0;
 pub const SAME_SPOT_M: f32 = 15.0;
 /// How long a segment stays blocked for the unit that got stuck on it, s.
 pub const BLOCK_SEGMENT_S: f32 = 30.0;
+/// A unit on a pursuit or intercept held at a standstill behind civilian traffic this long
+/// routes around the road it is on (row 86: active units are never parked in a jam), s.
+pub const JAM_REROUTE_S: f32 = 3.0;
 /// Despawn (out of sight) a unit still stuck this long after its first event, s.
 pub const GIVE_UP_S: f32 = 8.0;
+/// [`UnstickState::wedged`]: a world contact this recent, s.
+pub const WEDGED_CONTACT_S: f32 = 3.0;
 /// Driving this far from the first event ends the stuck episode, m.
 pub const PROGRESS_M: f32 = 20.0;
 /// Turn-round tries (U-turn, reverse swing, back-out from a stopped racer) within
@@ -78,6 +84,72 @@ pub const PROGRESS_M: f32 = 20.0;
 pub const MAX_TURNS: u32 = 4;
 /// After [`MAX_TURNS`]: no new turn-round for this long; the unit carries on along its road.
 pub const TURN_HOLD_S: f32 = 30.0;
+/// Standing this long blocked by a slow racer it is not after (nose to nose, each waiting for
+/// the other), a unit backs out of its way, straightening along its lane (opponent-pace: a
+/// responder stood across the Hollins hairpin and the racer behind it waited 40 s), s.
+pub const GIVE_WAY_S: f32 = 2.0;
+/// ... a racer slower than this (it rocks back and forth trying to get round), m/s.
+pub const GIVE_WAY_RACER_MPS: f32 = 3.0;
+/// ... or, blocked by anything, with such a racer standing this close, m.
+pub const GIVE_WAY_NEAR_M: f32 = 15.0;
+/// How far it backs out to give way, m.
+pub const GIVE_WAY_M: f32 = 6.0;
+/// A unit that gave up and has stood still this long with a racer within
+/// [`DEADLOCK_NEAR_M`] despawns even in view: the cars round it are waiting for it and nobody
+/// can move (Hollins: a parked fled racer, the field queued nose to nose with the police car, a
+/// wall behind it). Owner row 78 allows a quick visible reset for police; spawns still never
+/// happen in view, s.
+pub const DEADLOCK_VANISH_S: f32 = 30.0;
+/// See [`DEADLOCK_VANISH_S`], m.
+pub const DEADLOCK_NEAR_M: f32 = 20.0;
+/// Moving less than this from where it stopped still counts as standing, m. More than
+/// [`GIVE_WAY_M`]: a unit backing out of a racer's way and nosing back in again, over and over,
+/// is standing (Hollins seed 6: a unit cycled in front of a busted racer for a minute).
+pub const STAND_M: f32 = 8.0;
+/// A unit whose chassis up axis points below this (world Z) is on its side or roof (row 75)...
+pub const FLIPPED_UP_Z: f32 = 0.3;
+/// ...and after this long it is reset upright, s.
+pub const FLIPPED_RESET_S: f32 = 1.5;
+
+/// Reset in place (owner row 78), like the player's R: an un-wrecked AI unit that has stood
+/// within [`STAND_M`] this long while it wants to drive (not at a red light, not holding a
+/// block, not arresting a stopped racer it is after) snaps to a clear spot in its lane within
+/// [`RESET_RADIUS_M`], upright, damage kept, and drives on as a ghost for [`RESET_GHOST_S`]. A
+/// unit on a pursuit or search, s.
+pub const RESET_ACTIVE_S: f32 = 8.0;
+/// ... any other unit (patrol, call, give-way stand-offs), s.
+pub const RESET_IDLE_S: f32 = 15.0;
+/// ... a unit that is not chasing and only waits behind civilian traffic (a jam clears by
+/// itself), s.
+pub const RESET_TRAFFIC_S: f32 = 40.0;
+/// Reset spots are tried along the unit's own route this far either side of it, m.
+pub const RESET_RADIUS_M: f32 = 15.0;
+/// ... in steps of, m.
+pub const RESET_STEP_M: f32 = 2.5;
+/// A reset spot has no other car's centre this close (car-sized, not the 25 m spawn
+/// clearance: a reset is meant for a jam), m.
+pub const RESET_CLEAR_M: f32 = 5.5;
+/// ... and no moving car that would reach it within this long, s.
+pub const RESET_PATH_S: f32 = 2.0;
+/// No clear spot, standing this long with a racer within [`DEADLOCK_NEAR_M`]: it despawns
+/// even in view (the cars round it are waiting for it), s.
+pub const RESET_VANISH_S: f32 = 30.0;
+/// Two units each blocked by the other this long: the less busy one resets (whatever the
+/// junction rule says), s.
+pub const RESET_DEADLOCK_S: f32 = 3.0;
+/// No reset this close before a junction on its route unless the unit is in a stuck episode
+/// (queued to give way or turn is waiting, not stuck), m.
+pub const RESET_JUNCTION_M: f32 = 25.0;
+/// A unit due a reset whose own spot is the clear one checks again this much later, s.
+pub const RESET_RETRY_S: f32 = 5.0;
+/// A reset a racer could see waits this much longer (row 78: "about 2 s"), s.
+pub const RESET_VIEW_DELAY_S: f32 = 2.0;
+/// No-collision window after a reset (wp_sim keeps it a ghost until clear of other cars), s.
+pub const RESET_GHOST_S: f32 = 1.0;
+/// After backing out it waits up to this long for the racer to get past, s.
+pub const GIVE_WAY_HOLD_S: f32 = 8.0;
+/// ... while that racer is still in front of it and this close, m.
+pub const GIVE_WAY_HOLD_M: f32 = 25.0;
 /// Contacts this recent explain a stuck event, s.
 const CONTACT_WINDOW_S: f32 = 2.0;
 /// A world contact point this close to a parked-car / cone footprint is that prop, m.
@@ -216,6 +288,9 @@ pub struct UnstickState {
     pub(crate) blocked: Vec<(SegmentId, SimTime)>,
     /// Re-plan the route at the next think step.
     pub(crate) reroute: bool,
+    /// Seconds a chasing unit has stood held behind civilian traffic (see [`JAM_REROUTE_S`]).
+    #[serde(default)]
+    pub(crate) jam_s: f32,
     /// Despawn when out of sight.
     pub(crate) give_up: bool,
     /// Turn-round tries since `turn_first` (see [`MAX_TURNS`]).
@@ -231,6 +306,21 @@ pub struct UnstickState {
     /// it despawn out of sight.
     #[serde(default)]
     pub(crate) turn_loop: bool,
+    /// Seconds standing blocked by a slow racer it is not after (see [`GIVE_WAY_S`]).
+    #[serde(default)]
+    pub(crate) give_way_s: f32,
+    /// Gave way to this racer: wait for it to get past, until then.
+    #[serde(default)]
+    pub(crate) give_way_to: Option<(EntityId, SimTime)>,
+    /// Reset in place due then (row 78; delayed while a racer can see the unit).
+    #[serde(default)]
+    pub(crate) reset_due: Option<SimTime>,
+    /// Seconds within [`STAND_M`] of `stand_at` (rocking back and forth on the spot counts).
+    #[serde(default)]
+    pub(crate) stand_s: f32,
+    /// Where it stopped.
+    #[serde(default)]
+    pub(crate) stand_at: Option<[f32; 2]>,
 }
 
 impl UnstickState {
@@ -283,6 +373,16 @@ impl UnstickState {
     }
 
     /// Note forward progress: far enough from the first event ends the episode.
+    /// Stuck against the world and trying to free itself (row 168): an unstick attempt under
+    /// way (cleared once it moves [`PROGRESS_M`]) and touching a wall or the terrain within
+    /// the last [`WEDGED_CONTACT_S`]. Such a car is not there to make an arrest.
+    pub(crate) fn wedged(&self, now: SimTime) -> bool {
+        self.first.is_some()
+            && self
+                .world_contact
+                .is_some_and(|w| now.since(w.at) < WEDGED_CONTACT_S)
+    }
+
     pub(crate) fn progress(&mut self, pos: [f32; 2]) {
         if self.turn_first.is_some_and(|p| dist(p, pos) > PROGRESS_M) {
             self.turn_first = None;
@@ -358,6 +458,15 @@ impl PropIndex {
     /// No props.
     pub fn is_empty(&self) -> bool {
         self.boxes.is_empty()
+    }
+
+    /// Whether `p` is more than `margin_m` from every box (row 75: a unit spawned on a parked
+    /// car was thrown over by the physics, upside down in the road).
+    pub fn clear_of(&self, p: [f32; 2], margin_m: f32) -> bool {
+        let mut near = Vec::new();
+        self.around(p, &mut near);
+        near.iter()
+            .all(|&k| self.boxes[k as usize].distance(p) > margin_m)
     }
 
     /// Indices of props in the grid cells around `p` (everything within one cell, ≥ 25 m),
@@ -450,6 +559,23 @@ pub(crate) fn classify(c: &ClassifyInput) -> (StuckCause, Option<f32>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn prop_clearance_for_spawns() {
+        // A parked car 4.6 x 1.8 m at the origin, along +Y.
+        let idx = PropIndex::new(vec![PropBox {
+            pos: [0.0, 0.0],
+            half: [0.9, 2.3],
+            rot: [0.0, 1.0],
+        }]);
+        assert!(!idx.clear_of([0.0, 0.0], 3.0), "on top of it");
+        assert!(
+            !idx.clear_of([2.5, 0.0], 3.0),
+            "alongside, 1.6 m off its side"
+        );
+        assert!(idx.clear_of([0.0, 8.0], 3.0), "5.7 m ahead of its nose");
+        assert!(idx.clear_of([20.0, 0.0], 3.0));
+    }
+
     use super::*;
 
     #[test]

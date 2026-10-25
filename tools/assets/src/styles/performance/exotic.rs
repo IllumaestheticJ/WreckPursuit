@@ -11,14 +11,15 @@
 use wp_contracts::{BodyRegion, VehicleDef};
 
 use crate::builder::{Builder, PartKey};
-use crate::mesh::{MaterialSlot as M, PartKind};
+use crate::mesh::{MaterialSlot as M, PartKind, INDICATOR_SEAM_M};
 use crate::style::{
     ArchShape, BodyStyle, CaliperKind, CapKind, CarStyle, DetailCtx, EngineKind, EngineLayout,
     ExhaustKind, Induction, RimKind, Silhouette, SuspensionKind,
 };
 
 use super::kit::{
-    dkey, headlight_key, lkey, sided, taillight_key, top_band, Kit, Stand, Wing, SIDES,
+    dkey, indicator_front_key, indicator_rear_key, lkey, sided, taillight_key, top_band, Kit, Seg,
+    Stand, Wing, SIDES,
 };
 use super::{kit_detail, rgb, wheels};
 
@@ -114,26 +115,28 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
         let kl = sided(&dkey("popup_lid_l", hood, M::Paint), sx);
         k.patch(&kl, y0, y1, top_band(x0, x1), 0.004, 0.012, (3, 2));
-        // Flush parking / flash lamps in the nose face below the pods.
-        let hk = headlight_key(sx);
-        k.front_box(
-            &hk,
-            sx * 0.40,
-            sx * (wn - 0.14),
+        // Flush parking / flash lamp strip in the nose face below the pods, its outer corner
+        // the amber turn signal, which wraps round onto the fender side.
+        k.front_cluster(
+            sx,
+            0.40,
+            wn - 0.02,
             nz1 - 0.06,
             nz1 - 0.02,
             0.012,
             0.006,
+            Seg::Outboard(0.11),
         );
-        let ka = sided(&lkey("indicator_front_l", fb, M::EmissiveAmber), sx);
-        k.front_box(
-            &ka,
-            sx * (wn - 0.13),
-            sx * (wn - 0.02),
+        k.side_patch(
+            &indicator_front_key(-1.0),
+            sx,
+            yn - 0.10,
+            yn - 0.025,
             nz1 - 0.06,
             nz1 - 0.02,
-            0.014,
-            0.006,
+            0.002,
+            0.008,
+            (2, 1),
         );
     }
     // --- Black slatted nose intake + small side ducts, lip.
@@ -212,12 +215,8 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let r = (0.5 * (pz1 - pz0) - 0.03).min(0.06);
     for sx in SIDES {
         let tk = taillight_key(sx);
-        let ka = sided(
-            &dkey(
-                "taillight_ring_l",
-                BodyRegion::RearLeftQuarter,
-                M::EmissiveAmber,
-            ),
+        let kring = sided(
+            &dkey("taillight_ring_l", BodyRegion::RearLeftQuarter, M::Chrome),
             sx,
         );
         let kc = sided(
@@ -230,8 +229,10 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
         let xo = wt - 0.10;
         let xi = xo - 2.6 * r;
-        k.round_lamp(&tk, false, sx * xo, zc, r, 0.03, Some(&ka));
-        k.round_lamp(&tk, false, sx * xi, zc, r, 0.03, Some(&kc));
+        k.round_lamp(&tk, false, sx * xo, zc, r, 0.03, Some(&kring));
+        // The inner round lamp is the amber turn signal.
+        let ka = indicator_rear_key(sx, M::EmissiveAmber);
+        k.round_lamp(&ka, false, sx * xi, zc, r, 0.03, Some(&kc));
     }
     let kv = dkey("rear_valance", BodyRegion::RearBumper, M::Grille);
     k.rear_box(
@@ -245,6 +246,7 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     );
 
     k.mirrors(0.18, 0.10, None);
+    k.fender_repeaters();
     k.wipers();
     k.fuel_filler(1.0, 0.09, M::Trim);
 }
@@ -328,7 +330,8 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     // --- Slim LED lamps on the nose top with two angular DRL strokes each.
     for sx in SIDES {
         let (y0, y1) = (yn - 0.28, yn - 0.08);
-        k.top_lamp(sx, y0, y1, 0.52, wn - 0.08, 0.035);
+        // LED lens with the amber turn signal in its outer corner.
+        k.top_lamp_split(sx, y0, y1, 0.52, wn - 0.08, 0.035, Seg::Outboard(0.09));
         let kd = sided(
             &lkey("drl_l", BodyRegion::FrontLeftFender, M::Headlight),
             sx,
@@ -536,19 +539,23 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.01,
             0.004,
         );
-        // C: top stroke, outer vertical, bottom stroke.
+        // C: top stroke, outer vertical, bottom stroke; the outer vertical is the amber turn
+        // signal, the strokes stop a seam short of it.
+        let x_sig = wt - 0.06;
+        let x_stroke = x_sig - INDICATOR_SEAM_M;
         k.rear_box(
             &tk,
             sx * 0.47,
-            sx * (wt - 0.02),
+            sx * x_stroke,
             zt - 0.004,
             zt + 0.018,
             0.024,
             0.0,
         );
+        let ka = indicator_rear_key(sx, M::EmissiveAmber);
         k.rear_box(
-            &tk,
-            sx * (wt - 0.045),
+            &ka,
+            sx * x_sig,
             sx * (wt - 0.02),
             zt - 0.06,
             zt + 0.018,
@@ -558,7 +565,7 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         k.rear_box(
             &tk,
             sx * (wt - 0.24),
-            sx * (wt - 0.02),
+            sx * x_stroke,
             zt - 0.06,
             zt - 0.04,
             0.024,
@@ -570,5 +577,6 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.diffuser(M::Carbon, 0.70, 0.17, 6, 0.08);
 
     k.mirrors(0.20, 0.10, Some(M::Carbon));
+    k.mirror_repeaters(0.20, 0.10, true);
     k.wipers();
 }

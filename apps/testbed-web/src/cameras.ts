@@ -8,7 +8,7 @@
 // Chase follow: the camera sits at a car-relative offset built from a *smoothed heading*, and
 // only that offset is sprung — never the camera's world position. A world-space position spring
 // trails the car by roughly (2/ω)·speed, which is what made the old chase cam drift ~10–16 m
-// back at city-chase speeds. Speed adds at most `pullBack` metres.
+// back at night-run speeds. Speed adds at most `pullBack` metres.
 //
 // All targets are Three.js objects: the vehicle root (sim chassis space: +X right, +Y
 // forward, +Z up) inside the Z-up `world` group. Three world space is +Y up.
@@ -200,6 +200,15 @@ export class CameraRig {
 
   /** Orbit camera pinned to a world spot by [`lookFrom`] (does not follow the car). */
   private pinned = false;
+  /** Photo mode owns the mouse: no orbit drag/zoom and no look-around until released. */
+  private inputSuspended = false;
+
+  /** Stop (`true`) or resume reacting to the mouse (photo mode has its own free camera). */
+  suspendInput(on: boolean): void {
+    this.inputSuspended = on;
+    this.orbit.enabled = !on && this.mode === "orbit";
+    if (on) this.dragging = false;
+  }
 
   /** Alias of [`lookFrom`] (city-v2 automation name). */
   lookAt(from: [number, number, number], to: [number, number, number]): void {
@@ -221,7 +230,7 @@ export class CameraRig {
   setMode(mode: CameraMode, target?: THREE.Object3D, orbitOffset: [number, number, number] = [-7, -9, 6]): void {
     this.mode = mode;
     this.pinned = false;
-    this.orbit.enabled = mode === "orbit";
+    this.orbit.enabled = mode === "orbit" && !this.inputSuspended;
     if (mode === "orbit" && target) {
       target.updateWorldMatrix(true, false);
       const p = target.getWorldPosition(new THREE.Vector3());
@@ -524,7 +533,7 @@ export class CameraRig {
     let lastX = 0;
     let lastY = 0;
     dom.addEventListener("pointerdown", (e) => {
-      if (this.mode === "orbit" || e.button !== 0) return;
+      if (this.mode === "orbit" || this.inputSuspended || e.button !== 0) return;
       this.dragging = true;
       lastX = e.clientX;
       lastY = e.clientY;

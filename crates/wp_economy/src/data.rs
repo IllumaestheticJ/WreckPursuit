@@ -18,7 +18,9 @@ use crate::error::{invalid, DataError};
 use crate::garage::Condition;
 use crate::ledger::Money;
 use crate::mods::{ModCatalog, ModPack};
+use crate::parts::PartsTable;
 use crate::payouts::RaceType;
+use crate::progression::ProgressionRules;
 
 /// Every vehicle class, in declaration order.
 pub const ALL_CLASSES: [VehicleClass; 9] = [
@@ -130,6 +132,18 @@ pub struct PriceTables {
     pub repair_parts_fraction: f32,
     /// Clamp on `car_value / class.reference_value` when scaling parts prices.
     pub value_factor_clamp: [f32; 2],
+    /// Extra cost of heavy damage: each billed line is × `1 + heavy_damage_markup × severity²`,
+    /// so a scrape barely changes while a crushed part (more hours straightening, harder to
+    /// source) costs up to `1 + heavy_damage_markup` times the base price. 0 when absent.
+    #[serde(default)]
+    pub heavy_damage_markup: f32,
+    /// Whole-bill multiplier for rebuilding a car written off as a total loss (frame jig,
+    /// strip-down, re-shell). 1 when absent.
+    #[serde(default = "one")]
+    pub total_loss_markup: f32,
+    /// Full respray on the reference Compact (× class `parts_scale`; `Economy::respray_fee`).
+    #[serde(default = "respray_base")]
+    pub respray_base: f32,
     /// Parts cost to replace each region on the class-reference Compact.
     pub region_parts: BTreeMap<BodyRegion, f32>,
     /// Parts cost to replace each component on the class-reference Compact.
@@ -144,6 +158,14 @@ pub struct PriceTables {
     pub scrap: ScrapPricing,
     /// Insurance tiers keyed by id.
     pub insurance: BTreeMap<String, InsuranceTier>,
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+fn respray_base() -> f32 {
+    900.0
 }
 
 /// Pricing for one vehicle class.
@@ -557,6 +579,12 @@ pub struct DataSources {
     pub consequences: String,
     /// `data/economy/market.toml`.
     pub market: String,
+    /// `data/economy/lots.toml` (dealerships, used lots, junkyards, tyres).
+    pub lots: String,
+    /// `data/economy/parts.toml` (workshop slots).
+    pub parts: String,
+    /// `data/economy/career.toml` (rep tiers, unlocks, betting limits).
+    pub career: String,
     /// `data/mods/*.json` as `(file stem, contents)`.
     pub mods: Vec<(String, String)>,
     /// `data/modes/arcade.toml` (owned by workstream 03; read-only here).
@@ -620,6 +648,9 @@ impl DataSources {
             stakes: data_file!("economy/stakes.toml").to_string(),
             consequences: data_file!("economy/consequences.toml").to_string(),
             market: data_file!("economy/market.toml").to_string(),
+            lots: data_file!("economy/lots.toml").to_string(),
+            parts: data_file!("economy/parts.toml").to_string(),
+            career: data_file!("economy/career.toml").to_string(),
             mods: MOD_PACKS
                 .iter()
                 .zip(EMBEDDED_MODS.iter())
@@ -665,6 +696,9 @@ impl DataSources {
             stakes: read("economy/stakes.toml")?,
             consequences: read("economy/consequences.toml")?,
             market: read("economy/market.toml")?,
+            lots: read("economy/lots.toml")?,
+            parts: read("economy/parts.toml")?,
+            career: read("economy/career.toml")?,
             mods,
             arcade_mode: read("modes/arcade.toml")?,
             sim_mode: read("modes/sim.toml")?,
@@ -685,8 +719,14 @@ pub struct Economy {
     pub consequences: ConsequenceTables,
     /// `market.toml`.
     pub market: MarketTables,
+    /// `lots.toml`.
+    pub lots: crate::lots::LotTables,
     /// All mods.
     pub catalog: ModCatalog,
+    /// Workshop slots (`parts.toml`).
+    pub parts: PartsTable,
+    /// Career progression (`career.toml`, see [`crate::progression`]).
+    pub progression: ProgressionRules,
     /// Damage mode tables keyed by mode.
     pub modes: BTreeMap<DamageMode, ModeTable>,
 }
@@ -752,7 +792,10 @@ impl Economy {
             stakes: parse_toml("economy/stakes.toml", &src.stakes)?,
             consequences: parse_toml("economy/consequences.toml", &src.consequences)?,
             market: parse_toml("economy/market.toml", &src.market)?,
+            lots: parse_toml("economy/lots.toml", &src.lots)?,
             catalog: ModCatalog::from_packs(packs)?,
+            parts: PartsTable::parse(&src.parts)?,
+            progression: parse_toml("economy/career.toml", &src.career)?,
             modes: [
                 (DamageMode::Arcade, arcade),
                 (DamageMode::Simulation, sim),
@@ -783,6 +826,8 @@ impl Economy {
 
     /// Check every table is complete and in range.
     pub fn validate(&self) -> Result<(), DataError> {
+        self.parts.validate(&self.catalog)?;
+        self.progression.validate()?;
         let k = &self.consequences.career;
         require_frac("consequences.career.heat_carry_frac", k.heat_carry_frac)?;
         if !(k.heat_carry_min >= 0.0 && k.heat_carry_min <= k.heat_carry_max) {
@@ -794,6 +839,7 @@ impl Economy {
         if k.ledger_keep == 0 {
             return Err(invalid("consequences.career.ledger_keep", "must be > 0"));
         }
+        self.validate_lots()?;
         let p = &self.prices;
         require_positive("prices.labour_hours_per_item", p.labour_hours_per_item)?;
         require_frac("prices.repair_parts_fraction", p.repair_parts_fraction)?;

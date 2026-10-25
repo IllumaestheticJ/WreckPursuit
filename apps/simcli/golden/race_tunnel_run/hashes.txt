@@ -1,0 +1,11 @@
+# simcli hashes scenario=race_tunnel_run systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 1e091019cd318f6d
+480 5b44616e16611b08
+720 14bf0e1d5d5d626e
+960 8ac57147519f3dc8
+1200 5013b964ef44ccf0
+1440 c13505f09c2d6d23
+1680 b867215c9e95d2cd
+1920 117657878f53f3ee
+2160 9d0440b6db30343c
+2400 54927789720f7ca3

@@ -103,17 +103,22 @@
   ],
   "$defs": {
     "DamageMode": {
-      "description": "Damage mode. Both modes run the same code path with different [`crate::ModeTable`]s.",
+      "description": "Damage mode. Every mode runs the same code path with a different [`crate::ModeTable`].",
       "oneOf": [
         {
-          "description": "Punishing but survivable; one hard hit degrades, several end the car.",
+          "description": "Forgiving: the Simulation table with racer cars (player and AI racers) taking about 20 %\nof the damage (`ModeTable::racer_damage_scale`); traffic and police take full damage.",
           "type": "string",
           "const": "Arcade"
         },
         {
-          "description": "Real-world-ish; one hard hit at speed is a total loss.",
+          "description": "Punishing but survivable; one hard hit degrades, several end the car.",
           "type": "string",
           "const": "Simulation"
+        },
+        {
+          "description": "Real-world-ish; one hard hit at speed is a total loss (the pre-0.4 Simulation table).",
+          "type": "string",
+          "const": "Extreme"
         }
       ]
     },

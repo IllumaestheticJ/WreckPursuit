@@ -1,11 +1,11 @@
-# simcli hashes scenario=race_hollins_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
-240 087a80a79c2cd3ec
-480 cca0324621b87c5f
-720 adcde30c8fc65609
-960 605f9b4e01fc33d2
-1200 9181912ef17b6a63
-1440 5422998e0e21c9a2
-1680 5d58cc1cef3c812a
-1920 d4d8aabf37920567
-2160 19cde9c730feb90a
-2400 22d0444c1cf48ce2
+# simcli hashes scenario=race_hollins_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 75b9f5fef610ef11
+480 72da2f0eabe0bb09
+720 a723361ccd3a8d1e
+960 57502f248be6e1d8
+1200 7f6a2aafda907acb
+1440 6417ea22054034a9
+1680 f69204cbe1c82bb7
+1920 c84a5cd5f7d670d3
+2160 07536bb83c4882f9
+2400 12e2d5e6042ecc2f
