@@ -11,15 +11,15 @@
 // Row 131 (2026-10-21): no spawn where the racer will see it within 3 s along its road, so
 // responders appear past that look-ahead: mean 23.4 -> 26.6 s over the 3 timed calls (max 34.2 s
 // unchanged). Cap 25 -> 28 s; trade-off reported to the lead.
-// 2026-10-23 (owner: far fewer patrols, night a quarter of the old night): with no pool unit
-// near, more calls are left to spawned responders and some are not met inside the 60 s run
-// (61 = never). Measured: 4 calls, 25 s reached 0.5, mean 33.6 s, max 61.
+// Row 157 (2026-10-23: heat gains halved): the 8 runs time only 3 calls, and their mean moved
+// 26.5 -> 30.7 s on one call (max 37.1 -> 38.6 s). Same seeds, old vs new heat: 16 runs (9
+// calls) 19.1 -> 20.4 s, 32 runs (15 calls) 15.2 -> 15.7 s. Runs 8 -> 16; worst-call cap 38 -> 40 s.
 (
     name: "police_response_day_suburb",
     seed: 300,
     time_of_day_h: 12.0,
     duration_s: 60.0,
-    runs: 8,
+    runs: 16,
     racers: [(district: Suburb, speed_factor: 2.0)],
     expect: [
         (metric: "calls", min: 1.0, max: 10000.0),
@@ -28,7 +28,7 @@
         // Row 84 (search extras): 34.2 -> 37.1 s, the worst of 3 calls. Not a cap squeeze (the
         // same with 2 cap slots reserved for calls): the extra search requests draw from the
         // seeded RNG and shift every later draw; with the extras off it is 34.6 s. Mean 27.5 s.
-        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 61.0),
+        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 40.0),
         (metric: "spawns_in_view", min: 0.0, max: 0.0),
         (metric: "despawns_in_sight", min: 0.0, max: 0.0),
         (metric: "spawn_min_racer_m", min: 120.0, max: 10000.0),

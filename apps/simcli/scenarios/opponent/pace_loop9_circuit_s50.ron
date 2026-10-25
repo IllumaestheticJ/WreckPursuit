@@ -20,6 +20,9 @@
 // draw alone (opponent-pace.md, "Loop 9 s95 slowdown, bisected"), so this seed only catches
 // gross breakage: today's time −40 % .. +40 %, best_ratio at most today's × 1.4. Loop 9's pace
 // lock is the 8-seed mean in `loop9_traffic_field_finishes` (`just pace-loop9`).
+// 2026-10-23 (D, PR #38 port): spawns re-synced from the regenerated race pick file (the
+// Hollins Ascent grid moved across the Hollins Gorge Bridge; Loop 9's by millimetres). Ranges
+// unchanged: every time is inside them.
 (
     name: "opponent_pace_loop9_circuit_s50",
     seed: 9,
@@ -39,48 +42,48 @@
         (
             id: "player",
             car: "lindwurm_4t",
-            pos: (328.56927, 1419.1766, 23.714773),
-            yaw: 1.6529424,
+            pos: (328.56918, 1419.1771, 23.715284),
+            yaw: 1.6529596,
             driver: scripted,
             inputs: [],
         ),
         (
             id: "ai_vic",
             car: "kestrel_ts",
-            pos: (309.047, 1412.5524, 23.714773),
-            yaw: 1.6529424,
+            pos: (309.047, 1412.5525, 23.715284),
+            yaw: 1.6529596,
             driver: scripted,
             inputs: [],
         ),
         (
             id: "ai_mara",
             car: "hakone_gt",
-            pos: (312.62323, 1417.8636, 23.714773),
-            yaw: 1.6529424,
+            pos: (312.62317, 1417.8639, 23.715284),
+            yaw: 1.6529596,
             driver: scripted,
             inputs: [],
         ),
         (
             id: "ai_dez",
             car: "rampart_50",
-            pos: (317.02002, 1413.2087, 23.714773),
-            yaw: 1.6529424,
+            pos: (317.02002, 1413.2091, 23.715284),
+            yaw: 1.6529596,
             driver: scripted,
             inputs: [],
         ),
         (
             id: "ai_juno",
             car: "shiro_turbo",
-            pos: (320.59625, 1418.5201, 23.714773),
-            yaw: 1.6529424,
+            pos: (320.5962, 1418.5205, 23.715284),
+            yaw: 1.6529596,
             driver: scripted,
             inputs: [],
         ),
         (
             id: "ai_tito",
             car: "sperber_32",
-            pos: (324.99304, 1413.8652, 23.714773),
-            yaw: 1.6529424,
+            pos: (324.99304, 1413.8656, 23.715284),
+            yaw: 1.6529596,
             driver: scripted,
             inputs: [],
         ),

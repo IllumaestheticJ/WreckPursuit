@@ -2,7 +2,7 @@
   "id": "sentinel_warden",
   "display_name": "Sentinel Warden",
   "class": "PoliceCruiser",
-  "analog_of": "late-80s American full-size body-on-frame RWD police sedan, 5.7 L pushrod V8 police package, 4-speed automatic, boxy three-box body",
+  "analog_of": "late-80s American full-size body-on-frame RWD police sedan, 7.4 L big-block V8 police package, 4-speed automatic, boxy three-box body",
   "body_size_m": [1.98, 5.4, 1.43],
   "mass_kg": 1872.6,
   "front_weight_frac": 0.56,
@@ -16,25 +16,25 @@
   "lift_rear": 0.14,
   "engine": {
     "torque_curve_nm": [
-      [800, 290],
-      [1200, 340],
-      [1600, 380],
-      [2000, 400],
-      [2400, 410],
-      [2800, 412],
-      [3200, 405],
-      [3600, 392],
-      [4000, 370],
-      [4400, 330],
-      [4800, 290],
-      [5000, 265],
-      [5200, 240]
+      [800, 380],
+      [1200, 450],
+      [1600, 500],
+      [2000, 530],
+      [2400, 545],
+      [2800, 550],
+      [3200, 545],
+      [3600, 530],
+      [4000, 505],
+      [4400, 470],
+      [4800, 425],
+      [5000, 400],
+      [5200, 370]
     ],
     "idle_rpm": 600.0,
     "redline_rpm": 5000.0,
     "rev_limit_rpm": 5200.0,
-    "inertia_kgm2": 0.26,
-    "engine_brake_nm": 49.0
+    "inertia_kgm2": 0.3,
+    "engine_brake_nm": 66.0
   },
   "drivetrain": {
     "layout": "Rwd",
@@ -49,7 +49,7 @@
         "ramp_coast": 0.2
       }
     },
-    "clutch_max_nm": 660.0,
+    "clutch_max_nm": 880.0,
     "shift_time_s": 0.4,
     "torque_converter": {
       "stall_rpm": 2000.0,

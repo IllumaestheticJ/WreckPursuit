@@ -193,6 +193,17 @@ gives the wheel back. Afterwards every intact beam takes its current length as r
 (stress relief), so a partial repair never makes the car creep; health, total loss and effects
 are recomputed with the last mode passed to `apply_contacts`; the hull is rebuilt.
 
+### Pre-owned wear (`wear.rs`)
+`apply_preowned_wear(&PreownedWear, mode)` gives a car the damage a used-lot or junkyard car is
+sold with (the economy rolls it, `wp_economy::lots`): component health (0 fails it: a dead
+engine), missing bolt-on parts (their groups detach) and dents (a region's nodes pushed in
+horizontally towards the centre line by `frac × region_replace_displacement_m`, beams touching
+them take the new length as rest length, the region is charged `frac × region_ref_j` of plastic
+energy). Health, total loss and effects are then recomputed with `mode`, which also becomes the
+mode later repairs use. The result saves, restores, estimates and repairs like crash damage.
+`refresh_effects(mode)` recomputes health and effects for a model that was never stepped (the
+garage builds them from saves), so a restored dead engine reads as dead.
+
 ### Hull, skinning, sleeping
 `convex_hull_outer()` (parry quickhull over active nodes) is recomputed only when a node moved
 > 2 cm since the last hull and at most every 20 steps; `hull_version()` tells `wp_sim` when to

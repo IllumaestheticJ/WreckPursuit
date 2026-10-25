@@ -84,10 +84,11 @@ fn twenty_nights_solvent_in_arcade_marginal_in_extreme() {
         arc.pct(10)
     );
 
-    // Extreme: marginal. The typical racer roughly breaks even; a real fraction go backwards.
+    // Extreme: marginal. The typical racer roughly breaks even or slips back; a real fraction
+    // go backwards. (Median floor 0.7 → 0.5 on 2026-10-24 when heavy damage got pricier.)
     let med = sim.pct(50) as f32;
     assert!(
-        (0.7 * start..=1.3 * start).contains(&med),
+        (0.5 * start..=1.3 * start).contains(&med),
         "Extreme median {med}"
     );
     let mean = sim.mean() as f32;

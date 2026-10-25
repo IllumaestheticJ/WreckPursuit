@@ -26,6 +26,8 @@ export interface RaceCard {
   name: string;
   blurb: string;
   city: string;
+  /** Every city id it runs on (its own and the maps containing it, e.g. `ashpeak`). */
+  cities?: string[];
   kind: string;
   laps: number;
   legality: string;
@@ -81,6 +83,8 @@ export interface RegularCard {
 export interface BetPick {
   label: string;
   stake: number;
+  /** Decimal odds on the card when it was picked: the ticket is placed at these odds. */
+  odds: number;
 }
 
 /** Picker-race betting (venue City) on the current account. */
@@ -174,6 +178,12 @@ const ordinal = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? "st" : n % 10 =
 
 const BET_LABEL = (o: OddsCard) => (o.kind === "win" ? "You win" : o.kind === "podium" ? "You finish top 3" : `You beat ${o.opponent ?? "?"}`);
 
+/** Smallest stake the book takes (`data/events/betting.toml` `book.min_stake`). */
+const BET_MIN = 100;
+/** `stake` brought into `[BET_MIN, max]`, whole credits. */
+const clampStake = (stake: number, max: number) => Math.max(BET_MIN, Math.min(max, Math.round(stake) || BET_MIN));
+const money = (v: number) => `$${v.toLocaleString("en-US")}`;
+
 /** Bet slip on a picker card: pick a selection and a stake, or no bet. */
 function BetSlip(props: { card: RaceCard; status: BetStatus; pick: BetPick | null; onPick: (p: BetPick | null) => void }) {
   const { card, status, pick } = props;
@@ -189,9 +199,10 @@ function BetSlip(props: { card: RaceCard; status: BetStatus; pick: BetPick | nul
     );
   }
   const max = Math.max(0, status.max);
-  if (max < 100) return <div class="wp-dim" style={{ fontSize: "0.8em" }}>Betting: not enough cash for the minimum stake (100).</div>;
+  if (max < BET_MIN) return <div class="wp-dim" style={{ fontSize: "0.8em" }}>Betting: not enough cash for the minimum stake ({BET_MIN}).</div>;
   const label = pick?.label ?? "";
-  const stake = pick?.stake ?? Math.min(500, max);
+  const step = max >= 5000 ? 500 : 100;
+  const stake = clampStake(pick?.stake ?? 500, max);
   const odds = card.odds.find((o) => o.label === label);
   return (
     <div class="wp-spread" style={{ fontSize: "0.8em", marginTop: "0.3em", gap: "0.4em", pointerEvents: "auto" }} data-testid="bet-slip">
@@ -201,7 +212,8 @@ function BetSlip(props: { card: RaceCard; status: BetStatus; pick: BetPick | nul
         value={label}
         onChange={(e) => {
           const v = (e.target as HTMLSelectElement).value;
-          props.onPick(v ? { label: v, stake } : null);
+          const o = card.odds.find((x) => x.label === v);
+          props.onPick(v && o ? { label: v, stake, odds: o.odds } : null);
         }}
       >
         <option value="">No bet</option>
@@ -212,22 +224,23 @@ function BetSlip(props: { card: RaceCard; status: BetStatus; pick: BetPick | nul
         ))}
       </select>
       {label && (
-        <span>
-          stake{" "}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: "0.4em" }}>
+          stake <b data-testid="bet-stake">{money(stake)}</b>
+          {/* onInput, not onChange: the picker redraws ~10 times a second after a race, and a
+              value only committed on blur was put back before it ever reached the slip. */}
           <input
-            type="number"
-            min={100}
+            type="range"
+            class="wp-slider"
+            data-testid="bet-range"
+            min={BET_MIN}
             max={max}
-            step={100}
+            step={step}
             value={stake}
-            class="wp-select"
-            style={{ width: "6em" }}
-            onChange={(e) => {
-              const v = Math.max(100, Math.min(max, Math.round(Number((e.target as HTMLInputElement).value) || 0)));
-              props.onPick({ label, stake: v });
-            }}
-          />{" "}
-          → <Money value={Math.floor((stake * Math.round((odds?.odds ?? 0) * 1000)) / 1000)} /> <span class="wp-dim">(max {max})</span>
+            style={{ width: "8em" }}
+            onInput={(e) => props.onPick({ label, stake: clampStake(Number((e.target as HTMLInputElement).value), max), odds: pick?.odds ?? odds?.odds ?? 0 })}
+          />
+          → <Money value={Math.floor((stake * Math.round((odds?.odds ?? 0) * 1000)) / 1000)} />{" "}
+          <span class="wp-dim" style={{ whiteSpace: "nowrap" }}>(max {money(max)})</span>
         </span>
       )}
     </div>
@@ -250,7 +263,7 @@ function Picker(props: { cards: RaceCard[]; status: BetStatus; onStart: (id: str
                 </span>
               </div>
               <div class="wp-dim" style={{ fontSize: "0.85em", margin: "0.3em 0" }}>
-                {c.blurb} {c.city === "vesper_v2" ? "Port Vesper" : "Grid city"} · {(c.length_m / 1000).toFixed(1)} km · {fmtHour(c.time_of_day_h)}
+                {c.blurb} {CITY_LABEL[c.city] ?? c.city} · {(c.length_m / 1000).toFixed(1)} km · {fmtHour(c.time_of_day_h)}
                 {c.police > 1 ? " · police presence MAX" : ""}
                 {c.hot_meet ? " · hot meet: a patrol will come" : ""}
               </div>
@@ -362,7 +375,7 @@ function Hud(props: { frame: RaceFrame; names: Map<number, string>; map: CityMap
   );
 }
 
-function Results(props: { report: RaceReport; onAgain: () => void; onPicker: () => void; onFree: () => void }) {
+function Results(props: { report: RaceReport; onAgain: () => void; onPicker: () => void; onFree: () => void; onGarage: (() => void) | null }) {
   const r = props.report;
   const me = r.rows[r.player_row];
   const p = r.payout;
@@ -478,17 +491,42 @@ function Results(props: { report: RaceReport; onAgain: () => void; onPicker: () 
         {!p && r.final_results && <p class="wp-dim">Advertised purse <Money value={r.advertised_purse} /> (no account in this session).</p>}
         {r.economy_error && <p class="wp-danger" style={{ fontSize: "0.85em" }}>{r.economy_error}</p>}
         <div style={{ display: "flex", gap: "0.5em", marginTop: "0.8em", flexWrap: "wrap" }}>
-          <Button variant="primary" onClick={props.onAgain}>
-            Race again
-          </Button>
-          <Button onClick={props.onPicker}>Races…</Button>
-          <Button variant="ghost" onClick={props.onFree}>
-            Free drive
-          </Button>
+          {props.onGarage ? (
+            // A career race (playtest row 167): the result is booked on the career; back to its garage.
+            <Button variant="primary" onClick={props.onGarage} testid="race-to-garage">
+              Back to garage
+            </Button>
+          ) : (
+            <>
+              <Button variant="primary" onClick={props.onAgain}>
+                Race again
+              </Button>
+              <Button onClick={props.onPicker}>Races…</Button>
+              <Button variant="ghost" onClick={props.onFree}>
+                Free drive
+              </Button>
+            </>
+          )}
         </div>
       </Panel>
     </div>
   );
+}
+
+/** City names in the picker. */
+const CITY_LABEL: Record<string, string> = {
+  vesper_v2: "Port Vesper",
+  ashpeak: "Ashpeak County",
+  procedural_12x12: "Grid city",
+};
+
+/**
+ * The picker's races for the main menu's map: on `ashpeak` every race that runs there (Port
+ * Vesper's and Ashpeak County's); on any other map every race except the Ashpeak-only ones.
+ */
+export function racesForMap<C extends Pick<RaceCard, "city" | "cities">>(cards: C[], map: string): C[] {
+  if (map === "ashpeak") return cards.filter((c) => (c.cities ?? [c.city]).includes("ashpeak"));
+  return cards.filter((c) => c.city !== "ashpeak");
 }
 
 /** Mounts the race picker / HUD / results into `el`. */
@@ -514,6 +552,10 @@ export class RaceView {
       freeDrive: () => void;
       list: () => RaceCard[];
       betStatus: () => BetStatus;
+      /** The player closed the picker (the career garage reopens when it opened it). */
+      closed?: () => void;
+      /** During a career run: the results panel's "Back to garage" (null otherwise). */
+      garage?: () => (() => void) | null;
     },
   ) {}
 
@@ -528,6 +570,12 @@ export class RaceView {
   closePicker(): void {
     this.cards = null;
     this.draw();
+  }
+
+  /** The player closed the picker (its close button). */
+  private pickerClosed(): void {
+    this.closePicker();
+    this.actions.closed?.();
   }
 
   /** New session: `raceId` "" when it is not a race; `names` by entity; the race's course. */
@@ -571,9 +619,15 @@ export class RaceView {
       <div class="wp-ui wp-root" style={{ position: "absolute", inset: 0, pointerEvents: "none" }} data-testid="race-view">
         {this.raceId && f && f.info.length > 0 && !showResults && <Hud frame={f} names={this.names} map={this.map} course={this.course} />}
         {showResults && this.report && (
-          <Results report={this.report} onAgain={() => this.actions.start(this.raceId)} onPicker={() => this.openPicker()} onFree={() => this.actions.freeDrive()} />
+          <Results
+            report={this.report}
+            onAgain={() => this.actions.start(this.raceId)}
+            onPicker={() => this.openPicker()}
+            onFree={() => this.actions.freeDrive()}
+            onGarage={this.actions.garage?.() ?? null}
+          />
         )}
-        {this.cards && <Picker cards={this.cards} status={this.betStatus} onStart={(id, bet) => this.actions.start(id, bet)} onClose={() => this.closePicker()} />}
+        {this.cards && <Picker cards={this.cards} status={this.betStatus} onStart={(id, bet) => this.actions.start(id, bet)} onClose={() => this.pickerClosed()} />}
       </div>,
       this.el,
     );

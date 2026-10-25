@@ -288,6 +288,15 @@ pub struct CaptureConfig {
     /// police held up behind other cars 20 m away is captured rather than waited for forever
     /// (Hollins hairpin, lead/opponent-pace), m.
     pub pinned_unit_radius_m: f32,
+    /// Row 168: both rules wait at least this long, s, when the only units that count stand
+    /// in the racer's lane in front of it (a pursuer, interceptor or patrol, not a roadblock,
+    /// spike car or box-in).
+    #[serde(default = "default_blocked_ahead_stop_time_s")]
+    pub blocked_ahead_stop_time_s: f32,
+}
+
+fn default_blocked_ahead_stop_time_s() -> f32 {
+    12.0
 }
 
 /// Safehouse rule.
@@ -558,8 +567,6 @@ pub struct ChaseConfig {
     pub brake_mps2: f32,
     /// Closing on the racer: up to its speed × (1 + this).
     pub speed_margin: f32,
-    /// `pursuit_cap_mps` × this per level.
-    pub cap_scale: [f32; 5],
     /// Shadow (tail) gap band behind the racer per level, m: nearest.
     pub shadow_min_m: [f32; 5],
     /// ... farthest.
@@ -606,8 +613,6 @@ pub struct PursuitFile {
     pub patrol_speed_factor: f32,
     /// Responding (lights, no pursuit) speed as a fraction of the limit.
     pub respond_speed_factor: f32,
-    /// Absolute pursuit speed cap, m/s.
-    pub pursuit_cap_mps: PhaseTable<f32>,
     /// Pursuers may go this fraction faster than the target.
     pub target_speed_margin: f32,
     /// Lateral acceleration the AI plans corners with, g, while patrolling.

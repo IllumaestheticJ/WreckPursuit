@@ -18,6 +18,26 @@ use wp_race::live::{grid, LiveEntrant, LiveRace};
 use wp_race::{RaceSignal, RacerResult, RacerSample, RacerStatus};
 use wp_sim::{Sim, VehicleKind};
 
+/// Row 165: every spike strip on the road has its police unit within the leash of its post.
+fn assert_strips_manned(sim: &Sim, id: &str) {
+    let p = sim.police();
+    for s in p.spike_strips() {
+        let u = s
+            .unit
+            .and_then(|uid| p.units().iter().find(|u| u.id == uid))
+            .unwrap_or_else(|| panic!("{id}: spike strip {:?} without its unit", s.id));
+        let post = s.post.unwrap_or(s.site.pos);
+        let d = (u.body.pos[0] - post[0]).hypot(u.body.pos[1] - post[1]);
+        assert!(
+            d <= wp_police::dispatch::SPIKE_UNIT_LEASH_M,
+            "{id}: spike strip {:?}'s unit {:.1} m from its post at tick {}",
+            s.id,
+            d,
+            sim.tick()
+        );
+    }
+}
+
 fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -220,6 +240,8 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         }
         sim.step_fixed();
         events = sim.drain_events();
+        // Row 165: no spike strip ever lies on the road without its unit beside it.
+        assert_strips_manned(&sim, id);
         pursuits += events
             .iter()
             .filter(|e| {
@@ -271,6 +293,9 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
             let cur = sim.police().racer(*e).map_or(0.0, |r| r.heat);
             sim.police_mut().set_heat(*e, cur + h);
         }
+        for e in &out.impound {
+            sim.despawn_vehicle(*e).unwrap();
+        }
         signals.extend(out.signals);
         if sim.tick() == green_tick + 1 {
             heat_after_green = racers
@@ -310,12 +335,15 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
                 );
             }
             for s in live.standings() {
-                let st = sim
+                // Towed (impounded) cars are gone from the sim.
+                let Some(st) = sim
                     .vehicles()
                     .iter()
                     .find(|v| v.id == s.racer)
                     .map(|v| v.vehicle.state())
-                    .unwrap();
+                else {
+                    continue;
+                };
                 eprintln!(
                     "{id} t={} {:?} P{} {:?} gates {} prog {:.0} pos ({:.0},{:.0}) v {:.1}",
                     sim.tick() / 240,
@@ -331,14 +359,14 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
             }
         }
         if std::env::var("WP_RACE_TRACE_NEAR").is_ok() && sim.tick().is_multiple_of(240 * 20) {
-            let lead = sim
+            let Some(lead) = sim
                 .vehicles()
                 .iter()
                 .find(|v| v.id == racers[0])
-                .unwrap()
-                .vehicle
-                .state()
-                .pos;
+                .map(|v| v.vehicle.state().pos)
+            else {
+                continue;
+            };
             for a in sim.world().agents() {
                 let d = (a.pos[0] - lead[0]).hypot(a.pos[1] - lead[1]);
                 if d < 50.0 {
@@ -717,6 +745,76 @@ fn loop9_circuit_pace_without_police() {
     assert_eq!(r.pursuits, 0);
 }
 
+/// The picker offers only the Loop 9 races (owner, 2026-10-24); the older races are retired
+/// to regression scenarios and still found by id.
+#[test]
+fn picker_offers_only_the_loop9_races() {
+    let ids: Vec<&str> = catalog::races().iter().map(|r| r.id).collect();
+    assert_eq!(ids, ["loop9_circuit", "loop9_day", "loop9_ashpeak_highway"]);
+    for r in catalog::retired_races() {
+        assert!(!ids.contains(&r.id), "{} is both offered and retired", r.id);
+        assert_eq!(catalog::race(r.id).map(|d| d.id), Some(r.id));
+    }
+    // Retired races leave the picker everywhere: no meet spot plans them on any map.
+    for city in ["vesper_v2", "ashpeak", "procedural_12x12"] {
+        for r in catalog::races_on(city) {
+            assert!(ids.contains(&r.id), "{city}: {} still offered", r.id);
+        }
+    }
+}
+
+#[test]
+fn loop9_day() {
+    // The Loop 9 lap at 14:00, illegal daytime: police at full strength. As on the night lap
+    // the police decide how many finish; what must hold is that the race is judged to the end
+    // and every racer's race ends at the flag, by the police or in one racing incident.
+    let r = run_race("loop9_day", 600);
+    let id = r.def.id;
+    assert!(r.route_m > 9000.0);
+    assert!(r.finished_tick.is_some(), "{id}: never finished");
+    assert_eq!(r.results.len(), r.def.entrants());
+    assert!(matches!(
+        r.signals.last(),
+        Some(RaceSignal::RaceFinished { .. })
+    ));
+    let dqs = r
+        .results
+        .iter()
+        .filter(|x| matches!(x.status, RacerStatus::Dq(_)))
+        .count();
+    assert!(dqs <= 1, "{id}: {dqs} disqualified");
+    for x in &r.results {
+        assert!(
+            x.gates_passed >= 1 || x.progress_m >= 30.0,
+            "{id}: {x:?} never left the grid"
+        );
+    }
+    eprintln!(
+        "loop9_day pursuits: {}, results {:?}",
+        r.pursuits,
+        r.results
+            .iter()
+            .map(|x| (x.position, x.status, x.elapsed_s(), x.gates_passed))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn loop9_day_pace_without_police() {
+    // The daytime lap without police: the AI field through daytime highway traffic.
+    // 2026-10-24 (traffic 0.5, seed 19): 6 of 6 finish, winner 194.4 s.
+    let r = run_race_with("loop9_day", 600, Some(0.0));
+    eprintln!(
+        "loop9_day (no police): results {:?}",
+        r.results
+            .iter()
+            .map(|x| (x.position, x.status, x.elapsed_s(), x.gates_passed))
+            .collect::<Vec<_>>()
+    );
+    check(&r, 150.0..420.0, 4);
+    assert_eq!(r.pursuits, 0);
+}
+
 #[test]
 fn lantern_checkpoint_draws_the_police() {
     // Seed 31 (the catalog's) is back since the box-in escape (follow-up (a), 2026-10-22): the
@@ -837,9 +935,9 @@ fn crowfoot_descent_touge() {
 }
 
 #[test]
-fn harlan_dirt_run() {
+fn harnell_dirt_run() {
     // 4 km of gravel section roads: winner ~266 s.
-    ashpeak_race("harlan_dirt_run", 500, 190.0..380.0, 3);
+    ashpeak_race("harnell_dirt_run", 500, 190.0..380.0, 3);
 }
 
 #[test]
@@ -873,6 +971,15 @@ fn ashpeak_metro_circuit() {
 }
 
 #[test]
+fn loop9_ashpeak_highway() {
+    // One 17.9 km lap of the highways (Loop 9, Route 7, the Crosstown, Route 12 over the
+    // Grizzly Grade). 2026-10-24 (seed 29): 4 of 6
+    // finish, winner 446.3 s; the last two were stuck near the Lantern Way on-ramp (gates
+    // 62-64), one racing incident each.
+    ashpeak_race("loop9_ashpeak_highway", 1200, 300.0..800.0, 4);
+}
+
+#[test]
 fn harbor_dash() {
     let r = run_race("harbor_dash", 150);
     // 737 m down Harbor Boulevard onto the Loop 9 on-ramp.
@@ -889,8 +996,10 @@ fn tunnel_run() {
 #[test]
 fn hollins_descent() {
     let r = run_race("hollins_descent", 240);
-    // 1.35 km down the Hollins hairpins into Mercer.
-    check(&r, 40.0..150.0, 3);
+    // 1.35 km down the Hollins hairpins into Mercer, with a police stakeout on the course:
+    // since the road network centreline fix (playtest row 170) its pursuits catch two of the
+    // four (main: four pursuits, none caught), so captures count like `hollins_sprint`'s.
+    check_with_police(&r, 40.0..150.0, 3);
 }
 
 #[test]

@@ -85,13 +85,15 @@ fn dealer_classes_are_gated() {
     let a = account(&e, 0, 100_000);
     assert!(e.class_unlocked(&a, VehicleClass::Compact));
     assert!(!e.class_unlocked(&a, VehicleClass::Sport));
-    assert!(!e.class_unlocked(&a, VehicleClass::Exotic));
     assert!(matches!(
-        e.require_class(&a, VehicleClass::Exotic),
+        e.require_class(&a, VehicleClass::Sport),
         Err(EconomyError::Locked { .. })
     ));
+    // Exotics have no rep gate: price is the only thing holding them back.
+    assert!(e.class_unlocked(&a, VehicleClass::Exotic));
+    e.require_class(&a, VehicleClass::Exotic).unwrap();
     let legend = account(&e, 1_000_000, 0);
-    assert!(e.class_unlocked(&legend, VehicleClass::Exotic));
+    assert!(e.class_unlocked(&legend, VehicleClass::Sport));
     assert!(!e.class_unlocked(&legend, VehicleClass::PoliceInterceptor));
     assert!(matches!(
         e.require_class(&legend, VehicleClass::PoliceCruiser),
@@ -261,7 +263,7 @@ fn progress_view() {
     assert!(p
         .classes
         .iter()
-        .any(|c| c.class == VehicleClass::Exotic && !c.unlocked));
+        .any(|c| c.class == VehicleClass::Exotic && c.unlocked));
     let legend = e.career_progress(&account(&e, 1_000_000, 0));
     assert!(legend.next.is_none());
     assert_eq!(legend.tier_fraction, 1.0);

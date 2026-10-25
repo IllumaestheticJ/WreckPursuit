@@ -3,11 +3,11 @@
  * a `CareerApi` (wp_wasm's `career_*` exports, wired by the testbed), so it holds no game
  * state of its own: every action returns the new `CareerView` and the screen redraws.
  *
- * Tabs: Cars (condition, value, repair per item at a district shop, insurance, sell, mods,
- * the free four-slider tune),
- * Dealer (roster cars by class band, the economy-floor beater; classes above the player's rep
- * tier are locked), Impound (release or let the auction countdown run), Career (rep tier,
- * progress to the next, what each tier unlocks), Ledger. The head has cash / debt / rep /
+ * Tabs: Cars (condition, value, repair per item at a district shop, tyres, insurance, sell,
+ * mods, the free four-slider tune), Car lots (dealerships, used lots, junkyards: list today's
+ * stock or visit the lot; classes above the player's rep tier are locked; the economy-floor
+ * beater), Impound (release or let the auction countdown run), Career (rep tier, progress to
+ * the next, what each tier unlocks), Ledger. The head has cash / debt / rep /
  * bounty / carried heat and
  * starts the next run (free drive or night run) with the active car.
  */
@@ -21,8 +21,9 @@ import type {
   CareerView,
   CareerFeature,
   CarView,
-  Condition,
   DamageMode,
+  LotKind,
+  LotStockView,
   ModOption,
   ModTreeView,
   RepairItem,
@@ -34,7 +35,7 @@ import { pickTextFile } from "./store";
 import { isStockTune, normalizeTune, STOCK_TUNE, TUNE_SLIDERS, TUNE_STEPS, tuneSummary } from "./tune";
 import "./garage.css";
 
-type Tab = "cars" | "dealer" | "pound" | "career" | "ledger";
+type Tab = "cars" | "lots" | "pound" | "career" | "ledger";
 
 const itemKey = (i: RepairItem) => JSON.stringify(i);
 const fmt = {
@@ -97,7 +98,9 @@ function CarCard({ car, selected, onSelect }: { car: CarView; selected: boolean;
     <button type="button" class="wp-cg-card" aria-selected={selected} onClick={onSelect} data-testid={`car-${car.uid}`}>
       <div class="wp-spread">
         <b class="wp-upper">{car.name}</b>
-        <span class="wp-dim wp-mono">{words(car.class)}</span>
+        <span class="wp-dim wp-mono">
+          {car.rare && <Badge tone="info">rare</Badge>} {words(car.class)}
+        </span>
       </div>
       <Meter value={car.health} color={severityColor(1 - car.health)} label="Condition" />
       <div class="wp-row" style={{ gap: "0.3em", flexWrap: "wrap" }}>
@@ -229,6 +232,46 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; ru
   );
 }
 
+const WHEELS = ["Front left", "Front right", "Rear left", "Rear right"];
+
+/** Tyres: tread per wheel and replacement. Repair All never fits tyres. */
+function TiresPanel(props: { car: CarView; view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
+  const { car, view, api } = props;
+  const t = car.tires;
+  const [picked, setPicked] = useState<boolean[]>(t.worn_out.slice());
+  if (car.location !== "Garage") return null;
+  const n = picked.filter(Boolean).length;
+  const cost = n * t.price_each;
+  return (
+    <Panel title="Tyres" tag={t.worn_out.some(Boolean) ? "need replacing" : "ok"}>
+      <table class="wp-table" data-testid="tires">
+        <tbody>
+          {WHEELS.map((w, i) => (
+            <tr key={w}>
+              <td>
+                <input type="checkbox" checked={picked[i]} onChange={() => setPicked(picked.map((p, j) => (j === i ? !p : p)))} />
+              </td>
+              <td>{w}</td>
+              <td style={{ width: "40%" }}>
+                <Meter value={t.tread[i]} color={severityColor(1 - t.tread[i])} label="Tread" />
+              </td>
+              <td class="num">{t.flat[i] ? <span class="wp-danger">flat</span> : t.worn_out[i] ? <span class="wp-warn">bald</span> : `grip ${pct(t.grip[i])}`}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div class="wp-row" style={{ gap: "0.5em", marginTop: "0.5em" }}>
+        <Button variant="primary" disabled={n === 0 || cost > view.cash} onClick={() => props.run(() => api.replaceTires(car.uid, picked))}>
+          Replace {n} {n === 1 ? "tyre" : "tyres"} <Money value={cost} />
+        </Button>
+        <span class="wp-dim" style={{ fontSize: "0.8em" }}>
+          <Money value={t.price_each} /> each, fitted. Repairs never replace tyres.
+        </span>
+      </div>
+    </Panel>
+  );
+}
+
 /** Inline "are you sure" row for a destructive action (sell, scrap). */
 function Confirm(props: { text: ComponentChildren; yes: string; onYes: () => void; onNo: () => void }) {
   return (
@@ -313,7 +356,7 @@ function ModTree(props: { car: CarView; api: CareerApi; run: (f: () => CareerVie
           </thead>
           <tbody>
             {shown.map((m) => (
-              <tr key={m.id} onMouseEnter={() => setHover(m.id)} data-mod={m.id}>
+              <tr key={m.id} onMouseEnter={() => setHover(m.id)} onClick={() => setHover(m.id)} onFocusIn={() => setHover(m.id)} data-mod={m.id} class={m.id === hover ? "wp-cg-mod-focus" : undefined}>
                 <td>
                   <b>{m.name}</b> <span class="wp-dim wp-mono">T{m.tier}</span>
                   <div class="wp-dim" style={{ fontSize: "0.8em" }}>
@@ -345,12 +388,13 @@ function ModTree(props: { car: CarView; api: CareerApi; run: (f: () => CareerVie
           </tbody>
         </table>
       </Panel>
-      <Panel title={focus ? (focus.installed ? `Without ${focus.name}` : `With ${focus.name}`) : "Build"} tag={focus ? `T${focus.tier}` : undefined}>
+      {/* Sticky: stays in view while the mod list scrolls (garage.css .wp-cg-mods-effect). */}
+      <Panel class="wp-cg-mods-effect" title={focus ? (focus.installed ? `Without ${focus.name}` : `With ${focus.name}`) : "Build"} tag={focus ? `T${focus.tier}` : undefined}>
         <StatGrid now={tree.stats} after={focus?.stats_after} />
         {focus?.replaces && <p class="wp-dim">Replaces {focus.replaces} (refunded at 40 %).</p>}
         {focus && focus.requires.length > 0 && <p class="wp-dim">Needs: {focus.requires.join(", ")}</p>}
         <p class="wp-dim" style={{ fontSize: "0.8em" }}>
-          Hover a mod to see what it changes. Durability adds mass; removing a mod refunds 40 %.
+          Hover or tap a mod to see what it changes. Durability adds mass; removing a mod refunds 40 %.
         </p>
       </Panel>
     </div>
@@ -435,7 +479,7 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
   if (!car) {
     return (
       <Panel title="No cars">
-        <p>Buy one at the dealer{view.floor_car ? ", or take the street beater" : ""}.</p>
+        <p>Buy one at a car lot{view.floor_car ? ", or take the street beater" : ""}.</p>
         {view.floor_car && (
           <Button variant="primary" onClick={() => props.run(() => api.floorCar())}>
             Street beater (<Money value={view.floor_car[1]} />)
@@ -454,7 +498,7 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
         ))}
       </div>
       <div class="wp-cg-detail">
-        <Panel title={car.name} tag={words(car.class)}>
+        <Panel title={car.name} tag={car.rare ? `RARE · ${words(car.class)}` : words(car.class)}>
           <div class="wp-cg-hero">
             <Stat label="Condition" value={pct(car.health)} tone={car.total_loss ? "danger" : car.health > 0.8 ? "ok" : "warn"} />
             <Stat label="Value" value={<Money value={car.value} />} />
@@ -505,73 +549,105 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
           )}
         </Panel>
         <RepairPanel key={`r${car.uid}`} car={car} view={view} api={api} run={props.run} />
+        <TiresPanel key={`t${car.uid}`} car={car} view={view} api={api} run={props.run} />
         <InsurancePanel car={car} view={view} api={api} run={props.run} />
       </div>
     </div>
   );
 }
 
-function DealerTab(props: { view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
+const LOT_KIND: Record<LotKind, string> = {
+  Dealership: "Dealership",
+  UsedLot: "Used cars",
+  Junkyard: "Junkyard",
+};
+
+const LOT_BLURB: Record<LotKind, string> = {
+  Dealership: "Brand new cars. The floor changes every day: not every model is in.",
+  UsedLot: "Running cars, some tired. Dents and worn parts repair in the garage; tyres are bought separately.",
+  Junkyard: "Barely running or dead, sometimes missing panels. What's wrong under the hood is a surprise. Rare finds turn up.",
+};
+
+/** The car lots (dealerships by tier, used lots, junkyards): pick one and drive there. */
+function LotsTab(props: { view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
   const { view, api } = props;
-  const buy = (id: string, c: Condition) => props.run(() => api.buy(id, c));
+  const [peek, setPeek] = useState<string | null>(null);
+  let stock: LotStockView | null = null;
+  if (peek) {
+    try {
+      stock = api.lot(peek);
+    } catch {
+      stock = null;
+    }
+  }
+  const kinds: LotKind[] = ["Dealership", "UsedLot", "Junkyard"];
   return (
-    <Panel title="Dealer" tag="street roster">
+    <div data-testid="lots">
       {view.floor_car && (
-        <p>
-          No usable car? The yard always has a beater:{" "}
-          <Button size="sm" variant="primary" onClick={() => props.run(() => api.floorCar())}>
-            Street beater (<Money value={view.floor_car[1]} />)
-          </Button>
-        </p>
+        <Panel title="Street beater" tag="economy floor">
+          <p>
+            No usable car? The yard always has a beater:{" "}
+            <Button size="sm" variant="primary" onClick={() => props.run(() => api.floorCar())}>
+              Street beater (<Money value={view.floor_car[1]} />)
+            </Button>
+          </p>
+        </Panel>
       )}
-      <table class="wp-table" data-testid="dealer">
-        <thead>
-          <tr>
-            <th>Car</th>
-            <th>Class</th>
-            <th class="num">PI</th>
-            <th class="num">0–100</th>
-            <th class="num">New</th>
-            <th class="num">Used</th>
-            <th class="num">Worn</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {view.dealer.map((d) => (
-            <tr key={d.def_id} data-car={d.def_id}>
-              <td>
-                <b>{d.name}</b>
-              </td>
-              <td class="wp-dim">{words(d.class)}</td>
-              <td class="num">
-                {d.stats.class_index} <span class="wp-dim">{d.stats.bracket}</span>
-              </td>
-              <td class="num">{d.stats.est_0_100_s.toFixed(1)} s</td>
-              {(["New", "Used", "Worn"] as Condition[]).map((c) => {
-                const price = c === "New" ? d.price_new : c === "Used" ? d.price_used : d.price_worn;
-                return (
-                  <td class="num" key={c}>
-                    <Button
-                      size="sm"
-                      disabled={d.locked || price > view.cash}
-                      onClick={() => buy(d.def_id, c)}
-                      title={d.locked ? `needs ${d.unlock_tier} rep tier` : `buy ${c.toLowerCase()}`}
-                    >
-                      <Money value={price} />
-                    </Button>
-                  </td>
-                );
-              })}
-              <td>{d.locked && <Badge tone="dim">needs {d.unlock_tier}</Badge>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p class="wp-dim" style={{ fontSize: "0.8em" }}>
-        Used cars start at 90 % condition, worn ones at 75 % (cosmetic wear: nothing to repair).
-      </p>
-    </Panel>
+      {kinds.map((k) => (
+        <Panel key={k} title={LOT_KIND[k]} tag={`restocks daily · night ${view.day}`}>
+          <p class="wp-dim" style={{ fontSize: "0.85em", marginTop: 0 }}>
+            {LOT_BLURB[k]}
+          </p>
+          <table class="wp-table">
+            <tbody>
+              {view.lots
+                .filter((l) => l.kind === k)
+                .map((l) => (
+                  <tr key={l.id} data-lot={l.id}>
+                    <td>
+                      <b>{l.name}</b> <span class="wp-dim wp-mono">{"★".repeat(l.tier)}</span>
+                      <div class="wp-dim" style={{ fontSize: "0.8em" }}>
+                        {words(l.district)} · {l.classes.map(words).join(", ")}
+                      </div>
+                    </td>
+                    <td class="num">{l.in_stock} cars</td>
+                    <td class="num">{l.from_price !== null ? <>from <Money value={l.from_price} /></> : <span class="wp-dim">empty today</span>}</td>
+                    <td>
+                      <div class="wp-row" style={{ gap: "0.3em" }}>
+                        <Button size="sm" pressed={peek === l.id} onClick={() => setPeek(peek === l.id ? null : l.id)}>
+                          List
+                        </Button>
+                        <Button size="sm" variant="primary" disabled={view.run_active} onClick={() => api.visitLot(l.id)} title="drive to the lot and walk the rows">
+                          Visit
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+          {stock && stock.lot.kind === k && (
+            <table class="wp-table" data-testid="lot-stock">
+              <tbody>
+                {stock.cars.map((c) => (
+                  <tr key={c.slot} style={{ opacity: c.sold ? 0.5 : 1 }}>
+                    <td>
+                      <b>{c.name}</b> {c.rare && <Badge tone="info">rare</Badge>} {c.sold && <Badge>sold</Badge>}{" "}
+                      {c.locked && <Badge tone="dim">needs {c.unlock_tier}</Badge>}
+                    </td>
+                    <td class="wp-dim">{words(c.class)}</td>
+                    <td class="num">{c.condition !== null ? pct(c.condition) : "?"}</td>
+                    <td class="num">
+                      <Money value={c.price} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Panel>
+      ))}
+    </div>
   );
 }
 
@@ -622,6 +698,13 @@ function reasonLabel(l: CareerView["ledger"][number]): string {
     if (scope === "bet") return kind === "stake" ? "Bet placed" : "Bet won";
   }
   return REASON[l.reason] ?? words(l.reason);
+}
+
+/** Garage "Touge battles" tooltip: what the player's tier opens (the picker shows the rest). */
+function tougeHint(view: CareerView): string {
+  const f = view.progress.features.find((x) => x.feature === "touge_races");
+  if (!f || f.unlocked) return "Touge picker: side bets, pink slips and bosses as your rep tier allows";
+  return `Touge battles open at ${words(f.needs)} (${f.needed_rep.toLocaleString("en-US")} rep); the picker shows what each needs`;
 }
 
 /** Career feature → label. */
@@ -743,7 +826,7 @@ function NewCareer(props: { api: CareerApi; run: (f: () => CareerView) => void; 
 function GarageScreen(props: { api: CareerApi; initial: CareerView; message: string | null }) {
   const { api } = props;
   const [view, setView] = useState<CareerView>(props.initial);
-  const [tab, setTab] = useState<Tab>(props.initial.cars.length ? "cars" : "dealer");
+  const [tab, setTab] = useState<Tab>(props.initial.cars.length ? "cars" : "lots");
   const [error, setError] = useState<string | null>(props.message);
   const [fresh, setFresh] = useState(false);
   const run = (f: () => CareerView) => {
@@ -806,6 +889,16 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
         <Button disabled={!view.can_start} onClick={() => api.startRun("free")}>
           Free drive
         </Button>
+        {api.races && (
+          <Button disabled={!view.can_start} onClick={() => api.races?.()} testid="career-races" title="Race picker: buy-in, purse, bets and rep go through this career">
+            Street races
+          </Button>
+        )}
+        {api.touge && (
+          <Button disabled={!view.can_start} onClick={() => api.touge?.()} testid="career-touge" title={tougeHint(view)}>
+            Touge battles
+          </Button>
+        )}
         {view.start_blocker && <span class="wp-warn">{view.start_blocker}</span>}
         <span style={{ marginLeft: "auto" }} />
         <Button size="sm" onClick={() => api.exportSave()}>
@@ -827,7 +920,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
       <Tabs
         tabs={[
           { id: "cars", label: `Cars (${view.cars.length})` },
-          { id: "dealer", label: "Dealer" },
+          { id: "lots", label: "Car lots" },
           { id: "pound", label: pound ? `Impound (${pound})` : "Impound" },
           { id: "career", label: "Career" },
           { id: "ledger", label: "Ledger" },
@@ -837,7 +930,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
       />
       <div style={{ marginTop: "0.8em" }}>
         {tab === "cars" && <CarsTab view={view} api={api} run={run} />}
-        {tab === "dealer" && <DealerTab view={view} api={api} run={run} />}
+        {tab === "lots" && <LotsTab view={view} api={api} run={run} />}
         {tab === "pound" && <PoundTab view={view} api={api} run={run} />}
         {tab === "career" && <CareerTab view={view} />}
         {tab === "ledger" && <LedgerTab view={view} />}

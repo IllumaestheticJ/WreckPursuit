@@ -1,0 +1,15 @@
+{
+  "id": "merlo_20t",
+  "engine": {
+    "cylinders": 4,
+    "layout": "Inline",
+    "firing": "Even",
+    "induction_exhaust_balance": 0.45,
+    "turbo": true,
+    "supercharger": false,
+    "gain": 1.15
+  },
+  "engine_pack": "engine_rec_turbo",
+  "world_pack": "world_rec",
+  "horn_cue": "horn/standard"
+}

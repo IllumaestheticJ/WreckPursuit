@@ -289,6 +289,47 @@ impl Economy {
         Ok(())
     }
 
+    /// Price of a full respray for `car`: `respray_base` (prices.toml) × its class `parts_scale`.
+    pub fn respray_fee(&self, car: &OwnedCar) -> Money {
+        let k = self.prices.class[&car.class].parts_scale;
+        (self.prices.respray_base * k).round() as Money
+    }
+
+    /// Respray the car `paint` (0xRRGGBB): pays [`Self::respray_fee`] and saves the colour on the
+    /// car. Posted as `ModInstalled { mod_id: "respray" }` (the contract has no paint reason).
+    /// The same colour again is refused, so a misclick never charges.
+    pub fn respray(&self, acct: &mut PlayerAccount, car: CarUid, paint: u32) -> EconResult<Money> {
+        let c = acct.try_car(car)?;
+        if c.location != CarLocation::Garage {
+            return Err(EconomyError::CarUnavailable {
+                car,
+                reason: "in the pound".into(),
+            });
+        }
+        if paint > 0x00ff_ffff {
+            return Err(EconomyError::InvalidInput(format!(
+                "paint {paint:#x} is not 0xRRGGBB"
+            )));
+        }
+        if c.paint == Some(paint) {
+            return Err(EconomyError::InvalidInput(
+                "the car is already that colour".into(),
+            ));
+        }
+        let fee = self.respray_fee(c);
+        transact(acct, |tx| {
+            tx.spend(
+                fee,
+                EventReason::ModInstalled {
+                    mod_id: "respray".into(),
+                },
+                Some(car),
+            )?;
+            tx.car_mut(car)?.paint = Some(paint);
+            Ok(fee)
+        })
+    }
+
     /// Install a mod (pays the price; a replaced same-line mod is refunded at resale value).
     pub fn install_mod(
         &self,
@@ -430,16 +471,14 @@ impl Economy {
         Ok(p)
     }
 
-    /// Buy (or replace) insurance on a car. The first day's premium is charged now.
+    /// Buy (or replace) insurance on a car. The first day's premium is charged now. Refused for a
+    /// damaged car (repair it first): a policy never covers damage the car already had.
     pub fn buy_insurance(
         &self,
         acct: &mut PlayerAccount,
         car: CarUid,
         tier: &str,
     ) -> EconResult<()> {
-        let t = self.prices.insurance.get(tier).ok_or_else(|| {
-            EconomyError::InvalidInput(format!("unknown insurance tier {tier:?}"))
-        })?;
         let c = acct.try_car(car)?;
         if c.location != CarLocation::Garage {
             return Err(EconomyError::CarUnavailable {
@@ -447,14 +486,15 @@ impl Economy {
                 reason: "in the pound".into(),
             });
         }
-        let premium = money(t.premium_per_day_frac * self.car_value(c) as f32).max(1);
-        let policy = InsurancePolicy {
-            tier: tier.to_string(),
-            premium_per_day: premium,
-            coverage: t.coverage,
-            deductible: t.deductible,
-            since_day: acct.day,
-        };
+        // No cover for damage the car already has: insurers want it repaired first, so a policy
+        // bought after a crash cannot make that crash's repair cheaper.
+        if c.damage.total_loss || !c.damage.outstanding.lines.is_empty() {
+            return Err(EconomyError::InvalidInput(
+                "insurers will not cover a damaged car: repair it first".into(),
+            ));
+        }
+        let policy = self.policy(c, tier, acct.day)?;
+        let premium = policy.premium_per_day;
         transact(acct, |tx| {
             tx.spend(
                 premium,
@@ -465,6 +505,27 @@ impl Economy {
             )?;
             tx.car_mut(car)?.insurance = Some(policy);
             Ok(())
+        })
+    }
+
+    /// The policy of `tier` for `car` starting on `day` (premium from the car's value), without
+    /// buying it: what [`Self::buy_insurance`] would sell. Quote previews use it to price a
+    /// repair as if the car were insured.
+    pub fn policy(
+        &self,
+        car: &OwnedCar,
+        tier: &str,
+        day: u32,
+    ) -> Result<InsurancePolicy, EconomyError> {
+        let t = self.prices.insurance.get(tier).ok_or_else(|| {
+            EconomyError::InvalidInput(format!("unknown insurance tier {tier:?}"))
+        })?;
+        Ok(InsurancePolicy {
+            tier: tier.to_string(),
+            premium_per_day: money(t.premium_per_day_frac * self.car_value(car) as f32).max(1),
+            coverage: t.coverage,
+            deductible: t.deductible,
+            since_day: day,
         })
     }
 
@@ -508,6 +569,9 @@ fn new_car(spec: &CarSpec, condition: Condition, paid: Money) -> OwnedCar {
         location: CarLocation::Garage,
         insurance: None,
         purchase_price: Some(paid),
+        tires: Default::default(),
+        variant_name: None,
+        paint: None,
         tune: Default::default(),
         parts: None,
     }

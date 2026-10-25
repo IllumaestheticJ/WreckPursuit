@@ -44,6 +44,8 @@ export const PALETTE = {
   retainingWall: 0x3c3f4b,
   /** Level lot behind the sidewalk (front strip of every frontage). */
   lot: 0x343a37,
+  /** Car park pads (rest stop lots): parking-lane asphalt. */
+  carPark: 0x30333d,
   // ---- residential lots (playtest row 95) ----
   /** Grass verge between kerb and walkway, residential streets. */
   verge: 0x2f3c31,
@@ -182,6 +184,7 @@ export const CITY_MATERIAL_COLOURS: Record<string, Hex> = {
   sidewalk_corner: PALETTE.sidewalk,
   lot: PALETTE.lot,
   lot_skirt: PALETTE.lot,
+  car_park: PALETTE.carPark,
   kerb: PALETTE.kerb,
   verge: PALETTE.verge,
   roof: PALETTE.roof,

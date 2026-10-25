@@ -2,7 +2,7 @@
 //! stored lattice, buy / sell / mod flows, the impound lot, heat carry-over, and the full
 //! loop run → captured → garage → repair → new run with the repaired car.
 
-use wp_contracts::{DamageMode, DamageSim, EntityId, VehicleInput};
+use wp_contracts::{DamageMode, DamageSim, EntityId, VehicleInput, VehicleSim};
 use wp_damage::barrier::{run_barrier, ImpactKind};
 use wp_damage::DamageModel;
 use wp_economy::{CarLocation, CarUid, Condition, Economy, RepairOption, RunEnd, ShopKind};
@@ -691,15 +691,20 @@ fn rep_tiers_gate_the_dealer_and_pay_their_bonus_once() {
     c.profile_mut().account.cash = 500_000;
     let view = c.view();
     assert_eq!(view.progress.tier, wp_economy::RepTier::Unknown);
-    let exotic = view
+    let sport = view
         .dealer
         .iter()
-        .find(|d| d.class == wp_contracts::VehicleClass::Exotic)
+        .find(|d| d.class == wp_contracts::VehicleClass::Sport)
         .unwrap()
         .clone();
-    assert!(exotic.locked);
+    assert!(sport.locked);
     assert!(view.dealer.iter().any(|d| !d.locked));
-    let err = c.buy_car(&exotic.def_id, Condition::New).unwrap_err();
+    // Exotics have no rep gate: open at the dealer from the first night.
+    assert!(view
+        .dealer
+        .iter()
+        .any(|d| d.class == wp_contracts::VehicleClass::Exotic && !d.locked));
+    let err = c.buy_car(&sport.def_id, Condition::New).unwrap_err();
     assert!(err.contains("locked"), "{err}");
 
     // Rep earned on the night pays each tier's bonus the first time only.
@@ -721,8 +726,8 @@ fn rep_tiers_gate_the_dealer_and_pay_their_bonus_once() {
     assert!(!view
         .dealer
         .iter()
-        .any(|d| d.def_id == exotic.def_id && d.locked));
-    c.buy_car(&exotic.def_id, Condition::Worn).unwrap();
+        .any(|d| d.def_id == sport.def_id && d.locked));
+    c.buy_car(&sport.def_id, Condition::Worn).unwrap();
     let cash = c.profile().account.cash;
     c.next_night().unwrap();
     assert!(c.profile().account.cash <= cash, "no second bonus");
@@ -836,6 +841,8 @@ fn a_worn_piston_set_costs_the_car_torque_and_the_engine_stand_round_trips() {
 #[test]
 fn a_car_with_a_torn_off_panel_can_be_quoted_and_repaired() {
     let (mut c, uid) = career_with("kestrel_ts", 40_000, DamageMode::Arcade);
+    // Insured while undamaged: a damaged car cannot be insured.
+    c.insure(uid, "basic").unwrap();
     drive_and_crash(&mut c, 35.0);
     let mut snap = c
         .lattice(uid)
@@ -847,7 +854,6 @@ fn a_car_with_a_torn_off_panel_can_be_quoted_and_repaired() {
     c.profile_mut()
         .lattices
         .insert(uid.0, serde_json::to_string(&snap).unwrap());
-    c.insure(uid, "basic").unwrap();
     c.quote(uid, &ShopRequest::parse("").unwrap()).unwrap();
     c.repair(uid, &ShopRequest::parse("").unwrap()).unwrap();
     assert!(c.profile().account.car(uid).unwrap().damage.is_pristine());
@@ -913,4 +919,202 @@ fn a_car_with_a_torn_off_panel_and_mounted_parts_can_be_quoted_repaired_and_work
     assert!(car.mods.contains(&"aero_wing_1".to_string()));
     assert!(c.workshop(uid).unwrap().view.missing.is_empty());
     assert!(c.start_blocker().is_none());
+}
+
+/// Playtest row 167: a picker race started from the career garage is a career run, and its
+/// buy-in comes off the career's account (not the session's throwaway one).
+#[test]
+fn a_picker_race_from_the_garage_charges_the_career_account() {
+    let (mut c, _) = career_with("kestrel_ts", 50_000, DamageMode::Arcade);
+    let def = wp_race::catalog::race("hollins_sprint").unwrap();
+    let sc =
+        crate::race::race_scenario_in(&def, "ignored", DamageMode::Arcade, false, def.city.id())
+            .unwrap();
+    let before = c.profile().account.cash;
+    let s = c.start_run(sc).unwrap();
+    assert!(s.is_career());
+    assert_eq!(
+        s.scenario().entities[0].car,
+        "kestrel_ts",
+        "the career car races"
+    );
+    let run = s.run().expect("economy run");
+    let paid = before - run.account().cash;
+    assert!(
+        paid > 0,
+        "the buy-in is charged on the career account ({paid})"
+    );
+    assert!(run
+        .ledger()
+        .iter()
+        .any(|e| e.cash_delta < 0 && e.cash_after == run.account().cash));
+}
+
+/// A career picker race with street rep, the player's car driven by the autopilot.
+fn career_race_with_rep() -> (Career, Session) {
+    let (mut c, _) = career_with("kestrel_ts", 50_000, DamageMode::Arcade);
+    c.profile_mut().account.rep = 2_000;
+    let def = wp_race::catalog::race("hollins_sprint").unwrap();
+    let sc =
+        crate::race::race_scenario_in(&def, "ignored", DamageMode::Arcade, true, def.city.id())
+            .unwrap();
+    let s = c.start_run(sc).unwrap();
+    (c, s)
+}
+
+/// Ledger lines of the career since `seq`.
+fn career_cash_deltas(c: &Career, seq: u64) -> Vec<i64> {
+    c.profile()
+        .ledger
+        .iter()
+        .filter(|e| e.seq >= seq)
+        .map(|e| e.cash_delta)
+        .collect()
+}
+
+/// A bet on a career picker race keeps the odds the player signed up at; it and the purse are
+/// paid at the player's own finish (the results panel shows them paid while the rest of the
+/// field is still racing), and the money lands on the career account when the player goes
+/// back to the garage right away.
+#[test]
+fn a_career_race_bet_settles_at_the_finish_and_posts_to_the_career() {
+    let (mut c, mut s) = career_race_with_rep();
+    let seq = s.run().unwrap().account().next_event_seq;
+    // The odds the picker card showed are the ticket's odds, whatever the book prices now.
+    let t = s.race_place_bet("win:player", 500, Some(9.95)).unwrap();
+    assert!((t.odds - 9.95).abs() < 1e-3, "{}", t.odds);
+    assert_eq!(t.paid, 4_975);
+    let me = player(&s);
+    let rivals: Vec<EntityId> = s
+        .race()
+        .unwrap()
+        .live()
+        .racers()
+        .iter()
+        .copied()
+        .filter(|&e| e != me)
+        .collect();
+    let mut report = None;
+    for i in 0..240 * 300 {
+        s.run_ticks(1);
+        // Keep the field well behind the player's car, so the player wins with it still racing.
+        let running = s
+            .race()
+            .unwrap()
+            .standings()
+            .iter()
+            .any(|st| st.racer == me && st.status == wp_race::RacerStatus::Running);
+        if i % 240 == 0 && running {
+            for &r in &rivals {
+                let _ = s.debug_park_in_front_of(r, me, -60.0);
+            }
+        }
+        if let Some(r) = s.race_report() {
+            report = Some(r);
+            break;
+        }
+    }
+    let report = report.expect("the player's result is in");
+    assert!(!report.final_results, "the field is still racing");
+    let paid = report
+        .payout
+        .as_ref()
+        .expect("purse paid at the player's finish");
+    assert!(paid.purse > 0, "a win pays the purse");
+    assert_eq!(report.bets.len(), 1);
+    let b = &report.bets[0];
+    assert_eq!(b.outcome, "won", "settled at the player's finish line");
+    assert_eq!(b.paid, t.paid);
+    // Later ticks do not change the ticket.
+    s.run_ticks(240);
+    let later = &s.race_report().unwrap().bets[0];
+    assert_eq!((later.outcome, later.paid), (b.outcome, b.paid));
+    // Back to the garage before the field is home: the win is on the career.
+    c.finish_run(&mut s).unwrap();
+    let deltas = career_cash_deltas(&c, seq);
+    assert!(
+        deltas.contains(&-500) && deltas.contains(&t.paid),
+        "stake and payout on the career ledger: {deltas:?}"
+    );
+}
+
+/// Going back to the garage during the countdown refunds the stake on the career account.
+#[test]
+fn leaving_a_career_race_before_the_green_light_refunds_the_bet() {
+    let (mut c, mut s) = career_race_with_rep();
+    let seq = s.run().unwrap().account().next_event_seq;
+    s.race_place_bet("win:player", 500, None).unwrap();
+    s.run_ticks(10);
+    c.finish_run(&mut s).unwrap();
+    let deltas = career_cash_deltas(&c, seq);
+    assert!(
+        deltas.contains(&-500) && deltas.contains(&500),
+        "{deltas:?}"
+    );
+}
+
+/// Put the player at `xy` at rest, then let the car settle for a second.
+fn park_at(s: &mut Session, xy: [f32; 2]) {
+    let id = player(s);
+    s.debug_place(id, xy, 0.0, 0.0, None).unwrap();
+    for _ in 0..240 {
+        let _ = s.set_input(
+            id,
+            VehicleInput {
+                brake: 0.5,
+                ..Default::default()
+            },
+        );
+        s.run_ticks(1);
+        if s.place().visit.is_some() {
+            return;
+        }
+    }
+}
+
+#[test]
+fn stopping_in_a_garage_or_safehouse_on_a_career_run_opens_the_place() {
+    let (mut c, _) = career_with("kestrel_ts", 50_000, DamageMode::Arcade);
+    let mut sc = night_run_in("ignored", DamageMode::Arcade, procedural_city());
+    sc.entities[0].speed_mps = 0.0;
+    let mut s = c.start_run(sc).unwrap();
+    assert!(!s.garages().is_empty(), "career runs show the garages");
+    assert!(
+        !s.safehouses().is_empty(),
+        "career runs show the safehouses"
+    );
+    s.run_ticks(10);
+    assert!(s.place().visit.is_none());
+    let st = s.vehicle(player(&s)).unwrap().vehicle.state();
+    let start = [st.pos[0], st.pos[1]];
+
+    let garage = s.garages()[0].clone();
+    park_at(&mut s, [garage.pos[0], garage.pos[1]]);
+    let v = s.place().visit.expect("a garage visit opens");
+    assert_eq!(v.kind, crate::garage_visit::PlaceKind::Garage);
+    assert_eq!(v.name, garage.name);
+    assert!(
+        s.garage_visit().is_none(),
+        "no demo repair panel in a career run"
+    );
+
+    // Leaving gives the car back; it must drive out before the next visit.
+    s.place_leave();
+    s.run_ticks(240);
+    assert!(
+        s.place().visit.is_none(),
+        "no new visit before leaving the ring"
+    );
+    // Out of the ring (the start spot) re-arms it.
+    let id = player(&s);
+    s.debug_place(id, start, 0.0, 0.0, None).unwrap();
+    s.run_ticks(10);
+
+    let home = s.safehouses()[0].clone();
+    park_at(&mut s, [home.pos[0], home.pos[1]]);
+    let v = s.place().visit.expect("a safehouse visit opens");
+    assert_eq!(v.kind, crate::garage_visit::PlaceKind::Safehouse);
+    assert_eq!(v.name, home.name);
+    let close = c.finish_run(&mut s).unwrap();
+    assert_eq!(close.end, RunEnd::Free);
 }

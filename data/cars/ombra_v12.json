@@ -1,0 +1,169 @@
+{
+  "id": "ombra_v12",
+  "display_name": "Ombra V12",
+  "class": "Exotic",
+  "analog_of": "2010s Italian mid-engine flagship supercar, 6.5 L naturally aspirated V12, permanent AWD, 7-speed single-clutch automated manual, scissor doors",
+  "body_size_m": [2.03, 4.78, 1.14],
+  "mass_kg": 1691.5,
+  "front_weight_frac": 0.43,
+  "wheelbase_m": 2.7,
+  "track_front_m": 1.72,
+  "track_rear_m": 1.68,
+  "cg_height_m": 0.43,
+  "inertia_kgm2": [600.0, 2590.0, 2890.0],
+  "drag_cd_a_m2": 0.702,
+  "lift_front": -0.06,
+  "lift_rear": -0.14,
+  "engine": {
+    "torque_curve_nm": [
+      [1000, 330],
+      [2000, 450],
+      [3000, 540],
+      [4000, 610],
+      [4500, 640],
+      [5000, 670],
+      [5500, 690],
+      [6000, 688],
+      [6500, 680],
+      [7000, 665],
+      [7500, 645],
+      [8000, 615],
+      [8250, 598],
+      [8500, 570],
+      [8700, 535]
+    ],
+    "idle_rpm": 1000.0,
+    "redline_rpm": 8500.0,
+    "rev_limit_rpm": 8700.0,
+    "inertia_kgm2": 0.18,
+    "engine_brake_nm": 69.0
+  },
+  "drivetrain": {
+    "layout": {
+      "Awd": {
+        "front_split": 0.25
+      }
+    },
+    "gear_ratios": [3.91, 2.44, 1.81, 1.46, 1.19, 0.97, 0.83],
+    "final_drive": 3.42,
+    "reverse_ratio": 2.9,
+    "diff_front": "Open",
+    "diff_rear": {
+      "Lsd": {
+        "preload_nm": 60.0,
+        "ramp_power": 0.45,
+        "ramp_coast": 0.3
+      }
+    },
+    "clutch_max_nm": 970.0,
+    "shift_time_s": 0.22
+  },
+  "wheels": [
+    {
+      "position_m": [-0.86, 1.35, 0.321],
+      "radius_m": 0.321,
+      "width_m": 0.255,
+      "mass_kg": 24.0,
+      "tire_id": "sport",
+      "steerable": true,
+      "max_steer_rad": 0.527,
+      "ackermann_frac": 0.5,
+      "camber_rad": -0.0227,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1222
+    },
+    {
+      "position_m": [0.86, 1.35, 0.321],
+      "radius_m": 0.321,
+      "width_m": 0.255,
+      "mass_kg": 24.0,
+      "tire_id": "sport",
+      "steerable": true,
+      "max_steer_rad": 0.527,
+      "ackermann_frac": 0.5,
+      "camber_rad": -0.0227,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1222
+    },
+    {
+      "position_m": [-0.84, -1.35, 0.345],
+      "radius_m": 0.345,
+      "width_m": 0.355,
+      "mass_kg": 28.0,
+      "tire_id": "sport",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0297,
+      "toe_rad": 0.0035,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.84, -1.35, 0.345],
+      "radius_m": 0.345,
+      "width_m": 0.355,
+      "mass_kg": 28.0,
+      "tire_id": "sport",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0297,
+      "toe_rad": 0.0035,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 51000.0,
+      "damper_bump_ns_per_m": 3190.0,
+      "damper_rebound_ns_per_m": 6380.0,
+      "travel_m": 0.11,
+      "preload_m": 0.02,
+      "arb_n_per_m": 11000.0,
+      "bump_stop_n_per_m": 200000.0
+    },
+    {
+      "spring_n_per_m": 51000.0,
+      "damper_bump_ns_per_m": 3190.0,
+      "damper_rebound_ns_per_m": 6380.0,
+      "travel_m": 0.11,
+      "preload_m": 0.02,
+      "arb_n_per_m": 11000.0,
+      "bump_stop_n_per_m": 200000.0
+    },
+    {
+      "spring_n_per_m": 82900.0,
+      "damper_bump_ns_per_m": 4720.0,
+      "damper_rebound_ns_per_m": 9440.0,
+      "travel_m": 0.12,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 200000.0
+    },
+    {
+      "spring_n_per_m": 82900.0,
+      "damper_bump_ns_per_m": 4720.0,
+      "damper_rebound_ns_per_m": 9440.0,
+      "travel_m": 0.12,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 200000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 2820.0,
+    "max_torque_rear_nm": 1570.0,
+    "bias_front": 0.5,
+    "handbrake_rear_nm": 2450.0
+  },
+  "steering": {
+    "ratio": 14.5,
+    "rack_speed_rad_per_s": 1.6,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "ombra_v12",
+  "base_price": 124000,
+  "durability_class": 3,
+  "fuel_capacity_l": 90.0
+}

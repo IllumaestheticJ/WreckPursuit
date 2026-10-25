@@ -15,6 +15,7 @@ import type * as THREE from "three";
 import { buildCourse } from "./test_pad";
 import { setRawKeyboard } from "./input";
 import { assistLevel, type AssistLevel, type sim as Sim } from "./wasm/sim";
+import { EyeTest } from "./eye_test";
 
 /** Scenario name of the lab (sim.scenario().name). */
 export const DRIFT_LAB_W = "drift_lab_w";
@@ -46,6 +47,7 @@ export function driftLabWScenario(freeDriveJson: string): string {
 const FIELDS: Record<string, { label: string; min: number; max: number; step: number; scale?: number; unit?: string; hint: string }> = {
   t_full_s: { label: "full lock time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "centre → full lock with a key held (reference ≈ 0.28 s)" },
   t_return_s: { label: "return time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "full lock → centre after release (reference ≈ 0.33 s)" },
+  t_reverse_s: { label: "direction change time", min: 0.02, max: 0.8, step: 0.01, unit: "s", hint: "full lock → centre with the other key held (default 0.08 s, so a left → right change turns the car at once; 0.33 s = the release rate, the car kept turning the old way ~0.5 s)" },
   speed_sensitivity: { label: "speed sensitivity", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "less lock at speed (the owner's reference setting: 75 %)" },
   sens_ref_kmh: { label: "sens. ref speed", min: 40, max: 250, step: 1, unit: "km/h", hint: "speed where lock = 1 / (1 + sensitivity) (75 %: 57 % lock)" },
   trans_catch_gain: { label: "transition: new-side catch", min: 0, max: 1.2, step: 0.05, scale: 100, unit: "% of travel", hint: "step 13: right after a lift-flick crosses onto the new side, a countersteer key points the wheels at this share of the front axle's travel at once (lab A/B only: off for players since row 142, as the whole transition rack; was 80 %; past 100 % over-catches and swings back). Settles the new drift in ~0.5 s instead of ~1.5 s" },
@@ -161,6 +163,16 @@ const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`;
 
 /** Whether two grip-balance sets are the same (numbers within 1e-6; JSON key order and f32
  * round-trips do not matter). */
+/// Highlight the selected button of an A/B row (owner: "not having those sections highlighted
+/// makes it hard to figure out what's selected").
+function markActive(b: HTMLButtonElement, active: boolean): void {
+  b.dataset.active = active ? "1" : "0";
+  b.style.background = active ? "#2f6fdf" : "";
+  b.style.color = active ? "#fff" : "";
+  b.style.fontWeight = active ? "600" : "";
+  if (active) b.textContent = `✓ ${b.textContent}`;
+}
+
 function sameGrip(a: Record<string, unknown> | null, b: Record<string, unknown>): boolean {
   if (!a) return false;
   return Object.keys(b).every((k) =>
@@ -196,6 +208,10 @@ export class DriftLabWPanel {
   /** The lab's current car id (set by the session start). */
   car = DRIFT_LAB_W_CAR;
   private prevTitle = "";
+  /** Blind handling A/B (owner, 2026-10-22: "blind test it and ask me which feels better"). */
+  private readonly eye: EyeTest;
+  /** The player's TCS level before the eye test changed it (restored after). */
+  private eyeTcs: string | null = null;
 
   constructor(
     parent: HTMLElement,
@@ -224,6 +240,66 @@ export class DriftLabWPanel {
     this.body.style.cssText = "background:rgba(0,0,0,.72);padding:8px;border-radius:6px;margin-top:4px;max-height:60vh;overflow:auto";
     this.root.append(btn, this.readout, this.body);
     parent.appendChild(this.root);
+    const store = (key: string, text: string) => {
+      try {
+        if (text) localStorage.setItem(key, text);
+        else localStorage.removeItem(key);
+      } catch {
+        /* ignore */
+      }
+    };
+    this.eye = new EyeTest({
+      resetShipped: () => {
+        for (const [set, key] of [
+          [(t: string) => this.sim.plainSteerSet(t), STORE],
+          [(t: string) => this.sim.carTuneSet(t), CAR_STORE],
+          [(t: string) => this.sim.gripBalanceSet(t), GRIP_STORE],
+          [(t: string) => this.sim.rideTuneSet(t), RIDE_STORE],
+        ] as const) {
+          set("");
+          store(key, "");
+        }
+      },
+      setSteer: (patch) => {
+        const t = JSON.stringify({ ...this.sim.plainSteerDefaults(), ...patch });
+        this.sim.plainSteerSet(t);
+        store(STORE, t);
+      },
+      setTyres: (patch) => {
+        const t = JSON.stringify({ ...this.sim.carTuneDefaults().shipped, ...patch });
+        this.sim.carTuneSet(t);
+        store(CAR_STORE, t);
+      },
+      setGrip: (patch) => {
+        const t = JSON.stringify({ ...this.sim.gripBalanceDefaults().shipped, ...patch });
+        this.sim.gripBalanceSet(t);
+        store(GRIP_STORE, t);
+      },
+      setRide: (patch, base = "shipped") => {
+        const d = this.sim.rideTuneDefaults() as Record<string, Record<string, unknown>>;
+        const t = JSON.stringify({ ...(d[base] ?? d.shipped), ...patch });
+        this.sim.rideTuneSet(t);
+        store(RIDE_STORE, t);
+      },
+      setTcs: (level) => {
+        try {
+          const id = this.player();
+          const a = this.sim.assists(id) as unknown as Record<string, unknown>;
+          if (level === null) {
+            if (this.eyeTcs !== null) this.sim.setAssists(id, { ...a, tcs: this.eyeTcs } as never);
+            this.eyeTcs = null;
+            return;
+          }
+          if (this.eyeTcs === null) this.eyeTcs = String(a.tcs);
+          this.sim.setAssists(id, { ...a, tcs: level } as never);
+        } catch {
+          /* no player car */
+        }
+      },
+      restartCar: () => this.restart(this.car),
+      currentCar: () => this.car,
+      setCar: (id) => this.restart(id),
+    });
   }
 
   /** Whether the panel is on screen. */
@@ -395,6 +471,10 @@ export class DriftLabWPanel {
     const p = this.sim.plainSteer() ?? this.sim.plainSteerDefaults();
     const defaults = this.sim.plainSteerDefaults();
     this.body.replaceChildren();
+    // Eye test first; while it runs nothing else is shown, so no setting gives it away.
+    this.body.appendChild(this.eye.render(() => this.build()));
+    this.readout.style.display = this.eye.running() ? "none" : "";
+    if (this.eye.running()) return;
     const row = (label: string, hint: string, input: HTMLElement, val: HTMLSpanElement) => {
       const l = document.createElement("label");
       l.title = hint;
@@ -438,8 +518,10 @@ export class DriftLabWPanel {
       const ab = document.createElement("div");
       ab.style.cssText = "display:flex;gap:6px;align-items:center;margin:2px 0 4px";
       const lbl = document.createElement("span");
-      lbl.textContent = "catch A/B:";
+      lbl.textContent = "catch A/B (only acts with a countersteer limit set; shipped has none):";
+      lbl.title = "Switches the countersteer limit between 'always' (before) and 'only while the slide closes' (new). The shipped steering has no countersteer limit (row 142, key = key), so with shipped settings both buttons drive the same";
       ab.appendChild(lbl);
+      const catchNow = (this.sim.plainSteer() ?? defaults) as unknown as Record<string, unknown>;
       for (const [label, id, on] of [
         ["before", "drift-lab-w-catch-before", false],
         ["new", "drift-lab-w-catch-new", true],
@@ -454,6 +536,7 @@ export class DriftLabWPanel {
           this.save({ ...(this.sim.plainSteer() ?? defaults), counter_closing_only: on } as unknown as Record<string, number>);
           this.build();
         };
+        markActive(b, catchNow.counter_closing_only === on);
         ab.appendChild(b);
       }
       this.body.appendChild(ab);
@@ -464,8 +547,11 @@ export class DriftLabWPanel {
       const ab = document.createElement("div");
       ab.style.cssText = "display:flex;gap:6px;align-items:center;margin:2px 0 4px";
       const lbl = document.createElement("span");
-      lbl.textContent = "handling A/B:";
+      lbl.textContent = "handling A/B (suspension: old lab ride vs shipped ride):";
+      lbl.title = "before = the soft step-3 lab ride (springs × 0.9, anti-roll bars × 0.25); new = the shipped ride (the owner's: springs and bars × 1.5). Steering and tyres are the same in both";
       ab.appendChild(lbl);
+      const rideNow = (this.sim.rideTune() ?? this.sim.rideTuneDefaults().shipped) as Record<string, unknown>;
+      const marginNow = ((this.sim.plainSteer() ?? defaults) as Record<string, number>).counter_margin_deg;
       for (const [label, id, margin, ride] of [
         ["before", "drift-lab-w-before", 0, "lab"],
         ["new", "drift-lab-w-new", (defaults as Record<string, number>).counter_margin_deg, "shipped"],
@@ -488,6 +574,7 @@ export class DriftLabWPanel {
           }
           this.restart(this.car);
         };
+        markActive(b, sameGrip(rideNow, this.sim.rideTuneDefaults()[ride] as Record<string, unknown>) && Math.abs(marginNow - margin) < 1e-6);
         ab.appendChild(b);
       }
       this.body.appendChild(ab);
@@ -871,30 +958,37 @@ export class DriftLabWPanel {
         this.save({ ...(this.sim.plainSteer() ?? this.sim.plainSteerDefaults()), ...DRIFT_BEST_STEER } as unknown as Record<string, number>);
         this.build();
       };
-      // Held-key drift (lab, 2026-10-22): the held_search shortlist's best candidate (the owner's
-      // reference clips: a held countersteer key + throttle lifts holds the drift for seconds).
-      // Tyres + grip balance + ride + the player rack's speed curve together; lab A/B only,
-      // nothing ships from here.
-      const heldKey = document.createElement("button");
-      heldKey.textContent = "lab · held-key drift";
-      heldKey.title =
-        "held_search candidate D (AI-safe: no car-wide lock change): spin model b0 11.8 / b2 2.88 / c 0.80, side floor 0.52, rear relaxation × 1.26, rear peak slip × 1.04, front / rear cornering stiffness × 0.78 / 0.63, yaw inertia × 1.39, player rack speed curve 49 km/h (less player lock at speed). Held countersteer + throttle lifts hold 3.9 s on average (shipped 2.2 s); taps 26 / 36 (shipped 20); AI pace unchanged. Sets tyres, grip balance, ride and steering; restarts the car";
-      heldKey.onclick = () => {
-        const cd = this.sim.carTuneDefaults();
-        const tyres = JSON.stringify({ ...cd.shipped, spin_b0: 11.84, spin_b2: 2.881, spin_c: 0.796, side_floor: 0.517, rear_relax: 1.262, rear_peak_slip: 1.038 });
-        const ride = JSON.stringify({ ...this.sim.rideTuneDefaults().owner, yaw_inertia: 1.385 });
-        saveGrip({ ...gd.shipped, rear_stiffness: 0.634, front_stiffness: 0.784 });
-        this.sim.carTuneSet(tyres);
-        this.sim.rideTuneSet(ride);
-        try {
-          localStorage.setItem(CAR_STORE, tyres);
-          localStorage.setItem(RIDE_STORE, ride);
-        } catch {
-          /* ignore */
-        }
-        this.save({ ...(this.sim.plainSteer() ?? this.sim.plainSteerDefaults()), sens_ref_kmh: 49.2 } as unknown as Record<string, number>);
-        this.restart(this.car);
+      // Player rack A/B (physics lead, 2026-10-22; owner rows 147 / physics-1): only the player's
+      // speed-sensitive lock changes; tyres, ride and balance stay as they are. "reference"
+      // follows the reference clips' held-key wheel angle vs speedometer (near full lock to
+      // ~110 km/h, then easing; docs/integration/physics.md).
+      const rackBtn = (label: string, title: string, curve: { speed_sensitivity: number; sens_ref_kmh: number; sens_exponent: number }) => {
+        const b = document.createElement("button");
+        b.textContent = label;
+        b.title = title;
+        b.onclick = () => {
+          this.save({ ...(this.sim.plainSteer() ?? this.sim.plainSteerDefaults()), ...curve } as unknown as Record<string, number>);
+          this.build();
+        };
+        const now = (this.sim.plainSteer() ?? this.sim.plainSteerDefaults()) as unknown as Record<string, number>;
+        markActive(b, (curve.speed_sensitivity === 0 && now.speed_sensitivity === 0) || (Math.abs(now.speed_sensitivity - curve.speed_sensitivity) < 1e-6 && Math.abs(now.sens_ref_kmh - curve.sens_ref_kmh) < 1e-4 && Math.abs(now.sens_exponent - curve.sens_exponent) < 1e-6));
+        return b;
       };
+      const rackShipped = rackBtn(
+        "rack · shipped",
+        "Today's player rack: a held key gets 83 % of full lock at 60 km/h, 63 % at 100, 47 % at 140. Steering only",
+        { speed_sensitivity: 0.75, sens_ref_kmh: 113.0, sens_exponent: 2.0 },
+      );
+      const rackRef = rackBtn(
+        "rack · reference",
+        "Matches the reference clips: a held key gets 98 % of full lock at 60 km/h, 92 % at 100, 89 % at 110, 75 % at 140, 70 % at 150. Steering only",
+        { speed_sensitivity: 0.75, sens_ref_kmh: 172.0, sens_exponent: 4.0 },
+      );
+      const rackFull = rackBtn(
+        "rack · full lock",
+        "No speed reduction: a held key gets full lock at every speed. Steering only",
+        { speed_sensitivity: 0.0, sens_ref_kmh: 113.0, sens_exponent: 2.0 },
+      );
       // Drift transitions (tyre-slip; docs/integration/tyre-slip.md "Drift transitions").
       const trans = document.createElement("button");
       trans.textContent = "transition: swing rack (test)";
@@ -937,7 +1031,7 @@ export class DriftLabWPanel {
       abRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
       // The transition preset is a flick / transition setting: hidden lab only (row 137).
       trans.textContent = `lab · ${trans.textContent}`;
-      abRow.append(ab, ...rearBtns, step14, gripBtn, forSlow, driftBest, step2, lockOnly, ...(this.lab ? [trans, heldKey] : []), v2);
+      abRow.append(ab, ...rearBtns, step14, gripBtn, forSlow, driftBest, step2, lockOnly, ...(this.lab ? [trans] : []), v2, rackShipped, rackRef, rackFull);
       this.body.appendChild(abRow);
       const sel = document.createElement("select");
       sel.id = "drift-w-lock-mode";

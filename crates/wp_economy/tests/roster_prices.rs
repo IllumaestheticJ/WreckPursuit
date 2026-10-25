@@ -8,7 +8,8 @@ mod common;
 
 use common::*;
 use wp_contracts::{
-    load_car, BodyRegion, Component, DamageMode, DayPhase, LoadedCar, RepairItem, VehicleClass,
+    load_car, BodyRegion, Component, DamageMode, DayPhase, LoadedCar, PriceTable, RepairItem,
+    VehicleClass,
 };
 use wp_economy::repair::reference_estimate;
 use wp_economy::{CarSpec, Condition, Economy, RaceSetup, RaceType};
@@ -52,6 +53,16 @@ struct Row {
     premium: f32,
 }
 
+/// What the shop bills for `damage` at a legit shop in a 1.0 district: the reference estimate
+/// with the economy's heavy-damage markup per line (`Economy::price_lines`).
+fn billed(e: &Economy, table: &PriceTable, scale: f32, damage: &[(RepairItem, f32)]) -> f32 {
+    reference_estimate(table, scale, damage)
+        .lines
+        .iter()
+        .map(|l| l.total * e.heavy_damage_factor(l.severity))
+        .sum()
+}
+
 fn row(e: &Economy, car: &LoadedCar, mode: DamageMode) -> Row {
     use RepairItem::{Component as C, Region as R};
     let spec = CarSpec::from(&car.def);
@@ -88,9 +99,9 @@ fn row(e: &Economy, car: &LoadedCar, mode: DamageMode) -> Row {
         class: car.def.class,
         value,
         pi: e.class_index(&car.def),
-        wreck: reference_estimate(&table, scale, &everything).total,
-        front_hit: reference_estimate(&table, scale, &front).total,
-        scrape: reference_estimate(&table, scale, &[(R(BodyRegion::FrontBumper), 0.25)]).total,
+        wreck: e.prices.total_loss_markup * billed(e, &table, scale, &everything),
+        front_hit: billed(e, &table, scale, &front),
+        scrape: billed(e, &table, scale, &[(R(BodyRegion::FrontBumper), 0.25)]),
         purse: e.base_purse(&setup),
         buy_in: e.entry_fee(&setup),
         impound: e.consequences.impound.base_fee[&car.def.class],
@@ -166,9 +177,9 @@ fn roster_table_and_feel_targets() {
             // Simulation ratio); Simulation halves the bill at the x1.2 purse (0.5x).
             let ratio = r.front_hit / r.purse as f32;
             let (lo, hi) = match mode {
-                DamageMode::Extreme => (0.5, 1.6),
-                DamageMode::Simulation => (0.25, 0.8),
-                DamageMode::Arcade => (0.3, 1.0),
+                DamageMode::Extreme => (0.8, 2.6),
+                DamageMode::Simulation => (0.4, 1.3),
+                DamageMode::Arcade => (0.5, 1.5),
             };
             assert!(
                 (lo..=hi).contains(&ratio),

@@ -1,4 +1,4 @@
-// wp_race picker race "Loop 9 circuit" (loop9_circuit): One flat-out lap of the Loop 9 highway, through late-night traffic.
+// wp_race picker race "Loop 9 night" (loop9_circuit): One flat-out lap of the Loop 9 highway, through late-night traffic.
 // Generated from wp_race::catalog by wp_wasm's race_scenario_files_match_the_picker
 // (WP_RACE_WRITE_SCENARIOS=1); the browser's race_start builds the same scenario with
 // the player's car. Entity "player" sits on the last grid slot, the AI field ahead.
@@ -23,7 +23,7 @@
         (
             id: "player",
             car: "lindwurm_4t",
-            pos: (328.56918, 1419.1771, 23.715113),
+            pos: (328.56918, 1419.1771, 23.715284),
             yaw: 1.6529596,
             driver: scripted,
             inputs: [],
@@ -31,7 +31,7 @@
         (
             id: "ai_vic",
             car: "kestrel_ts",
-            pos: (309.047, 1412.5525, 23.715113),
+            pos: (309.047, 1412.5525, 23.715284),
             yaw: 1.6529596,
             driver: scripted,
             inputs: [],
@@ -39,7 +39,7 @@
         (
             id: "ai_mara",
             car: "hakone_gt",
-            pos: (312.62317, 1417.8639, 23.715113),
+            pos: (312.62317, 1417.8639, 23.715284),
             yaw: 1.6529596,
             driver: scripted,
             inputs: [],
@@ -47,7 +47,7 @@
         (
             id: "ai_dez",
             car: "rampart_50",
-            pos: (317.02002, 1413.2091, 23.715113),
+            pos: (317.02002, 1413.2091, 23.715284),
             yaw: 1.6529596,
             driver: scripted,
             inputs: [],
@@ -55,7 +55,7 @@
         (
             id: "ai_juno",
             car: "shiro_turbo",
-            pos: (320.5962, 1418.5205, 23.715113),
+            pos: (320.5962, 1418.5205, 23.715284),
             yaw: 1.6529596,
             driver: scripted,
             inputs: [],
@@ -63,7 +63,7 @@
         (
             id: "ai_tito",
             car: "sperber_32",
-            pos: (324.99304, 1413.8656, 23.715113),
+            pos: (324.99304, 1413.8656, 23.715284),
             yaw: 1.6529596,
             driver: scripted,
             inputs: [],

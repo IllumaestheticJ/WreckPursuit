@@ -11,6 +11,7 @@
 //! - [`deck_rails`]: guard-rail lines along bridge decks;
 //! - [`median_barriers`]: concrete barrier lines between divided-highway carriageways;
 //! - [`deck_slabs`]: bridge-deck pieces that hide what is under them (line of sight);
+//! - [`edge_barriers`]: concrete barrier lines along the outer edges of highways;
 //! - [`MapGround`]: a wheel ground probe over roads and terrain without a physics engine.
 
 use wp_vehicle::{GroundHit, WheelCaster};
@@ -1919,6 +1920,243 @@ pub fn median_barriers(net: &RoadNetwork) -> Vec<Vec<V3>> {
         .filter(|s| s.median_barrier && s.centre.len() >= 2)
         .map(|s| surface_edges(s).0)
         .collect()
+}
+
+/// Half width of a concrete barrier (Jersey base), m: [`edge_barriers`] lines run this far
+/// outside the paved edge, so the barrier's inner face is on the edge.
+pub const BARRIER_HALF_WIDTH_M: f32 = 0.25;
+
+/// An [`edge_barriers`] line ends this far outside a junction's paved radius, m.
+pub const JUNCTION_BARRIER_GAP_M: f32 = 2.0;
+
+/// An [`edge_barriers`] line stops this far along the edge before and after any other paving
+/// meeting it (a ramp's taper and gore, a junction), m: a car merging off a ramp drifts
+/// across the taper for up to ~60 m and must not meet the barrier's end there (row 162).
+pub const GORE_BARRIER_GAP_M: f32 = 40.0;
+
+/// No [`edge_barriers`] line runs closer than this to a median barrier's centre line, m: the
+/// median already walls that edge.
+pub const MEDIAN_CLEAR_M: f32 = 3.0;
+
+/// Concrete barrier lines (at road height) along the outer edges of highways: the right edge
+/// of every divided-highway carriageway and both edges of ramps, so a car cannot leave the
+/// highway for the verge. Left out where another road's paving meets the edge (ramp tapers,
+/// gores: the rest-stop ramps too), at junctions (a ramp terminal's paving and turning paths:
+/// [`JUNCTION_BARRIER_GAP_M`] past its paved radius), on bridge decks (they have guard rails, see
+/// [`deck_rails`]) and inside covered spans (the Hollins Tunnel: its walls; the barrier stops
+/// at the portals, so the exit stays open), and never beside a median barrier
+/// ([`MEDIAN_CLEAR_M`]). Empty without terrain.
+pub fn edge_barriers(map: &CityMap) -> Vec<Vec<V3>> {
+    let net = &*map.net;
+    let Some(t) = &net.terrain else {
+        return Vec::new();
+    };
+    let ground = |q: V2| t.height_at(q);
+    let covers: Vec<crate::covered::CoverShape> = net
+        .covered
+        .iter()
+        .map(crate::covered::CoverShape::new)
+        .collect();
+    // Junction paving (a ramp's terminal on a street): the barrier ends before it, so turning
+    // paths stay clear (row 162). Freeway merges (radius 0) stay open through the paving test.
+    let radii = junction_paved_radii(net);
+    let junctions: Vec<(V3, f32)> = net
+        .intersections
+        .iter()
+        .zip(&radii)
+        .filter(|(_, r)| **r > 0.0)
+        .map(|(ix, r)| (net.nodes[ix.node as usize].pos, r + JUNCTION_BARRIER_GAP_M))
+        .collect();
+    // And off every node patch's paving (a freeway merge's taper connectors: no road surface
+    // there, so `inside_other_paving` does not see it).
+    let patches: Vec<(V2, V2, TriMesh)> = node_patches(map)
+        .into_iter()
+        .filter(|p| !p.mesh.indices.is_empty())
+        .map(|p| {
+            let (mut lo, mut hi) = ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]);
+            for q in &p.mesh.positions {
+                lo = [lo[0].min(q[0]), lo[1].min(q[1])];
+                hi = [hi[0].max(q[0]), hi[1].max(q[1])];
+            }
+            (lo, hi, p.mesh)
+        })
+        .collect();
+    let on_patch = |p: V3| {
+        let q = geom::xy(p);
+        patches.iter().any(|(lo, hi, m)| {
+            q[0] >= lo[0] - 0.5
+                && q[0] <= hi[0] + 0.5
+                && q[1] >= lo[1] - 0.5
+                && q[1] <= hi[1] + 0.5
+                && m.indices.iter().any(|t| {
+                    let [a, b, c] = t.map(|i| m.positions[i as usize]);
+                    (a[2] - p[2]).abs() < 1.0
+                        && geom::point_in_polygon(q, &[geom::xy(a), geom::xy(b), geom::xy(c)])
+                })
+        })
+    };
+    let at_junction = |p: V3| {
+        on_patch(p)
+            || junctions.iter().any(|(c, r)| {
+                geom::dist(geom::xy(p), geom::xy(*c)) < *r && (p[2] - c[2]).abs() < 3.0
+            })
+    };
+    // Median barriers, in 32 m cells: an edge never gets a second barrier beside one. Both
+    // carriageways of a divided highway border the median, but only one of them carries it
+    // (`median_barrier`); the other's median-side edge is no outer edge (a barrier there ran
+    // 0.25 m beside the median and stuck out of its face: a scraping car caught it).
+    let medians = median_barriers(net);
+    const MCELL: f32 = 32.0;
+    let mcell = |q: V2| ((q[0] / MCELL).floor() as i32, (q[1] / MCELL).floor() as i32);
+    let mut msegs: Vec<(V2, V2, f32)> = Vec::new();
+    let mut mcells: BTreeMap<(i32, i32), Vec<usize>> = BTreeMap::new();
+    for line in &medians {
+        for w in line.windows(2) {
+            let (a, b) = (geom::xy(w[0]), geom::xy(w[1]));
+            let r = MEDIAN_CLEAR_M;
+            let (lo, hi) = (
+                mcell([a[0].min(b[0]) - r, a[1].min(b[1]) - r]),
+                mcell([a[0].max(b[0]) + r, a[1].max(b[1]) + r]),
+            );
+            for x in lo.0..=hi.0 {
+                for y in lo.1..=hi.1 {
+                    mcells.entry((x, y)).or_default().push(msegs.len());
+                }
+            }
+            msegs.push((a, b, 0.5 * (w[0][2] + w[1][2])));
+        }
+    }
+    let beside_median = |p: V3| {
+        let q = geom::xy(p);
+        mcells.get(&mcell(q)).is_some_and(|v| {
+            v.iter().any(|i| {
+                let (a, b, z) = msegs[*i];
+                geom::point_segment_distance(q, a, b) < MEDIAN_CLEAR_M && (p[2] - z).abs() < 3.0
+            })
+        })
+    };
+    let mut out = Vec::new();
+    for (si, s) in net.surfaces.iter().enumerate() {
+        if !s.highway || s.centre.len() < 2 {
+            continue;
+        }
+        let (l, r) = surface_edges(s);
+        // A carriageway's left edge carries the median barrier.
+        let sides: &[(f32, &Vec<V3>)] = if s.median_barrier {
+            &[(1.0, &r)]
+        } else {
+            &[(-1.0, &l), (1.0, &r)]
+        };
+        for (side, edge) in sides {
+            let line = geom::offset_polyline(edge, side * BARRIER_HALF_WIDTH_M);
+            // Openings for other paving (ramp tapers, gores, junctions), widened by
+            // GORE_BARRIER_GAP_M along the edge each way: a merging car still drifting across
+            // the taper meets no blunt barrier end (row 162).
+            let open: Vec<bool> = (0..edge.len())
+                .map(|k| {
+                    let p = edge[k];
+                    let q = [line[k][0], line[k][1], p[2]];
+                    inside_other_paving(net, si, p)
+                        || inside_other_paving(net, si, q)
+                        || at_junction(q)
+                })
+                .collect();
+            let ecum = geom::cumulative(edge);
+            let opened: Vec<f32> = (0..edge.len())
+                .filter(|k| open[*k])
+                .map(|k| ecum[k])
+                .collect();
+            let keep: Vec<bool> = (0..edge.len())
+                .map(|k| {
+                    let p = edge[k];
+                    !is_elevated(s, k, &ground, 1.5)
+                        && !beside_median([line[k][0], line[k][1], p[2]])
+                        && !covers.iter().any(|c| c.contains([p[0], p[1], p[2] + 1.0]))
+                        && !opened
+                            .iter()
+                            .any(|o| (ecum[k] - o).abs() <= GORE_BARRIER_GAP_M)
+                })
+                .collect();
+            let mut run: Vec<V3> = Vec::new();
+            for k in 0..edge.len() {
+                if keep[k] {
+                    run.push([line[k][0], line[k][1], edge[k][2]]);
+                } else {
+                    if run.len() >= 2 {
+                        out.push(std::mem::take(&mut run));
+                    }
+                    run.clear();
+                }
+            }
+            if run.len() >= 2 {
+                out.push(run);
+            }
+        }
+    }
+    out
+}
+
+/// One ramp → carriageway merge: the connector that joins them and the line a car drives
+/// through it (see [`ramp_merges`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RampMerge {
+    /// The merge connector's segment id ([`CityMap::segs`]).
+    pub connector: u32,
+    /// Source road of the ramp and of the carriageway.
+    pub roads: [u32; 2],
+    /// Lane centreline from `before_m` up the ramp lane, through the connector, to `after_m`
+    /// along the carriageway lane it joins, m.
+    pub path: Vec<V3>,
+}
+
+/// Every place a ramp lane (a highway road of one or two lanes: interchange and rest-stop
+/// ramps) joins a carriageway's lane (a highway road of three or more), with the driving line
+/// through it (row 162: ramp merges are flush and clear). In segment order.
+pub fn ramp_merges(map: &CityMap, before_m: f32, after_m: f32) -> Vec<RampMerge> {
+    let net = &map.net;
+    let highway = |road: u32| net.surfaces.iter().any(|s| s.road == road && s.highway);
+    let lanes = |road: u32| {
+        net.lanes
+            .iter()
+            .filter(|l| l.road == road && l.kind.drivable())
+            .count()
+    };
+    // A ramp has one or two lanes, a carriageway (piece) three or more.
+    let ramp = |road: u32| highway(road) && lanes(road) <= 2;
+    let carriageway = |road: u32| highway(road) && lanes(road) >= 3;
+    let mut out = Vec::new();
+    for (ci, c) in map.segs.iter().enumerate() {
+        let SegKind::Connector { from, to, .. } = c.kind else {
+            continue;
+        };
+        let (rf, rt) = (net.lanes[from as usize].road, net.lanes[to as usize].road);
+        if !ramp(rf) || !carriageway(rt) {
+            continue;
+        }
+        let (a, b) = (&map.segs[from as usize], &map.segs[to as usize]);
+        let mut path: Vec<V3> = a
+            .pts
+            .iter()
+            .zip(&a.cum)
+            .filter(|(_, s)| **s >= a.length - before_m)
+            .map(|(p, _)| *p)
+            .collect();
+        path.extend(c.pts.iter().copied());
+        path.extend(
+            b.pts
+                .iter()
+                .zip(&b.cum)
+                .filter(|(_, s)| **s <= after_m)
+                .map(|(p, _)| *p),
+        );
+        path.dedup_by(|x, y| geom::dist(geom::xy(*x), geom::xy(*y)) < 0.05);
+        out.push(RampMerge {
+            connector: ci as u32,
+            roads: [rf, rt],
+            path,
+        });
+    }
+    out
 }
 
 /// Clearance under a deck piece before it counts as cover for line of sight, m (a car fits).

@@ -34,6 +34,7 @@ mod solver;
 mod tests;
 pub mod tuning;
 pub mod vec3;
+mod wear;
 
 pub use contact::scale_racer_contacts;
 pub use debris::{DetachedKind, DetachedPart};
@@ -47,4 +48,5 @@ pub use panels::{
 pub use repair::default_price_table;
 pub use snapshot::{DamageSnapshotExt, FullDamageSnapshot};
 pub use tuning::{forgiving_rules, DamageTuning};
+pub use wear::PreownedWear;
 pub use wp_contracts::{HandlingEffects, ModeTable, PriceTable, RepairEstimate};

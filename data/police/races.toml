@@ -18,6 +18,14 @@
 #                 when a racer passes within `trigger_m`
 #   [[x.spikes]]  spike strips laid across part of the course at `at`, centred `offset_m` to
 #                 the left (+) or right (-) of the course line (the planned racing lane)
+#   patrol_corridor_m  patrols on the course: pool units appear and patrol only on roads of
+#                 the course's own class within this many m of it (on a divided road, only the
+#                 carriageway running the racing direction); responders and backup appear there
+#                 first. Leave out for the normal city-wide patrols (which never use highways).
+#   helicopters   helicopters up at once in this race (any time of day)
+#   max_ground_units  ground unit cap for this race
+#   [x.unlocks]   wanted level (1-5) at which roadblock / spikes / helicopter / pit / boxin /
+#                 rolling_block tactics unlock in this race (a tactic switched off stays off)
 #
 # Physics is the same for every race and both damage modes: these tables only decide where the
 # police are and what they may do (owner rule 2026-10-20).
@@ -63,6 +71,8 @@ trigger_m = 60.0
 # No roadblocks, spikes, box-ins, rolling blocks, junction blocks or helicopter: interceptors
 # chase at highway speed (cap raised to 70 m/s, PIT allowed up to 220 km/h) and fresh units
 # wait on the loop's shoulders to join the chase as the field comes by.
+# Owner 2026-10-24 ("stop spawning cops off the highway on loop 9 races"): patrols, responders
+# and backup appear on Loop 9 itself, running the racing direction.
 [loop9_circuit]
 name = "Highway interceptors"
 summary = "Pure high-speed pursuit: interceptors join from the shoulder and run the field down. No roadblocks, no spikes."
@@ -70,6 +80,7 @@ presence = 1.0
 backup_scale = 1.0
 tool_lifetime_s = 0.0
 recognise_on_sight = true
+patrol_corridor_m = 60.0
 
 [loop9_circuit.tactics]
 roadblocks = false
@@ -82,7 +93,6 @@ pit = true
 rams = true
 
 [loop9_circuit.speed]
-pursuit_cap_mps = 70.0
 pit_max_kmh = [0.0, 180.0, 200.0, 220.0, 220.0]
 speed_margin = 0.35
 
@@ -100,6 +110,118 @@ trigger_m = 120.0
 
 [[loop9_circuit.stakeouts]]
 at = 0.85
+trigger_m = 120.0
+
+# One lap of Loop 9 at 2 pm (wp_race::catalog loop9_day). Owner brief 2026-10-24: "much heavier
+# police presence, with helicopters, road blocks, etc". Every patrol in town works the loop
+# (on the highway, racing direction, never on the streets off it); two helicopters up from the
+# first wanted level; the captain's roadblocks from level 2 and spikes from 3; two scripted
+# roadblocks across the loop with one lane open, a spike strip over the outer half of the road,
+# the on-ramps sealed and six units waiting on the shoulders. PIT and rams at highway speed.
+[loop9_day]
+name = "Daylight dragnet"
+summary = "Every unit in the city on the loop: two helicopters, roadblocks and spikes across the highway, ramps sealed, units on every shoulder."
+# Owner 2026-10-23 cut day patrols 13 -> 5 city-wide (PR #64); the dragnet keeps its old count:
+# 2.5 x 13 = 33 before, 6.5 x 5 = 34 now (Core 3 -> 20, Suburb 1 -> 7, Industrial 1 -> 7).
+presence = 6.5
+backup_scale = 2.0
+tool_lifetime_s = 600.0
+recognise_on_sight = true
+patrol_corridor_m = 60.0
+helicopters = 2
+max_ground_units = 36
+
+[loop9_day.unlocks]
+helicopter_level = 1
+roadblock_level = 2
+spikes_level = 3
+pit_level = 1
+rolling_block_level = 2
+
+[loop9_day.speed]
+pit_max_kmh = [180.0, 200.0, 220.0, 220.0, 220.0]
+speed_margin = 0.35
+
+[[loop9_day.route_blocks]]
+at = 0.35
+gap_m = 3.5
+gap_side = "left"
+units = 2
+
+[[loop9_day.route_blocks]]
+at = 0.7
+gap_m = 3.5
+gap_side = "right"
+units = 2
+
+[[loop9_day.spikes]]
+at = 0.55
+length_m = 4.0
+offset_m = -2.5
+
+[[loop9_day.side_blocks]]
+from = 0.1
+to = 0.95
+count = 3
+into_m = 25.0
+units = 1
+
+[[loop9_day.stakeouts]]
+at = 0.1
+trigger_m = 120.0
+
+[[loop9_day.stakeouts]]
+at = 0.25
+trigger_m = 120.0
+
+[[loop9_day.stakeouts]]
+at = 0.45
+trigger_m = 120.0
+
+[[loop9_day.stakeouts]]
+at = 0.6
+trigger_m = 120.0
+
+[[loop9_day.stakeouts]]
+at = 0.8
+trigger_m = 120.0
+
+[[loop9_day.stakeouts]]
+at = 0.92
+trigger_m = 120.0
+
+# Long night run from Loop 9 out over the Ashpeak County freeways (wp_race::catalog
+# loop9_ashpeak_highway, from the "Trim street races to Loop 9" work). Style: the Loop 9
+# interceptors, kept on the highway: no tools, PIT and rams at speed, patrols on the course.
+[loop9_ashpeak_highway]
+name = "Freeway interceptors"
+summary = "Interceptors and county deputies work the freeway itself: no roadblocks or spikes, PITs and rams at speed."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 0.0
+recognise_on_sight = true
+patrol_corridor_m = 60.0
+
+[loop9_ashpeak_highway.tactics]
+roadblocks = false
+spikes = false
+helicopter = false
+box_in = false
+rolling_block = true
+junction_block = false
+pit = true
+rams = true
+
+[loop9_ashpeak_highway.speed]
+pit_max_kmh = [0.0, 180.0, 200.0, 220.0, 220.0]
+speed_margin = 0.35
+
+[[loop9_ashpeak_highway.stakeouts]]
+at = 0.3
+trigger_m = 120.0
+
+[[loop9_ashpeak_highway.stakeouts]]
+at = 0.7
 trigger_m = 120.0
 
 # Night hill sprint up six hairpins to the Knob Observatory Lot. Proposed style: summit trap.
@@ -226,17 +348,19 @@ rams = false
 at = 0.9
 trigger_m = 60.0
 
-# Dusk run over Harlan Flats' gravel section roads. Proposed style: open country. Few units
+# Dusk run over Harnell Flats' gravel section roads. Proposed style: open country. Few units
 # out on the farm roads, so the helicopter does the spotting; no spikes on gravel.
-[harlan_dirt_run]
+# Row 168 tuning (2026-10-24, race_picker with police on, seeds 1-4): presence 1.0 -> 0.5,
+# backup 0.75 -> 0.5. The field was captured on 3 of 4 seeds; now it finishes on 2.
+[harnell_dirt_run]
 name = "Open country"
 summary = "Thin patrols on the section roads; the helicopter spots and calls in units ahead."
-presence = 1.0
-backup_scale = 0.75
+presence = 0.5
+backup_scale = 0.5
 tool_lifetime_s = 300.0
 recognise_on_sight = false
 
-[harlan_dirt_run.tactics]
+[harnell_dirt_run.tactics]
 roadblocks = true
 spikes = false
 helicopter = true
@@ -287,13 +411,15 @@ trigger_m = 80.0
 
 # Night sprint over Route 12's Grizzly Grade. Proposed style: pass patrol. The highway patrol
 # works the grade: PITs on the climb, a roadblock allowed over the saddle.
+# Row 168 tuning: no pursuit on any of seeds 1-4 (no patrol on the pass). A unit staked out
+# past the saddle that knows the field on sight: 1-2 pursuits a race, all four still finish.
 [grizzly_grade_sprint]
 name = "Pass patrol"
 summary = "Units work the climb with PITs; past the saddle the captain may block the road."
 presence = 1.0
 backup_scale = 1.0
 tool_lifetime_s = 300.0
-recognise_on_sight = false
+recognise_on_sight = true
 
 [grizzly_grade_sprint.tactics]
 roadblocks = true
@@ -305,8 +431,14 @@ junction_block = false
 pit = true
 rams = false
 
+[[grizzly_grade_sprint.stakeouts]]
+at = 0.7
+trigger_m = 100.0
+
 # Quarter-mile drag on the waterfront. Proposed style: late response. Too short for a chase:
 # units only arrive at the end, no tools.
+# Row 168 tuning: no pursuit on any of seeds 1-4. A unit staked out near the end of the strip
+# (the summary's late response): 2 pursuits a race, both racers still finish.
 [waterfront_drag]
 name = "Late response"
 summary = "Too short to chase: the nearest unit rolls in at the end of the strip."
@@ -324,6 +456,10 @@ rolling_block = false
 junction_block = true
 pit = false
 rams = false
+
+[[waterfront_drag.stakeouts]]
+at = 0.9
+trigger_m = 60.0
 
 # Two night laps of the downtown block grid. Proposed style: block grid. Units cut through the
 # grid to block junctions ahead on the second lap; no spikes between the towers.

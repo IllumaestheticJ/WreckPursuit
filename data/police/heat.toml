@@ -17,9 +17,13 @@ repeat_cooldown_s = 1.0
 # Seconds after the last sighting before heat starts to decay.
 decay_grace_s = 5.0
 # Long chases escalate: heat per second while actively pursued (seen).
-pursuit_heat_per_s = 0.25
+# Row 157 (owner, 2026-10-23: "heat builds too fast"): every heat gain in this file is half what it
+# was (0.25 here, 15 for a disabled cop, 20 for an assault, violations 2/0.4/6/4/8/3), so a
+# chase climbs a wanted level in about 40 s instead of about 20 s. Thresholds, decay and the
+# min_level floors are unchanged. Before/after table: docs/integration/police.md, row 157.
+pursuit_heat_per_s = 0.125
 # Disabling a police unit by contact.
-cop_disabled_heat = 15.0
+cop_disabled_heat = 7.5
 
 # Hitting a police car is assaulting an officer (owner playtest row 24): heat jumps to at least
 # `min_level` and the hit unit, plus units within `nearby_units_m` that can see the racer,
@@ -40,7 +44,7 @@ min_rel_speed_mps = 2.5
 min_racer_speed_mps = 2.5
 episode_s = 0.5
 repeat_cooldown_s = 3.0
-heat = 20.0
+heat = 10.0
 min_level = 2
 nearby_units_m = 60.0
 
@@ -86,12 +90,12 @@ far_extra_s = 2.0
 decay_per_s = 0.5
 
 [heat.violation]
-speeding_base = 2.0
-speeding_per_mps = 0.4
-red_light = 6.0
-wrong_way = 4.0
-collision = 8.0
-reckless = 3.0
+speeding_base = 1.0
+speeding_per_mps = 0.2
+red_light = 3.0
+wrong_way = 2.0
+collision = 4.0
+reckless = 1.5
 
 # Owner playtest row 89, "if I can see them, they can see me": a unit with line of sight within
 # this range witnesses a violation (was 70-160 m). Headlights and street lights make a moving
@@ -155,6 +159,12 @@ pinned_time_s = 6.0
 # police held up behind other cars 20 m away, is captured, not waited for forever; Hollins
 # hairpin, lead/opponent-pace).
 pinned_unit_radius_m = 30.0
+# Row 168: when the only units that close (stop rule) or chasing it that close (pinned rule)
+# stand in the racer's lane in front of it, a pursuer, interceptor or patrol that cut in or
+# crashed there (not a roadblock, spike car or box-in), both rules wait this long: the
+# racer stopped because the car is in its way, and gets time to back out and go round.
+# A cruiser wedged on a one-lane hairpin had the race field behind it arrested in 4 s.
+blocked_ahead_stop_time_s = 12.0
 
 [safehouse]
 dwell_s = 10.0

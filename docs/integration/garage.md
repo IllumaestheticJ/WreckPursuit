@@ -133,6 +133,25 @@ mechanic with the old part sold or kept, and sortable part lists.
 - Later (stage 6): the mechanic's labour should also cost game time through
   `wp_world::progression` (`Activity::ModInstall { labour_hours }`).
 
+### Career places: garages and safehouses in the open world
+Owner bug (2026-10-24): "the safehouses and garages still don't do anything". Career runs had
+garage stops switched off (`Session::check_garage` returned early for career runs, and
+`garages()` was empty, so no markers either); safehouses only mattered to the police rule.
+- `wp_wasm::garage_visit`: `SafehouseSite`, `safehouse_sites(world)`, `PlaceKind`,
+  `PlaceVisit`, `LayingLow`, `PlaceStatus`.
+- `Session` (career runs): stopping (< 3 m/s, no pursuit) inside a garage or safehouse ring opens
+  a `PlaceVisit` and holds the car, like the demo garage visit; `place_leave()` gives it back
+  (drive out of every ring before the next one opens). `place()` also reports the police
+  safehouse dwell while chased. `garages()` now lists the shops in career runs too;
+  `safehouses()` lists the safehouses in career runs.
+- wasm exports: `safehouses_json()`, `place_json()`, `place_leave()`.
+- Testbed: `src/ui/placeVisit.tsx` (garage: Workshop / Garage: repair, mods, tuning / Back on the
+  road; safehouse: End the night here / Workshop / Back on the road; "Laying low" strip with the
+  dwell meter while chased). `main.ts` ends the run into the garage or workshop;
+  `scene.setGarages(garages, safehouses)` draws safehouses as green rings and beams.
+- Tests: `career_tests::stopping_in_a_garage_or_safehouse_on_a_career_run_opens_the_place`,
+  `e2e/places.mjs`.
+
 ### Testbed (`apps/testbed-web`, `apps/ui-kit`)
 - `src/workshop/room.ts`: the garage bay, built in code (concrete floor, block walls, roller door,
   two-post lift, bench, tool chest, tyre rack, shelving, lights). The car never moves: raising the
@@ -257,3 +276,17 @@ Workshop operations run on a button press, not per frame.
 - Workshop hardware (battery, diff, tank...) is drawn in the workshop only, not while driving.
 - Replacement bumpers hide the stock grille and indicators; the new cover draws its own intakes
   and LED strips.
+
+## Paint shop and car colour (2026-10-25)
+
+- Every career car has one body colour: `OwnedCar::paint`, else a factory colour fixed by its
+  uid (`wp_wasm::career::car_paint`). `CarView::paint` is always set, so the workshop, career
+  runs and a non-career test drive in the same model all show the same colour (before, dealer
+  and floor cars took a colour from the view's entity id, which differed per session).
+- `Economy::respray(acct, car, paint)` / `respray_fee` (`prices.toml respray_base` × class
+  `parts_scale`); posted as `ModInstalled { mod_id: "respray" }` since the contract has no paint
+  reason. wasm `career_respray(uid, paint)`; `CarView::respray_fee`.
+- Workshop "Paint shop" (`apps/ui-kit/src/garage/PaintShop.tsx`, host in
+  `apps/testbed-web/src/workshop/mode.ts`): 28 swatches + a custom colour, previewed on the car
+  before paying; Finish / Vinyls / Body / Wheels / Cabin & bay list the cosmetic mods with
+  Preview (adds only) and Fit / Swap / Remove. `e2e/paint_shop.mjs` covers it.

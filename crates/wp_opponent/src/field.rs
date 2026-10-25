@@ -374,6 +374,11 @@ struct Racer {
     /// beside it I am working towards (reverse with the nose swinging out, creep forward,
     /// repeat), and how long I have been at it, s.
     escape: Option<(Who, f32, f32)>,
+    /// Time spent pulling over (rolling on towards the kerb), s.
+    pull_over_s: f32,
+    /// Finished where the corridor ends at the line, and rolled clear past its end: parked for
+    /// good (never drives on along the corridor again).
+    line_cleared: bool,
     /// Stuck and wanting to back out, but something stands right behind me (the car there
     /// backs off for me).
     wants_room: bool,
@@ -647,6 +652,9 @@ const CIV_DRIFT_DEADBAND: f32 = 0.025;
 
 /// How far along the corridor a relocated racer is looked for, either way, m.
 const RELOCATE_WINDOW_M: f32 = 1500.0;
+/// On its first look at a point-to-point course, a car this close to the centreline near the
+/// start is taken to be at the start (not at an end that comes back past it), m.
+const START_SNAP_M: f32 = 8.0;
 
 /// A finished racer whose corridor ends at the finish line rolls on this far past it before
 /// pulling over, m, at most this fast, m/s.
@@ -656,8 +664,28 @@ const FINISH_CLEAR_MPS: f32 = 5.0;
 /// line, give or take its sampling), m.
 const NO_RUN_OFF_M: f32 = 5.0;
 
+/// Room kept between my body and the edge of the lanes I may use, m. 0.5 since candidate G
+/// (was 0.25): its softer, slower-answering car runs a little wider of its line, and on the
+/// narrow Hollins lanes (±1.45 m) that was the kerb (walls 2 → 124 at s50, 16 seeds).
+const EDGE_MARGIN_M: f32 = 0.5;
+/// A car pulling over (yielding, out of the race) that has not reached the kerb after rolling
+/// this long stops short of it, as soon as it is clear of junctions and tight bends, s.
+const PULL_OVER_MAX_S: f32 = 8.0;
+/// A car pulling over stops after rolling this long, wherever it is, s.
+const PULL_OVER_HARD_MAX_S: f32 = 30.0;
+/// A car pulling over counts towards [`PULL_OVER_MAX_S`] / [`PULL_OVER_HARD_MAX_S`] only while
+/// rolling faster than this, m/s.
+const PULL_OVER_ROLLING_MPS: f32 = 1.0;
+/// Room kept to the kerb when pulled over (parked, yielding, out of the race), m.
+const PARK_EDGE_MARGIN_M: f32 = 0.25;
+/// Room kept to the edge of the lanes while passing, m (the pre-G racing margin).
+const PASS_EDGE_MARGIN_M: f32 = 0.25;
+
 /// Lateral step between the pass positions tried beside a car (about a lane), m.
 const PASS_LANE_STEP_M: f32 = 3.5;
+/// A careful driver (traffic risk under 0.5) goes round a non-racer crawling ahead on the
+/// opposing lanes once held up this long behind it, s.
+const CRAWLER_PATIENCE_S: f32 = 2.0;
 
 /// Road width (my lanes plus any usable for passing) from which a car that is itself passing
 /// may be passed (three wide), m.
@@ -815,6 +843,8 @@ impl Field {
                 pass_blocked_s: 0.0,
                 stuck_s: 0.0,
                 escape: None,
+                pull_over_s: 0.0,
+                line_cleared: false,
                 wants_room: false,
                 stable_s: 0.0,
                 defended: false,
@@ -1208,7 +1238,11 @@ impl Field {
                 PursuitOutcome::Captured | PursuitOutcome::CapturedTotalLoss => {
                     if r.status != RacerStatus::Busted {
                         r.status = RacerStatus::Busted;
-                        r.tactic = Tactic::Park;
+                        // Pull over to the kerb clear of junctions, then stay there (a busted
+                        // car stopped mid-lane, its cruiser beside it, blocks the whole field).
+                        r.tactic = Tactic::Yield;
+                        r.tactic_ticks = 0;
+                        r.pass_target = None;
                         self.events.push(OpponentEvent::Busted {
                             entity: r.entity,
                             time_s,
@@ -1224,7 +1258,7 @@ impl Field {
                             time_s,
                         });
                     }
-                    if r.tactic == Tactic::Yield {
+                    if r.tactic == Tactic::Yield && r.status != RacerStatus::Busted {
                         r.tactic = Tactic::Rejoin;
                         r.tactic_ticks = 0;
                         r.yield_s = 0.0;
@@ -1264,6 +1298,20 @@ impl Field {
                 let first = r.progress.is_nan();
                 let hint = if first { None } else { Some(r.hint) };
                 let cp = corridor.project(pos, hint, 40);
+                // First look on a point-to-point course: a car beside its start is at the start,
+                // even where the course ends right there too (a street racer's Loop 9 lap from
+                // a rest stop back into it: projected onto the end, it had finished before it
+                // moved).
+                let cp = if first && !corridor.closed {
+                    let at_start = corridor.project(pos, Some(0), 40);
+                    if at_start.n.abs() <= START_SNAP_M {
+                        at_start
+                    } else {
+                        cp
+                    }
+                } else {
+                    cp
+                };
                 let t = corridor.samples[cp.index].tangent;
                 let prev_s = r.s;
                 r.pos = pos;
@@ -1927,9 +1975,17 @@ fn decide_racer(
         // short of it until the finish window closed (s95 seed 3, 15-17 rejoins each).
         let no_run_off =
             !corridor.closed && finish_m.is_none_or(|f| f >= corridor.length_m - NO_RUN_OFF_M);
-        let clearing_line = matches!(r.status, RacerStatus::Finished { .. })
-            && no_run_off
-            && r.s_rel < corridor.length_m + FINISH_CLEAR_M;
+        // How far past the end of the corridor I am, straight along its last direction (not the
+        // corridor position: past a dead end at the top of a switchback climb that snaps back
+        // onto a lower hairpin, and a finisher drove back down into the field — Hollins).
+        let end_xy = geom::xy(corridor.point(corridor.length_m, 0.0));
+        let end_t = corridor.samples[corridor.samples.len() - 1].tangent;
+        let beyond = geom::dot(geom::sub(r.pos, end_xy), end_t);
+        let finished_dead_end = matches!(r.status, RacerStatus::Finished { .. }) && no_run_off;
+        if finished_dead_end && beyond >= FINISH_CLEAR_M {
+            r.line_cleared = true;
+        }
+        let clearing_line = finished_dead_end && !r.line_cleared;
         r.wide_on = match wide {
             Some((wl, wp)) if !fleeing && !finished_or_dq && r.flight.is_none() => {
                 let a_brk = wp.a_brake.max(3.0);
@@ -1955,8 +2011,8 @@ fn decide_racer(
         };
         let line_n = |s: f32| corridor.interp(&line.offset, s);
         let to_limits = |(l, rr): (f32, f32)| {
-            let lo = -l + hw + 0.25;
-            let hi = rr - hw - 0.25;
+            let lo = -l + hw + EDGE_MARGIN_M;
+            let hi = rr - hw - EDGE_MARGIN_M;
             if lo <= hi {
                 (lo, hi)
             } else {
@@ -1985,8 +2041,9 @@ fn decide_racer(
             RacerStatus::Finished { .. } | RacerStatus::Disqualified
         ) || (!corridor.closed && finish_m.is_some_and(|f| r.progress >= f));
         // A non-racer crawling along ahead (under 70 % of my own pace here, or 6 m/s: a car
-        // that just turned round, a slow climber) that has held me up for 4 s: even a careful
-        // driver goes round it on the opposing lanes when the pass checks find them clear.
+        // that just turned round, a slow climber) that has held me up for
+        // `CRAWLER_PATIENCE_S`: even a careful driver goes round it on the opposing lanes when
+        // the pass checks find them clear.
         let crawl_mps = (0.7 * corridor.interp(&profile.v, r.s + 30.0)).max(6.0);
         // A racer out of the race (fled, busted, retired, rolling on to a place to stop) is
         // gone round as soon as it holds me up at all (Hollins, police seed 6: the field crawled
@@ -2000,7 +2057,9 @@ fn decide_racer(
                 && if o.out_of_race {
                     r.blocked_s > 1.5 && o.v_s < 0.9 * corridor.interp(&profile.v, o.s)
                 } else {
-                    r.blocked_s > 4.0 && o.v_s < crawl_mps
+                    // 2 s (was 4): Lantern under G, 16 seeds — s95 61 → 64/64 finishers, walls
+                    // 11 → 0; s50 unchanged (64/64, 80.1 s); Loop 9 s50 unchanged.
+                    r.blocked_s > CRAWLER_PATIENCE_S && o.v_s < crawl_mps
                 }
         });
         // A non-racer standing in my way (a civilian at a light, a stalled car) that has held me
@@ -2058,12 +2117,19 @@ fn decide_racer(
                     junction_arms_empty(geom::xy(corridor.sample(i0 + j).pos), &others, t_clear)
                 })
         };
+        // Passing keeps the pre-G edge room: a pass is brief and planned with its own
+        // clearances, and the wider racing margin left the pack queueing on Lantern's narrow
+        // streets (G, s50: 10 s more per car held behind another racer).
+        let widen = |(lo, hi): (f32, f32)| {
+            let d = EDGE_MARGIN_M - PASS_EDGE_MARGIN_M;
+            (lo - d, hi + d)
+        };
         let pass_limits = |s: f32| {
-            if may_use_opposing {
+            widen(if may_use_opposing {
                 to_limits(corridor.pass_bounds(s))
             } else {
                 limits(s)
-            }
+            })
         };
         let v_line = |s: f32| corridor.interp(&profile.v, s);
         let me_who = Who::Racer(k);
@@ -2126,9 +2192,14 @@ fn decide_racer(
 
         // ---- Tactical state machine ----
         let (lim_lo, lim_hi) = limits(r.s);
+        // Pulled over (parking, yielding, out of the race): at the kerb, with the old 0.25 m
+        // there rather than the racing edge margin.
+        let kerb_hi = lim_hi + (EDGE_MARGIN_M - PARK_EDGE_MARGIN_M);
         let (pass_lo, pass_hi) = pass_limits(r.s);
         r.tactic_ticks += 1;
-        let parked = matches!(r.status, RacerStatus::Retired | RacerStatus::Busted)
+        // A busted racer pulls over first (Yield) and then holds there.
+        let parked = r.status == RacerStatus::Retired
+            || (r.status == RacerStatus::Busted && r.tactic != Tactic::Yield)
             || r.tactic == Tactic::Park;
         if parked {
             r.tactic = Tactic::Park;
@@ -2150,9 +2221,10 @@ fn decide_racer(
                 !on_grid && (r.n < road_lo.min(pass_lo) - 1.0 || r.n > road_hi.max(pass_hi) + 1.0);
             // Finished and past the open end of the corridor (clearing the finish line): that
             // is meant to be off it, not a reason to drive back to it.
-            let past_end = matches!(r.status, RacerStatus::Finished { .. })
-                && !corridor.closed
-                && r.s_rel > corridor.length_m - 1.0;
+            let past_end = finished_dead_end
+                || (matches!(r.status, RacerStatus::Finished { .. })
+                    && !corridor.closed
+                    && r.s_rel > corridor.length_m - 1.0);
             if r.tactic != Tactic::Reverse
                 && r.tactic != Tactic::Rejoin
                 && !past_end
@@ -2734,7 +2806,7 @@ fn decide_racer(
             }
             Tactic::Park | Tactic::Yield => {
                 follow_w = 0.0;
-                lim_hi
+                kerb_hi
             }
         };
         let rate = match r.tactic {
@@ -2769,6 +2841,8 @@ fn decide_racer(
                 Some(x) => squeeze_limits((pass_lo, pass_hi), &x.o),
                 None => (pass_lo, pass_hi),
             }
+        } else if matches!(r.tactic, Tactic::Park | Tactic::Yield) {
+            (lim_lo, kerb_hi)
         } else {
             (lim_lo, lim_hi)
         };
@@ -2856,9 +2930,10 @@ fn decide_racer(
         // once past its end where it ends at the finish line (`clearing_line`).
         if clearing_line {
             cap_to(&mut v_target, FINISH_CLEAR_MPS, SpeedLimit::Mode);
-        } else if matches!(r.status, RacerStatus::Finished { .. })
-            && !corridor.closed
-            && r.s > corridor.length_m - 25.0
+        } else if finished_dead_end
+            || (matches!(r.status, RacerStatus::Finished { .. })
+                && !corridor.closed
+                && r.s > corridor.length_m - 25.0)
         {
             r.tactic = Tactic::Park;
         }
@@ -2885,8 +2960,25 @@ fn decide_racer(
                     && (-5..=10).any(|j| {
                         line.curvature[corridor.wrap(i0 + j)].abs() > 1.0 / PARK_MIN_RADIUS_M
                     });
-                (r.n - lim_hi).abs() > 0.5 || near_junction || in_bend
+                let off_kerb = (r.n - kerb_hi).abs() > 0.5;
+                // Whatever stops it reaching the kerb (flat tyres from a spike strip, heavy
+                // damage), after `PULL_OVER_MAX_S` it stops short of the kerb, once clear of
+                // junctions and bends (row 165: a busted racer on four deflated tyres rolled
+                // on at 6 m/s for the rest of the chase); after `PULL_OVER_HARD_MAX_S` it
+                // stops wherever it is.
+                (off_kerb && r.pull_over_s < PULL_OVER_MAX_S) || near_junction || in_bend
             };
+        // Only time spent rolling counts: a car held where it stands (a unit parked in front
+        // of it, a queue) has not been failing to reach the kerb, and once the way clears it
+        // pulls over (Crowfoot ascent, police seed 3: a racer busted behind the unit that
+        // blocked it stopped mid-lane for good after 8 s, and the field behind it was caught
+        // there one by one).
+        if pulling_over && v > PULL_OVER_ROLLING_MPS {
+            r.pull_over_s += dt;
+        } else if !matches!(r.tactic, Tactic::Park | Tactic::Yield) {
+            r.pull_over_s = 0.0;
+        }
+        let pulling_over = pulling_over && r.pull_over_s < PULL_OVER_HARD_MAX_S;
         match r.tactic {
             // Rejoin at a crawl when pointing the wrong way, briskly when merely beside the
             // corridor and pointing along it.
@@ -3234,8 +3326,28 @@ fn decide_racer(
         // Steering looks from where the car will be after its response lag (position and
         // heading 0.2 s on), so lane changes at highway speed don't overshoot and weave; the
         // lookahead stretches above 25 m/s for the same reason.
-        const STEER_LAG_S: f32 = 0.2;
-        let mut ld = r.ctrl.lookahead(v) + 0.3 * (v - 25.0).max(0.0) + v * STEER_LAG_S;
+        // 0.25 s since candidate G (2026-10-23: yaw inertia × 1.35, the car answers the wheel
+        // later; with 0.2 s it ran 0.5 m wide of its line in the Hollins hairpins, into the kerb).
+        const STEER_LAG_S: f32 = 0.25;
+        // Since candidate G the stretch is 0.6 s per m/s over 25 on open, gently curving road
+        // (no bend tighter than `STRETCH_MIN_RADIUS_M` ahead): with G's slower yaw answer the
+        // steering loop weaved with growing amplitude at 45-50 m/s on Loop 9 (4.7 m off the
+        // commanded line, then a spin; s95 walls 22 -> 52 over 16 seeds). Into a tighter bend it
+        // stays 0.3: a longer look-ahead there cut corners into Lantern's walls.
+        const STRETCH_S: f32 = 0.3;
+        const OPEN_STRETCH_S: f32 = 0.6;
+        const STRETCH_MIN_RADIUS_M: f32 = 200.0;
+        let base_ld = r.ctrl.lookahead(v) + v * STEER_LAG_S;
+        let open_ld = base_ld + OPEN_STRETCH_S * (v - 25.0).max(0.0);
+        let i_here = (r.s / CORRIDOR_STEP_M) as isize;
+        let n_ahead = (open_ld / CORRIDOR_STEP_M).ceil() as isize;
+        let open_road = (0..=n_ahead)
+            .all(|j| line.curvature[corridor.wrap(i_here + j)].abs() < 1.0 / STRETCH_MIN_RADIUS_M);
+        let mut ld = if open_road {
+            open_ld
+        } else {
+            base_ld + STRETCH_S * (v - 25.0).max(0.0)
+        };
         // Held up and slowing (a car or a light ahead): aim no further than where I stop.
         // A target around the next corner turns the car in early, across the inside lane —
         // queued at a junction that is the oncoming lane (Lantern Row, round-12 tip: a racer
@@ -3261,14 +3373,14 @@ fn decide_racer(
         let mut target = corridor.point(s_t, n_t);
         // Clearing the finish line past the end of the corridor: straight on along its last
         // direction.
-        if clearing_line && r.s_rel + ld > corridor.length_m {
+        if clearing_line && beyond + ld > 0.0 {
             // Towards the kerb on my side as I roll on, round whatever stands at the end of
             // the road straight ahead (the Knob lot: a broken-down car in the entrance).
             let (_, kerb) = limits(corridor.length_m);
             let end = corridor.point(corridor.length_m, kerb);
             let t = corridor.samples[corridor.samples.len() - 1].tangent;
             // From where I am past the end (`s` stops at the end; `s_rel` runs on).
-            let past = r.s_rel + ld - corridor.length_m;
+            let past = (beyond + ld).max(0.0);
             target = [end[0] + t[0] * past, end[1] + t[1] * past, end[2]];
         }
         let pos_lag = geom::add(r.pos, geom::scale(r.vel, STEER_LAG_S));
@@ -4490,6 +4602,56 @@ mod tests {
         // Clear of it: pull over.
         let (_, tac) = at(&mut f, 398.0 + FINISH_CLEAR_M + 2.0, 4.0);
         assert_eq!(tac, Tactic::Park);
+    }
+
+    #[test]
+    fn a_car_at_the_start_of_a_course_that_ends_beside_it_has_not_finished() {
+        // A 100 m square driven clockwise from (0, 0) up +y, back along y = -1 to (0, -1): the
+        // end is 1 m from the start (a street racer's Loop 9 lap from a rest stop back into
+        // it). The car stands between the two, nearer the end.
+        let mut pts: Vec<[f32; 2]> = Vec::new();
+        pts.extend((0..=50).map(|i| [0.0, 2.0 * i as f32]));
+        pts.extend((1..=50).map(|i| [2.0 * i as f32, 100.0]));
+        pts.extend((1..=50).map(|i| [100.0, 100.0 - 2.0 * i as f32]));
+        pts.extend((1..=50).map(|i| [100.0 - 2.0 * i as f32, -1.0]));
+        let samples: Vec<CorridorSample> = (0..pts.len())
+            .map(|i| {
+                let (a, b) = if i + 1 < pts.len() {
+                    (pts[i], pts[i + 1])
+                } else {
+                    (pts[i - 1], pts[i])
+                };
+                CorridorSample {
+                    pos: [pts[i][0], pts[i][1], 0.0],
+                    tangent: geom::normalize(geom::sub(b, a)),
+                    left_m: 5.0,
+                    left_pass_m: 5.0,
+                    right_m: 5.0,
+                    junction: false,
+                    surface: wp_contracts::SurfaceType::Asphalt,
+                }
+            })
+            .collect();
+        let corridor = Corridor {
+            length_m: (samples.len() - 1) as f32 * CORRIDOR_STEP_M,
+            samples,
+            closed: false,
+            opposing: OpposingLanes::Never,
+            junction_lanes: Vec::new(),
+        };
+        let spec = RacerSpec {
+            entity: EntityId(1),
+            profile: DriverProfile::default(),
+            capability: cap(),
+        };
+        let mut f = Field::new(corridor, &[spec], RaceConfig::default());
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        let mut car = obs(1, -0.8, 0.0, HandlingEffects::NEUTRAL);
+        car.state.speed_mps = 0.0;
+        car.state.lin_vel = [0.0; 3];
+        f.tick(&world, &[car], &[], &NoPolice);
+        assert_eq!(f.racers[0].status, RacerStatus::Racing);
+        assert!(f.racers[0].progress < 5.0, "{}", f.racers[0].progress);
     }
 
     #[test]

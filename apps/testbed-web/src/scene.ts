@@ -8,7 +8,7 @@ import { tagFeature } from "./perf";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { setCarEnvironment } from "./render/panels";
-import type { Barrier, GarageSite, SimEvent } from "./wasm/sim";
+import type { Barrier, GarageSite, SafehouseSite, SimEvent } from "./wasm/sim";
 import { D, DRAW_STRIDE, INTENT_STRIDE, POLICE_DRAW_FLAG, TL, TOOL_KIND, TOOL_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
@@ -32,6 +32,8 @@ const CONTACT_LIFETIME_S = 1.5;
 const MAX_CONTACT_MARKERS = 64;
 /** Garage marker colours: legit (blue) and crooked (amber) shops. */
 const GARAGE_COLOUR = { Legit: 0x3399ff, Crooked: 0xffaa22 } as const;
+/** Safehouse ring and beam colour (career runs). */
+const SAFEHOUSE_COLOUR = 0x33dd88;
 /** Height of a garage's light beam, m (visible over the greybox blocks). */
 const GARAGE_BEAM_M = 40;
 const CONTACT_DOT = new THREE.SphereGeometry(0.08, 8, 6);
@@ -293,16 +295,10 @@ export class SceneView {
     tagFeature(holder, "city");
     this.scene.add(holder);
     try {
-      // The published (artifact) build cannot serve binary files, so it ships the same bytes
-      // base64-encoded as `<id>.greybox.b64.txt`.
-      let gltf;
-      try {
-        gltf = await new GLTFLoader().loadAsync(`data/city/${cityId}.greybox.glb`);
-      } catch {
-        const b64 = await fetchGreyboxB64(cityId);
-        const bytes = Uint8Array.from(atob(b64.trim()), (c) => c.charCodeAt(0));
-        gltf = await new GLTFLoader().parseAsync(bytes.buffer, "");
-      }
+      // A city shipped as parts (`<id>.greybox.parts.json`: Port Vesper's shared part is
+      // loaded by both `vesper_v2` and `ashpeak`, city-import `parts`) loads them all into one
+      // group; any other city is one greybox.
+      const gltf = { scene: await loadGreybox(cityId) };
       // glTF is +Y up, same as Three: add to the scene, not the Z-up world group.
       // Layers that share a plane in the greybox (bus lanes and parking painted on asphalt,
       // sidewalks, their corner fills and the level lots behind them on zone ground) draw over
@@ -318,6 +314,8 @@ export class SceneView {
         verge: 1,
         lot: 1,
         lot_skirt: 1,
+        // Car parks lie 2 cm over the sidewalk and lot they cover.
+        car_park: 2,
         asphalt: 1,
         highway_concrete: 1,
         gravel_road: 1,
@@ -519,8 +517,9 @@ export class SceneView {
   }
 
   /** Repair shop markers (`garages_json()`): a ring on the ground at the shop's radius and a
-   * light beam, blue for legit shops, amber for crooked ones. Stop inside the ring to repair. */
-  setGarages(list: GarageSite[]): void {
+   * light beam, blue for legit shops, amber for crooked ones. Stop inside the ring to repair.
+   * Safehouses (`safehouses_json()`, career runs) get the same marker in green. */
+  setGarages(list: GarageSite[], safehouses: SafehouseSite[] = []): void {
     for (const old of this.garages.children) {
       old.traverse((o) => {
         if (o instanceof THREE.Mesh) {
@@ -530,8 +529,12 @@ export class SceneView {
       });
     }
     this.garages.clear();
-    for (const g of list) {
-      const colour = GARAGE_COLOUR[g.kind] ?? GARAGE_COLOUR.Legit;
+    const places = [
+      ...list.map((g) => ({ name: `garage:${g.name}`, pos: g.pos, radius_m: g.radius_m, colour: GARAGE_COLOUR[g.kind] ?? GARAGE_COLOUR.Legit })),
+      ...safehouses.map((h) => ({ name: `safehouse:${h.name}`, pos: h.pos, radius_m: h.radius_m, colour: SAFEHOUSE_COLOUR })),
+    ];
+    for (const g of places) {
+      const colour = g.colour;
       const holder = new THREE.Group();
       holder.position.set(...g.pos);
       const ring = new THREE.Mesh(
@@ -548,7 +551,7 @@ export class SceneView {
       beam.rotation.x = Math.PI / 2;
       beam.position.z = GARAGE_BEAM_M / 2;
       holder.add(ring, beam);
-      holder.name = `garage:${g.name}`;
+      holder.name = g.name;
       this.garages.add(holder);
     }
   }
@@ -823,6 +826,40 @@ function prewarmStandIn(o: THREE.Object3D, m: THREE.Material, kind: number): THR
       return new THREE.Points(geo, m);
   }
   return null;
+}
+
+/** One greybox file (`data/city/<stem>.greybox.glb`, else its base64 text: the published
+ * build cannot serve binary files). */
+async function loadGreyboxFile(stem: string): Promise<THREE.Object3D> {
+  try {
+    return (await new GLTFLoader().loadAsync(`data/city/${stem}.greybox.glb`)).scene;
+  } catch {
+    const b64 = await fetchGreyboxB64(stem);
+    const bytes = Uint8Array.from(atob(b64.trim()), (c) => c.charCodeAt(0));
+    return (await new GLTFLoader().parseAsync(bytes.buffer, "")).scene;
+  }
+}
+
+/** The greybox of `cityId`: its parts in manifest order (`<id>.greybox.parts.json`,
+ * `{"parts": [...]}`), or the single `<id>.greybox` file. */
+async function loadGreybox(cityId: string): Promise<THREE.Object3D> {
+  let parts: string[] | null = null;
+  try {
+    const r = await fetch(`data/city/${cityId}.greybox.parts.json`);
+    if (r.ok) {
+      const text = await r.text();
+      // A dev server answers unknown paths with index.html.
+      if (!text.trimStart().startsWith("<")) parts = (JSON.parse(text) as { parts: string[] }).parts;
+    }
+  } catch {
+    parts = null;
+  }
+  if (!parts || parts.length === 0) return loadGreyboxFile(cityId);
+  const scenes = await Promise.all(parts.map((p) => loadGreyboxFile(p)));
+  const group = new THREE.Group();
+  group.name = `${cityId}.greybox`;
+  for (const sc of scenes) group.add(sc);
+  return group;
 }
 
 /**

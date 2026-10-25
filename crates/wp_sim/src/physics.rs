@@ -42,8 +42,11 @@ pub struct CityColliders {
     pub tunnel_boxes: usize,
     /// Tree trunks, hedges and fences (residential lots, playtest row 95).
     pub decor: usize,
-    /// Median barrier segments between divided-highway carriageways (one smooth mesh collider
-    /// per barrier line).
+    /// Structure colliders: canopies and their pillars, landmark parts, bridge trusses
+    /// (`wp_world::network::CityFeatures::structures`, PR #38).
+    pub structures: usize,
+    /// Concrete barrier segments: medians between divided-highway carriageways and the outer
+    /// edges of highways and ramps (one smooth mesh collider per barrier line).
     pub barriers: usize,
 }
 
@@ -253,11 +256,13 @@ impl PhysicsWorld {
     }
 
     /// Height of the drivable ground (road and sidewalk meshes, terrain: the triangle-mesh and
-    /// heightfield colliders, never buildings, rails, decor or bodies) hit by a ray straight
+    /// heightfield colliders except barrier and rail meshes, never buildings, decor or bodies)
+    /// hit by a ray straight
     /// down from `(xy, from_z)`, at most `max_m` below it. Seats parked cars on what is drawn.
     pub fn drivable_ground_z(&self, xy: [f32; 2], from_z: f32, max_m: f32) -> Option<f32> {
         let ground = |_: ColliderHandle, c: &Collider| {
             c.parent().is_none()
+                && c.user_data != BARRIER_USER_DATA
                 && (c.shape().as_trimesh().is_some() || c.shape().as_heightfield().is_some())
         };
         let qp = self.query_pipeline(QueryFilter::default().predicate(&ground));
@@ -387,6 +392,10 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     let (walk_colliders, sidewalk_triangles) = sidewalk_mesh_colliders(&walks);
     out.sidewalk_triangles = sidewalk_triangles;
     added.extend(walk_colliders);
+    // Car parks (rest stop lots): their pads over the sidewalks and the dropped kerbs, paved
+    // like the roads.
+    let lots = wp_world::car_park::pad_mesh(&map.car_parks);
+    added.extend(mesh_tile_colliders(&lots, InteractionGroups::all()));
 
     // Buildings: extruded footprints as convex hulls (footprints are convex lots), pitched
     // roofs included (a gable or hip house is still convex). A city on flat ground (the
@@ -408,6 +417,19 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
         }
     }
 
+    // Structures: canopies and pillars, landmarks, trusses (prisms, possibly floating).
+    for st in &net.features.structures {
+        let mut pts: Vec<Vector> = Vec::with_capacity(st.footprint.len() * 2);
+        for q in &st.footprint {
+            pts.push(Vector::new(q[0], q[1], st.z0_m));
+            pts.push(Vector::new(q[0], q[1], st.z1_m));
+        }
+        if let Some(cb) = ColliderBuilder::convex_hull(&pts) {
+            added.push(cb.friction(0.6).build());
+            out.structures += 1;
+        }
+    }
+
     // Guard rails along decks: 0.3 m wide, 0.9 m tall on each paved edge, one smooth mesh per
     // chained run of rail segments (row 164: no seams for a scraping car to catch).
     for run in chain_segments(&wp_world::surface::deck_rails(net)) {
@@ -416,7 +438,12 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     }
     // Median barriers between divided-highway carriageways: 0.5 m wide, 0.81 m tall concrete,
     // one smooth mesh per barrier line.
-    for line in wp_world::surface::median_barriers(net) {
+    // And along the outer edges of highways and ramps (row 160; open at ramp tapers, gores
+    // and rest-stop ramps, on decks and in covered spans).
+    for line in wp_world::surface::median_barriers(net)
+        .into_iter()
+        .chain(wp_world::surface::edge_barriers(map))
+    {
         added.extend(barrier_colliders(
             &line,
             0.0,
@@ -497,7 +524,8 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     Some((added, out))
 }
 
-/// Static collider of one piece of street / yard furniture: a tree trunk (cylinder up to the
+/// Static collider of one piece of street / yard furniture (the same footprint as
+/// [`wp_world::obstacles::SolidDecor::of`], which police feel for): a tree trunk (cylinder up to the
 /// crown, 2.5 m), a hedge, fence, crane mast, barrier, hay bale or billboard (box). `None` for flush decor (driveways).
 pub fn decor_collider(d: &wp_world::network::Decor) -> Option<Collider> {
     use wp_world::network::DecorKind;
@@ -505,7 +533,7 @@ pub fn decor_collider(d: &wp_world::network::Decor) -> Option<Collider> {
     let rot = rapier3d::math::Rotation::from_xyzw(0.0, 0.0, s, c);
     match d.kind {
         DecorKind::StreetTree | DecorKind::YardTree | DecorKind::PineTree => {
-            let h = 2.5f32.min(d.size[2]);
+            let h = wp_world::obstacles::TRUNK_SOLID_H_M.min(d.size[2]);
             // Parry cylinders stand along local Y: rotate +90° about X so it stands on Z.
             let half = core::f32::consts::FRAC_1_SQRT_2;
             let up = rapier3d::math::Rotation::from_xyzw(half, 0.0, 0.0, half);
@@ -551,6 +579,9 @@ pub const BARRIER_HEIGHT_M: f32 = 0.81;
 const BARRIER_FOOT_M: f32 = 0.3;
 /// Friction of barriers and rails: smooth concrete and steel a car slides along (row 164).
 const BARRIER_FRICTION: f32 = 0.3;
+/// `Collider::user_data` of barrier and rail meshes: triangle meshes that are not drivable
+/// ground ([`PhysicsWorld::drivable_ground_z`] skips them).
+pub const BARRIER_USER_DATA: u128 = 0x0BA2_21E2;
 
 /// Length of the 2D vector `(x, y)` (plain `sqrt`, which is exactly rounded, not `hypot`).
 fn len2(x: f32, y: f32) -> f32 {
@@ -676,7 +707,12 @@ fn barrier_colliders(line: &[[f32; 3]], right: f32, half_w: f32, height: f32) ->
         idx,
         TriMeshFlags::FIX_INTERNAL_EDGES,
     ) {
-        Ok(b) => Some(b.friction(BARRIER_FRICTION).restitution(0.0).build()),
+        Ok(b) => Some(
+            b.friction(BARRIER_FRICTION)
+                .restitution(0.0)
+                .user_data(BARRIER_USER_DATA)
+                .build(),
+        ),
         Err(e) => {
             eprintln!("barrier trimesh failed: {e:?}");
             None

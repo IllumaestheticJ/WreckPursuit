@@ -250,6 +250,109 @@ fn car_parked_across_a_two_lane_street_is_passed_or_turned_away_from() {
 }
 
 #[test]
+fn a_car_parked_in_a_junction_box_is_edged_around() {
+    // A police car stops in a junction right in front of a civilian already crossing it
+    // (jam_pursuit_vesper: one stood there for minutes and trapped the car behind it in the
+    // box). The civilian edges around it instead of waiting there for good.
+    let mut w = World::procedural(&ProcGenConfig::default(), cfg(4.0));
+    w.populate();
+    let net = w.network().clone();
+    let lanes: Vec<(Vec<V3>, Vec<f32>)> = net
+        .lanes
+        .iter()
+        .filter(|l| l.kind.drivable())
+        .map(|l| (l.polyline.clone(), geom::cumulative(&l.polyline)))
+        .collect();
+    // Inside a junction box: past the end of a lane it came along, on no lane.
+    let in_box = |q: V2, f: V2| {
+        let past_end = lanes.iter().any(|(pts, _)| {
+            let e = geom::xy(pts[pts.len() - 1]);
+            let d = geom::dot(geom::sub(q, e), f);
+            geom::dist(q, e) < 8.0 && d > 1.5
+        });
+        past_end
+            && lanes
+                .iter()
+                .all(|(pts, cum)| geom::project(pts, cum, q).dist > 1.0)
+    };
+    let mut ev = Vec::new();
+    let mut tries = 0;
+    let mut trapped = 0;
+    let mut longest = 0.0f32;
+    let mut contacts = 0;
+    while tries < 6 {
+        w.set_tracked_vehicles(&[]);
+        for _ in 0..(5.0 / PHYSICS_DT) as usize {
+            w.step(PHYSICS_DT, &mut ev);
+        }
+        // A car crossing a junction, going straight on at town speed: the vehicle stops in the
+        // box right ahead of it.
+        let Some(car) = w
+            .agents()
+            .filter(|a| a.speed_mps > 3.0 && a.speed_mps < 7.0)
+            .find(|a| in_box(geom::xy(a.pos), geom::dir_of_yaw(a.yaw)))
+        else {
+            continue;
+        };
+        tries += 1;
+        let f = geom::dir_of_yaw(car.yaw);
+        let b = TrackedVehicle {
+            entity: EntityId(77),
+            pos: [
+                car.pos[0] + f[0] * 11.0,
+                car.pos[1] + f[1] * 11.0,
+                car.pos[2],
+            ],
+            vel: [0.0; 3],
+            forward: f,
+            siren: false,
+            player: false,
+        };
+        let b_box = Obb {
+            hl: 2.3,
+            hw: 1.0,
+            ..body(geom::xy(b.pos), f)
+        };
+        let mut stood = 0.0f32;
+        let mut held = false;
+        for k in 0..(60.0 / PHYSICS_DT) as usize {
+            w.set_tracked_vehicles(&[b]);
+            w.step(PHYSICS_DT, &mut ev);
+            if k % 4 != 0 {
+                continue;
+            }
+            let Some(a) = w.agents().find(|a| a.id == car.id) else {
+                break;
+            };
+            if geom::obb_overlap(&body(geom::xy(a.pos), geom::dir_of_yaw(a.yaw)), &b_box) {
+                contacts += 1;
+            }
+            let r = geom::sub(geom::xy(a.pos), geom::xy(b.pos));
+            if geom::dot(r, f) > 0.0 {
+                break; // past it
+            }
+            if a.speed_mps < 0.5 {
+                stood += 4.0 * PHYSICS_DT;
+                held = true;
+            }
+        }
+        if held {
+            trapped += 1;
+        }
+        longest = longest.max(stood);
+    }
+    println!(
+        "junction box blocker: {tries} placed, {trapped} held up, longest stand {longest:.1} s, \
+         contacts {contacts}"
+    );
+    assert_eq!(contacts, 0, "a civilian touched the parked car");
+    assert!(
+        longest < 30.0,
+        "a car stood behind it in the box for {longest:.1} s"
+    );
+}
+
+#[test]
 fn multi_lane_road_changes_lane_around_a_stopped_car() {
     // 4.8 at noon on the round-13 curve (Commercial 0.75, the block this lane runs through) =
     // the old 4.0 × 0.90: same cars.
@@ -374,8 +477,9 @@ fn single_lane_one_way_followers_reverse_and_reroute() {
 
 #[test]
 fn port_vesper_two_lane_street_gets_around_a_stopped_car() {
-    let mut w = World::vesper(&VesperConfig::default(), cfg(4.0));
-    let net = w.network().clone();
+    let net = World::vesper(&VesperConfig::default(), cfg(4.0))
+        .network()
+        .clone();
     // A straight-ish 1+1 street (bend < 20° over the lane) near downtown.
     let lanes: Vec<usize> = two_lane_streets(&net, 100.0)
         .into_iter()
@@ -388,21 +492,27 @@ fn port_vesper_two_lane_street_gets_around_a_stopped_car() {
         })
         .collect();
     assert!(!lanes.is_empty());
-    let lane = *lanes
-        .iter()
-        .min_by(|&&a, &&b| {
-            let d = |l: usize| geom::dist(geom::xy(net.lanes[l].polyline[0]), net.core);
-            d(a).total_cmp(&d(b)).then(a.cmp(&b))
-        })
-        .unwrap();
-    let b = blocker_on(&net, lane, len_of(&net, lane) * 0.6, false, false);
-    w.set_tracked_vehicles(&[b]);
-    w.populate();
-    let r = blocked_run(&mut w, b, &net.lanes[lane].polyline, 150.0);
-    report("Port Vesper 1+1, stopped car in lane", &r);
-    assert_eq!(r.contacts, 0);
-    assert_eq!(r.collisions, 0);
-    assert!(r.queued >= 1, "{r:?}");
+    // The nearest such lanes to downtown, in order; the first one traffic queues on is the
+    // test (a lane can be a quiet side street: the river's bridges moved through routes).
+    let mut near = lanes.clone();
+    let d = |l: usize| geom::dist(geom::xy(net.lanes[l].polyline[0]), net.core);
+    near.sort_by(|&a, &b| d(a).total_cmp(&d(b)).then(a.cmp(&b)));
+    let mut picked = None;
+    for &lane in near.iter().take(4) {
+        let mut w = World::vesper(&VesperConfig::default(), cfg(4.0));
+        let b = blocker_on(&net, lane, len_of(&net, lane) * 0.6, false, false);
+        w.set_tracked_vehicles(&[b]);
+        w.populate();
+        let r = blocked_run(&mut w, b, &net.lanes[lane].polyline, 150.0);
+        report("Port Vesper 1+1, stopped car in lane", &r);
+        assert_eq!(r.contacts, 0);
+        assert_eq!(r.collisions, 0);
+        if r.queued >= 1 {
+            picked = Some(r);
+            break;
+        }
+    }
+    let r = picked.expect("no traffic queued on any of the nearest 1+1 lanes");
     assert!(r.resolved * 2 >= r.queued, "{r:?}");
     assert!(r.still_waiting <= 3, "{r:?}");
 }

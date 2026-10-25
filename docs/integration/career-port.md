@@ -148,6 +148,81 @@ header-only blessed (contract 0.3.1 → 0.4.1, no tick hash moved). **Three gold
 blessed here: they belong to round12 (the police heat-level change, row 156, is the likely
 cause).
 
+## Round 3: races and touge from the career garage (playtest row 167)
+
+Owner: "I need to be able to reach the touge and race features in the career menu, instead of
+having to go back to the main menu to get to it." Base: `origin/main` `aa30f9ea` (the branch was
+restarted there; rounds 1–2 are in main).
+
+- **Garage start row** (`ui-kit` `CareerGarage`): Night run, Free drive (already there), and now
+  **Street races** and **Touge battles** (`CareerApi.races?()` / `touge?()`, optional so other
+  hosts hide them; disabled when the career car can't go out, like the others). The touge
+  button's tooltip names the tier touge needs while it is locked.
+- **Street races** open the race picker as a career run: cards priced for the career car and
+  mode, bet limits from the career (`progress.max_bet_city`; locked below the Street tier with
+  the reason). "Race" starts `career_start_run(race_scenario_json(…))` (new wasm export), so
+  buy-in, purse, bets and rep go through the career. **Fix:** `Session::begin_career` now
+  re-charges a picker race's buy-in on the career account (`RaceRun::reenter`); before, it went
+  on the session's throwaway account (test
+  `a_picker_race_from_the_garage_charges_the_career_account`).
+- **Touge battles** open the touge picker on the career's account (`tougeUsesCareer()` is true
+  for a garage-opened picker): locked battles and wagers show the rep tier they need
+  (`require_unlocked`, unchanged rules).
+- **Back to the garage:** closing a garage-opened picker reopens the garage; a career race's
+  results show **Back to garage** (instead of Race again / Races… / Free drive), and a decided
+  career touge battle shows it on its panel. Both end the run through `openGarage()` (settled
+  on the career, one night passes). "Restart" on the end-of-run panel of a career race / battle
+  also goes to the garage. Main-menu entries are unchanged (quick play stays outside the
+  career).
+- **Map** (agreed with the ashpeak-port helper): career races and garage night runs / free
+  drives use the main menu's remembered map (`loadMenuMap(MENU_MAPS)`, key `wp.menu.map.v1`);
+  the career race picker lists `racesForMap(…, citySel.value)` like the main one, and the
+  menu's `play()` now applies the map for the garage choice too (only touge stays off-map).
+  2026-10-25: the maps became one world (`ashpeak`), so career races and garage runs always use
+  it; the remembered menu entry is now the spawn city (`port_vesper`, `ashpeak_city`,
+  `harnell_crossing`; same key) where garage night runs / free drives start.
+- **e2e:** race.mjs (+5: garage → Street races → career race with the career car, buy-in off the
+  career → results → Back to garage, settled; closing the picker returns), touge.mjs (+3:
+  garage → Touge battles reads the career's tier, locked; closing returns). run.mjs and tune.mjs
+  were broken on main by round 1's Dealer lock-badge column (`td:last-child` became the badge
+  cell): their "buy worn" selector now targets `td:nth-last-child(2)`.
+
+## Round 4: street bets reach the career (playtest row 169)
+
+Owner: "street race bets don't go to career". Base `origin/main` `431232c5`.
+
+- **Cause:** not the wasm side. A street race inside a career run already stakes and pays on
+  the career run's account, and `finish_run` writes it back (new test
+  `street_bets_settle_on_the_career`: one lost, one won race in a garage-started free drive →
+  both stakes, the even-money payout and the level's rep are in the career's ledger). The
+  testbed's **main menu** started Night run / Rainy night / Free drive as quick play
+  ("Quick play runs outside the career") even with the career box ticked, so those bets went on
+  the quick-play account and never reached the career. (The developer panel's buttons already
+  followed the box.)
+- **Fix:** with the career box ticked (the default), a career, and a career car that can go out
+  (`can_start`), the main menu's Night run / Rainy night / Free drive start **career runs**
+  (`startCareerRun`, which gained `rain` and `city` arguments; restarts keep the rainy night).
+  Otherwise they stay quick play.
+- **Career off / no usable career car = quick play:** betting still works on practice cash
+  that does not count for the career, and the street UI says so: the bet slip's stake line
+  carries a tag, "quick play: not your career" (or "career cash"; a tooltip explains), and the
+  result banner says "quick-play cash" / "career cash".
+  `street_status_json` gained `career` (the session is a career run).
+- **Rule: a bet placed while the career box is ticked lands in the career.** A quick-play
+  session with the box ticked (the page's opening free drive, or the menu with no usable career
+  car) takes **no** street bets: Race is disabled and the slip's win / lose line becomes "Career
+  is on: no bets in quick play" (tooltip: start a career run from the garage or the menu with a
+  career car, or untick career to bet practice cash; same height, so the touch layout keeps its
+  Decline button on screen)
+  (`StreetUi` gets a `careerTicked` callback; Enter / pad accept are refused too). Unticked:
+  practice betting as before. (The wasm `street_accept` itself still takes any session's bet;
+  the rule is the testbed's, as the career box is.)
+- **e2e (street.mjs, +7):** main menu → Free drive with the career box on and a career car is a
+  career run, the slip says career cash; box off: quick play, the slip says so, betting
+  allowed; box on but no career car: quick play and the bet is refused. The existing
+  quick-play race flows untick the box first (the touch check keeps it ticked: it only
+  declines).
+
 ## Contract change requests
 
 | # | Change | Why | Who is affected | Status |

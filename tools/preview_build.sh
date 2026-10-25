@@ -30,6 +30,8 @@ PY
 rm -rf $S/preview && mkdir -p $S/preview && cp -r $W/dist/* $S/preview/
 P=$S/preview; mkdir -p $P/data/city $P/data/panels $P/data/audio $P/scenarios
 cp $R/data/city/*.greybox.b64.txt $P/data/city/ 2>/dev/null || true
+# Cities shipped as parts (vesper_v2, ashpeak: city-import `parts`) list them here.
+cp $R/data/city/*.greybox.parts.json $P/data/city/ 2>/dev/null || true
 # Split greyboxes over the 15 MB per-file cap into 12 MB parts plus a count manifest
 # (scene.ts fetchGreyboxB64 joins them).
 for f in $P/data/city/*.greybox.b64.txt; do

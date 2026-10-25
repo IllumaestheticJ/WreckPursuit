@@ -459,6 +459,7 @@ impl TougeSetup {
             prior_meets: 0,
             // Touge lays out its own single-file grid ([`plan_course`]); no picker override.
             grid: None,
+            finish_window_s: None,
         }
     }
 }
@@ -737,7 +738,7 @@ impl TougeTable {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Wager {
-    /// Race for rep (and the boss purse) only.
+    /// Race for rep and the purse only.
     None,
     /// A cash side bet.
     SideBet {
@@ -911,7 +912,7 @@ pub struct TougeSettlement {
     pub bet_payout: Money,
     /// Net side-bet result (payout − stake).
     pub bet_net: Money,
-    /// Boss purse paid.
+    /// Purse paid for the win (challenger or boss).
     pub purse: Money,
     /// Rep change (result + pink slip + totaled).
     pub rep: i64,
@@ -923,7 +924,7 @@ pub struct TougeSettlement {
     pub car_lost: Option<CarUid>,
 }
 
-/// Pay out a decided battle on the player's account: side bet, boss purse, rep (through
+/// Pay out a decided battle on the player's account: side bet, win purse, rep (through
 /// `Economy::award_rep`, which pays any tier reward reached), and the pink slip (the NPC's car
 /// arrives with `opponent.damage`, exactly as it finished; the player's goes to the NPC).
 #[allow(clippy::too_many_arguments)]

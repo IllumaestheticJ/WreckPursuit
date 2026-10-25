@@ -20,6 +20,10 @@
 // Re-locked 2026-10-22 when the pace harness moved to the browser setup (the player seat stays
 // a player car, AI-driven, so traffic spawns round it): best ratio 2.248 -> 1.311, field
 // faster: downtown traffic now spawns round the player car instead of all over the city (about 12 civilians within 300 m of each racer before), so the field meets less of it.
+// Re-locked 2026-10-23 by the rule for candidate G (the owner's new shipped handling) with the
+// AI retune (lead/opponent-pace): this seed's back pair queues behind the front pair at s50
+// (+20 s) and runs clear at s95 (−4 s). 16-seed means: s50 72.7 s (pre-G 75.1, 59/64 finish),
+// s95 72.0 s (74.9). Reasons in docs/integration/opponent-pace.md "Candidate G".
 (
     name: "opponent_pace_lantern_checkpoint_s95",
     seed: 31,
@@ -84,10 +88,10 @@
     ],
     expect_pending: [
         metric(name: "finishers", min: 4, max: 4),
-        metric(name: "best_ratio", min: 0.97, max: 1.36),
-        metric(name: "race_time_s", entity: "ai_juno", min: 41.1, max: 55.6),
-        metric(name: "race_time_s", entity: "ai_dez", min: 40.2, max: 54.3),
-        metric(name: "race_time_s", entity: "ai_tito", min: 52.7, max: 71.3),
-        metric(name: "race_time_s", entity: "player", min: 53.7, max: 72.7),
+        metric(name: "best_ratio", min: 0.97, max: 1.34),
+        metric(name: "race_time_s", entity: "ai_juno", min: 39.5, max: 53.4),
+        metric(name: "race_time_s", entity: "ai_dez", min: 41.4, max: 56.0),
+        metric(name: "race_time_s", entity: "ai_tito", min: 42.5, max: 57.5),
+        metric(name: "race_time_s", entity: "player", min: 43.6, max: 59.0),
     ],
 )

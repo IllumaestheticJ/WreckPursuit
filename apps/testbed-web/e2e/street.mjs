@@ -8,11 +8,11 @@
 // honking (the rebindable horn: Q / pad L3) right behind a racer opens the map as the finish picker;
 // picking B on the map (mouse click / pad crosshair + A) previews a raceable route; the bet
 // slider / pad LB-RB sets the stake; by day extra waypoints are added, re-ordered and removed on the
-// map (row 151: numbered flags, the route through them, gates in the world); a wanted player cannot
+// map (row 151: numbered flags, the route through them, gates in the world); a chased player cannot
 // challenge (row 150); Race (Enter / pad Menu) pays it, puts both cars side by side at rest
 // (row 150) and counts down with the
 // race panel up and the route on the minimap; the street UI hides in photo mode, under the
-// game menu and during a crash replay; reaching B wins even money and shows the result. Roaming
+// game menu and during a crash replay; reaching B pays the stake times the challenge's odds and shows the result. Roaming
 // racers are fleet-drawn past ~40 m and get their hero view near the camera; the opponent keeps
 // its view while racing. (Draw calls / triangles: e2e/perf_check.mjs, night run incl. racers.) Then the late-night night run
 // has its racers, and on touch (?touch=1) the 📯 button challenges and the picker takes taps.
@@ -113,6 +113,10 @@ const frames = (p, n) =>
 
 await page.goto(`${URL}?city=${CITY}`);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 90000 });
+// These races are quick play (practice cash): untick the career box, or a quick-play
+// session takes no bets (row 169: with it ticked, bets must land in the career).
+const untickCareer = (p) => p.evaluate(() => (document.getElementById("career").checked = false));
+await untickCareer(page);
 
 // Sim cost without street racers, then with.
 const simMs = async () => {
@@ -466,7 +470,8 @@ async function race(label, pad) {
   const res = (await status(page))?.result;
   check(res?.won === true, `${label}: race finished, won (${res?.reason})`);
   const cash2 = await page.evaluate(() => window.__wp.sim.runAccount().cash);
-  check(cash2 === cash0 + r.stake, `${label}: even money ${cash0} → ${cash2}`);
+  // The win pays the stake times the race's odds (racer level and car vs yours): RaceView.payout.
+  check(res?.net === r.payout - r.stake && cash2 === cash0 - r.stake + r.payout, `${label}: paid ${r.payout} at the challenge's odds ${cash0} → ${cash2}`);
   await page.waitForSelector("#street-result:not(.hidden)", { timeout: 20000 }).catch(() => {});
   check(await visible(page, "#street-result"), `${label}: result banner visible`);
   await shot(page, `street_${label}_6_result.png`);
@@ -489,20 +494,29 @@ async function race(label, pad) {
   await frames(page, 3);
   check(!(await page.evaluate(() => document.getElementById("street-ui").classList.contains("hidden"))), `${label}: street UI back after the replay`);
   if (!pad) {
-    // Last: wanted, a honk challenges nobody and the hint says to lose the police (row 150).
+    // Last: wanted. A wanted level alone still allows a challenge; only an active pursuit or
+    // search blocks it, with a hint to lose the police (row 150, owner 2026-10-24).
     await page.evaluate(() => window.__wp.sim.debugSetHeat(window.__wp.app.player, 40));
     await page.keyboard.down(hornKey);
     let blocked = null;
+    let offered = null;
     for (let i = 0; i < 12; i++) {
       await placeBehind(page, st.roster[1].entity);
       await wait(page, 250);
-      blocked = (await status(page))?.blocked ?? blocked;
+      const s = await status(page);
+      blocked = s?.blocked ?? blocked;
+      offered = s?.offer ?? offered;
+      if (offered) break;
     }
     await page.keyboard.up(hornKey);
     const ws = await status(page);
     const hint = await page.evaluate(() => document.querySelector("#street-hint")?.textContent ?? "");
-    check(ws.pursued && !ws.offer && !!blocked, `${label}: wanted, a honk opens no challenge (blocked: ${blocked?.name})`);
-    check(/Lose the police/.test(hint), `${label}: hint says to lose the police first ("${hint.trim()}")`);
+    if (ws.pursued) {
+      check(!ws.offer && !!blocked, `${label}: wanted and chased, a honk opens no challenge (blocked: ${blocked?.name})`);
+      check(/Lose the police/.test(hint), `${label}: hint says to lose the police first ("${hint.trim()}")`);
+    } else {
+      check(!!offered && !blocked, `${label}: wanted but not chased, a honk still challenges (offer: ${offered?.entity}, blocked: ${blocked?.name})`);
+    }
     // (The pursuit outlives the heat; the session ends here.)
   }
 }
@@ -640,6 +654,57 @@ await page.keyboard.press("KeyM");
   await frames(tp, 2);
   check(!(await status(tp))?.offer && !(await tp.evaluate(() => window.__wp.map.isOpen)), "touch: Decline closes the picker");
   await tctx.close();
+}
+
+// Row 169: street bets follow the career. Main menu → Free drive with the career box ticked
+// (and a career car) is a career run: the bet slip says "Career cash". Career box off: quick
+// play, and the slip says the bet is practice cash. (Settlement on the career account:
+// wp_wasm street_bets_settle_on_the_career.)
+// Third case: career box ticked but no career car (the menu falls back to quick play): the
+// bet is refused, so nothing is bet outside the career while it is ticked.
+for (const [careerBox, buyCar] of [[true, true], [false, true], [true, false]]) {
+  const label = !careerBox ? "career off" : buyCar ? "career on" : "career on, no car";
+  const cp = await context.newPage();
+  watch(cp);
+  await cp.goto(`${URL}?city=${CITY}&menu=1`);
+  await cp.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 120000 });
+  await cp.evaluate((on) => {
+    const wp = window.__wp;
+    wp.careerApi.newCareer("Arcade");
+    if (on[1]) wp.careerApi.buy("junkyard_beater", "Worn");
+    document.getElementById("career").checked = on[0];
+  }, [careerBox, buyCar]);
+  await cp.click("#gm-play-free");
+  await cp.waitForFunction(() => window.__wp.sim.streetStatus() !== null, null, { timeout: 60000 }).catch(() => {});
+  await wait(cp, 1500);
+  const st0 = await status(cp);
+  const active = await cp.evaluate(() => window.__wp.sim.careerRunActive());
+  const career = careerBox && buyCar;
+  check(active === career && st0?.career === career, `${label}: menu Free drive is ${career ? "a career run" : "quick play"} (career run ${active}, street career ${st0?.career})`);
+  const target = st0?.roster.find((r) => r.mode !== "OffDuty");
+  const hornKey = await cp.evaluate(() => window.__wp.bindings().keys.horn[0]);
+  if (target) {
+    await cp.keyboard.down(hornKey);
+    for (let i = 0; i < 40; i++) {
+      await placeBehind(cp, target.entity);
+      await wait(cp, 250);
+      if ((await status(cp))?.offer) break;
+    }
+    await cp.keyboard.up(hornKey);
+  }
+  await cp.waitForSelector('[data-testid="st-wallet"]', { timeout: 20000 }).catch(() => {});
+  const wallet = await cp.evaluate(() => {
+    const el = document.querySelector('[data-testid="st-wallet"]');
+    return el ? { career: el.getAttribute("data-career"), text: el.textContent } : null;
+  });
+  check(wallet?.career === (career ? "1" : "0"), `${label}: the bet slip says ${career ? "career cash" : "quick play"} ("${wallet?.text ?? "no offer"}")`);
+  const refused = await cp.evaluate(() => ({
+    note: !!document.querySelector('[data-testid="st-career-locked"]'),
+    goDisabled: document.querySelector("#st-go")?.disabled ?? null,
+  }));
+  const locked = careerBox && !career;
+  check(refused.note === locked && (!locked || refused.goDisabled === true), `${label}: ${locked ? "the bet is refused (career is ticked, the drive is quick play)" : "betting allowed"} (${JSON.stringify(refused)})`);
+  await cp.close();
 }
 
 check(errors.length === 0, `no page errors ${errors.slice(0, 3).join(" | ")}`);

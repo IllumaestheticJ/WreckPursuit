@@ -546,6 +546,7 @@ pub(super) fn profile_path(
         dsr,
         &[aa, ab],
         &internal,
+        &[],
         (pin_a, pin_b),
         st.grade,
         kmax,

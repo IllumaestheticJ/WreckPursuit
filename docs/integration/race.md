@@ -281,6 +281,23 @@ let settled = book.settle(&mut wallet, &placings);
 BetVenue::City)`, `take_stake` = `place_bet`, `pay_out` = `settle_bet` (see
 `wp_wasm::race::RunWallet`).
 
+### Betting fixes (2026-10-24)
+- **Bet slip stake**: a range slider (`onInput`) replaces the number box, which only
+  committed on blur and was reset by the picker's 10 Hz redraw after a race.
+- **Paid at the player's own result**: `RaceRun::settle` pays the buy-in / purse settlement
+  and the bets as soon as the player's result is decided (finished, DNF or DQ), not when the
+  last car is home: finishers' positions are final and a rival still running counts as
+  finishing behind them. Form ratings are still recorded once the results are final.
+- **Odds locked at sign-up**: `race_bet(label, stake, odds)` takes the decimal odds shown on
+  the picker card and `Book::place_quoted` puts them on the ticket (held to the book's bounds
+  and step). The card was priced for the stock car, the race's book for the career car with
+  its mods, so the two could differ.
+- **Money reaches the career**: `Session::end_career` / `take_run` call
+  `RaceRun::close_bets` before the account leaves (refund during the countdown; after the
+  green, leaving counts as not finishing). The testbed's picker races are career runs when
+  the career box is ticked and the career car can go out (`racesUseCareer` in `main.ts`),
+  like night runs and touge battles, instead of quick play on the practice account.
+
 ### Needs
 | From | What | Why | Workaround now |
 |---|---|---|---|
@@ -692,8 +709,9 @@ Vesper and on the new combined map (Port Vesper + Ashpeak County, city id `ashpe
   spots are planned lazily (first `race_spots()` call or first press).
   **Ported to round 12 (`lead/ashpeak-port`):** the session owns one horn edge per tick for
   round 12's single challenge system: a roaming street racer within honking range takes the
-  honk (`StreetStep::challenged`), else the spot; no spot while wanted / chased, with a street
-  offer or street race open, or with the run over (owner row 150, as street challenges).
+  honk (`StreetStep::challenged`), else the spot; no spot while chased (pursuit or search; a
+  wanted level alone is fine since 2026-10-24, `street::pursued`), with a street offer or
+  street race open, or with the run over (owner row 150, as street challenges).
   `HonkTrigger` was replaced by `spots::honk_spot`. The race's money is the picker's existing
   stake (buy-in / purse from `race_list`, shown in the spot prompt); no second bet. See
   `docs/integration/ashpeak-port.md`.
@@ -709,8 +727,8 @@ Vesper and on the new combined map (Port Vesper + Ashpeak County, city id `ashpe
   <length>" ("Stop here to start" above 3 m/s); hidden during races, replays and crash replays.
   Each frame `main.ts` polls `raceSpotHonked()` and calls `startRace(id, car, mode)`.
 - **New races** (`RaceCity::Ashpeak`): `crowfoot_ascent` (touge uphill, Crowfoot Ascent →
-  Crowfoot Summit), `crowfoot_descent` (Summit → Crowfoot North Foot), `harlan_dirt_run` (Harlan
-  Farm Run → Harlan Crossing), `ashpeak_downtown_checkpoint` (illegal daytime, Ashpeak Downtown →
+  Crowfoot Summit), `crowfoot_descent` (Summit → Crowfoot North Foot), `harnell_dirt_run` (Harnell
+  Farm Run → Harnell Crossing), `ashpeak_downtown_checkpoint` (illegal daytime, Ashpeak Downtown →
   Meridian Spire), `route7_tunnel_sprint` (Route 7 South → North through the Talon Tunnel),
   `grizzly_grade_sprint` (Grizzly Grade → Route 12 north foot), `waterfront_drag` (new
   `CourseSpec::PoiAhead`, 402 m from Ashpeak Waterfront, one AI), `ashpeak_metro_circuit` (2 laps
@@ -732,7 +750,7 @@ lane changes, so several finishes had to be put on the lane the start lane actua
 |---|---|---|---|
 | `crowfoot_ascent` | Crowfoot Ascent → Crowfoot Summit, single-file grid | 3543 m | 4/4, ~165 s |
 | `crowfoot_descent` | Summit → beside North Foot on the northbound carriageway, single-file grid (a two-wide grid put a car into roadside geometry: total loss) | 2892 m | 3/4, ~100 s |
-| `harlan_dirt_run` | Harlan Farm Run → the south gravel road short of Harlan Crossing (the AI overshot the turn up to the village) | 3978 m | 4/4, ~256 s (gravel-aware profile, below) |
+| `harnell_dirt_run` | Harnell Farm Run → the south gravel road short of Harnell Crossing (the AI overshot the turn up to the village) | 3978 m | 4/4, ~256 s (gravel-aware profile, below) |
 | `ashpeak_downtown_checkpoint` | `Points` from Southgate Blvd's inner eastbound lane beside the Ashpeak Downtown grid (its kerb lane only feeds the Crowfoot Interchange) → Foundry St at the Grand Promenade | 1254 m | 4/4, ~42 s |
 | `route7_tunnel_sprint` | Route 7 South → northbound past Northgate (the Route 7 North grid faces south) | 3461 m | 5/5, ~64 s |
 | `grizzly_grade_sprint` | Grizzly Grade → Route 12 northbound at the pass's north foot | 2193 m | 4/4, ~58 s |
@@ -740,18 +758,48 @@ lane changes, so several finishes had to be put on the lane the start lane actua
 | `ashpeak_metro_circuit` | Corwin Ave ↓, Southgate →, Juniper ↑, Union ← (one-block jink near Southgate, lane graph) × 2 laps | 4182 m/lap | 3/6, ~326 s |
 
 `RaceDef::grid` (new) overrides the grid layout; `None` everywhere except the two touge races.
-Known gaps: the Harlan run does not reach Harlan Crossing itself, the downtown run finishes a
+Known gaps: the Harnell run does not reach Harnell Crossing itself, the downtown run finishes a
 block east of the Spire, and the metro circuit has a jink; all three come from lane
 connectivity in the districts (no lane changes), not from the race code.
 
 
 **Gravel after the visuals merge (ws/ashpeak 438ec68).** Unpaved lanes lost their paint, and with
 it the near-asphalt grip of the painted centre and edge strips the AI had been running on. The
-AI's speed profile planned every course at its asphalt grip, so on Harlan's gravel the whole
+AI's speed profile planned every course at its asphalt grip, so on Harnell's gravel the whole
 field ran 8–22 m wide at the bends. A car outside the gate corridor as it passed a gate never
 got that gate (they are taken in order) and stalled the race ("never finished": two cars held
 at gate 3, two at gate 17). Fix in `wp_opponent`: each `CorridorSample` carries the `surface`
 under it, `CarCapability::surface_grip` gives the car's tyre ratio for gravel / dirt / grass
 (1.0 on every paved surface, so paved courses keep the same profile bit for bit), and
 `SpeedProfile::build` scales cornering, braking and traction-limited drive per sample. After
-the fix the largest lateral offset logged on Harlan is 1.4 m and all four cars finish.
+the fix the largest lateral offset logged on Harnell is 1.4 m and all four cars finish.
+
+## Street races trimmed to Loop 9 + highway run (owner, 2026-10-24, branch `claude/project-thread-3jtx3j`)
+
+Owner: "remove all current street races and only leave in loop 9 night, and loop 9 day; also
+make another long highway street race using the loop 9 AND ashcroft racers". "Ashcroft" is
+read as Ashpeak County (no Ashcroft exists in the code or data).
+
+- `catalog::races()` (the picker, race cards, meet spots via `races_on`) now holds three races:
+  `loop9_circuit` (renamed "Loop 9 night"; id kept because its police table, goldens and pace
+  runs are keyed by it), the new `loop9_day` (the Loop 9 lap from a grid on the south side, so its meet spot is its own; 14:00, illegal daytime,
+  traffic 1.0, seed 19) and the new `loop9_ashpeak_highway` (Ashpeak map, 17.9 km lap of Loop 9
+  + Route 7 + Crosstown + Route 12, 00:30, traffic 1.0, seed 29). Both new races field the Loop
+  9 regulars, who are also the whole Ashpeak County field (Vic, Mara, Dez, Juno, Tito).
+- Every other race moved to `catalog::retired_races()`: not offered anywhere, still found by
+  `race(id)` / `race_for_scenario`, so its scenario, golden and race_picker test still run.
+  `race_scenario_files_match_the_picker` checks retired scenarios too.
+- New scenarios `pick_loop9_day.ron`, `pick_loop9_ashpeak_highway.ron` (generated) and their
+  goldens (blessed with `simcli run --bless` on the two files only).
+- Police: no police code touched. Starter tables `[loop9_day]` ("Daylight interceptors",
+  presence 2.0) and `[loop9_ashpeak_highway]` ("Freeway interceptors") copy the night lap's
+  high-speed pursuit (race_picker needs a profile per picker race). The "Heavier police on
+  Loop 9 daytime" branch (`claude/project-thread-97ist8`) has its own versions of both: on a
+  merge conflict keep those and drop the starters.
+- Unit tests that pinned the old list (catalog, spots, wp_wasm race spots/cards) now pin the
+  new one; spot honk tests use the Loop 9 night spot.
+- `apps/testbed-web/e2e/race.mjs` runs its picker, betting and career flows on Loop 9 night
+  (and the stake check on Loop 9 day); its autopilot results run keeps the short retired grid
+  sprint through the `?race=grid_highway_sprint` debug link. All 33 checks pass headless.
+- Known gap: `race_spots.mjs` and `menu.mjs` still expect retired races' spots and cards
+  (not in CI); `drift_lab_w.mjs` only uses a `?race=` link, which still works.

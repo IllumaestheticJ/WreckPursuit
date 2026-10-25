@@ -138,6 +138,9 @@ pub struct SimVehicle {
     player_steering: Option<bool>,
     /// Ticks the ghost was extended because the car still overlapped another car.
     ghost_overstay: u32,
+    /// Tyre condition set by the career ([`Sim::set_tire_condition`]): per-wheel grip
+    /// multiplier and deflation, applied on top of damage every tick.
+    tire_condition: Option<([f32; 4], [f32; 4])>,
     /// Dormant ([`Sim::set_dormant`]): a fixed body, no vehicle or damage-motion step.
     dormant: bool,
     /// May drive in light mode far from every player ([`Sim::set_light_when_far`]).
@@ -383,6 +386,7 @@ impl Sim {
             chassis_skips_sidewalks: false,
             ghost_ticks: 0,
             ghost_overstay: 0,
+            tire_condition: None,
             player_steering: None,
             dormant: false,
             light_when_far: false,
@@ -884,6 +888,20 @@ impl Sim {
             .ok_or(SimError::UnknownEntity(id))
     }
 
+    /// Set a vehicle's tyre condition (career tyres, `wp_economy::lots`): per-wheel grip
+    /// multiplier (1 = new tyres, FL, FR, RL, RR) and deflation 0..=1 (1 = flat), applied on
+    /// top of damage every tick. Like mods, not recorded in replays: set it before the first
+    /// tick of a session.
+    pub fn set_tire_condition(
+        &mut self,
+        id: EntityId,
+        grip: [f32; 4],
+        deflation: [f32; 4],
+    ) -> Result<(), SimError> {
+        self.slot_mut(id)?.tire_condition = Some((grip, deflation));
+        Ok(())
+    }
+
     /// Set the input a vehicle uses from the next tick on.
     pub fn set_input(&mut self, id: EntityId, input: VehicleInput) -> Result<(), SimError> {
         self.slot_mut(id)?.input = input;
@@ -1367,6 +1385,19 @@ impl Sim {
                 slot.vehicle.read_body(&self.physics.bodies[slot.body.body]);
             }
         }
+        // A hard hit wrecks a traffic car: it stops with hazards on and stays put. Judged on
+        // the impulse, not the damage, so both damage modes react the same (owner rule).
+        for (slot, contacts) in self.vehicles.iter().zip(&tick_contacts.per_vehicle) {
+            let Some(agent) = slot.traffic_agent else {
+                continue;
+            };
+            if contacts.is_empty() {
+                continue;
+            }
+            let mass = self.physics.bodies[slot.body.body].mass();
+            let dv = impact_delta_v(contacts, mass);
+            self.world.report_agent_impact(agent, dv);
+        }
         // Anything that touched a dormant car wakes it for the next tick; a light one goes back
         // to full physics.
         let touched: Vec<EntityId> = self
@@ -1407,6 +1438,13 @@ impl Sim {
                 let spikes = self.police.tire_puncture(slot.id);
                 for (t, s) in effects.tire_puncture.iter_mut().zip(spikes) {
                     *t = t.max(s);
+                }
+                // Career tyres: worn tread grips less, a flat stays flat.
+                if let Some((grip, deflation)) = slot.tire_condition {
+                    for w in 0..4 {
+                        effects.grip_scale[w] *= grip[w];
+                        effects.tire_puncture[w] = effects.tire_puncture[w].max(deflation[w]);
+                    }
                 }
                 slot.vehicle.apply_damage_effects(&effects);
             }
@@ -1650,6 +1688,21 @@ fn hash_nodes_lockstep(hashers: &mut [StateHasher], nodes: &[&[[f32; 3]]]) {
             }
         }
     }
+}
+
+/// Velocity change one tick's contacts give a body of `mass_kg`, m/s: the magnitude of the
+/// summed normal and friction impulses (chassis space) over the mass.
+fn impact_delta_v(contacts: &[wp_contracts::ContactImpulse], mass_kg: f32) -> f32 {
+    if mass_kg <= 0.0 {
+        return 0.0;
+    }
+    let mut j = [0.0f32; 3];
+    for c in contacts {
+        for (k, jk) in j.iter_mut().enumerate() {
+            *jk += c.normal_local[k] * c.impulse_ns + c.tangent_impulse_local_ns[k];
+        }
+    }
+    (j[0] * j[0] + j[1] * j[1] + j[2] * j[2]).sqrt() / mass_kg
 }
 
 /// Version of the [`Sim::state_hash`] layout. Bump when the hashed fields change; every golden
