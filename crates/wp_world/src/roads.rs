@@ -610,8 +610,8 @@ impl<'a> RoadNetworkIndex<'a> {
                     W::RaceStartGrid => (C::RaceStartGrid, 15.0),
                     W::PoliceStation => (C::PoliceStation, 15.0),
                     W::Helipad => (C::Helipad, 15.0),
-                    // World-only site (no contract kind).
-                    W::RestStop => return None,
+                    // World-only sites (no contract kind).
+                    W::RestStop | W::MedianCrossover => return None,
                 };
                 Some(wp_contracts::PoiInfo {
                     kind,

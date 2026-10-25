@@ -51,6 +51,7 @@ use crate::surface::{self, is_elevated, KERB_H_M, LOT_W_M, SIDEWALK_W_M};
 use crate::terrain::{bump, smoothstep, Heightfield, ValueNoise};
 
 pub mod ashpeak;
+mod crossovers;
 mod divided;
 
 use divided::*;
@@ -5308,6 +5309,14 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
             divided: &fw_pieces,
         }));
     }
+    // Loop 9's median crossovers (after every other POI, so their indices stay put).
+    pois.extend(crossovers::crossovers(
+        &ring,
+        &built,
+        &loop_roads,
+        &covered,
+        &crossings,
+    ));
     let (city_id, source) = match region {
         Some(r) => (r.city_id(), r.description(cfg.seed)),
         None => (

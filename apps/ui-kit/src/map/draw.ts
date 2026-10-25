@@ -463,6 +463,17 @@ export function drawPoi(ctx: Ctx, kind: MapPoi["kind"], x: number, y: number, s:
       ctx.stroke();
       glyph(ctx, "P", s * 0.9, "#000");
       break;
+    case "Crossover":
+      // Median crossover (an opening in the highway divider): a small traffic cone.
+      ctx.fillStyle = pal.warn;
+      ctx.beginPath();
+      ctx.moveTo(0, -s * 0.6);
+      ctx.lineTo(s * 0.45, s * 0.5);
+      ctx.lineTo(-s * 0.45, s * 0.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      break;
     case "RaceStartGrid":
       ctx.fillStyle = pal.ink;
       ctx.fillRect(-s * 0.5, -s * 0.5, s * 0.5, s * 0.5);

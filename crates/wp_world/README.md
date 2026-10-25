@@ -32,6 +32,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `roads` | Road-level graph view (`RoadGraphView`) for police routing / minimaps; `RoadNetworkIndex` (contract `RoadNetworkQuery`, grid-indexed `nearest_on_road`) |
 | `manoeuvre` | Low-speed manoeuvres: k-point turn planner (`plan_turn`), closed-loop `TurnDriver` / `ReverseDriver` for physical cars (reverse gear through the automatic box), `sight_clear` (crest / bend check), map helpers `road_corridor` / `overtake_sight_clear` |
 | `markings` | Painted markings derived from the lane layout (`marking_at` / `painted_at`): `WorldQuery::surface_at` reports `SurfaceType::PaintedLine` on them |
+| `crossover` | Median crossovers (owner 2026-10-25): openings in Loop 9's median barrier where cars can cross to the other carriageway. The generator records each as a `PoiKind::MedianCrossover` point on the median line; `surface::median_barriers` leaves a 30 m gap there and `crossover::cones` stands three cones in from each end (World props) |
 | `car_park` | Car parks beside a road (one per Loop 9 rest stop, derived at map build: `CityMap::car_parks`): paved pad over the sidewalk and lot, dropped kerb, a row of 45° nose-in bays with painted lines |
 
 City data lives in `data/city/` (see its README); importer and generator in
@@ -238,6 +239,11 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   then split into two one-way 3-lane carriageways 7.05 m either side of the centreline: 1.5 m
   paved median shoulders up to a Jersey-profile concrete barrier on the centreline (0.6 m base,
   0.81 m tall; `wp_sim` builds 0.5 × 0.81 m box colliders along it), 2.5 m outer shoulders.
+  **Median crossovers** (`vesper/crossovers.rs`, owner 2026-10-25): one per quarter of the
+  loop at its straightest, flattest at-grade stretch ≥ 120 m from any gore and ≥ 60 m from the
+  tunnel and the roads bridging it, the barrier is open for 30 m and coned at both ends, so a
+  car can cut across to the other carriageway (south leg near x 150, east near y 470, north
+  near x 880, west near y −400). Traffic keeps to its own carriageway.
   **Interchanges:** five diamonds (Harbor Boulevard west and east, Lantern Way, Bluff Road,
   Uptown Connector) and a half diamond at the port (inner carriageway only). Each diamond's
   crossroad (2+2, 10 % grade cap) bridges both carriageways with 7.5 m clearance between two

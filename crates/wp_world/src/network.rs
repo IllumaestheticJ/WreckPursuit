@@ -374,6 +374,11 @@ pub enum PoiKind {
     /// Highway rest stop: a pull-off with a lit parking road (pose = the middle of the
     /// parking road, facing its travel direction). Not in `wp_contracts`' POI list.
     RestStop,
+    /// Median crossover: an opening in a divided highway's median barrier, marked with cones,
+    /// where cars can cross to the other carriageway (pos = the middle of the opening on the
+    /// median line, heading = along the highway; `lane` None; [`crate::crossover`]).
+    /// Appended, so files without it read as before. Not in `wp_contracts`' POI list.
+    MedianCrossover,
 }
 
 /// A point of interest.

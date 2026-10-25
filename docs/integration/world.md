@@ -2179,3 +2179,33 @@ honks are blocked only while the player is chased, meaning a pursuit or a search
 also blocked them. Being wanted with no unit on the player now still allows a challenge, and
 an open offer only lapses once a pursuit starts. Police behaviour is unchanged. Test:
 `street_tests::wanted_can_challenge_but_not_while_chased`.
+
+## Loop 9 median crossovers (owner request 2026-10-25: "add cones in select sections of loop 9 so we can cross over the center divider in certain places")
+**Before.** Loop 9's concrete median barrier ran unbroken all the way round: the only way to
+the other carriageway was off at an interchange and back on.
+**Now.**
+- `vesper/crossovers.rs` (generator): one crossover per quarter of the loop by arc length, at
+  the straightest, flattest spot of that quarter (bank < 2 %, < 6° of turn over 160 m, no deck
+  within 80 m) that is ≥ 120 m from every gore (interchange and rest-stop ramps) and ≥ 60 m from
+  the Hollins Tunnel and every road bridging the loop. Port Vesper gets four: south leg
+  (150, −1060), east leg (1524, 468), north leg (882, 1374), west leg (−1491, −400). Each is a
+  `PoiKind::MedianCrossover` POI ("Loop 9 crossover 1..4") on the median line, appended after
+  every other POI. `PoiKind` gained the variant at the end, so road files without it read as
+  before (no format bump; same as `RestStop`). It maps to no `wp_contracts` POI.
+- `wp_world::crossover` (new): `surface::median_barriers` now leaves a 30 m opening centred on
+  each crossover (physics colliders and the greybox both build from it).
+  `surface::median_barrier_lines` is the full median line. `edge_barriers` uses it, so no
+  outer-edge barrier fills the opening. `crossover::cones` places three cones on the median line
+  1, 2.5 and 4 m in from each barrier end (22 m clear between them). `World::new` adds them to
+  the fixed props after the parked cars (`set_parked_cars` keeps them), so they are light,
+  knockable Rapier boxes like route-closure cones.
+- Both carriageways' median-side paving already meets on the centreline at the same height
+  (one shared profile and bank), so the opening is paved with no step. Lanes are unchanged:
+  traffic, racers and police keep to their own carriageway.
+- Map: `map_static_json` lists them as kind `Crossover`. The ui-kit draws a small orange cone.
+**Tests.** `wp_world::crossover::tests`: four crossovers spread round the loop, on the median,
+deterministic; the barrier is 4 × 30 m shorter, open at each one, and no edge barrier fills
+the opening; both carriageway edges meet level (< 5 cm) in each opening; 6 cones per opening,
+inside it and clear of its middle, present as World props; the procedural grid is unchanged.
+**Changes outside wp_world:** `crates/wp_wasm/src/map.rs` (POI kind string),
+`apps/ui-kit/src/map/{data,draw}.ts` (cone icon), greyboxes regenerated (`vesper_v2*`, `ashpeak*`).
