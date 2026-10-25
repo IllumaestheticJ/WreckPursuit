@@ -1763,7 +1763,7 @@ Physics uses the smooth row-164 meshes. Tests:
 | Greybox | glb (MB) | b64 (MB) | Note |
 |---|---|---|---|
 | vesper_v2 | 10.44 | 13.92 | under the 15 MB preview cap; size check raised to 11 MB |
-| vesper_v2 (row 171) | 12.26 | 16.35 | road-band terrain drawn from the fine grid; the browser loads the parts (own 7.61 MB, shared 4.67 MB), size check raised to 12.5 MB |
+| vesper_v2 (row 172) | 12.26 | 16.35 | road-band terrain drawn from the fine grid; the browser loads the parts (own 7.61 MB, shared 4.67 MB), size check raised to 12.5 MB |
 | procedural_12x12 | 3.02 | 4.02 | |
 | ashpeak | 25.86 | 34.48 | split for the preview by `tools/preview_build.sh` (b0269195) |
 
@@ -2216,7 +2216,7 @@ area out for race start".
   (now: within the road); `street.rs` `a_gate_spans_the_whole_road`, `gates_count_in_order_and_cap_progress`; `street_tests.rs`
   `betting_holds_both_cars_and_the_start_is_cleared`; replay round trip carries the new op.
 
-## Solid ground never stands above the drawn terrain (playtest row 171)
+## Solid ground never stands above the drawn terrain (playtest row 172)
 **Cause.** Row 119's fix made physics collide with the drawn terrain everywhere except the road
 band (at-grade roads, junctions and bends: paved width + sidewalk + lot + skirt + half a cell),
 which keeps the fine 5 m heights the sidewalks, lots and skirts are laid on. The greybox drew the

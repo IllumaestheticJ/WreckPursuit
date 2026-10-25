@@ -114,7 +114,7 @@ fn terrain_blocks_line_of_sight_across_the_hill() {
 
 /// Solid ground is never more than `DRAWN_BAND_TOLERANCE_M` (+ the drawn ground's 5 cm) above the
 /// terrain the greybox draws, anywhere on the fine grid (vertices, cell centres, edge midpoints),
-/// and the refined drawn terrain still never rises above a road (playtest row 171: in the road
+/// and the refined drawn terrain still never rises above a road (playtest row 172: in the road
 /// band, solid shelves stood up to 15 m above the coarse drawn ground beside steep roads).
 #[test]
 fn solid_ground_never_stands_above_the_drawn_terrain() {
