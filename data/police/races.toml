@@ -308,8 +308,8 @@ offset_m = 2.5
 # blocks on the one-lane hairpins, pursuers close only to the racer's own speed
 # (speed_margin 0), and no helicopter (it called units in head-on at intercept speed, where
 # they wedged on the hairpin walls and pinned the field behind them, row 168).
-# Measured (race_picker, police on, seeds 1-8): finishers 4,1,3,4,4,4,3,4 of 4, 1-4 pursuits
-# a race, every capture at the saddle (gate 17). With the old profile (presence 1.0, the
+# Measured (race_picker, police on, seeds 1-8): finishers 4,3,4,4,3,4,4,4 of 4, 1-4 pursuits
+# a race, every capture at the saddle. With the old profile (presence 1.0, the
 # helicopter and box-ins on) patrols on the pass caught the whole field on every seed.
 [crowfoot_ascent]
 name = "Mountain tail"
@@ -370,8 +370,8 @@ trigger_m = 60.0
 # helicopter spotting for the chase and the crossings blocked once it is on. No spikes, PITs
 # or rams on gravel. Earlier in the run (a deputy at 0.35) the chase lasted 2 km and caught
 # the whole field together at 3.3-3.5 km on 4 of 8 seeds.
-# Measured (race_picker, police on, seeds 1-8): 4-5 pursuits every race, finishers 4 of 4 on
-# 7 seeds (3 on seed 6, the fourth out of time). The old profile drew no pursuit at all.
+# Measured (race_picker, police on, seeds 1-8): 2-5 pursuits every race, finishers
+# 4,4,4,4,4,4,3,3 of 4. The old profile drew no pursuit at all.
 [harnell_dirt_run]
 name = "Open country"
 summary = "Thin patrols on the section roads, but a deputy waits outside Harnell Crossing and the helicopter spots for him."
@@ -400,8 +400,8 @@ trigger_m = 80.0
 # units staked out at the checkpoints that know the field on sight. As on the Lantern run the
 # police may take the whole field (owner brief for illegal daytime). No roadblock across the
 # route: the AI field cannot thread its gap and was arrested queued at it on every seed.
-# Measured (race_picker, police on, seeds 1-8): 4-5 pursuits every race; the whole field
-# finishes on half the seeds (2, 3, 5, 6) and is taken on the other half.
+# Measured (race_picker, police on, seeds 1-8): 4 pursuits every race; finishers
+# 0,4,4,3,4,4,0,0 of 4 (the field gets through on 5 seeds and is taken on 3).
 [ashpeak_downtown_checkpoint]
 name = "Downtown crackdown"
 summary = "Maximum presence downtown in daylight: the side streets sealed, units waiting at the checkpoints. Make the Spire or lose everything."
@@ -508,8 +508,8 @@ trigger_m = 60.0
 # come from a unit staked out on the back of the lap that knows the field on sight, so every
 # lap draws a chase the field can shake in the grid. Thinning the patrols alone (1.0 -> 0.4)
 # and every tactic mix tried still lost the whole field on most seeds.
-# Measured (race_picker, police on, seeds 1-8): 6-9 pursuits every race, all six finish on
-# 7 seeds (5 of 6 on seed 4, one captured).
+# Measured (race_picker, police on, seeds 1-8): 3-9 pursuits every race, finishers
+# 6,3,6,5,6,5,6,5 of 6.
 [ashpeak_metro_circuit]
 name = "Block grid"
 summary = "A deputy watches the back of the lap and the chase is on every time round; nobody rams between the towers, so lose them in the grid."
