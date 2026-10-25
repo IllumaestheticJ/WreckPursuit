@@ -2239,7 +2239,13 @@ fn decide_racer(
         // Unafraid of traffic (`RaceConfig::ram_traffic`) while racing: anything that is not a
         // racer is fair game — tagged, leaned on, punted out of the way. (A racer out of the race
         // — fled, busted, retired — reads as a plain vehicle but is still an AI racer: left be.)
-        let ram = ram && !done_racing;
+        // Still shoving through for the first `FINISH_CLEAR_M` past the line: a finisher that
+        // stops there behind a car it tagged on the line holds everyone behind short of it
+        // (Lantern s95: the winner clipped a civilian it was passing at the line, both
+        // stopped 3 m past it, and the three behind queued until the finish window closed).
+        let clearing_finish = r.status != RacerStatus::Disqualified
+            && (clearing_line || finish_m.is_some_and(|f| r.progress < f + FINISH_CLEAR_M));
+        let ram = ram && (!done_racing || clearing_finish);
         let fair_game = |o: &Obstacle| ram && !matches!(o.who, Who::Racer(_)) && !o.out_of_race;
         // A non-racer crawling along ahead (under 70 % of my own pace here, or 6 m/s: a car
         // that just turned round, a slow climber) that has held me up for
