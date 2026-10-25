@@ -43,7 +43,7 @@ fn reversal_lag(c: &LoadedCar, kmh: f32) -> (f32, f32) {
             for k in 0..ticks {
                 let seg = (k as f32 * PHYSICS_DT / hold) as usize;
                 // Left first, then right, left, … (key + = right).
-                let key = if seg % 2 == 0 { -1.0 } else { 1.0 };
+                let key = if seg.is_multiple_of(2) { -1.0 } else { 1.0 };
                 if seg != last_seg {
                     if !matched && last_seg > 0 {
                         // Never turned the key's way within the hold: count the whole hold.
