@@ -86,6 +86,8 @@ mod roam_tests;
 #[cfg(test)]
 mod run_tests;
 #[cfg(test)]
+mod spawn_tests;
+#[cfg(test)]
 mod street_tests;
 #[cfg(test)]
 mod touge_tests;
@@ -216,7 +218,8 @@ pub fn free_drive_city_json(car: &str, mode: &str, city_id: &str) -> Result<Stri
     )))
 }
 
-/// Free roam in a chosen city (`city_id` as in [`free_drive_city_json`]): free drive plus
+/// Free roam in a chosen city (`city_id` as in [`free_drive_city_json`], starting at spawn
+/// choice `spawn` as in [`with_spawn_json`]): free drive plus
 /// `roamers` AI street racers (0 = the default 10, at most 24) roaming the city's highways,
 /// touge, dirt roads, downtown and countryside. Start it with `init` like any scenario.
 #[wasm_bindgen]
@@ -224,6 +227,7 @@ pub fn free_roam_city_json(
     car: &str,
     mode: &str,
     city_id: &str,
+    spawn: &str,
     roamers: u32,
 ) -> Result<String, JsValue> {
     let mode = data::parse_mode(mode).map_err(err)?;
@@ -232,8 +236,35 @@ pub fn free_roam_city_json(
         n => n as usize,
     };
     Ok(json(
-        &roam::free_roam_in(car, mode, city_id, n).map_err(err)?,
+        &roam::free_roam_in(car, mode, city_id, spawn, n).map_err(err)?,
     ))
+}
+
+/// `scenario_json` (a free drive or night run) starting at spawn choice `spawn` of the combined
+/// world ([`spawn_points_json`]; `""` or an unknown id leaves the start as it is).
+#[wasm_bindgen]
+pub fn with_spawn_json(scenario_json: &str, spawn: &str) -> Result<String, JsValue> {
+    let sc: simcli::Scenario = serde_json::from_str(scenario_json).map_err(err)?;
+    Ok(json(&scenario::with_spawn(sc, spawn)))
+}
+
+/// The spawn choices of the combined world as JSON (`[{id, label}]`, the default first;
+/// [`scenario::SPAWNS`]).
+#[wasm_bindgen]
+pub fn spawn_points_json() -> String {
+    #[derive(Serialize)]
+    struct Choice {
+        id: &'static str,
+        label: &'static str,
+    }
+    let list: Vec<Choice> = scenario::SPAWNS
+        .iter()
+        .map(|s| Choice {
+            id: s.id,
+            label: s.label,
+        })
+        .collect();
+    json(&list)
 }
 
 /// Free-roam status JSON (`null` outside free roam): every roamer's entity id, home haunt,

@@ -73,6 +73,9 @@ export interface GameMenuOptions {
   /** Maps the main screen offers (a "Map" picker when there are two or more; the first is the
    * default). Night run, rainy night, street races and free drive start on the chosen one. */
   maps?: MenuMap[];
+  /** Label of the main screen's map picker (default "Map"; the testbed says "Spawn in": its
+   * entries are the cities of one world). */
+  mapLabel?: string;
 }
 
 /** Element that Left / Right adjust (cycle buttons, toggles). */
@@ -380,6 +383,7 @@ export class GameMenu {
       body = (
         <MainScreen
           maps={this.opts.maps ?? []}
+          mapLabel={this.opts.mapLabel ?? "Map"}
           map={this.map}
           setMap={(id) => this.setMap(id)}
           play={(c) => this.act(() => h.play(c, this.map))}
@@ -485,7 +489,7 @@ function Brand(props: { kicker: string }) {
 }
 
 const PLAY: { id: PlayChoice; label: string; hint: string }[] = [
-  { id: "chase", label: "Night run", hint: "Night on the chosen map. You're speeding; the police will come." },
+  { id: "chase", label: "Night run", hint: "Night in the city. You're speeding; the police will come." },
   { id: "chaseRain", label: "Rainy night", hint: "Same chase on a soaked road" },
   { id: "races", label: "Street races", hint: "Races against AI drivers" },
   { id: "touge", label: "Touge battles", hint: "One-on-one down sealed mountain passes. Bets and pink slips with rep" },
@@ -493,7 +497,7 @@ const PLAY: { id: PlayChoice; label: string; hint: string }[] = [
   { id: "garage", label: "Garage", hint: "Your career: cars, repairs, mods" },
 ];
 
-function MainScreen(props: { maps: MenuMap[]; map: string; setMap: (id: string) => void; play: (c: PlayChoice) => void; settings: () => void; controls: () => void }) {
+function MainScreen(props: { maps: MenuMap[]; mapLabel: string; map: string; setMap: (id: string) => void; play: (c: PlayChoice) => void; settings: () => void; controls: () => void }) {
   const cur = props.maps.find((m) => m.id === props.map);
   return (
     <div class="wp-gm-card wp-gm-main" role="dialog" aria-label="Main menu">
@@ -501,8 +505,8 @@ function MainScreen(props: { maps: MenuMap[]; map: string; setMap: (id: string) 
       <p class="wp-gm-tag">Street racing, soft-body crashes and police chases in a living city.</p>
       {props.maps.length > 1 && (
         <div class="wp-gm-map">
-          <Row label="Map" hint={cur?.note ?? `Night run, rainy night, street races and free drive start here`}>
-            <Cycle id="gm-map" label="Map" value={props.map} options={props.maps.map((m) => ({ id: m.id, label: m.label }))} onChange={props.setMap} />
+          <Row label={props.mapLabel} hint={cur?.note ?? `Night run, rainy night, street races and free drive start here`}>
+            <Cycle id="gm-map" label={props.mapLabel} value={props.map} options={props.maps.map((m) => ({ id: m.id, label: m.label }))} onChange={props.setMap} />
           </Row>
         </div>
       )}
