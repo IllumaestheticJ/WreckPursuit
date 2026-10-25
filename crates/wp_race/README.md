@@ -231,8 +231,8 @@ traffic, no police). Every pass has a fixed challenger and boss (`ROSTER`).
   `Feature::TougeRaces`, a boss `Feature::BossRaces`; side bets need `Feature::TougeBetting`
   (stake up to `max_bet(BetVenue::Touge)`), pink slips `Feature::PinkSlips`. `wager_menu` lists
   each line with the locked reason; `place` refuses a locked or oversized wager.
-- **Settlement (`settle`):** side bet via `settle_bet` (challenger 2.0×, boss 2.5×), boss purse
-  (12 000), rep via `award_rep` (`boss:<map>` / `touge:<map>`; −100 extra for going through the
+- **Settlement (`settle`):** side bet via `settle_bet` (challenger 2.0×, boss 2.5×), the win
+  purse (challenger 3 500, boss 12 000) via `award_credits`, rep via `award_rep` (`boss:<map>` / `touge:<map>`; −100 extra for going through the
   wall), and pink slips: the winner takes the loser's car **exactly as it finished**
   (`Economy::take_pink_slip_car` with the NPC's damage snapshot; `lose_pink_slip_car`).
 

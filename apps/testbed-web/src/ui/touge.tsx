@@ -308,7 +308,7 @@ function BattlePanel(props: { report: TougeReport; onGarage: (() => void) | null
             ) : null}
             {s.purse > 0 && (
               <div class="wp-spread">
-                <span class="wp-dim">Boss purse</span>
+                <span class="wp-dim">Purse</span>
                 <Money value={s.purse} tone />
               </div>
             )}
