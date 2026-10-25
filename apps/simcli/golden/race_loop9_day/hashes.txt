@@ -1,0 +1,11 @@
+# simcli hashes scenario=race_loop9_day systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 5ef8693bf1728d7f
+480 28e75b5027d27c87
+720 c1e4f0bca4929e17
+960 93a071bf7fbcc0ec
+1200 0aa41eaad2b6a841
+1440 71eddf609c0b2a1b
+1680 eb8fd56a689297bf
+1920 31823db9cd3a6cea
+2160 705ea4beb73c1a69
+2400 3cef51ef6c64d9c0

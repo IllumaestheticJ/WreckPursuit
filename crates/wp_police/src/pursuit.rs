@@ -876,6 +876,18 @@ impl PoliceSystem {
     }
 
     pub(crate) fn random_node_in(&mut self, d: Option<crate::graph::District>) -> Option<NodeId> {
+        // A race with a patrol corridor (Loop 9): patrol along the course, in district `d`'s
+        // part of it if there is one.
+        if let Some(c) = self.race_corridor() {
+            let in_d = |n: &&NodeId| d.is_none_or(|d| self.graph.nodes[n.0 as usize].district == d);
+            let mut cands: Vec<NodeId> = c.nodes.iter().filter(in_d).copied().collect();
+            if cands.is_empty() {
+                cands = c.nodes.clone();
+            }
+            if !cands.is_empty() {
+                return Some(cands[self.rng.below(cands.len() as u32) as usize]);
+            }
+        }
         let cands: Vec<u32> = (0..self.graph.nodes.len() as u32)
             .filter(|&n| d.is_none_or(|d| self.graph.nodes[n as usize].district == d))
             .collect();

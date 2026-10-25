@@ -8,7 +8,8 @@
 # severity / 0.6 of it (straighten / repair) — the same rule wp_damage uses.
 # Labour = item hours (tables below, else labour_hours_per_item) × max(severity, 0.1)
 #          × class.labour_per_hour × district × shop markup.
-# The bill is then × the damage mode's repair_cost_scale (data/modes: Sim 1.0, Arcade 0.5).
+# The bill is then × the damage mode's repair_cost_scale (data/modes), × the heavy-damage
+# markup per line (1 + heavy_damage_markup × severity²) and × total_loss_markup for a write-off.
 #
 # Feel target: a fully wrecked car (every line at severity 1) costs ~2× its value in
 # Simulation (>= 60% is the hard floor, checked by tests); a bumper scrape costs less than a
@@ -17,6 +18,8 @@
 labour_hours_per_item = 2.0        # fallback for items not in the hour tables below
 value_factor_clamp = [0.4, 2.5]
 repair_parts_fraction = 0.3        # a repair (not a replacement) costs 30% of the part at most
+heavy_damage_markup = 0.75         # crushed parts cost up to 1.75x: scrape (0.25) +5%, half-crushed +19%
+total_loss_markup = 1.4            # rebuilding a written-off car: frame jig, strip-down, re-shell
 
 # Parts cost on the reference Compact (value 18 000).
 [region_parts]

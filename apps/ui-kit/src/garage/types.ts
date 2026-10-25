@@ -78,7 +78,12 @@ export interface RepairLineView {
 export interface CarView {
   uid: number;
   def_id: string;
+  /** The variant's name for a rare variant. */
   name: string;
+  /** Bought as a rare variant. */
+  rare: boolean;
+  /** Factory paint 0xRRGGBB it was sold in (null: the default colour). */
+  paint: number | null;
   class: string;
   active: boolean;
   location: "Garage" | "Impound";
@@ -138,6 +143,8 @@ export interface ListingView {
   grade: ListingGrade;
   price: number;
   rare: boolean;
+  /** Factory paint 0xRRGGBB (the car keeps it once bought). */
+  paint: number;
   mods: string[];
   condition: number | null;
   /** Repair All at a legit residential shop, tyres excluded. */

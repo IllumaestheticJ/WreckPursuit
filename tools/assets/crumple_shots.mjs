@@ -65,7 +65,9 @@ for (const [name, file, tS, speed] of [
   await page.waitForFunction(() => [...window.__wp.app.views.values()].every((v) => v.panels.ready), null, { timeout: 20000 });
   await page.evaluate(() => window.__wp.setCamera("orbit", [-2, -7, 3]));
   await page.waitForFunction((t) => window.__wp.sim.worldInfo()[0] >= t * 240, tS, { timeout: 90000 });
-  await page.keyboard.press("KeyP"); // pause
+  // Pause through the app (P opens the game menu while driving since round 12, which keeps the
+  // sim paused after a second P and covers the shot).
+  await page.evaluate(() => (window.__wp.app.paused = true));
   await sleep(500);
   results[name] = await page.evaluate(() => {
     const v = [...window.__wp.app.views.values()][0];
@@ -78,7 +80,7 @@ for (const [name, file, tS, speed] of [
     // Crop to the middle of the frame (the car), away from the HUD panels.
     await page.screenshot({ path: join(out, `crumple_${prefix}_${name}_${d}m.png`), clip: { x: 340, y: 150, width: 600, height: 420 } });
   }
-  await page.keyboard.press("KeyP");
+  await page.evaluate(() => (window.__wp.app.paused = false));
 }
 console.log(JSON.stringify(results, (k, v) => (k === "states" ? undefined : typeof v === "number" ? Math.round(v * 1000) / 1000 : v)));
 if (errors.length) console.log(`page errors: ${errors.slice(0, 3).join(" | ")}`);
