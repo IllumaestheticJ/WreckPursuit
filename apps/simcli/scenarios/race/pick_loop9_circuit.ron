@@ -1,4 +1,4 @@
-// wp_race picker race "Loop 9 circuit" (loop9_circuit): One flat-out lap of the Loop 9 highway, through late-night traffic.
+// wp_race picker race "Loop 9 night" (loop9_circuit): One flat-out lap of the Loop 9 highway, through late-night traffic.
 // Generated from wp_race::catalog by wp_wasm's race_scenario_files_match_the_picker
 // (WP_RACE_WRITE_SCENARIOS=1); the browser's race_start builds the same scenario with
 // the player's car. Entity "player" sits on the last grid slot, the AI field ahead.
