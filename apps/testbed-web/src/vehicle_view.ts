@@ -220,6 +220,9 @@ export class VehicleView {
   /** `colour` is a livery (a street racer's level colour): kept in every art style instead of
    * the style's car palette. */
   readonly livery: boolean;
+  /** The car's own factory paint (a career car or a lot car): kept in every art style, like
+   * a livery. Set with [`setPaint`]. */
+  private ownPaint = false;
 
   /** `livery`: keep `colour` in every art style (see `livery`). */
   constructor(readonly entity: number, colour: number, livery = false) {
@@ -820,7 +823,7 @@ export class VehicleView {
     const kind = this.info.kind === "Police" ? "police" : this.info.kind === "Traffic" ? "traffic" : "player";
     // Traffic and police keep the livery the instanced fleet gave them (render/fleet.ts
     // styledPaint), so a promotion swaps the drawer without a recolour.
-    const paint = !lowpoly || this.livery
+    const paint = !lowpoly || this.livery || this.ownPaint
       ? this.greyPaint
       : new THREE.Color(kind === "player" ? vehiclePaint(kind, this.entity) : styledPaint(this.greyPaint.getHex(), kind === "police"));
     const bodyMat = this.box.material as THREE.MeshStandardMaterial;
@@ -849,6 +852,14 @@ export class VehicleView {
    * wp_economy::visuals) are left out, so nothing is drawn twice: the look adds what the mod
    * parts renderer has no part or style for (fog lights, underglow, new rims and vinyls, …).
    */
+  /** Paint the car in its own factory colour (0xRRGGBB; career and lot cars). */
+  setPaint(hex: number): void {
+    if (this.ownPaint && this.greyPaint.getHex() === hex) return;
+    this.greyPaint.setHex(hex);
+    this.ownPaint = true;
+    this.styleVersion = -1;
+  }
+
   setLook(mods: readonly string[] | null, showcase = false): void {
     const gen = ++this.lookGen;
     this.look?.dispose();

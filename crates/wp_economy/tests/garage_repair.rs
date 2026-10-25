@@ -495,3 +495,17 @@ fn class_index_brackets_debug_cars_apart() {
     assert!(c.class_index > s.class_index + 100);
     assert_ne!(s.bracket, c.bracket);
 }
+
+#[test]
+fn insurance_cannot_be_bought_for_damage_the_car_already_has() {
+    let e = econ();
+    let (mut a, car) = account_with_sedan(&e, 100_000);
+    let r = damaged_report(&e, &a, car, DamageMode::Arcade);
+    e.record_damage(&mut a, &r).unwrap();
+    let before = a.clone();
+    assert!(matches!(
+        e.buy_insurance(&mut a, car, "full"),
+        Err(EconomyError::InvalidInput(_))
+    ));
+    assert_eq!(a, before, "nothing charged, no policy");
+}

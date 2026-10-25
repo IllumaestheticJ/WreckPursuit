@@ -231,6 +231,8 @@ pub struct CityMap {
     road_material: Arc<Vec<RoadMaterial>>,
     /// Structures (canopies, landmarks, trusses) by grid cell, for line of sight.
     structure_grid: Arc<Grid>,
+    /// Car parks beside the roads ([`crate::car_park::car_parks`]: the rest stops' lots).
+    pub car_parks: Arc<Vec<crate::car_park::CarPark>>,
 }
 
 impl CityMap {
@@ -462,7 +464,9 @@ impl CityMap {
             deck_grid: Arc::new(deck_grid),
             paint: Default::default(),
             structure_grid: Arc::new(structure_grid),
+            car_parks: Default::default(),
         };
+        map.car_parks = Arc::new(crate::car_park::car_parks(&map.net));
         map.covers = crate::covered::CoverIndex::new(&map.net.covered);
         map.paint = Arc::new(crate::markings::freeway_paint(&map));
         // Drivable lane-km per zone (sampled every 10 m).
@@ -587,11 +591,17 @@ impl CityMap {
         Some((ix.control, ap, ix.allow_rtor))
     }
 
-    /// Drivable surface height at `p`: the lane or junction connector under it (the one
-    /// closest to `near_z` when given, else the lowest — grade separation), else the terrain.
-    /// Given `near_z`, the terrain wins when it is more than 1 m closer to it than the road
+    /// Drivable surface height at `p`: a car park's pad or dropped kerb under it
+    /// ([`crate::car_park`]), else the lane or junction connector under it (the one closest to
+    /// `near_z` when given, else the lowest — grade separation), else the terrain. Given
+    /// `near_z`, the terrain wins when it is more than 1 m closer to it than the road
     /// (hillside over a tunnel, ground under a deck).
     pub fn ground_height(&self, p: V2, near_z: Option<f32>) -> f32 {
+        if let Some(z) = self.car_parks.iter().find_map(|c| c.surface_z(p)) {
+            if near_z.is_none_or(|h| (z - h).abs() < 3.0) {
+                return z;
+            }
+        }
         let mut best: Option<f32> = None;
         let score = |z: f32| near_z.map_or(z, |h| (z - h).abs());
         for &id in self.seg_grid.at(p) {
@@ -1028,6 +1038,14 @@ impl WorldQuery for CityMap {
             return SurfaceType::PaintedLine;
         }
         let q = geom::xy(p);
+        // A car park's pad and dropped kerb are paved.
+        if self
+            .car_parks
+            .iter()
+            .any(|c| c.surface_z(q).is_some_and(|z| (z - p[2]).abs() < 1.0))
+        {
+            return SurfaceType::Asphalt;
+        }
         if let Some(ix) = self.intersection_at(q) {
             let node = self.net.intersections[ix as usize].node;
             if (self.net.nodes[node as usize].pos[2] - p[2]).abs() < 3.0 {

@@ -45,8 +45,9 @@ export type MaterialJson =
   | "lightbar_clear" | "emissive_amber" | "grille" | "exhaust" | "rim" | "spring" | "accent" | "underglow";
 /** Materials of the mesh files plus the ones only mod parts use (render/mod_parts.ts):
  * `caliperSport` / `caliperRace` brake-kit calipers (the mesh files' `caliper` is the stock
- * one, tinted per car), `steel`, `stripe`. */
-export type PartMaterial = MaterialJson | "steel" | "caliperSport" | "caliperRace" | "stripe";
+ * one, tinted per car), `steel`, `stripe`, and `carbonWeave` (bought carbon hood / trunk lid:
+ * visible twill weave under a gloss coat, unlike the plain dark `carbon` trim of the mesh files). */
+export type PartMaterial = MaterialJson | "steel" | "caliperSport" | "caliperRace" | "stripe" | "carbonWeave";
 
 /** One part of data/panels/meshes/<car>.json (tools/assets/src/mesh.rs `MeshPart`). Mod parts
  * (render/mod_parts.ts) use the same shape with kind "mod". */
@@ -478,7 +479,7 @@ export function applyCarEnv(m: THREE.Material, on: boolean): void {
  * per slot and colour (`tintedShared`). */
 type SharedKind =
   | "glass" | "trim" | "rubber" | "metal" | "interior" | "brokenLamp" | "carbon" | "chrome" | "steel"
-  | "caliper" | "caliperSport" | "caliperRace" | "stripe" | "engine" | "grille" | "exhaust" | "rim" | "spring" | "accent";
+  | "caliper" | "caliperSport" | "caliperRace" | "stripe" | "carbonWeave" | "engine" | "grille" | "exhaust" | "rim" | "spring" | "accent";
 let sharedMats: Record<SharedKind, THREE.MeshStandardMaterial> | null = null;
 /** Every shared material (to tell them from a car's own copies). */
 const sharedSet = new Set<THREE.Material>();
@@ -509,10 +510,42 @@ function shared(): NonNullable<typeof sharedMats> {
     caliperSport: std({ color: 0xc8161d, metalness: 0.2, roughness: 0.45 }),
     caliperRace: std({ color: 0xe0a812, metalness: 0.3, roughness: 0.4 }),
     stripe: std({ color: 0xf2f2f2, roughness: 0.5 }),
+    // The texture carries the colour (white base so it is not darkened twice).
+    carbonWeave: std({ color: 0xffffff, map: carbonWeaveTexture(), metalness: 0.4, roughness: 0.25 }),
   };
   for (const m of Object.values(sharedMats)) sharedSet.add(m);
   return sharedMats;
 }
+/**
+ * 2x2 twill carbon weave for `carbonWeave`, repeated over the livery atlas UVs of the panels
+ * (top band: about 4.8 m of car length across u 0..0.5 and 2 m of width across v 0.5..0.8), so
+ * one tile is roughly 14 cm of panel. Real tows are a few mm; this is exaggerated, with strong
+ * light/dark contrast, so the weave still reads at game distance and next to a black painted lid.
+ */
+function carbonWeaveTexture(): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const g = c.getContext("2d")!;
+  const tow = 16;
+  for (let i = 0; i < 4; i++)
+    for (let j = 0; j < 4; j++) {
+      // Twill: the over/under pattern steps one tow per row.
+      const over = (i + j) % 4 < 2;
+      const grad = over ? g.createLinearGradient(i * tow, 0, i * tow + tow, 0) : g.createLinearGradient(0, j * tow, 0, j * tow + tow);
+      grad.addColorStop(0, over ? "#15181c" : "#08090b");
+      grad.addColorStop(0.5, over ? "#737d8a" : "#353b44");
+      grad.addColorStop(1, over ? "#15181c" : "#08090b");
+      g.fillStyle = grad;
+      g.fillRect(i * tow, j * tow, tow, tow);
+    }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(68, 48);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
 /** One shared material per tinted slot and colour (`tints`: every car of a model shares it). */
 const tintCache = new Map<string, THREE.MeshStandardMaterial>();
 function tintedShared(slot: SharedKind, rgb: [number, number, number]): THREE.MeshStandardMaterial {
@@ -1212,8 +1245,10 @@ export class PanelBody {
       applyCarEnv(m, !lowpoly);
       if (k === "paint") m.color.copy(this.liveryBase ?? (lowpoly ? paint : g.color));
       else m.color.copy(lowpoly && lp[k] !== undefined ? tmpStyle.setHex(lp[k]) : g.color);
-      m.roughness = lowpoly ? (k === "glass" ? 0.35 : 0.85) : g.roughness;
-      m.metalness = lowpoly ? (k === "paint" ? 0.15 : 0) : g.metalness;
+      // Bought carbon keeps its gloss in low-poly too, so it never reads as a matte black lid.
+      const gloss = k === "carbonWeave";
+      m.roughness = lowpoly && !gloss ? (k === "glass" ? 0.35 : 0.85) : g.roughness;
+      m.metalness = lowpoly && !gloss ? (k === "paint" ? 0.15 : 0) : g.metalness;
       // Low-poly glass is darker and less see-through (picker: near-opaque blue-black).
       if (k === "glass") m.opacity = lowpoly ? 0.82 : g.opacity;
       // What the player bought shows in every style.

@@ -45,7 +45,7 @@ pub enum RepTier {
     Known,
     /// Touge betting and boss races.
     Respected,
-    /// Pink slips; exotics at the dealer.
+    /// Pink slips.
     Feared,
     /// Top of the ladder.
     Legend,

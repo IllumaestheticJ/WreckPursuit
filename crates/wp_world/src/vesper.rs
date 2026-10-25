@@ -5571,7 +5571,9 @@ mod tests {
             .filter(|p| p.kind == PoiKind::RestStop)
             .collect();
         assert_eq!(sites.len(), REST_SITES.len());
-        let parked = crate::props::parked_cars(&map, 1);
+        let mut parked = crate::props::parked_cars(&map, 1);
+        // Kerbside and in the car parks' bays.
+        parked.extend(crate::props::car_park_cars(&map, 1));
         let loop_lane = |l: LaneId| {
             rep.loop_roads
                 .contains(&(net.lanes[l as usize].road as usize))

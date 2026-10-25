@@ -1,6 +1,7 @@
 //! Tuners / sport: `kestrel_ts` (rally sedan), `shiro_turbo` (FR drift coupe), `hakone_gt`
 //! (90s twin-turbo GT), `sperber_32` (German I6 sport sedan), `debug_coupe` (sport coupe), plus
-//! `arashi_t4` / `talus_20t` (90s AWD rally saloons, variants of the kestrel style).
+//! `arashi_t4` (mid-90s AWD rally saloon, a variant of the kestrel style) and `talus_20t`
+//! (late-90s AWD rally saloon, its own body and kit).
 //!
 //! Genre cues (research §3): a big rear wing on tall stands (pedestal / swan-neck GT / hoop),
 //! a dropped stance with flush wheels and rear camber, aftermarket wheels, a body kit (wide
@@ -94,20 +95,167 @@ pub fn arashi(def: &VehicleDef) -> CarStyle {
     s
 }
 
-/// Late-90s AWD rally-homologation four-door saloon (`talus_20t`): the [`kestrel`] family
-/// with a lower stance, a taller bonnet scoop, dark red paint and bronze wheels. Shares the
-/// kestrel body kit.
+/// Late-90s AWD rally-homologation four-door saloon (`talus_20t`). Its own body, not the
+/// kestrel's: an upright, boxy late-90s greenhouse with a taller roof and a steep rear screen,
+/// a near-vertical squared-off nose, a flat bonnet with twin vents (no scoop), round blistered
+/// arches over the wheels, and a tall square tail. Kit: quad round head lamps on a black
+/// panel, a big central intercooler mouth, a deck-wide hoop wing and a full-width black tail
+/// panel with slim lamps. Dark red paint, bronze six-spoke wheels, gold calipers.
 pub fn talus(def: &VehicleDef) -> CarStyle {
-    let mut s = kestrel(def);
-    s.body.ride_dz = -0.03;
-    s.body.hood_scoop_h = 0.085;
-    s.body.flare = 0.035;
-    s.tints.retain(|t| t.0 != M::Paint);
+    let mut s = CarStyle::with_body(BodyStyle {
+        nose_h: Some(0.72),
+        nose_rake_deg: 6.0,
+        nose_plan_round: 0.12,
+        tail_plan_round: 0.10,
+        hood_crown: 0.008,
+        hood_bulge_h: 0.0,
+        hood_bulge_w: 0.50,
+        hood_scoop: HoodScoop::Vents,
+        hood_scoop_h: 0.11,
+        windshield_rake_deg: Some(54.0),
+        a_pillar_rake_deg: 4.0,
+        rear_glass_rake_deg: Some(44.0),
+        tumblehome: Some(0.11),
+        roof_dz: 0.04,
+        roof_crown: 0.012,
+        roof_len_trim: 0.02,
+        belt_dz: 0.02,
+        crease_z: 0.42,
+        crease_depth: 0.008,
+        shoulder_round: 0.03,
+        haunch: 0.045,
+        front_haunch: 0.040,
+        flare: 0.015,
+        flare_shape: ArchShape::Round,
+        ride_dz: -0.025,
+        deck_drop: -0.02,
+        ducktail_h: 0.0,
+        tail_round: 0.10,
+        tail_drop: 0.03,
+        ..BodyStyle::preset(Silhouette::Notchback)
+    });
+    s.details.push(kit_detail(talus_kit));
+    wheels(
+        &mut s,
+        def,
+        RimKind::SixSpoke,
+        6,
+        0.68,
+        M::Metal,
+        CapKind::Centre,
+        (0.025, 0.012),
+        (0.0, 0.8),
+    );
+    let m = &mut s.mechanical;
+    m.engine = EngineKind::Inline4;
+    m.induction = Induction::Turbo;
+    m.front_suspension = SuspensionKind::Strut;
+    m.rear_suspension = SuspensionKind::Multilink;
+    m.caliper_rgb = Some(rgb(0xD4A017));
+    m.exhaust = ExhaustKind::Single;
+    m.exhaust_tip_r_m = 0.05;
     s.tints.push((M::Paint, rgb(0x7A1418)));
     s.wheel.rim_rgb = Some(rgb(0x8C6A3A));
-    s.underglow_rgb = None;
-    s.mechanical.caliper_rgb = Some(rgb(0xD4A017));
     s
+}
+
+fn talus_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
+    let mut k = Kit::new(ctx.profile, b);
+    let wn = k.wn();
+    let wt = k.wt();
+    let (nz0, nz1) = k.nose_z();
+    let (tz0, tz1) = k.tail_z();
+    let fb = BodyRegion::FrontBumper;
+
+    // --- Front: black lamp panel across the nose with quad round lamps and a slim slot
+    // grille between them, then a big square intercooler mouth in the bumper.
+    let (lz0, lz1) = (nz1 - 0.15, nz1 - 0.015);
+    let kp = dkey("lamp_panel_front", BodyRegion::Hood, M::Trim);
+    k.front_box(&kp, -(wn - 0.02), wn - 0.02, lz0, lz1, 0.008, 0.004);
+    let zl = 0.5 * (lz0 + lz1);
+    let r = (0.5 * (lz1 - lz0) - 0.012).min(0.06);
+    for sx in SIDES {
+        let bez = sided(
+            &dkey("headlamp_bezel_l", BodyRegion::FrontLeftFender, M::Chrome),
+            sx,
+        );
+        let x_out = wn - 0.06 - r;
+        for x in [x_out, x_out - 2.25 * r] {
+            k.round_lamp(&headlight_key(sx), true, sx * x, zl, r, 0.022, Some(&bez));
+        }
+        // Amber corner lens wrapping the outboard end of the lamp panel.
+        k.front_box(
+            &indicator_front_key(sx),
+            sx * (wn - 0.055),
+            sx * (wn - 0.005),
+            lz0 + 0.02,
+            lz1 - 0.02,
+            0.014,
+            0.006,
+        );
+    }
+    k.grille(
+        "grille",
+        BodyRegion::Hood,
+        0.26,
+        zl - 0.03,
+        zl + 0.03,
+        1,
+        M::Trim,
+        None,
+    );
+    let (zm0, zm1) = (nz0 + 0.07, nz0 + 0.29);
+    k.mesh_grille("lower_grille", fb, 0.30, zm0, zm1, 4, 7, M::Metal);
+    for sx in SIDES {
+        // Brake-cooling slots outboard of the mouth.
+        let ks = sided(&dkey("brake_duct_l", fb, M::Grille), sx);
+        k.front_box(
+            &ks,
+            sx * (wn - 0.20),
+            sx * (wn - 0.08),
+            zm0 + 0.02,
+            zm0 + 0.09,
+            0.004,
+            0.002,
+        );
+    }
+    k.splitter(M::Trim, 0.04, 0.12, 0.02, false);
+
+    // --- Rear: deck-wide hoop wing, full-width black tail panel with slim lamps.
+    k.hoop_wing(0.30, 0.22, 0.16, M::Paint);
+    let (pz0, pz1) = (tz1 - 0.13, tz1 - 0.025);
+    k.rear_panel(
+        "tail_panel",
+        BodyRegion::Trunk,
+        wt - 0.01,
+        pz0,
+        pz1,
+        M::Trim,
+    );
+    for sx in SIDES {
+        k.rear_cluster(
+            sx,
+            0.30,
+            wt - 0.03,
+            pz0 + 0.025,
+            pz1 - 0.02,
+            0.014,
+            0.005,
+            Seg::Outboard(0.10),
+            M::EmissiveAmber,
+        );
+    }
+    let kp = dkey("plate_recess", BodyRegion::Trunk, M::Trim);
+    k.rear_box(&kp, -0.22, 0.22, tz0 + 0.12, tz0 + 0.24, 0.004, 0.0);
+    let kv = dkey("rear_valance", BodyRegion::RearBumper, M::Trim);
+    k.rear_box(&kv, -0.40, 0.40, tz0 + 0.02, tz0 + 0.07, 0.010, 0.004);
+
+    k.skirts(M::Trim, 0.015, 0.05);
+    k.mirrors(0.08, 0.12, None);
+    k.fender_repeaters();
+    k.door_handles(M::Trim);
+    k.fuel_filler(-1.0, 0.10, M::Paint);
+    k.wipers();
 }
 
 fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {

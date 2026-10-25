@@ -98,7 +98,9 @@ function CarCard({ car, selected, onSelect }: { car: CarView; selected: boolean;
     <button type="button" class="wp-cg-card" aria-selected={selected} onClick={onSelect} data-testid={`car-${car.uid}`}>
       <div class="wp-spread">
         <b class="wp-upper">{car.name}</b>
-        <span class="wp-dim wp-mono">{words(car.class)}</span>
+        <span class="wp-dim wp-mono">
+          {car.rare && <Badge tone="info">rare</Badge>} {words(car.class)}
+        </span>
       </div>
       <Meter value={car.health} color={severityColor(1 - car.health)} label="Condition" />
       <div class="wp-row" style={{ gap: "0.3em", flexWrap: "wrap" }}>
@@ -354,7 +356,7 @@ function ModTree(props: { car: CarView; api: CareerApi; run: (f: () => CareerVie
           </thead>
           <tbody>
             {shown.map((m) => (
-              <tr key={m.id} onMouseEnter={() => setHover(m.id)} data-mod={m.id}>
+              <tr key={m.id} onMouseEnter={() => setHover(m.id)} onClick={() => setHover(m.id)} onFocusIn={() => setHover(m.id)} data-mod={m.id} class={m.id === hover ? "wp-cg-mod-focus" : undefined}>
                 <td>
                   <b>{m.name}</b> <span class="wp-dim wp-mono">T{m.tier}</span>
                   <div class="wp-dim" style={{ fontSize: "0.8em" }}>
@@ -386,12 +388,13 @@ function ModTree(props: { car: CarView; api: CareerApi; run: (f: () => CareerVie
           </tbody>
         </table>
       </Panel>
-      <Panel title={focus ? (focus.installed ? `Without ${focus.name}` : `With ${focus.name}`) : "Build"} tag={focus ? `T${focus.tier}` : undefined}>
+      {/* Sticky: stays in view while the mod list scrolls (garage.css .wp-cg-mods-effect). */}
+      <Panel class="wp-cg-mods-effect" title={focus ? (focus.installed ? `Without ${focus.name}` : `With ${focus.name}`) : "Build"} tag={focus ? `T${focus.tier}` : undefined}>
         <StatGrid now={tree.stats} after={focus?.stats_after} />
         {focus?.replaces && <p class="wp-dim">Replaces {focus.replaces} (refunded at 40 %).</p>}
         {focus && focus.requires.length > 0 && <p class="wp-dim">Needs: {focus.requires.join(", ")}</p>}
         <p class="wp-dim" style={{ fontSize: "0.8em" }}>
-          Hover a mod to see what it changes. Durability adds mass; removing a mod refunds 40 %.
+          Hover or tap a mod to see what it changes. Durability adds mass; removing a mod refunds 40 %.
         </p>
       </Panel>
     </div>
@@ -495,7 +498,7 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
         ))}
       </div>
       <div class="wp-cg-detail">
-        <Panel title={car.name} tag={words(car.class)}>
+        <Panel title={car.name} tag={car.rare ? `RARE · ${words(car.class)}` : words(car.class)}>
           <div class="wp-cg-hero">
             <Stat label="Condition" value={pct(car.health)} tone={car.total_loss ? "danger" : car.health > 0.8 ? "ok" : "warn"} />
             <Stat label="Value" value={<Money value={car.value} />} />

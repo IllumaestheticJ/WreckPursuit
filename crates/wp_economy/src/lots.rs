@@ -193,7 +193,17 @@ pub struct Listing {
     /// Junkyard: the mechanical state (components, `runs`, `condition`) is not shown before
     /// buying; only what can be seen (missing panels, dents, tyres).
     pub hidden: bool,
+    /// Factory paint, 0xRRGGBB: the car is drawn in it on the lot and keeps it once bought.
+    #[serde(default)]
+    pub paint: u32,
 }
+
+/// Factory paints lot cars are sold in (0xRRGGBB): reds, blues, greens, golds, purples,
+/// teals, white, silver, black, orange.
+pub const FACTORY_PAINTS: [u32; 12] = [
+    0xd04a2a, 0x2a7fd0, 0x3fb950, 0xd0a92a, 0x9b59b6, 0x1abc9c, 0xd8d8d2, 0x8a9099, 0x1e1e22,
+    0x7a1f1f, 0x2b3a55, 0xe07a1f,
+];
 
 /// Panels a lot car can be dented in.
 const DENT_REGIONS: [BodyRegion; 13] = [
@@ -392,6 +402,8 @@ impl Economy {
             base_price: spec.base_price,
             variant: rare.map(|r| r.id.clone()),
             variant_name: rare.map(|r| r.name.clone()),
+            // From a copy of the slot's stream, so adding paint left every other roll as it was.
+            paint: FACTORY_PAINTS[(rng.clone().next_u64() % FACTORY_PAINTS.len() as u64) as usize],
             mods: rare.map(|r| r.mods.clone()).unwrap_or_default(),
             grade,
             price,
@@ -459,6 +471,8 @@ impl Economy {
             tune: Default::default(),
             parts: None,
             tires: listing.tires,
+            variant_name: listing.variant_name.clone(),
+            paint: Some(listing.paint),
         };
         transact(acct, |tx| {
             tx.spend(

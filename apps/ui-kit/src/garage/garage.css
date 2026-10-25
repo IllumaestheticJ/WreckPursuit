@@ -55,9 +55,26 @@
   gap: 1em;
   align-items: start;
 }
+/* The effect panel follows the mod list down as it scrolls (beside it on wide screens, pinned
+   to the bottom of the view on narrow ones). */
+.wp-cg-mods-effect {
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 2em);
+  overflow-y: auto;
+  z-index: 1;
+}
+.wp-cg-mods tr.wp-cg-mod-focus td {
+  background: rgba(255, 255, 255, 0.05);
+}
 @media (max-width: 760px) {
   .wp-cg-mods {
     grid-template-columns: 1fr;
+  }
+  .wp-cg-mods-effect {
+    grid-row: 1;
+    top: 0;
+    max-height: 45vh;
   }
 }
 .wp-cg-pound {
