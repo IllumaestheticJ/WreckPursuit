@@ -1859,7 +1859,7 @@ pub const DRAWN_BAND_TOLERANCE_M: f32 = 0.25;
 
 /// The terrain mesh the greybox draws: the coarse [`drawn_terrain`] grid, with every coarse cell
 /// where the solid road-band ground stands more than [`DRAWN_BAND_TOLERANCE_M`] above it drawn
-/// from the fine grid instead (playtest row 171: solid shelves up to 15 m above the drawn ground
+/// from the fine grid instead (playtest row 172: solid shelves up to 15 m above the drawn ground
 /// beside roads on steep slopes). See [`drawn_terrain_mesh`].
 #[derive(Debug, Clone)]
 pub struct DrawnTerrain {
