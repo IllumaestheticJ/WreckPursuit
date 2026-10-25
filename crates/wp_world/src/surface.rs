@@ -9,7 +9,8 @@
 //!   to the ground beyond — the greybox draws exactly these triangles and `wp_sim` collides
 //!   with exactly these triangles;
 //! - [`deck_rails`]: guard-rail lines along bridge decks;
-//! - [`median_barriers`]: concrete barrier lines between divided-highway carriageways;
+//! - [`median_barriers`]: concrete barrier lines between divided-highway carriageways (open
+//!   at median crossovers, [`crate::crossover`]);
 //! - [`deck_slabs`]: bridge-deck pieces that hide what is under them (line of sight);
 //! - [`edge_barriers`]: concrete barrier lines along the outer edges of highways;
 //! - [`MapGround`]: a wheel ground probe over roads and terrain without a physics engine.
@@ -2036,8 +2037,20 @@ pub fn inside_other_paving(net: &RoadNetwork, si: usize, p: V3) -> bool {
 }
 
 /// Median barrier polylines (at road height, along the left paved edge of every surface
-/// flagged [`RoadSurface::median_barrier`]).
+/// flagged [`RoadSurface::median_barrier`]), open at every median crossover
+/// ([`crate::crossover`]): the barrier that physics and the greybox build.
 pub fn median_barriers(net: &RoadNetwork) -> Vec<Vec<V3>> {
+    let points = crate::crossover::crossovers(net);
+    median_barrier_lines(net)
+        .into_iter()
+        .flat_map(|line| crate::crossover::cut_line(&line, &points))
+        .collect()
+}
+
+/// The median lines themselves, one per surface flagged [`RoadSurface::median_barrier`],
+/// without the crossover openings (where the median runs, whether or not a barrier stands
+/// on it).
+pub fn median_barrier_lines(net: &RoadNetwork) -> Vec<Vec<V3>> {
     net.surfaces
         .iter()
         .filter(|s| s.median_barrier && s.centre.len() >= 2)
@@ -2127,8 +2140,9 @@ pub fn edge_barriers(map: &CityMap) -> Vec<Vec<V3>> {
     // Median barriers, in 32 m cells: an edge never gets a second barrier beside one. Both
     // carriageways of a divided highway border the median, but only one of them carries it
     // (`median_barrier`); the other's median-side edge is no outer edge (a barrier there ran
-    // 0.25 m beside the median and stuck out of its face: a scraping car caught it).
-    let medians = median_barriers(net);
+    // 0.25 m beside the median and stuck out of its face: a scraping car caught it). The
+    // whole median line counts, crossover openings included (they stay open).
+    let medians = median_barrier_lines(net);
     const MCELL: f32 = 32.0;
     let mcell = |q: V2| ((q[0] / MCELL).floor() as i32, (q[1] / MCELL).floor() as i32);
     let mut msegs: Vec<(V2, V2, f32)> = Vec::new();

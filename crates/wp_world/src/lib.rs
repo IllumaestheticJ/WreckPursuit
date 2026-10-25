@@ -27,6 +27,7 @@ pub mod builder;
 pub mod car_park;
 pub mod clock;
 pub mod covered;
+pub mod crossover;
 pub mod density;
 pub mod drive;
 pub mod geom;
@@ -173,7 +174,7 @@ impl World {
         let mut map = CityMap::new(net);
         map.time = cfg.start_time;
         let traffic = Traffic::new(&map, cfg.traffic.clone(), cfg.seed);
-        let parked = if cfg.parked_cars {
+        let mut parked = if cfg.parked_cars {
             // Kerbside cars (never across a driveway mouth or a car park's bays), then the
             // driveway cars (residential lots, playtest row 95).
             let mut cars = props::parked_cars(&map, cfg.seed);
@@ -185,6 +186,9 @@ impl World {
         } else {
             Vec::new()
         };
+        // Cones at the median crossovers (after every parked car: `set_parked_cars` keeps
+        // them, in order).
+        parked.extend(crossover::cones(&map.net));
         let n_lanes = map.n_lanes();
         let obstacles = std::sync::Arc::new(obstacles::ObstacleIndex::new(&map.net));
         Self {
@@ -495,7 +499,8 @@ impl World {
         &self.obstacles
     }
 
-    /// Static colliders: parked cars and route-closure cones.
+    /// Static colliders: parked cars, other fixed props (median crossover cones, touge
+    /// K-rails) and route-closure cones.
     pub fn static_props(&self) -> impl Iterator<Item = &StaticProp> + '_ {
         self.parked.iter().chain(self.cones.iter())
     }

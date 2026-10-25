@@ -168,6 +168,7 @@ pub fn map_static(map: &CityMap) -> MapStatic {
                 PoiKind::PoliceStation => "PoliceStation",
                 PoiKind::Helipad => "Helipad",
                 PoiKind::RestStop => "RestStop",
+                PoiKind::MedianCrossover => "Crossover",
             },
             name: p.name.clone(),
             pos: [r1(p.pos[0]), r1(p.pos[1])],
