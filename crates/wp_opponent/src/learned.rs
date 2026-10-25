@@ -18,7 +18,8 @@
 //! the same road in the same direction (Loop 9 night and day, a street racer's rest-stop lap)
 //! gets the same corrections. A row only applies to a car whose measured capability still
 //! matches the one it was trained with (a physics change makes the table stale, never wrong:
-//! the car drives untrained). Generated, never hand-edited:
+//! the car drives untrained). Generated; the two hand-set values (`traffic.ram_min_nerve`,
+//! `traffic.civilian_headway_scale`) are explained in the crate README ("Training"):
 //!
 //! ```sh
 //! WP_TRAIN_WRITE=1 cargo test --release -p wp_race --test opponent_train stage1 -- --ignored --nocapture

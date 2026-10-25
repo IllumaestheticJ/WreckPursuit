@@ -160,7 +160,28 @@ separately dodge traffic / ram police while racing." The trainer is
   slow for Loop 9's sweepers at 50+ m/s (the off-line cap then took cars from 55 to 42 m/s);
   it now follows the line's own lateral speed, as the whole-road line already did.
 - `stage1_check`: every trained car untrained vs as the game drives it (embedded table); fails
-  when the table adds incidents.
+  when the table adds incidents. With `WP_TRAIN_WRITE=1` it drops the car / course rows that
+  did (18 of 64 dropped; the highway course is chaotic, most cars touch its walls 15–100 times
+  even untrained).
+
+Results (native release, cloud 4 vCPU, 2026-10-24):
+
+| Check | Untrained | Trained |
+|---|---|---|
+| Loop 9 night, 32 cars solo: finishers / wall hits | 29 / 460 | 30 / 365 (most cars 2–9 s a lap faster) |
+| Loop 9 day, solo: finishers | 28 | 29 |
+| Loop 9 → Ashpeak highway, solo: finishers / wall hits | 17 / 93 305 | 21 / 1 620 |
+| Stage 2 (5 races × 3 seeds, 78 cars): finishers / civilian hits | 52 / 34 (start values) | 53 / 19 (ramming off), 52 / 30 (ramming at nerve 1.2, as shipped) |
+
+Stage 2 found ramming costs the field (a racer swerving onto a unit's rear corner meets
+civilians), so its search turns ramming off (`ram_min_nerve` 2.1). The owner asked for
+ramming, so the shipped table hand-sets `ram_min_nerve` to 1.2: only drivers with
+`aggression + risk` above 1.2 ram. Stage 2 also picked `civilian_headway_scale` 1.15 (+0.9
+score, just over the 0.5 noise margin); it made `wp_wasm`'s
+`a_racer_never_gives_up_after_a_spin_or_a_crash` street challenge time out (the racer
+trails slow civilians after its shove), so it is hand-set back to 1.0. Re-running `stage2`
+overwrites both; restore them by hand. Spike strips: 8 dodges, no punctures in any stage 2 run;
+`spike_clearance_m` 0.4–0.9 made no difference (one 4 m strip on half the road).
 
 ## Free roam (`roam`)
 

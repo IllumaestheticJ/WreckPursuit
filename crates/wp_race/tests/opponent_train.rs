@@ -844,6 +844,9 @@ fn full_race(id: &str, seed: u64, traffic: LearnedTraffic) -> RaceOutcome {
     let racers: Vec<EntityId> = entrants.iter().map(|e| e.racer).collect();
     judge.set_stranded_reset(&racers);
     let green = judge.start(sim.tick()).unwrap();
+    // The race's own police, as the game sets it up: doctrine plus the scripted roadblocks,
+    // spike strips and stakeouts (without this stage 2 never meets a spike strip).
+    wp_race::police::start_race(sim.police_mut(), &def, &race, &racers);
     let mut events: Vec<SimEvent> = Vec::new();
     let max_s = (race.route.length_m / 8.0 + 90.0) as u64;
     while sim.tick() < green + 240 * max_s {

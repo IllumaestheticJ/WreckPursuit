@@ -374,3 +374,38 @@ lane's centre, ±0.1 m), and on Loop 9 that lane is the race route's. Flights no
 100 / 150). The full race line takes ~27 ms for Loop 9's 5 000 samples (native release); the
 cost scales with the fine-level sweeps, so a 2 km flight (1 000 samples) should cost about 1 ms
 per replan (estimated, not measured; replans every `FLIGHT_REPLAN_S` = 6 s).
+
+## Racer training (owner request 2026-10-24, branch `claude/project-thread-ot78s9`)
+
+Owner: "train the AI by having them do a full speed run with no traffic, and then have the AI
+separately dodge traffic / ram police while racing", and "AI needs to know how to attempt to
+dodge spikes". Design, results and how to re-train: `crates/wp_opponent/README.md`
+("Training"). Summary:
+
+- New `wp_opponent::learned` (embedded `data/ai/racer_training.json`): per-car, per-course
+  steering look-ahead, aim corrections and corner-speed scales (stage 1, solo flat-out runs),
+  plus `LearnedTraffic` (stage 2: civilian clearance, ram nerve / closing speed, spike
+  clearance). `RaceConfig::learned` (default on) applies it; off = the old behaviour.
+- New racer behaviours in `field`: ram a slower police car in my path when chased and bold
+  (`ram_target`), steer round the end of a spike strip (`spike_dodge`). Police AI unchanged.
+- `PoliceQuery` gained `police_vehicles()` and `spike_strips()` (default empty; `SimPolice`
+  implements both from `wp_police`).
+- Bug fixed: own-lane line command slew limit (0.9 m/s) lagged the line in fast sweepers.
+- Trainer: `crates/wp_race/tests/opponent_train.rs` (`stage1`, `stage1_check`, `stage2`,
+  all `#[ignore]`, release). Stage 2 trains on `loop9_circuit`, `loop9_day`,
+  `loop9_ashpeak_highway`, `grid_highway_sprint` (spike strip) and `lantern_checkpoint`
+  (roadblocks); ids missing from the catalog are skipped.
+
+### Changes outside my crates
+- `crates/wp_race/src/entrants.rs`: `AiEntrants::field_mut` (the trainer sets per-car
+  corrections).
+- `crates/wp_race/tests/opponent_train.rs` (new), `data/ai/racer_training.json` (new).
+
+### Known gaps
+- The table's highway rows and `loop9_day` validation came from the race-trim branch
+  (`claude/project-thread-3jtx3j`); on main without it those rows simply never match a race.
+- ironside_440, brigand_400 and mesquite_pr hit Loop 9 walls heavily even untrained.
+- A car physics change makes its rows stale (they stop applying); re-run the trainer.
+- Ramming costs the field in stage 2 (more civilian hits); kept for bold drivers by owner
+  request, see the README. `civilian_headway_scale` is hand-set back to 1.0 (stage 2's 1.15
+  broke `wp_wasm` `a_racer_never_gives_up_after_a_spin_or_a_crash`).
