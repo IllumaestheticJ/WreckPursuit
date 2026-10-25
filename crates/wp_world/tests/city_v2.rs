@@ -112,6 +112,64 @@ fn terrain_blocks_line_of_sight_across_the_hill() {
         .line_of_sight([-1000.0, 1080.0, 260.0], [-500.0, 1050.0, 30.0]));
 }
 
+/// Solid ground is never more than `DRAWN_BAND_TOLERANCE_M` (+ the drawn ground's 5 cm) above the
+/// terrain the greybox draws, anywhere on the fine grid (vertices, cell centres, edge midpoints),
+/// and the refined drawn terrain still never rises above a road (playtest row 171: in the road
+/// band, solid shelves stood up to 15 m above the coarse drawn ground beside steep roads).
+#[test]
+fn solid_ground_never_stands_above_the_drawn_terrain() {
+    let map = wp_world::CityMap::new(net().clone());
+    let t = net().terrain.as_ref().unwrap();
+    let drawn = wp_world::surface::drawn_terrain_mesh(&map).unwrap();
+    let solid = wp_world::surface::collision_terrain(&map).unwrap();
+    let mut worst = (f32::NEG_INFINITY, [0.0f32; 2]);
+    for j in 0..t.ny - 1 {
+        for i in 0..t.nx - 1 {
+            let p = t.vertex_pos(i, j);
+            let h = t.cell_m;
+            for q in [
+                p,
+                [p[0] + h * 0.5, p[1]],
+                [p[0], p[1] + h * 0.5],
+                [p[0] + h * 0.5, p[1] + h * 0.5],
+                [p[0] + h * 0.25, p[1] + h * 0.75],
+            ] {
+                let d = solid.height_on_triangles(q) - drawn.height_at(q);
+                if d > worst.0 {
+                    worst = (d, q);
+                }
+            }
+        }
+    }
+    let limit = wp_world::surface::DRAWN_BAND_TOLERANCE_M + 0.05 + 1e-3;
+    assert!(
+        worst.0 <= limit,
+        "solid ground {:.2} m above the drawn terrain at {:?}",
+        worst.0,
+        worst.1
+    );
+    let refined = drawn.refined.iter().filter(|r| **r).count();
+    assert!(
+        refined > 0,
+        "nothing refined: the test no longer covers the band"
+    );
+    // Refined or not, the drawn terrain stays under the roads.
+    let mesh = wp_world::surface::road_mesh(&map);
+    let mut above = f32::NEG_INFINITY;
+    for tri in &mesh.indices {
+        for v in tri {
+            let q = mesh.positions[*v as usize];
+            above = above.max(drawn.height_at([q[0], q[1]]) - q[2]);
+        }
+    }
+    assert!(above <= 0.0, "drawn terrain {above:.3} m above a road");
+    eprintln!(
+        "drawn terrain: {refined} of {} coarse cells refined; solid at most {:.3} m above drawn",
+        drawn.refined.len(),
+        worst.0
+    );
+}
+
 #[test]
 fn queries_respect_grade_separation_and_terrain() {
     let w = world(1, 0.0);
