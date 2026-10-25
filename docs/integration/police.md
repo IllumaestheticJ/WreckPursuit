@@ -1887,6 +1887,30 @@ Tests: `race::tests::loop9_day_is_the_heaviest_police_in_the_picker`, `switched_
 
 Known gaps: there is no `race_picker` run of `loop9_day` yet (its RaceDef is on another branch). Once both are on main, the field's finish rate under the dragnet wants a seed sweep. Tools.toml still caps highway roadblocks from the captain at L3 (`highway_max_level`), so at L4+ the captain only lays spikes on the loop. The scripted route blocks are not affected.
 
+## AI units that get nowhere despawn out of sight (owner request, 2026-10-23)
+
+Owner: AI police that are not making meaningful progress and not in view of any racer should
+despawn.
+
+- New `progress.rs`: `ProgressWatch` per unit (`Unit::progress`), updated at think rate by
+  `dispatch::maintain_progress` (right after `maintain_stuck`). Goal per assignment: `Pursue` →
+  racer, `Respond` → reported racer / crash, `Intercept` → point (ambush wait point included),
+  `Patrol` → destination node. Distance = remaining length of the unit's planned track (roads bend
+  away from a destination: straight-line distance despawned moving patrols in `traffic_soak`);
+  straight line for `Pursue` (local steering track) and once within 40 m. Progress = 25 m closer than the best since the job / patrol leg
+  began, or within 40 m of the goal; `Idle` (no goal) = 40 m driven. 30 s without progress →
+  despawn when `may_vanish` (out of every racer's sight, ≥ `despawn_min_m`); in sight it keeps
+  going and is re-checked every think step.
+- The call is handed back (`ResponseOutcome::NoProgress`) and dispatched again; pool patrols are
+  refilled by `maintain_pool`. `PoliceStats::no_progress_despawns` counts them.
+- Exempt: player units, `UnitRole::Tool`, helicopters, wrecked / out-of-service units, parked
+  roadblock / spike assignments. Applies to headless and physical units alike, both damage modes.
+  `set_unstick_recovery(false)` disables the despawn (measurements).
+- Constants in `progress.rs` (`NO_PROGRESS_S`, `GAIN_M`, `ARRIVED_M`, `MOVE_M`), like `stuck.rs`.
+- Tests: `progress::tests::*` (closing in vs. holding distance, arrival / new job / new patrol leg
+  reset, idle shuffling vs. driving).
+- Outside my crate: none.
+
 ## Owner tuning 2026-10-23: far fewer cops, far less suspicious
 
 Owner: "cops are far too common and spawn too much at night time — the night spawn rate should be the daytime rate, and the new night time rate should be 1/4 what it is now. The suspicion/investigation rate needs to also be FAR less sensitive."

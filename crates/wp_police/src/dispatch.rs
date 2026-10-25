@@ -894,6 +894,68 @@ impl PoliceSystem {
         }
     }
 
+    /// Despawn AI ground units that have made no meaningful progress toward their goal for
+    /// [`crate::progress::NO_PROGRESS_S`] once nobody can see them ([`crate::progress`]). A
+    /// call is dispatched again; a patrol is refilled out of sight by `maintain_pool`.
+    pub(crate) fn maintain_progress(&mut self, world: &dyn WorldQuery) {
+        let now = self.now;
+        let mut i = 0;
+        while i < self.units.len() {
+            let watched = {
+                let u = &self.units[i];
+                u.kind == UnitKind::Car
+                    && u.player.is_none()
+                    && !u.wrecked
+                    && !matches!(u.role, UnitRole::Player | UnitRole::Tool)
+                    && !matches!(
+                        u.assignment,
+                        Assignment::RoadblockAt { .. }
+                            | Assignment::SpikeAt { .. }
+                            | Assignment::OutOfService
+                    )
+            };
+            if !watched {
+                self.units[i].progress.clear();
+                i += 1;
+                continue;
+            }
+            // How far the goal is: along the unit's planned route where it drives one (roads
+            // bend away from a destination; the straight line can grow while it drives on),
+            // straight line for a pursuer (its track is local steering) and once close.
+            let goal_m = self.goal_of(i).map(|g| {
+                let u = &self.units[i];
+                let straight = dist(u.body.pos, g);
+                let routed =
+                    u.cmd.track.is_drivable() && !matches!(u.assignment, Assignment::Pursue { .. });
+                if straight <= crate::progress::ARRIVED_M || !routed {
+                    straight
+                } else {
+                    (u.cmd.track.length() - u.track_s).max(0.0)
+                }
+            });
+            let u = &mut self.units[i];
+            let leg = match u.assignment {
+                Assignment::Patrol { dest } => dest.0,
+                _ => 0,
+            };
+            let (job, pos) = ((u.assigned, leg), u.body.pos);
+            let stalled = u.progress.update(now, job, pos, goal_m);
+            if stalled && self.unstick_recovery && self.may_vanish(world, i) {
+                let id = self.units[i].id;
+                self.end_response(id, crate::ResponseOutcome::NoProgress);
+                for inc in self.incidents.iter_mut() {
+                    if inc.unit == Some(id) {
+                        inc.unit = None;
+                    }
+                }
+                self.stats.no_progress_despawns += 1;
+                self.despawn(i);
+                continue;
+            }
+            i += 1;
+        }
+    }
+
     /// Reset in place (owner row 78): an un-wrecked AI unit that has stood stuck long enough
     /// (see [`crate::stuck::RESET_ACTIVE_S`]) snaps to the nearest clear spot in its lane
     /// within [`crate::stuck::RESET_RADIUS_M`] along its route, keeps its damage and drives on
@@ -1027,6 +1089,26 @@ impl PoliceSystem {
                 }
             }
             i += 1;
+        }
+    }
+
+    /// Where unit `i`'s current job takes it ([`crate::progress`]): the racer it pursues or
+    /// was called about, the crash it was sent to, its intercept point or patrol destination.
+    /// `None` for a unit without one (idle).
+    fn goal_of(&self, i: usize) -> Option<[f32; 2]> {
+        let racer = |e: EntityId| self.racers.get(&e).map(|r| xy(r.pos));
+        match self.units[i].assignment {
+            Assignment::Pursue { target } => racer(target),
+            Assignment::Intercept { point, .. } => Some(point),
+            Assignment::Patrol { dest } => Some(self.graph.node(dest).pos),
+            Assignment::Respond { incident } => {
+                let inc = self.incidents.iter().find(|x| x.id == incident)?;
+                match inc.kind {
+                    IncidentKind::Report { racer: r } => racer(r).or(Some(inc.pos)),
+                    IncidentKind::Crash => Some(inc.pos),
+                }
+            }
+            _ => None,
         }
     }
 
@@ -1697,6 +1779,7 @@ impl PoliceSystem {
         self.update_racer_rules(tdt);
         self.check_unit_health();
         self.maintain_stuck(world);
+        self.maintain_progress(world);
         self.maintain_resets(world);
         self.maintain_pool(world);
         self.dispatch_incidents(world);
