@@ -400,6 +400,14 @@ dodge spikes". Design, results and how to re-train: `crates/wp_opponent/README.m
 - `crates/wp_race/src/entrants.rs`: `AiEntrants::field_mut` (the trainer sets per-car
   corrections).
 - `crates/wp_race/tests/opponent_train.rs` (new), `data/ai/racer_training.json` (new).
+- `crates/wp_race/src/judge.rs`: `RacerSample::up_z` (serde default upright) and flip
+  recovery: an AI racer on `set_stranded_reset` lying on its side or roof for
+  `FLIPPED_RESET_S` (3 s) is put back on the course, as police units already were. Found by
+  CI on main's `loop9_ashpeak_highway`: racers, trained or not, cut the Lantern Way junction
+  (gates 62-63) and some roll; they lay inside the corridor, so the off-course rule never
+  fired, until the race timed out. Seeds 1-6 before: 16 finishers of 36 trained, 16
+  untrained; with the fix the test's seed and seeds 1-3 all pass (4-5 of 6 finish). The
+  junction itself still bites (every car runs over the inside edge there).
 
 ### Known gaps
 - The table's highway rows and `loop9_day` validation came from the race-trim branch
