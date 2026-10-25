@@ -691,12 +691,27 @@ async function main(): Promise<void> {
   let lookCar: { uid: number; showcase: boolean } | null = null;
   const applyCareerLook = () => {
     const career = lookCar ?? (sim.careerRunActive() ? { uid: sim.careerView().active_car ?? -1, showcase: false } : null);
-    if (!career) return;
+    const view = app.views.get(app.player);
+    if (!career) {
+      // A test drive outside the career in the same model as the career car: same colour, so
+      // the car does not change colour between career, workshop and test drives.
+      const active = careerActiveCar();
+      if (active && sim.scenario().entities?.[0]?.car === active.def_id) view?.setPaint(active.paint);
+      return;
+    }
     const car = sim.careerView().cars.find((c) => c.uid === career.uid);
     if (!car) return;
-    const view = app.views.get(app.player);
-    if (car.paint != null) view?.setPaint(car.paint);
+    view?.setPaint(car.paint);
     view?.setLook(car.mods.map((m) => m.id), career.showcase);
+  };
+  /** The career's active car, if a career exists. */
+  const careerActiveCar = () => {
+    try {
+      const v = sim.careerView();
+      return v.cars.find((c) => c.uid === v.active_car) ?? null;
+    } catch {
+      return null;
+    }
   };
   const rebuildViews = () => {
     scene.warmLightVariants();

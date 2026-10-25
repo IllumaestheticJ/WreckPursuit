@@ -150,8 +150,9 @@ pub struct CarView {
     pub name: String,
     /// A rare variant (bought as one from a lot).
     pub rare: bool,
-    /// Factory paint 0xRRGGBB it was sold in (`None`: the renderer's default colour).
-    pub paint: Option<u32>,
+    /// Body colour 0xRRGGBB: the paint it was sold or resprayed in, else a fixed factory colour
+    /// picked by uid ([`car_paint`]), so the car looks the same in every view and session.
+    pub paint: u32,
     /// Class.
     pub class: VehicleClass,
     /// The career's active car.
@@ -918,7 +919,7 @@ impl Career {
             def_id: c.def_id.clone(),
             name,
             rare: c.variant_name.is_some(),
-            paint: c.paint,
+            paint: car_paint(c),
             class: c.class,
             active: acct.active_car == Some(c.uid),
             location: match c.location {
@@ -2495,4 +2496,13 @@ pub fn career_next_night() -> Result<String, JsValue> {
 #[cfg(test)]
 pub(crate) fn set_career(career: Option<Career>) {
     CAREER.with(|c| *c.borrow_mut() = career);
+}
+
+/// A career car's body colour: its own paint, or (cars bought before paint was saved, dealer
+/// and floor cars) a factory colour fixed by its uid, never by the view or the session.
+pub fn car_paint(c: &wp_economy::OwnedCar) -> u32 {
+    c.paint.unwrap_or_else(|| {
+        let n = wp_economy::FACTORY_PAINTS.len();
+        wp_economy::FACTORY_PAINTS[c.uid.0 as usize % n]
+    })
 }

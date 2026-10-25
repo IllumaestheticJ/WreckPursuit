@@ -82,8 +82,8 @@ export interface CarView {
   name: string;
   /** Bought as a rare variant. */
   rare: boolean;
-  /** Factory paint 0xRRGGBB it was sold in (null: the default colour). */
-  paint: number | null;
+  /** Body colour 0xRRGGBB (its own paint, else a factory colour fixed by its uid). */
+  paint: number;
   class: string;
   active: boolean;
   location: "Garage" | "Impound";
