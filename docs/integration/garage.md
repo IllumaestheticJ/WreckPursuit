@@ -276,3 +276,17 @@ Workshop operations run on a button press, not per frame.
 - Workshop hardware (battery, diff, tank...) is drawn in the workshop only, not while driving.
 - Replacement bumpers hide the stock grille and indicators; the new cover draws its own intakes
   and LED strips.
+
+## Paint shop and car colour (2026-10-25)
+
+- Every career car has one body colour: `OwnedCar::paint`, else a factory colour fixed by its
+  uid (`wp_wasm::career::car_paint`). `CarView::paint` is always set, so the workshop, career
+  runs and a non-career test drive in the same model all show the same colour (before, dealer
+  and floor cars took a colour from the view's entity id, which differed per session).
+- `Economy::respray(acct, car, paint)` / `respray_fee` (`prices.toml respray_base` × class
+  `parts_scale`); posted as `ModInstalled { mod_id: "respray" }` since the contract has no paint
+  reason. wasm `career_respray(uid, paint)`; `CarView::respray_fee`.
+- Workshop "Paint shop" (`apps/ui-kit/src/garage/PaintShop.tsx`, host in
+  `apps/testbed-web/src/workshop/mode.ts`): 28 swatches + a custom colour, previewed on the car
+  before paying; Finish / Vinyls / Body / Wheels / Cabin & bay list the cosmetic mods with
+  Preview (adds only) and Fit / Swap / Remove. `e2e/paint_shop.mjs` covers it.

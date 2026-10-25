@@ -2,8 +2,8 @@
 // Usage: npm run e2e:race (needs `npm run wasm` first; `npm run e2e` runs it after run.mjs).
 // Env: CHROMIUM=/path/to/chrome, SHOTS=dir for screenshots.
 //
-// Checks: the "races" button opens the picker with every race the city offers (Loop 9 night
-// and day since 2026-10-24); picking Loop 9 night starts a race session (countdown, HUD, player held on the grid, gate marker in the
+// Checks: the "races" button opens the picker with every race the world offers (Loop 9 night
+// and day, and the Loop 9 → Ashpeak highway run); picking Loop 9 night starts a race session (countdown, HUD, player held on the grid, gate marker in the
 // world); after the green light the AI racers move and show on the city minimap; on autopilot the race runs to a results
 // table with a payout from the economy; no page errors.
 import { spawn } from "node:child_process";
@@ -59,9 +59,9 @@ await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 3
 await page.click("#sc-races");
 await page.waitForSelector('[data-testid="race-picker"]', { timeout: 10000 });
 const cards = await page.$$eval("[data-race]", (els) => els.map((e) => e.getAttribute("data-race")));
-// Owner, 2026-10-24: Port Vesper offers Loop 9 night and day only (the highway run needs the
-// Ashpeak map; every older race is retired).
-check(cards.join(",") === "loop9_circuit,loop9_day", `race picker lists the Loop 9 races (${cards.join(", ")})`);
+// Owner, 2026-10-24: Loop 9 night and day plus the Loop 9 → Ashpeak highway run (every older
+// race is retired). Since the maps are one world (2026-10-25) the highway run is offered too.
+check(cards.join(",") === "loop9_circuit,loop9_day,loop9_ashpeak_highway", `race picker lists the Loop 9 races (${cards.join(", ")})`);
 for (const id of ["hollins_sprint", "lantern_checkpoint", "grid_highway_sprint", "harbor_dash"]) check(!cards.includes(id), `picker no longer offers ${id}`);
 // Betting: every card prices the player (odds on yourself); a fresh account below Street rep
 // sees them with the lock reason, an unlocked one gets the bet slip.
