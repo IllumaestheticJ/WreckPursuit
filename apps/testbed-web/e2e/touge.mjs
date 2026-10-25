@@ -5,7 +5,7 @@
 // Checks: the "touge" button opens the picker with the four passes; at rep 0 every battle is
 // locked; the testbed rep buttons open bosses, side bets and pink slips; a boss battle with a
 // side bet starts a two-car session on the pass (NPC on pole, no traffic, no police) and takes
-// the stake from the session's cash ledger; K-rails are drawn; a car put through the wall is
+// the stake from the session's cash ledger; guard rails are drawn; a car put through the wall is
 // totaled and loses at once, and the side bet settles as lost; no page errors.
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -104,14 +104,14 @@ let r = await page.evaluate(() => window.__wp.sim.tougeResult());
 check(r !== null && r.wager.kind === "side_bet" && r.wager_taken, `side bet of ${stake} taken (${r?.wager_error ?? "ok"})`);
 const cash1 = await page.evaluate(() => window.__wp.sim.runAccount()?.cash ?? null);
 check(cash1 === cash0 - stake, `stake left the session's cash (${cash0} → ${cash1})`);
-const krails = await page.evaluate(() => {
+const rails = await page.evaluate(() => {
   const s = window.__wp.sim.propsStatic();
   const stride = 11; // wp_wasm::props::PROP_STRIDE
   let n = 0;
-  for (let o = 0; o < s.length; o += stride) if (s[o] === 2) n++;
+  for (let o = 0; o < s.length; o += stride) if (s[o] === 3) n++; // guard rail (PR #75; K-rails are gone)
   return n;
 });
-check(krails > 10, `K-rail sections on the pass (${krails})`);
+check(rails > 10, `guard rail sections on the pass (${rails})`);
 await shot("touge_grid.png");
 
 // 4. Put the player through the wall: totaled, battle lost at once, side bet lost.
