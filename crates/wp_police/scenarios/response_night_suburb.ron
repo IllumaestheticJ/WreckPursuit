@@ -22,7 +22,9 @@
     expect: [
         (metric: "calls", min: 1.0, max: 10000.0),
         (metric: "call_reached_25s_frac", min: 0.6, max: 1.0),
-        (metric: "call_to_unit_100m_s", min: 0.0, max: 30.0),
+        // PR #64 refresh (owner 2026-10-23: night patrols a quarter, none in Suburb): every call
+        // waits for a spawned responder. Measured mean 31.8 s (25 s reached 0.6).
+        (metric: "call_to_unit_100m_s", min: 0.0, max: 35.0),
         (metric: "responder_spawns", min: 1.0, max: 1000.0),
         (metric: "spawns_in_view", min: 0.0, max: 0.0),
         (metric: "despawns_in_sight", min: 0.0, max: 0.0),

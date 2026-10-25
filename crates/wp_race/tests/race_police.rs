@@ -350,9 +350,9 @@ fn city_sprint_pulls_in_police() {
         .signals
         .iter()
         .any(|s| matches!(s, RaceSignal::PatrolAttracted { .. })));
-    // (Entrants start at 6.0 heat, see the scenario header.)
+    // (Entrants start at 8.25 heat, see the scenario header.)
     assert!(
-        r.heat_after_report.iter().all(|h| *h > 6.0),
+        r.heat_after_report.iter().all(|h| *h > 8.25),
         "{:?}",
         r.heat_after_report
     );
@@ -382,7 +382,7 @@ fn city_sprint_pulls_in_police() {
 #[test]
 fn without_the_meet_report_nobody_is_chased() {
     // Control run: same race, same seed, but nobody calls the hot meet in. The racers still
-    // speed and pick up heat on top of their starting 6.0; the meet report is what tips the
+    // speed and pick up heat on top of their starting 8.25; the meet report is what tips the
     // field into pursuits. Since the round-12 merges (side floor, clutch, AI pace) a racer at
     // race pace can also earn a pursuit of its own (a patrol witnesses it speeding or running
     // a red light), as in `wanted_ai_racer_flees_police_through_the_city`. So what must hold:

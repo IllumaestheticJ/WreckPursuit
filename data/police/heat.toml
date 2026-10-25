@@ -7,7 +7,11 @@ max_heat = 100.0
 # Heat at which wanted levels L1..L5 begin.
 level_thresholds = [10.0, 30.0, 50.0, 70.0, 90.0]
 # A violation nobody saw (no unit / camera with line of sight) counts at this fraction ("reports").
-unseen_factor = 0.2
+# Owner 2026-10-23: investigations far less sensitive (was 0.2).
+unseen_factor = 0.1
+# ...and only becomes a call (a unit sent to look) once the racer's heat is at least this: a
+# cluster of offences (a crash plus a red light, say), not a bit of unseen speeding (was: any).
+call_min_heat = 1.5
 # The same violation kind from the same racer is counted at most once per this period.
 repeat_cooldown_s = 1.0
 # Seconds after the last sighting before heat starts to decay.
@@ -64,17 +68,18 @@ all_round_m = 60.0
 # can see a racer (sight, line of sight, witness range) clocks it. Over the limit where it drives
 # by more than max(margin_mps, ratio x limit) is a witnessed speeding violation. wp_world only reports speeding against a lane pointing the car's way,
 # every 5 s: on the wrong side of the road, or between two reports, a speeder was seen but never
-# clocked. Same margins as wp_world's detector. Only racers not wanted yet are clocked (a wanted
+# clocked. Wider margins than wp_world's detector since 2026-10-23. Only racers not wanted yet are clocked (a wanted
 # racer a unit sees is recognised and pursued anyway).
+# Owner 2026-10-23 (far less sensitive): over by max(16 km/h, 25 %) for 2 s (was 8 km/h / 10 %, 1 s).
 [heat.radar]
-margin_mps = 2.24
-ratio = 0.1
+margin_mps = 4.5
+ratio = 0.25
 # Clock only when no speeding counted for this long (wp_world's repeat): the same heat rate as
 # the world's reports, just never missed while a unit watches.
 repeat_s = 5.0
-# Speeding in sight this long before it is clocked (wp_world's hold). The limit is the higher
+# Speeding in sight this long before it is clocked (was wp_world's 1 s hold). The limit is the higher
 # of the lane's and the police road graph's (at a junction the lane can be the cross street).
-hold_s = 1.0
+hold_s = 2.0
 
 # Recognising an already-wanted car the unit did not see offend (rows 80 / 89):
 # recognition_time_s within near_m, + far_extra_s at the edge of recognition_range_m (linear).

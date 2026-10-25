@@ -8,11 +8,15 @@
 // change moved the patrol spawns): every start from y = -35 to y = 10 on this lane pursues
 // within 20 s (searched with simcli in 15-30 m steps); y = -10 is the middle of that band.
 // If police spawning changes, re-aim with `examples/probe_police.rs`.
+// 2026-10-25 (PR #64 refresh): aimed at one particular patrol, so it keeps the patrol counts
+// from before the owner's cut (`dense_patrols`); with the night's single patrol only isolated
+// starts pursued within 20 s. It checks how a chase feels, not how many cops patrol.
 (
     name: "golden_city_chase",
     seed: 108,
     city: procedural(seed: 1, blocks_x: 12, blocks_y: 12, block_m: 110.0),
     time_of_day_h: 23.0,
+    dense_patrols: true,
     time_ratio: 1.0,
     mode: Simulation,
     // Parked cars (3000+ physics bodies) don't take part in the chase and make debug test

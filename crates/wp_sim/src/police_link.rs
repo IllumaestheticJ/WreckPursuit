@@ -116,6 +116,13 @@ impl Sim {
     /// Rebuild the police system on the current world's road network (called by
     /// [`Sim::set_world`]). Units drive kinematically until bound to a vehicle.
     pub(crate) fn rebuild_police(&mut self) {
+        self.set_police_config(PoliceConfig::builtin());
+    }
+
+    /// Rebuild the police system with other tables (tests, scenarios: e.g.
+    /// `PoliceConfig::builtin_dense_patrols()`), seeded exactly as [`Sim::set_world`] seeds it.
+    /// Call after `set_world` and before the first tick.
+    pub fn set_police_config(&mut self, cfg: PoliceConfig) {
         let setup = wp_police::PoliceSetup {
             seed: self.config.seed ^ POLICE_SEED_SALT,
             mode: self.config.mode.mode,
@@ -125,7 +132,7 @@ impl Sim {
             // that turned every unseen civilian car into a random health/speed hit.
             hazards: false,
         };
-        self.police = PoliceSystem::for_world(PoliceConfig::builtin(), &self.world, setup);
+        self.set_police(PoliceSystem::for_world(cfg, &self.world, setup));
     }
 
     /// Car model for AI police units (e.g. `sentinel_cruiser`). With a city loaded, every AI
