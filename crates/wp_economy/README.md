@@ -223,8 +223,8 @@ spike-strip flats.
 Credits are cash; rep is `PlayerAccount::rep`. On top sits a tier ladder decided by *current*
 rep: Unknown (0) → Street (500) → Known (2 000) → Respected (5 000) → Feared (10 000) → Legend
 (20 000). Tiers gate features (city betting at Street, touge at Known, touge betting and boss
-races at Respected, pink slips at Feared) and dealer classes (Sport / Muscle at Known, Exotic at
-Feared). The first time a tier is reached its bonus is paid once (`career.peak_tier`); a capture
+races at Respected, pink slips at Feared) and dealer classes (Sport / Muscle at Known; Exotic is
+open from the start, so only its price holds it back). The first time a tier is reached its bonus is paid once (`career.peak_tier`); a capture
 can drop you a tier and close what it opened. Bets are capped per tier and at 50 % of cash, and
 refused in debt. The scripted mid-skill racer makes ~250 rep a night: Street after ~2 nights,
 Known ~8, Respected ~20, Feared ~40 (`tests/progression.rs::tier_pacing`). API and ledger notes:
@@ -290,6 +290,7 @@ debug coupe = 559 (B). Monotone in power and in lower mass (property-tested).
 | Lever | File | Feel target |
 |---|---|---|
 | `labour_hours_per_item`, `region_parts`, `component_parts`, `class.*.parts_scale` | prices.toml | bumper scrape < one buy-in; medium front hit ≈ one race win in Sim (half in Arcade); full wreck ≈ 2× value in Sim (≥ 60 % hard floor) |
+| `heavy_damage_markup`, `total_loss_markup` | prices.toml | scrapes stay cheap; crushed parts cost up to 1.75×; rebuilding a write-off costs 1.4× more, so a wreck is usually a scrap |
 | `data/modes/*.toml repair_cost_scale` | (workstream 03) | Arcade repairs half of Sim |
 | `shop.*`, `district_labour` | prices.toml | crooked = convenience tax; legit = risk of a report |
 | `race_types.*`, `race_kinds.*`, `legality.*`, `day_phase.*`, `class_purse`, `mode_purse` | stakes.toml | Compact 9 km night sprint win ≈ 2 800; mid-skill nets ≈ 3 000 / night before repairs |
@@ -327,6 +328,14 @@ the purse); pound base fee 1–8 % of value; every price × condition inside its
 (`roster_prices_sit_inside_their_class_bands`); the floor car file matches `market.toml`; a car
 costing ≥ 25 % more than another street car is not slower (`pricier_cars_are_not_slower`,
 known outliers `hakone_gt` and `ironside_440`, sent to 09).
+
+2026-10-24 (player feedback: wrecks were too cheap to fix): every billed line is now
+× `1 + heavy_damage_markup × severity²` and a total loss × `total_loss_markup` (prices.toml,
+applied in `Economy::price_lines`; 0.75 and 1.4). A full Shiro Turbo wreck went 0.91 → 2.2× its value, a
+medium front hit 0.59 → 0.75× a win (Arcade), a bumper scrape +5 %. The asserted front-hit
+bands moved to 0.4–1.3× a win in Simulation and 0.5–1.5× in Arcade, and the Extreme career
+median floor to 0.5× the start (it lands near 0.6×). The table above predates
+this; rerun the test with `--nocapture` for current numbers.
 
 Changes this round: class bands widened (Compact min 9 000 → 4 000, Sport 25 000 → 12 000,
 Muscle 22 000 → 14 000, Exotic 90 000 → 60 000, Truck 15 000 → 12 000) because they were

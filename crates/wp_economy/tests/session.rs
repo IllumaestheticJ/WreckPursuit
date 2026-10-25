@@ -397,7 +397,14 @@ fn recorded_capture_arcade_impounds_bills_and_keeps_damage() {
     assert_eq!(c.damage, stored);
     assert_eq!(a.active_car, Some(car));
 
-    // And it is repaired like any damaged car: the bill is the recorded estimate.
+    // And it is repaired like any damaged car: the bill is the recorded estimate plus the
+    // shop's heavy-damage markup (prices.toml), never less.
+    let (_, priced) = e.price_lines(
+        a.car(car).unwrap(),
+        &report.estimate.lines,
+        &ShopContext::legit_default(),
+        mode,
+    );
     let q = e
         .quote_repair(
             &a,
@@ -407,7 +414,8 @@ fn recorded_capture_arcade_impounds_bills_and_keeps_damage() {
             mode,
         )
         .unwrap();
-    assert_eq!(q.gross, report.estimate.total.round() as i64);
+    assert_eq!(q.gross, priced);
+    assert!(q.gross >= report.estimate.total.round() as i64);
 }
 
 #[test]

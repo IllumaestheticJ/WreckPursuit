@@ -7,8 +7,13 @@
 //!   level); at night ([`is_night`]) 13, four of them lapping the Loop 9 highway (owner row
 //!   152). Off-shift racers wait in a lockup off the roads (asleep, `Sim::set_dormant`) and
 //!   change shift out of the player's sight (logged moves, like a respawn). At night the loop
-//!   racers end their laps in the Loop 9 rest stops and idle there; a challenge at a rest stop
-//!   starts side by side on its parking road and offers a Loop 9 lap back to it (row 153).
+//!   racers end their laps in the Loop 9 rest stops and idle there, parked nose-in in a free
+//!   bay of the rest stop's car park (`wp_world::car_park`, owner request 2026-10-24: not in
+//!   the middle of the parking road): they drive in at walking pace ([`BayPhase::In`]) and
+//!   back out onto the parking road when they leave ([`BayPhase::Out`]). A challenge at a
+//!   rest stop (right behind the racer, or a honk while stopped within
+//!   [`PARKED_CHALLENGE_M`] of one parked in a bay) starts side by side on its parking road
+//!   and offers a Loop 9 lap back to it (row 153).
 //!   They are
 //!   ordinary *scenario entities* (`street_<level>_<name>`, AI assists, no player steering
 //!   aids), added to the scenario before the sim is built ([`plan_roster`]), so every
@@ -23,7 +28,8 @@
 //!   optionally waypoints the route must run through in order (up to [`MAX_WAYPOINTS`], owner
 //!   row 151; gates the player passes within [`GATE_RADIUS_M`] before B counts), and a stake
 //!   inside the level's range (capped by their cash), then accepts. Not while the player is
-//!   wanted or chased (owner row 150): a honk does nothing and an open offer lapses.
+//!   chased (owner row 150; a pursuit or search, a wanted level alone is fine): a honk does
+//!   nothing and an open offer lapses.
 //! - **Race.** Accepting pays the stake (a betting ticket on the one career wallet:
 //!   `wp_economy` `place_bet`, venue `Street`, open from the start and capped only by cash and
 //!   the level's range; ledger note `bet:stake:street:…`), resets both cars side by side at the
@@ -35,8 +41,10 @@
 //!   police until it finishes, is wrecked or is actually captured). First within
 //!   [`FINISH_RADIUS_M`] of B wins, by any path (shortcuts are fair); a wreck or a capture
 //!   decides it early; at the time limit the one further along the route wins. A win pays back
-//!   twice the stake (even money, `settle_bet`, `bet:payout:street:…`) and the level's
-//!   `win_rep` (`award_rep`, so street wins climb the career's rep tiers).
+//!   the stake times the challenge's odds (`settle_bet`, `bet:payout:street:…`) and rep
+//!   (`award_rep`, so street wins climb the career's rep tiers), both scaled by the racer's
+//!   level and their car against the player's ([`crate::street_odds`]; fixed when the
+//!   challenge opens).
 //! - **Police.** Street racers are `VehicleKind::AiRacer` for the whole session (the kind is
 //!   not a replay op, so it cannot change mid-session): the police treat them as racers, as
 //!   they treat a picker race's AI. Roaming ones keep to the law, so they draw no heat; a
@@ -67,6 +75,7 @@ use wp_world::{geom, World};
 
 use crate::data::mem_data;
 use crate::run::PlayerRun;
+use crate::street_odds::{self, Matchup};
 
 /// Tests: wall-clock time spent in the street AI (`before_step` + `after_step`), for the perf
 /// test. Never read by the sim.
@@ -117,6 +126,21 @@ pub const REST_STOP_MEET_M: f32 = 80.0;
 /// Lateral offset of each car from the rest stop's lane centre at a rest-stop start, m (the
 /// parking road is paved 4.25 m either side of its centre).
 const REST_STOP_GRID_M: f32 = 2.0;
+/// Honking while stopped (slower than `wp_race::spots::HONK_MAX_SPEED_MPS`) this close to a
+/// racer parked in a car park bay challenges it, m (from behind a car parked nose-in the
+/// player is in the lane, not right behind it).
+pub const PARKED_CHALLENGE_M: f32 = 12.0;
+/// Walking pace into a car park bay, m/s.
+const BAY_SPEED_MPS: f32 = 3.0;
+/// Backing out of a bay, m/s.
+const BAY_BACK_MPS: f32 = 1.8;
+/// A bay manoeuvre that takes longer than this (a car in the way) is given up, ticks.
+const BAY_TIMEOUT_TICKS: u64 = 40 * 240;
+/// The drive into a bay starts on the road this far back from the bay mouth along its axis,
+/// m.
+const BAY_APPROACH_M: f32 = 6.0;
+/// A bay counts as taken when a parked car or a vehicle stands this close to its centre, m.
+const BAY_TAKEN_M: f32 = 2.5;
 /// A loop racer idles this long at a rest stop between laps, s (plus up to
 /// [`LOOP_IDLE_EXTRA_S`]).
 const LOOP_IDLE_S: u64 = 40;
@@ -206,19 +230,27 @@ pub struct Level {
     pub bet_min: i64,
     /// Largest bet the racer takes, $.
     pub bet_max: i64,
-    /// Rep for beating a racer of this level (`wp_economy` `award_rep`: the career tier
-    /// ladder sees street wins; a picker-race win is ~100-200). A loss costs no rep.
+    /// Rep for beating a racer of this level in a car like the player's (`wp_economy`
+    /// `award_rep`: the career tier ladder sees street wins; a picker-race win is ~100-200),
+    /// scaled by the car gap ([`crate::street_odds`]). A loss costs no rep.
     pub win_rep: i64,
+    /// Driver rating (Elo-like, the player is 1000): with the car gap it sets the odds a win
+    /// pays ([`crate::street_odds`]).
+    pub rating: f32,
 }
 
 /// The four levels, in order (owner, 2026-10-22: the slowest level, Rookie, was dropped; the
 /// others keep their numbers 2..=5, so `level` in every JSON is still the table's `level`).
+///
+/// The car pools climb with the level and do not overlap (class index, `wp_economy`, at
+/// 2026-10-24: Street 330-460, Pro 465-500, Elite 569-674, Legend 682-858), so a higher-level
+/// racer brings a faster car as well as a better driver (owner request 2026-10-24).
 pub const LEVELS: [Level; 4] = [
     Level {
         level: 2,
         name: "Street",
         colour: "#2f81f7",
-        cars: &["kestrel_ts", "shiro_turbo"],
+        cars: &["ironside_440", "kestrel_ts", "shiro_turbo"],
         skill: 0.45,
         aggression: 0.4,
         consistency: 0.55,
@@ -227,12 +259,19 @@ pub const LEVELS: [Level; 4] = [
         bet_min: 250,
         bet_max: 1_200,
         win_rep: 40,
+        rating: 1000.0,
     },
     Level {
         level: 3,
         name: "Pro",
         colour: "#a371f7",
-        cars: &["lindwurm_4t", "sperber_32", "ironside_440"],
+        cars: &[
+            "lindwurm_4t",
+            "arashi_t4",
+            "talus_20t",
+            "hakone_gt",
+            "sperber_32",
+        ],
         skill: 0.65,
         aggression: 0.55,
         consistency: 0.7,
@@ -241,12 +280,13 @@ pub const LEVELS: [Level; 4] = [
         bet_min: 500,
         bet_max: 2_500,
         win_rep: 70,
+        rating: 1070.0,
     },
     Level {
         level: 4,
         name: "Elite",
         colour: "#f0883e",
-        cars: &["rampart_50", "hakone_gt"],
+        cars: &["rampart_50", "lucciola_350", "kagero_hx"],
         skill: 0.82,
         aggression: 0.7,
         consistency: 0.85,
@@ -255,12 +295,13 @@ pub const LEVELS: [Level; 4] = [
         bet_min: 1_000,
         bet_max: 5_000,
         win_rep: 110,
+        rating: 1140.0,
     },
     Level {
         level: 5,
         name: "Legend",
         colour: "#f85149",
-        cars: &["lucciola_350", "hakone_gt"],
+        cars: &["merlo_20t", "fulmine_v10", "ostwind_6t", "ombra_v12"],
         skill: 0.97,
         aggression: 0.8,
         consistency: 0.95,
@@ -269,6 +310,7 @@ pub const LEVELS: [Level; 4] = [
         bet_min: 2_000,
         bet_max: 10_000,
         win_rep: 160,
+        rating: 1210.0,
     },
 ];
 
@@ -497,8 +539,34 @@ struct Racer {
     idle_ticks: u64,
     /// Wrecked or stuck: repair and move it out of the player's sight at the next plan.
     respawn: bool,
+    /// Parking in (or parked in, or backing out of) a car park bay at a rest stop.
+    bay: Option<BayPark>,
+    /// The roam route ends at a Loop 9 rest stop (a loop racer's lap): it slows down on the
+    /// last stretch to turn into a bay ([`rest_stop_approach`]).
+    to_rest_stop: bool,
     wins: u32,
     losses: u32,
+}
+
+/// Where a loop racer is with its car park bay ([`BayPark`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BayPhase {
+    /// Driving in at walking pace, nose first.
+    In,
+    /// Parked in the bay, on the handbrake, until its idle time is up.
+    Parked,
+    /// Backing out onto the parking road, then off on the next lap.
+    Out,
+}
+
+/// A loop racer's car park bay (`World::map().car_parks[park].bays[bay]`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct BayPark {
+    park: usize,
+    bay: usize,
+    phase: BayPhase,
+    /// Tick the phase began.
+    since: u64,
 }
 
 /// An open challenge, waiting for the player's finish and stake (JSON for the testbed).
@@ -528,6 +596,8 @@ pub struct Offer {
     pub cash: i64,
     /// The player can afford the minimum stake.
     pub affordable: bool,
+    /// The two cars, the player's chance, and what a win pays (odds and rep).
+    pub odds: Matchup,
     /// Start (A): where the player is now (the rest stop's parking road at a rest-stop meet).
     pub start: [f32; 2],
     /// The Loop 9 rest stop this meet is at (owner row 153).
@@ -578,6 +648,8 @@ pub struct RaceView {
     pub colour: &'static str,
     /// Stake, $.
     pub stake: i64,
+    /// What a win pays back, $ (stake included).
+    pub payout: i64,
     /// Seconds to the green light (0 once racing).
     pub countdown_s: f32,
     /// Seconds since the green light.
@@ -621,9 +693,9 @@ pub struct RaceResult {
     pub colour: &'static str,
     /// Stake, $.
     pub stake: i64,
-    /// Cash change from the race (+stake on a win, -stake on a loss), $.
+    /// Cash change from the race (payout less stake on a win, -stake on a loss), $.
     pub net: i64,
-    /// Rep earned (the level's `win_rep` on a win, 0 on a loss).
+    /// Rep earned (the challenge's `Matchup::win_rep` on a win, 0 on a loss).
     pub rep: i64,
     /// Cash after, $.
     pub cash_after: i64,
@@ -651,6 +723,8 @@ struct Race {
     stake: i64,
     /// The stake's betting ticket (career economy, venue Street).
     ticket: BetTicket,
+    /// Odds and rep, locked at accept.
+    odds: Matchup,
     go_tick: u64,
     limit_tick: u64,
     /// Player's progress along the route, m.
@@ -667,6 +741,8 @@ pub struct StreetRacers {
     seq: u32,
     /// Tick the open offer was made.
     offer_tick: u64,
+    /// The open offer's odds, priced when it opened.
+    offer_odds: Option<Matchup>,
     /// Last tick's sim events (contacts and police events for the fields).
     events: Vec<SimEvent>,
     /// Loaded cars per car id.
@@ -679,10 +755,26 @@ pub struct StreetRacers {
     pending_light: Vec<(EntityId, bool)>,
 }
 
-/// The player is wanted or in a pursuit (search included): no street challenges then (owner
-/// row 150).
-fn pursued(sim: &Sim, player: EntityId) -> bool {
-    sim.police().is_wanted_or_pursued(player)
+/// The player is in an active pursuit (search included): no street challenges then (owner
+/// row 150). A wanted level alone with no unit on the player does not block a challenge
+/// (owner, 2026-10-24); the police are not changed by it. Race meet spots use the same gate.
+pub(crate) fn pursued(sim: &Sim, player: EntityId) -> bool {
+    sim.police().racer(player).is_some_and(|r| r.pursued())
+}
+
+/// Price a challenge against `racer` (level `l`): its car's class index against the player's
+/// car's, both from the live definitions in the sim (mods included). A missing player car
+/// counts as the racer's equal.
+fn price(sim: &Sim, l: &Level, racer: EntityId, player: EntityId) -> Matchup {
+    let class_of = |id: EntityId| {
+        sim.vehicles()
+            .iter()
+            .find(|v| v.id == id)
+            .map(|v| street_odds::class_index(v.vehicle.def()))
+    };
+    let r = class_of(racer).unwrap_or(0);
+    let p = class_of(player).unwrap_or(r);
+    street_odds::matchup(l, r, p)
 }
 
 /// For each waypoint, the index of the nearest point of the route centreline (searched in
@@ -775,6 +867,14 @@ fn pose_of(sim: &Sim, id: EntityId) -> Option<([f32; 2], [f32; 2])> {
     })
 }
 
+/// Signed forward speed of a vehicle, m/s.
+fn speed_of(sim: &Sim, id: EntityId) -> Option<f32> {
+    sim.vehicles()
+        .iter()
+        .find(|v| v.id == id)
+        .map(|v| v.vehicle.state().speed_mps)
+}
+
 /// How far the `player` pose is behind the `racer` pose along the racer's heading, m, when the
 /// player is right behind it (a challenge may open): at most [`CHALLENGE_BEHIND_M`] back, within
 /// [`CHALLENGE_SIDE_M`] of its centre line and facing its way (within 45°,
@@ -862,6 +962,8 @@ impl StreetRacers {
                 cooldown_until: 0,
                 idle_ticks: 0,
                 respawn: false,
+                bay: None,
+                to_rest_stop: false,
                 wins: 0,
                 losses: 0,
             });
@@ -878,6 +980,7 @@ impl StreetRacers {
             result: None,
             seq: 0,
             offer_tick: 0,
+            offer_odds: None,
             events: Vec::new(),
             cars: BTreeMap::new(),
             ring: None,
@@ -970,6 +1073,10 @@ impl StreetRacers {
                 geom::dir_of_yaw(p.heading_rad),
             ),
         });
+        let odds = self.offer_odds.unwrap_or_else(|| match player {
+            Some(p) => price(sim, l, r.entity, p),
+            None => price(sim, l, r.entity, r.entity),
+        });
         Some(Offer {
             entity: r.entity.0,
             name: r.name.clone(),
@@ -983,6 +1090,7 @@ impl StreetRacers {
             bet_max: l.bet_max.min(cash),
             cash,
             affordable: cash >= l.bet_min,
+            odds,
             start,
             rest_stop: meet.map(|p| p.name.clone()),
             loop_lap,
@@ -1007,6 +1115,7 @@ impl StreetRacers {
             level_name: l.name,
             colour: l.colour,
             stake: race.stake,
+            payout: race.odds.payout(race.stake),
             countdown_s: race.go_tick.saturating_sub(tick) as f32 / 240.0,
             elapsed_s: tick.saturating_sub(race.go_tick) as f32 / 240.0,
             time_left_s: race.limit_tick.saturating_sub(tick) as f32 / 240.0,
@@ -1069,12 +1178,23 @@ impl StreetRacers {
 
     fn nearest_roaming(&self, sim: &Sim, player: EntityId) -> Option<usize> {
         let p = pose_of(sim, player)?;
+        let slow =
+            speed_of(sim, player).is_some_and(|v| v.abs() < wp_race::spots::HONK_MAX_SPEED_MPS);
         let tick = sim.tick();
         self.racers
             .iter()
             .enumerate()
             .filter(|(_, r)| r.mode == RacerMode::Roam && tick >= r.cooldown_until)
-            .filter_map(|(k, r)| pose_of(sim, r.entity).and_then(|q| Some((k, tailing(p, q)?))))
+            .filter_map(|(k, r)| {
+                let q = pose_of(sim, r.entity)?;
+                // Parked nose-in in a bay: a honk from the lane beside it, stopped, will do.
+                let parked = r.bay.is_some_and(|b| b.phase == BayPhase::Parked);
+                let near = dist(p.0, q.0);
+                if parked && slow && near <= PARKED_CHALLENGE_M {
+                    return Some((k, near));
+                }
+                Some((k, tailing(p, q)?))
+            })
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(k, _)| k)
     }
@@ -1257,6 +1377,10 @@ impl StreetRacers {
             }
             None => (pos, yaw),
         };
+        // Odds as the card showed them (priced when the challenge opened).
+        let odds = self
+            .offer_odds
+            .unwrap_or_else(|| price(sim, &l, entity, player));
         // The one betting wallet (career economy, venue Street): open from the start, the
         // level's range was checked above and cash covers it.
         let ticket = run.place_bet(
@@ -1271,9 +1395,11 @@ impl StreetRacers {
         let r = &mut self.racers[k];
         r.mode = RacerMode::Racing;
         r.field = None;
+        r.bay = None;
         // Full physics for the whole race, however far ahead it gets.
         self.pending_light.push((r.entity, false));
         self.offer = None;
+        self.offer_odds = None;
         let gates = snap_gates(&route.polyline, via);
         self.race = Some(Race {
             racer: k,
@@ -1287,6 +1413,7 @@ impl StreetRacers {
             length_m: route.length_m,
             stake,
             ticket,
+            odds,
             go_tick,
             limit_tick,
             player_s: 0.0,
@@ -1303,7 +1430,8 @@ impl StreetRacers {
     }
 
     /// Debug / e2e: park roaming racer `entity` idle at rest stop `name` (as at the end of a
-    /// loop lap) for two minutes; returns the move that puts it there (the session logs it).
+    /// loop lap) for two minutes, in a free bay of its car park (on the parking road where it
+    /// has none); returns the move that puts it there (the session logs it).
     pub fn park_at_rest_stop(
         &mut self,
         sim: &Sim,
@@ -1314,25 +1442,132 @@ impl StreetRacers {
             .world()
             .rest_stop(name)
             .ok_or_else(|| format!("no rest stop {name}"))?;
-        let r = self
+        let k = self
             .racers
-            .iter_mut()
-            .find(|r| r.entity == entity && r.mode == RacerMode::Roam)
+            .iter()
+            .position(|r| r.entity == entity && r.mode == RacerMode::Roam)
             .ok_or("not a roaming street racer")?;
+        let tick = sim.tick();
+        let park = sim
+            .world()
+            .map()
+            .car_parks
+            .iter()
+            .position(|c| c.name == poi.name);
+        let bay = park.and_then(|pi| {
+            let n = sim.world().map().car_parks[pi].bays.len();
+            (0..n)
+                .find(|&b| self.bay_free(sim, k, pi, b))
+                .map(|b| (pi, b))
+        });
+        let r = &mut self.racers[k];
         r.field = None;
-        r.replan_at = sim.tick() + 120 * 240;
+        r.replan_at = tick + 120 * 240;
+        let Some((pi, b)) = bay else {
+            r.bay = None;
+            return Ok(Move {
+                entity,
+                xy: geom::xy(poi.pos),
+                yaw: poi.heading_rad,
+                near_z: poi.pos[2],
+                repair: false,
+                ghost_ticks: 0,
+            });
+        };
+        r.bay = Some(BayPark {
+            park: pi,
+            bay: b,
+            phase: BayPhase::Parked,
+            since: tick,
+        });
+        let at = sim.world().map().car_parks[pi].bays[b];
         Ok(Move {
             entity,
-            xy: geom::xy(poi.pos),
-            yaw: poi.heading_rad,
-            near_z: poi.pos[2],
+            xy: geom::xy(at.pos),
+            yaw: at.heading_rad,
+            near_z: at.pos[2],
             repair: false,
             ghost_ticks: 0,
         })
     }
 
+    /// Whether bay `bay` of car park `park` is free for racer `k`: no other racer has it, and
+    /// no parked car or vehicle stands in it.
+    fn bay_free(&self, sim: &Sim, k: usize, park: usize, bay: usize) -> bool {
+        let Some(b) = sim
+            .world()
+            .map()
+            .car_parks
+            .get(park)
+            .and_then(|c| c.bays.get(bay))
+        else {
+            return false;
+        };
+        let q = geom::xy(b.pos);
+        let claimed = self
+            .racers
+            .iter()
+            .enumerate()
+            .any(|(j, r)| j != k && r.bay.is_some_and(|o| o.park == park && o.bay == bay));
+        let prop = sim
+            .world()
+            .static_props()
+            .any(|p| dist(geom::xy(p.pos), q) < BAY_TAKEN_M);
+        let me = self.racers[k].entity;
+        let car = sim
+            .vehicles()
+            .iter()
+            .any(|v| v.id != me && dist(geom::xy(v.vehicle.state().pos), q) < BAY_TAKEN_M);
+        !(claimed || prop || car)
+    }
+
+    /// A free bay for loop racer `k` arriving at a rest stop: in the car park along the road
+    /// it is on, with the drive in still ahead of it (room to slow down to walking pace), one
+    /// of the first few such at random. `None` when there is none (it then idles where it
+    /// stopped, as before car parks).
+    fn pick_bay(&mut self, sim: &Sim, k: usize) -> Option<BayPark> {
+        let v = sim
+            .vehicles()
+            .iter()
+            .find(|v| v.id == self.racers[k].entity)?;
+        let st = v.vehicle.state();
+        let here = geom::xy(st.pos);
+        let parks = &sim.world().map().car_parks;
+        let pi = parks.iter().position(|c| {
+            let (u, v) = c.frame(here);
+            (-10.0..=1.0).contains(&v) && u > c.pad_m.0 - 60.0 && u < c.pad_m.1
+        })?;
+        let park = &parks[pi];
+        let (u_car, _) = park.frame(here);
+        let speed = st.speed_mps.max(0.0);
+        // Stopping distance at a gentle 2.5 m/s², plus the approach.
+        let need = speed * speed / 5.0 + BAY_APPROACH_M + 4.0;
+        let ahead: Vec<usize> = (0..park.bays.len())
+            .filter(|&b| park.frame(geom::xy(park.bays[b].mouth)).0 - u_car >= need)
+            .filter(|&b| self.bay_free(sim, k, pi, b))
+            .take(4)
+            .collect();
+        if ahead.is_empty() {
+            return None;
+        }
+        let b = ahead[self.rng.below(ahead.len() as u32) as usize];
+        Some(BayPark {
+            park: pi,
+            bay: b,
+            phase: BayPhase::In,
+            since: sim.tick(),
+        })
+    }
+
+    /// Tests: racer `k`'s bay phase and car park bay (`World::map().car_parks`).
+    #[cfg(test)]
+    pub(crate) fn bay_of(&self, k: usize) -> Option<(BayPhase, usize, usize)> {
+        self.racers[k].bay.map(|b| (b.phase, b.park, b.bay))
+    }
+
     /// Decline (or withdraw) the open offer: the racer drives off.
     pub fn decline(&mut self, tick: u64) {
+        self.offer_odds = None;
         if let Some(k) = self.offer.take() {
             let r = &mut self.racers[k];
             r.mode = RacerMode::Roam;
@@ -1371,6 +1606,7 @@ impl StreetRacers {
                 r.field = None;
                 self.offer = Some(k);
                 self.offer_tick = tick;
+                self.offer_odds = Some(price(sim, level(r.level), r.entity, player));
                 out.challenged = true;
             }
         }
@@ -1392,7 +1628,7 @@ impl StreetRacers {
         // Plan roam routes that are due (at most one per tick: the line optimiser is not free).
         if let Some(k) = (0..self.racers.len()).find(|&k| {
             let r = &self.racers[k];
-            r.mode == RacerMode::Roam && r.field.is_none() && tick >= r.replan_at
+            r.mode == RacerMode::Roam && r.field.is_none() && r.bay.is_none() && tick >= r.replan_at
         }) {
             self.plan_roam(sim, player, k, &mut out.moves);
         }
@@ -1411,10 +1647,19 @@ impl StreetRacers {
                             .iter()
                             .find(|o| o.entity == r.entity)
                             .map_or(0.0, |o| o.state.speed_mps);
-                        out.inputs
-                            .push((r.entity, red_light_guard(sim.world(), f, v, input)));
+                        let mut input = red_light_guard(sim.world(), f, v, input);
+                        if r.to_rest_stop {
+                            input = rest_stop_approach(f, v, input);
+                        }
+                        out.inputs.push((r.entity, input));
                     }
-                    None => out.inputs.push((r.entity, stopped())),
+                    None => {
+                        let input = match r.bay {
+                            Some(_) => bay_step(sim, r, tick, &mut out.light),
+                            None => stopped(),
+                        };
+                        out.inputs.push((r.entity, input));
+                    }
                 },
                 RacerMode::Racing => {}
             }
@@ -1486,6 +1731,7 @@ impl StreetRacers {
             let r = &mut self.racers[k];
             r.mode = RacerMode::OffDuty;
             r.field = None;
+            r.bay = None;
             r.respawn = false;
         }
     }
@@ -1588,6 +1834,7 @@ impl StreetRacers {
                 Some(f) => self.racers[k].field = Some(f),
                 None => self.racers[k].replan_at = tick + 3 * 240,
             }
+            self.racers[k].to_rest_stop = end.is_some();
             return;
         }
         // A destination 300–1200 m away (cheap draws), then at most one route plan this tick:
@@ -1621,6 +1868,7 @@ impl StreetRacers {
             // Nothing to drive on that route: another destination a quarter second later.
             None => self.racers[k].replan_at = tick + 60,
         }
+        self.racers[k].to_rest_stop = false;
     }
 
     /// After the sim step: roam routes that ended, and the race (finish, wreck, capture, time
@@ -1631,7 +1879,8 @@ impl StreetRacers {
         #[cfg(test)]
         let t0 = std::time::Instant::now();
         let tick = sim.tick();
-        for r in &mut self.racers {
+        let mut arrived_at_stop = Vec::new();
+        for (k, r) in self.racers.iter_mut().enumerate() {
             if r.mode != RacerMode::Roam {
                 r.idle_ticks = 0;
                 continue;
@@ -1659,6 +1908,7 @@ impl StreetRacers {
                 if r.shift == Shift::Loop && at_stop {
                     r.replan_at =
                         tick + (LOOP_IDLE_S + u64::from(self.rng.below(LOOP_IDLE_EXTRA_S))) * 240;
+                    arrived_at_stop.push(k);
                 }
             } else if f.race_over() || r.idle_ticks > STUCK_TICKS {
                 // Wrecked (retired), caught or stuck: pause, then repair and move it.
@@ -1666,6 +1916,16 @@ impl StreetRacers {
                 r.respawn = true;
                 r.replan_at = tick + 10 * 240;
             }
+        }
+        // It parks in a free bay of the rest stop's car park (idling the same time), on full
+        // physics while it manoeuvres (the far-away light model cannot reverse, nor climb the
+        // dropped kerb).
+        for k in arrived_at_stop {
+            let bay = self.pick_bay(sim, k);
+            if bay.is_some() {
+                self.pending_light.push((self.racers[k].entity, false));
+            }
+            self.racers[k].bay = bay;
         }
         self.judge_race(sim, events, run);
         #[cfg(test)]
@@ -1751,6 +2011,7 @@ impl StreetRacers {
         };
         let stake = race.stake;
         let ticket = race.ticket.clone();
+        let odds = race.odds;
         let margin_m = if won {
             race.length_m - racer_s
         } else {
@@ -1763,11 +2024,14 @@ impl StreetRacers {
         self.pending_light.push((r.entity, true));
         let l = level(r.level);
         let mut rep = 0;
+        let mut net = -stake;
         if won {
             r.losses += 1;
-            // Even money: the stake back plus the racer's.
-            run.settle_bet(&ticket, 2 * stake);
-            rep = l.win_rep;
+            // The stake back times the odds (level and car gap, `street_odds`).
+            let paid = odds.payout(stake);
+            run.settle_bet(&ticket, paid);
+            net = paid - stake;
+            rep = odds.win_rep;
             run.award_rep(rep, &format!("street:vs {} ({})", r.name, l.name));
         } else {
             r.wins += 1;
@@ -1786,7 +2050,7 @@ impl StreetRacers {
             level_name: l.name,
             colour: l.colour,
             stake,
-            net: if won { stake } else { -stake },
+            net,
             rep,
             cash_after: run.account().cash,
             time_s: elapsed,
@@ -1827,6 +2091,25 @@ const GUARD_HOLD_M: f32 = 1.0;
 const GUARD_DECEL_MPS2: f32 = 2.0;
 /// Most throttle while rolling up to a red line.
 const GUARD_CREEP_THROTTLE: f32 = 0.35;
+
+/// A loop racer's last stretch into a rest stop: no faster than a 3 m/s² slow-down to 4 m/s
+/// at 35 m before the route's end (where it arrives and turns into a car park bay at walking
+/// pace), braking when faster.
+fn rest_stop_approach(f: &Field, v: f32, input: VehicleInput) -> VehicleInput {
+    let progress = f.standings().first().map_or(0.0, |s| s.progress_m);
+    let left = f.corridor().length_m - progress;
+    let allowed = (16.0 + 6.0 * (left - 35.0).max(0.0)).sqrt();
+    if v <= allowed {
+        return input;
+    }
+    VehicleInput {
+        throttle: 0.0,
+        brake: ((v - allowed) * 0.25 + 0.2)
+            .clamp(0.2, 1.0)
+            .max(input.brake),
+        ..input
+    }
+}
 
 /// Roaming racers stop for red (and catchable amber) lights. The race AI caps its speed for a
 /// red too, but a cruise-paced car that lags its falling target ends up "unable to stop" and
@@ -1905,6 +2188,205 @@ fn red_light_guard(
         brake: (need / 7.0 + 0.1).clamp(0.1, 1.0).max(input.brake),
         ..input
     }
+}
+
+/// This tick's input of a roaming racer with a car park bay (`r.bay`), and its phase changes:
+/// drive in ([`bay_in`]), stay parked until `r.replan_at`, back out ([`bay_out`]), then plan
+/// the next lap. A manoeuvre that runs over [`BAY_TIMEOUT_TICKS`] is given up where it is.
+/// Manoeuvres run on full physics, parked and on the road the light model is allowed again
+/// (pushed to `light`).
+fn bay_step(
+    sim: &Sim,
+    r: &mut Racer,
+    tick: u64,
+    light: &mut Vec<(EntityId, bool)>,
+) -> VehicleInput {
+    let Some(mut b) = r.bay else {
+        return stopped();
+    };
+    let park = sim.world().map().car_parks.get(b.park);
+    let bay = park.and_then(|c| c.bays.get(b.bay).copied());
+    let state = sim
+        .vehicles()
+        .iter()
+        .find(|v| v.id == r.entity)
+        .map(|v| v.vehicle.state());
+    let (Some(park), Some(bay), Some(st)) = (park, bay, state) else {
+        r.bay = None;
+        return stopped();
+    };
+    let timed_out = tick.saturating_sub(b.since) > BAY_TIMEOUT_TICKS;
+    let (input, done) = match b.phase {
+        BayPhase::In => bay_in(park, &bay, &st),
+        BayPhase::Parked => (stopped(), tick >= r.replan_at),
+        BayPhase::Out => bay_out(park, &bay, &st),
+    };
+    if done || (timed_out && b.phase != BayPhase::Parked) {
+        match b.phase {
+            BayPhase::In if done => {
+                b.phase = BayPhase::Parked;
+                b.since = tick;
+                r.bay = Some(b);
+                light.push((r.entity, true));
+            }
+            BayPhase::Parked => {
+                b.phase = BayPhase::Out;
+                b.since = tick;
+                r.bay = Some(b);
+                light.push((r.entity, false));
+            }
+            // Out (or a drive in given up): off on the next lap from here.
+            _ => {
+                r.bay = None;
+                r.replan_at = tick;
+                light.push((r.entity, true));
+            }
+        }
+        return stopped();
+    }
+    input
+}
+
+/// Lane direction at the car park's kerb beside `q`.
+fn kerb_dir(park: &wp_world::car_park::CarPark, q: [f32; 2]) -> [f32; 2] {
+    let (u, _) = park.frame(q);
+    let (a, b) = (park.point(u - 1.0, 0.0), park.point(u + 1.0, 0.0));
+    geom::normalize(geom::sub(geom::xy(b), geom::xy(a)))
+}
+
+/// Driving into `bay` nose first at walking pace: along the road to a point
+/// [`BAY_APPROACH_M`] short of the mouth on the bay's axis, then along the axis to the bay
+/// centre (look-ahead steering, so the car turns in smoothly). Done when it stands there.
+fn bay_in(
+    park: &wp_world::car_park::CarPark,
+    bay: &wp_world::car_park::Bay,
+    st: &wp_contracts::VehicleState,
+) -> (VehicleInput, bool) {
+    let d = bay.axis();
+    let mouth = geom::xy(bay.mouth);
+    let f = kerb_dir(park, mouth);
+    let a = geom::sub(mouth, geom::scale(d, BAY_APPROACH_M));
+    let path = [
+        geom::sub(a, geom::scale(f, 40.0)),
+        a,
+        mouth,
+        geom::xy(bay.pos),
+    ];
+    let p = geom::xy(st.pos);
+    let fwd = wp_world::drive::forward_of(st.rot);
+    let (s, total) = path_project(&path, p);
+    let left = total - s;
+    let v = st.speed_mps;
+    if left < 0.4 {
+        return (stopped(), v.abs() < 0.3);
+    }
+    let target = path_point(&path, s + 3.5_f32.min(left));
+    let speed = BAY_SPEED_MPS.min(0.7 * left + 0.2);
+    let (throttle, brake) = if v > speed + 0.4 {
+        // Under the auto-reverse threshold (a held brake above 0.5 at rest engages reverse).
+        (0.0, ((v - speed) * 0.25).clamp(0.1, 0.45))
+    } else {
+        (((speed - v) * 0.4).clamp(0.0, 0.35), 0.0)
+    };
+    let input = VehicleInput {
+        steer: steer_toward(p, fwd, target),
+        throttle,
+        brake,
+        headlights: true,
+        ..Default::default()
+    };
+    (input, false)
+}
+
+/// Backing out of `bay` onto the parking road: straight back along the bay's axis until the
+/// car's centre is past the mouth, then on back with the wheel turned so the nose swings round
+/// to the travel direction, then stop. Done when it stands facing along the road.
+fn bay_out(
+    park: &wp_world::car_park::CarPark,
+    bay: &wp_world::car_park::Bay,
+    st: &wp_contracts::VehicleState,
+) -> (VehicleInput, bool) {
+    let d = bay.axis();
+    let mouth = geom::xy(bay.mouth);
+    let f_road = kerb_dir(park, mouth);
+    let p = geom::xy(st.pos);
+    let fwd = wp_world::drive::forward_of(st.rot);
+    let v = st.speed_mps;
+    // Facing along the road (within 10°): stop there.
+    if geom::dot(fwd, f_road) > 0.985 && geom::dot(geom::sub(p, mouth), d) < 0.0 {
+        return (stopped(), v.abs() < 0.3);
+    }
+    // In reverse the pedals swap (`wp_vehicle` auto-reverse): the brake drives back, the
+    // throttle brakes. Held at a standstill, the brake engages reverse.
+    let (throttle, brake) = if st.gear >= 0 {
+        (0.0, 1.0)
+    } else if -v < BAY_BACK_MPS {
+        (0.0, 0.6)
+    } else {
+        (0.25, 0.0)
+    };
+    let along = geom::dot(geom::sub(p, mouth), d);
+    let steer = if along > 0.0 {
+        // Straight back out: hold the bay's heading, drifting back onto its axis (the nose
+        // turns right of the axis to bring the tail left). Reversing, a right lock swings the
+        // nose left.
+        let side = geom::dot(geom::sub(p, mouth), geom::right_of(d));
+        let off = (0.4 * side).clamp(-0.3, 0.3);
+        let (sn, cs) = wp_math::sin_cos(off);
+        let want = geom::add(geom::scale(d, cs), geom::scale(geom::right_of(d), sn));
+        let h = wp_math::atan2(geom::dot(want, geom::right_of(fwd)), geom::dot(want, fwd));
+        (-2.0 * h).clamp(-1.0, 1.0)
+    } else {
+        // Clear of the bay: swing the nose left, round to the road.
+        1.0
+    };
+    let input = VehicleInput {
+        steer,
+        throttle,
+        brake,
+        headlights: true,
+        ..Default::default()
+    };
+    (input, false)
+}
+
+/// Steering towards `target` driving forward: full lock half a radian off.
+fn steer_toward(p: [f32; 2], fwd: [f32; 2], target: [f32; 2]) -> f32 {
+    let to = geom::sub(target, p);
+    let a = wp_math::atan2(geom::dot(to, geom::right_of(fwd)), geom::dot(to, fwd));
+    (2.0 * a).clamp(-1.0, 1.0)
+}
+
+/// Arc length of the point of `path` nearest `p`, and the path's length.
+fn path_project(path: &[[f32; 2]], p: [f32; 2]) -> (f32, f32) {
+    let (mut best, mut best_s, mut acc) = (f32::INFINITY, 0.0, 0.0);
+    for w in path.windows(2) {
+        let seg = geom::sub(w[1], w[0]);
+        let len = geom::len(seg).max(1e-6);
+        let t = (geom::dot(geom::sub(p, w[0]), seg) / (len * len)).clamp(0.0, 1.0);
+        let q = geom::add(w[0], geom::scale(seg, t));
+        let d = dist(p, q);
+        if d < best {
+            best = d;
+            best_s = acc + t * len;
+        }
+        acc += len;
+    }
+    (best_s, acc)
+}
+
+/// The point at arc length `s` along `path` (clamped to its ends).
+fn path_point(path: &[[f32; 2]], s: f32) -> [f32; 2] {
+    let mut acc = 0.0;
+    for w in path.windows(2) {
+        let len = dist(w[0], w[1]);
+        if s <= acc + len {
+            let t = ((s - acc) / len.max(1e-6)).clamp(0.0, 1.0);
+            return geom::add(w[0], geom::scale(geom::sub(w[1], w[0]), t));
+        }
+        acc += len;
+    }
+    path[path.len() - 1]
 }
 
 /// Standing still: the handbrake (a held brake pedal at a standstill would engage reverse),
@@ -2426,6 +2908,200 @@ mod tests {
         }
         eprintln!("racer top {top:.1} m/s");
         assert!(top > 20.0, "the racer laps at speed ({top} m/s)");
+    }
+
+    /// Night Port Vesper session (23:00) and the roster index and entity of its first loop
+    /// racer.
+    fn night_vesper() -> (Session, usize, EntityId) {
+        let mut sc = crate::scenario::free_drive_in(
+            "debug_sedan",
+            DamageMode::Arcade,
+            crate::scenario::city_spec("vesper_v2"),
+        );
+        sc.time_of_day_h = 23.0;
+        let mut s = Session::new(sc, false).unwrap();
+        s.run_ticks(240);
+        let k = s
+            .street()
+            .unwrap()
+            .racers
+            .iter()
+            .position(|r| r.shift == Shift::Loop)
+            .unwrap();
+        let e = s.street().unwrap().racers[k].entity;
+        (s, k, e)
+    }
+
+    /// Owner request 2026-10-24: a loop racer that ends its lap at a rest stop parks nose-in in
+    /// a free bay of the rest stop's car park, off the road, and when its idle time is up backs
+    /// out onto the parking road, facing its way, and sets off on the next lap.
+    #[test]
+    fn loop_racer_parks_in_a_car_park_bay_and_backs_out() {
+        let (mut s, k, e) = night_vesper();
+        let park = s.sim().world().map().car_parks[0].clone();
+        let net = s.sim().world().network();
+        let lane = &net.lanes[park.lane as usize];
+        let f = geom::normalize(geom::sub(
+            geom::xy(lane.polyline[2]),
+            geom::xy(lane.polyline[1]),
+        ));
+        // On the off-ramp into the rest stop, at rest, on the last stretch of a lap: a route
+        // into the rest stop.
+        let ramp = net
+            .lanes
+            .iter()
+            .find(|l| l.connections.iter().any(|c| c.to == park.lane))
+            .expect("an off-ramp");
+        let n = ramp.polyline.len();
+        let (p0, p1) = (ramp.polyline[n / 2], ramp.polyline[n / 2 + 1]);
+        let yaw = geom::yaw_of(geom::normalize(geom::sub(geom::xy(p1), geom::xy(p0))));
+        s.place_logged(e, geom::xy(p0), yaw, p0[2]).unwrap();
+        s.run_ticks(120);
+        let poi = s.sim().world().rest_stop(&park.name).cloned().unwrap();
+        {
+            let (street, sim) = s.street_and_sim_for_tests();
+            let st = sim
+                .vehicles()
+                .iter()
+                .find(|v| v.id == e)
+                .unwrap()
+                .vehicle
+                .state();
+            let route = sim
+                .world()
+                .plan_route(st.pos, Some(wp_world::drive::forward_of(st.rot)), poi.pos)
+                .expect("a route into the rest stop");
+            let car = street
+                .car(&street.racers[k].car_id.clone())
+                .cloned()
+                .unwrap();
+            let spec = RacerSpec {
+                entity: e,
+                profile: roam_profile(),
+                capability: cruise_capability(&car, LOOP_CRUISE_MPS),
+            };
+            let r = &mut street.racers[k];
+            r.field = field_on(sim.world(), &route, &[spec], roam_config(7));
+            assert!(r.field.is_some());
+            r.bay = None;
+            r.to_rest_stop = true;
+        }
+        // It arrives, takes a bay and drives in.
+        let mut n = 0;
+        while s.street().unwrap().bay_of(k).is_none() {
+            s.run_ticks(24);
+            n += 24;
+            assert!(
+                n < 240 * 60,
+                "never took a bay: {:?}",
+                s.vehicle(e).unwrap().vehicle.state().pos
+            );
+        }
+        s.street_mut_for_tests().racers[k].replan_at = u64::MAX;
+        let (_, pi, bi) = s.street().unwrap().bay_of(k).unwrap();
+        let bay = s.sim().world().map().car_parks[pi].bays[bi];
+        let st = |s: &Session| s.vehicle(e).unwrap().vehicle.state();
+        let mut n = 0;
+        while s.street().unwrap().bay_of(k).map(|b| b.0) == Some(BayPhase::In) {
+            s.run_ticks(24);
+            n += 24;
+            assert!(n < 240 * 40, "never parked: {:?}", st(&s).pos);
+        }
+        s.run_ticks(240);
+        let a = st(&s);
+        let fwd = wp_world::drive::forward_of(a.rot);
+        let off = dist(geom::xy(a.pos), geom::xy(bay.pos));
+        let (_, v) = park.frame(geom::xy(a.pos));
+        eprintln!(
+            "parked after {:.1} s: {off:.2} m from the bay centre, v {v:.2}, heading cos {:.3}",
+            n as f32 / 240.0,
+            geom::dot(fwd, bay.axis())
+        );
+        assert_eq!(
+            s.street().unwrap().bay_of(k).map(|b| b.0),
+            Some(BayPhase::Parked)
+        );
+        assert!(off < 0.8, "in the bay ({off:.2} m off)");
+        assert!(geom::dot(fwd, bay.axis()) > 0.985, "nose-in, straight");
+        assert!(park.on_pad(geom::xy(a.pos)), "off the road, on the lot");
+        assert!(a.speed_mps.abs() < 0.2);
+        // Idle time up: it backs out onto the parking road, facing its way.
+        s.street_mut_for_tests().racers[k].replan_at = s.sim().tick();
+        let mut n = 0;
+        while s.street().unwrap().bay_of(k).is_some() {
+            s.run_ticks(24);
+            n += 24;
+            assert!(n < 240 * 30, "never backed out: {:?}", st(&s).pos);
+        }
+        let a = st(&s);
+        let fwd = wp_world::drive::forward_of(a.rot);
+        let (_, v) = park.frame(geom::xy(a.pos));
+        eprintln!(
+            "out after {:.1} s: v {v:.2}, heading cos {:.3}",
+            n as f32 / 240.0,
+            geom::dot(fwd, f)
+        );
+        assert!(geom::dot(fwd, f) > 0.96, "facing along the road");
+        assert!((-6.5..-0.5).contains(&v), "on the parking road (v {v:.2})");
+        // And off on the next lap.
+        s.run_ticks(240 * 3);
+        assert!(
+            s.street().unwrap().racers[k].field.is_some(),
+            "a lap planned"
+        );
+    }
+
+    /// A racer parked in a bay takes a honk from the lane beside it (stopped, within
+    /// `PARKED_CHALLENGE_M`): the card is a rest-stop meet; declined, it backs out.
+    #[test]
+    fn honk_beside_a_racer_parked_in_a_bay_challenges_it() {
+        let (mut s, k, e) = night_vesper();
+        let poi = s.sim().world().rest_stops().next().cloned().unwrap();
+        s.street_park_at_rest_stop(e, &poi.name).unwrap();
+        s.run_ticks(240);
+        let (phase, pi, bi) = s.street().unwrap().bay_of(k).expect("in a bay");
+        assert_eq!(phase, BayPhase::Parked);
+        let park = s.sim().world().map().car_parks[pi].clone();
+        let bay = park.bays[bi];
+        let at = s.vehicle(e).unwrap().vehicle.state().pos;
+        assert!(dist(geom::xy(at), geom::xy(bay.pos)) < 0.5);
+        // The player stops in the travel lane beside the bay's mouth.
+        let (u, _) = park.frame(geom::xy(bay.mouth));
+        let q = park.point(u, -4.25);
+        let f = kerb_dir(&park, geom::xy(bay.mouth));
+        let player = s.entities()[0];
+        s.place_logged(player, geom::xy(q), geom::yaw_of(f), q[2])
+            .unwrap();
+        s.run_ticks(240);
+        assert!(
+            s.street().unwrap().offer.is_none(),
+            "no challenge without a honk"
+        );
+        let horn = |on: bool| VehicleInput {
+            handbrake: 1.0,
+            horn: on,
+            headlights: true,
+            ..Default::default()
+        };
+        s.set_input(player, horn(true)).unwrap();
+        s.run_ticks(2);
+        s.set_input(player, horn(false)).unwrap();
+        s.run_ticks(2);
+        let offer = s
+            .street()
+            .unwrap()
+            .offer(s.sim(), s.run())
+            .expect("challenge from beside the bay");
+        assert_eq!(offer.entity, e.0);
+        assert_eq!(offer.rest_stop.as_deref(), Some(poi.name.as_str()));
+        // Declined: it backs out of the bay and leaves.
+        let tick = s.sim().tick();
+        s.street_mut_for_tests().decline(tick);
+        s.run_ticks(240);
+        assert_eq!(
+            s.street().unwrap().bay_of(k).map(|b| b.0),
+            Some(BayPhase::Out)
+        );
     }
 
     /// Row 153: a loop racer's lap ends in a rest stop (one to two laps from wherever it is).

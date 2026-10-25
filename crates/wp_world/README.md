@@ -32,6 +32,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `roads` | Road-level graph view (`RoadGraphView`) for police routing / minimaps; `RoadNetworkIndex` (contract `RoadNetworkQuery`, grid-indexed `nearest_on_road`) |
 | `manoeuvre` | Low-speed manoeuvres: k-point turn planner (`plan_turn`), closed-loop `TurnDriver` / `ReverseDriver` for physical cars (reverse gear through the automatic box), `sight_clear` (crest / bend check), map helpers `road_corridor` / `overtake_sight_clear` |
 | `markings` | Painted markings derived from the lane layout (`marking_at` / `painted_at`): `WorldQuery::surface_at` reports `SurfaceType::PaintedLine` on them |
+| `car_park` | Car parks beside a road (one per Loop 9 rest stop, derived at map build: `CityMap::car_parks`): paved pad over the sidewalk and lot, dropped kerb, a row of 45° nose-in bays with painted lines |
 
 City data lives in `data/city/` (see its README); importer and generator in
 `tools/city-import/`.
@@ -380,6 +381,21 @@ so what you see is what you drive on (`tools/city-import/tests/surface_match.rs`
 - `residential::driveway_cars` parks cars in 60 % of driveways; kerbside cars never stand in
   front of a driveway mouth (`blocks_driveway`). Trunks, hedges and fences are `wp_sim`
   colliders in cities with terrain. Details: `docs/integration/city-residential.md`.
+
+### Rest stop car parks (`car_park`, owner request 2026-10-24)
+- Every Loop 9 rest stop gets a car park along the outer kerb of its parking road (the side
+  away from the highway), derived from the network when the map is built
+  (`CityMap::car_parks`; no road format change): a paved **pad** from the kerb line out over
+  the sidewalk and its level lot (`PAD_DEPTH_M` 6.5 m, 2 cm above the sidewalk top, so it lies
+  on ground the road band already levels; the sidewalk, kerb and guard-rail rules underneath
+  are unchanged), a **dropped kerb** 1.2 m into the parking lane along the bay mouths, and one
+  row of **45° nose-in bays** (2.6 m × 5.4 m deep, 16–18 per rest stop) with painted lines.
+- `pad_mesh` is collided with (`wp_sim`) and drawn (greybox material `car_park`);
+  `paint_mesh` is part of `markings::marking_mesh`; `surface_at` reports asphalt and
+  `ground_height` the pad on it. `props::car_park_cars` parks cars in about a third of the bays
+  (never more than half); kerbside cars keep clear of the bay mouths.
+- Street racers lapping Loop 9 park in a free bay at the end of a lap and back out when they
+  leave (`wp_wasm::street`).
 
 ## Touge passes (`touge::generate`, `World::touge`, `gen-city --preset touge`)
 Four sealed mountain roads for one-on-one touge battles, specs in `data/touge/<id>.json`
