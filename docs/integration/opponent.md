@@ -428,3 +428,18 @@ dodge spikes". Design, results and how to re-train: `crates/wp_opponent/README.m
   `ram_traffic` already does for every non-racer, police included.
 - **#63** (bolder racers): superseded by #76 (traffic) and the training's ramming (police);
   its stake fix is on main (R5).
+
+### Follow-up: right-angle junction turns (2026-10-25)
+
+- Loop 9 → Ashpeak highway jammed at gate 62 (Lantern Way onto the one-lane Route 12
+  ramp): pure pursuit aimed round the 90° turn, cut 2-5 m over the inside edge into the ramp
+  barrier, and the field queued behind the wedged cars. With a bend under 30 m radius inside
+  the look-ahead, `decide_racer` now shortens the look-ahead (×0.75, up to 4 times, not under
+  6 m) until the straight line to the target stays on the road. The highway race passes on
+  the default seed and seeds 29-31, with and without #92's crossovers.
+- New `RaceConfig::tight_turn_lookahead` (default on). Free roam (`wp_opponent::roam`, and
+  `wp_wasm` street roam, a one-line change there) turns it off. With it on, the roam test
+  seed got one roamer–roamer contact at a city junction. The 6-seed roam sweep shows that's
+  noise (4 contacts without the change, 6 with), but roamers cruise and don't need it.
+- `tests/race.rs` police chase: the allowance for a car still pulling over goes from 6.5 to
+  8 m/s, because the 6 m/s cap is a speed target and main overshot it (6.8 m/s).
