@@ -100,8 +100,9 @@ pub const SPIKE_UNIT_LEASH_M: f32 = 15.0;
 /// many times as far ahead (owner, 2026-10-24: set up far enough out not to be seen arriving).
 const SPIKE_FAR_FACTOR: f32 = 2.0;
 
-/// A spike car and strip appear only this far or further from every racer, m.
-const SPIKE_HIDDEN_MIN_M: f32 = 250.0;
+/// A spike site is picked with this much distance to spare, so it still qualifies when its
+/// car appears (next think), m.
+const SPIKE_PICK_MARGIN_M: f32 = 60.0;
 
 /// A spike strip still on its way is given up once its racer is closer than this to the
 /// strip's line (or past it): too late to lay it in front of the racer, m.
@@ -123,10 +124,11 @@ pub(crate) struct PendingToolCar {
 }
 
 /// A spike strip on its way (row 165: a strip never lies on the road without its unit beside
-/// it, and no police car appears in a racer's view). Its strip is laid only together with its
-/// car, which appears at its post while the post is out of every racer's view. Given up, with
-/// no strip, once the post comes into view (owner, 2026-10-24: no spike car is seen arriving),
-/// the racer gets too close ([`SPIKE_LATE_M`]), the pursuit ends or the lifetime runs out.
+/// it). Its strip is laid only together with its car, which appears at its post, already set
+/// up, while the post may take it ([`PoliceSystem::spike_post_ok`]: out of view, or very far
+/// out on a straight). Given up, with no strip, once it may not (owner, 2026-10-24: no spike
+/// car is seen arriving), the racer gets too close ([`SPIKE_LATE_M`]), the pursuit ends or the
+/// lifetime runs out.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SpikeRun {
     /// The strip to lay (`unit` / `post` set when it is laid).
@@ -3978,19 +3980,19 @@ impl PoliceSystem {
             min_sight_m: sc.min_sight_m,
             highway_ok: true,
         };
-        // Row 165: the strip goes down only with its car, which never appears in a racer's
-        // view. Owner (2026-10-24): the racer never sees the car and strip arrive either; it
-        // comes upon them already set up. So the site needs a shoulder spot a car may stand
-        // on (row 75: clear of parked cars, cones and vehicles) that the racer cannot see now
-        // or along its road ahead (beyond corners and crests): the car and strip appear there
-        // together. No such site: no spikes this time (the captain tries again next think).
+        // Row 165: the strip goes down only with its car. Owner (2026-10-24/25): the racer
+        // never sees the car and strip arrive; it comes upon them already set up. So the site
+        // needs a shoulder spot a car may stand on (row 75: clear of parked cars, cones and
+        // vehicles) where the car may appear ([`Self::spike_post_ok`]: out of sight, or very
+        // far out on a straight): the car and strip appear there together. No such site: no
+        // spikes this time (the captain tries again next think).
         let post_of = |site: &ToolSite| {
             let span = self.tool_span(site);
             span.at(site.pos, span.outer + SPIKE_CAR_SHOULDER_M)
         };
         let hidden = |site: &ToolSite| {
             let post = post_of(site);
-            self.spot_clear(post) && self.spike_post_hidden(world, post)
+            self.spot_clear(post) && self.spike_post_ok(world, post, SPIKE_PICK_MARGIN_M)
         };
         // Nothing hidden in the usual range (a long straight in plain view): look up to
         // SPIKE_FAR_FACTOR times as far ahead, past the next bend or crest.
@@ -4091,24 +4093,32 @@ impl PoliceSystem {
         Some((ahead, closing))
     }
 
-    /// Whether a spike car (and its strip) may appear at `post`: no racer sees it now or a
-    /// moment on ([`Self::in_racer_view_opt`] without the road-ahead points, which a post on
-    /// the racer's own road always falls on) and every racer is at least
-    /// [`SPIKE_HIDDEN_MIN_M`] away, so by the time it comes round the bend or over the crest
-    /// the car and strip have long stood there (owner, 2026-10-24).
-    fn spike_post_hidden(&self, world: Option<&dyn WorldQuery>, post: [f32; 2]) -> bool {
-        self.racers
+    /// Whether a spike car (and its strip) may appear at `post`, already set up (owner,
+    /// 2026-10-24/25: the racer never watches it arrive). Every racer is at least
+    /// `spikes.appear_min_m` (+ `margin_m`) away, and either none sees it now or a moment on
+    /// ([`Self::in_racer_view_opt`] without the road-ahead points, which a post on the
+    /// racer's own road always falls on: by the time it comes round the bend or over the crest
+    /// the car and strip have long stood there) or every racer is at least
+    /// `spikes.appear_far_m` (+ `margin_m`) away (a long straight: a speck in the distance).
+    /// `margin_m` lets a site chosen now still qualify when its car appears a think later.
+    fn spike_post_ok(&self, world: Option<&dyn WorldQuery>, post: [f32; 2], margin_m: f32) -> bool {
+        let nearest = self
+            .racers
             .values()
-            .all(|r| dist(xy(r.pos), post) >= SPIKE_HIDDEN_MIN_M)
-            && !self.in_racer_view_opt(world, post, false)
+            .map(|r| dist(xy(r.pos), post))
+            .fold(f32::MAX, f32::min);
+        let sc = &self.cfg.tools.spikes;
+        nearest >= sc.appear_min_m + margin_m
+            && (nearest >= sc.appear_far_m + margin_m
+                || !self.in_racer_view_opt(world, post, false))
     }
 
-    /// Row 165: bring each spike strip on its way to the road with its car. Car's post still
-    /// hidden: the car appears there and the strip goes down with it. Owner (2026-10-24): a
-    /// racer never watches a spike car arrive, so a post that has come into view, a racer
-    /// within [`SPIKE_LATE_M`], a pursuit over or a lifetime out gives the strip up (no car,
-    /// no strip). A post seen in time hands the captain its cooldown back, so it can pick a
-    /// hidden site further on at its next think.
+    /// Row 165: bring each spike strip on its way to the road with its car. Post still fit
+    /// ([`Self::spike_post_ok`]): the car appears there and the strip goes down with it.
+    /// Owner (2026-10-24): a racer never watches a spike car arrive, so a post no longer fit,
+    /// a racer within [`SPIKE_LATE_M`], a pursuit over or a lifetime out gives the strip up
+    /// (no car, no strip). A post lost that way hands the captain its cooldown back, so it can
+    /// pick another site further on at its next think.
     fn maintain_spike_runs(&mut self, world: &dyn WorldQuery) {
         let runs = std::mem::take(&mut self.spike_runs);
         for run in runs {
@@ -4123,7 +4133,7 @@ impl PoliceSystem {
                 continue;
             }
             // Hidden post (or the session's opening): the car simply appears there.
-            if (!self.warmed_up || self.spike_post_hidden(Some(world), run.post))
+            if (!self.warmed_up || self.spike_post_ok(Some(world), run.post, 0.0))
                 && self.spot_clear(run.post)
             {
                 let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, run.post, run.heading);

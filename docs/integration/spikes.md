@@ -108,3 +108,24 @@ seeds.
 - A run whose racer leaves the predicted road keeps going until too late; re-planning is not
   done.
 - Roadblocks have the same shape (barriers can outlive their units); not changed here.
+
+## Follow-up (2026-10-25): spike car and strip appear already set up
+Playtest report: the spike car could be seen arriving. When no hidden post was found, a car
+spawned out of view and drove up to its post in front of the racer (`spike_drive_in`).
+
+- Drive-ins are removed. The car and strip appear together, already set up, only where
+  `PoliceSystem::spike_post_ok` allows: every racer at least `spikes.appear_min_m` (250 m) away
+  and none sees the post now or a moment on, **or** (owner's pick for long straights in plain
+  view) every racer at least `spikes.appear_far_m` (600 m) away. Both are in
+  `data/police/tools.toml` (serde defaults, so older files still load).
+- If nothing qualifies within `max_ahead_m`, the site search looks up to 2x as far ahead.
+- If the post stops qualifying before the car appears (next think), the strip is given up and
+  the captain gets its cooldown back.
+- The AI captain checks posts with the world's sight lines (`place_spikes(.., Some(world))`).
+  A human captain's request is checked on the road graph only.
+- `SpikeRun::unit`, `spike_car_en_route`, `SPIKE_ARRIVE_M` and the drive-in constants are gone.
+  `stats.spike_drive_ins` stays (always 0) for saved stats.
+- Tests: in `system.rs` and `radio_chatter.rs`, the small procedural city uses `appear_far_m = 300`
+  because its straights are too short for 600 m sites. `spikes_manned` and the scenario pop-in
+  audit (`spawns_in_view`) accept tool cars that appear in sight at `appear_far_m` or more.
+  Goldens are unchanged.
