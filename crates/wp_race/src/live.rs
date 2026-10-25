@@ -578,6 +578,7 @@ mod tests {
                 engine_rpm: 1000.0,
                 gear: 1,
                 throttle: 0.0,
+                up_z: 1.0,
             })
             .collect();
         let green = live.judge().green_tick();

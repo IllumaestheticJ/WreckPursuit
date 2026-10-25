@@ -1,7 +1,7 @@
 //! Row 165 ("unaccompanied spikes"): across the police scenarios that use spike strips, no
 //! strip ever lies on the road without its police unit beside it (within the leash of its
 //! post), checked after every step, and no spike car appears where a racer sees it (the row
-//! 131 pop-in audit). Prints spike hits and how the strips went down (cars appearing at a
+//! 131 pop-in audit), unless it is `spikes.appear_far_m` or more away (owner, 2026-10-25). Prints spike hits and how the strips went down (cars appearing at a
 //! hidden post, cars driving in, strips given up) for the integration notes.
 
 use std::path::Path;
@@ -54,9 +54,14 @@ fn check_step(p: &PoliceSystem, name: &str) -> (usize, usize, usize) {
         .iter()
         .filter(|r| r.role == UnitRole::Tool)
         .collect();
+    // Owner (2026-10-25): on a long straight a spike car may appear in plain view, but only
+    // `spikes.appear_far_m` or further out (a speck in the distance), already set up.
+    let far = PoliceConfig::builtin().tools.spikes.appear_far_m;
     (
         tool.len(),
-        tool.iter().filter(|r| r.in_sight).count(),
+        tool.iter()
+            .filter(|r| r.in_sight && r.nearest_racer_m < far)
+            .count(),
         tool.iter().filter(|r| r.seen_after_s.is_some()).count(),
     )
 }

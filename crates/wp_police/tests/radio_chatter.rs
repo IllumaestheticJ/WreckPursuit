@@ -85,8 +85,12 @@ impl Harness {
             .filter_map(|s| s.edge)
             .max()
             .unwrap_or(0);
+        // Spike cars may appear in plain view from 300 m (data: 600 m): the small procedural
+        // city's straights are too short for 600 m sites.
+        let mut cfg = PoliceConfig::builtin();
+        cfg.tools.spikes.appear_far_m = 300.0;
         let mut police = PoliceSystem::with_city(
-            PoliceConfig::builtin(),
+            cfg,
             graph,
             PoliceSetup {
                 seed,
