@@ -262,7 +262,9 @@ fn a_career_touge_win_pays_the_career_and_the_pass_has_no_police() {
         "no heat on the pass"
     );
     assert!(s.sim().police().units().is_empty(), "no police units");
-    launch_at_krails(&mut s, NPC, 30.0);
+    // The rival goes over an open drop: off the mountain, the player wins.
+    let (at, side) = longest(&s, EdgeKind::Drop);
+    launch(&mut s, NPC, at, side, 40.0, 30.0);
     let mut settled = None;
     for _ in 0..240 * 8 {
         s.run_ticks(1);
