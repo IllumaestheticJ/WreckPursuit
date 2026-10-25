@@ -691,15 +691,20 @@ fn rep_tiers_gate_the_dealer_and_pay_their_bonus_once() {
     c.profile_mut().account.cash = 500_000;
     let view = c.view();
     assert_eq!(view.progress.tier, wp_economy::RepTier::Unknown);
-    let exotic = view
+    let sport = view
         .dealer
         .iter()
-        .find(|d| d.class == wp_contracts::VehicleClass::Exotic)
+        .find(|d| d.class == wp_contracts::VehicleClass::Sport)
         .unwrap()
         .clone();
-    assert!(exotic.locked);
+    assert!(sport.locked);
     assert!(view.dealer.iter().any(|d| !d.locked));
-    let err = c.buy_car(&exotic.def_id, Condition::New).unwrap_err();
+    // Exotics have no rep gate: open at the dealer from the first night.
+    assert!(view
+        .dealer
+        .iter()
+        .any(|d| d.class == wp_contracts::VehicleClass::Exotic && !d.locked));
+    let err = c.buy_car(&sport.def_id, Condition::New).unwrap_err();
     assert!(err.contains("locked"), "{err}");
 
     // Rep earned on the night pays each tier's bonus the first time only.
@@ -721,8 +726,8 @@ fn rep_tiers_gate_the_dealer_and_pay_their_bonus_once() {
     assert!(!view
         .dealer
         .iter()
-        .any(|d| d.def_id == exotic.def_id && d.locked));
-    c.buy_car(&exotic.def_id, Condition::Worn).unwrap();
+        .any(|d| d.def_id == sport.def_id && d.locked));
+    c.buy_car(&sport.def_id, Condition::Worn).unwrap();
     let cash = c.profile().account.cash;
     c.next_night().unwrap();
     assert!(c.profile().account.cash <= cash, "no second bonus");
