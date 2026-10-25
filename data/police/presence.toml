@@ -1,28 +1,31 @@
 # Patrol presence, reinforcement, helicopter availability and tool unlocks (wp_police::dispatch).
-# Day: dense patrols, fast reinforcement, full toolset. Night: sparse, slow, helicopter iffy.
+# Day: a few patrols, fast reinforcement, full toolset. Night: one patrol, slow, helicopter iffy.
 
 max_ground_units = 24
 # A civilian-civilian contact faster than this creates a crash-scene incident.
 crash_incident_min_speed_mps = 8.0
 
 # Patrol unit count per district per phase (the dispatcher keeps this many pool units alive).
+# Owner 2026-10-23 ("cops far too common"): day takes the old night counts (3/1/1) and night is
+# a quarter of that (rounded to 1 unit city-wide; the city total must stay >= 1 or the unit cap
+# drops to zero and no police appear at all). Dawn/dusk sit between.
 [patrols.core]
 dawn = 2
-day = 8
-dusk = 6
-night = 3
-
-[patrols.suburb]
-dawn = 1
 day = 3
 dusk = 2
 night = 1
 
-[patrols.industrial]
+[patrols.suburb]
 dawn = 1
-day = 2
-dusk = 2
-night = 1
+day = 1
+dusk = 1
+night = 0
+
+[patrols.industrial]
+dawn = 0
+day = 1
+dusk = 0
+night = 0
 
 # A crash scene keeps one unit busy this long.
 [crash_scene_s]

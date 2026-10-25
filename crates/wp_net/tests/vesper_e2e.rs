@@ -185,7 +185,12 @@ fn vesper_sim(data: &Data) -> WpSim {
         police_car: Some(cars[AI_POLICE_CAR].clone()),
         traffic_car: Some(cars[TRAFFIC_CAR].clone()),
     };
-    WpSim::with_city(config, cars.clone(), city)
+    let mut sim = WpSim::with_city(config, cars.clone(), city);
+    // The pre-2026-10-23 patrol counts: this checks replication of a busy chase (several AI
+    // cars, dents seen by several clients), not how many cops patrol at night.
+    sim.sim_mut()
+        .set_police_config(wp_police::PoliceConfig::builtin_dense_patrols());
+    sim
 }
 
 /// Quantised state of every vehicle, exactly as the server sends it.

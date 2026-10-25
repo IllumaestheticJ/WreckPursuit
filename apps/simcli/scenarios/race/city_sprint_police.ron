@@ -38,6 +38,9 @@
 // Re-aimed for wp_police row 157 (2026-10-23: every heat gain halved, so the report and the
 // racers' own violations add half as much): at 3.75 nobody reaches L1 and no pursuit starts.
 // Seed 1: heat 4.5-8.25 passes both runs, starting heat 3.75 -> 6.0.
+// Re-aimed for PR #64 (owner 2026-10-23: far fewer cops, day patrols 13 -> 5) on main after
+// row 170: at 6.0 no patrol sees the field and no pursuit starts. Seed 1: heat 7.0-9.5 passes
+// both runs, starting heat 6.0 -> 8.25.
 //
 // Run standalone, simcli has no race block and no AI driver for these entities (see
 // docs/integration/race.md, requests to I and N), so the cars wait on the grid while traffic
@@ -59,10 +62,10 @@
     // Parked cars make debug test runs very slow and take no part in the race.
     parked_cars: false,
     entities: [
-        (id: "ai_coupe", car: "debug_coupe", pos: (59.55, -440.0, 0.0), police_heat: 6.0),
-        (id: "ai_sedan", car: "debug_sedan", pos: (64.55, -444.0, 0.0), police_heat: 6.0),
-        (id: "ai_coupe_2", car: "debug_coupe", pos: (59.55, -448.0, 0.0), police_heat: 6.0),
-        (id: "ai_sedan_2", car: "debug_sedan", pos: (64.55, -452.0, 0.0), police_heat: 6.0),
+        (id: "ai_coupe", car: "debug_coupe", pos: (59.55, -440.0, 0.0), police_heat: 8.25),
+        (id: "ai_sedan", car: "debug_sedan", pos: (64.55, -444.0, 0.0), police_heat: 8.25),
+        (id: "ai_coupe_2", car: "debug_coupe", pos: (59.55, -448.0, 0.0), police_heat: 8.25),
+        (id: "ai_sedan_2", car: "debug_sedan", pos: (64.55, -452.0, 0.0), police_heat: 8.25),
     ],
     duration_s: 30.0,
     hash_every: 240,

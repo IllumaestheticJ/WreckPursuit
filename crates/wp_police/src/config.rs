@@ -126,6 +126,9 @@ pub struct HeatConfig {
     pub level_thresholds: [f32; 5],
     /// Fraction of a violation's heat that counts when no unit or camera saw it ("reports").
     pub unseen_factor: f32,
+    /// A violation nobody saw only becomes a call (a unit sent to look) once the racer's heat
+    /// is at least this, so a little unseen speeding is not investigated.
+    pub call_min_heat: f32,
     /// Same violation kind from the same racer is counted at most once per this many seconds.
     pub repeat_cooldown_s: f32,
     /// Heat per violation kind.
@@ -914,7 +917,31 @@ fn parse_one<T: for<'de> Deserialize<'de>>(name: &str, text: &str) -> Result<T, 
     toml::from_str(text).map_err(|e| ConfigError::Parse(name.to_string(), e))
 }
 
+/// The patrol counts shipped before the owner's 2026-10-23 cut (Core 2/8/6/3, Suburb 1/3/2/1,
+/// Industrial 1/2/2/1 by dawn/day/dusk/night). For tests and scenarios that check how units
+/// behave with several close to the racer, not how many patrol the city.
+pub fn dense_patrols() -> DistrictTable<PhaseTable<u32>> {
+    let t = |dawn, day, dusk, night| PhaseTable {
+        dawn,
+        day,
+        dusk,
+        night,
+    };
+    DistrictTable {
+        core: t(2, 8, 6, 3),
+        suburb: t(1, 3, 2, 1),
+        industrial: t(1, 2, 2, 1),
+    }
+}
+
 impl PoliceConfig {
+    /// The built-in tables with [`dense_patrols`] in place of the shipped patrol counts.
+    pub fn builtin_dense_patrols() -> Self {
+        let mut cfg = Self::builtin();
+        cfg.presence.patrols = dense_patrols();
+        cfg
+    }
+
     /// Parse from the four TOML texts (heat, presence, pursuit, tools), with the built-in
     /// `radio.toml`.
     pub fn parse(
@@ -1031,6 +1058,9 @@ impl PoliceConfig {
         if !(0.0..=1.0).contains(&self.heat.heat.unseen_factor) {
             return bad("heat.unseen_factor must be in 0..=1");
         }
+        if self.heat.heat.call_min_heat < 0.0 {
+            return bad("heat.call_min_heat must be >= 0");
+        }
         if self.pursuit.think_hz <= 0.0 {
             return bad("pursuit.think_hz must be > 0");
         }
@@ -1078,8 +1108,8 @@ mod tests {
     #[test]
     fn builtin_tables_parse_and_validate() {
         let c = PoliceConfig::builtin();
-        assert_eq!(c.presence.patrols.core.day, 8);
-        assert_eq!(c.presence.patrols.suburb.night, 1);
+        assert_eq!(c.presence.patrols.core.day, 3);
+        assert_eq!(c.presence.patrols.suburb.night, 0);
         // The data dir on disk matches the compiled-in copy.
         let disk =
             PoliceConfig::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/police")).unwrap();
