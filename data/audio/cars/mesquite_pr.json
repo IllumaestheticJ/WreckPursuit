@@ -1,0 +1,15 @@
+{
+  "id": "mesquite_pr",
+  "engine": {
+    "cylinders": 8,
+    "layout": "V",
+    "firing": "CrossPlane",
+    "induction_exhaust_balance": 0.3,
+    "turbo": false,
+    "supercharger": false,
+    "gain": 1.1
+  },
+  "engine_pack": "engine_proc_v8",
+  "world_pack": "world_rec",
+  "horn_cue": "horn/truck"
+}

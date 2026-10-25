@@ -144,6 +144,48 @@ pub struct OwnedCar {
     /// workshop: the parts are derived from `mods` (stock everywhere else).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parts: Option<crate::parts::CarParts>,
+    /// Tyres (FL, FR, RL, RR). Worn by driving and replaced on their own
+    /// ([`crate::Economy::replace_tires`]): a repair never fixes tyres. Saves without it load
+    /// with new tyres.
+    #[serde(default)]
+    pub tires: TireState,
+    /// Rare variant name the car was sold as (lots' `rare_variants`, e.g. a time-attack
+    /// special); `None` for an ordinary car. Shown instead of the model name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant_name: Option<String>,
+    /// Factory paint (0xRRGGBB) the car was sold in; `None` = the renderer's default colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint: Option<u32>,
+}
+
+/// Condition of a car's four tyres (FL, FR, RL, RR).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TireState {
+    /// Tread left 0 (bald) ..= 1 (new).
+    pub tread: [f32; 4],
+    /// Flat (spike strips, junkyard).
+    pub flat: [bool; 4],
+}
+
+impl Default for TireState {
+    /// Four new tyres.
+    fn default() -> Self {
+        Self {
+            tread: [1.0; 4],
+            flat: [false; 4],
+        }
+    }
+}
+
+impl TireState {
+    /// Tyres that need replacing: flat, or tread below `bald_below`.
+    pub fn worn_out(&self, bald_below: f32) -> [bool; 4] {
+        let mut out = [false; 4];
+        for (w, o) in out.iter_mut().enumerate() {
+            *o = self.flat[w] || self.tread[w] < bald_below;
+        }
+        out
+    }
 }
 
 impl OwnedCar {

@@ -1526,6 +1526,28 @@ on lead/round12 353744ec and on ws/world (debug and release: 1 go-around, contac
 failure opponent-pace saw on 0e84a9f7 predates a779ad57 (the fix and the re-aimed ≥ 1
 threshold are not in that commit), so it is not a regression. The margin is thin (exactly 1).
 
+## Police can see solid verge furniture (lead / E, 2026-10-24)
+
+**Why:** police units hit verge street trees (Crowfoot, row 168 follow-up), because trees were
+not in anything the police query.
+
+**What's new:** `wp_world::obstacles`.
+- `SolidDecor::of(&Decor)` gives the sim's collider footprint as 2D:
+  - tree trunks (street, yard, pine): circles of `TRUNK_R_M` (0.22 m), solid to `TRUNK_SOLID_H_M`
+    (2.5 m);
+  - hedges, fences, jersey barriers, site fences, hay bales, billboards, crane masts: oriented
+    boxes.
+  - Also gives `distance_to(p)` and `outline()`.
+- `ObstacleIndex`: a 16 m grid; `near(p, r)` returns the items within `r` of `p`, in ascending
+  index order.
+- `World::obstacles()`, built in `World::new`.
+- Empty on cities without relief, like the sim.
+- There are no lamp posts or hydrants in the world yet (no DecorKind).
+
+**Kept in step with the sim:** `wp_sim::physics::decor_collider` uses `TRUNK_SOLID_H_M`, so both
+read the same constants. No simulation change and no golden moves. Police integration (feelers,
+U-turn room) is E's.
+
 ## Ashpeak greybox de-dup, option A (lead + ashpeak-port, 2026-10-24)
 
 **Goal:** `ashpeak` ships `vesper_v2`'s greybox once, plus county tiles. Port Vesper inside
@@ -2100,3 +2122,60 @@ a car in its lane head-on still triggers it.
   `opponent_reverse_grid_2laps`, `race_city_sprint_police`, `world_traffic_soak`; 45/45
   scenarios pass.
 - **Perf:** `surface_at` 0.61 µs/query (0.49 before, same run), markings 0.17 µs (0.13).
+
+## Road network centrelines follow the road centre (playtest row 170)
+`RoadNetworkIndex` built each edge's centreline from the node centres plus the interior
+points of the road's first lane. On curved roads (74 % of Port Vesper's edges) that is a
+lane's offset off centre, and users that offset into a lane from it (police units, 1.75 m)
+ended up one lane too far right one way and on the centre line the other way. Edges now use
+the interior points of the road surface's own centreline (`RoadSurface::centre`, oriented
+a -> b), so straight roads stay node-to-node, simplified to the points that shape the
+road (Douglas-Peucker, 0.2 m): every interior point is a node in users' graphs (police patrol
+destinations). Test:
+`tests/city_v2.rs::road_network_centrelines_offset_into_the_right_lane` (1918 samples: 937 in
+the wrong lane before, 4 at junction edges after). Police side: `docs/integration/police.md`.
+
+## Rest stop car parks (owner request 2026-10-24: "the parking stations should have more of a parking lot — the AI racers are parked in the middle of the street")
+**Before.** At night the loop street racers ended each lap at a Loop 9 rest stop's POI (the
+middle of its one-lane parking road) and stood there on the handbrake for 40–90 s, in the travel
+lane.
+**Now.**
+- `wp_world::car_park` (new): one car park per rest stop, derived from the network in
+  `CityMap::new` (`CityMap::car_parks`; no road format change, nothing in the lanes changes).
+  A paved pad from the outer kerb line over the sidewalk and its level lot (6.5 m deep, 2 cm
+  over the sidewalk top: the road band's ground is already level there, so no terrain change),
+  a dropped kerb 1.2 m into the parking lane along the bay mouths, one row of 45° nose-in bays
+  (2.6 m wide, 5.4 m deep; Hollins 18, Larkspur and Harbor 16) with painted dividers and a back
+  line. The sidewalk / kerb / guard-rail rules (`surface::sidewalk_mesh` on every non-highway
+  lane edge) still build underneath; the pad covers them.
+- `CityMap::surface_at` → asphalt on the pad and ramp; `CityMap::ground_height` → the pad (the
+  light-model racers and traffic's own ground probe stand on it); `markings::marking_mesh`
+  includes the bay lines; `props::car_park_cars` fills about 35 % of the bays (at most half a
+  lot) on its own RNG stream, and kerbside cars keep clear of the bay mouths (the kerbside
+  draws are unchanged, so no other parked car moves).
+- Street racers (`wp_wasm::street`): a loop racer's lap into a rest stop eases down to 4 m/s
+  35 m before the end (`rest_stop_approach`), then takes a free bay ahead (not claimed by
+  another racer, no parked car or vehicle in it), drives in nose first at walking pace
+  (`BayPhase::In`), stays parked for its idle time (`Parked`), then backs out onto the parking
+  road facing its way (`Out`) and sets off on the next lap. Manoeuvres run on full physics
+  (the far-away light model cannot reverse). A racer parked in a bay is challenged by a honk
+  while stopped within 12 m of it (`PARKED_CHALLENGE_M`; right behind a car parked nose-in is
+  the lot); the rest-stop meet then starts as before, side by side on the parking road. A
+  declined racer backs out and leaves. `debug_street_park_at_rest_stop` parks it in a bay.
+  Police behaviour is unchanged.
+**Tests.** `wp_world::car_park::tests` (bays on the pad, off the road, angled, a car fits,
+dropped kerb meets the road), `wp_wasm::street::tests::loop_racer_parks_in_a_car_park_bay_and_backs_out`
+(off-ramp → arrives → parks 0.3 m from the bay centre, nose-in → backs out onto the parking
+road facing its way → plans its next lap), `..::honk_beside_a_racer_parked_in_a_bay_challenges_it`.
+**Changes outside wp_world:** `crates/wp_sim/src/physics.rs` (pad colliders, 3 lines),
+`crates/wp_wasm/src/{street,session}.rs`, `tools/city-import/src/glb.rs` (`car_park`
+material), `apps/testbed-web/src/{scene.ts,render/palette.ts,render/weather.ts}` (polygon
+offset, colour, wet surface), greyboxes regenerated (`vesper_v2*`, `ashpeak*`).
+
+
+**Challenge while wanted (owner, 2026-10-24, same PR).** Street challenges and race meet spot
+honks are blocked only while the player is chased, meaning a pursuit or a search
+(`wp_wasm::street::pursued` = `RacerRecord::pursued()`). Before this change, any wanted level
+also blocked them. Being wanted with no unit on the player now still allows a challenge, and
+an open offer only lapses once a pursuit starts. Police behaviour is unchanged. Test:
+`street_tests::wanted_can_challenge_but_not_while_chased`.

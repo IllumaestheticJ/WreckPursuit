@@ -392,6 +392,10 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     let (walk_colliders, sidewalk_triangles) = sidewalk_mesh_colliders(&walks);
     out.sidewalk_triangles = sidewalk_triangles;
     added.extend(walk_colliders);
+    // Car parks (rest stop lots): their pads over the sidewalks and the dropped kerbs, paved
+    // like the roads.
+    let lots = wp_world::car_park::pad_mesh(&map.car_parks);
+    added.extend(mesh_tile_colliders(&lots, InteractionGroups::all()));
 
     // Buildings: extruded footprints as convex hulls (footprints are convex lots), pitched
     // roofs included (a gable or hip house is still convex). A city on flat ground (the
@@ -520,7 +524,8 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     Some((added, out))
 }
 
-/// Static collider of one piece of street / yard furniture: a tree trunk (cylinder up to the
+/// Static collider of one piece of street / yard furniture (the same footprint as
+/// [`wp_world::obstacles::SolidDecor::of`], which police feel for): a tree trunk (cylinder up to the
 /// crown, 2.5 m), a hedge, fence, crane mast, barrier, hay bale or billboard (box). `None` for flush decor (driveways).
 pub fn decor_collider(d: &wp_world::network::Decor) -> Option<Collider> {
     use wp_world::network::DecorKind;
@@ -528,7 +533,7 @@ pub fn decor_collider(d: &wp_world::network::Decor) -> Option<Collider> {
     let rot = rapier3d::math::Rotation::from_xyzw(0.0, 0.0, s, c);
     match d.kind {
         DecorKind::StreetTree | DecorKind::YardTree | DecorKind::PineTree => {
-            let h = 2.5f32.min(d.size[2]);
+            let h = wp_world::obstacles::TRUNK_SOLID_H_M.min(d.size[2]);
             // Parry cylinders stand along local Y: rotate +90° about X so it stands on Z.
             let half = core::f32::consts::FRAC_1_SQRT_2;
             let up = rapier3d::math::Rotation::from_xyzw(half, 0.0, 0.0, half);

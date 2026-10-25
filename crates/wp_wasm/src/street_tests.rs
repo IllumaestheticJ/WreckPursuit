@@ -414,6 +414,7 @@ fn challenge_race_result(hour: f32) {
     let before = cash(&s);
     let rep_before = s.run().unwrap().account().rep;
     let stake = street::level(ROSTER[1].0).bet_min;
+    let odds = s.street().unwrap().offer(s.sim(), s.run()).unwrap().odds;
     s.street_accept(fin, &[], stake).unwrap();
     s.run_ticks(street::COUNTDOWN_TICKS + 240);
     let z = state(&s, PLAYER).pos[2];
@@ -423,16 +424,18 @@ fn challenge_race_result(hour: f32) {
     let r = s.street().unwrap().result().cloned().expect("decided");
     assert_eq!(r.seq, 2);
     assert!(r.won, "{r:?}");
-    assert_eq!(r.net, stake);
-    assert_eq!(cash(&s), before + stake, "stake back plus theirs");
-    // The win climbs the career's rep ladder by the level's win_rep (a loss costs none).
-    let win_rep = street::level(ROSTER[1].0).win_rep;
-    assert_eq!(r.rep, win_rep);
-    assert_eq!(s.run().unwrap().account().rep, rep_before + win_rep);
+    // The stake back times the odds the card showed (level and car gap).
+    let paid = odds.payout(stake);
+    assert!(paid > stake, "{odds:?}");
+    assert_eq!(r.net, paid - stake);
+    assert_eq!(cash(&s), before - stake + paid, "stake back times the odds");
+    // The win climbs the career's rep ladder by the challenge's win_rep (a loss costs none).
+    assert_eq!(r.rep, odds.win_rep);
+    assert_eq!(s.run().unwrap().account().rep, rep_before + odds.win_rep);
     let ledger = s.run().unwrap().ledger();
     assert!(ledger
         .iter()
-        .any(|e| e.cash_delta == 2 * stake && e.cash_after == before + stake));
+        .any(|e| e.cash_delta == paid && e.cash_after == before - stake + paid));
 }
 
 #[test]
@@ -878,11 +881,11 @@ fn four_racers_lap_loop9_at_night_in_port_vesper() {
     assert!(city_top < 15.0, "city racers keep to city pace: {city_top}");
 }
 
-/// Row 150: no challenge while the player is wanted (a honk does nothing, an open offer lapses,
-/// accepting is refused); accepting resets both cars side by side at the start, at rest, facing
-/// along the route, as logged moves (the recording replays them).
+/// Row 150: no challenge while the player is chased (pursuit or search: no hint, a honk does
+/// nothing, an open offer lapses), but a wanted level with no pursuit is fine (owner,
+/// 2026-10-24): the hint shows, a honk opens the challenge and the offer stays open.
 #[test]
-fn no_challenge_while_wanted_and_both_cars_start_side_by_side() {
+fn wanted_can_challenge_but_not_while_chased() {
     let mut s = city_session();
     s.run_ticks(240 * 2);
     s.debug_sim_mut()
@@ -890,11 +893,30 @@ fn no_challenge_while_wanted_and_both_cars_start_side_by_side() {
         .police_mut()
         .set_heat(PLAYER, 40.0);
     s.run_ticks(2);
-    assert!(s.sim().police().is_wanted_or_pursued(PLAYER));
+    assert!(s.sim().police().wanted_level(PLAYER).number() > 0);
+    assert!(!street::pursued(s.sim(), PLAYER), "wanted, not chased");
     park_behind(&mut s, 0);
     assert!(
+        s.street().unwrap().challengeable(s.sim(), PLAYER).is_some(),
+        "a wanted level alone still shows the hint"
+    );
+    challenge(&mut s, 0);
+    // Chased: the open offer lapses, no hint, a honk opens nothing.
+    s.debug_sim_mut()
+        .unwrap()
+        .police_mut()
+        .begin_pursuit(PLAYER)
+        .expect("a unit takes the pursuit");
+    s.run_ticks(2);
+    assert!(street::pursued(s.sim(), PLAYER));
+    assert!(
+        s.street().unwrap().offer(s.sim(), s.run()).is_none(),
+        "the offer lapsed"
+    );
+    park_behind(&mut s, 1);
+    assert!(
         s.street().unwrap().challengeable(s.sim(), PLAYER).is_none(),
-        "no hint while wanted"
+        "no hint while chased"
     );
     assert!(s.street().unwrap().in_reach(s.sim(), PLAYER).is_some());
     s.set_input(PLAYER, horn(true)).unwrap();
@@ -903,30 +925,16 @@ fn no_challenge_while_wanted_and_both_cars_start_side_by_side() {
     s.run_ticks(2);
     assert!(
         s.street().unwrap().offer(s.sim(), s.run()).is_none(),
-        "a honk opens no challenge while wanted"
+        "a honk opens no challenge while chased"
     );
-    // Clean again: the challenge opens; wanted again: it lapses.
-    s.debug_sim_mut()
-        .unwrap()
-        .police_mut()
-        .set_heat(PLAYER, 0.0);
-    s.run_ticks(2);
-    assert!(!s.sim().police().is_wanted_or_pursued(PLAYER));
-    let racer = challenge(&mut s, 0);
-    s.debug_sim_mut()
-        .unwrap()
-        .police_mut()
-        .set_heat(PLAYER, 40.0);
-    s.run_ticks(2);
-    assert!(
-        s.street().unwrap().offer(s.sim(), s.run()).is_none(),
-        "the offer lapsed"
-    );
-    s.debug_sim_mut()
-        .unwrap()
-        .police_mut()
-        .set_heat(PLAYER, 0.0);
-    s.run_ticks(240 * 21);
+}
+
+/// Row 150: accepting resets both cars side by side at the start, at rest, facing along the
+/// route, as logged moves (the recording replays them).
+#[test]
+fn both_cars_start_side_by_side() {
+    let mut s = city_session();
+    s.run_ticks(240 * 2);
     // Rolling a little and turned off the lane's heading before the accept.
     challenge(&mut s, 1);
     let fin = finish_for(&s);
@@ -985,7 +993,6 @@ fn no_challenge_while_wanted_and_both_cars_start_side_by_side() {
         along.abs() < 1.5,
         "beside, not ahead or behind ({along:.2} m)"
     );
-    let _ = racer;
 }
 
 /// Row 151: a route through waypoints runs through them in order; the gates sit on the route
@@ -1240,4 +1247,98 @@ fn career_time_shifts_line_up_with_the_street_racers_day_and_night() {
         }
         assert!(samples > 100, "{shift:?}: {samples} samples");
     }
+}
+
+/// Playtest row 169: a street race driven in a career run (garage → free drive) settles on the
+/// career: a lost stake comes off the career's cash, a win pays even money and the level's rep,
+/// and both are in the career's ledger once the run is back in the garage.
+#[test]
+fn street_bets_settle_on_the_career() {
+    use crate::career::Career;
+    use wp_economy::Condition;
+    let econ = crate::garage::with_economy(|e| e.clone());
+    let mut c = Career::new(econ, DamageMode::Arcade);
+    c.profile_mut().account.cash = 60_000;
+    let uid = c.buy_car("junkyard_beater", Condition::Worn).unwrap();
+    c.set_active(uid).unwrap();
+    let mut sc = free_drive("ignored", DamageMode::Arcade, true);
+    sc.time_of_day_h = 12.0;
+    let mut s = c.start_run(sc).unwrap();
+    assert!(s.is_career() && s.street().is_some());
+    s.run_ticks(240 * 2);
+    let cash0 = cash(&s);
+    let rep0 = s.run().unwrap().account().rep;
+
+    // Lost: the racer wins while the player waits on the handbrake.
+    challenge(&mut s, 0);
+    let fin = finish_for(&s);
+    let lost = street::level(ROSTER[0].0).bet_min;
+    s.street_accept(fin, &[], lost).unwrap();
+    s.run_ticks(street::COUNTDOWN_TICKS + 2);
+    let r = race_to_result(&mut s, 180, |_, _| {});
+    assert!(!r.won, "{r:?}");
+
+    // Won: the player is at B first.
+    challenge(&mut s, 1);
+    let fin = finish_for(&s);
+    let won = street::level(ROSTER[1].0).bet_min;
+    let odds = s.street().unwrap().offer(s.sim(), s.run()).unwrap().odds;
+    let paid = odds.payout(won);
+    s.street_accept(fin, &[], won).unwrap();
+    s.run_ticks(street::COUNTDOWN_TICKS + 240);
+    let z = state(&s, PLAYER).pos[2];
+    let ground = s.sim().world().map().ground_height(fin, Some(z));
+    s.place_logged(PLAYER, fin, 0.0, ground).unwrap();
+    s.run_ticks(4);
+    let r = s.street().unwrap().result().cloned().expect("decided");
+    assert!(r.won, "{r:?}");
+    assert_eq!(
+        cash(&s),
+        cash0 - lost - won + paid,
+        "the run's account is the career's"
+    );
+
+    // Back in the garage: the career kept both bets and the rep.
+    let start_seq = c.profile().account.next_event_seq;
+    c.finish_run(&mut s).unwrap();
+    let p = c.profile();
+    let notes: Vec<(i64, String)> = p
+        .ledger
+        .iter()
+        .filter_map(|e| match &e.reason {
+            wp_economy::EventReason::Adjustment { note } if note.starts_with("bet:") => {
+                Some((e.cash_delta, note.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        notes
+            .iter()
+            .any(|(d, n)| *d == -lost && n.starts_with("bet:stake:street:")),
+        "lost stake in the career ledger: {notes:?}"
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|(d, n)| *d == -won && n.starts_with("bet:stake:street:")),
+        "won stake in the career ledger: {notes:?}"
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|(d, n)| *d == paid && n.starts_with("bet:payout:street:")),
+        "payout in the career ledger: {notes:?}"
+    );
+    let win_rep = odds.win_rep;
+    assert!(
+        p.account.rep >= rep0 + win_rep,
+        "rep {} (was {rep0})",
+        p.account.rep
+    );
+    // ... posted during this run.
+    assert!(p
+        .ledger
+        .iter()
+        .any(|e| e.seq >= start_seq && e.cash_delta == paid));
 }
