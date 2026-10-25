@@ -8,10 +8,11 @@
 //!   ride in the scenario name ([`TougeSetup::scenario_name`]) so replays rebuild the race.
 //! - **Who:** every pass has a regular [`Opponent::Challenger`] and a [`Opponent::Boss`], the
 //!   same named NPCs every time ([`ROSTER`]).
-//! - **Walls:** the track is sealed by fixed walls; on the K-rail stretches the outboard wall
-//!   is loose concrete over a cliff. A car whose centre gets past the wall line (or that drops
-//!   well below the road) is **totaled** and the battle is over: the other car wins at once
-//!   ([`Boundary`], [`TougeBattle`]).
+//! - **Off the mountain:** the road is cut into a mountainside (`wp_world::touge`): a cut bank
+//!   uphill, breakaway guard rail, runoff aprons and open drops downhill. A car that falls off
+//!   the mountain (well below the road beside it) or leaves the road's corridor is
+//!   **totaled** and the battle is over: the other car wins at once ([`Boundary`],
+//!   [`TougeBattle`]).
 //! - **Stakes:** who may race a challenger, a boss, bet or put up a pink slip is decided by
 //!   the rep tiers of `wp_economy::progression` (`Feature::TougeRaces`, `BossRaces`,
 //!   `TougeBetting`, `PinkSlips`); [`wager_menu`] shows what is open and why not. Payouts and
@@ -42,11 +43,16 @@ pub const TOUGE_TOML: &str = include_str!("../../../data/events/touge.toml");
 /// Gap between the leader and the chaser on the start grid, m.
 pub const GRID_GAP_M: f32 = 12.0;
 
-/// A car whose centre is this far past the inner face of the wall line is through it, m.
-pub const BREACH_PAST_WALL_M: f32 = 1.5;
-
-/// A car this far below the road surface (next to it) has gone over the edge, m.
+/// A car this far below the road surface (next to it) has fallen off the mountain, m.
 pub const BREACH_DROP_M: f32 = 4.0;
+
+/// A car is looked for on the road within this distance of where it last was, m (so one that
+/// drops onto the leg below a hairpin stack is judged against the leg it left).
+pub const TRACK_WINDOW_M: f32 = 40.0;
+
+/// A car that moved further than this between two looks was placed (a reset, a debug move),
+/// not driven there: it is looked for on the whole road again, m.
+pub const TRACK_JUMP_M: f32 = 10.0;
 
 /// Start hour of a day battle.
 pub const DAY_HOUR: f32 = 14.0;
@@ -146,6 +152,21 @@ pub enum Surface {
     /// Heavy rain, soaked road.
     Rain,
 }
+
+impl Surface {
+    /// Fraction of dry grip the AI drivers plan their corner and braking speeds with (a soaked
+    /// road costs ~30 % of a street tyre's grip, `wp_vehicle::surface`). Without it the AI
+    /// takes wet corners at dry speeds and goes off the mountain.
+    pub fn ai_grip(self) -> f32 {
+        match self {
+            Surface::Dry => 1.0,
+            Surface::Rain => RAIN_AI_GRIP,
+        }
+    }
+}
+
+/// See [`Surface::ai_grip`].
+pub const RAIN_AI_GRIP: f32 = 0.7;
 
 /// Who the player races.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -472,22 +493,29 @@ pub fn plan_course(world: &World, def: &RaceDef) -> Option<CityRace> {
     Some(race)
 }
 
-/// The pass's wall line, from the loaded world's road surface.
+/// The pass's road corridor, from the loaded world's road surface: a car that falls off the
+/// mountain or leaves the corridor (through a guard rail and away, over a drop, off the end
+/// of a runoff apron) is out.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Boundary {
     centre: Vec<V3>,
     cum: Vec<f32>,
     bank: Vec<f32>,
-    /// Centreline to the inner face of the walls, m.
-    pub wall_offset_m: f32,
+    /// Centreline to the paved edge, m.
+    pub half_width_m: f32,
+    /// Centreline to the edge of the corridor (the paved half width plus
+    /// [`wp_world::touge::COURSE_EXTENT_M`]), m.
+    pub corridor_m: f32,
 }
 
 /// Why a car is out of the battle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BreachKind {
-    /// Past the wall line (through a K-rail stretch).
-    ThroughWall,
-    /// Fell off the road (well below it).
+    /// Left the road's corridor sideways (through the guard rail and away from the road, or
+    /// cutting across the mountain).
+    OffCourse,
+    /// Fell off the mountain: well below the road beside it (over a drop, through a guard rail
+    /// and down the slope, onto the leg below).
     OffTheEdge,
 }
 
@@ -499,36 +527,70 @@ impl Boundary {
             return None;
         }
         let s = &net.surfaces[0];
+        let half = s.left_m.max(s.right_m);
         Some(Self {
             cum: geom::cumulative(&s.centre),
             centre: s.centre.clone(),
             bank: s.bank.clone(),
-            wall_offset_m: s.left_m.max(s.right_m) + wp_world::touge::WALL_GAP_M,
+            half_width_m: half,
+            corridor_m: half + wp_world::touge::COURSE_EXTENT_M,
         })
     }
 
-    /// Whether a car centred at `pos` is out: past the wall line by more than
-    /// [`BREACH_PAST_WALL_M`] or more than [`BREACH_DROP_M`] below the road beside it.
+    /// Road length, m.
+    pub fn length_m(&self) -> f32 {
+        *self.cum.last().unwrap_or(&0.0)
+    }
+
+    /// Where a car centred at `pos` is: distance along the road and lateral offset (positive
+    /// to the right of base → summit), on the whole road or, with `near_s`, only on the road
+    /// within [`TRACK_WINDOW_M`] of that distance.
+    pub fn locate(&self, pos: [f32; 3], near_s: Option<f32>) -> (f32, f32) {
+        let n = self.centre.len();
+        let (a, b) = match near_s {
+            Some(s0) => (
+                self.cum
+                    .partition_point(|c| *c < s0 - TRACK_WINDOW_M)
+                    .saturating_sub(1),
+                self.cum
+                    .partition_point(|c| *c <= s0 + TRACK_WINDOW_M)
+                    .min(n - 1),
+            ),
+            None => (0, n - 1),
+        };
+        let b = b.max(a + 1).min(n - 1);
+        let a = a.min(b - 1);
+        let p = geom::project(&self.centre[a..=b], &self.cum[a..=b], geom::xy(pos));
+        (p.s.clamp(0.0, self.length_m()), p.lateral)
+    }
+
+    /// Whether a car centred at `pos` is out: beyond the corridor ([`Boundary::corridor_m`])
+    /// or more than [`BREACH_DROP_M`] below the road beside it. Judged on the whole road.
     pub fn check(&self, pos: [f32; 3]) -> Option<BreachKind> {
-        let p = geom::project(&self.centre, &self.cum, geom::xy(pos));
-        let len = *self.cum.last()?;
-        let s = p.s.clamp(0.0, len);
+        self.check_near(pos, None).0
+    }
+
+    /// [`Boundary::check`] on the road near `near_s` ([`Boundary::locate`]); also returns
+    /// the car's distance along the road, to pass back next time.
+    pub fn check_near(&self, pos: [f32; 3], near_s: Option<f32>) -> (Option<BreachKind>, f32) {
+        let (s, lateral) = self.locate(pos, near_s);
         let k = self
             .cum
             .partition_point(|c| *c <= s)
             .saturating_sub(1)
             .min(self.centre.len() - 2);
         let t = ((s - self.cum[k]) / (self.cum[k + 1] - self.cum[k]).max(1e-6)).clamp(0.0, 1.0);
-        let lat = p.lateral.clamp(-self.wall_offset_m, self.wall_offset_m);
+        let lat = lateral.clamp(-self.half_width_m, self.half_width_m);
         let z_at = |i: usize| self.centre[i][2] + self.bank[i] * lat;
         let road_z = z_at(k) + (z_at(k + 1) - z_at(k)) * t;
-        if p.lateral.abs() > self.wall_offset_m + BREACH_PAST_WALL_M {
-            Some(BreachKind::ThroughWall)
-        } else if pos[2] < road_z - BREACH_DROP_M {
+        let breach = if pos[2] < road_z - BREACH_DROP_M {
             Some(BreachKind::OffTheEdge)
+        } else if lateral.abs() > self.corridor_m {
+            Some(BreachKind::OffCourse)
         } else {
             None
-        }
+        };
+        (breach, s)
     }
 }
 
@@ -545,7 +607,7 @@ pub enum BattleResult {
 }
 
 /// The battle's result from the judge's statuses of the player and the NPC when nobody went
-/// through a wall: the first across the line wins; a DNF or DQ while the other still runs
+/// off the mountain: the first across the line wins; a DNF or DQ while the other still runs
 /// loses; both ended as stuck by the judge is a [`BattleResult::Draw`]. `None` while undecided.
 pub fn judge_result(player: RacerStatus, npc: RacerStatus) -> Option<BattleResult> {
     use RacerStatus::{Dnf, Dq, Finished, Running};
@@ -566,13 +628,14 @@ pub struct BattleOutcome {
     pub result: BattleResult,
     /// Tick it was decided.
     pub tick: u64,
-    /// The car that went through the wall, if that decided it.
+    /// The car that went off the mountain, if that decided it.
     pub totaled: Option<EntityId>,
     /// How that car went out.
     pub breach: Option<BreachKind>,
 }
 
-/// One battle's touge-specific state: wall breaches and the early decision.
+/// One battle's touge-specific state: where each car is along the road, breaches and the
+/// early decision.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TougeBattle {
     /// The setup.
@@ -580,6 +643,9 @@ pub struct TougeBattle {
     boundary: Boundary,
     player: EntityId,
     opponent: EntityId,
+    /// Last distance along the road and position of the player and the opponent (`None`
+    /// before the first look).
+    progress: [Option<(f32, [f32; 3])>; 2],
     outcome: Option<BattleOutcome>,
 }
 
@@ -597,11 +663,12 @@ impl TougeBattle {
             boundary: Boundary::from_world(world)?,
             player,
             opponent,
+            progress: [None; 2],
             outcome: None,
         })
     }
 
-    /// The wall line.
+    /// The road corridor.
     pub fn boundary(&self) -> &Boundary {
         &self.boundary
     }
@@ -611,18 +678,32 @@ impl TougeBattle {
         self.outcome.as_ref()
     }
 
-    /// Check both cars after a tick (`positions` = `(entity, chassis position)`). Returns the
-    /// car that went out *this* tick (the caller declares it a total loss); the first breach
-    /// decides the battle for the other car. Nothing happens once the battle is decided.
+    /// Check both cars after a tick (`positions` = `(entity, chassis position)`), each on the
+    /// road near where it last was (on the whole road after a jump of more than
+    /// [`TRACK_JUMP_M`]: a reset or a placement). Returns the car that went out *this* tick (the caller
+    /// declares it a total loss); the first breach decides the battle for the other car.
+    /// Nothing happens once the battle is decided.
     pub fn observe(&mut self, tick: u64, positions: &[(EntityId, [f32; 3])]) -> Option<EntityId> {
         if self.outcome.is_some() {
             return None;
         }
         for (e, pos) in positions {
-            if *e != self.player && *e != self.opponent {
+            let slot = if *e == self.player {
+                0
+            } else if *e == self.opponent {
+                1
+            } else {
                 continue;
-            }
-            if let Some(kind) = self.boundary.check(*pos) {
+            };
+            let near_s = self.progress[slot]
+                .filter(|(_, last)| {
+                    let d = [pos[0] - last[0], pos[1] - last[1], pos[2] - last[2]];
+                    d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= TRACK_JUMP_M * TRACK_JUMP_M
+                })
+                .map(|(s, _)| s);
+            let (breach, s) = self.boundary.check_near(*pos, near_s);
+            self.progress[slot] = Some((s, *pos));
+            if let Some(kind) = breach {
                 self.outcome = Some(BattleOutcome {
                     result: if *e == self.player {
                         BattleResult::Lost
@@ -639,7 +720,7 @@ impl TougeBattle {
         None
     }
 
-    /// Decide from the judge when nobody went through a wall: `player_won` = the player
+    /// Decide from the judge when nobody went out: `player_won` = the player
     /// finished ahead (or the NPC did not finish). Ignored once decided.
     pub fn decide(&mut self, tick: u64, player_won: bool) {
         self.decide_as(
@@ -701,7 +782,7 @@ pub struct TougeTable {
     pub boss: OpponentStakes,
     /// Pink slips.
     pub pink_slip: PinkSlipStakes,
-    /// Extra rep when your own car went through the wall (≤ 0).
+    /// Extra rep when your own car went off the mountain (≤ 0).
     pub totaled_rep: i64,
 }
 
@@ -906,7 +987,7 @@ pub struct OpponentCar {
 pub struct TougeSettlement {
     /// Player's result.
     pub result: BattleResult,
-    /// The player's car went through the wall.
+    /// The player's car went off the mountain.
     pub player_totaled: bool,
     /// Gross side-bet return (0 = lost or none).
     pub bet_payout: Money,
@@ -1102,7 +1183,7 @@ mod tests {
                 );
                 let slots = crate::live::grid(&def, &race);
                 assert_eq!(slots.len(), 2);
-                // Both slots on the road, inside the walls.
+                // Both slots on the road, inside the corridor.
                 let b = Boundary::from_world(&w).unwrap();
                 for s in &slots {
                     assert_eq!(b.check(s.pos), None, "{} {d:?}: grid slot out", m.id);
@@ -1112,24 +1193,57 @@ mod tests {
     }
 
     #[test]
-    fn breach_is_past_the_wall_or_off_the_edge() {
+    fn breach_is_off_the_corridor_or_off_the_edge() {
         let w = world(MAPS[0].id);
         let b = Boundary::from_world(&w).unwrap();
         let s = &w.network().surfaces[0];
-        let (p, d) = geom::point_at(&s.centre, &geom::cumulative(&s.centre), 500.0);
+        // On the first straight, with no other leg of the road within the corridor.
+        let (p, d) = geom::point_at(&s.centre, &geom::cumulative(&s.centre), 120.0);
         let r = geom::right_of(d);
         let at = |lat: f32, dz: f32| [p[0] + r[0] * lat, p[1] + r[1] * lat, p[2] + dz];
         assert_eq!(b.check(at(0.0, 0.5)), None);
-        assert_eq!(b.check(at(b.wall_offset_m, 0.5)), None);
+        // On a verge or an apron, up a bank: still racing.
+        assert_eq!(b.check(at(b.half_width_m + 3.0, 0.0)), None);
+        assert_eq!(b.check(at(-(b.half_width_m + 6.0), 3.0)), None);
         assert_eq!(
-            b.check(at(b.wall_offset_m + BREACH_PAST_WALL_M + 0.5, 0.5)),
-            Some(BreachKind::ThroughWall)
+            b.check(at(b.corridor_m + 0.5, 0.5)),
+            Some(BreachKind::OffCourse)
         );
         assert_eq!(
-            b.check(at(-(b.wall_offset_m + BREACH_PAST_WALL_M + 0.5), 0.5)),
-            Some(BreachKind::ThroughWall)
+            b.check(at(-(b.corridor_m + 0.5), 0.5)),
+            Some(BreachKind::OffCourse)
+        );
+        assert_eq!(
+            b.check(at(b.half_width_m + 6.0, -BREACH_DROP_M - 0.5)),
+            Some(BreachKind::OffTheEdge)
         );
         assert_eq!(b.check(at(0.0, -6.0)), Some(BreachKind::OffTheEdge));
+    }
+
+    #[test]
+    fn a_car_that_drops_onto_the_leg_below_is_off_the_mountain() {
+        // Hollow Crown's stacked hairpins: the straight after the first hairpin runs beside
+        // the straight before it, ~30 m lower.
+        let w = world("touge_hollow_crown");
+        let b = Boundary::from_world(&w).unwrap();
+        let s = &w.network().surfaces[0];
+        let cum = geom::cumulative(&s.centre);
+        let (upper, _) = geom::point_at(&s.centre, &cum, 850.0);
+        let (lower_s, _) = b.locate(upper, Some(560.0));
+        let (lower, _) = geom::point_at(&s.centre, &cum, lower_s);
+        assert!(geom::dist(geom::xy(upper), geom::xy(lower)) < 40.0);
+        assert!(upper[2] - lower[2] > 10.0, "{} vs {}", upper[2], lower[2]);
+        // Judged on the whole road, a car on the lower leg is simply on the road...
+        let landed = [lower[0], lower[1], lower[2] + 0.5];
+        assert_eq!(b.check(landed), None);
+        // ...but a car tracked on the upper leg that lands there fell off the mountain.
+        assert_eq!(
+            b.check_near(landed, Some(850.0)).0,
+            Some(BreachKind::OffTheEdge)
+        );
+        // Tracking follows a car along its own leg.
+        let (_, s1) = b.check_near([upper[0], upper[1], upper[2] + 0.5], Some(845.0));
+        assert!((s1 - 850.0).abs() < 1.0, "{s1}");
     }
 
     #[test]
@@ -1308,7 +1422,7 @@ mod tests {
             result: BattleResult::Won,
             tick: 900,
             totaled: Some(EntityId(2)),
-            breach: Some(BreachKind::ThroughWall),
+            breach: Some(BreachKind::OffCourse),
         };
         let opp = OpponentCar {
             class: VehicleClass::Exotic,
