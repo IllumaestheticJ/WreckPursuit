@@ -19,6 +19,7 @@ labour_hours_per_item = 2.0        # fallback for items not in the hour tables b
 value_factor_clamp = [0.4, 2.5]
 repair_parts_fraction = 0.3        # a repair (not a replacement) costs 30% of the part at most
 heavy_damage_markup = 0.75         # crushed parts cost up to 1.75x: scrape (0.25) +5%, half-crushed +19%
+respray_base = 900                 # paint shop respray on a Compact; × class parts_scale
 total_loss_markup = 1.4            # rebuilding a written-off car: frame jig, strip-down, re-shell
 
 # Parts cost on the reference Compact (value 18 000).
