@@ -158,6 +158,7 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
         assists: AssistSpec::Keyboard,
         traffic_density: None,
         police_presence: None,
+        dense_patrols: false,
         restart_after_capture: false,
         car_mix: false,
         traffic_cars: true,

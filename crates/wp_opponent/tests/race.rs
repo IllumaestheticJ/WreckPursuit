@@ -257,7 +257,8 @@ fn open_roads_with_traffic_no_civilian_contact() {
     // An illegal street race on open roads: civilian traffic, junctions, signals. Racers read
     // the signals (a lasting green means cross traffic is held), wait out reds when cross
     // traffic is moving, and break junction stand-offs. Nobody touches a civilian, nobody
-    // hits another racer, nobody is stuck.
+    // hits another racer, nobody is stuck. (The careful driver, `ram_traffic: false`: what
+    // free roam drives like. In a race they are unafraid of traffic, see below.)
     let setup = Setup {
         // Seed 5 (was 7): the circuit's south side crosses the highway's ramp terminals since
         // the grid highway got ramps, which shifts when the last racer reaches the 6-way
@@ -270,6 +271,7 @@ fn open_roads_with_traffic_no_civilian_contact() {
         traffic: 0.25,
         grid: GridLayout::SingleFile,
         max_s: 90.0,
+        ram_traffic: false,
         ..Setup::default()
     };
     let out = common::run_plain(&setup);
@@ -482,9 +484,14 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
         ..Setup::default()
     };
     let mut speeds = [0.0f32; 3];
+    // When each car last stood still (< 1 m/s), s: pull-over time only counts while rolling.
+    let mut last_still_s = [0.0f32; 3];
     let out = common::run(&setup, &wp_opponent::NoPolice, &mut |sim, _| {
         for (k, v) in sim.vehicles().iter().take(3).enumerate() {
             speeds[k] = v.vehicle.state().speed_mps;
+            if speeds[k].abs() < 1.0 {
+                last_still_s[k] = sim.tick() as f32 / 240.0;
+            }
         }
     });
     let mut field = out.field;
@@ -527,7 +534,10 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
                 // 30 s pull-over limit; clear of junctions and bends): main + the trained
                 // racers, racer 3 booked at 138 s of 150. The cap is a speed target, so allow
                 // the controller's overshoot on it (main after #89 in a debug build: racer 1
-                // booked at 137.7 s still at 6.8 m/s).
+                // booked at 137.7 s still at 6.8 m/s). The field counts only time spent
+                // rolling towards its pull-over limit, so count from when the car last stood
+                // still if that is later (racer 1 booked at 67 s, held in a queue until 137 s,
+                // then rolling to the kerb at 6 m/s).
                 let k = (s.entity.0 - 1) as usize;
                 let booked_s = events.iter().find_map(|e| match e {
                     OpponentEvent::Busted { entity, time_s } if *entity == s.entity => {
@@ -535,7 +545,7 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
                     }
                     _ => None,
                 });
-                let pulling_over = booked_s.is_some_and(|t| end_s - t < 35.0);
+                let pulling_over = booked_s.is_some_and(|t| end_s - t.max(last_still_s[k]) < 35.0);
                 let limit = if pulling_over { 8.0 } else { 1.0 };
                 assert!(
                     speeds[k].abs() < limit,
@@ -697,4 +707,53 @@ fn draft_lets_a_faster_driver_in_the_same_car_pass() {
         gained_with >= 4 && gained_with > gained_without,
         "places gained with draft {gained_with}, without {gained_without}"
     );
+}
+
+#[test]
+fn open_roads_with_traffic_unafraid_racers_plough_on() {
+    // The race of `open_roads_with_traffic_no_civilian_contact` with the game's racers:
+    // unafraid of traffic (owner, 2026-10-24) — they tag civilians out of the way, run reds
+    // and never wait at junctions, so they get further than careful drivers in the same time.
+    // Racer–racer racecraft is unchanged: still no hard contact between racers.
+    let setup = Setup {
+        seed: 5,
+        laps: 1,
+        drivers: eight_drivers()[..4].to_vec(),
+        closed_roads: false,
+        traffic: 0.25,
+        grid: GridLayout::SingleFile,
+        max_s: 60.0,
+        run_full: true,
+        ..Setup::default()
+    };
+    let progress = |out: &mut common::Outcome| -> f32 {
+        out.field
+            .standings()
+            .iter()
+            .map(|s| s.progress_m)
+            .sum::<f32>()
+    };
+    let mut ram = common::run_plain(&setup);
+    let mut calm = common::run_plain(&Setup {
+        ram_traffic: false,
+        ..setup.clone()
+    });
+    let (p_ram, p_calm) = (progress(&mut ram), progress(&mut calm));
+    eprintln!(
+        "unafraid {p_ram:.0} m ({} traffic contacts), careful {p_calm:.0} m ({})",
+        ram.other_contacts, calm.other_contacts
+    );
+    assert!(
+        p_ram > 1.1 * p_calm,
+        "unafraid {p_ram:.0} m vs careful {p_calm:.0} m"
+    );
+    let hard = ram
+        .contacts
+        .iter()
+        .filter(|c| c.3 >= AI_CONTACT_IMPULSE_NS)
+        .count();
+    assert_eq!(hard, 0, "{:?}", ram.contacts);
+    for (k, t) in ram.max_stuck_s.iter().enumerate() {
+        assert!(*t < 8.0, "racer {} stuck {t:.0} s", k + 1);
+    }
 }

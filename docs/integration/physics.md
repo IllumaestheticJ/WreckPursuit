@@ -196,3 +196,12 @@ Sweep: 0.04 s → 0.26 s mean, 0.08 s → 0.30 s, 0.12 s → 0.33 s, 0.18 s → 
 0.449 s. What is left on ironside_440 is the rear sliding 10–12° in a plain slalom (candidate G
 tyres), not the steering. Guard: `tests/key_reversal.rs`.
 
+## 2026-10-25: handbrake turns are the driver's (row 173)
+Owner: "when I hit the ebrake it would rather override trying to countersteer than taking my
+keyboard input". With the keys released the plain rack's self-align (countersteer help, 30 % on
+the keyboard preset) steered the wheels toward the slide in a handbrake turn (~10° at 60 km/h);
+the normal steering model has always kept its countersteer off under the handbrake and for
+`HANDBRAKE_GRACE_S` (0.5 s) after. The plain rack now does the same (`Vehicle::step_with_ground`,
+`hb_hold`). A countersteer key pressed mid-turn already reaches its side in 0.08 s (row 171).
+Guard: `tests/key_reversal.rs::the_handbrake_turn_is_the_drivers`.
+

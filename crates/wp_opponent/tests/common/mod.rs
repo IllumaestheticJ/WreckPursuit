@@ -97,6 +97,9 @@ pub struct Setup {
     /// Apply the slipstream model (`wp_opponent::draft`) to every vehicle each tick. Needs
     /// the `sim-draft-hook` feature (`Sim::set_drag_scale`); ignored without it.
     pub draft: bool,
+    /// `RaceConfig::ram_traffic` (racers unafraid of traffic, the game's default). Off, the
+    /// field also disqualifies racers that touch a civilian (the careful driving tests).
+    pub ram_traffic: bool,
 }
 
 impl Default for Setup {
@@ -117,6 +120,7 @@ impl Default for Setup {
             sim_police: None,
             heat: Vec::new(),
             run_full: false,
+            ram_traffic: true,
             draft: false,
             allow_abandon: false,
         }
@@ -229,6 +233,8 @@ pub fn run(
         signals: !setup.closed_roads && std::env::var("WP_NO_SIGNALS").is_err(),
         draft: setup.draft && cfg!(feature = "sim-draft-hook"),
         allow_abandon: setup.allow_abandon,
+        ram_traffic: setup.ram_traffic,
+        civilian_contact_dq: !setup.ram_traffic,
         ..RaceConfig::default()
     };
     // Entities are assigned 1.. in spawn order, before any other vehicle.

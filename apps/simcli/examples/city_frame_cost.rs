@@ -49,6 +49,7 @@ fn main() {
         covered_los: true,
         police_tools: true,
         police_presence: Some(1.0),
+        dense_patrols: false,
         car_mix: false,
         systems: None,
         barriers: Vec::new(),

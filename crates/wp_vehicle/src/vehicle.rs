@@ -1558,7 +1558,15 @@ impl Vehicle {
             // The countersteer help is the hands-off self-alignment on the plain rack (row
             // 142): it acts only with no key held (`crate::plain::PlainSteer::self_align`).
             let p = crate::plain::PlainSteer {
-                self_align: p.self_align.max(assists.countersteer_help.clamp(0.0, 1.0)),
+                // Not while the handbrake is pulled or for `HANDBRAKE_GRACE_S` after (owner,
+                // 2026-10-25: "when I hit the ebrake it would rather override trying to
+                // countersteer than taking my keyboard input"): a handbrake turn is the
+                // driver's, as on the normal steering model.
+                self_align: if hb_hold {
+                    0.0
+                } else {
+                    p.self_align.max(assists.countersteer_help.clamp(0.0, 1.0))
+                },
                 ..p
             };
             // Grip-balance lab: the smart lock replaces the plain speed curve (`None` = plain).

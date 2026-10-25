@@ -186,6 +186,7 @@ impl BenchCell {
             police_tools: true,
             car_mix: false,
             police_presence: None,
+            dense_patrols: false,
             slow: false,
             restart_after_capture: false,
             panels: false,
