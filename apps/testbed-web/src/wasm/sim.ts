@@ -257,8 +257,13 @@ export const sim = {
   freeDriveCityJson: (car: string, mode: string, cityId: string): string => wasm.free_drive_city_json(car, mode, cityId),
   nightRunCityJson: (car: string, mode: string, cityId: string): string => wasm.night_run_city_json(car, mode, cityId),
   /** Free roam: free drive plus `roamers` AI street racers (0 = default 10). */
-  freeRoamCityJson: (car: string, mode: string, cityId: string, roamers = 0): string =>
-    wasm.free_roam_city_json(car, mode, cityId, roamers),
+  freeRoamCityJson: (car: string, mode: string, cityId: string, spawn = "", roamers = 0): string =>
+    wasm.free_roam_city_json(car, mode, cityId, spawn, roamers),
+  /** A free drive / night run scenario starting at spawn choice `spawn` of the combined world
+   * (`spawnPoints()`; "" = unchanged). */
+  withSpawnJson: (scenarioJson: string, spawn: string): string => wasm.with_spawn_json(scenarioJson, spawn),
+  /** The combined world's spawn choices (`[{id, label}]`, default first). */
+  spawnPoints: (): { id: string; label: string }[] => JSON.parse(wasm.spawn_points_json()) as { id: string; label: string }[],
   /** Free-roam status (`null` outside free roam). */
   roamStatus: (): unknown => JSON.parse(wasm.roam_status_json()),
   /** Id of the session's city ("" on the flat world): data/city/<id>.greybox.glb. */

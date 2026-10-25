@@ -34,7 +34,7 @@ use wp_sim::{Sim, VehicleKind};
 use wp_world::geom;
 
 use crate::data::mem_data;
-use crate::scenario::{city_spec, entity, free_drive_in};
+use crate::scenario::{city_spec, entity, free_drive_in, spawn_grid, with_spawn};
 
 /// Scenario name of a free-roam session.
 pub const FREE_ROAM_NAME: &str = "free_roam";
@@ -72,7 +72,8 @@ pub fn haunt_of_id(id: &str) -> Option<Haunt> {
     haunt_by_name(name)
 }
 
-/// Free roam in `city_id`: the player in `car` on the city's race start grid and `roamers`
+/// Free roam in `city_id`: the player in `car` on the city's race start grid (the one spawn
+/// choice `spawn` picks, [`crate::scenario::SPAWNS`]; `""` = the first grid) and `roamers`
 /// street racers (capped at [`MAX_ROAMERS`]) spread over the haunts the city has, each on a
 /// spawn slot of its haunt. Live player assists come from the testbed; roamers drive with
 /// the AI assist profile.
@@ -80,6 +81,7 @@ pub fn free_roam_in(
     car: &str,
     mode: DamageMode,
     city_id: &str,
+    spawn: &str,
     roamers: usize,
 ) -> Result<Scenario, String> {
     let mut sc = free_drive_in(car, mode, city_spec(city_id));
@@ -87,12 +89,8 @@ pub fn free_roam_in(
     let world = simcli::data::load_world(mem_data(), &sc.city, world_config(&sc))
         .map_err(|e| e.to_string())?
         .ok_or("free roam needs a city")?;
-    if let Some(p) = world
-        .network()
-        .pois
-        .iter()
-        .find(|p| p.kind == wp_world::network::PoiKind::RaceStartGrid)
-    {
+    sc = with_spawn(sc, spawn);
+    if let Some(p) = spawn_grid(world.network(), sc.entities[0].pos) {
         sc.entities[0].pos = p.pos;
         sc.entities[0].yaw = p.heading_rad;
     }
