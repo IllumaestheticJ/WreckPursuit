@@ -2,9 +2,8 @@
 
 AI racers that race cleanly and believably where contact is expensive: a racing line from the
 route geometry, braking points from the car's measured capability, overtakes only with margin,
-one defensive move, no ramming of rivals or civilians (police in the way while they chase
-you are fair game, see *Training*), mistakes that grow with pressure, civilians avoided at all
-costs, damage and police awareness. **No rubber-banding**: nothing reads race position or the
+one defensive move, no ramming of rivals (police in the way while they chase you are fair game, see *Training*), mistakes that grow with pressure, **traffic
+and players treated as fair game in a race** (see below), damage and police awareness. **No rubber-banding**: nothing reads race position or the
 gap to the player — pace is car capability × how much of it the driver dares to use.
 
 ## How it works
@@ -63,7 +62,26 @@ gap to the player — pace is car capability × how much of it the driver dares 
 - **Start discipline**: hold the grid lane, no passing, for the first 150 m.
 - **Rejoin** after an off (outside the corridor by 1 m or facing > 60° off): 7 m/s cap, waits for
   cars arriving from behind. **Reverse** when stuck against something for 2 s.
-- **Civilians**: obstacles with a margin that grows with my speed (0.4 m at a crawl, full
+- **Unafraid of traffic** (`RaceConfig::ram_traffic`, on by default; owner 2026-10-24:
+  "completely unafraid of tagging/hitting" traffic and player vehicles in a race). While
+  racing, anything that is not an AI racer — civilians, physical traffic, players, police — is
+  fair game (racers out of the race are left be):
+  - no following distance: braking only so as not to hit it more than `TAG_CLOSING_MPS`
+    (15 m/s) faster than it is going — up to 25 m/s, falling as 1/v above (6 m/s at
+    60 m/s: full tags at highway speed threw skill-95 racers into the barrier) — and full
+    shove once in contact (no creeping round it);
+  - no junction yielding, no stopping for reds (any personality);
+  - no side clearance below 30 m/s (`RAM_LEAN_MAX_MPS`): a non-racer alongside does not bound
+    my line (I lean on it) — only one coming at me head on does; never backs out from beside one, never waits for one on a rejoin;
+  - no patience: a pass round it is looked for at once, the opposing lanes always allowed;
+    clearance beside it 0.1 m (`RAM_MARGIN_M`), no extra pass margin.
+  - Unchanged: racer–racer racecraft, head-on aborts (oncoming traffic in a passing lane),
+    the race judge's civilian-hit count. Pair with `civilian_contact_dq: false` (the race
+    glue does). Free roam (`roam`, `wp_wasm` roamers) turns it off: the rules below are the
+    careful driver they still use.
+  - Full sim, open roads, 25 % traffic, 4 racers × 60 s (`open_roads_with_traffic_unafraid_racers_plough_on`):
+    4768 m vs 2672 m careful (+78 %), zero racer–racer hard contacts.
+- **Civilians** (careful driver, `ram_traffic: false`): obstacles with a margin that grows with my speed (0.4 m at a crawl, full
   `civilian_margin_m` at 15 m/s+ — a car in the next lane is not in my way), crossing traffic
   extrapolated 3 s, passed like anyone (planned 3.5 s ahead at the closing speed, the next
   lane is enough). Physical traffic and police cars are passed with the same margins.
