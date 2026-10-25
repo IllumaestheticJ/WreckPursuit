@@ -17,8 +17,8 @@
 //!   first tick and settles it once the battle is decided (a won pink slip waits for the
 //!   NPC's race to end, to bring its car home as it finished).
 //!
-//! Touge battles charge no buy-in and pay no picker purse: the stakes are the wager, the boss
-//! purse and rep (`data/events/touge.toml`).
+//! Touge battles charge no buy-in and pay no picker purse: the stakes are the wager, the
+//! battle's purse (challenger or boss) and rep (`data/events/touge.toml`).
 
 use std::cell::RefCell;
 
@@ -53,6 +53,9 @@ fn take_next_wager() -> Wager {
     NEXT_WAGER.with(|n| std::mem::replace(&mut *n.borrow_mut(), Wager::None))
 }
 
+/// Systems a touge battle steps: everything but police.
+pub const TOUGE_SYSTEMS: &str = "vehicle,damage,world,net";
+
 /// The touge setup a scenario name stands for (the autopilot suffix ignored).
 pub fn setup_for_scenario(name: &str) -> Option<TougeSetup> {
     let base = name
@@ -62,7 +65,8 @@ pub fn setup_for_scenario(name: &str) -> Option<TougeSetup> {
 }
 
 /// The live scenario of battle `setup` with the player in `car`: the pass, the hour, rain or
-/// dry (locked weather), no traffic, no police; the NPC on pole and the player behind it.
+/// dry (locked weather), no traffic, no police at all (the police system is not stepped: no
+/// units, no heat, no radio); the NPC on pole and the player behind it.
 pub fn touge_scenario(
     setup: &TougeSetup,
     car: &str,
@@ -80,6 +84,9 @@ pub fn touge_scenario(
     sc.time_ratio = 1.0;
     sc.assists = simcli::scenario::AssistSpec::Ai;
     sc.police_presence = Some(0.0);
+    // The pass is sealed: no police system at all (the session still keeps the player's
+    // economy run for the wager, purse and rep, see `Session::build`).
+    sc.systems = Some(TOUGE_SYSTEMS.into());
     sc.traffic_density = Some(0.0);
     sc.weather = Some(simcli::scenario::WeatherSpec {
         kind: match setup.surface {

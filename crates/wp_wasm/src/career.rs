@@ -1835,7 +1835,10 @@ impl Career {
             .ok_or("the scenario has no player entity")?;
         first.car = car.def_id.clone();
         first.tune = vehicle_tune(car.tune);
-        first.police_heat = if sc.city == simcli::scenario::CitySpec::Flat {
+        // No heat on the flat lot or a touge pass (no police there; the carried heat waits
+        // for the next city run).
+        let touge = crate::touge::setup_for_scenario(&sc.name).is_some();
+        first.police_heat = if sc.city == simcli::scenario::CitySpec::Flat || touge {
             0.0
         } else {
             heat
@@ -1986,8 +1989,14 @@ impl Career {
             }
             None => self.reseat_active(start.car),
         }
+        // A touge battle has no police: it leaves the carried heat as it was.
+        let touge = crate::touge::setup_for_scenario(&s.scenario().name).is_some();
+        let carried = self.profile.carry.heat;
         self.econ
             .close_run(&mut self.profile, end, heat, bounty_cash, driven_ticks);
+        if touge {
+            self.profile.carry.heat = carried;
+        }
         let (progress, _) = self.update_progression();
         let ledger = self
             .profile

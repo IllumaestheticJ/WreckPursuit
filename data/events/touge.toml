@@ -10,14 +10,16 @@
 # back (stake included, settle_bet), a loss or a totaled car pays nothing.
 # Rep: `win_rep` / `loss_rep` for the result, plus `totaled_rep` when your car went through the
 # wall, plus the pink-slip rep when one was on the line (award_rep, which pays any tier reward
-# reached). A boss win also pays `purse` credits (award_credits).
+# reached). A win also pays `purse` credits (award_credits) onto the same account: the career's
+# on a career run, so every won battle pays career money (playtest: "touge runs don't count
+# towards career money"). Challenger purses sit near a mid-bracket city street race's.
 
 totaled_rep = -100
 
 [challenger]
 win_rep = 150
 loss_rep = -40
-purse = 0
+purse = 3500
 side_bet_payout = 2.0
 
 [boss]

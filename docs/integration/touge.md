@@ -55,6 +55,17 @@
   list, which dropped the K-rails and shifted prop indices).
 - `wp_sim` untouched: walls are ordinary fence decor and K-rails ordinary static props.
 
+## Career money and police (2026-10-25, playtest "touge runs don't count towards career money")
+- Challenger wins now pay a purse (`data/events/touge.toml [challenger] purse = 3500`; boss
+  stays 12 000) through `award_credits` on the battle's account, which on a career run is the
+  career's. Before, a challenger win with no side bet paid nothing.
+- Touge passes have no police at all: `touge_scenario` sets `systems =
+  "vehicle,damage,world,net"` (`TOUGE_SYSTEMS`), so no units, heat or radio callouts.
+  `Session::build` keeps the player's economy run for touge scenarios even without police.
+- Career: a touge run starts with 0 heat in the session and `finish_run` leaves
+  `carry.heat` as it was (the police never saw the pass). Touched outside the touge files:
+  `wp_wasm/src/session.rs` (run gate), `wp_wasm/src/career.rs` (heat in/out).
+
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|

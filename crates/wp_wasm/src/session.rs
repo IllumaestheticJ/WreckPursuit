@@ -201,10 +201,12 @@ impl Session {
         } = build_sim(&sc, data, &opts(systems)).map_err(|e| e.to_string())?;
         let log = Replay::new(&sc, &selection.to_string(), ids.len());
         let n = ids.len();
-        // The player's economy: live (not replayed, not scripted) sessions with police.
+        // The player's economy: live (not replayed, not scripted) sessions with police, and
+        // touge battles (no police on the pass, but the wager, purse and rep are paid).
+        let touge = crate::touge::setup_for_scenario(&sc.name).is_some();
         let mut run = match (ids.first(), &sc.entities.first()) {
             (Some(&player), Some(spec))
-                if playback.is_none() && !scripted && sim.systems().police =>
+                if playback.is_none() && !scripted && (sim.systems().police || touge) =>
             {
                 cars.get(&spec.car).map(|car| {
                     let car = PlayerCar {
