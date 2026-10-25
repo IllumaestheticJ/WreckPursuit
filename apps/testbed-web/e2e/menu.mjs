@@ -260,43 +260,44 @@ m = await menu();
 const sc = await page.evaluate(() => window.__wp.sim.scenario().name);
 check(m.screen === "closed" && !m.paused && sc === "night_run", `Enter starts the night run (${sc}, menu ${m.screen})`);
 
-// ----- 7. Map choice on the title screen (owner 2026-10-23: reach Ashpeak from the menu) -------
+// ----- 7. Spawn choice on the title screen (owner 2026-10-25: one world, pick the city) -------
 await page.evaluate(() => localStorage.removeItem("wp.menu.map.v1"));
 await page.goto(`${URL}?menu=1`);
 await ready();
 await frames(3);
 const mapLabel = () => page.evaluate(() => document.querySelector("#gm-map b")?.textContent ?? "");
-check((await mapLabel()) === "Port Vesper", `the Map picker defaults to Port Vesper (${await mapLabel()})`);
+check((await mapLabel()) === "Port Vesper", `the Spawn picker defaults to Port Vesper (${await mapLabel()})`);
 await page.focus("#gm-map");
 await press("ArrowRight");
 await frames(2);
 const note = await page.evaluate(() => document.querySelector(".wp-gm-map small")?.textContent ?? "");
-check((await mapLabel()) === "Port Vesper + Ashpeak County" && /large download/i.test(note), `Right picks Port Vesper + Ashpeak County with a large-download note ("${note}")`);
-check((await page.evaluate(() => localStorage.getItem("wp.menu.map.v1"))) === "ashpeak", "the map choice is stored");
-// Street races on Ashpeak: the picker lists the Ashpeak County races and Port Vesper's, not the grid's.
+check((await mapLabel()) === "Ashpeak City" && /connected world/i.test(note), `Right picks Ashpeak City, noting the one connected world ("${note}")`);
+check((await page.evaluate(() => localStorage.getItem("wp.menu.map.v1"))) === "ashpeak_city", "the spawn choice is stored");
+// Street races take place in the world from any spawn: Port Vesper's and Ashpeak County's races are listed.
 await page.click("#gm-play-races");
 await frames(3);
 const ids = await page.evaluate(() => (window.__wp.raceView.cards ?? []).map((c) => c.id));
-check(ids.includes("crowfoot_ascent") && ids.includes("hollins_sprint") && !ids.includes("grid_highway_sprint"), `Street races on Ashpeak lists its races (${ids.join(", ")})`);
+check(ids.includes("loop9_circuit") && (ids.includes("crowfoot_ascent") || ids.includes("loop9_ashpeak_highway")), `Street races lists the world's races (${ids.join(", ")})`);
 await page.evaluate(() => window.__wp.raceView.closePicker());
-// Reload: the choice is remembered; Free drive starts on the Ashpeak map.
+// Reload: the choice is remembered; Free drive starts in the world, downtown Ashpeak City.
 await page.goto(`${URL}?menu=1`);
 await ready();
 await frames(3);
-check((await mapLabel()) === "Port Vesper + Ashpeak County", `the map choice survives a reload (${await mapLabel()})`);
+check((await mapLabel()) === "Ashpeak City", `the spawn choice survives a reload (${await mapLabel()})`);
 await page.click("#gm-play-free");
 await page.waitForFunction(() => window.__wp.sim.cityId() === "ashpeak", null, { timeout: 120000 }).catch(() => {});
 const city = await page.evaluate(() => window.__wp.sim.cityId());
-check(city === "ashpeak", `Free drive starts on the Ashpeak map (${city})`);
-// Back to Port Vesper: the picker lists no Ashpeak-only race.
-await page.evaluate(() => localStorage.setItem("wp.menu.map.v1", "vesper_v2"));
+const at = await page.evaluate(() => window.__wp.sim.scenario().entities[0].pos);
+check(city === "ashpeak" && at[1] > 3650, `Free drive starts in the world in Ashpeak City (${city}, ${at})`);
+// Harnell Crossing: the night run starts in the village west of Port Vesper.
+await page.evaluate(() => localStorage.setItem("wp.menu.map.v1", "harnell_crossing"));
 await page.goto(`${URL}?menu=1`);
 await ready();
 await frames(3);
-await page.click("#gm-play-races");
-await frames(3);
-const vIds = await page.evaluate(() => (window.__wp.raceView.cards ?? []).map((c) => c.id));
-check(vIds.includes("hollins_sprint") && !vIds.includes("crowfoot_ascent"), `Street races on Port Vesper hides Ashpeak's races (${vIds.join(", ")})`);
+await page.click("#gm-play-chase");
+await page.waitForFunction(() => window.__wp.sim.cityId() === "ashpeak", null, { timeout: 120000 }).catch(() => {});
+const hAt = await page.evaluate(() => window.__wp.sim.scenario().entities[0].pos);
+check(hAt[0] < -2500, `the night run starts in Harnell Crossing (${hAt})`);
 await page.evaluate(() => localStorage.removeItem("wp.menu.map.v1"));
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);

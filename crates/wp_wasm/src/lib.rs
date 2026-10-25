@@ -26,7 +26,7 @@
 //! | parked-car damage (lead) | `parked_wrecks()` per frame, `parked_wreck_stride()`, `parked_entity_base()`, `parked_wreck_shattered(entity)`; a wreck's entity works with the `lattice_*` / `vehicle_info` calls — see [`props`] |
 //! | map (16) | `map_static_json()` once per city, `map_dynamic(player)` per frame — see [`map`] |
 //! | weather (lead) | `weather_choices()`, `scenario_with_weather(json, choice)`, `scenario_weather_choice(json)`, `night_run_rain_json(car, mode, city_id)`, `weather_info()`, `weather_grid_meta()`, `weather_grid()`, `weather_spray()` — see [`weather`] |
-//! | career (G) | `career_new(mode)`, `career_load_json`, `career_save_json`, `career_view_json`, `career_mods_json(uid)`, `career_start_run(scenario_json)`, `career_end_run`, `career_run_active`, `career_buy_car`, `career_floor_car`, `career_sell_car`, `career_set_active`, `career_install_mod`, `career_uninstall_mod`, `career_quote_json`, `career_repair`, `career_release`, `career_insure`, `career_next_night` — see [`career`] |
+//! | career (G) | `career_new(mode)`, `career_load_json`, `career_save_json`, `career_view_json`, `career_mods_json(uid)`, `career_start_run(scenario_json)`, `career_end_run`, `career_run_active`, `career_buy_car`, `career_floor_car`, `career_sell_car`, `career_set_active`, `career_install_mod`, `career_uninstall_mod`, `career_respray`, `career_quote_json`, `career_repair`, `career_release`, `career_insure`, `career_next_night` — see [`career`] |
 //! | drift lab B (lead) | `drift_tuning_json()`, `drift_tuning_defaults_json()`, `drift_tuning_set(json)`, `drift_readout(entity)` — see [`drift_lab`] |
 //! | mods | `mod_catalog_json(car)`, `build_visuals_json(car, mods)`, `entity_visuals_json(entity)` — see [`mod_visuals`]; install with `EntitySpec::mods` in the scenario |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)`, `debug_place(entity, x, y, yaw, speed)` — see [`run`] |
@@ -85,6 +85,8 @@ mod race_tests;
 mod roam_tests;
 #[cfg(test)]
 mod run_tests;
+#[cfg(test)]
+mod spawn_tests;
 #[cfg(test)]
 mod street_tests;
 #[cfg(test)]
@@ -216,7 +218,8 @@ pub fn free_drive_city_json(car: &str, mode: &str, city_id: &str) -> Result<Stri
     )))
 }
 
-/// Free roam in a chosen city (`city_id` as in [`free_drive_city_json`]): free drive plus
+/// Free roam in a chosen city (`city_id` as in [`free_drive_city_json`], starting at spawn
+/// choice `spawn` as in [`with_spawn_json`]): free drive plus
 /// `roamers` AI street racers (0 = the default 10, at most 24) roaming the city's highways,
 /// touge, dirt roads, downtown and countryside. Start it with `init` like any scenario.
 #[wasm_bindgen]
@@ -224,6 +227,7 @@ pub fn free_roam_city_json(
     car: &str,
     mode: &str,
     city_id: &str,
+    spawn: &str,
     roamers: u32,
 ) -> Result<String, JsValue> {
     let mode = data::parse_mode(mode).map_err(err)?;
@@ -232,8 +236,35 @@ pub fn free_roam_city_json(
         n => n as usize,
     };
     Ok(json(
-        &roam::free_roam_in(car, mode, city_id, n).map_err(err)?,
+        &roam::free_roam_in(car, mode, city_id, spawn, n).map_err(err)?,
     ))
+}
+
+/// `scenario_json` (a free drive or night run) starting at spawn choice `spawn` of the combined
+/// world ([`spawn_points_json`]; `""` or an unknown id leaves the start as it is).
+#[wasm_bindgen]
+pub fn with_spawn_json(scenario_json: &str, spawn: &str) -> Result<String, JsValue> {
+    let sc: simcli::Scenario = serde_json::from_str(scenario_json).map_err(err)?;
+    Ok(json(&scenario::with_spawn(sc, spawn)))
+}
+
+/// The spawn choices of the combined world as JSON (`[{id, label}]`, the default first;
+/// [`scenario::SPAWNS`]).
+#[wasm_bindgen]
+pub fn spawn_points_json() -> String {
+    #[derive(Serialize)]
+    struct Choice {
+        id: &'static str,
+        label: &'static str,
+    }
+    let list: Vec<Choice> = scenario::SPAWNS
+        .iter()
+        .map(|s| Choice {
+            id: s.id,
+            label: s.label,
+        })
+        .collect();
+    json(&list)
 }
 
 /// Free-roam status JSON (`null` outside free roam): every roamer's entity id, home haunt,

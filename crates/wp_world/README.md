@@ -516,8 +516,10 @@ a `wp_vehicle::Vehicle` with `AssistProfile::ai()` stepped every physics tick, d
 pursuit (look-ahead 5–25 m) for steering and a PID on the IDM-commanded speed profile.
 Promotion copies pose and speed; demotion (beyond 100 m) projects the vehicle back onto its
 path. A physical agent that leaves the road (> 6 m or facing away) or is wrecked
-(`apply_agent_damage` with a dead engine / lost wheel) is disabled (stopped, hazards) and is
-removed once out of sight. The sim loop gets `LodChange::{Promoted, Demoted, Despawned}`.
+(`apply_agent_damage` with a dead engine / lost wheel) or takes a hard hit
+(`report_agent_impact` with a one-tick velocity change of at least `HARD_IMPACT_DV_MPS` = 5 m/s,
+from the sim's contact impulses; the same in both damage modes) is disabled (stopped on the
+handbrake, hazards on, never drives on) and is removed once out of sight. The sim loop gets `LodChange::{Promoted, Demoted, Despawned}`.
 With the cap full, a kinematic car within 40 m of a player takes the place of the physical
 car farthest from any player (playtest row 149: kinematic cars have no collider, the player
 drove through them), and a kinematic car turning around or reversing within 20 m of a player
@@ -714,6 +716,10 @@ plus rules in `traffic.rs` / `traffic/blocked.rs`).
   (`reroute_around_box`), else the queue turns around / backs out from the tail and the lane is
   marked blocked so upstream cars re-route (now on multi-lane roads too when the obstruction is
   at the line or the wait is long). An obstructed car gives up its permit (no new one for 10 s).
+  A car already inside the box behind one that has stood for 5 s edges around it at 2 m/s,
+  shifting up to 3 m off its path with 0.4 m clearance (`BOX_SQUEEZE_*`), instead of backing out
+  into the queue behind it (jam_pursuit_vesper: a police car parked in a junction kept the car
+  behind it there for minutes; test `a_car_parked_in_a_junction_box_is_edged_around`).
 - *Sirens*: a driver held at the line by a unit heading for the junction goes after 8 s
   (`SIREN_JUNCTION_HOLD_MAX_S`); a pulled-over driver gives up on a unit that stands or crawls
   (< 2 m/s) behind it after 8 s (`STALL_S`, was 15 s); with a unit standing beside it

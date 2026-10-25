@@ -65,6 +65,17 @@ pub const OFF_ROAD_STRAY_M: f32 = 5.5;
 /// A tracked vehicle standing still inside the junction box longer than this is an obstruction,
 /// not a car waiting its turn, s.
 pub const TRACKED_IN_BOX_S: f32 = 3.0;
+/// A car inside a junction box behind a tracked vehicle that has stood still this long
+/// edges around it within the box ([`BOX_SQUEEZE_MAX_M`]) instead of waiting for it, s (a
+/// police car left parked in a junction trapped the civilian behind it for minutes, and the
+/// queue behind that one backed up through the next junction).
+pub const BOX_SQUEEZE_S: f32 = 5.0;
+/// Largest sideways shift off its path a car takes to edge around a vehicle in the box, m.
+pub const BOX_SQUEEZE_MAX_M: f32 = 3.0;
+/// Clearance kept to the side of the vehicle being edged around, m.
+pub const BOX_SQUEEZE_MARGIN_M: f32 = 0.4;
+/// Speed while edging around a vehicle in the box, m/s.
+pub const BOX_SQUEEZE_MPS: f32 = 2.0;
 /// A tracked vehicle standing still at the stop line longer than this, while the lane is not red
 /// or amber, is an obstruction, s (a turn or an all-way stop takes a few seconds).
 pub const TRACKED_AT_LINE_S: f32 = 6.0;
@@ -875,6 +886,9 @@ impl Traffic {
             let seg_lane = map.seg(a.seg).lane();
             self.agents[i].retry_s = 1.0;
             let Some(lane) = seg_lane else {
+                if self.agents[i].box_squeeze {
+                    continue;
+                }
                 // Stuck in a junction connector behind the queue: back out of it.
                 self.try_reverse(map, inp, i);
                 continue;

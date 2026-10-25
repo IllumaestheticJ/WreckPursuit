@@ -141,6 +141,9 @@ pub struct PriceTables {
     /// strip-down, re-shell). 1 when absent.
     #[serde(default = "one")]
     pub total_loss_markup: f32,
+    /// Full respray on the reference Compact (× class `parts_scale`; `Economy::respray_fee`).
+    #[serde(default = "respray_base")]
+    pub respray_base: f32,
     /// Parts cost to replace each region on the class-reference Compact.
     pub region_parts: BTreeMap<BodyRegion, f32>,
     /// Parts cost to replace each component on the class-reference Compact.
@@ -159,6 +162,10 @@ pub struct PriceTables {
 
 fn one() -> f32 {
     1.0
+}
+
+fn respray_base() -> f32 {
+    900.0
 }
 
 /// Pricing for one vehicle class.

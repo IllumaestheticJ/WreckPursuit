@@ -178,6 +178,9 @@ restarted there; rounds 1–2 are in main).
   drives use the main menu's remembered map (`loadMenuMap(MENU_MAPS)`, key `wp.menu.map.v1`);
   the career race picker lists `racesForMap(…, citySel.value)` like the main one, and the
   menu's `play()` now applies the map for the garage choice too (only touge stays off-map).
+  2026-10-25: the maps became one world (`ashpeak`), so career races and garage runs always use
+  it; the remembered menu entry is now the spawn city (`port_vesper`, `ashpeak_city`,
+  `harnell_crossing`; same key) where garage night runs / free drives start.
 - **e2e:** race.mjs (+5: garage → Street races → career race with the career car, buy-in off the
   career → results → Back to garage, settled; closing the picker returns), touge.mjs (+3:
   garage → Touge battles reads the career's tier, locked; closing returns). run.mjs and tune.mjs

@@ -11,6 +11,7 @@
  *   inventory or bought new; everything around it goes back on). Old parts are kept or sold.
  * - Bottom: the inventory strip; choosing a part lights up where it fits.
  * - Engine stand: a loose engine (taken out whole) stripped and built part by part, in order.
+ * - Paint shop: respray, vinyls, finishes and cosmetic parts, previewed on the car (PaintShop).
  *
  * Every action goes through `WorkshopApi` and redraws from the screen it returns; the overlay
  * holds no game state of its own.
@@ -18,6 +19,7 @@
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Badge, Button, Meter, Money, Panel, severityColor, Tabs } from "../ui/kit";
+import { PaintShop } from "./PaintShop";
 import type {
   CatalogEntry,
   InventoryView,
@@ -669,6 +671,7 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
   const [list, setList] = useState(false);
   const [stand, setStand] = useState(false);
   const [lift, setLift] = useState(false);
+  const [paint, setPaint] = useState(false);
   const act = (f: () => { screen: WorkshopScreen; notice: string | null }) => {
     try {
       const next = f();
@@ -762,6 +765,11 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
         <Button size="sm" pressed={list} onClick={() => setList(!list)}>
           Part list
         </Button>
+        {api.paintShop && (
+          <Button size="sm" pressed={paint} testid="ws-paint-shop" onClick={() => (setPaint(!paint), !paint && host.camera("overview"))} title="respray, vinyls, finishes and cosmetic parts">
+            Paint shop
+          </Button>
+        )}
         {cam("stand", "Engine stand")}
         <Button size="sm" pressed={stand} onClick={() => (setStand(!stand), !stand && host.camera("stand"))} title="strip and build a loose engine">
           Stand parts{screen.stands.length > 0 ? ` (${screen.stands.length})` : ""}
@@ -793,7 +801,9 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
             {notice}
           </p>
         )}
-        {slot ? (
+        {paint && api.paintShop ? (
+          <PaintShop api={api.paintShop} onScreen={(next) => (setScreen(next), host.changed(next))} onClose={() => setPaint(false)} />
+        ) : slot ? (
           <PartCard
             slot={slot}
             screen={screen}
