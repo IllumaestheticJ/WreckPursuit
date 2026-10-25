@@ -23,12 +23,15 @@
     racers: [(district: Suburb, speed_factor: 2.0)],
     expect: [
         (metric: "calls", min: 1.0, max: 10000.0),
-        (metric: "call_reached_25s_frac", min: 0.33, max: 1.0),
+        // PR #64 refresh (owner 2026-10-23: Suburb day patrols 3 -> 1): with no pool unit near,
+        // more calls are left to spawned responders and some are not met inside the 60 s run
+        // (61 = never). Measured on the 16 runs: 25 s reached 0.29, mean 31.2 s, max 61.
+        (metric: "call_reached_25s_frac", min: 0.25, max: 1.0),
         (metric: "call_to_unit_100m_s", min: 0.0, max: 40.0),
         // Row 84 (search extras): 34.2 -> 37.1 s, the worst of 3 calls. Not a cap squeeze (the
         // same with 2 cap slots reserved for calls): the extra search requests draw from the
         // seeded RNG and shift every later draw; with the extras off it is 34.6 s. Mean 27.5 s.
-        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 40.0),
+        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 61.0),
         (metric: "spawns_in_view", min: 0.0, max: 0.0),
         (metric: "despawns_in_sight", min: 0.0, max: 0.0),
         (metric: "spawn_min_racer_m", min: 120.0, max: 10000.0),

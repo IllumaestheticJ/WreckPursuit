@@ -27,7 +27,9 @@
         // 15 s before the road network centreline fix; main itself gave 19.0 s on seeds 306-307.
         // With centrelines on the road centre the slowest call is 19.4 s on seeds 300-307 (mean
         // 5.7-8.0 s, unchanged within noise). Review with the police balance.
-        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 20.0),
+        // PR #64 refresh (owner 2026-10-23: Core day patrols 8 -> 3): 21.7 s on seeds 300-307,
+        // held to presence.toml's 25 s target.
+        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 25.0),
         (metric: "spawns_in_view", min: 0.0, max: 0.0),
         (metric: "despawns_in_sight", min: 0.0, max: 0.0),
         (metric: "spawn_min_racer_m", min: 120.0, max: 10000.0),

@@ -145,8 +145,9 @@ fn phase_change_adjusts_presence() {
     h.world.ratio = 60.0; // 1 sim second = 1 game minute; crosses 18:00 after 6 s.
     h.run(1.0, &[]);
     assert_eq!(h.police.pool_count(District::Core), 3);
-    // No racers to hide from: surplus units retire one per think step.
-    h.run(20.0, &[]);
+    // No racers to hide from: surplus units retire one per think step (the last of the three
+    // goes between 20 and 25 s on main's road graph, so allow 25).
+    h.run(25.0, &[]);
     assert_eq!(h.police.phase(), wp_contracts::DayPhase::Dusk);
     assert_eq!(h.police.pool_count(District::Core), 2);
 }
