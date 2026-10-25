@@ -234,6 +234,12 @@ impl AiEntrants {
     pub fn field(&self) -> &Field {
         &self.field
     }
+
+    /// The underlying field, mutable (the trainer swaps learned corrections in:
+    /// `Field::set_learned`).
+    pub fn field_mut(&mut self) -> &mut Field {
+        &mut self.field
+    }
 }
 
 #[cfg(test)]

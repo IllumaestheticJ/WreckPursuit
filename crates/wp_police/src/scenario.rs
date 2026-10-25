@@ -622,7 +622,11 @@ fn run_once(
                     || (cos >= wp_math::sin_cos(VIEW_HALF_ANGLE_RAD).1
                         && police.sees(&world, rp, sp.pos))
             });
-            nums.spawns_in_view += in_view as u32;
+            // Owner (2026-10-25): a spike car may appear in plain view on a long straight, set
+            // up, `spikes.appear_far_m` or more away (a speck in the distance).
+            let far_tool =
+                sp.role == UnitRole::Tool && sp.nearest_racer_m >= cfg.tools.spikes.appear_far_m;
+            nums.spawns_in_view += (in_view && !far_tool) as u32;
         }
         spawns_seen = spawns.len();
         let mut wanted = false;

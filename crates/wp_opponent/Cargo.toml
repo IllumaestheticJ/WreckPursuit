@@ -13,6 +13,7 @@ wp_vehicle.workspace = true
 wp_world.workspace = true
 wp_police.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 
 [features]
 # Full-sim draft tests: need `wp_sim::Sim::set_drag_scale` (requested from the lead, see

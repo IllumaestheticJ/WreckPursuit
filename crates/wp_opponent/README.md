@@ -2,7 +2,8 @@
 
 AI racers that race cleanly and believably where contact is expensive: a racing line from the
 route geometry, braking points from the car's measured capability, overtakes only with margin,
-one defensive move, no ramming, mistakes that grow with pressure, civilians avoided at all
+one defensive move, no ramming of rivals or civilians (police in the way while they chase
+you are fair game, see *Training*), mistakes that grow with pressure, civilians avoided at all
 costs, damage and police awareness. **No rubber-banding**: nothing reads race position or the
 gap to the player — pace is car capability × how much of it the driver dares to use.
 
@@ -118,6 +119,69 @@ gap to the player — pace is car capability × how much of it the driver dares 
 - **Mistakes**: each braking zone samples a braking-point error (seconds of travel) and a line
   error; both scale with `1 + pressure × pressure_sensitivity` (pressure = a car right behind
   or alongside).
+
+## Training (`learned`, owner request 2026-10-24)
+
+"Train the AI by having them do a full speed run with no traffic, and then have the AI
+separately dodge traffic / ram police while racing." The trainer is
+`crates/wp_race/tests/opponent_train.rs` (release, `#[ignore]`d; `WP_TRAIN_WRITE=1` writes
+`data/ai/racer_training.json`, which `learned` embeds and `Field::new` applies when
+`RaceConfig::learned` is on, the default).
+
+- **Stage 1 (`stage1`): full-speed runs, no traffic, no police.** Every non-debug, non-police
+  car alone on each kept street race course (Loop 9; the Loop 9 to Ashpeak highway run),
+  noise-free and flat out, run again and again. First a steering look-ahead search (1, 1.2,
+  1.45, 1.75×: a car whose yaw answers late weaves at highway speed), then per 10 m of road an
+  **aim correction** learned by iterative learning control (the drift off the commanded line
+  0.8 s of travel later is subtracted from the aim there), then a few rounds of **corner-speed
+  scale** (up where clean, down over the run-in to a slide, wall hit or reset). A round is kept
+  only with no more incidents and a faster lap, or clearly better tracking at the same pace.
+  Stored every 20 m by world position and direction, so Loop 9 night, Loop 9 day and the street
+  racers' rest-stop laps share the Loop 9 rows; a row applies to a car only while its measured
+  capability matches (a physics change leaves the car untrained, never wrong). The aim is
+  applied in proportion to `(v / v_ref)²`, so slower drivers get less of it.
+- **Stage 2 (`stage2`): traffic and police.** Full fields with the races' own traffic and
+  police over seeds, coordinate search over `LearnedTraffic` (civilian clearance and time gap
+  scales, ramming nerve and closing speed, spike-strip clearance) scored on finishers, civilian
+  hits, captures, punctures and pace. Trains on the Loop 9 races plus two retired picker races
+  kept as training grounds for police tools Loop 9 at night does not use: the Grid highway
+  sprint (scripted spike strip, PITs) and Lantern Row (roadblocks).
+- **Ramming police** (`field::ram_target`): wanted or chased, `aggression + risk` ≥
+  `ram_min_nerve`, health ≥ 0.5, a police car in my path ahead and slower than me (not coming
+  head on at speed): it stops being an obstacle; I line up with its rear corner on my side and
+  arrive at its speed + `ram_closing_mps`. Civilians and rivals are never rammed. Police AI is
+  unchanged.
+- **Spike strips** (`field::spike_dodge`, `PoliceQuery::spike_strips`): the nearest strip across
+  my road within 3 s + 30 m: steer to the nearest centre position clearing an end of it by half
+  my width + `spike_clearance_m`, the opposing lanes and 2 m past the kerb included; no room
+  either side = the roomier edge (an attempt). Lateral rate sized to reach it in time; slower
+  (never below 10 m/s) when the strip is too close at 5 m/s sideways.
+- Found by stage 1 and fixed in `field`: the own-lane line command was slewed at 0.9 m/s, too
+  slow for Loop 9's sweepers at 50+ m/s (the off-line cap then took cars from 55 to 42 m/s);
+  it now follows the line's own lateral speed, as the whole-road line already did.
+- `stage1_check`: every trained car untrained vs as the game drives it (embedded table); fails
+  when the table adds incidents. With `WP_TRAIN_WRITE=1` it drops the car / course rows that
+  did (18 of 64 dropped; the highway course is chaotic, most cars touch its walls 15–100 times
+  even untrained).
+
+Results (native release, cloud 4 vCPU, 2026-10-24):
+
+| Check | Untrained | Trained |
+|---|---|---|
+| Loop 9 night, 32 cars solo: finishers / wall hits | 29 / 460 | 30 / 365 (most cars 2–9 s a lap faster) |
+| Loop 9 day, solo: finishers | 28 | 29 |
+| Loop 9 → Ashpeak highway, solo: finishers / wall hits | 17 / 93 305 | 21 / 1 620 |
+| Stage 2 (5 races × 3 seeds, 78 cars): finishers / civilian hits | 52 / 34 (start values) | 53 / 19 (ramming off), 52 / 30 (ramming at nerve 1.2, as shipped) |
+
+Stage 2 found ramming costs the field (a racer swerving onto a unit's rear corner meets
+civilians), so its search turns ramming off (`ram_min_nerve` 2.1). The owner asked for
+ramming, so the shipped table hand-sets `ram_min_nerve` to 1.2: only drivers with
+`aggression + risk` above 1.2 ram. Stage 2 also picked `civilian_headway_scale` 1.15 (+0.9
+score, just over the 0.5 noise margin); it made `wp_wasm`'s
+`a_racer_never_gives_up_after_a_spin_or_a_crash` street challenge time out (the racer
+trails slow civilians after its shove), so it is hand-set back to 1.0. Re-running `stage2`
+overwrites both; restore them by hand. Spike strips: 8 dodges, no punctures in any stage 2 run;
+`spike_clearance_m` 0.4–0.9 made no difference (one 4 m strip on half the road).
 
 ## Free roam (`roam`)
 

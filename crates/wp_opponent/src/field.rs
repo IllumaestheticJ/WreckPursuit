@@ -28,6 +28,7 @@ use wp_world::World;
 
 use crate::capability::CarCapability;
 use crate::corridor::{Corridor, CorridorOptions, OpposingLanes, CORRIDOR_STEP_M};
+use crate::learned::{LearnedPath, LearnedTable, LearnedTraffic};
 use crate::line::{LineParams, RacingLine, SpeedProfile};
 use crate::profile::{DriverParams, DriverProfile};
 use crate::pursuit::PoliceQuery;
@@ -72,6 +73,10 @@ pub struct RaceConfig {
     /// corridor runs on past it (run-off): racers beyond it are done racing (they cool down in
     /// their lane and pass nobody). `None`: the corridor's end is the finish.
     pub finish_m: Option<f32>,
+    /// Apply what offline training learned ([`crate::learned`]): per-car corner-speed and
+    /// aim corrections on trained road, and the trained traffic / police numbers. On by
+    /// default; the trainer turns it off to learn from scratch.
+    pub learned: bool,
 }
 
 impl Default for RaceConfig {
@@ -88,6 +93,7 @@ impl Default for RaceConfig {
             signals: true,
             draft: false,
             finish_m: None,
+            learned: true,
         }
     }
 }
@@ -324,6 +330,18 @@ struct Racer {
     speed: SpeedProfile,
     /// Speed profile on the whole-road line (`Field::wide_lines`), if there is one.
     wide_speed: Option<SpeedProfile>,
+    /// Trained corrections on the race corridor ([`crate::learned`]), if any.
+    learned: Option<LearnedPath>,
+    /// Wanted or chased by the police (set each observation).
+    pursued: bool,
+    /// Body health (0..1, set each observation).
+    health: f32,
+    /// Police car being rammed (last decision), and rams started so far.
+    ram_who: Option<Who>,
+    rams: u32,
+    /// Spike strips steered round so far (a dodge planned for a strip ahead).
+    dodges: u32,
+    dodging: bool,
     /// Following the whole-road line right now.
     wide_on: bool,
     /// Lane picked by the gap planner (lateral offset of its centre), and how long it has
@@ -449,6 +467,12 @@ pub struct Debug {
     /// a standing car right ahead): the stand-off a racer has to back out of.
     #[serde(default)]
     pub head_on: bool,
+    /// The racing line's lateral offset here (the line being followed), m.
+    #[serde(default)]
+    pub line_n: f32,
+    /// Following the whole-road line (opposing lanes included).
+    #[serde(default)]
+    pub wide: bool,
 }
 
 /// What limits a racer's speed target.
@@ -507,6 +531,11 @@ pub struct Field {
     /// [`STILL_DRIFT_M`] of that spot, s (civilian agents by agent id, other sim vehicles by
     /// entity id + [`STILL_VEHICLE_KEY`]). Kept only near racers.
     still: BTreeMap<u64, (V2, f32)>,
+    /// Police cars on the road and spike strips, read from the police each decision.
+    police_cars: Vec<EntityId>,
+    spikes: Vec<(V2, V2)>,
+    /// Trained traffic / police numbers ([`crate::learned`]; defaults when untrained).
+    traffic: LearnedTraffic,
 }
 
 impl Racer {
@@ -778,16 +807,35 @@ impl Field {
                     lines.len() - 1
                 }
             };
-            let params = spec.profile.params();
-            let speed = SpeedProfile::build(
+            let mut params = spec.profile.params();
+            let learned = if config.learned {
+                let table = LearnedTable::embedded();
+                params = table.traffic.apply(params);
+                table.fit(&corridor, &spec.capability).and_then(|fit| {
+                    params.lookahead_per_mps *= fit.lookahead_scale;
+                    fit.path
+                })
+            } else {
+                None
+            };
+            let scale = learned.as_ref().map_or(&[][..], |l| &l.v_scale[..]);
+            let speed = SpeedProfile::build_scaled(
                 &corridor,
                 &lines[line_idx].1,
                 &spec.capability,
                 &params.usage,
                 f32::INFINITY,
+                scale,
             );
             let wide_speed = wide_lines[line_idx].as_ref().map(|w| {
-                SpeedProfile::build(&corridor, w, &spec.capability, &params.usage, f32::INFINITY)
+                SpeedProfile::build_scaled(
+                    &corridor,
+                    w,
+                    &spec.capability,
+                    &params.usage,
+                    f32::INFINITY,
+                    scale,
+                )
             });
             let gains = DriveGains {
                 lookahead_per_mps: params.lookahead_per_mps,
@@ -803,6 +851,13 @@ impl Field {
                 line_idx,
                 speed,
                 wide_speed,
+                learned,
+                pursued: false,
+                health: 1.0,
+                ram_who: None,
+                rams: 0,
+                dodges: 0,
+                dodging: false,
                 wide_on: false,
                 weave_n: None,
                 weave_s: 0.0,
@@ -882,7 +937,6 @@ impl Field {
             lines,
             wide_lines,
             racers,
-            config,
             tick: 0,
             hints: BTreeMap::new(),
             events: Vec::new(),
@@ -890,6 +944,14 @@ impl Field {
             finishers: 0,
             contacts: BTreeMap::new(),
             still: BTreeMap::new(),
+            police_cars: Vec::new(),
+            spikes: Vec::new(),
+            traffic: if config.learned {
+                LearnedTable::embedded().traffic
+            } else {
+                LearnedTraffic::default()
+            },
+            config,
         }
     }
 
@@ -925,6 +987,70 @@ impl Field {
     /// Racing line for racer `k` (spec order).
     pub fn line_of(&self, k: usize) -> &RacingLine {
         &self.lines[self.racers[k].line_idx].1
+    }
+
+    /// Replace racer `k`'s trained corrections ([`crate::learned`]; `None` = untrained) and
+    /// rebuild its speed profiles from them. For the trainer and tests; a field built with
+    /// [`RaceConfig::learned`] on already has the embedded table's.
+    pub fn set_learned(&mut self, k: usize, learned: Option<LearnedPath>) {
+        let r = &mut self.racers[k];
+        r.learned = learned.filter(|l| l.v_scale.len() == self.corridor.len());
+        let scale = r.learned.as_ref().map_or(&[][..], |l| &l.v_scale[..]);
+        r.speed = SpeedProfile::build_scaled(
+            &self.corridor,
+            &self.lines[r.line_idx].1,
+            &r.cap_now,
+            &r.params.usage,
+            r.v_cap,
+            scale,
+        );
+        if r.wide_speed.is_some() {
+            r.wide_speed = self.wide_lines[r.line_idx].as_ref().map(|w| {
+                SpeedProfile::build_scaled(
+                    &self.corridor,
+                    w,
+                    &r.cap_now,
+                    &r.params.usage,
+                    r.v_cap,
+                    scale,
+                )
+            });
+        }
+    }
+
+    /// Set racer `k`'s steering look-ahead multiplier (on the personality's own look-ahead;
+    /// the trainer's search, see [`crate::learned::CarCourse::lookahead_scale`]).
+    pub fn set_lookahead_scale(&mut self, k: usize, scale: f32) {
+        let r = &mut self.racers[k];
+        r.params.lookahead_per_mps = r.profile.params().lookahead_per_mps * scale;
+        r.ctrl.gains.lookahead_per_mps = r.params.lookahead_per_mps;
+    }
+
+    /// Replace the trained traffic / police numbers (the trainer's search; a field built with
+    /// [`RaceConfig::learned`] on has the embedded table's). Rebuilds every racer's civilian
+    /// clearance and time gap from its personality.
+    pub fn set_traffic(&mut self, traffic: LearnedTraffic) {
+        self.traffic = traffic;
+        for r in &mut self.racers {
+            let base = r.profile.params();
+            r.params.civilian_margin_m = base.civilian_margin_m * traffic.civilian_margin_scale;
+            r.params.civilian_headway_s = base.civilian_headway_s * traffic.civilian_headway_scale;
+        }
+    }
+
+    /// Police cars racer `k` has rammed (started a ram on) so far.
+    pub fn rams_by(&self, k: usize) -> u32 {
+        self.racers[k].rams
+    }
+
+    /// Spike strips racer `k` has steered round (planned a dodge for) so far.
+    pub fn spike_dodges_by(&self, k: usize) -> u32 {
+        self.racers[k].dodges
+    }
+
+    /// Racer `k`'s trained corrections, if any.
+    pub fn learned_of(&self, k: usize) -> Option<&LearnedPath> {
+        self.racers[k].learned.as_ref()
     }
 
     /// Speed profile racer `k` (spec order) currently drives to.
@@ -1096,6 +1222,8 @@ impl Field {
             .is_multiple_of(self.config.decision_ticks.max(1) as u64)
         {
             let dt = self.config.decision_ticks.max(1) as f32 * PHYSICS_DT;
+            self.police_cars = police.police_vehicles();
+            self.spikes = police.spike_strips();
             self.observe(world, vehicles, police, dt);
             self.update_still(world, vehicles, dt);
             let snapshot = self.perceive_all(world, vehicles);
@@ -1389,12 +1517,13 @@ impl Field {
                         r.race_speed = Some(r.speed.clone());
                     }
                     let cap = r.cap_now;
-                    r.speed = SpeedProfile::build(
+                    r.speed = SpeedProfile::build_scaled(
                         &self.corridor,
                         &self.lines[r.line_idx].1,
                         &cap,
                         &r.params.usage,
                         r.v_cap,
+                        r.learned.as_ref().map_or(&[][..], |l| &l.v_scale[..]),
                     );
                     // Cooling down after the flag: my own lanes only.
                     r.wide_speed = None;
@@ -1430,21 +1559,24 @@ impl Field {
                     if r.race_speed.is_none() {
                         r.race_speed = Some(r.speed.clone());
                     }
-                    r.speed = SpeedProfile::build(
+                    let scale = r.learned.as_ref().map_or(&[][..], |l| &l.v_scale[..]);
+                    r.speed = SpeedProfile::build_scaled(
                         &self.corridor,
                         &self.lines[r.line_idx].1,
                         &r.cap_now,
                         &r.params.usage,
                         v_cap,
+                        scale,
                     );
                     if r.wide_speed.is_some() {
                         r.wide_speed = self.wide_lines[r.line_idx].as_ref().map(|w| {
-                            SpeedProfile::build(
+                            SpeedProfile::build_scaled(
                                 &self.corridor,
                                 w,
                                 &r.cap_now,
                                 &r.params.usage,
                                 v_cap,
+                                scale,
                             )
                         });
                     }
@@ -1461,6 +1593,8 @@ impl Field {
             r.pressure = (r.pressure - 0.5 * dt).max(0.0);
             // Police heat.
             let lvl = police.wanted_level(r.entity);
+            r.pursued = lvl > 0 || police.in_pursuit(r.entity);
+            r.health = st.health;
             if lvl > 0 || r.status == RacerStatus::Fled || r.tactic == Tactic::Yield {
                 let at = police_at.get_or_insert_with(|| police.police_positions());
                 self.react_to_police(k, world, police, at, lvl, dt);
@@ -1870,8 +2004,14 @@ impl Field {
         } else {
             self.config.finish_m
         };
+        let threats = Threats {
+            police_cars: &self.police_cars,
+            spikes: &self.spikes,
+            traffic: &self.traffic,
+        };
         decide_racer(
             &mut self.racers[k],
+            &threats,
             civs,
             signal,
             priority,
@@ -1941,6 +2081,7 @@ impl Field {
 #[allow(clippy::too_many_arguments)]
 fn decide_racer(
     r: &mut Racer,
+    th: &Threats,
     civs: &[Civ],
     signal: Option<SignalAhead>,
     priority: Option<f32>,
@@ -2135,7 +2276,7 @@ fn decide_racer(
         let me_who = Who::Racer(k);
 
         // Relative view of every obstacle.
-        let rel: Vec<Rel> = obstacles
+        let mut rel: Vec<Rel> = obstacles
             .iter()
             .filter(|o| o.who != me_who && !matches!(o.who, Who::Vehicle(e) if e == r.entity))
             .map(|o| {
@@ -2145,6 +2286,17 @@ fn decide_racer(
             })
             .filter(|x| x.ds > -p.mirror_range_m && x.ds < r.ahead_m())
             .collect();
+        // A police car in my way while they are after me: ram it out of the way (its rear
+        // corner on my side, at a shove's closing speed) instead of queueing behind it. It is
+        // then no obstacle to brake for or keep clear of.
+        let ram = ram_target(r, th, &rel, hw, v);
+        if let Some(x) = ram {
+            rel.retain(|y| y.o.who != x.o.who);
+            if r.ram_who != Some(x.o.who) {
+                r.rams += 1;
+            }
+        }
+        r.ram_who = ram.map(|x| x.o.who);
         let is_civ = |o: &Obstacle| matches!(o.who, Who::Civilian(_));
 
         // Pressure from cars right behind / alongside.
@@ -2819,8 +2971,12 @@ fn decide_racer(
                     * (30.0 / v.max(30.0))
             }
             Tactic::Park | Tactic::Yield => 0.8,
-            // On the whole-road line: keep up with it as it swings across the road.
-            Tactic::Follow if follow_w > 0.0 && r.wide_on => {
+            // On the line (my lanes' or the whole road's): keep up with it as it swings
+            // across the road. Training (2026-10-24, solo Loop 9 runs) found the own-lane
+            // line moving ~2 m/s sideways through the sweepers at 50+ m/s: held to 0.9 m/s
+            // the command fell 2-3 m behind the line, and the off-line cap below took the car
+            // from 55 to 42 m/s through every one of them.
+            Tactic::Follow if follow_w > 0.0 => {
                 let slope = (line_n(r.s + 2.0) - line_n(r.s)) / 2.0;
                 (1.2 * slope.abs() * v).max(0.9)
             }
@@ -2847,11 +3003,31 @@ fn decide_racer(
             (lim_lo, lim_hi)
         };
         let mut n_cmd = approach(r.n_cmd, desired.clamp(act_lo, act_hi), rate * dt);
+        if let Some(x) = ram {
+            let side = if r.n >= x.o.n { 1.0 } else { -1.0 };
+            let aim = (x.o.n + side * RAM_CORNER * x.o.half_w).clamp(act_lo, act_hi);
+            n_cmd = approach(r.n_cmd, aim, rate.max(3.0) * dt);
+        }
+        // A spike strip ahead: steer round its end (the shoulder too), as early as needed.
+        let dodge = spike_dodge(r, th, corridor, &pass_limits, hw, hl, v);
+        if dodge.is_some() && !r.dodging {
+            r.dodges += 1;
+        }
+        r.dodging = dodge.is_some();
+        if let Some((nt, d)) = dodge {
+            let need = (nt - r.n).abs() * v / d.max(1.0);
+            n_cmd = approach(r.n_cmd, nt, (1.3 * need).clamp(rate, 8.0) * dt);
+        }
 
         // Hard side constraints: never move toward a car that overlaps me longitudinally.
-        // (Bounds are the active ones: an overtake may use the opposing lanes.)
+        // (Bounds are the active ones: an overtake may use the opposing lanes; a spike dodge
+        // the shoulder.)
         let mut lo = act_lo.min(r.n);
         let mut hi = act_hi.max(r.n);
+        if let Some((nt, _)) = dodge {
+            lo = lo.min(nt);
+            hi = hi.max(nt);
+        }
         let mut squeezed_by_ahead = false;
         for x in &rel {
             // Alongside, or (mirrors) coming up from behind fast enough to be alongside
@@ -2922,6 +3098,21 @@ fn decide_racer(
             }
         };
         cap_to(&mut v_target, r.v_cap, SpeedLimit::Mode);
+        if let Some(x) = ram {
+            // Arrive at the police car's speed plus a shove, braking for it like for any car.
+            let a_brk = profile.a_brake.max(3.0) * 0.85;
+            let v_hit = x.o.v_s.max(0.0) + th.traffic.ram_closing_mps;
+            let cap = (v_hit * v_hit + 2.0 * a_brk * x.gap.max(0.0)).sqrt();
+            cap_to(&mut v_target, cap, SpeedLimit::Obstacle(who_id(x.o.who)));
+        }
+        if let Some((nt, d)) = dodge {
+            // Slow down when the strip is too close to get round at this speed.
+            let lat = (nt - r.n).abs();
+            if lat > 0.2 {
+                let v_ok = SPIKE_LAT_MPS * d.max(1.0) / lat;
+                cap_to(&mut v_target, v_ok.max(SPIKE_MIN_MPS), SpeedLimit::Mode);
+            }
+        }
         if r.status == RacerStatus::Fled && fleeing && r.s > corridor.length_m - 15.0 {
             r.tactic = Tactic::Park;
         }
@@ -3368,8 +3559,24 @@ fn decide_racer(
         let l_t = s_t - r.s;
         let k_mid = line.curvature[corridor.wrap(((r.s + 0.5 * l_t) / CORRIDOR_STEP_M) as isize)];
         let inside = (k_mid * l_t * l_t / 8.0).clamp(-1.5, 1.5);
+        // Trained aim correction: cancels the drift off the commanded line this car showed
+        // here in training (`crate::learned`), racing on the race corridor only.
+        let aim = match &r.learned {
+            Some(l)
+                if r.flight.is_none()
+                    && matches!(r.tactic, Tactic::Follow | Tactic::Overtake | Tactic::Defend)
+                    && !finished_or_dq =>
+            {
+                l.aim_at(corridor.wrap(i_here), v)
+            }
+            _ => 0.0,
+        };
+        // The aim goes on after the clamp to the drivable band: where the line runs along
+        // the edge (Loop 9's sweepers: apex and exit on the outer lane) the car drifts inside
+        // it, and the target has to sit past the edge for the car to end up on it.
         let n_t = (n_cmd + follow_w * (line_n(s_t) - line_n(r.s)) + inside)
-            .clamp(t_lo.min(n_cmd), t_hi.max(n_cmd));
+            .clamp(t_lo.min(n_cmd), t_hi.max(n_cmd))
+            + aim;
         let mut target = corridor.point(s_t, n_t);
         // Clearing the finish line past the end of the corridor: straight on along its last
         // direction.
@@ -3463,6 +3670,8 @@ fn decide_racer(
             pass_checks: r.pass_checks,
             opposing: r.n - hw < -corridor.sample((r.s / CORRIDOR_STEP_M) as isize).left_m,
             head_on: head_on_now,
+            line_n: line_n(r.s),
+            wide: wide_now,
         };
     }
 }
@@ -3472,6 +3681,117 @@ fn decide_racer(
 /// else (civilians, physical traffic, police: passed in the next lane like any driver
 /// does; their clearance is already in the margin), least for a parked sim vehicle
 /// (squeezed past at walking pace).
+/// What a racer knows of the police this decision (see [`PoliceQuery::police_vehicles`] and
+/// [`PoliceQuery::spike_strips`]).
+struct Threats<'a> {
+    police_cars: &'a [EntityId],
+    spikes: &'a [(V2, V2)],
+    traffic: &'a LearnedTraffic,
+}
+
+/// A rammed police car is hit at its rear corner on my side: my centre this many of its half
+/// widths off its centre line.
+const RAM_CORNER: f32 = 0.8;
+/// Spike strips are looked for this many seconds of travel ahead (plus 30 m).
+const SPIKE_LOOK_S: f32 = 3.0;
+/// Most sideways speed a spike dodge is planned with, m/s; slower when the strip is closer.
+const SPIKE_LAT_MPS: f32 = 5.0;
+/// A dodge never slows a racer below this, m/s (better over the strip at speed than stopped
+/// on it with the police arriving).
+const SPIKE_MIN_MPS: f32 = 10.0;
+/// How far past the road's edge a spike dodge may go (shoulder, kerb, pavement), m.
+const SPIKE_KERB_M: f32 = 2.0;
+
+/// The police car to ram, if any: I am wanted or chased, have the nerve for it
+/// (`aggression + risk` ≥ the trained `ram_min_nerve`), a sound car, and a police car is in my
+/// path ahead, slower than me, not coming head on at speed.
+fn ram_target(r: &Racer, th: &Threats, rel: &[Rel], hw: f32, v: f32) -> Option<Rel> {
+    let nerve = r.profile.aggression + r.profile.risk;
+    if !r.pursued
+        || nerve < th.traffic.ram_min_nerve
+        || r.health < 0.5
+        || r.unstable
+        || th.police_cars.is_empty()
+        || !matches!(r.tactic, Tactic::Follow | Tactic::Overtake)
+        || !matches!(r.status, RacerStatus::Racing | RacerStatus::Fled)
+    {
+        return None;
+    }
+    rel.iter()
+        .filter(|x| matches!(x.o.who, Who::Vehicle(e) if th.police_cars.contains(&e)))
+        .filter(|x| {
+            x.ds > 0.0
+                && x.gap < (2.5 * v).max(40.0)
+                && (x.o.n - r.n).abs() < hw + x.o.half_w + 1.0
+                && x.o.v_s < v - 0.5
+                && (x.o.facing > -0.5 || x.o.v_s.abs() < 2.0)
+        })
+        .min_by(|a, b| a.gap.total_cmp(&b.gap))
+        .copied()
+}
+
+/// Where to steer round the nearest spike strip ahead: `(lateral target, distance to the
+/// strip)`. The target is the nearest centre position that clears either end of the strip by
+/// half my width plus the trained clearance, within the road (opposing lanes where usable)
+/// and [`SPIKE_KERB_M`] past its edges; with no room on either side, the edge on the roomier
+/// side (an attempt).
+fn spike_dodge(
+    r: &Racer,
+    th: &Threats,
+    corridor: &Corridor,
+    pass_limits: &dyn Fn(f32) -> (f32, f32),
+    hw: f32,
+    hl: f32,
+    v: f32,
+) -> Option<(f32, f32)> {
+    if th.spikes.is_empty()
+        || matches!(r.tactic, Tactic::Reverse | Tactic::Park | Tactic::Yield)
+        || matches!(r.status, RacerStatus::Busted | RacerStatus::Retired)
+    {
+        return None;
+    }
+    let horizon = SPIKE_LOOK_S * v + 30.0;
+    let window = (horizon / CORRIDOR_STEP_M) as usize + 10;
+    let mut best: Option<(f32, f32, f32)> = None;
+    for (a, b) in th.spikes {
+        let pa = corridor.project(*a, Some(r.hint), window);
+        let pb = corridor.project(*b, Some(r.hint), window);
+        // Across my road: both ends near the same corridor station, within the road.
+        if corridor.delta_s(pa.s, pb.s).abs() > 8.0 {
+            continue;
+        }
+        let s_mid = pa.s + 0.5 * corridor.delta_s(pa.s, pb.s);
+        let (b_lo, b_hi) = pass_limits(s_mid);
+        let (n_lo, n_hi) = (pa.n.min(pb.n), pa.n.max(pb.n));
+        if n_hi < b_lo - 6.0 || n_lo > b_hi + 6.0 {
+            continue;
+        }
+        let ds = corridor.delta_s(r.s_rel, s_mid);
+        if ds <= hl - 1.0 || ds > horizon {
+            continue;
+        }
+        if best.is_none_or(|(d, _, _)| ds < d) {
+            best = Some((ds, n_lo, n_hi));
+        }
+    }
+    let (ds, n_lo, n_hi) = best?;
+    let (b_lo, b_hi) = pass_limits(r.s_rel + ds);
+    let (b_lo, b_hi) = (b_lo - SPIKE_KERB_M, b_hi + SPIKE_KERB_M);
+    let c = hw + th.traffic.spike_clearance_m;
+    let sides = [(b_lo, n_lo - c), (n_hi + c, b_hi)];
+    let target = sides
+        .iter()
+        .filter(|(lo, hi)| lo <= hi)
+        .map(|(lo, hi)| r.n.clamp(*lo, *hi))
+        .min_by(|a, b| (a - r.n).abs().total_cmp(&(b - r.n).abs()))
+        .unwrap_or(if n_lo - b_lo > b_hi - n_hi {
+            b_lo
+        } else {
+            b_hi
+        });
+    Some((target, ds - hl))
+}
+
 fn pass_margin(o: &Obstacle, p: &DriverParams) -> f32 {
     if parked_non_racer(o) {
         0.1
@@ -4688,6 +5008,95 @@ mod tests {
             assert!(f.debug_of(0).n_cmd <= 1e-3, "{:?}", f.debug_of(0));
             assert!(f.debug_of(1).n_cmd >= 2.6 - 1e-3, "{:?}", f.debug_of(1));
         }
+    }
+
+    /// Police that want racer 1 and have car 9 on the road (and maybe a spike strip).
+    struct Chase(Vec<(V2, V2)>);
+
+    impl PoliceQuery for Chase {
+        fn wanted_level(&self, racer: EntityId) -> u8 {
+            u8::from(racer == EntityId(1)) * 2
+        }
+        fn in_pursuit(&self, racer: EntityId) -> bool {
+            racer == EntityId(1)
+        }
+        fn police_vehicles(&self) -> Vec<EntityId> {
+            vec![EntityId(9)]
+        }
+        fn spike_strips(&self) -> Vec<(V2, V2)> {
+            self.0.clone()
+        }
+    }
+
+    fn chased_field(aggression: f32, risk: f32) -> Field {
+        let spec = RacerSpec {
+            entity: EntityId(1),
+            profile: DriverProfile {
+                aggression,
+                risk,
+                ..DriverProfile::default()
+            },
+            capability: cap(),
+        };
+        Field::new(straight(), &[spec], RaceConfig::default())
+    }
+
+    #[test]
+    fn a_chased_racer_with_nerve_rams_the_police_car_in_its_way_a_calm_one_brakes() {
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        // Racer at 25 m/s, a police car 20 m ahead at 10 m/s, both on the centreline.
+        let cars = [
+            obs(1, 100.0, 25.0, HandlingEffects::NEUTRAL),
+            obs(9, 120.0, 10.0, HandlingEffects::NEUTRAL),
+        ];
+        let mut bold = chased_field(0.8, 0.7);
+        let mut calm = chased_field(0.3, 0.3);
+        for _ in 0..8 {
+            bold.tick(&world, &cars, &[], &Chase(Vec::new()));
+            calm.tick(&world, &cars, &[], &Chase(Vec::new()));
+        }
+        assert_eq!(bold.rams_by(0), 1, "{:?}", bold.debug_of(0));
+        assert_eq!(calm.rams_by(0), 0, "{:?}", calm.debug_of(0));
+        // The bold one closes at a shove's speed and lines up with a rear corner; the calm one
+        // brakes to follow it.
+        let (b, c) = (bold.debug_of(0), calm.debug_of(0));
+        assert!(b.v_target > 14.0, "{b:?}");
+        assert!(c.v_target < b.v_target, "{c:?} vs {b:?}");
+        assert!(b.n_cmd.abs() > 0.05, "{b:?}");
+        // Not wanted: nobody rams.
+        let mut free = chased_field(0.8, 0.7);
+        let others = [
+            obs(1, 100.0, 25.0, HandlingEffects::NEUTRAL),
+            obs(9, 120.0, 10.0, HandlingEffects::NEUTRAL),
+        ];
+        for _ in 0..8 {
+            free.tick(&world, &others, &[], &NoPolice);
+        }
+        assert_eq!(free.rams_by(0), 0);
+    }
+
+    #[test]
+    fn a_racer_steers_round_the_end_of_a_spike_strip() {
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        let cars = [obs(1, 100.0, 25.0, HandlingEffects::NEUTRAL)];
+        // A strip across most of the road 60 m ahead, open on the +x side.
+        let strip = ([-6.0, 160.0], [1.0, 160.0]);
+        let free_side = straight().project([3.0, 160.0], None, 0).n.signum();
+        let mut f = chased_field(0.5, 0.4);
+        // One second (the car is held where it is, so the strip stays 60 m ahead).
+        for _ in 0..240 {
+            f.tick(&world, &cars, &[], &Chase(vec![strip]));
+        }
+        let d = f.debug_of(0);
+        assert_eq!(f.spike_dodges_by(0), 1, "{d:?}");
+        assert!(d.n_cmd * free_side > 1.0, "{d:?}");
+        // No strip: stays on its line.
+        let mut g = chased_field(0.5, 0.4);
+        for _ in 0..240 {
+            g.tick(&world, &cars, &[], &Chase(Vec::new()));
+        }
+        assert_eq!(g.spike_dodges_by(0), 0);
+        assert!(g.debug_of(0).n_cmd.abs() < 0.5, "{:?}", g.debug_of(0));
     }
 
     fn side_state() -> VehicleState {

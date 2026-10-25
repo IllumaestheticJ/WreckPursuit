@@ -808,6 +808,22 @@ pub struct SpikeConfig {
     pub cooldown_s: PhaseTable<f32>,
     /// Max strips active at once.
     pub max_active: u32,
+    /// A spike car and its strip appear (already set up) only this far or further from every
+    /// racer, and only where no racer sees the spot (owner, 2026-10-24), m.
+    #[serde(default = "default_spike_appear_min_m")]
+    pub appear_min_m: f32,
+    /// ... or, where a racer can see the spot (a long straight), this far or further (owner,
+    /// 2026-10-25), m.
+    #[serde(default = "default_spike_appear_far_m")]
+    pub appear_far_m: f32,
+}
+
+fn default_spike_appear_min_m() -> f32 {
+    250.0
+}
+
+fn default_spike_appear_far_m() -> f32 {
+    600.0
 }
 
 /// Helicopter entity.

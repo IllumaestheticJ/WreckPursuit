@@ -40,6 +40,15 @@ pub struct RacerSample {
     pub gear: i8,
     /// Engine speed, rpm (drag shift scoring).
     pub engine_rpm: f32,
+    /// World Z of the chassis up axis: 1 upright, 0 on its side, -1 on its roof (flip
+    /// recovery for AI racers, [`FLIPPED_RESET_S`]). Samples recorded before it existed
+    /// read upright.
+    #[serde(default = "upright")]
+    pub up_z: f32,
+}
+
+fn upright() -> f32 {
+    1.0
 }
 
 impl RacerSample {
@@ -53,8 +62,14 @@ impl RacerSample {
             throttle,
             gear: s.gear,
             engine_rpm: s.engine_rpm,
+            up_z: up_z(s.rot),
         }
     }
+}
+
+/// World Z of the up axis of a body with rotation `q` = `[x, y, z, w]`.
+fn up_z(q: [f32; 4]) -> f32 {
+    1.0 - 2.0 * (q[0] * q[0] + q[1] * q[1])
 }
 
 /// A racer entering the race.
@@ -108,6 +123,14 @@ pub const STUCK_PROGRESS_M: f32 = 5.0;
 /// seed 13: spun off the embankment and 29 m down the bank, 30 rejoins up a slope it could
 /// not climb).
 pub const STRANDED_GRACE_S: f32 = 20.0;
+/// An AI racer on its side or roof ([`RacerSample::up_z`] below [`FLIPPED_UP_Z`]) this long
+/// is put back on the course upright ([`RaceJudge::set_stranded_reset`]), s, wherever it
+/// lies: a car on its roof cannot drive back (Loop 9 → Ashpeak highway: racers rolled at
+/// the Lantern Way junction and lay there, inside the corridor, until the race timed out).
+/// Police units already get the same rule (`wp_police::stuck::FLIPPED_RESET_S`).
+pub const FLIPPED_RESET_S: f32 = 3.0;
+/// Up-axis Z below which a car counts as flipped (as `wp_police::stuck::FLIPPED_UP_Z`).
+pub const FLIPPED_UP_Z: f32 = 0.3;
 
 #[derive(Debug, Clone)]
 struct Track {
@@ -132,6 +155,7 @@ struct Track {
     best_progress_m: f32,
     progress_tick: u64,
     out_ticks: u64,
+    flipped_ticks: u64,
     /// Course distance (within the lap) of the last sample inside the corridor, m.
     on_course_m: Option<f32>,
     contacts: u32,
@@ -319,6 +343,7 @@ impl RaceJudge {
             best_progress_m: 0.0,
             progress_tick: 0,
             out_ticks: 0,
+            flipped_ticks: 0,
             on_course_m: None,
             contacts: 0,
             civilian_hits: 0,
@@ -677,6 +702,26 @@ impl RaceJudge {
             } else {
                 t.out_ticks = 0;
                 t.on_course_m = Some(proj.along_m);
+            }
+        }
+        // Flipped AI racers are righted on the course where they lie (or where they last
+        // were on it).
+        if stranded && self.rules.kind.uses_corridor() {
+            if s.up_z < FLIPPED_UP_Z {
+                t.flipped_ticks += tick - prev_tick;
+                if t.flipped_ticks > ticks_for(FLIPPED_RESET_S) {
+                    t.flipped_ticks = 0;
+                    t.out_ticks = 0;
+                    let along = t.on_course_m.unwrap_or(proj.along_m);
+                    let (pos, dir) = self.course.point_at(along);
+                    self.resets.push(CourseReset {
+                        racer: t.entry.racer,
+                        pos,
+                        dir,
+                    });
+                }
+            } else {
+                t.flipped_ticks = 0;
             }
         }
     }

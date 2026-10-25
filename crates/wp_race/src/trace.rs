@@ -230,6 +230,7 @@ pub fn simulate(
                         },
                         gear,
                         engine_rpm: red * (0.55 + (r.shift_frac - 0.55) * in_gear),
+                        up_z: 1.0,
                     }
                 })
                 .collect();

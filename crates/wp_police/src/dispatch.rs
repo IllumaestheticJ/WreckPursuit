@@ -96,23 +96,17 @@ pub const SPIKE_CAR_SHOULDER_M: f32 = 2.5;
 /// beside it (PR #54), m.
 pub const SPIKE_UNIT_LEASH_M: f32 = 15.0;
 
-/// A spike car driving in parks (and lays its strip) once it is this close to its post and
-/// (almost) stopped, m.
-pub const SPIKE_ARRIVE_M: f32 = 8.0;
+/// With no hidden car post within `spikes.max_ahead_m`, spike sites are searched up to this
+/// many times as far ahead (owner, 2026-10-24: set up far enough out not to be seen arriving).
+const SPIKE_FAR_FACTOR: f32 = 2.0;
+
+/// A spike site is picked with this much distance to spare, so it still qualifies when its
+/// car appears (next think), m.
+const SPIKE_PICK_MARGIN_M: f32 = 60.0;
 
 /// A spike strip still on its way is given up once its racer is closer than this to the
 /// strip's line (or past it): too late to lay it in front of the racer, m.
 pub const SPIKE_LATE_M: f32 = 40.0;
-
-/// Road distance window for the hidden spot a spike car drives in from, m.
-const SPIKE_DRIVE_MIN_M: f32 = 40.0;
-const SPIKE_DRIVE_MAX_M: f32 = 900.0;
-/// A drive-in spike car must reach its post this long before its racer reaches the strip, s.
-const SPIKE_SETTLE_S: f32 = 4.0;
-/// A spawned car starts from rest: seconds added to a drive-in's cruise time.
-const SPIKE_STARTUP_S: f32 = 3.0;
-/// Drive-in candidates whose route is planned per think (nearest by road first).
-const SPIKE_DRIVE_TRIES: usize = 8;
 
 /// A roadblock car not spawned yet: it waits while its spot is in a racer's view (row 131)
 /// and appears once the spot is hidden, while its roadblock lasts. (Spike cars never wait with
@@ -130,10 +124,11 @@ pub(crate) struct PendingToolCar {
 }
 
 /// A spike strip on its way (row 165: a strip never lies on the road without its unit beside
-/// it, and no police car appears in a racer's view). Its strip is laid only together with its
-/// car: at once when the car's post is hidden (the car appears there), or when a car spawned
-/// out of view has driven in and parked at the post. Given up, with no strip, when the racer
-/// gets too close first ([`SPIKE_LATE_M`]), the pursuit ends or the strip's lifetime runs out.
+/// it). Its strip is laid only together with its car, which appears at its post, already set
+/// up, while the post may take it ([`PoliceSystem::spike_post_ok`]: out of view, or very far
+/// out on a straight). Given up, with no strip, once it may not (owner, 2026-10-24: no spike
+/// car is seen arriving), the racer gets too close ([`SPIKE_LATE_M`]), the pursuit ends or the
+/// lifetime runs out.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SpikeRun {
     /// The strip to lay (`unit` / `post` set when it is laid).
@@ -142,8 +137,6 @@ pub(crate) struct SpikeRun {
     pub post: [f32; 2],
     /// Parked heading (unit vector).
     pub heading: [f32; 2],
-    /// The car driving in, once spawned.
-    pub unit: Option<UnitId>,
 }
 
 /// Where a tool goes across the road at a site (row 133): the traffic flow there and the
@@ -1712,7 +1705,7 @@ impl PoliceSystem {
         self.maintain_helicopters();
         self.race_think(world);
         if !self.captain.human {
-            self.ai_captain_tools();
+            self.ai_captain_tools(world);
         }
         self.expire_tools();
         self.maintain_tool_cars(world);
@@ -4005,11 +3998,6 @@ impl PoliceSystem {
         }
     }
 
-    /// Whether unit `unit` is a spike car still driving in to its post ([`SpikeRun`]).
-    pub(crate) fn spike_car_en_route(&self, unit: UnitId) -> bool {
-        self.spike_runs.iter().any(|r| r.unit == Some(unit))
-    }
-
     /// Remove strip `tool` from the road (no-op if already gone). Its unit is not touched.
     fn lift_spikes(&mut self, tool: ToolId) {
         let before = self.spikes.len();
@@ -4036,11 +4024,14 @@ impl PoliceSystem {
         true
     }
 
-    /// Place a spike strip ahead of `racer` (optionally on a specific road).
+    /// Place a spike strip ahead of `racer` (optionally on a specific road). `world` sharpens
+    /// the "car post out of view" test with the world's own sight lines (the AI captain has
+    /// it; a human captain's command is checked on the road graph's city blocks only).
     pub(crate) fn place_spikes(
         &mut self,
         racer: EntityId,
         road: Option<crate::captain::RoadEdgeId>,
+        world: Option<&dyn WorldQuery>,
     ) -> Result<ToolId, CaptainError> {
         let now = self.now;
         let rec = self.racers.get(&racer).ok_or(CaptainError::UnknownTarget)?;
@@ -4069,24 +4060,29 @@ impl PoliceSystem {
             min_sight_m: sc.min_sight_m,
             highway_ok: true,
         };
-        // Row 165: the strip goes down only with its car, which never appears in a racer's
-        // view. The site needs a shoulder spot a car may stand on (row 75: clear of parked
-        // cars, cones and vehicles); preferred: the first one along the racer's route (beyond
-        // corners and crests) whose spot it cannot see now or along its road ahead, so the car
-        // can simply appear there. Else the first valid site: its car drives in from out of
-        // view (`maintain_spike_runs`).
+        // Row 165: the strip goes down only with its car. Owner (2026-10-24/25): the racer
+        // never sees the car and strip arrive; it comes upon them already set up. So the site
+        // needs a shoulder spot a car may stand on (row 75: clear of parked cars, cones and
+        // vehicles) where the car may appear ([`Self::spike_post_ok`]: out of sight, or very
+        // far out on a straight): the car and strip appear there together. No such site: no
+        // spikes this time (the captain tries again next think).
         let post_of = |site: &ToolSite| {
             let span = self.tool_span(site);
             span.at(site.pos, span.outer + SPIKE_CAR_SHOULDER_M)
         };
-        let parkable = |site: &ToolSite| self.spot_clear(post_of(site));
         let hidden = |site: &ToolSite| {
             let post = post_of(site);
-            self.spot_clear(post) && !self.in_racer_view_opt(None, post, true)
+            self.spot_clear(post) && self.spike_post_ok(world, post, SPIKE_PICK_MARGIN_M)
+        };
+        // Nothing hidden in the usual range (a long straight in plain view): look up to
+        // SPIKE_FAR_FACTOR times as far ahead, past the next bend or crest.
+        let far = SiteRules {
+            max_ahead_m: rules.max_ahead_m * SPIKE_FAR_FACTOR,
+            ..rules
         };
         let road = road.map(|r| r.0);
         let site = plan_site_where(&self.graph, p, v, &rules, road, &hidden)
-            .or_else(|_| plan_site_where(&self.graph, p, v, &rules, road, &parkable))
+            .or_else(|_| plan_site_where(&self.graph, p, v, &far, road, &hidden))
             .map_err(CaptainError::Site)?;
         let (length, lifetime, cooldown) =
             (sc.length_m, sc.lifetime_s, sc.cooldown_s.get(self.phase));
@@ -4109,7 +4105,6 @@ impl PoliceSystem {
             strip,
             post,
             heading: span.flow,
-            unit: None,
         });
         self.spikes_decided.push((id, racer));
         self.captain.spikes_ready = now.plus(cooldown);
@@ -4178,226 +4173,67 @@ impl PoliceSystem {
         Some((ahead, closing))
     }
 
-    /// Row 165: bring each spike strip on its way to the road with its car. Car's post hidden:
-    /// the car appears there and the strip goes down with it. Post in view: a car spawned out
-    /// of view drives in ([`Self::spike_drive_in`]) and lays the strip once parked. Too late
-    /// (racer within [`SPIKE_LATE_M`]), pursuit over or lifetime out: given up, no strip (a car
-    /// already driving in goes out of service).
+    /// Whether a spike car (and its strip) may appear at `post`, already set up (owner,
+    /// 2026-10-24/25: the racer never watches it arrive). Every racer is at least
+    /// `spikes.appear_min_m` (+ `margin_m`) away, and either none sees it now or a moment on
+    /// ([`Self::in_racer_view_opt`] without the road-ahead points, which a post on the
+    /// racer's own road always falls on: by the time it comes round the bend or over the crest
+    /// the car and strip have long stood there) or every racer is at least
+    /// `spikes.appear_far_m` (+ `margin_m`) away (a long straight: a speck in the distance).
+    /// `margin_m` lets a site chosen now still qualify when its car appears a think later.
+    fn spike_post_ok(&self, world: Option<&dyn WorldQuery>, post: [f32; 2], margin_m: f32) -> bool {
+        let nearest = self
+            .racers
+            .values()
+            .map(|r| dist(xy(r.pos), post))
+            .fold(f32::MAX, f32::min);
+        let sc = &self.cfg.tools.spikes;
+        nearest >= sc.appear_min_m + margin_m
+            && (nearest >= sc.appear_far_m + margin_m
+                || !self.in_racer_view_opt(world, post, false))
+    }
+
+    /// Row 165: bring each spike strip on its way to the road with its car. Post still fit
+    /// ([`Self::spike_post_ok`]): the car appears there and the strip goes down with it.
+    /// Owner (2026-10-24): a racer never watches a spike car arrive, so a post no longer fit,
+    /// a racer within [`SPIKE_LATE_M`], a pursuit over or a lifetime out gives the strip up
+    /// (no car, no strip). A post lost that way hands the captain its cooldown back, so it can
+    /// pick another site further on at its next think.
     fn maintain_spike_runs(&mut self, world: &dyn WorldQuery) {
         let runs = std::mem::take(&mut self.spike_runs);
-        for mut run in runs {
+        for run in runs {
             let racer = run.strip.racer;
             let pursued = self.racers.get(&racer).is_some_and(|r| r.pursued());
             let to_strip = self.racer_to_strip(racer, &run.strip);
             let late = !pursued
                 || self.now >= run.strip.expires
                 || to_strip.is_none_or(|(ahead, _)| ahead < SPIKE_LATE_M);
-            match run.unit {
-                None => {
-                    if late {
-                        self.stats.spikes_given_up += 1;
-                        continue;
-                    }
-                    // Hidden post (or the session's opening): the car simply appears there.
-                    if (!self.warmed_up || !self.spawn_in_view(world, run.post))
-                        && self.spot_clear(run.post)
-                    {
-                        let i =
-                            self.spawn_unit(UnitKind::Car, UnitRole::Tool, run.post, run.heading);
-                        self.assign(
-                            i,
-                            Assignment::SpikeAt {
-                                segment: run.strip.site.segment,
-                                tool: run.strip.id,
-                            },
-                        );
-                        self.record_spawn(world, i);
-                        let mut strip = run.strip;
-                        strip.unit = Some(self.units[i].id);
-                        strip.post = Some(run.post);
-                        self.lay_spikes(strip);
-                        continue;
-                    }
-                    let eta = to_strip.map_or(0.0, |(ahead, closing)| {
-                        if closing > 1.0 {
-                            ahead / closing
-                        } else {
-                            f32::INFINITY
-                        }
-                    });
-                    if let Some((pos, heading, track, speed)) =
-                        self.spike_drive_in(world, &run, eta)
-                    {
-                        let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, pos, heading);
-                        self.assign(
-                            i,
-                            Assignment::SpikeAt {
-                                segment: run.strip.site.segment,
-                                tool: run.strip.id,
-                            },
-                        );
-                        self.record_spawn(world, i);
-                        self.units[i].set_command(DriveCommand {
-                            track,
-                            speed_mps: speed,
-                            cornering_g: self.cfg.pursuit.pursuit_cornering_g,
-                            siren: false,
-                            lane_offset_m: LANE_OFFSET_M,
-                        });
-                        run.unit = Some(self.units[i].id);
-                        self.stats.spike_drive_ins += 1;
-                    }
-                    // Else: try again next think (the racer moves, spots hide).
-                    self.spike_runs.push(run);
-                }
-                Some(uid) => {
-                    let Some(i) = self.unit_index(uid) else {
-                        self.stats.spikes_given_up += 1;
-                        continue;
-                    };
-                    let u = &self.units[i];
-                    let still = !u.wrecked
-                        && matches!(u.assignment, Assignment::SpikeAt { tool, .. } if tool == run.strip.id);
-                    if !still {
-                        self.stats.spikes_given_up += 1;
-                        continue;
-                    }
-                    // Too late (the racer is at or past the strip's line): no strip.
-                    if late {
-                        self.stats.spikes_given_up += 1;
-                        self.assign(i, Assignment::OutOfService);
-                        continue;
-                    }
-                    if dist(u.body.pos, run.post) <= SPIKE_ARRIVE_M && u.body.speed < 1.5 {
-                        // Parked: the strip goes down beside it.
-                        let at = u.body.pos;
-                        self.units[i].cmd = DriveCommand::stop();
-                        let mut strip = run.strip;
-                        strip.unit = Some(uid);
-                        strip.post = Some(at);
-                        self.lay_spikes(strip);
-                        continue;
-                    }
-                    self.spike_runs.push(run);
-                }
-            }
-        }
-    }
-
-    /// Where a spike car for `run` can appear out of every racer's view and drive in to its
-    /// post in time (`eta_s` = when the racer reaches the strip): a lane spot on a road
-    /// [`SPIKE_DRIVE_MIN_M`]..[`SPIKE_DRIVE_MAX_M`] from the post by road, hidden (row 131 /
-    /// 158), clear (row 75), not on the racer's far carriageway (row 140), whose route there
-    /// keeps clear of the racer and arrives [`SPIKE_SETTLE_S`] early. Nearest by road first.
-    /// Returns the spot, heading, route and cruise speed.
-    fn spike_drive_in(
-        &self,
-        world: &dyn WorldQuery,
-        run: &SpikeRun,
-        eta_s: f32,
-    ) -> Option<([f32; 2], [f32; 2], Track, f32)> {
-        const STEP_M: f32 = 25.0;
-        const JUNCTION_CLEAR_M: f32 = 12.0;
-        /// A drive-in route never passes this close to the racer, m.
-        const RACER_CLEAR_M: f32 = 60.0;
-        let racer_pos = self.racers.get(&run.strip.racer).map(|r| xy(r.pos))?;
-        let to_post = self.graph.distances_to(run.post);
-        let corridor = self.racer_corridor(run.strip.racer);
-        let p = &self.cfg.pursuit;
-        let cap = p.pro.default_limits.top_speed_mps;
-        let mut cands: Vec<(f32, [f32; 2], [f32; 2], f32)> = Vec::new();
-        for (k, seg) in self.graph.segments.iter().enumerate() {
-            let sid = crate::graph::SegmentId(k as u32);
-            let (a, b) = (self.graph.node(seg.a).pos, self.graph.node(seg.b).pos);
-            let len = seg.length_m;
-            let clear = |n: NodeId| {
-                if self.graph.node(n).junction {
-                    JUNCTION_CLEAR_M
-                } else {
-                    0.0
-                }
-            };
-            let (lo, hi) = (clear(seg.a), len - clear(seg.b));
-            if hi - lo < 2.0 {
+            if late {
+                self.stats.spikes_given_up += 1;
                 continue;
             }
-            let (da, db) = (to_post[seg.a.0 as usize], to_post[seg.b.0 as usize]);
-            if da.min(db) > SPIKE_DRIVE_MAX_M || da.min(db) + len < SPIKE_DRIVE_MIN_M {
-                continue;
-            }
-            let v = (seg.speed_limit_mps * p.respond_speed_factor)
-                .min(cap)
-                .max(5.0);
-            let n = ((hi - lo) / STEP_M).floor() as usize + 1;
-            for j in 0..n {
-                let off = if hi - lo < STEP_M {
-                    (lo + hi) * 0.5
-                } else {
-                    lo + j as f32 * STEP_M
-                };
-                let centre = lerp2(a, b, off / len);
-                let via_a = if self.graph.can_travel(sid, seg.b) {
-                    off + da
-                } else {
-                    f32::INFINITY
-                };
-                let via_b = if self.graph.can_travel(sid, seg.a) {
-                    (len - off) + db
-                } else {
-                    f32::INFINITY
-                };
-                let (d_road, dir) = if via_a <= via_b {
-                    (via_a, normalize(sub(a, b)))
-                } else {
-                    (via_b, normalize(sub(b, a)))
-                };
-                if !(SPIKE_DRIVE_MIN_M..=SPIKE_DRIVE_MAX_M).contains(&d_road)
-                    || d_road / v + SPIKE_STARTUP_S + SPIKE_SETTLE_S > eta_s
-                    || dist(centre, racer_pos) < RACER_CLEAR_M
-                {
-                    continue;
-                }
-                let pos = add(centre, scale([dir[1], -dir[0]], LANE_OFFSET_M));
-                cands.push((d_road, pos, dir, v));
-            }
-        }
-        cands.sort_by(|x, y| x.0.total_cmp(&y.0));
-        let site = &run.strip.site;
-        let ends = [
-            self.graph.other_end(site.segment, site.from_node),
-            site.from_node,
-        ];
-        let mut tried = 0;
-        for (_, pos, dir, v) in cands {
-            if tried >= SPIKE_DRIVE_TRIES {
-                break;
-            }
-            if self.far_side(&corridor, pos)
-                || !self.spot_clear(pos)
-                || (self.warmed_up && self.spawn_in_view(world, pos))
+            // Hidden post (or the session's opening): the car simply appears there.
+            if (!self.warmed_up || self.spike_post_ok(Some(world), run.post, 0.0))
+                && self.spot_clear(run.post)
             {
+                let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, run.post, run.heading);
+                self.assign(
+                    i,
+                    Assignment::SpikeAt {
+                        segment: run.strip.site.segment,
+                        tool: run.strip.id,
+                    },
+                );
+                self.record_spawn(world, i);
+                let mut strip = run.strip;
+                strip.unit = Some(self.units[i].id);
+                strip.post = Some(run.post);
+                self.lay_spikes(strip);
                 continue;
             }
-            tried += 1;
-            for end in ends {
-                let (track, _) = self.route_from(pos, dir, end, Some(run.post));
-                if !track.is_drivable() {
-                    continue;
-                }
-                let n = (track.length() / 10.0).ceil().max(1.0) as usize;
-                let passes_racer = (0..=n).any(|k| {
-                    dist(
-                        track.point_at(track.length() * k as f32 / n as f32),
-                        racer_pos,
-                    ) < RACER_CLEAR_M
-                });
-                if passes_racer || track.length() / v + SPIKE_STARTUP_S + SPIKE_SETTLE_S > eta_s {
-                    continue;
-                }
-                return Some((pos, dir, track, v));
-            }
+            self.stats.spikes_given_up += 1;
+            self.captain.spikes_ready = self.now;
         }
-        None
     }
 
     /// Row 86 audit: time active ground units stand still with no reason to, and log each
@@ -4459,7 +4295,7 @@ impl PoliceSystem {
         }
     }
 
-    fn ai_captain_tools(&mut self) {
+    fn ai_captain_tools(&mut self, world: &dyn WorldQuery) {
         for racer in self.pursued_by_priority() {
             let r = &self.racers[&racer];
             if r.status != PursuitStatus::Pursuit {
@@ -4470,7 +4306,7 @@ impl PoliceSystem {
                 && self.now >= self.captain.spikes_ready
             {
                 // No valid site yet (blind corners ahead) is normal; try again next think.
-                let _ = self.place_spikes(racer, None);
+                let _ = self.place_spikes(racer, None, Some(world));
             }
             if lvl >= self.cfg.presence.unlocks.roadblock_level
                 && self.now >= self.captain.roadblock_ready
@@ -4490,19 +4326,12 @@ impl PoliceSystem {
             }
             keep
         });
-        // Spike strips still on their way go with their racer's pursuit (a car driving in goes
-        // out of service; `maintain_spike_runs` handles the lifetime).
+        // Spike strips still on their way go with their racer's pursuit (`maintain_spike_runs`
+        // handles the lifetime).
         if let Some(r) = racer {
-            let (gone, keep): (Vec<SpikeRun>, Vec<SpikeRun>) = std::mem::take(&mut self.spike_runs)
-                .into_iter()
-                .partition(|run| run.strip.racer == r);
-            self.spike_runs = keep;
-            for run in gone {
-                self.stats.spikes_given_up += 1;
-                if let Some(i) = run.unit.and_then(|u| self.unit_index(u)) {
-                    self.assign(i, Assignment::OutOfService);
-                }
-            }
+            let before = self.spike_runs.len();
+            self.spike_runs.retain(|run| run.strip.racer != r);
+            self.stats.spikes_given_up += (before - self.spike_runs.len()) as u32;
         }
         // Row 165 / PR #54: a strip whose unit has left its post (wrecked, shoved or driven
         // away, reassigned, gone) is lifted.
