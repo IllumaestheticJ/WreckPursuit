@@ -274,7 +274,7 @@ fn solo_run(id: &str, car_id: &str, learned: Option<&LearnedPath>, lookahead: f3
                 .map(|t| t as f32 * PHYSICS_DT / wp_race::result::SUBTICKS_PER_TICK as f32);
             break;
         }
-        if tick < green || tick % 4 != 0 {
+        if tick < green || !tick.is_multiple_of(4) {
             continue;
         }
         let v = sim
@@ -284,7 +284,7 @@ fn solo_run(id: &str, car_id: &str, learned: Option<&LearnedPath>, lookahead: f3
             .map(|x| x.vehicle.state().speed_mps)
             .unwrap_or(0.0);
         if std::env::var("WP_TRAIN_DEBUG").is_ok()
-            && tick % num("WP_TRAIN_DEBUG_TICKS", 240u64) == 0
+            && tick.is_multiple_of(num("WP_TRAIN_DEBUG_TICKS", 240u64))
         {
             let th = sim
                 .vehicles()
