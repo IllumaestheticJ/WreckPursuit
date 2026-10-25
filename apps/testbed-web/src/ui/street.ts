@@ -519,7 +519,7 @@ export class StreetUi {
     let html = "";
     if (o && !this.map.isOpen) {
       const m = bound("map");
-      html = `<b>${esc(o.name)}</b> is waiting: open the map (${[m.key && `<span class="wp-kbd">${esc(m.key)}</span>`, m.pad && `pad ${esc(m.pad)}`].filter(Boolean).join(" / ")}) to pick the finish`;
+      html = `<b>${esc(o.name)}</b> is waiting: open the map (${[m.key && `<span class="wp-kbd">${esc(m.key)}</span>`, m.pad && `pad ${esc(m.pad)}`].filter(Boolean).join(" / ")}) to pick the finish, or honk (${this.hornLabel()}) to call it off`;
     } else if (h && !o && !st.race) {
       html = `Honk (${this.hornLabel()}) to challenge <b>${esc(h.name)}</b> <span class="st-lv" style="background:${h.colour}">Lv ${h.level} ${esc(h.level_name)}</span>`;
     } else if (st.blocked && !o && !st.race) {

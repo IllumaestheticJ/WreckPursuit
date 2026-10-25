@@ -561,6 +561,19 @@ impl Session {
                 }
             }
         }
+        // Held while betting on a street challenge: the horn still gets through (a honk calls
+        // the challenge off).
+        if self.held(id)
+            && self.last_input[idx].horn != input.horn
+            && self.street.as_ref().is_some_and(|s| s.offer_open())
+        {
+            let held = VehicleInput {
+                horn: input.horn,
+                ..self.last_input[idx]
+            };
+            self.log_input(idx, held);
+            return Ok(true);
+        }
         if self.script_running()
             || self.last_input[idx] == input
             || self.held(id)
@@ -1406,6 +1419,16 @@ impl Session {
             .zip(self.run.as_mut())
             .ok_or("no street racers in this session")?;
         let moves = street.accept(&self.sim, run, finish, via, stake)?;
+        // Clear the start of civilian cars (wrecks too) before both cars go onto it.
+        if let Some(c) = crate::street::grid_centre(&moves) {
+            let _ = self.log_op(
+                0,
+                OpKind::ClearTraffic {
+                    xy: c,
+                    radius_m: crate::street::START_CLEAR_M,
+                },
+            );
+        }
         for m in moves {
             self.apply_street_move(m);
         }
@@ -1564,14 +1587,22 @@ impl Session {
             .and(self.run.as_ref())
             .and_then(|r| self.index(r.player()))
         {
-            // Street race countdown: the player waits on the handbrake for the green light (a
-            // held brake pedal at a standstill would engage reverse).
+            // Street race betting and countdown: the player brakes to a halt, then waits on the
+            // handbrake (a held brake pedal at a standstill would engage reverse).
             let keep = self.last_input[idx];
+            let moving = self
+                .sim
+                .vehicles()
+                .iter()
+                .find(|v| v.id == self.ids[idx])
+                .is_some_and(|v| v.vehicle.state().speed_mps.abs() > 1.0);
             self.log_input(
                 idx,
                 VehicleInput {
+                    brake: if moving { 1.0 } else { 0.0 },
                     handbrake: 1.0,
                     headlights: keep.headlights,
+                    horn: keep.horn,
                     ..Default::default()
                 },
             );
