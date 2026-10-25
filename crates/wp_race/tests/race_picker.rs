@@ -745,6 +745,76 @@ fn loop9_circuit_pace_without_police() {
     assert_eq!(r.pursuits, 0);
 }
 
+/// The picker offers only the Loop 9 races (owner, 2026-10-24); the older races are retired
+/// to regression scenarios and still found by id.
+#[test]
+fn picker_offers_only_the_loop9_races() {
+    let ids: Vec<&str> = catalog::races().iter().map(|r| r.id).collect();
+    assert_eq!(ids, ["loop9_circuit", "loop9_day", "loop9_ashpeak_highway"]);
+    for r in catalog::retired_races() {
+        assert!(!ids.contains(&r.id), "{} is both offered and retired", r.id);
+        assert_eq!(catalog::race(r.id).map(|d| d.id), Some(r.id));
+    }
+    // Retired races leave the picker everywhere: no meet spot plans them on any map.
+    for city in ["vesper_v2", "ashpeak", "procedural_12x12"] {
+        for r in catalog::races_on(city) {
+            assert!(ids.contains(&r.id), "{city}: {} still offered", r.id);
+        }
+    }
+}
+
+#[test]
+fn loop9_day() {
+    // The Loop 9 lap at 14:00, illegal daytime: police at full strength. As on the night lap
+    // the police decide how many finish; what must hold is that the race is judged to the end
+    // and every racer's race ends at the flag, by the police or in one racing incident.
+    let r = run_race("loop9_day", 600);
+    let id = r.def.id;
+    assert!(r.route_m > 9000.0);
+    assert!(r.finished_tick.is_some(), "{id}: never finished");
+    assert_eq!(r.results.len(), r.def.entrants());
+    assert!(matches!(
+        r.signals.last(),
+        Some(RaceSignal::RaceFinished { .. })
+    ));
+    let dqs = r
+        .results
+        .iter()
+        .filter(|x| matches!(x.status, RacerStatus::Dq(_)))
+        .count();
+    assert!(dqs <= 1, "{id}: {dqs} disqualified");
+    for x in &r.results {
+        assert!(
+            x.gates_passed >= 1 || x.progress_m >= 30.0,
+            "{id}: {x:?} never left the grid"
+        );
+    }
+    eprintln!(
+        "loop9_day pursuits: {}, results {:?}",
+        r.pursuits,
+        r.results
+            .iter()
+            .map(|x| (x.position, x.status, x.elapsed_s(), x.gates_passed))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn loop9_day_pace_without_police() {
+    // The daytime lap without police: the AI field through daytime highway traffic.
+    // 2026-10-24 (traffic 0.5, seed 19): 6 of 6 finish, winner 194.4 s.
+    let r = run_race_with("loop9_day", 600, Some(0.0));
+    eprintln!(
+        "loop9_day (no police): results {:?}",
+        r.results
+            .iter()
+            .map(|x| (x.position, x.status, x.elapsed_s(), x.gates_passed))
+            .collect::<Vec<_>>()
+    );
+    check(&r, 150.0..420.0, 4);
+    assert_eq!(r.pursuits, 0);
+}
+
 #[test]
 fn lantern_checkpoint_draws_the_police() {
     // Seed 31 (the catalog's) is back since the box-in escape (follow-up (a), 2026-10-22): the
@@ -898,6 +968,15 @@ fn waterfront_drag() {
 fn ashpeak_metro_circuit() {
     // Two 4.2 km laps of the downtown grid at night: winner ~326 s, three of six finish.
     ashpeak_race("ashpeak_metro_circuit", 900, 240.0..480.0, 3);
+}
+
+#[test]
+fn loop9_ashpeak_highway() {
+    // One 17.9 km lap of the highways (Loop 9, Route 7, the Crosstown, Route 12 over the
+    // Grizzly Grade). 2026-10-24 (seed 29): 4 of 6
+    // finish, winner 446.3 s; the last two were stuck near the Lantern Way on-ramp (gates
+    // 62-64), one racing incident each.
+    ashpeak_race("loop9_ashpeak_highway", 1200, 300.0..800.0, 4);
 }
 
 #[test]
