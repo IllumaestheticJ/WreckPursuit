@@ -290,6 +290,7 @@ debug coupe = 559 (B). Monotone in power and in lower mass (property-tested).
 | Lever | File | Feel target |
 |---|---|---|
 | `labour_hours_per_item`, `region_parts`, `component_parts`, `class.*.parts_scale` | prices.toml | bumper scrape < one buy-in; medium front hit ≈ one race win in Sim (half in Arcade); full wreck ≈ 2× value in Sim (≥ 60 % hard floor) |
+| `respray_base` | prices.toml | paint shop respray (× class `parts_scale`): a few hundred on a beater, thousands on an exotic |
 | `heavy_damage_markup`, `total_loss_markup` | prices.toml | scrapes stay cheap; crushed parts cost up to 1.75×; rebuilding a write-off costs 1.4× more, so a wreck is usually a scrap |
 | `data/modes/*.toml repair_cost_scale` | (workstream 03) | Arcade repairs half of Sim |
 | `shop.*`, `district_labour` | prices.toml | crooked = convenience tax; legit = risk of a report |

@@ -171,7 +171,7 @@ impl Sim {
 #[cfg(test)]
 mod tests {
     use crate::{Sim, SimConfig, VehicleKind};
-    use wp_contracts::{LoadedCar, TimeOfDay, VehicleInput};
+    use wp_contracts::{LoadedCar, TimeOfDay, VehicleInput, VehicleSim};
     use wp_world::World;
 
     fn car(id: &str) -> LoadedCar {
@@ -237,6 +237,126 @@ mod tests {
             }
         }
         (sim.state_hash(), seen)
+    }
+
+    /// Player rear-ends the first moving physical traffic car at `closing_mps` over its speed,
+    /// under damage mode `mode` (`arcade` / `sim`).
+    /// Returns (largest one-tick velocity change of the struck car, its hazards on, its speed,
+    /// both 11 s after the hit).
+    fn rear_end(closing_mps: f32, mode: &str) -> (f32, bool, f32) {
+        let sedan = car("debug_sedan");
+        let mode = wp_contracts::load_mode_table(format!(
+            "{}/../../data/modes/{mode}.toml",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap();
+        let mut sim = Sim::new(SimConfig {
+            seed: 12,
+            mode,
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 10.0,
+        });
+        let mut world = World::procedural(
+            &wp_world::procgen::ProcGenConfig::small(),
+            wp_world::WorldConfig::default(),
+        );
+        let id = sim.spawn_vehicle(&sedan, [0.0, 0.0, 0.0], 0.0).unwrap();
+        let tracked: Vec<_> = sim
+            .vehicle_states()
+            .iter()
+            .map(|(e, s)| wp_world::TrackedVehicle::from_state(*e, s, false, true))
+            .collect();
+        world.set_tracked_vehicles(&tracked);
+        world.populate();
+        sim.set_world(world);
+        sim.set_traffic_car(sedan);
+        sim.set_record_applied_contacts(true);
+        let mut target = None;
+        for _ in 0..2400 {
+            sim.step_fixed();
+            target = sim
+                .vehicles()
+                .iter()
+                .find(|v| v.kind == VehicleKind::Traffic && v.vehicle.state().speed_mps > 3.0)
+                .map(|v| (v.id, v.traffic_agent.unwrap()));
+            if target.is_some() {
+                break;
+            }
+        }
+        let (car_id, agent) = target.expect("no moving physical traffic car");
+        let st = sim
+            .vehicles()
+            .iter()
+            .find(|v| v.id == car_id)
+            .unwrap()
+            .vehicle
+            .state();
+        let f = [st.lin_vel[0] / st.speed_mps, st.lin_vel[1] / st.speed_mps];
+        let yaw = (-f[0]).atan2(f[1]);
+        let behind = [st.pos[0] - f[0] * 7.0, st.pos[1] - f[1] * 7.0, st.pos[2]];
+        sim.place_vehicle(id, behind, yaw, st.speed_mps + closing_mps)
+            .unwrap();
+        sim.set_input(id, VehicleInput::default()).unwrap();
+        sim.drain_applied_contacts();
+        let mut max_dv = 0.0f32;
+        for _ in 0..240 {
+            sim.step_fixed();
+            for (e, cs) in sim.drain_applied_contacts() {
+                if e == car_id {
+                    let slot = sim.vehicles.iter().find(|v| v.id == car_id).unwrap();
+                    let m = sim.physics.bodies[slot.body.body].mass();
+                    max_dv = max_dv.max(crate::impact_delta_v(&cs, m));
+                }
+                if e == id {
+                    // Brake once it has hit, so the player does not push the car along.
+                    sim.set_input(
+                        id,
+                        VehicleInput {
+                            brake: 1.0,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                }
+            }
+        }
+        // Well after the hit (10 s): still where it stopped?
+        for _ in 0..2400 {
+            sim.step_fixed();
+        }
+        let view = sim.world().agents().find(|a| a.id == agent).unwrap();
+        (max_dv, view.hazard_lights, view.speed_mps)
+    }
+
+    #[test]
+    fn a_hard_rear_end_leaves_the_car_stopped_with_hazards() {
+        let (dv, hazards, speed) = rear_end(14.0, "sim");
+        assert!(
+            dv >= wp_world::traffic::HARD_IMPACT_DV_MPS,
+            "hit too soft: dv {dv}"
+        );
+        assert!(hazards, "no hazard lights after a {dv} m/s hit");
+        assert!(speed < 0.1, "drove on at {speed} m/s after a {dv} m/s hit");
+    }
+
+    #[test]
+    fn a_light_bump_drives_on() {
+        let (dv, hazards, speed) = rear_end(4.0, "sim");
+        assert!(dv > 0.0, "never touched");
+        assert!(!hazards, "a {dv} m/s bump disabled the car");
+        assert!(speed > 5.0, "stopped ({speed} m/s) after a {dv} m/s bump");
+    }
+
+    #[test]
+    fn hard_impacts_stop_traffic_the_same_in_both_damage_modes() {
+        // Owner rule: only car damage differs between modes.
+        for c in [4.0, 14.0] {
+            assert_eq!(
+                rear_end(c, "arcade").1,
+                rear_end(c, "sim").1,
+                "closing {c} m/s"
+            );
+        }
     }
 
     #[test]

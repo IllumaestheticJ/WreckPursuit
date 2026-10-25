@@ -1385,6 +1385,19 @@ impl Sim {
                 slot.vehicle.read_body(&self.physics.bodies[slot.body.body]);
             }
         }
+        // A hard hit wrecks a traffic car: it stops with hazards on and stays put. Judged on
+        // the impulse, not the damage, so both damage modes react the same (owner rule).
+        for (slot, contacts) in self.vehicles.iter().zip(&tick_contacts.per_vehicle) {
+            let Some(agent) = slot.traffic_agent else {
+                continue;
+            };
+            if contacts.is_empty() {
+                continue;
+            }
+            let mass = self.physics.bodies[slot.body.body].mass();
+            let dv = impact_delta_v(contacts, mass);
+            self.world.report_agent_impact(agent, dv);
+        }
         // Anything that touched a dormant car wakes it for the next tick; a light one goes back
         // to full physics.
         let touched: Vec<EntityId> = self
@@ -1675,6 +1688,21 @@ fn hash_nodes_lockstep(hashers: &mut [StateHasher], nodes: &[&[[f32; 3]]]) {
             }
         }
     }
+}
+
+/// Velocity change one tick's contacts give a body of `mass_kg`, m/s: the magnitude of the
+/// summed normal and friction impulses (chassis space) over the mass.
+fn impact_delta_v(contacts: &[wp_contracts::ContactImpulse], mass_kg: f32) -> f32 {
+    if mass_kg <= 0.0 {
+        return 0.0;
+    }
+    let mut j = [0.0f32; 3];
+    for c in contacts {
+        for (k, jk) in j.iter_mut().enumerate() {
+            *jk += c.normal_local[k] * c.impulse_ns + c.tangent_impulse_local_ns[k];
+        }
+    }
+    (j[0] * j[0] + j[1] * j[1] + j[2] * j[2]).sqrt() / mass_kg
 }
 
 /// Version of the [`Sim::state_hash`] layout. Bump when the hashed fields change; every golden

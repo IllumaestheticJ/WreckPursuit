@@ -10,7 +10,7 @@ const CAR: &str = "lindwurm_4t";
 
 #[test]
 fn free_roam_scenario_puts_roamers_on_the_roads() {
-    let sc = free_roam_in(CAR, DamageMode::Arcade, "vesper_v2", 8).unwrap();
+    let sc = free_roam_in(CAR, DamageMode::Arcade, "vesper_v2", "", 8).unwrap();
     assert_eq!(sc.name, FREE_ROAM_NAME);
     assert_eq!(sc.entities[0].id, "player");
     let roamers: Vec<_> = sc.entities.iter().filter(|e| is_roamer(&e.id)).collect();
@@ -19,13 +19,13 @@ fn free_roam_scenario_puts_roamers_on_the_roads() {
         assert!(haunt_of_id(&e.id).is_some(), "{}", e.id);
     }
     // Same scenario every time.
-    let again = free_roam_in(CAR, DamageMode::Arcade, "vesper_v2", 8).unwrap();
+    let again = free_roam_in(CAR, DamageMode::Arcade, "vesper_v2", "", 8).unwrap();
     assert_eq!(sc.to_ron(), again.to_ron());
 }
 
 #[test]
 fn roamers_drive_off_and_the_recording_replays_without_drift() {
-    let sc = free_roam_in(CAR, DamageMode::Arcade, "vesper_v2", 6).unwrap();
+    let sc = free_roam_in(CAR, DamageMode::Arcade, "vesper_v2", "", 6).unwrap();
     let mut s = Session::new(sc, false).unwrap();
     let roam = s.roam().expect("roamers attached");
     let ids = roam.roamers().entities();

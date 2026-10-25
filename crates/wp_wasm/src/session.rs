@@ -309,7 +309,8 @@ impl Session {
 
     /// Live session. `scripted` = drive every entity by its scenario driver until
     /// `duration_s` (menu scenarios); otherwise every entity is live-controlled (free drive).
-    /// A free-drive city session spawns the first entity on the city's race start grid.
+    /// A free-drive city session spawns the first entity on a race start grid of the city
+    /// ([`crate::scenario::spawn_grid`]).
     pub fn new(sc: Scenario, scripted: bool) -> Result<Self, String> {
         Self::new_with_data(sc, scripted, mem_data())
     }
@@ -328,14 +329,13 @@ impl Session {
             let city = simcli::data::load_world(mem_data(), &sc.city, world_config(&sc))
                 .map_err(|e| e.to_string())?;
             if let Some(world) = city {
-                let grid = world
-                    .network()
-                    .pois
-                    .iter()
-                    .find(|p| p.kind == wp_world::network::PoiKind::RaceStartGrid);
-                if let (Some(p), Some(e)) = (grid, sc.entities.first_mut()) {
-                    e.pos = p.pos;
-                    e.yaw = p.heading_rad;
+                // The player's scenario position picks the grid (a spawn choice, see
+                // `scenario::SPAWNS`; the origin = the city's first grid).
+                if let Some(e) = sc.entities.first_mut() {
+                    if let Some(p) = crate::scenario::spawn_grid(world.network(), e.pos) {
+                        e.pos = p.pos;
+                        e.yaw = p.heading_rad;
+                    }
                 }
                 // Street racers join the scenario as entities before the sim is built, so a
                 // recording carries them and playback spawns them the same way.
