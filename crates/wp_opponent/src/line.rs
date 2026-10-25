@@ -281,6 +281,21 @@ impl SpeedProfile {
         usage: &Usage,
         v_cap: f32,
     ) -> Self {
+        Self::build_scaled(corridor, line, cap, usage, v_cap, &[])
+    }
+
+    /// [`SpeedProfile::build`] with a learned corner-speed scale per corridor sample
+    /// ([`crate::learned::LearnedPath::v_scale`]; empty = none): each sample's corner-speed
+    /// limit is multiplied by it before the acceleration and braking passes, so braking
+    /// points follow.
+    pub fn build_scaled(
+        corridor: &Corridor,
+        line: &RacingLine,
+        cap: &CarCapability,
+        usage: &Usage,
+        v_cap: f32,
+        scale: &[f32],
+    ) -> Self {
         let m = corridor.len();
         let a_lat = cap.max_lat_g * GRAVITY_MPS2 * usage.lateral;
         let a_brk = cap.brake_g * GRAVITY_MPS2 * usage.braking;
@@ -307,6 +322,11 @@ impl SpeedProfile {
                 }
             })
             .collect();
+        if scale.len() == m {
+            for (x, k) in v.iter_mut().zip(scale) {
+                *x = (*x * k).min(v_top);
+            }
+        }
         let v_corner = v.clone();
         // Remaining longitudinal grip inside the friction ellipse at speed `u` on sample `i`.
         let ellipse = |i: usize, u: f32| -> f32 {

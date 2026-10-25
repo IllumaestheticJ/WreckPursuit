@@ -161,7 +161,7 @@ impl PoliceSystem {
                 self.place_roadblock(target, road).map(|_| ())
             }
             CaptainCommand::RequestSpikes { target, road } => {
-                self.place_spikes(target, road).map(|_| ())
+                self.place_spikes(target, road, None).map(|_| ())
             }
             CaptainCommand::RequestHelicopter { target } => {
                 let r = self

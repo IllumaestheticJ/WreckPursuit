@@ -29,6 +29,10 @@ length_m = 7.0
 deflate_s = 1.0
 lifetime_s = 60.0
 max_active = 2
+# The spike car and strip appear already set up: out of every racer's view and at least
+# appear_min_m away, or (a long straight in plain view) at least appear_far_m away.
+appear_min_m = 250.0
+appear_far_m = 600.0
 [spikes.cooldown_s]
 dawn = 30.0
 day = 20.0

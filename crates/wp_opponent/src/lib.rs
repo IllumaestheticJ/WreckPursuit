@@ -12,6 +12,9 @@
 //!   (follow, overtake with margin, one defensive move, back out of side-by-side, rejoin,
 //!   reverse, park), braking-point noise, damage awareness, civilian-contact DQ, police flight,
 //!   laps and standings.
+//! - [`learned`]: corrections learned in offline training runs (per car and stretch of road:
+//!   corner-speed scale and lateral aim; traffic and police behaviour numbers), applied by
+//!   [`Field`] when [`RaceConfig::learned`] is on.
 //! - [`draft`]: slipstream model (drag multiplier per vehicle from wake geometry) for the sim
 //!   loop to apply.
 //! - [`evader`]: scripted escapee for the police benchmark (`simcli police-bench`): flees
@@ -36,6 +39,7 @@ pub mod corridor;
 pub mod draft;
 pub mod evader;
 pub mod field;
+pub mod learned;
 pub mod line;
 pub mod profile;
 pub mod pursuit;
@@ -54,6 +58,7 @@ pub use field::{
     Standing, Tactic, VehicleObs, AI_CONTACT_IMPULSE_NS, RED_LIGHT_RISK, YIELD_AFTER_S,
     YIELD_RADIUS_M,
 };
+pub use learned::{LearnedPath, LearnedTable, LearnedTraffic};
 pub use line::{drive_accel, LineParams, RacingLine, SpeedProfile, Usage};
 pub use profile::{DriverParams, DriverProfile};
 pub use pursuit::{EventHeat, FixedHeat, NoPolice, PoliceQuery, SimPolice};
