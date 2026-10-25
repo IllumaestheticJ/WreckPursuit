@@ -170,8 +170,7 @@ fn spikes_stay_on_the_racers_carriageway(name: &str, world: &World) -> usize {
         let median = [0.5 * (far[0] + site.pos[0]), 0.5 * (far[1] + site.pos[1])];
         let side = right_of(median, flow, site.pos).signum();
         let ours = |p: [f32; 2]| right_of(median, flow, p) * side > 0.0;
-        // The car: spawned, or waiting for the next think (PR #54 port); none when its spot
-        // was in the racer's view (the strip is unmanned, rows 131 / 158).
+        // The car: spawned, or waiting for the next think (its post may take it then).
         let car = match strip.unit {
             Some(u) => {
                 let u = police.units().iter().find(|x| x.id == u).unwrap();

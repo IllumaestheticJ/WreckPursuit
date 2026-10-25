@@ -173,3 +173,26 @@ G_firm) is the default for every car on `lead/physics`:
 - scenario `world_traffic_soak`: 1 civilian collision (limit 0).
 - AI pace (measured limits, 4 seeds): lantern / hollins at skills 0.75 / 0.95 slower by up to
   ~8 s, more wall hits at hollins.
+
+## 2026-10-25: direction changes on the keyboard (row 171)
+Owner: "the cars should not be overriding directional changes on the keyboard — it's still going
+in complete opposite directions". The front wheels were already key = key; the delay was the plain
+rack's reversal, which crossed back to the centre at the release rate (`t_return_s` 0.33 s) before
+going out at `t_full_s`. New `PlainSteer::t_reverse_s` (default 0.08 s, `lab_w` keeps 0.33 s): with
+the other key held the rack is back at the centre in 0.08 s; released keys still take 0.33 s.
+
+Key → yaw lag (time from a key change until the yaw rate turns the key's way; keyboard preset,
+slaloms of 0.5 / 0.8 / 1.2 s holds, 0 / 50 / 100 % throttle, mean of 40 / 80 / 120 / 160 km/h):
+
+| car | before (0.33 s) | after (0.08 s) |
+|---|---|---|
+| kestrel_ts | 0.42 s | 0.24 s |
+| rampart_50 | 0.47 s | 0.29 s |
+| hakone_gt | 0.45 s | 0.26 s |
+| ironside_440 | 0.54 s | 0.39 s |
+
+Sweep: 0.04 s → 0.26 s mean, 0.08 s → 0.30 s, 0.12 s → 0.33 s, 0.18 s → 0.38 s; no spins at
+0.04 / 0.08 (one at 0.12 / 0.18). Rear relaxation 1.0 alone changed nothing (0.494 s); yaw inertia 1.0 alone
+0.449 s. What is left on ironside_440 is the rear sliding 10–12° in a plain slalom (candidate G
+tyres), not the steering. Guard: `tests/key_reversal.rs`.
+

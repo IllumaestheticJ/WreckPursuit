@@ -305,7 +305,8 @@ pub struct PoliceStats {
     /// in time without appearing in a racer's view, or the pursuit ended).
     #[serde(default)]
     pub spikes_given_up: u32,
-    /// Spike cars that appeared out of view and drove in to their post (row 165).
+    /// Spike cars that appeared out of view and drove in to their post (row 165). Always 0
+    /// since 2026-10-24: spike cars no longer drive in (kept for saved stats).
     #[serde(default)]
     pub spike_drive_ins: u32,
     /// PIT attempts.
@@ -1185,7 +1186,7 @@ impl PoliceSystem {
     }
 
     /// Spike strips requested but not on the road yet: each waits for its car, which appears
-    /// at its post out of view or drives in to it, and is laid only then (row 165).
+    /// at its post while the post is out of view, and is laid only then (row 165).
     pub fn spike_strips_pending(&self) -> Vec<&SpikeStrip> {
         self.spike_runs.iter().map(|r| &r.strip).collect()
     }

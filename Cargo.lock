@@ -4922,6 +4922,7 @@ version = "0.1.0"
 dependencies = [
  "lint-determinism",
  "serde",
+ "serde_json",
  "wp_contracts",
  "wp_damage",
  "wp_math",

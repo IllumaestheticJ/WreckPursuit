@@ -33,6 +33,14 @@ pub struct PlainSteer {
     /// (reference ≈ 0.33). A reversal (one key released, the other pressed) runs at this rate
     /// back to centre, then at the [`PlainSteer::t_full_s`] rate out to the other side.
     pub t_return_s: f32,
+    /// Time for the rack to come back from full lock to centre while the **other** key is held
+    /// (a direction change), s. Then it goes out to the new side at the
+    /// [`PlainSteer::t_full_s`] rate. Released keys still return in
+    /// [`PlainSteer::t_return_s`]. Owner (2026-10-25): "the cars should not be overriding
+    /// directional changes on the keyboard": at the release rate a left-to-right change left
+    /// the wheels pointing left for a third of a second and the car kept turning the old way
+    /// for about half a second after the right key went down.
+    pub t_reverse_s: f32,
     /// Steering speed sensitivity, 0..=1 (the reference's "Steering speed sensitivity"; the
     /// owner's setting is 0.75). 0 = full lock at every speed.
     pub speed_sensitivity: f32,
@@ -231,6 +239,8 @@ impl Default for PlainSteer {
     fn default() -> Self {
         Self {
             trans_follow: false,
+            // A direction change brings the wheels back across the centre at once.
+            t_reverse_s: 0.08,
             drift_lock_extra: 0.0,
             over_rate: 1.0,
             counter_margin_deg: 0.0,
@@ -252,6 +262,7 @@ impl PlainSteer {
         Self {
             t_full_s: 0.28,
             t_return_s: 0.33,
+            t_reverse_s: 0.33,
             speed_sensitivity: 0.75,
             sens_ref_kmh: 113.0,
             sens_exponent: 2.0,
@@ -327,6 +338,12 @@ impl PlainSteer {
     fn rate_back(&self) -> f32 {
         1.0 / self.t_return_s.max(0.01)
     }
+
+    /// Rack slew toward centre with the other key held, units of full rack per second (never
+    /// slower than [`PlainSteer::rate_back`]).
+    fn rate_reverse(&self) -> f32 {
+        (1.0 / self.t_reverse_s.max(0.01)).max(self.rate_back())
+    }
 }
 
 /// `x^e` for `x >= 0` and `e` rounded to a half step in 1..=4, from multiplies and one `sqrt`
@@ -371,6 +388,23 @@ pub fn rack_of(center: f32, lock: f32, pull: f32) -> f32 {
 /// rate while heading toward the centre, at the full-lock rate while heading away from it
 /// (a reversal does both in one step if it crosses the centre).
 pub fn slew(rack: f32, target: f32, p: &PlainSteer, dt: f32) -> f32 {
+    slew_at(rack, target, p, p.rate_back(), dt)
+}
+
+/// [`slew`] for a held steer key `key` (−1..=1, + = right): with the key held to the other
+/// side of the centre from the rack (a direction change), the way back to the centre runs at
+/// the [`PlainSteer::t_reverse_s`] rate instead of the release rate.
+pub fn slew_key(rack: f32, target: f32, key: f32, p: &PlainSteer, dt: f32) -> f32 {
+    let reversing = key.abs() > crate::steering::STEER_DEADZONE && key * rack < 0.0;
+    let back = if reversing {
+        p.rate_reverse()
+    } else {
+        p.rate_back()
+    };
+    slew_at(rack, target, p, back, dt)
+}
+
+fn slew_at(rack: f32, target: f32, p: &PlainSteer, rate_back: f32, dt: f32) -> f32 {
     let target = target.clamp(-1.0, 1.0);
     let mut r = rack;
     let mut t = dt;
@@ -383,12 +417,12 @@ pub fn slew(rack: f32, target: f32, p: &PlainSteer, dt: f32) -> f32 {
         if toward_centre {
             // Heading back: stop at the target if it is on this side, else at the centre.
             let stop = if target * r > 0.0 { target } else { 0.0 };
-            let need = (stop - r).abs() / p.rate_back();
+            let need = (stop - r).abs() / rate_back;
             if need <= t {
                 r = stop;
                 t -= need;
             } else {
-                r += (stop - r).signum() * p.rate_back() * t;
+                r += (stop - r).signum() * rate_back * t;
                 t = 0.0;
             }
         } else {
@@ -546,7 +580,7 @@ pub fn update_center_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f
     };
     let target = counter_limited(target, inp, p, lock);
     let target = old_side_limited(target, inp, p, lock);
-    let rack = slew(rack, target, p, dt);
+    let rack = slew_key(rack, target, key, p, dt);
     -(rack + inp.pull) * lock
 }
 
@@ -840,6 +874,26 @@ mod tests {
             rack = slew(rack, target, p, DT);
         }
         rack
+    }
+
+    #[test]
+    fn a_direction_change_crosses_the_centre_in_t_reverse() {
+        let p = PlainSteer::default();
+        let key_run = |mut rack: f32, key: f32, ticks: usize| {
+            for _ in 0..ticks {
+                rack = slew_key(rack, key, key, &p, DT);
+            }
+            rack
+        };
+        // Full right lock, left key held: at the centre after 0.08 s (19.2 ticks), not before.
+        assert!(key_run(1.0, -1.0, 18) > 0.0);
+        assert!(key_run(1.0, -1.0, 20) < 0.0);
+        // Then out to the left at the t_full rate: full left 0.08 + 0.28 s after the change.
+        assert!(key_run(1.0, -1.0, 84) > -1.0);
+        assert_eq!(key_run(1.0, -1.0, 88), -1.0);
+        // Released keys still come back in t_return (0.33 s = 79.2 ticks).
+        assert!(key_run(1.0, 0.0, 78) > 0.0);
+        assert_eq!(key_run(1.0, 0.0, 80), 0.0);
     }
 
     #[test]

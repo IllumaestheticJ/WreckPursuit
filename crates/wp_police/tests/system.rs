@@ -34,6 +34,14 @@ fn city() -> &'static (RoadGraph, Arc<wp_world::CityMap>) {
     })
 }
 
+/// The builtin config with spike cars allowed to appear in plain view from 300 m (data:
+/// 600 m): the small procedural city's straights are too short for 600 m sites.
+fn small_city_spikes() -> PoliceConfig {
+    let mut cfg = PoliceConfig::builtin();
+    cfg.tools.spikes.appear_far_m = 300.0;
+    cfg
+}
+
 impl Harness {
     fn new(hour: f32, seed: u64) -> Self {
         Self::with_mode(hour, seed, DamageMode::Arcade)
@@ -153,7 +161,7 @@ fn phase_change_adjusts_presence() {
 
 #[test]
 fn heat_violation_wanted_pursuit_and_captain_tools() {
-    let mut h = Harness::new(12.0, 3);
+    let mut h = Harness::with_config(12.0, 3, DamageMode::Arcade, small_city_spikes());
     h.police.set_human_captain(true);
     h.speed = 20.0;
     h.run(1.0, &[]);
@@ -1792,7 +1800,7 @@ fn unbodied_spike_unit_is_withdrawn_with_its_strip() {
 fn ai_spikes_hit_a_racer_that_keeps_its_road() {
     let mut hits = 0;
     for seed in 1..=12u64 {
-        let mut h = Harness::new(12.0, 100 + seed);
+        let mut h = Harness::with_config(12.0, 100 + seed, DamageMode::Arcade, small_city_spikes());
         h.speed = 30.0;
         h.run(1.0, &[]);
         h.police.begin_pursuit(RACER);

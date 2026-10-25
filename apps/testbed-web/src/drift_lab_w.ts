@@ -47,6 +47,7 @@ export function driftLabWScenario(freeDriveJson: string): string {
 const FIELDS: Record<string, { label: string; min: number; max: number; step: number; scale?: number; unit?: string; hint: string }> = {
   t_full_s: { label: "full lock time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "centre → full lock with a key held (reference ≈ 0.28 s)" },
   t_return_s: { label: "return time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "full lock → centre after release (reference ≈ 0.33 s)" },
+  t_reverse_s: { label: "direction change time", min: 0.02, max: 0.8, step: 0.01, unit: "s", hint: "full lock → centre with the other key held (default 0.08 s, so a left → right change turns the car at once; 0.33 s = the release rate, the car kept turning the old way ~0.5 s)" },
   speed_sensitivity: { label: "speed sensitivity", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "less lock at speed (the owner's reference setting: 75 %)" },
   sens_ref_kmh: { label: "sens. ref speed", min: 40, max: 250, step: 1, unit: "km/h", hint: "speed where lock = 1 / (1 + sensitivity) (75 %: 57 % lock)" },
   trans_catch_gain: { label: "transition: new-side catch", min: 0, max: 1.2, step: 0.05, scale: 100, unit: "% of travel", hint: "step 13: right after a lift-flick crosses onto the new side, a countersteer key points the wheels at this share of the front axle's travel at once (lab A/B only: off for players since row 142, as the whole transition rack; was 80 %; past 100 % over-catches and swings back). Settles the new drift in ~0.5 s instead of ~1.5 s" },

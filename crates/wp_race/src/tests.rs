@@ -239,6 +239,7 @@ fn server_reset_is_not_a_teleport() {
         throttle: 1.0,
         gear: 3,
         engine_rpm: 5000.0,
+        up_z: 1.0,
     };
     j.observe(green, &[sample(1, 50.0), sample(2, 50.0)], &[]);
     // Racer 1 is reset 40 m back by the server; racer 2 "moves" 40 m on its own.
@@ -273,6 +274,7 @@ fn a_stranded_ai_racer_is_put_back_after_its_grace_and_the_player_is_not() {
         throttle: 0.0,
         gear: 1,
         engine_rpm: 1000.0,
+        up_z: 1.0,
     };
     // Both on course at y = 120, then both 40 m to the side.
     for id in [1, 2] {
@@ -303,6 +305,52 @@ fn a_stranded_ai_racer_is_put_back_after_its_grace_and_the_player_is_not() {
 }
 
 #[test]
+fn a_flipped_ai_racer_is_righted_on_the_course_and_the_player_is_not() {
+    // On its roof inside the corridor (never off course): only the AI entrant is reset,
+    // after `FLIPPED_RESET_S`, where it lies.
+    let mut j = judge(RaceKind::Sprint, sprint_course());
+    j.set_stranded_reset(&[EntityId(1)]);
+    for id in [1, 2] {
+        j.enter(RacerEntry {
+            racer: EntityId(id),
+            redline_rpm: 0.0,
+        })
+        .unwrap();
+    }
+    let green = j.start(0).unwrap();
+    let at = |id: u32, up_z: f32| RacerSample {
+        racer: EntityId(id),
+        pos: [0.0, 120.0, 0.0],
+        vel: [0.0, 0.0, 0.0],
+        speed_mps: 0.0,
+        throttle: 0.0,
+        gear: 1,
+        engine_rpm: 1000.0,
+        up_z,
+    };
+    for id in [1, 2] {
+        j.relocate(EntityId(id), [0.0, 120.0, 0.0], green);
+    }
+    j.observe(green, &[at(1, 1.0), at(2, 1.0)], &[]);
+    let limit = (crate::judge::FLIPPED_RESET_S / wp_contracts::PHYSICS_DT) as u64;
+    let mut resets = Vec::new();
+    for k in 1..=limit + 240 {
+        j.observe(green + k, &[at(1, -0.95), at(2, -0.95)], &[]);
+        let r = j.drain_resets();
+        if !r.is_empty() {
+            assert!(k > limit, "reset at tick {k}, limit {limit}");
+        }
+        resets.extend(r);
+    }
+    assert_eq!(resets.len(), 1, "{resets:?}");
+    assert_eq!(resets[0].racer, EntityId(1));
+    assert!((resets[0].pos[1] - 120.0).abs() < 1e-3, "{:?}", resets[0]);
+    // Upright again: the count starts over.
+    j.observe(green + limit + 241, &[at(1, 1.0), at(2, 1.0)], &[]);
+    assert!(j.drain_resets().is_empty());
+}
+
+#[test]
 fn reset_mode_puts_an_off_course_racer_back_instead_of_a_dq() {
     let mut j = judge(RaceKind::Sprint, sprint_course());
     j.set_reset_off_course(true);
@@ -323,6 +371,7 @@ fn reset_mode_puts_an_off_course_racer_back_instead_of_a_dq() {
         throttle: 0.0,
         gear: 1,
         engine_rpm: 1000.0,
+        up_z: 1.0,
     };
     // On course at y = 120, then parked 40 m to the side for 4 s (grace is 3 s).
     // (Both moves are announced so they are not judged as teleports.)
