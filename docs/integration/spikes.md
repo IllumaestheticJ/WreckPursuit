@@ -129,3 +129,5 @@ spawned out of view and drove up to its post in front of the racer (`spike_drive
   because its straights are too short for 600 m sites. `spikes_manned` and the scenario pop-in
   audit (`spawns_in_view`) accept tool cars that appear in sight at `appear_far_m` or more.
   Goldens are unchanged.
+- Re-blessed `jam_pursuit_grid` and `jam_pursuit_vesper` (release-only goldens). Their chases
+  place spikes, so the hashes moved. Every expectation still passes.
