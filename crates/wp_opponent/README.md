@@ -197,7 +197,10 @@ ramming, so the shipped table hand-sets `ram_min_nerve` to 1.2: only drivers wit
 `aggression + risk` above 1.2 ram. Stage 2 also picked `civilian_headway_scale` 1.15 (+0.9
 score, just over the 0.5 noise margin); it made `wp_wasm`'s
 `a_racer_never_gives_up_after_a_spin_or_a_crash` street challenge time out (the racer
-trails slow civilians after its shove), so it is hand-set back to 1.0. Re-running `stage2`
+trails slow civilians after its shove), so it is hand-set back to 1.0. With `RaceConfig::ram_traffic`
+(unafraid of traffic, PR #76, ported on top of the training) stage 2's careful-driver
+civilian numbers no longer fit the owner's ask, so `civilian_margin_scale` is 1.0 too; both
+scales still apply to the careful driver (free roam). Re-running `stage2`
 overwrites both; restore them by hand. Spike strips: 8 dodges, no punctures in any stage 2 run;
 `spike_clearance_m` 0.4–0.9 made no difference (one 4 m strip on half the road).
 
