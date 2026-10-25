@@ -153,6 +153,8 @@ pub struct CarView {
     /// Body colour 0xRRGGBB: the paint it was sold or resprayed in, else a fixed factory colour
     /// picked by uid ([`car_paint`]), so the car looks the same in every view and session.
     pub paint: u32,
+    /// What a respray at the paint shop costs.
+    pub respray_fee: Money,
     /// Class.
     pub class: VehicleClass,
     /// The career's active car.
@@ -920,6 +922,7 @@ impl Career {
             name,
             rare: c.variant_name.is_some(),
             paint: car_paint(c),
+            respray_fee: self.econ.respray_fee(c),
             class: c.class,
             active: acct.active_car == Some(c.uid),
             location: match c.location {
@@ -1513,6 +1516,17 @@ impl Career {
     pub fn install_mod(&mut self, uid: CarUid, mod_id: &str) -> Result<(), String> {
         self.guard()?;
         self.change_mods(uid, |e, acct, mode| e.install_mod(acct, uid, mod_id, mode))
+    }
+
+    /// Respray car `uid` in `paint` (0xRRGGBB) at the paint shop (see `Economy::respray`).
+    /// Returns the fee paid.
+    pub fn respray(&mut self, uid: CarUid, paint: u32) -> Result<Money, String> {
+        self.guard()?;
+        let (fee, _) = self
+            .econ
+            .respray(&mut self.profile.account, uid, paint)
+            .map_err(e2s)?;
+        Ok(fee)
     }
 
     /// Remove a mod (refund at resale value).
@@ -2330,6 +2344,15 @@ pub fn career_set_tune(uid: u32, tune_json: &str) -> Result<String, JsValue> {
 pub fn career_install_mod(uid: u32, mod_id: &str) -> Result<String, JsValue> {
     with_career(|c| {
         c.install_mod(CarUid(uid), mod_id)?;
+        view_json(c)
+    })
+}
+
+/// Respray car `uid` in `paint` (0xRRGGBB) at the paint shop. Returns the view JSON.
+#[wasm_bindgen]
+pub fn career_respray(uid: u32, paint: u32) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.respray(CarUid(uid), paint)?;
         view_json(c)
     })
 }

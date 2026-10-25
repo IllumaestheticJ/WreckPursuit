@@ -611,6 +611,8 @@ export const sim = {
   careerSetActive: (uid: number): CareerView => JSON.parse(wasm.career_set_active(uid)),
   careerInstall: (uid: number, modId: string): CareerView => JSON.parse(wasm.career_install_mod(uid, modId)),
   careerUninstall: (uid: number, modId: string): CareerView => JSON.parse(wasm.career_uninstall_mod(uid, modId)),
+  /** Paint shop: respray a career car in 0xRRGGBB (pays `CarView.respray_fee`). */
+  careerRespray: (uid: number, paint: number): CareerView => JSON.parse(wasm.career_respray(uid, paint)),
   /** Set a career car's free tune (no money). */
   careerSetTune: (uid: number, tune: CarTune): CareerView => JSON.parse(wasm.career_set_tune(uid, JSON.stringify(tune))),
   careerQuote: (uid: number, req: ShopRequest): RepairQuote => JSON.parse(wasm.career_quote_json(uid, JSON.stringify(req))),
