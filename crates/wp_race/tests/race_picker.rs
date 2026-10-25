@@ -28,8 +28,11 @@ fn assert_strips_manned(sim: &Sim, id: &str) {
             .unwrap_or_else(|| panic!("{id}: spike strip {:?} without its unit", s.id));
         let post = s.post.unwrap_or(s.site.pos);
         let d = (u.body.pos[0] - post[0]).hypot(u.body.pos[1] - post[1]);
+        // The police lift a strip whose unit is past the leash on their next tick, so a unit
+        // shoved just past it in this tick's physics (Loop 9 day with racers that ram the
+        // police: 15.0 m at tick 36193) still has its strip down for one tick.
         assert!(
-            d <= wp_police::dispatch::SPIKE_UNIT_LEASH_M,
+            d <= wp_police::dispatch::SPIKE_UNIT_LEASH_M + 1.0,
             "{id}: spike strip {:?}'s unit {:.1} m from its post at tick {}",
             s.id,
             d,

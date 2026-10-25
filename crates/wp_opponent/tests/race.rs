@@ -484,9 +484,14 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
         ..Setup::default()
     };
     let mut speeds = [0.0f32; 3];
+    // When each car last stood still (< 1 m/s), s: pull-over time only counts while rolling.
+    let mut last_still_s = [0.0f32; 3];
     let out = common::run(&setup, &wp_opponent::NoPolice, &mut |sim, _| {
         for (k, v) in sim.vehicles().iter().take(3).enumerate() {
             speeds[k] = v.vehicle.state().speed_mps;
+            if speeds[k].abs() < 1.0 {
+                last_still_s[k] = sim.tick() as f32 / 240.0;
+            }
         }
     });
     let mut field = out.field;
@@ -529,7 +534,10 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
                 // 30 s pull-over limit; clear of junctions and bends): main + the trained
                 // racers, racer 3 booked at 138 s of 150. The cap is a speed target, so allow
                 // the controller's overshoot on it (main after #89 in a debug build: racer 1
-                // booked at 137.7 s still at 6.8 m/s).
+                // booked at 137.7 s still at 6.8 m/s). The field counts only time spent
+                // rolling towards its pull-over limit, so count from when the car last stood
+                // still if that is later (racer 1 booked at 67 s, held in a queue until 137 s,
+                // then rolling to the kerb at 6 m/s).
                 let k = (s.entity.0 - 1) as usize;
                 let booked_s = events.iter().find_map(|e| match e {
                     OpponentEvent::Busted { entity, time_s } if *entity == s.entity => {
@@ -537,7 +545,7 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
                     }
                     _ => None,
                 });
-                let pulling_over = booked_s.is_some_and(|t| end_s - t < 35.0);
+                let pulling_over = booked_s.is_some_and(|t| end_s - t.max(last_still_s[k]) < 35.0);
                 let limit = if pulling_over { 8.0 } else { 1.0 };
                 assert!(
                     speeds[k].abs() < limit,
