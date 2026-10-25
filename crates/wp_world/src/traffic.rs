@@ -679,6 +679,9 @@ pub struct Agent {
     pub yielding: bool,
     /// Disabled (wrecked or lost control): stopped with hazard lights.
     pub disabled: bool,
+    /// Edging around a tracked vehicle parked in the junction box this step
+    /// ([`blocked::BOX_SQUEEZE_S`]); it does not back out meanwhile.
+    box_squeeze: bool,
     /// Visual variant for the renderer.
     pub variant: u8,
     /// LOD.
@@ -2189,6 +2192,7 @@ impl Traffic {
                 v0 = v0.min(blocked::PASS_MPS);
             }
             let mut lat_target = 0.0f32;
+            let mut box_squeeze = false;
             let mut acc = f32::INFINITY;
             let mut emergency = false;
             // What caps the acceleration (for the blocked-vehicle logic).
@@ -2589,12 +2593,46 @@ impl Traffic {
                 };
                 let ext = 2.25 * geom::dot(tf, right).abs() + 0.95 * geom::dot(tf, pose.f).abs();
                 let is_obs = pass.is_some_and(|b| b.obs == ObsRef::Tracked(t.entity.0));
+                let still = geom::dot(tv, tv) < 0.25;
+                // In the junction box behind a vehicle parked there: edge around it on the side
+                // with the smaller shift, rather than wait for it to leave; held, past the box
+                // too, until the body is past it.
+                let clear = CAR_WIDTH_M * 0.5 + ext + blocked::BOX_SQUEEZE_MARGIN_M;
+                if still
+                    && (seg.is_connector() || a.box_squeeze)
+                    && long > -CAR_LENGTH_M
+                    && long < 20.0
+                    && latd.abs() < clear + 0.3
+                    && self.tracked_still_s(t.entity.0) >= blocked::BOX_SQUEEZE_S
+                {
+                    let shift = if latd >= 0.0 {
+                        latd - clear
+                    } else {
+                        latd + clear
+                    };
+                    if shift.abs() <= blocked::BOX_SQUEEZE_MAX_M {
+                        box_squeeze = true;
+                        lat_target = a.lat + shift;
+                        v0 = v0.min(blocked::BOX_SQUEEZE_MPS);
+                        // Creep up to it while sliding over (a physical car only steers aside
+                        // while rolling) until the body is clear of it.
+                        if long > 0.0 && latd.abs() < clear - 0.1 {
+                            let g = long - CAR_LENGTH_M - 0.5;
+                            cap(
+                                &mut acc,
+                                &mut bind,
+                                idm(v, v0, g, 0.0, &p),
+                                Bind::Tracked(k, Wait::Line, g),
+                            );
+                        }
+                        continue;
+                    }
+                }
                 if long > 0.0
                     && long < 80.0
                     && latd.abs() < CAR_WIDTH_M * 0.5 + ext + 0.3
                     && !is_obs
                 {
-                    let still = geom::dot(tv, tv) < 0.25;
                     let cls = if still {
                         self.classify_tracked(map, i, long, self.tracked_still_s(t.entity.0))
                     } else {
@@ -2864,6 +2902,7 @@ impl Traffic {
             a.start_wait_s = start_wait;
             a.acc = acc.clamp(-9.0, p.max_accel);
             a.lat_target = lat_target;
+            a.box_squeeze = box_squeeze;
             a.wait = if v < 0.5 { cls } else { Wait::Free };
             a.blocked_s = if cls == Wait::Obstructed && v < 0.5 {
                 a.blocked_s + TRAFFIC_DT
@@ -3976,6 +4015,7 @@ impl Traffic {
                 box_s: 0.0,
                 metric_stop_s: 0.0,
                 man_still_s: 0.0,
+                box_squeeze: false,
                 siren_hold_s: 0.0,
                 lc_block_until: 0,
                 permit_block_until: 0,

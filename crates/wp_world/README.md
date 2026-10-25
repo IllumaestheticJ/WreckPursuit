@@ -694,6 +694,10 @@ plus rules in `traffic.rs` / `traffic/blocked.rs`).
   (`reroute_around_box`), else the queue turns around / backs out from the tail and the lane is
   marked blocked so upstream cars re-route (now on multi-lane roads too when the obstruction is
   at the line or the wait is long). An obstructed car gives up its permit (no new one for 10 s).
+  A car already inside the box behind one that has stood for 5 s edges around it at 2 m/s,
+  shifting up to 3 m off its path with 0.4 m clearance (`BOX_SQUEEZE_*`), instead of backing out
+  into the queue behind it (jam_pursuit_vesper: a police car parked in a junction kept the car
+  behind it there for minutes; test `a_car_parked_in_a_junction_box_is_edged_around`).
 - *Sirens*: a driver held at the line by a unit heading for the junction goes after 8 s
   (`SIREN_JUNCTION_HOLD_MAX_S`); a pulled-over driver gives up on a unit that stands or crawls
   (< 2 m/s) behind it after 8 s (`STALL_S`, was 15 s); with a unit standing beside it

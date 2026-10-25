@@ -24,20 +24,25 @@ So a rear-ender at roughly 35 km/h over the other car's speed, or a wall at 18 k
 
 The testbed already blinks hazards on promoted cars from the agent flags; no renderer change.
 
-## Changes outside my crates
-None.
-
 ## Scenario impact
-- `jam_pursuit_grid`: hashes change (struck cars stop instead of driving on); gates pass.
-- `jam_pursuit_vesper`: hashes change and the row 85 gates fail (max stop 114 s, queue 18).
-  Traced: no wreck is involved. The changed chase leaves police unit entity 2 (siren off)
-  parked in the junction box at about (-8, 153) from ~350 s to the end; the civilian behind
-  it in the box (agent 2076) waits there for good and the northbound queue spills ~100 m back
-  through the (0, 50) junction. Wrecks from this change are all despawned out of sight well
-  before. On main the same scenario passes, so it is the chase course, not the jam logic,
-  that changed.
+- `jam_pursuit_grid`, `jam_pursuit_vesper`: hashes change (struck cars stop instead of driving
+  on); goldens re-blessed.
+- `jam_pursuit_vesper` first failed its row 85 gates (max stop 114 s, queue 18). No wreck was
+  involved: the changed chase left police unit entity 2 parked in a junction box at about
+  (-8, 153) from ~350 s to the end, and the civilian already in the box behind it (agent
+  2076) could only try to back out into the queue behind it, which kept refilling. The queue
+  spilled ~100 m back through the (0, 50) junction.
+- Fix (traffic side, police unchanged): a car inside the box behind a tracked vehicle that has
+  stood for `BOX_SQUEEZE_S` = 5 s edges around it (`BOX_SQUEEZE_MAX_M` 3 m, 0.4 m clearance,
+  2 m/s) and does not back out meanwhile. Vesper passes again; grid's pending gates are as
+  before (queue 14, was 15 on main).
+- Test `wp_world/tests/blocked.rs::a_car_parked_in_a_junction_box_is_edged_around`: longest
+  stand behind the parked car 5.2 s (48.6 s without the squeeze), no contact.
+
+## Changes outside my crates
+None (wp_world and wp_sim only).
 
 ## Known gaps
 - Kinematic (far) traffic has no collider and cannot be hit; unchanged.
-- Runs where a traffic car is hit hard now diverge from before (the car stops instead of
-  driving on); any golden hash covering such a hit needs re-blessing.
+- A car still at the stop line (not yet in the box) behind a parked vehicle keeps the old
+  behaviour: another exit, or turn around / back out from the tail of the queue.
