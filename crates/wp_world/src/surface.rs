@@ -1844,12 +1844,23 @@ pub fn render_spacing(t: &Heightfield) -> f32 {
     t.cell_m * (TERRAIN_RENDER_M / t.cell_m - 1e-3).ceil().max(1.0)
 }
 
+/// Grid spacing the terrain of `map` is drawn (and collided off the roads) at: a touge pass
+/// (`crate::touge`, a small map) at its own resolution, so its roadside ditches, cut banks and
+/// drops are drawn as solid as they are; every other city at [`render_spacing`].
+pub fn drawn_spacing(map: &CityMap, t: &Heightfield) -> f32 {
+    if crate::touge::is_touge(&map.net.id) {
+        t.cell_m
+    } else {
+        render_spacing(t)
+    }
+}
+
 /// The terrain the greybox draws (`None` without terrain): `net.terrain` on a
 /// [`TERRAIN_RENDER_M`] grid ([`Heightfield::coarse_under`]), following the fine heights
 /// except where it must stay under the ground roads, sidewalks and lots are laid on.
 pub fn drawn_terrain(map: &CityMap) -> Option<Heightfield> {
     let t = map.net.terrain.as_ref()?;
-    Some(t.coarse_under(render_spacing(t), &road_band(map, t)))
+    Some(t.coarse_under(drawn_spacing(map, t), &road_band(map, t)))
 }
 
 /// The terrain physics collides with, on the fine grid of `net.terrain` (`None` without
@@ -1867,7 +1878,7 @@ pub fn collision_terrain(map: &CityMap) -> Option<Heightfield> {
         return Some(t.clone());
     }
     let keep = road_band(map, t);
-    let drawn = t.coarse_under(render_spacing(t), &keep);
+    let drawn = t.coarse_under(drawn_spacing(map, t), &keep);
     let mut out = t.clone();
     for j in 0..t.ny {
         for i in 0..t.nx {

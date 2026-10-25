@@ -66,9 +66,10 @@ fn main() {
             let build = touge::generate_builtin(id).expect("touge pass");
             city_import::write_city_files(&build.net, &out, json).expect("write city files");
             println!(
-                "{id}: {:.0} m, {} K-rail sections -> {}",
+                "{id}: {:.0} m, {} guard rail sections, {} trees -> {}",
                 build.track.length_m,
-                build.krails.len(),
+                build.rails.len(),
+                build.track.trees,
                 out.display()
             );
         }
