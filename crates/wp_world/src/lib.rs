@@ -24,6 +24,7 @@
 #![warn(missing_docs)]
 
 pub mod builder;
+pub mod car_park;
 pub mod clock;
 pub mod covered;
 pub mod density;
@@ -173,11 +174,13 @@ impl World {
         map.time = cfg.start_time;
         let traffic = Traffic::new(&map, cfg.traffic.clone(), cfg.seed);
         let parked = if cfg.parked_cars {
-            // Kerbside cars (never across a driveway mouth), then the driveway cars
-            // (residential lots, playtest row 95).
+            // Kerbside cars (never across a driveway mouth or a car park's bays), then the
+            // driveway cars (residential lots, playtest row 95).
             let mut cars = props::parked_cars(&map, cfg.seed);
             cars.retain(|c| !residential::blocks_driveway(&map.net, c.pos));
             cars.extend(residential::driveway_cars(&map, cfg.seed));
+            // And the car parks' bays (rest stops).
+            cars.extend(props::car_park_cars(&map, cfg.seed));
             cars
         } else {
             Vec::new()
@@ -465,6 +468,13 @@ impl World {
     /// Record the sim-loop entity id of a (physical) agent.
     pub fn set_agent_entity(&mut self, agent: AgentId, entity: Option<wp_contracts::EntityId>) {
         self.traffic.set_entity(agent, entity);
+    }
+
+    /// Report a collision that changed physical agent `agent`'s velocity by `dv_mps` this
+    /// tick: a hard one ([`traffic::HARD_IMPACT_DV_MPS`]) disables the car, which stops with
+    /// hazard lights on and stays stopped. Returns whether this report disabled it.
+    pub fn report_agent_impact(&mut self, agent: AgentId, dv_mps: f32) -> bool {
+        self.traffic.report_impact(agent, dv_mps)
     }
 
     /// Push damage effects to a physical agent (a dead engine / lost wheel disables it).

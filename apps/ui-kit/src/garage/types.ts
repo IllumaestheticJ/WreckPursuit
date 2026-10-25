@@ -78,7 +78,14 @@ export interface RepairLineView {
 export interface CarView {
   uid: number;
   def_id: string;
+  /** The variant's name for a rare variant. */
   name: string;
+  /** Bought as a rare variant. */
+  rare: boolean;
+  /** Body colour 0xRRGGBB (its own paint, else a factory colour fixed by its uid). */
+  paint: number;
+  /** What a respray at the paint shop costs. */
+  respray_fee: number;
   class: string;
   active: boolean;
   location: "Garage" | "Impound";
@@ -138,6 +145,8 @@ export interface ListingView {
   grade: ListingGrade;
   price: number;
   rare: boolean;
+  /** Factory paint 0xRRGGBB (the car keeps it once bought). */
+  paint: number;
   mods: string[];
   condition: number | null;
   /** Repair All at a legit residential shop, tyres excluded. */
@@ -472,6 +481,9 @@ export interface WorkshopScreen {
 }
 
 /** What the workshop screen calls; every call returns the new screen (throws on refusal). */
+export type { PaintShopApi } from "./PaintShop";
+import type { PaintShopApi } from "./PaintShop";
+
 export interface WorkshopApi {
   screen(): WorkshopScreen;
   remove(slot: string): WorkshopScreen;
@@ -486,6 +498,8 @@ export interface WorkshopApi {
   clearWay(slot: string): WorkshopScreen;
   /** Pay the mechanic to fit a part in `slot` (from the inventory, or bought now). */
   mechanic(slot: string, source: MechanicSource, sellOld: boolean): MechanicResult;
+  /** The paint shop (colours, vinyls, cosmetic parts); absent where there is none. */
+  paintShop?: PaintShopApi;
 }
 
 /** Where the part the mechanic fits comes from. */

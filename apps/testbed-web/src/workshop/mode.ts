@@ -144,6 +144,31 @@ export class WorkshopMode {
         this.after(r.workshop);
         return r;
       },
+      paintShop: {
+        car: () => {
+          const car = sim.careerView().cars.find((c) => c.uid === uid);
+          if (!car) throw new Error("the car is gone");
+          return car;
+        },
+        mods: () => sim.careerMods(uid),
+        respray: (paint) => {
+          sim.careerRespray(uid, paint);
+          // The paint is saved on the car; no rebuild needed, just repaint the view.
+          this.deps.playerView()?.setPaint(paint);
+          return this.after(sim.careerWorkshop(uid), false);
+        },
+        install: (id) => (sim.careerInstall(uid, id), this.after(sim.careerWorkshop(uid))),
+        uninstall: (id) => (sim.careerUninstall(uid, id), this.after(sim.careerWorkshop(uid))),
+        previewPaint: (paint) => {
+          const car = sim.careerView().cars.find((c) => c.uid === uid);
+          const hex = paint ?? car?.paint;
+          if (hex !== undefined) this.deps.playerView()?.setPaint(hex);
+        },
+        previewMods: (mods) => {
+          const real = sim.careerView().cars.find((c) => c.uid === uid)?.mods.map((m) => m.id) ?? [];
+          this.deps.playerView()?.setLook(mods ?? real, true);
+        },
+      },
     };
     const host: WorkshopHost = {
       highlight: (slots) => this.highlight(slots),

@@ -43,9 +43,17 @@ npm run typecheck
 | `e2e/signals.mjs` | `npm run e2e:signals`: traffic turn signals — a car whose draw record signals right / left blinks that side's corner lamps (lit and unlit frames, read back from the fleet instance or VehicleView), never the other side; hazards light both; the player's cosmetic stalk (`-` / `=`) |
 | `e2e/city_v2_shots.mjs` | Port Vesper v2 screenshots → `docs/media/city-v2/` (`node e2e/city_v2_shots.mjs [dir]`) |
 
-Cities: the "city" box (free drive) and the night run use the city selector — Port Vesper v2
-(`vesper_v2`, hills, default) or the flat grid (`procedural_12x12`); URL `?city=vesper_v2` or
-`?city=procedural_12x12` opens free drive in that city (ticks the box), `?chase=1` the chase.
+Cities: the game has one world, Port Vesper and Ashpeak County as one connected map (`ashpeak`,
+owner 2026-10-25). Night run, rainy night, free drive, free roam, street races and career runs
+all take place in it, and the player picks the city they start in: the start menu's "Spawn in"
+picker (Port Vesper, Ashpeak City, Harnell Crossing; `wp_wasm::scenario::SPAWNS`, remembered in
+`wp.menu.map.v1`) or the developer panel's "spawn" box. The session spawns the player on the
+race start grid nearest the chosen city's anchor (`scenario::spawn_grid`; Port Vesper keeps the
+old default, the map's first grid). The developer panel's city selector also offers the flat
+test grid (`procedural_12x12`); Port Vesper on its own (`vesper_v2`) is no longer offered.
+URL `?city=ashpeak` (`?city=vesper_v2` opens the world too) or `?city=procedural_12x12` opens
+free drive in that city (ticks the box), `?spawn=ashpeak_city` picks the spawn, `?chase=1` the
+chase.
 The greybox is `data/city/<sim.cityId()>.greybox.glb` (base64 fallback `.greybox.b64.txt` on the
 published build; a failed load is retried on the next session in that city). Automation: `__wp.lookAt(from, to)` places a fixed
 orbit camera in sim coordinates, `__wp.setClip(near, far)`.

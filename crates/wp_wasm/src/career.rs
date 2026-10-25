@@ -146,8 +146,15 @@ pub struct CarView {
     pub uid: u32,
     /// Car id (`data/cars`).
     pub def_id: String,
-    /// Display name.
+    /// Display name (the variant's name for a rare variant).
     pub name: String,
+    /// A rare variant (bought as one from a lot).
+    pub rare: bool,
+    /// Body colour 0xRRGGBB: the paint it was sold or resprayed in, else a fixed factory colour
+    /// picked by uid ([`car_paint`]), so the car looks the same in every view and session.
+    pub paint: u32,
+    /// What a respray at the paint shop costs.
+    pub respray_fee: Money,
     /// Class.
     pub class: VehicleClass,
     /// The career's active car.
@@ -264,6 +271,8 @@ pub struct ListingView {
     pub tread: [f32; 4],
     /// Flat tyres (visible).
     pub flat: [bool; 4],
+    /// Factory paint 0xRRGGBB (drawn on the lot; the car keeps it once bought).
+    pub paint: u32,
     /// Performance as built (with the variant's mods).
     pub stats: Option<StatsView>,
     /// Sold today.
@@ -889,9 +898,12 @@ impl Career {
                 price: l.total,
             })
             .collect();
-        let name = base_car(&c.def_id)
-            .map(|l| l.def.display_name)
-            .unwrap_or_else(|_| c.def_id.clone());
+        // A rare variant keeps the name it was sold under.
+        let name = c.variant_name.clone().unwrap_or_else(|| {
+            base_car(&c.def_id)
+                .map(|l| l.def.display_name)
+                .unwrap_or_else(|_| c.def_id.clone())
+        });
         let mods = c
             .mods
             .iter()
@@ -908,6 +920,9 @@ impl Career {
             uid: c.uid.0,
             def_id: c.def_id.clone(),
             name,
+            rare: c.variant_name.is_some(),
+            paint: car_paint(c),
+            respray_fee: self.econ.respray_fee(c),
             class: c.class,
             active: acct.active_car == Some(c.uid),
             location: match c.location {
@@ -1030,6 +1045,7 @@ impl Career {
             grade: l.grade,
             price: l.price,
             rare: l.variant.is_some(),
+            paint: l.paint,
             mods: l
                 .mods
                 .iter()
@@ -1159,6 +1175,8 @@ impl Career {
             tune: Default::default(),
             parts: None,
             tires: l.tires,
+            variant_name: None,
+            paint: None,
         };
         let estimate = model.repair_estimate(mode_table, &self.econ.price_table_for(&car));
         let (_, gross) = self.econ.price_lines(
@@ -1500,6 +1518,17 @@ impl Career {
         self.change_mods(uid, |e, acct, mode| e.install_mod(acct, uid, mod_id, mode))
     }
 
+    /// Respray car `uid` in `paint` (0xRRGGBB) at the paint shop (see `Economy::respray`).
+    /// Returns the fee paid.
+    pub fn respray(&mut self, uid: CarUid, paint: u32) -> Result<Money, String> {
+        self.guard()?;
+        let (fee, _) = self
+            .econ
+            .respray(&mut self.profile.account, uid, paint)
+            .map_err(e2s)?;
+        Ok(fee)
+    }
+
     /// Remove a mod (refund at resale value).
     pub fn uninstall_mod(&mut self, uid: CarUid, mod_id: &str) -> Result<(), String> {
         self.guard()?;
@@ -1821,7 +1850,10 @@ impl Career {
             .ok_or("the scenario has no player entity")?;
         first.car = car.def_id.clone();
         first.tune = vehicle_tune(car.tune);
-        first.police_heat = if sc.city == simcli::scenario::CitySpec::Flat {
+        // No heat on the flat lot or a touge pass (no police there; the carried heat waits
+        // for the next city run).
+        let touge = crate::touge::setup_for_scenario(&sc.name).is_some();
+        first.police_heat = if sc.city == simcli::scenario::CitySpec::Flat || touge {
             0.0
         } else {
             heat
@@ -1972,8 +2004,14 @@ impl Career {
             }
             None => self.reseat_active(start.car),
         }
+        // A touge battle has no police: it leaves the carried heat as it was.
+        let touge = crate::touge::setup_for_scenario(&s.scenario().name).is_some();
+        let carried = self.profile.carry.heat;
         self.econ
             .close_run(&mut self.profile, end, heat, bounty_cash, driven_ticks);
+        if touge {
+            self.profile.carry.heat = carried;
+        }
         let (progress, _) = self.update_progression();
         let ledger = self
             .profile
@@ -2319,6 +2357,15 @@ pub fn career_install_mod(uid: u32, mod_id: &str) -> Result<String, JsValue> {
     })
 }
 
+/// Respray car `uid` in `paint` (0xRRGGBB) at the paint shop. Returns the view JSON.
+#[wasm_bindgen]
+pub fn career_respray(uid: u32, paint: u32) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.respray(CarUid(uid), paint)?;
+        view_json(c)
+    })
+}
+
 /// Remove mod `mod_id` from car `uid`. Returns the view JSON.
 #[wasm_bindgen]
 pub fn career_uninstall_mod(uid: u32, mod_id: &str) -> Result<String, JsValue> {
@@ -2481,4 +2528,13 @@ pub fn career_next_night() -> Result<String, JsValue> {
 #[cfg(test)]
 pub(crate) fn set_career(career: Option<Career>) {
     CAREER.with(|c| *c.borrow_mut() = career);
+}
+
+/// A career car's body colour: its own paint, or (cars bought before paint was saved, dealer
+/// and floor cars) a factory colour fixed by its uid, never by the view or the session.
+pub fn car_paint(c: &wp_economy::OwnedCar) -> u32 {
+    c.paint.unwrap_or_else(|| {
+        let n = wp_economy::FACTORY_PAINTS.len();
+        wp_economy::FACTORY_PAINTS[c.uid.0 as usize % n]
+    })
 }

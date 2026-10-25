@@ -132,6 +132,18 @@ pub struct PriceTables {
     pub repair_parts_fraction: f32,
     /// Clamp on `car_value / class.reference_value` when scaling parts prices.
     pub value_factor_clamp: [f32; 2],
+    /// Extra cost of heavy damage: each billed line is × `1 + heavy_damage_markup × severity²`,
+    /// so a scrape barely changes while a crushed part (more hours straightening, harder to
+    /// source) costs up to `1 + heavy_damage_markup` times the base price. 0 when absent.
+    #[serde(default)]
+    pub heavy_damage_markup: f32,
+    /// Whole-bill multiplier for rebuilding a car written off as a total loss (frame jig,
+    /// strip-down, re-shell). 1 when absent.
+    #[serde(default = "one")]
+    pub total_loss_markup: f32,
+    /// Full respray on the reference Compact (× class `parts_scale`; `Economy::respray_fee`).
+    #[serde(default = "respray_base")]
+    pub respray_base: f32,
     /// Parts cost to replace each region on the class-reference Compact.
     pub region_parts: BTreeMap<BodyRegion, f32>,
     /// Parts cost to replace each component on the class-reference Compact.
@@ -146,6 +158,14 @@ pub struct PriceTables {
     pub scrap: ScrapPricing,
     /// Insurance tiers keyed by id.
     pub insurance: BTreeMap<String, InsuranceTier>,
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+fn respray_base() -> f32 {
+    900.0
 }
 
 /// Pricing for one vehicle class.

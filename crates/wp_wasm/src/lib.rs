@@ -20,17 +20,17 @@
 //! | scenario | `scenario_json()`, `scenario_result()` |
 //! | crash replay (lead) | `crash_take()`, `crash_tuning_json()`, `crash_tuning_set(json)`, `crash_detect_enable(on)`, `crash_buffer_ticks()`, `crash_replay_start(seq)`, `crash_replay_active()`, `crash_replay_stop()` — see [`crash_replay`] |
 //! | touge | `touge_list_json()`, `touge_menu_json(map, dir, daylight, surface, opponent)`, `touge_scenario_json(…, car, mode, wager_json, autopilot)`, `touge_start(…)`, `touge_result_json()`, `touge_debug_set_rep(rep)` — see [`touge`] |
-//! | race (19) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_start_on(…, tune_json, map)`, `race_spots()`, `race_spot_honked()`, `debug_place(entity, x, y, yaw, speed)`, `race_bet(label, stake)`, `race_bet_status()`, `roster_json()`, `roster_state()` / `roster_state_load(text)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
+//! | race (19) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_start_on(…, tune_json, map)`, `race_spots()`, `race_spot_honked()`, `debug_place(entity, x, y, yaw, speed)`, `race_bet(label, stake, odds)`, `race_bet_status()`, `roster_json()`, `roster_state()` / `roster_state_load(text)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
 //! | props (lead) | `props_static()` once per session, `props_moved()` per frame, `prop_stride()`, `prop_moved_stride()`, `prop_pose(i)`, `debug_knock_prop(entity, prop, speed)` — see [`props`] |
 //! | parked-car damage (lead) | `parked_wrecks()` per frame, `parked_wreck_stride()`, `parked_entity_base()`, `parked_wreck_shattered(entity)`; a wreck's entity works with the `lattice_*` / `vehicle_info` calls — see [`props`] |
 //! | map (16) | `map_static_json()` once per city, `map_dynamic(player)` per frame — see [`map`] |
 //! | weather (lead) | `weather_choices()`, `scenario_with_weather(json, choice)`, `scenario_weather_choice(json)`, `night_run_rain_json(car, mode, city_id)`, `weather_info()`, `weather_grid_meta()`, `weather_grid()`, `weather_spray()` — see [`weather`] |
-//! | career (G) | `career_new(mode)`, `career_load_json`, `career_save_json`, `career_view_json`, `career_mods_json(uid)`, `career_start_run(scenario_json)`, `career_end_run`, `career_run_active`, `career_buy_car`, `career_floor_car`, `career_sell_car`, `career_set_active`, `career_install_mod`, `career_uninstall_mod`, `career_quote_json`, `career_repair`, `career_release`, `career_insure`, `career_next_night` — see [`career`] |
+//! | career (G) | `career_new(mode)`, `career_load_json`, `career_save_json`, `career_view_json`, `career_mods_json(uid)`, `career_start_run(scenario_json)`, `career_end_run`, `career_run_active`, `career_buy_car`, `career_floor_car`, `career_sell_car`, `career_set_active`, `career_install_mod`, `career_uninstall_mod`, `career_respray`, `career_quote_json`, `career_repair`, `career_release`, `career_insure`, `career_next_night` — see [`career`] |
 //! | drift lab B (lead) | `drift_tuning_json()`, `drift_tuning_defaults_json()`, `drift_tuning_set(json)`, `drift_readout(entity)` — see [`drift_lab`] |
 //! | mods | `mod_catalog_json(car)`, `build_visuals_json(car, mods)`, `entity_visuals_json(entity)` — see [`mod_visuals`]; install with `EntitySpec::mods` in the scenario |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)`, `debug_place(entity, x, y, yaw, speed)` — see [`run`] |
-//! | garages (lead) | `garages_json()`, `garage_visit_json()`, `garage_repair()`, `garage_leave()` — see [`garage_visit`] |
+//! | garages (lead) | `garages_json()`, `garage_visit_json()`, `garage_repair()`, `garage_leave()`; career places `safehouses_json()`, `place_json()`, `place_leave()` — see [`garage_visit`] |
 //! | audio (13) | `audio_library()`, `audio_frame(listener, events_json, focus)`, `audio_set_siren`, `audio_set_scanner_tier`, `audio_radio`, `audio_reset()` — see [`audio`] |
 
 #![warn(missing_docs)]
@@ -63,6 +63,7 @@ pub mod session;
 pub mod signals;
 pub mod siren_cue;
 pub mod street;
+pub mod street_odds;
 pub mod touge;
 pub mod weather;
 
@@ -84,6 +85,8 @@ mod race_tests;
 mod roam_tests;
 #[cfg(test)]
 mod run_tests;
+#[cfg(test)]
+mod spawn_tests;
 #[cfg(test)]
 mod street_tests;
 #[cfg(test)]
@@ -215,7 +218,8 @@ pub fn free_drive_city_json(car: &str, mode: &str, city_id: &str) -> Result<Stri
     )))
 }
 
-/// Free roam in a chosen city (`city_id` as in [`free_drive_city_json`]): free drive plus
+/// Free roam in a chosen city (`city_id` as in [`free_drive_city_json`], starting at spawn
+/// choice `spawn` as in [`with_spawn_json`]): free drive plus
 /// `roamers` AI street racers (0 = the default 10, at most 24) roaming the city's highways,
 /// touge, dirt roads, downtown and countryside. Start it with `init` like any scenario.
 #[wasm_bindgen]
@@ -223,6 +227,7 @@ pub fn free_roam_city_json(
     car: &str,
     mode: &str,
     city_id: &str,
+    spawn: &str,
     roamers: u32,
 ) -> Result<String, JsValue> {
     let mode = data::parse_mode(mode).map_err(err)?;
@@ -231,8 +236,35 @@ pub fn free_roam_city_json(
         n => n as usize,
     };
     Ok(json(
-        &roam::free_roam_in(car, mode, city_id, n).map_err(err)?,
+        &roam::free_roam_in(car, mode, city_id, spawn, n).map_err(err)?,
     ))
+}
+
+/// `scenario_json` (a free drive or night run) starting at spawn choice `spawn` of the combined
+/// world ([`spawn_points_json`]; `""` or an unknown id leaves the start as it is).
+#[wasm_bindgen]
+pub fn with_spawn_json(scenario_json: &str, spawn: &str) -> Result<String, JsValue> {
+    let sc: simcli::Scenario = serde_json::from_str(scenario_json).map_err(err)?;
+    Ok(json(&scenario::with_spawn(sc, spawn)))
+}
+
+/// The spawn choices of the combined world as JSON (`[{id, label}]`, the default first;
+/// [`scenario::SPAWNS`]).
+#[wasm_bindgen]
+pub fn spawn_points_json() -> String {
+    #[derive(Serialize)]
+    struct Choice {
+        id: &'static str,
+        label: &'static str,
+    }
+    let list: Vec<Choice> = scenario::SPAWNS
+        .iter()
+        .map(|s| Choice {
+            id: s.id,
+            label: s.label,
+        })
+        .collect();
+    json(&list)
 }
 
 /// Free-roam status JSON (`null` outside free roam): every roamer's entity id, home haunt,
@@ -1177,11 +1209,11 @@ pub fn street_status_json() -> Result<String, JsValue> {
             "levels": street::LEVELS,
             "roster": st.roster(),
             "hint": player.and_then(|p| st.challengeable(s.sim(), p)),
-            // Wanted or chased: no challenges (owner row 150); `blocked` = the racer a honk
-            // would challenge without the police.
-            "pursued": player.is_some_and(|p| s.sim().police().is_wanted_or_pursued(p)),
+            // Chased (pursuit or search): no challenges (owner row 150; a wanted level alone
+            // is fine); `blocked` = the racer a honk would challenge without the police.
+            "pursued": player.is_some_and(|p| street::pursued(s.sim(), p)),
             "blocked": player
-                .filter(|p| s.sim().police().is_wanted_or_pursued(*p))
+                .filter(|p| street::pursued(s.sim(), *p))
                 .and_then(|p| st.in_reach(s.sim(), p)),
             "offer": st.offer(s.sim(), s.run()),
             "race": st.race(s.sim()),
@@ -1319,14 +1351,40 @@ pub fn garage_leave() -> Result<(), JsValue> {
     get(|s| s.garage_leave())
 }
 
+/// The city's safehouses as JSON ([`garage_visit::SafehouseSite`] array: name, position,
+/// radius). Career runs only; `[]` otherwise.
+#[wasm_bindgen]
+pub fn safehouses_json() -> Result<String, JsValue> {
+    get(|s| json(&s.safehouses()))
+}
+
+/// Career places as JSON ([`garage_visit::PlaceStatus`]): the open garage / safehouse visit
+/// (the car stopped inside one with no pursuit on and is held until the testbed ends the run
+/// into the garage or calls `place_leave()`), and the safehouse dwell while chased.
+#[wasm_bindgen]
+pub fn place_json() -> Result<String, JsValue> {
+    get(|s| json(&s.place()))
+}
+
+/// "Back on the road" from the open career place visit (no-op without one).
+#[wasm_bindgen]
+pub fn place_leave() -> Result<(), JsValue> {
+    get(|s| s.place_leave())
+}
+
 /// Bet on yourself in the current race while the countdown runs: `label` from the picker's
-/// `odds[].label` (`win:player`, `podium:player`, `h2h:player>vic`), `stake` in credits. The
+/// `odds[].label` (`win:player`, `podium:player`, `h2h:player>vic`), `stake` in credits, `odds`
+/// the decimal odds shown on the card (locked onto the ticket; 0 = the book's price now). The
 /// career economy takes the stake (rep tier cap, cash, debt). Returns the ticket
 /// ([`race::BetCard`]) as JSON; an error when betting is locked, closed or the stake is out of
 /// bounds.
 #[wasm_bindgen]
-pub fn race_bet(label: &str, stake: f64) -> Result<String, JsValue> {
-    with(|s| s.race_place_bet(label, stake as i64).map(|t| json(&t)))
+pub fn race_bet(label: &str, stake: f64, odds: f64) -> Result<String, JsValue> {
+    let quoted = (odds > 0.0).then_some(odds as f32);
+    with(|s| {
+        s.race_place_bet(label, stake as i64, quoted)
+            .map(|t| json(&t))
+    })
 }
 
 /// Picker-race betting (venue `City`) on the current session's account: `{"max": credits,

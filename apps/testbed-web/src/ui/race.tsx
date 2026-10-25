@@ -83,6 +83,8 @@ export interface RegularCard {
 export interface BetPick {
   label: string;
   stake: number;
+  /** Decimal odds on the card when it was picked: the ticket is placed at these odds. */
+  odds: number;
 }
 
 /** Picker-race betting (venue City) on the current account. */
@@ -176,6 +178,12 @@ const ordinal = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? "st" : n % 10 =
 
 const BET_LABEL = (o: OddsCard) => (o.kind === "win" ? "You win" : o.kind === "podium" ? "You finish top 3" : `You beat ${o.opponent ?? "?"}`);
 
+/** Smallest stake the book takes (`data/events/betting.toml` `book.min_stake`). */
+const BET_MIN = 100;
+/** `stake` brought into `[BET_MIN, max]`, whole credits. */
+const clampStake = (stake: number, max: number) => Math.max(BET_MIN, Math.min(max, Math.round(stake) || BET_MIN));
+const money = (v: number) => `$${v.toLocaleString("en-US")}`;
+
 /** Bet slip on a picker card: pick a selection and a stake, or no bet. */
 function BetSlip(props: { card: RaceCard; status: BetStatus; pick: BetPick | null; onPick: (p: BetPick | null) => void }) {
   const { card, status, pick } = props;
@@ -191,9 +199,10 @@ function BetSlip(props: { card: RaceCard; status: BetStatus; pick: BetPick | nul
     );
   }
   const max = Math.max(0, status.max);
-  if (max < 100) return <div class="wp-dim" style={{ fontSize: "0.8em" }}>Betting: not enough cash for the minimum stake (100).</div>;
+  if (max < BET_MIN) return <div class="wp-dim" style={{ fontSize: "0.8em" }}>Betting: not enough cash for the minimum stake ({BET_MIN}).</div>;
   const label = pick?.label ?? "";
-  const stake = pick?.stake ?? Math.min(500, max);
+  const step = max >= 5000 ? 500 : 100;
+  const stake = clampStake(pick?.stake ?? 500, max);
   const odds = card.odds.find((o) => o.label === label);
   return (
     <div class="wp-spread" style={{ fontSize: "0.8em", marginTop: "0.3em", gap: "0.4em", pointerEvents: "auto" }} data-testid="bet-slip">
@@ -203,7 +212,8 @@ function BetSlip(props: { card: RaceCard; status: BetStatus; pick: BetPick | nul
         value={label}
         onChange={(e) => {
           const v = (e.target as HTMLSelectElement).value;
-          props.onPick(v ? { label: v, stake } : null);
+          const o = card.odds.find((x) => x.label === v);
+          props.onPick(v && o ? { label: v, stake, odds: o.odds } : null);
         }}
       >
         <option value="">No bet</option>
@@ -214,22 +224,23 @@ function BetSlip(props: { card: RaceCard; status: BetStatus; pick: BetPick | nul
         ))}
       </select>
       {label && (
-        <span>
-          stake{" "}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: "0.4em" }}>
+          stake <b data-testid="bet-stake">{money(stake)}</b>
+          {/* onInput, not onChange: the picker redraws ~10 times a second after a race, and a
+              value only committed on blur was put back before it ever reached the slip. */}
           <input
-            type="number"
-            min={100}
+            type="range"
+            class="wp-slider"
+            data-testid="bet-range"
+            min={BET_MIN}
             max={max}
-            step={100}
+            step={step}
             value={stake}
-            class="wp-select"
-            style={{ width: "6em" }}
-            onChange={(e) => {
-              const v = Math.max(100, Math.min(max, Math.round(Number((e.target as HTMLInputElement).value) || 0)));
-              props.onPick({ label, stake: v });
-            }}
-          />{" "}
-          → <Money value={Math.floor((stake * Math.round((odds?.odds ?? 0) * 1000)) / 1000)} /> <span class="wp-dim">(max {max})</span>
+            style={{ width: "8em" }}
+            onInput={(e) => props.onPick({ label, stake: clampStake(Number((e.target as HTMLInputElement).value), max), odds: pick?.odds ?? odds?.odds ?? 0 })}
+          />
+          → <Money value={Math.floor((stake * Math.round((odds?.odds ?? 0) * 1000)) / 1000)} />{" "}
+          <span class="wp-dim" style={{ whiteSpace: "nowrap" }}>(max {money(max)})</span>
         </span>
       )}
     </div>

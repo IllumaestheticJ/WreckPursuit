@@ -196,3 +196,91 @@ mod tests {
         }
     }
 }
+
+// ----- career places (garages and safehouses in a career run) ---------------------------------
+
+/// Radius around a safehouse POI that counts as inside, m (the police safehouse rule uses the
+/// POI's own radius; this is the same 15 m `wp_world` gives every POI).
+pub const SAFEHOUSE_RADIUS_M: f32 = 15.0;
+
+/// One safehouse on the map (JSON for the testbed's markers; `safehouses_json`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SafehouseSite {
+    /// Safehouse name (the POI's name).
+    pub name: String,
+    /// Position, m.
+    pub pos: [f32; 3],
+    /// Radius that counts as inside, m.
+    pub radius_m: f32,
+}
+
+impl SafehouseSite {
+    /// The point `[x, y]` is inside the safehouse radius.
+    pub fn contains(&self, xy: [f32; 2]) -> bool {
+        (xy[0] - self.pos[0]).hypot(xy[1] - self.pos[1]) <= self.radius_m
+    }
+}
+
+/// Every safehouse POI of the world's road network, in POI order.
+pub fn safehouse_sites(world: &World) -> Vec<SafehouseSite> {
+    world
+        .network()
+        .pois
+        .iter()
+        .filter(|p| p.kind == PoiKind::SafehouseCandidate)
+        .map(|p| SafehouseSite {
+            name: p.name.clone(),
+            pos: p.pos,
+            radius_m: SAFEHOUSE_RADIUS_M,
+        })
+        .collect()
+}
+
+/// Kind of career place the car pulled into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum PlaceKind {
+    /// A repair / mod garage: the workshop and the career garage open from here.
+    Garage,
+    /// A safehouse: end the night safely (the run is saved) or work on the car.
+    Safehouse,
+}
+
+/// An open career place visit (JSON for the testbed's place panel; `place_json`): the car
+/// stopped inside a garage or safehouse with no pursuit on and is held until the player
+/// chooses (the testbed ends the run into the garage / workshop) or leaves.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PlaceVisit {
+    /// Increments with every visit (the panel redraws on a new one).
+    pub seq: u32,
+    /// Garage or safehouse.
+    pub kind: PlaceKind,
+    /// Place name.
+    pub name: String,
+    /// Legit or crooked (garages only).
+    pub shop: Option<ShopKind>,
+    /// The car's wanted level (heat left over without a pursuit).
+    pub wanted: WantedLevel,
+}
+
+/// Laying low in a safehouse during a pursuit (JSON; `place_json`): the police safehouse rule
+/// ends the pursuit after `need_s` inside with no unit within `clear_radius_m`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LayingLow {
+    /// Safehouse name.
+    pub name: String,
+    /// Seconds of quiet dwell so far.
+    pub dwell_s: f32,
+    /// Seconds needed.
+    pub need_s: f32,
+    /// No unit may be closer than this, m.
+    pub clear_radius_m: f32,
+}
+
+/// What `place_json` returns: the open visit and the safehouse dwell during a pursuit.
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+pub struct PlaceStatus {
+    /// The open visit, if any.
+    pub visit: Option<PlaceVisit>,
+    /// Inside a safehouse while chased, if so.
+    pub laying_low: Option<LayingLow>,
+}

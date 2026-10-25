@@ -197,3 +197,72 @@ fn locked_wager_is_refused_and_the_battle_still_runs() {
     assert!(r.wager_error.is_some());
     assert_eq!(s.run().unwrap().account().cash, cash0);
 }
+
+/// Playtest: touge runs count towards career money, and the pass has no police at all. A
+/// career battle won against a challenger with no wager pays the challenger purse onto the
+/// career account; a wanted player meets no police there (the system is not stepped, the
+/// carried heat stays out of the session) and the carried heat is still waiting afterwards.
+#[test]
+fn a_career_touge_win_pays_the_career_and_the_pass_has_no_police() {
+    use wp_economy::{Condition, Economy};
+    let econ: Economy = crate::garage::with_economy(|e| e.clone());
+    let mut c = crate::career::Career::new(econ, DamageMode::Arcade);
+    c.profile_mut().account.cash = 50_000;
+    // Any class: lift the career's dealer gate for the purchase only.
+    c.profile_mut().account.rep = 1_000_000;
+    let uid = c.buy_car(CAR, Condition::Used).unwrap();
+    c.set_active(uid).unwrap();
+    c.profile_mut().account.rep = rep_for(Feature::TougeRaces);
+    c.profile_mut().carry.heat = 60.0;
+    let st = setup("touge_hollow_crown", "up", "challenger");
+    set_next_wager(Wager::None);
+    let sc = touge_scenario(&st, CAR, DamageMode::Arcade, false).unwrap();
+    let mut s = c.start_run(sc).unwrap();
+    assert!(s.is_career());
+    let seq = s
+        .run()
+        .expect("economy run on the pass")
+        .account()
+        .next_event_seq;
+    assert!(
+        !s.sim().systems().police,
+        "no police system on a touge pass"
+    );
+    s.run_ticks(240 * 4);
+    assert!(
+        s.sim().police().racer(PLAYER).is_none(),
+        "no heat on the pass"
+    );
+    assert!(s.sim().police().units().is_empty(), "no police units");
+    launch_at_krails(&mut s, NPC, 30.0);
+    let mut settled = None;
+    for _ in 0..240 * 8 {
+        s.run_ticks(1);
+        settled = s.race().unwrap().touge().unwrap().report().settlement;
+        if settled.is_some() {
+            break;
+        }
+    }
+    let out = settled.expect("battle settled");
+    assert_eq!(out.result, BattleResult::Won);
+    let purse = wp_race::touge::TougeTable::embedded().challenger.purse;
+    assert!(purse > 0, "a challenger win pays a purse");
+    assert_eq!(out.purse, purse);
+    c.finish_run(&mut s).unwrap();
+    let on_career: Vec<i64> = c
+        .profile()
+        .ledger
+        .iter()
+        .filter(|e| e.seq >= seq)
+        .map(|e| e.cash_delta)
+        .collect();
+    assert!(
+        on_career.contains(&purse),
+        "the purse is on the career ledger: {on_career:?}"
+    );
+    assert_eq!(
+        c.profile().carry.heat,
+        60.0,
+        "the carried heat waits for the city"
+    );
+}

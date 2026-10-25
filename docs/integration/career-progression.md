@@ -59,8 +59,8 @@ A stake is also capped at 50 % of cash on hand, and betting is refused while in 
 | `PinkSlips` | Feared |
 | `StreetBetting` | Unknown (lead/round12 port: the roaming street racers' horn challenges stay open from the start; venue `Street` is capped by cash and the racer's level range only, not by the tier's `max_bet`) |
 
-Dealer: Beater / Compact / Truck at Unknown, Sport / Muscle at Known, Exotic at Feared; police
-classes never.
+Dealer: Beater / Compact / Truck / Exotic at Unknown, Sport / Muscle at Known; police classes
+never. Exotic had a Feared gate until 2026-10-24; the owner dropped it, so cash is the only limit.
 
 Tiers follow **current** rep: a capture or a string of DNFs can drop a tier and close its
 features again (`ProgressUpdate::relocked`). Rewards are paid once per tier, tracked by

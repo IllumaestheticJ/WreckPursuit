@@ -32,6 +32,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `roads` | Road-level graph view (`RoadGraphView`) for police routing / minimaps; `RoadNetworkIndex` (contract `RoadNetworkQuery`, grid-indexed `nearest_on_road`) |
 | `manoeuvre` | Low-speed manoeuvres: k-point turn planner (`plan_turn`), closed-loop `TurnDriver` / `ReverseDriver` for physical cars (reverse gear through the automatic box), `sight_clear` (crest / bend check), map helpers `road_corridor` / `overtake_sight_clear` |
 | `markings` | Painted markings derived from the lane layout (`marking_at` / `painted_at`): `WorldQuery::surface_at` reports `SurfaceType::PaintedLine` on them |
+| `car_park` | Car parks beside a road (one per Loop 9 rest stop, derived at map build: `CityMap::car_parks`): paved pad over the sidewalk and lot, dropped kerb, a row of 45° nose-in bays with painted lines |
 
 City data lives in `data/city/` (see its README); importer and generator in
 `tools/city-import/`.
@@ -381,6 +382,21 @@ so what you see is what you drive on (`tools/city-import/tests/surface_match.rs`
   front of a driveway mouth (`blocks_driveway`). Trunks, hedges and fences are `wp_sim`
   colliders in cities with terrain. Details: `docs/integration/city-residential.md`.
 
+### Rest stop car parks (`car_park`, owner request 2026-10-24)
+- Every Loop 9 rest stop gets a car park along the outer kerb of its parking road (the side
+  away from the highway), derived from the network when the map is built
+  (`CityMap::car_parks`; no road format change): a paved **pad** from the kerb line out over
+  the sidewalk and its level lot (`PAD_DEPTH_M` 6.5 m, 2 cm above the sidewalk top, so it lies
+  on ground the road band already levels; the sidewalk, kerb and guard-rail rules underneath
+  are unchanged), a **dropped kerb** 1.2 m into the parking lane along the bay mouths, and one
+  row of **45° nose-in bays** (2.6 m × 5.4 m deep, 16–18 per rest stop) with painted lines.
+- `pad_mesh` is collided with (`wp_sim`) and drawn (greybox material `car_park`);
+  `paint_mesh` is part of `markings::marking_mesh`; `surface_at` reports asphalt and
+  `ground_height` the pad on it. `props::car_park_cars` parks cars in about a third of the bays
+  (never more than half); kerbside cars keep clear of the bay mouths.
+- Street racers lapping Loop 9 park in a free bay at the end of a lap and back out when they
+  leave (`wp_wasm::street`).
+
 ## Touge passes (`touge::generate`, `World::touge`, `gen-city --preset touge`)
 Four sealed mountain roads for one-on-one touge battles, specs in `data/touge/<id>.json`
 (embedded): Hollow Crown Pass (≈ 2.8 km, 280 m climb), Mistral Ridge (≈ 3.0 km, 200 m),
@@ -494,8 +510,10 @@ a `wp_vehicle::Vehicle` with `AssistProfile::ai()` stepped every physics tick, d
 pursuit (look-ahead 5–25 m) for steering and a PID on the IDM-commanded speed profile.
 Promotion copies pose and speed; demotion (beyond 100 m) projects the vehicle back onto its
 path. A physical agent that leaves the road (> 6 m or facing away) or is wrecked
-(`apply_agent_damage` with a dead engine / lost wheel) is disabled (stopped, hazards) and is
-removed once out of sight. The sim loop gets `LodChange::{Promoted, Demoted, Despawned}`.
+(`apply_agent_damage` with a dead engine / lost wheel) or takes a hard hit
+(`report_agent_impact` with a one-tick velocity change of at least `HARD_IMPACT_DV_MPS` = 5 m/s,
+from the sim's contact impulses; the same in both damage modes) is disabled (stopped on the
+handbrake, hazards on, never drives on) and is removed once out of sight. The sim loop gets `LodChange::{Promoted, Demoted, Despawned}`.
 With the cap full, a kinematic car within 40 m of a player takes the place of the physical
 car farthest from any player (playtest row 149: kinematic cars have no collider, the player
 drove through them), and a kinematic car turning around or reversing within 20 m of a player
@@ -692,6 +710,10 @@ plus rules in `traffic.rs` / `traffic/blocked.rs`).
   (`reroute_around_box`), else the queue turns around / backs out from the tail and the lane is
   marked blocked so upstream cars re-route (now on multi-lane roads too when the obstruction is
   at the line or the wait is long). An obstructed car gives up its permit (no new one for 10 s).
+  A car already inside the box behind one that has stood for 5 s edges around it at 2 m/s,
+  shifting up to 3 m off its path with 0.4 m clearance (`BOX_SQUEEZE_*`), instead of backing out
+  into the queue behind it (jam_pursuit_vesper: a police car parked in a junction kept the car
+  behind it there for minutes; test `a_car_parked_in_a_junction_box_is_edged_around`).
 - *Sirens*: a driver held at the line by a unit heading for the junction goes after 8 s
   (`SIREN_JUNCTION_HOLD_MAX_S`); a pulled-over driver gives up on a unit that stands or crawls
   (< 2 m/s) behind it after 8 s (`STALL_S`, was 15 s); with a unit standing beside it

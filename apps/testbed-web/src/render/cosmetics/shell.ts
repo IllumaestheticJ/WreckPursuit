@@ -60,7 +60,11 @@ function faceY(geo: THREE.BufferGeometry, x: number, z: number, front: boolean, 
 
 let weave: THREE.CanvasTexture | null = null;
 
-/** 2x2 twill carbon weave tile (light and dark tows on the diagonal). */
+/**
+ * 2x2 twill carbon weave tile (light and dark tows on the diagonal). The contrast and the tow
+ * size are exaggerated well past real carbon (a few mm per tow) so the weave still reads at
+ * game distance and stays distinct from a satin-black painted hood.
+ */
 function weaveTexture(): THREE.CanvasTexture {
   if (weave) return weave;
   const c = document.createElement("canvas");
@@ -72,9 +76,9 @@ function weaveTexture(): THREE.CanvasTexture {
       // Twill: the over/under pattern steps one tow per row.
       const over = (i + j) % 4 < 2;
       const grad = over ? g.createLinearGradient(i * tow, 0, i * tow + tow, 0) : g.createLinearGradient(0, j * tow, 0, j * tow + tow);
-      grad.addColorStop(0, over ? "#15171a" : "#0c0d0f");
-      grad.addColorStop(0.5, over ? "#3a3f46" : "#24282d");
-      grad.addColorStop(1, over ? "#15171a" : "#0c0d0f");
+      grad.addColorStop(0, over ? "#14171b" : "#08090b");
+      grad.addColorStop(0.5, over ? "#6d7682" : "#323840");
+      grad.addColorStop(1, over ? "#14171b" : "#08090b");
       g.fillStyle = grad;
       g.fillRect(i * tow, j * tow, tow, tow);
     }
@@ -92,17 +96,17 @@ export function carbonFibre(): THREE.MeshPhysicalMaterial {
   return (carbonMat ??= new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
     map: weaveTexture(),
-    roughness: 0.42,
-    metalness: 0.15,
+    roughness: 0.35,
+    metalness: 0.3,
     clearcoat: 1,
-    clearcoatRoughness: 0.06,
+    clearcoatRoughness: 0.03,
     side: THREE.DoubleSide,
     flatShading: true,
   }));
 }
 
 /** Planar UVs: x and y in car metres, one weave tile every `tile` metres (top-down panels). */
-function topUV(geo: THREE.BufferGeometry, tile = 0.05): void {
+function topUV(geo: THREE.BufferGeometry, tile = 0.14): void {
   const p = geo.getAttribute("position");
   const uv = new Float32Array(p.count * 2);
   for (let i = 0; i < p.count; i++) {
@@ -329,7 +333,8 @@ const lip: Builder = (c, p) => {
 
 /**
  * Carbon hood / trunk lid (`carbon` piece, `panel`: hood or trunk): the stock lid's shape in
- * clear-coated weave, replacing the painted lid.
+ * clear-coated weave, replacing the painted lid, held down by a pair of chrome lid pins at the
+ * leading edge (the race-car tell, so it never reads as a black painted lid).
  */
 const carbon: Builder = (c, p) => {
   const region = p.panel === "trunk" ? "Trunk" : "Hood";
@@ -337,8 +342,45 @@ const carbon: Builder = (c, p) => {
   if (!geo) return;
   topUV(geo);
   c.hide(panelOf(region));
-  c.body(new THREE.Mesh(geo, carbonFibre()), region, region === "Hood" ? "hood" : "trunk_lid");
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(geo, carbonFibre()));
+  // Stock plain-black carbon trim on the lid (the Shiro Turbo's hood cover, its wing) would sit
+  // over the new weave and look stock: redraw it in the weave too.
+  const trimOf = (m: MeshPartJson) => m.wheel == null && m.region === region && m.material === "carbon";
+  const trim = shellOf(c.frame, trimOf);
+  if (trim) {
+    topUV(trim);
+    c.hide(trimOf);
+    g.add(new THREE.Mesh(trim, carbonFibre()));
+  }
+  geo.computeBoundingBox();
+  const b = geo.boundingBox!;
+  const w = b.max.x - b.min.x;
+  // Pins sit near the lid's outer edge: the front of a hood, the back of a trunk lid.
+  const edgeY = region === "Hood" ? b.max.y - 0.1 : b.min.y + 0.1;
+  for (const sx of [-1, 1]) {
+    const x = sx * w * 0.32;
+    const z = topZ(geo, x, edgeY, b.max.z) + 0.006;
+    const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.012, 12), c.kit.chrome);
+    pin.rotation.x = Math.PI / 2;
+    pin.position.set(x, edgeY, z);
+    g.add(pin);
+    const clip = new THREE.Mesh(new THREE.TorusGeometry(0.02, 0.004, 6, 12, Math.PI), c.kit.chrome);
+    clip.position.set(x, edgeY - 0.012, z + 0.004);
+    g.add(clip);
+  }
+  c.body(g, region, region === "Hood" ? "hood" : "trunk_lid");
 };
+
+/** Highest point of `geo` within 6 cm of (x, y), else `fallback`. */
+function topZ(geo: THREE.BufferGeometry, x: number, y: number, fallback: number): number {
+  const p = geo.getAttribute("position");
+  let best = -Infinity;
+  for (let i = 0; i < p.count; i++) {
+    if (Math.abs(p.getX(i) - x) < 0.06 && Math.abs(p.getY(i) - y) < 0.06) best = Math.max(best, p.getZ(i));
+  }
+  return Number.isFinite(best) ? best : fallback;
+}
 
 /** Replacement-panel builders by piece name. */
 export const SHELL_BUILDERS: Record<string, Builder> = { bumper, lip, carbon };

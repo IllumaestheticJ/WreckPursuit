@@ -281,6 +281,23 @@ let settled = book.settle(&mut wallet, &placings);
 BetVenue::City)`, `take_stake` = `place_bet`, `pay_out` = `settle_bet` (see
 `wp_wasm::race::RunWallet`).
 
+### Betting fixes (2026-10-24)
+- **Bet slip stake**: a range slider (`onInput`) replaces the number box, which only
+  committed on blur and was reset by the picker's 10 Hz redraw after a race.
+- **Paid at the player's own result**: `RaceRun::settle` pays the buy-in / purse settlement
+  and the bets as soon as the player's result is decided (finished, DNF or DQ), not when the
+  last car is home: finishers' positions are final and a rival still running counts as
+  finishing behind them. Form ratings are still recorded once the results are final.
+- **Odds locked at sign-up**: `race_bet(label, stake, odds)` takes the decimal odds shown on
+  the picker card and `Book::place_quoted` puts them on the ticket (held to the book's bounds
+  and step). The card was priced for the stock car, the race's book for the career car with
+  its mods, so the two could differ.
+- **Money reaches the career**: `Session::end_career` / `take_run` call
+  `RaceRun::close_bets` before the account leaves (refund during the countdown; after the
+  green, leaving counts as not finishing). The testbed's picker races are career runs when
+  the career box is ticked and the career car can go out (`racesUseCareer` in `main.ts`),
+  like night runs and touge battles, instead of quick play on the practice account.
+
 ### Needs
 | From | What | Why | Workaround now |
 |---|---|---|---|
@@ -692,8 +709,9 @@ Vesper and on the new combined map (Port Vesper + Ashpeak County, city id `ashpe
   spots are planned lazily (first `race_spots()` call or first press).
   **Ported to round 12 (`lead/ashpeak-port`):** the session owns one horn edge per tick for
   round 12's single challenge system: a roaming street racer within honking range takes the
-  honk (`StreetStep::challenged`), else the spot; no spot while wanted / chased, with a street
-  offer or street race open, or with the run over (owner row 150, as street challenges).
+  honk (`StreetStep::challenged`), else the spot; no spot while chased (pursuit or search; a
+  wanted level alone is fine since 2026-10-24, `street::pursued`), with a street offer or
+  street race open, or with the run over (owner row 150, as street challenges).
   `HonkTrigger` was replaced by `spots::honk_spot`. The race's money is the picker's existing
   stake (buy-in / purse from `race_list`, shown in the spot prompt); no second bet. See
   `docs/integration/ashpeak-port.md`.
@@ -755,3 +773,33 @@ under it, `CarCapability::surface_grip` gives the car's tyre ratio for gravel / 
 (1.0 on every paved surface, so paved courses keep the same profile bit for bit), and
 `SpeedProfile::build` scales cornering, braking and traction-limited drive per sample. After
 the fix the largest lateral offset logged on Harnell is 1.4 m and all four cars finish.
+
+## Street races trimmed to Loop 9 + highway run (owner, 2026-10-24, branch `claude/project-thread-3jtx3j`)
+
+Owner: "remove all current street races and only leave in loop 9 night, and loop 9 day; also
+make another long highway street race using the loop 9 AND ashcroft racers". "Ashcroft" is
+read as Ashpeak County (no Ashcroft exists in the code or data).
+
+- `catalog::races()` (the picker, race cards, meet spots via `races_on`) now holds three races:
+  `loop9_circuit` (renamed "Loop 9 night"; id kept because its police table, goldens and pace
+  runs are keyed by it), the new `loop9_day` (the Loop 9 lap from a grid on the south side, so its meet spot is its own; 14:00, illegal daytime,
+  traffic 1.0, seed 19) and the new `loop9_ashpeak_highway` (Ashpeak map, 17.9 km lap of Loop 9
+  + Route 7 + Crosstown + Route 12, 00:30, traffic 1.0, seed 29). Both new races field the Loop
+  9 regulars, who are also the whole Ashpeak County field (Vic, Mara, Dez, Juno, Tito).
+- Every other race moved to `catalog::retired_races()`: not offered anywhere, still found by
+  `race(id)` / `race_for_scenario`, so its scenario, golden and race_picker test still run.
+  `race_scenario_files_match_the_picker` checks retired scenarios too.
+- New scenarios `pick_loop9_day.ron`, `pick_loop9_ashpeak_highway.ron` (generated) and their
+  goldens (blessed with `simcli run --bless` on the two files only).
+- Police: no police code touched. Starter tables `[loop9_day]` ("Daylight interceptors",
+  presence 2.0) and `[loop9_ashpeak_highway]` ("Freeway interceptors") copy the night lap's
+  high-speed pursuit (race_picker needs a profile per picker race). The "Heavier police on
+  Loop 9 daytime" branch (`claude/project-thread-97ist8`) has its own versions of both: on a
+  merge conflict keep those and drop the starters.
+- Unit tests that pinned the old list (catalog, spots, wp_wasm race spots/cards) now pin the
+  new one; spot honk tests use the Loop 9 night spot.
+- `apps/testbed-web/e2e/race.mjs` runs its picker, betting and career flows on Loop 9 night
+  (and the stake check on Loop 9 day); its autopilot results run keeps the short retired grid
+  sprint through the `?race=grid_highway_sprint` debug link. All 33 checks pass headless.
+- Known gap: `race_spots.mjs` and `menu.mjs` still expect retired races' spots and cards
+  (not in CI); `drift_lab_w.mjs` only uses a `?race=` link, which still works.
