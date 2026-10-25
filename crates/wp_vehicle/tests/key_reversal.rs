@@ -101,3 +101,54 @@ fn the_car_turns_the_new_way_soon_after_a_key_change() {
         );
     }
 }
+
+/// Owner (2026-10-25): "when I hit the ebrake it would rather override trying to countersteer
+/// than taking my keyboard input". Handbrake turn at 60 km/h, left key + handbrake: the hands-off
+/// countersteer (the keyboard preset's countersteer help) stays off while the handbrake is
+/// pulled and for its grace after, so released keys centre the wheels instead of steering them
+/// the other way; and a countersteer key pressed mid-turn has the wheels on its side in 0.1 s.
+#[test]
+fn the_handbrake_turn_is_the_drivers() {
+    let a = AssistProfile::keyboard_default();
+    assert!(a.countersteer_help > 0.0, "the preset this guards");
+    for id in ["kestrel_ts", "rampart_50", "hakone_gt"] {
+        let c = car(id);
+        for counter in [false, true] {
+            let mut rig = Rig::new(&c);
+            rig.set_player_input(true);
+            rig.teleport([0.0, 0.0, 0.0], 0.0, 60.0 / 3.6, 0.0);
+            for k in 0..(1.4 / PHYSICS_DT) as usize {
+                let t = k as f32 * PHYSICS_DT;
+                // Left key 0.5 s, then released (or the right key); handbrake for 1 s.
+                let steer = match (t < 0.5, counter) {
+                    (true, _) => -1.0,
+                    (false, false) => 0.0,
+                    (false, true) => 1.0,
+                };
+                let inp = VehicleInput {
+                    steer,
+                    handbrake: if t < 1.0 { 1.0 } else { 0.0 },
+                    ..Default::default()
+                };
+                rig.step(&inp, &a);
+                // + wheel = left; the right key's side is negative.
+                let wheel = rig.vehicle.telemetry().steer_rad;
+                if !counter && t > 0.5 {
+                    assert!(
+                        wheel > -0.2f32.to_radians(),
+                        "{id}: keys released in a handbrake turn, wheels at {:.1}° (t {t:.2})",
+                        wheel.to_degrees()
+                    );
+                }
+                if counter && t > 0.6 {
+                    assert!(
+                        wheel < 0.0,
+                        "{id}: right key held {:.2} s, wheels still left at {:.1}°",
+                        t - 0.5,
+                        wheel.to_degrees()
+                    );
+                }
+            }
+        }
+    }
+}
