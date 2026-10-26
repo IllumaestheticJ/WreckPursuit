@@ -175,6 +175,8 @@ pub struct SimVehicle {
     light: Option<LightState>,
     /// AI nitrous fires this tick (`nitrous_link`; AI racers and police only).
     nitrous_fire: bool,
+    /// Nitrous Kit tier of a player's car ([`Sim::set_nitrous_kit`]; 0 = no bottle).
+    nitrous_kit: u8,
 }
 
 /// A vehicle in light mode ([`Sim::set_light_when_far`]): heading, speed and the chassis
@@ -415,6 +417,7 @@ impl Sim {
             ghost_ticks: 0,
             ghost_overstay: 0,
             nitrous_fire: false,
+            nitrous_kit: 0,
             tire_condition: None,
             ram: wp_economy::RamProfile::default(),
             run_flat: false,
@@ -803,15 +806,11 @@ impl Sim {
         Ok(())
     }
 
-    /// Set a car's nitrous bottle scale (the player's Nitrous Kit,
-    /// `wp_vehicle::nitrous::NitrousTune::kit_scale`). AI racers and police get theirs from
-    /// the rubberbanding every tick, which overrides this.
-    pub fn set_nitrous_scale(
-        &mut self,
-        id: EntityId,
-        scale: wp_vehicle::nitrous::NitrousScale,
-    ) -> Result<(), SimError> {
-        self.slot_mut(id)?.vehicle.set_nitrous_scale(scale);
+    /// Set the Nitrous Kit tier of a player's car (0 = none, the default: a player's car has
+    /// no nitrous without the kit; owner decision 2026-10-26). AI racers and police always
+    /// carry a bottle, scaled by the rubberbanding (`nitrous_link`), whatever this says.
+    pub fn set_nitrous_kit(&mut self, id: EntityId, tier: u8) -> Result<(), SimError> {
+        self.slot_mut(id)?.nitrous_kit = tier;
         Ok(())
     }
 

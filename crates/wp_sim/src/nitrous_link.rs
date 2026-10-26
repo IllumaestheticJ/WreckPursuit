@@ -5,7 +5,9 @@
 //! The hook sits here, not in the racer or police drivers: each tick, before the vehicles
 //! step, every AI racer looks at the nearest player and every pursuing police car at the car
 //! it chases. The gap is the target's distance ahead along the AI's own heading (negative =
-//! the target is behind it), so a car alongside or behind never counts as trailing.
+//! the target is behind it), so a car alongside or behind never counts as trailing. Racers
+//! ahead may burn too, at the player's scale; cops on a call also burn to get up to speed
+//! (owner 2026-10-26).
 
 use std::collections::BTreeMap;
 
@@ -74,10 +76,18 @@ impl Sim {
                     (&tune.police, target)
                 }
                 _ => {
+                    // Players (and player cop seats): a bottle only with the Nitrous Kit.
                     slot.nitrous_fire = false;
+                    if slot.kind != VehicleKind::Traffic {
+                        slot.vehicle.set_nitrous_fitted(slot.nitrous_kit > 0);
+                        slot.vehicle
+                            .set_nitrous_scale(tune.kit_scale(slot.nitrous_kit));
+                    }
                     continue;
                 }
             };
+            // AI always carry a bottle, kit or not: it is only for catching up.
+            slot.vehicle.set_nitrous_fitted(true);
             let ch = slot.vehicle.chassis();
             let f = ch.rot * wp_vehicle::math::V3::Y;
             let len = (f.x * f.x + f.y * f.y).sqrt().max(1e-3);
@@ -87,11 +97,13 @@ impl Sim {
                 Some(t) => {
                     let gap = gap_ahead(pos, [f.x / len, f.y / len], t);
                     slot.vehicle.set_nitrous_scale(ai.scale(gap));
-                    slot.nitrous_fire = ai.wants_fire(gap, &slot.input, speed);
+                    slot.nitrous_fire = ai.wants_fire(Some(gap), true, &slot.input, speed);
                 }
                 None => {
+                    // No target: the player's bottle; a cop on a call (siren on) may still
+                    // use it to get up to speed.
                     slot.vehicle.set_nitrous_scale(ai.scale(0.0));
-                    slot.nitrous_fire = false;
+                    slot.nitrous_fire = ai.wants_fire(None, slot.input.siren, &slot.input, speed);
                 }
             }
         }
@@ -146,10 +158,53 @@ mod tests {
         assert!(behind.scale.strength > nitrous::tune().racer.strength.near);
         assert!(behind.scale.refill > nitrous::tune().racer.refill.near);
         assert_eq!(h, ai_bottle(VehicleKind::AiRacer, 120.0).1, "deterministic");
-        // The player behind the AI (it leads): no nitrous, the near scale.
-        let (ahead, _) = ai_bottle(VehicleKind::AiRacer, -120.0);
-        assert_eq!(ahead.fill, 1.0);
-        assert_eq!(ahead.scale, nitrous::tune().racer.scale(0.0));
+        // The player just behind the AI (it leads): it may still burn, with the player's bottle
+        // (owner 2026-10-26: "AI racers can use nitrous if they're ahead (just normal regen)").
+        let (ahead, _) = ai_bottle(VehicleKind::AiRacer, -20.0);
+        assert!(ahead.fill < 1.0, "burned: {}", ahead.fill);
+        assert_eq!(ahead.scale, wp_vehicle::nitrous::NitrousScale::PLAYER);
+        // A clear leader (the player beyond `ahead_gap_m` behind) does not burn.
+        let (clear, _) = ai_bottle(VehicleKind::AiRacer, -120.0);
+        assert_eq!(clear.fill, 1.0, "clear leader burned: {}", clear.fill);
+    }
+
+    /// A player's car burns nitrous only with the Nitrous Kit (owner decision 2026-10-26).
+    #[test]
+    fn a_player_needs_the_kit() {
+        let run = |kit: u8| {
+            let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
+            let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+            let mut sim = Sim::new(SimConfig {
+                seed: 3,
+                mode,
+                time_of_day: TimeOfDay::from_hours(12.0),
+                time_ratio: 10.0,
+            });
+            let p = sim.spawn_vehicle(&car, [0.0; 3], 0.0).unwrap();
+            sim.set_nitrous_kit(p, kit).unwrap();
+            sim.place_vehicle(p, [0.0; 3], 0.0, 20.0).unwrap();
+            sim.set_input(
+                p,
+                VehicleInput {
+                    throttle: 1.0,
+                    tool_use: NITROUS_TOOL,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            for _ in 0..240 {
+                sim.step_fixed();
+            }
+            sim.vehicles()[0].vehicle.nitrous()
+        };
+        let none = run(0);
+        assert!(!none.fitted);
+        assert_eq!(none.fill, 1.0, "no kit, no burn");
+        let t1 = run(1);
+        let t2 = run(2);
+        assert!(t1.fitted && t1.fill < 1.0);
+        assert!(t2.fill > t1.fill, "tier 2's bigger bottle lasts longer");
+        assert!(t2.scale.strength > t1.scale.strength);
     }
 
     #[test]

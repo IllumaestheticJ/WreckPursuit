@@ -706,6 +706,7 @@ impl Vehicle {
         self.stalled = false;
         self.nitrous = crate::nitrous::Nitrous {
             scale: self.nitrous.scale,
+            fitted: self.nitrous.fitted,
             ..crate::nitrous::Nitrous::full()
         };
     }
@@ -719,6 +720,11 @@ impl Vehicle {
     /// [`crate::nitrous::NitrousScale::PLAYER`] by default. `wp_sim` sets it every tick.
     pub fn set_nitrous_scale(&mut self, scale: crate::nitrous::NitrousScale) {
         self.nitrous.scale = scale;
+    }
+
+    /// Fit or remove the nitrous bottle (a player's car has one only with the Nitrous Kit).
+    pub fn set_nitrous_fitted(&mut self, fitted: bool) {
+        self.nitrous.fitted = fitted;
     }
 
     /// Set the nitrous bottle level, 0..=1 (scenarios, save games).

@@ -2121,9 +2121,10 @@ pub fn ffb(entity: u32) -> Result<Vec<f32>, JsValue> {
     })
 }
 
-/// Nitrous bottle `[fill 0..1, burning 0/1, strength, refill]` (`wp_vehicle::nitrous`):
-/// the HUD gauge. Strength / refill are the bottle's scale (1 for the player; AI rubberbanding
-/// raises them). Fire it with tool 1 in `set_input` (`[..., tool_use = 1]`).
+/// Nitrous bottle `[fill 0..1, burning 0/1, strength, refill, fitted 0/1]`
+/// (`wp_vehicle::nitrous`): the HUD gauge. Strength / refill are the bottle's scale (the
+/// Nitrous Kit tier for a player; AI rubberbanding raises them). A player's car has a bottle
+/// (`fitted`) only with the Nitrous Kit. Fire it with tool 1 in `set_input`.
 #[wasm_bindgen]
 pub fn nitrous(entity: u32) -> Result<Vec<f32>, JsValue> {
     with(|s| {
@@ -2135,6 +2136,7 @@ pub fn nitrous(entity: u32) -> Result<Vec<f32>, JsValue> {
                     if n.burning { 1.0 } else { 0.0 },
                     n.scale.strength,
                     n.scale.refill,
+                    if n.fitted { 1.0 } else { 0.0 },
                 ]
             })
             .ok_or_else(|| format!("unknown entity {entity}"))
