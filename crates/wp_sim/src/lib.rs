@@ -89,6 +89,21 @@ pub enum VehicleKind {
     Traffic,
 }
 
+/// Multiplier on the contact impulses reaching a vehicle's damage model, from the mode table:
+/// the player's racer `racer_damage_scale`, AI racers `racer_damage_scale ×
+/// ai_racer_damage_mult`, AI police `police_damage_scale`, player cop seats
+/// (`player_driven_police`) and traffic 1.0. Damage only: the rigid-body response is never
+/// scaled.
+pub fn damage_scale(kind: VehicleKind, player_driven_police: bool, mode: &ModeTable) -> f32 {
+    match kind {
+        VehicleKind::Player => mode.racer_damage_scale,
+        VehicleKind::AiRacer => mode.racer_damage_scale * mode.ai_racer_damage_mult,
+        VehicleKind::Police if player_driven_police => 1.0,
+        VehicleKind::Police => mode.police_damage_scale,
+        VehicleKind::Traffic => 1.0,
+    }
+}
+
 /// Hook run on every contact before damage applies it (e.g. the server quantising contacts
 /// so clients can replay them bit-identically, see `wp_net`). Plain function pointer:
 /// deterministic and `wp_sim` does not depend on the caller's crate.
@@ -1367,13 +1382,12 @@ impl Sim {
             &infos,
         );
         out.extend(std::mem::take(&mut tick_contacts.events));
-        // Arcade: racers (player and AI) take `racer_damage_scale` of the collision impulse;
-        // traffic and police take it all. Before the filter, so the scaled contacts are the
-        // ones quantised, recorded and replicated.
+        // Arcade: each vehicle kind takes its own share of the collision impulse (player
+        // racer 0.25, AI racers 0.5, AI police 2.0, player cops and traffic all of it). Before the filter, so
+        // the scaled contacts are the ones quantised, recorded and replicated.
         for (slot, contacts) in self.vehicles.iter().zip(&mut tick_contacts.per_vehicle) {
-            if matches!(slot.kind, VehicleKind::Player | VehicleKind::AiRacer) {
-                wp_damage::scale_racer_contacts(contacts, &self.config.mode);
-            }
+            let scale = damage_scale(slot.kind, slot.player_police.is_some(), &self.config.mode);
+            wp_damage::scale_contacts(contacts, scale);
         }
         if let Some(filter) = self.contact_filter {
             for c in tick_contacts.per_vehicle.iter_mut().flatten() {
@@ -1848,24 +1862,28 @@ mod tests {
             .collect()
     }
 
-    /// Contract v0.4.0 (owner, 2026-10-22): in Arcade only racers (player, AI racers) take the
-    /// reduced damage; police and traffic take the same damage as in Simulation. In
-    /// Simulation every kind takes the same damage.
+    /// Contract v0.4.0 (owner, 2026-10-22): in Arcade racers take reduced damage and traffic
+    /// takes the same damage as in Simulation. Owner 2026-10-26: AI racers take 2x the
+    /// player's share and AI police 2x full damage. In Simulation every kind takes the same.
     #[test]
-    fn arcade_reduces_damage_for_racers_only() {
+    fn arcade_scales_damage_per_kind() {
         let arcade = wall_hit_health("modes/arcade.toml");
         let sim = wall_hit_health("modes/sim.toml");
         let lost = |h: &[(VehicleKind, f32)], k: VehicleKind| {
             1.0 - h.iter().find(|(kind, _)| *kind == k).unwrap().1
         };
-        for k in [VehicleKind::Police, VehicleKind::Traffic] {
-            let (a, s) = (lost(&arcade, k), lost(&sim, k));
-            assert!((a - s).abs() < 1e-3, "{k:?} takes full damage: {a} vs {s}");
-        }
+        let (a, s) = (
+            lost(&arcade, VehicleKind::Traffic),
+            lost(&sim, VehicleKind::Traffic),
+        );
+        assert!(
+            (a - s).abs() < 1e-3,
+            "traffic takes full damage: {a} vs {s}"
+        );
         for k in [VehicleKind::Player, VehicleKind::AiRacer] {
             let ratio = lost(&arcade, k) / lost(&sim, k);
             assert!(
-                ratio < 0.4,
+                ratio < 0.6,
                 "{k:?}: Arcade health lost {ratio:.2} of Simulation's"
             );
             assert!(
@@ -1873,11 +1891,46 @@ mod tests {
                 "{k:?}: the Simulation hit does damage"
             );
         }
+        let (player, ai) = (
+            lost(&arcade, VehicleKind::Player),
+            lost(&arcade, VehicleKind::AiRacer),
+        );
+        assert!(
+            ai > 1.4 * player,
+            "AI racer takes about 2x the player's damage: {ai} vs {player}"
+        );
+        let (a, s) = (
+            lost(&arcade, VehicleKind::Police),
+            lost(&sim, VehicleKind::Police),
+        );
+        assert!(
+            a > 1.4 * s,
+            "AI police take about 2x full damage: {a} vs {s}"
+        );
         let sim_lost: Vec<f32> = sim.iter().map(|(_, h)| 1.0 - h).collect();
         assert!(
             sim_lost.windows(2).all(|w| (w[0] - w[1]).abs() < 0.05),
             "Simulation: every kind takes about the same damage {sim_lost:?}"
         );
+    }
+
+    /// Player cop seats keep full damage; only AI police get `police_damage_scale`.
+    #[test]
+    fn damage_scale_by_kind() {
+        let arcade = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        assert_eq!(damage_scale(VehicleKind::Player, false, &arcade), 0.25);
+        assert_eq!(damage_scale(VehicleKind::AiRacer, false, &arcade), 0.5);
+        assert_eq!(damage_scale(VehicleKind::Police, false, &arcade), 2.0);
+        assert_eq!(damage_scale(VehicleKind::Police, true, &arcade), 1.0);
+        assert_eq!(damage_scale(VehicleKind::Traffic, false, &arcade), 1.0);
+        let sim = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        for k in [
+            VehicleKind::Player,
+            VehicleKind::AiRacer,
+            VehicleKind::Police,
+        ] {
+            assert_eq!(damage_scale(k, false, &sim), 1.0);
+        }
     }
 
     /// Two sedans 30 m apart, 10 m/s each, head-on. Returns every event of a 3 s run.

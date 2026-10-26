@@ -36,7 +36,7 @@ pub mod tuning;
 pub mod vec3;
 mod wear;
 
-pub use contact::scale_racer_contacts;
+pub use contact::{scale_contacts, scale_racer_contacts};
 pub use debris::{DetachedKind, DetachedPart};
 pub use model::{
     component_health_weight, region_health_weight, DamageLogEntry, DamageLogKind, DamageModel,
