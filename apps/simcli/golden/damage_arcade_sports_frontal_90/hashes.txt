@@ -1,4 +1,4 @@
-# simcli hashes scenario=damage_arcade_sports_frontal_90 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=damage_arcade_sports_frontal_90 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 60 18bc107727b33ff8
 120 343e32a92266fff3
 180 896cd24646dbd356

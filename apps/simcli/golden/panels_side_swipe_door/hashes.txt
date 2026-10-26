@@ -1,4 +1,4 @@
-# simcli hashes scenario=panels_side_swipe_door systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=panels_side_swipe_door systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 24 fe050bf0f2110f98
 48 a0c1e37d81714807
 72 1b33b08efea5e1ac
