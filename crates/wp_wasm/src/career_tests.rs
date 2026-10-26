@@ -1118,3 +1118,85 @@ fn stopping_in_a_garage_or_safehouse_on_a_career_run_opens_the_place() {
     let close = c.finish_run(&mut s).unwrap();
     assert_eq!(close.end, RunEnd::Free);
 }
+
+/// Owner report 2026-10-26: with 651 cash the Loop 9 day race still started. A career race
+/// whose buy-in the account cannot pay is refused before the run starts, and nothing is
+/// charged.
+#[test]
+fn a_picker_race_the_career_cannot_afford_is_refused() {
+    let (mut c, uid) = career_with("kestrel_ts", 50_000, DamageMode::Arcade);
+    let def = wp_race::catalog::race("loop9_day").unwrap();
+    let sc =
+        crate::race::race_scenario_in(&def, "ignored", DamageMode::Arcade, false, def.city.id())
+            .unwrap();
+    let car = c.loaded_car(c.profile().account.car(uid).unwrap()).unwrap();
+    let fee = crate::race::race_cards(Some(&car), DamageMode::Arcade)
+        .into_iter()
+        .find(|r| r.id == "loop9_day")
+        .unwrap()
+        .entry_fee;
+    assert!(
+        fee > 651,
+        "the day race costs more than the report's cash ({fee})"
+    );
+    c.profile_mut().account.cash = 651;
+    let err = c.start_run(sc.clone()).map(|_| ()).unwrap_err();
+    assert!(err.contains("buy-in"), "{err}");
+    assert_eq!(c.profile().account.cash, 651, "nothing charged");
+    assert!(!c.run_active(), "no run started");
+    // Exactly the buy-in is enough, and it is all taken.
+    c.profile_mut().account.cash = fee;
+    let s = c.start_run(sc).unwrap();
+    assert_eq!(s.run().unwrap().account().cash, 0);
+}
+
+/// Owner report 2026-10-26: the purse on the race menu did not match the finish. The run
+/// prices the career car with its mods (a higher class bracket), so the career picker must
+/// too: its cards advertise exactly what the run charges and pays.
+#[test]
+fn the_career_picker_prices_the_modded_car_like_the_run() {
+    let (mut c, uid) = career_with("kestrel_ts", 5_000_000, DamageMode::Arcade);
+    c.profile_mut().account.rep = 1_000_000;
+    for _ in 0..6 {
+        let tree = c.mod_tree(uid).unwrap();
+        for m in tree.mods.iter().filter(|m| m.allowed && !m.installed) {
+            let _ = c.install_mod(uid, &m.id);
+        }
+    }
+    let stock = simcli::data::load_car(crate::data::mem_data(), "kestrel_ts").unwrap();
+    let stock_cards = crate::race::race_cards(Some(&stock), DamageMode::Arcade);
+    for card in c.race_cards() {
+        let def = wp_race::catalog::race(card.id).unwrap();
+        let sc = crate::race::race_scenario_in(
+            &def,
+            "ignored",
+            DamageMode::Arcade,
+            false,
+            def.city.id(),
+        )
+        .unwrap();
+        let before = c.profile().account.cash;
+        let s = c.start_run(sc).unwrap();
+        let race = s.race().unwrap();
+        assert_eq!(
+            race.advertised(),
+            (card.purse, card.entry_fee),
+            "{}",
+            card.id
+        );
+        assert_eq!(
+            before - s.run().unwrap().account().cash,
+            card.entry_fee,
+            "{}",
+            card.id
+        );
+        let stock = stock_cards.iter().find(|s| s.id == card.id).unwrap();
+        assert!(
+            card.purse > stock.purse,
+            "the mods lift the bracket ({})",
+            card.id
+        );
+        let mut s = s;
+        c.finish_run(&mut s).unwrap();
+    }
+}
