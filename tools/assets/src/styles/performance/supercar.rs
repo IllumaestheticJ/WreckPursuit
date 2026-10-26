@@ -177,6 +177,7 @@ pub fn halberd(def: &VehicleDef) -> CarStyle {
         belt_rake: 0.02,
         tail_round: 0.25,
         tail_drop: 0.06,
+        roof_dz: 0.02,
         ..BodyStyle::preset(Silhouette::Fastback)
     });
     s.details.push(kit_detail(halberd_kit));
@@ -492,13 +493,13 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 /// cover, Y-shaped tails, quad centre exhaust in a hexagonal surround.
 pub fn ombra(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        cabin_shift_m: 0.42,
-        nose_h: Some(0.44),
+        cabin_shift_m: 0.32,
+        nose_h: Some(0.42),
         nose_rake_deg: 58.0,
         nose_plan_round: 0.08,
         tail_plan_round: 0.08,
         hood_crown: 0.008,
-        cowl_h: 0.02,
+        cowl_h: 0.10,
         windshield_rake_deg: Some(66.0),
         a_pillar_rake_deg: 20.0,
         c_pillar_rake_deg: 12.0,
@@ -521,6 +522,7 @@ pub fn ombra(def: &VehicleDef) -> CarStyle {
         belt_rake: 0.06,
         tail_round: 0.05,
         tail_drop: 0.0,
+        roof_dz: -0.07,
         ..BodyStyle::preset(Silhouette::Wedge)
     });
     s.details.push(kit_detail(ombra_kit));
@@ -1282,17 +1284,17 @@ fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 /// tails over a black mesh, quad exhaust in a carbon tray, blue hybrid accent strips.
 pub fn kagero(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        cabin_shift_m: 0.38,
+        cabin_shift_m: 0.30,
         nose_h: Some(0.56),
         nose_rake_deg: 38.0,
-        nose_plan_round: 0.22,
+        nose_plan_round: 0.30,
         tail_plan_round: 0.12,
         hood_crown: 0.025,
         hood_valley: 0.02,
         windshield_rake_deg: Some(62.0),
         a_pillar_rake_deg: 14.0,
         rear_glass_rake_deg: Some(30.0),
-        roof_arc: 0.35,
+        roof_arc: 0.50,
         roof_len_trim: 0.05,
         tumblehome: Some(0.24),
         crease_z: 0.48,
@@ -1305,8 +1307,9 @@ pub fn kagero(def: &VehicleDef) -> CarStyle {
         ducktail_h: 0.030,
         belt_kick: 0.03,
         belt_rake: 0.05,
-        tail_round: 0.08,
-        tail_drop: 0.02,
+        tail_round: 0.22,
+        tail_drop: 0.06,
+        roof_dz: 0.03,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.details.push(kit_detail(kagero_kit));

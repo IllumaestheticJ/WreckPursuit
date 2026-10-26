@@ -301,6 +301,7 @@ pub fn fulmine(def: &VehicleDef) -> CarStyle {
         belt_rake: 0.045,
         tail_round: 0.05,
         tail_drop: 0.0,
+        roof_dz: -0.04,
         ..BodyStyle::preset(Silhouette::Wedge)
     });
     s.details.push(kit_detail(fulmine_kit));
