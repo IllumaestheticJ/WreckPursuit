@@ -205,7 +205,7 @@ L5 = 6000
 cost_frac = 0.75
 min_cost = 100
 
-# High-stakes races (illegal daytime meets): the organisers only invite drivers the police
+# High-stakes races (illegal daytime meets; in the picker that is Loop 9 day): the organisers only invite drivers the police
 # already want (min_bounty ≈ one L3 escape, or two L2 escapes at night), and a big bounty
 # pulls a bigger purse: +10 % per 1 000 bounty, at most +50 % (5 000 bounty).
 [bounty.high_stakes]
