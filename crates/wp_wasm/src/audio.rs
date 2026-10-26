@@ -96,6 +96,10 @@ pub fn audio_frame(listener: &[f32], events_json: &str, focus: u32) -> Result<St
                 *a = Some(AudioDirector::new(lib, AUDIO_SEED));
             }
             let d = a.as_mut().expect("just created");
+            // Career: the scanner is the car's mod, not the audio panel's choice.
+            if let Some(g) = s.gadgets() {
+                d.set_scanner_tier(career_scanner_tier(g.scanner));
+            }
             let focus = (focus != 0).then_some(EntityId(focus));
             let commands = frame_commands(s, d, lis, focus, &events);
             let siren = d.siren_space(&lis, &crate::siren_cue::WorldAcoustics(s.sim().world()));
@@ -325,7 +329,19 @@ pub fn audio_set_siren(entity: u32, mode: &str) -> Result<(), JsValue> {
     })
 }
 
-/// Set the listener's scanner tier.
+/// The audio scanner tier of a career car's police scanner mod (0 = none fitted): the Police
+/// Scanner hears the radio at police gadget tier 1 (`Pro`), the Decrypting Scanner at tier 2
+/// (`Elite`, the shortest delay).
+pub fn career_scanner_tier(mod_tier: u8) -> ScannerTier {
+    match mod_tier {
+        0 => ScannerTier::None,
+        1 => ScannerTier::Pro,
+        _ => ScannerTier::Elite,
+    }
+}
+
+/// Set the listener's scanner tier (ignored in a career run, where the car's scanner mod sets
+/// it; see [`career_scanner_tier`]).
 #[wasm_bindgen]
 pub fn audio_set_scanner_tier(tier: &str) -> Result<(), JsValue> {
     let t =

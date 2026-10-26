@@ -33,6 +33,16 @@ const bar = (frac: number, colour: string, centred = false): string => {
   return `<span class="bar"><i style="width:${Math.max(0, f) * 100}%;background:${colour}"></i></span>`;
 };
 
+/** Nitrous gauge line: the bottle level, magenta while burning, grey until it can fire again
+ * (an emptied bottle re-arms at 15 %, `data/tune/nitrous.toml`). */
+export function nitrousGauge(n: Float32Array | null): string {
+  if (!n || n.length < 2) return "";
+  const fill = n[0];
+  const burning = n[1] > 0.5;
+  const colour = burning ? "#ff40ff" : fill >= 0.15 ? "#40e0ff" : "#667";
+  return `<div class="nitrous${burning ? " burning" : ""}" title="nitrous: hold N (pad B) with the throttle down">N₂O ${bar(fill, colour)} ${(fill * 100).toFixed(0)}%</div>`;
+}
+
 /** Fields the event feed leaves out: who (shown separately), positions and raw payloads. */
 const FEED_SKIP = new Set(["vehicle", "pos", "heading", "payload"]);
 
@@ -96,6 +106,8 @@ export interface HudFrame {
   camera: string;
   /** Speed units (game menu setting; default km/h). */
   units?: "kmh" | "mph";
+  /** Nitrous bottle of the focused car (`sim.nitrous`: fill, burning, strength, refill). */
+  nitrous?: Float32Array | null;
 }
 
 export class Hud {
@@ -187,6 +199,7 @@ export class Hud {
     this.main.innerHTML =
       `<div class="speed">${Math.abs(speed).toFixed(0)}<small> ${mph ? "mph" : "km/h"}</small> <span class="gear">${gearTxt}</span></div>` +
       `<div>rpm ${rpm.toFixed(0)} ${bar(rpm / limit, rpm > redline ? "#ff4040" : "#40c0ff")}</div>` +
+      nitrousGauge(f.nitrous ?? null) +
       `<div>${badge(true, f.mode)}${f.replay ? badge(true, "REPLAY") : ""}${f.recording ? '<span class="badge rec">● REC</span>' : ""}</div>` +
       (a
         ? `<div>${badge(a.abs !== "Off", levelTag("ABS", a.abs))}${badge(a.tcs !== "Off", levelTag("TCS", a.tcs))}${badge(a.esc, "ESC")}${badge(a.steer_speed_sensitivity > 0, "STEER")}` +

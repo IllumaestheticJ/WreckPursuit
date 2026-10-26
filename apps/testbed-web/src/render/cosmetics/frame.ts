@@ -59,6 +59,36 @@ export class CarFrame {
     return out;
   }
 
+  /**
+   * Most forward point of the nose over x in [x0, x1], z in [z0, z1] (front bumper box, and the
+   * grilles, lamps and skid plates standing in front of it; not the police push bar and light
+   * bars, which bolt-ons replace or leave alone).
+   */
+  frontMost(x0: number, x1: number, z0: number, z1: number): number {
+    let y = this.bumperFront.max.y;
+    for (const b of this.endParts(x0, x1, z0, z1)) if (b.min.y > 0) y = Math.max(y, b.max.y);
+    return y;
+  }
+
+  /** Most rearward point of the tail over x in [x0, x1], z in [z0, z1] (as `frontMost`). */
+  rearMost(x0: number, x1: number, z0: number, z1: number): number {
+    let y = this.bumperRear.min.y;
+    for (const b of this.endParts(x0, x1, z0, z1)) if (b.max.y < 0) y = Math.min(y, b.min.y);
+    return y;
+  }
+
+  /** Boxes of the body, detail and lamp parts overlapping an x / z window (no Accessory). */
+  private endParts(x0: number, x1: number, z0: number, z1: number): THREE.Box3[] {
+    const out: THREE.Box3[] = [];
+    for (const [name, b] of this.partBoxes) {
+      const p = this.partsByName.get(name)!;
+      if (p.region === "Accessory" || !["panel", "body", "detail", "light"].includes(p.kind)) continue;
+      if (b.max.x < x0 || b.min.x > x1 || b.max.z < z0 || b.min.z > z1) continue;
+      out.push(b);
+    }
+    return out;
+  }
+
   /** Front bumper box, or the front 0.3 m of the body. */
   get bumperFront(): THREE.Box3 {
     const b = this.region("FrontBumper");
@@ -87,6 +117,27 @@ export class CarFrame {
   /** Trunk lid box (the tailgate on trucks and vans), or a guess at the back. */
   get trunk(): THREE.Box3 {
     return this.region("Trunk") ?? new THREE.Box3(new THREE.Vector3(-this.halfW + 0.05, this.body.min.y, 0.7), new THREE.Vector3(this.halfW - 0.05, this.body.min.y + 1.0, 0.85));
+  }
+
+  /**
+   * Where a rear wing stands: the back edge `y` it sits on, the surface height `z` there and the
+   * width `w` of what it sits on. A trunk lid: its back edge. An upright tailgate (hatchback,
+   * estate, van, SUV) has no lid to stand on, so the back edge of the roof, where the stock roof
+   * spoilers are; a pickup (roof far ahead of the tailgate): the top of the tailgate.
+   */
+  get wingMount(): { y: number; z: number; w: number } {
+    const t = this.trunk;
+    const depth = t.max.y - t.min.y;
+    if (depth >= 0.25) {
+      const y = t.min.y + 0.06;
+      return { y, z: this.surfaceZ("trunk", 0, y + 0.1, t.max.z), w: t.max.x - t.min.x };
+    }
+    const r = this.region("Roof");
+    if (r && r.min.y - t.min.y < 1.2) {
+      const y = r.min.y + 0.06;
+      return { y, z: this.surfaceZ("roof", 0, y + 0.1, r.max.z), w: r.max.x - r.min.x };
+    }
+    return { y: t.min.y + 0.06, z: t.max.z, w: t.max.x - t.min.x };
   }
 
   /** Roof box, or the top of the body. */
@@ -136,29 +187,39 @@ export class CarFrame {
     return new THREE.Box3().setFromCenterAndSize(c, new THREE.Vector3(0.3, 0.04, 0.12));
   }
 
-  /** Exhaust outlet: where the stock pipe ends at the back (centre of its last 5 cm), and the pipe radius. */
-  get exhaustOutlet(): { at: THREE.Vector3; radius: number } {
+  /**
+   * Exhaust outlet: where the stock pipe ends (centre of its last 5 cm), the pipe radius, and
+   * which way it blows: out the back (`dir` 0) or out of the side under the sills (−1 left,
+   * +1 right; rally raiders, vans and pickups with side exits). Tips on both sides of the car
+   * (`both`) give the left one: builders mirror their pieces to the right.
+   */
+  get exhaustOutlet(): { at: THREE.Vector3; radius: number; dir: -1 | 0 | 1; both: boolean } {
     const tip = this.partsByName.get("exhaust_tip") ?? this.partsByName.get("exhaust_pipe");
     if (tip) {
+      const pts: THREE.Vector3[] = [];
       const a = tip.positions_mm;
-      let minY = Infinity;
-      for (let i = 1; i < a.length; i += 3) minY = Math.min(minY, a[i] * 1e-3);
-      const c = new THREE.Vector3();
-      let n = 0;
+      for (let i = 0; i < a.length; i += 3) pts.push(new THREE.Vector3(a[i] * 1e-3, a[i + 1] * 1e-3, a[i + 2] * 1e-3));
+      // Tips on both sides of the car: keep the left one.
+      const both = pts.some((p) => p.x < -0.2) && pts.some((p) => p.x > 0.2) && tip.name === "exhaust_tip";
+      const own = both ? pts.filter((p) => p.x < 0) : pts;
+      const ext = (f: (p: THREE.Vector3) => number) => own.reduce((m, p) => Math.max(m, f(p)), -Infinity);
+      // The end nearest the outside of the body is the outlet: the back, or a side.
+      const back = -ext((p) => -p.y) - this.body.min.y;
+      const right = this.halfW - ext((p) => p.x);
+      const left = this.halfW - ext((p) => -p.x);
+      const span = ext((p) => p.y) + ext((p) => -p.y);
+      const dir: -1 | 0 | 1 = span > 0.5 && tip.name === "exhaust_tip" ? 0 : back <= Math.min(left, right) ? 0 : right < left ? 1 : -1;
+      // Distance of a point along the outlet direction (larger = further out).
+      const out = (p: THREE.Vector3) => (dir === 0 ? -p.y : dir * p.x);
+      const end = ext(out);
+      const ring = own.filter((p) => out(p) >= end - 0.05);
+      const c = ring.reduce((s, p) => s.add(p), new THREE.Vector3()).divideScalar(Math.max(ring.length, 1));
       let rx = 0;
-      for (let i = 0; i < a.length; i += 3) {
-        if (a[i + 1] * 1e-3 > minY + 0.05) continue;
-        c.x += a[i] * 1e-3;
-        c.y += a[i + 1] * 1e-3;
-        c.z += a[i + 2] * 1e-3;
-        n++;
-      }
-      c.divideScalar(Math.max(n, 1));
-      for (let i = 0; i < a.length; i += 3) if (a[i + 1] * 1e-3 <= minY + 0.05) rx = Math.max(rx, Math.abs(a[i] * 1e-3 - c.x));
-      return { at: c, radius: Math.min(Math.max(rx, 0.03), 0.07) };
+      for (const p of ring) rx = Math.max(rx, dir === 0 ? Math.abs(p.x - c.x) : Math.abs(p.y - c.y));
+      return { at: c, radius: Math.min(Math.max(rx, 0.03), 0.07), dir, both };
     }
     const r = this.bumperRear;
-    return { at: new THREE.Vector3(-this.halfW * 0.55, r.min.y, r.min.z + 0.05), radius: 0.035 };
+    return { at: new THREE.Vector3(-this.halfW * 0.55, r.min.y, r.min.z + 0.05), radius: 0.035, dir: 0, both: false };
   }
 
   /**

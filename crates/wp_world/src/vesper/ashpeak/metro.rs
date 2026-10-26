@@ -895,9 +895,14 @@ pub(super) fn extra_buildings(site: &mut Site) -> (Vec<Building>, Vec<Decor>) {
 /// Tower and the Seawall Point lighthouse; billboards round the plaza.
 fn landmarks(site: &mut Site, discs: &[(V2, f32)], b: &mut Vec<Building>, d: &mut Vec<Decor>) {
     let lm = BuildingKind::Landmark;
-    // Meridian Plaza: a paved plinth over the whole superblock, the Spire in the middle.
+    // Meridian Plaza: a paved plinth over the whole superblock, the Spire in the middle. The
+    // marches from the Spire run up Meridian Avenue and the Grand Promenade into the junction
+    // mouths at the plaza's edge, where no road surface is near, so they stopped 2 m short of
+    // the streets' centrelines: the plinth stood over the plaza-side lane of all four streets
+    // round it. It is fitted like the other landmarks, clear of every paved edge and junction
+    // disc (the grand avenues' T junctions at the edge midpoints keep it ~30 m in).
     let plaza = interior(site, SPIRE, 120.0);
-    let plinth = shrink(plaza, 0.5);
+    let plinth = fit_rect(site, discs, shrink(plaza, 0.5), 20).unwrap_or(shrink(plaza, 30.0));
     let base = on_ground(site, fp_rect(plinth), 0.4, lm);
     let top = base.roof_z();
     b.push(base);

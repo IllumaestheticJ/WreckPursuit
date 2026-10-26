@@ -320,6 +320,7 @@ function readGamepad(): PadRead | null {
     gearDown: rising("gearDown"),
     horn: !!now.horn,
     headlights,
+    nitrous: !!now.nitrous,
   };
   padPrev = now;
   padHeld = values;
@@ -384,6 +385,7 @@ export function readInput(dt: number): { input: DriverInput; source: InputSource
     gearDown: keyEdge("gearDown"),
     horn: keyAction("horn"),
     headlights,
+    nitrous: keyAction("nitrous"),
   };
   pressedEdges.clear();
   if (pad?.active) source = "Gamepad";
@@ -396,6 +398,7 @@ export function readInput(dt: number): { input: DriverInput; source: InputSource
     input.gearUp ||= keyboard.gearUp;
     input.gearDown ||= keyboard.gearDown;
     input.horn ||= keyboard.horn;
+    input.nitrous ||= keyboard.nitrous;
     return { input, source, edges };
   }
   if (source === "Gamepad" && pad) {
@@ -405,6 +408,7 @@ export function readInput(dt: number): { input: DriverInput; source: InputSource
     input.gearUp ||= keyboard.gearUp;
     input.gearDown ||= keyboard.gearDown;
     input.horn ||= keyboard.horn;
+    input.nitrous ||= keyboard.nitrous;
     return { input, source, edges };
   }
   return { input: keyboard, source, edges };

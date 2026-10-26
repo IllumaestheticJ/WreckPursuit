@@ -91,6 +91,13 @@ fn mode_tables_validate_against_schema_and_loader() {
     assert!(arcade.racer_damage_scale < 1.0);
     assert_eq!(sim.racer_damage_scale, 1.0);
     assert_eq!(extreme.racer_damage_scale, 1.0);
+    // Owner 2026-10-26: AI police and AI racers take 2x their damage in Arcade only.
+    assert_eq!(arcade.ai_racer_damage_mult, 2.0);
+    assert_eq!(arcade.police_damage_scale, 2.0);
+    for t in [&sim, &extreme] {
+        assert_eq!(t.ai_racer_damage_mult, 1.0);
+        assert_eq!(t.police_damage_scale, 1.0);
+    }
 }
 
 #[test]

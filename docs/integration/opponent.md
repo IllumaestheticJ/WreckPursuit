@@ -443,3 +443,24 @@ dodge spikes". Design, results and how to re-train: `crates/wp_opponent/README.m
   noise (4 contacts without the change, 6 with), but roamers cruise and don't need it.
 - `tests/race.rs` police chase: the allowance for a car still pulling over goes from 6.5 to
   8 m/s, because the 6 m/s cap is a speed target and main overshot it (6.8 m/s).
+
+### Follow-up: sharper Loop 9 fields (owner, 2026-10-26)
+"Make the loop 9 opponents more aggressive and smarter across the board."
+- `wp_race::catalog::sharpened` / `RaceDef::driver_profile`: in `loop9_circuit`, `loop9_day`
+  and `loop9_ashpeak_highway` every regular drives with skill +0.15 (max 0.95), aggression
+  +0.3 (at least 0.75), consistency +0.15 (max 0.95) and awareness +0.15 (at least 0.85).
+  Risk stays each driver's own (raised too, the day race lost nearly all finishers to
+  civilian hits and police stops). `data/events/racers.toml` is unchanged, so the betting
+  market still rates them from their record; other races use the plain profiles. The live
+  race, `opponent_pace` and the trainer all read `driver_profile`.
+- No drafting: the sim has no slipstream model, so "drafting" is only the shorter following
+  gap that aggression already gives.
+- `wp_race::judge::STALLED_RESET_S` (30 s): an AI racer on `set_stranded_reset` with no
+  course progress for that long is put back on the course where it stands (as the flip and
+  stranded resets). The sharper field brakes later into the Lantern Way → Route 12 turn
+  (gate 62-63); a car that lost it there slid into the inside barrier and the cars behind
+  wedged in beside it (held by a standing car, so none ever backed out) until the race timed
+  out. The same jam happened on main on some seeds.
+- Measured (race_picker, release): highway seeds 1-7 + test seed 45 of 48 finish, winners
+  400-427 s (main: 3-6 finishers per seed, winners 427-454 s); night seeds 1-4 24 of 24 finish;
+  day seeds 1-8 15 of 48 finish (main 16 of 48), losses are police captures.

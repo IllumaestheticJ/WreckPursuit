@@ -1,4 +1,4 @@
-# simcli hashes scenario=race_drag_coupe_vs_sedan systems=vehicle,damage hash_spec=4 contract=0.4.1
+# simcli hashes scenario=race_drag_coupe_vs_sedan systems=vehicle,damage hash_spec=4 contract=0.4.2
 240 e5a73ac2f067a6b7
 480 128856a851beb1d8
 720 3d95060b7f091f2f

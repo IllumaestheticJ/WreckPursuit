@@ -1,4 +1,4 @@
-# simcli hashes scenario=race_city_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=race_city_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 240 e5d82fa910f8a40b
 480 dde5be063d2157f2
 720 6434c28449157aa5
@@ -14,8 +14,8 @@
 3120 c107508d6934b689
 3360 f874ef91ea00a32a
 3600 af35e0d507fe0747
-3840 5c9ac91d98ffb5ec
-4080 57b981422eb8fd80
-4320 20bf961d047e6d27
-4560 870820d58970ab00
-4800 7a004168c1b0995a
+3840 7d424cbc407522c5
+4080 0929fa308c0955ac
+4320 d072b325a6fee335
+4560 23a85489187251a2
+4800 6d1792086bc7224a

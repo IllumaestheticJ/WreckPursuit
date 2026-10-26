@@ -573,6 +573,15 @@ pub fn apply_op(
         OpKind::ClearTraffic { xy, radius_m } => {
             sim.clear_traffic_near(xy, radius_m);
         }
+        OpKind::Recovered => {
+            let pos = sim
+                .vehicles()
+                .iter()
+                .find(|v| v.id == id)
+                .map(|v| wp_contracts::VehicleSim::state(&v.vehicle).pos)
+                .ok_or(wp_sim::SimError::UnknownEntity(id))?;
+            sim.police_mut().racer_recovered(id, pos);
+        }
     }
     Ok(())
 }

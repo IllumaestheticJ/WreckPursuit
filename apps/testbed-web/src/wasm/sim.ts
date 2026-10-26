@@ -27,6 +27,8 @@ export interface DriverInput {
   gearDown: boolean;
   horn: boolean;
   headlights: boolean;
+  /** Nitrous key held (sent as tool 1, `wp_vehicle::nitrous`). Optional: off when absent. */
+  nitrous?: boolean;
 }
 
 export interface WheelInfo {
@@ -240,9 +242,12 @@ export async function loadWasm(): Promise<void> {
   await initWasm();
 }
 
+/** `set_input` tool value that burns nitrous (`wp_vehicle::nitrous::NITROUS_TOOL`). */
+export const NITROUS_TOOL = 1;
+
 export function packInput(i: DriverInput): Float32Array {
   const flags = (i.gearUp ? 1 : 0) | (i.gearDown ? 2 : 0) | (i.horn ? 4 : 0) | (i.headlights ? 8 : 0);
-  return new Float32Array([i.steer, i.throttle, i.brake, i.handbrake, i.clutch, flags, 0]);
+  return new Float32Array([i.steer, i.throttle, i.brake, i.handbrake, i.clutch, flags, i.nitrous ? NITROUS_TOOL : 0]);
 }
 
 let lastEventsJson = "";
@@ -462,6 +467,10 @@ export const sim = {
   mapStaticJson: (): string => wasm.map_static_json(),
   /** Per-frame map data for `player` (units, tools, search zone; layout in ui-kit `src/map/data.ts`). */
   mapDynamic: (player: number): Float32Array => wasm.map_dynamic(player),
+  /** map_dynamic() with every police unit and tool, whatever the career car's gadgets (3D world). */
+  mapDynamicWorld: (player: number): Float32Array => wasm.map_dynamic_world(player),
+  /** Career gadgets `[radar, scanner, fake_plates]` (mod tiers), empty outside a career run. */
+  playerGadgets: (): Float32Array => wasm.player_gadgets(),
   stateHash: (): string => wasm.state_hash(),
   latticeNodes: (entity: number): Float32Array => wasm.lattice_nodes(entity),
   latticeRest: (entity: number): Float32Array => wasm.lattice_rest(entity),
@@ -485,6 +494,8 @@ export const sim = {
   telemetry: (entity: number): Float32Array => wasm.telemetry(entity),
   telemetryNames: (): string[] => JSON.parse(wasm.telemetry_names()),
   ffb: (entity: number): Float32Array => wasm.ffb(entity),
+  /** Nitrous bottle `[fill 0..1, burning 0/1, strength, refill]` (HUD gauge). */
+  nitrous: (entity: number): Float32Array => wasm.nitrous(entity),
   intents: (): Float32Array => wasm.intents(),
   recordStart: (): void => wasm.record_start(),
   recordStop: (): Uint8Array => wasm.record_stop(),
@@ -627,6 +638,8 @@ export const sim = {
   careerRelease: (uid: number): CareerView => JSON.parse(wasm.career_release(uid)),
   careerInsure: (uid: number, tier: string): CareerView => JSON.parse(wasm.career_insure(uid, tier)),
   careerNextNight: (): CareerView => JSON.parse(wasm.career_next_night()),
+  careerBuyInformant: (tier: string): CareerView => JSON.parse(wasm.career_buy_informant(tier)),
+  careerPayOffBounty: (): CareerView => JSON.parse(wasm.career_pay_off_bounty()),
   // ----- car lots (crates/wp_wasm/src/lots.rs) ----------------------------------------------
   careerLot: (lotId: string): LotStockView => JSON.parse(wasm.career_lot_json(lotId)),
   careerBuyListing: (lotId: string, slot: number): CareerView => JSON.parse(wasm.career_buy_listing(lotId, slot)),

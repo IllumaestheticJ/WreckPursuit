@@ -196,6 +196,8 @@ pub struct RacePayout {
     pub rep: i64,
     /// Bounty gained (winning while wanted).
     pub bounty: i64,
+    /// High-stakes purse bonus for the career's bounty (`Economy::bounty_purse_bonus`).
+    pub bounty_bonus: i64,
     /// Cash after the settlement.
     pub cash_after: i64,
     /// Ledger lines of the buy-in and the settlement, in order.
@@ -754,6 +756,7 @@ impl PlayerRun {
             clean_bonus: pay.clean_bonus,
             rep: pay.rep,
             bounty: pay.bounty as i64,
+            bounty_bonus: 0,
             cash_after: self.acct.cash,
             ledger,
         })

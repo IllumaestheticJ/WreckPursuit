@@ -265,7 +265,10 @@ same line at an equal or higher tier, so upgrading a prerequisite never strands 
 - `Cosmetic` mods (and every other mod that can be seen) are drawn by the testbed from
   `data/cosmetics/visuals.json`; `tests/visuals.rs` keeps that table in step with the catalog.
 - `Tool { kind, tier }` — radar detector, scanner, run-flat, reinforced cooling, fake plates,
-  nitrous → `ToolLoadout`.
+  nitrous → `ToolLoadout`. The career (`wp_wasm::career`) hands them on: run-flat and cooling
+  to `wp_sim` (`Sim::set_run_flat`, `Sim::set_cooling_tier`), radar / scanner / plates to the
+  session's `PlayerGadgets` (map, radio, `Economy::carry_heat_with_plates`). Nitrous is wired
+  by the nitrous workstream. See `docs/integration/mod-effects.md`.
 
 **What a build looks like** (`visuals`, `Economy::build_visuals`): every mod that changes
 something you could see on a real car says so, and a build resolves to `BuildVisuals` — the parts

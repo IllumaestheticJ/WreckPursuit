@@ -16,6 +16,7 @@
 //! Modules:
 //! - [`ledger`] — accounts, events, transactions, stores.
 //! - [`repair`] — price tables for `wp_damage`, damage reports, repair options, shops, insurance.
+//! - [`bounty`] — paying the bounty off; high-stakes races (bounty gate, purse bonus).
 //! - [`capture`] — fines, bail, impound, seizure, escapes, the daily tick, cop XP.
 //! - [`payouts`] — purses, buy-ins, clean bonus, pink slips, informants.
 //! - [`mods`] — mod definitions, catalog, install rules, applying mods to definitions.
@@ -34,6 +35,7 @@
 
 #![warn(missing_docs)]
 
+pub mod bounty;
 pub mod capture;
 pub mod career;
 pub mod data;

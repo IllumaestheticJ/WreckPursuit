@@ -50,6 +50,7 @@ pub mod lod;
 pub mod lots;
 pub mod map;
 pub mod mod_visuals;
+pub mod out_of_play;
 pub mod pack;
 pub mod police;
 pub mod props;
@@ -75,6 +76,8 @@ mod collide_tests;
 mod crash_replay_tests;
 #[cfg(test)]
 mod lots_tests;
+#[cfg(test)]
+mod out_of_play_tests;
 #[cfg(test)]
 mod police_audio_trace;
 #[cfg(test)]
@@ -950,10 +953,18 @@ pub fn map_static_json() -> Result<String, JsValue> {
 /// zone, escape progress, sight ranges, player pose, racer count), then every police unit
 /// (`map::UNIT_STRIDE` floats), every roadblock / spike strip (`map::TOOL_STRIDE`) and,
 /// during a race, every racer in position order (`map::RACER_STRIDE`). Without police in
-/// the session there are no units or tools.
+/// the session there are no units or tools. In a career run only the units and tools the
+/// player knows about (plain sight, radar detector, scanner: [`session::PlayerGadgets`]).
 #[wasm_bindgen]
 pub fn map_dynamic(player: u32) -> Result<Vec<f32>, JsValue> {
-    get(|s| map::map_dynamic_for(s, EntityId(player)))
+    get(|s| map::map_dynamic_for(s, EntityId(player), s.gadgets()))
+}
+
+/// [`map_dynamic`] with every unit and tool whatever the player's gadgets: for the 3D world
+/// (spike strips on the road are there whether the map knows of them or not).
+#[wasm_bindgen]
+pub fn map_dynamic_world(player: u32) -> Result<Vec<f32>, JsValue> {
+    get(|s| map::map_dynamic_for(s, EntityId(player), None))
 }
 
 /// Helicopters tracking a racer, 8 floats each: `[x, y, z, aim_x, aim_y, aim_z,
@@ -1737,6 +1748,18 @@ pub fn police_tools() -> Result<Vec<f32>, JsValue> {
     })
 }
 
+/// The player's career gadgets as `[radar, scanner, fake_plates]` (mod tiers, 0 = not fitted;
+/// fake plates 0 / 1), or empty outside a career run (sandbox: every unit on the map, the radio
+/// as the audio panel picks). In a career run the scanner tier also drives the audio scanner.
+#[wasm_bindgen]
+pub fn player_gadgets() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        s.gadgets().map_or(Vec::new(), |g| {
+            vec![g.radar as f32, g.scanner as f32, g.fake_plates as u8 as f32]
+        })
+    })
+}
+
 /// Tyre deflation per vehicle, 4 floats each (FL, FR, RL, RR; 0 inflated … 1 flat), same order
 /// as `vehicle_states()`: what the handling drives on (the worst of spike-strip punctures,
 /// crash damage to the wheel and career tyres, capped by run-flat tyres).
@@ -2094,6 +2117,26 @@ pub fn ffb(entity: u32) -> Result<Vec<f32>, JsValue> {
     with(|s| {
         s.ffb(EntityId(entity))
             .map(|f| vec![f.rack_torque_nm, f.road_rumble, f.damper])
+            .ok_or_else(|| format!("unknown entity {entity}"))
+    })
+}
+
+/// Nitrous bottle `[fill 0..1, burning 0/1, strength, refill]` (`wp_vehicle::nitrous`):
+/// the HUD gauge. Strength / refill are the bottle's scale (1 for the player; AI rubberbanding
+/// raises them). Fire it with tool 1 in `set_input` (`[..., tool_use = 1]`).
+#[wasm_bindgen]
+pub fn nitrous(entity: u32) -> Result<Vec<f32>, JsValue> {
+    with(|s| {
+        s.vehicle(EntityId(entity))
+            .map(|v| {
+                let n = v.vehicle.nitrous();
+                vec![
+                    n.fill,
+                    if n.burning { 1.0 } else { 0.0 },
+                    n.scale.strength,
+                    n.scale.refill,
+                ]
+            })
             .ok_or_else(|| format!("unknown entity {entity}"))
     })
 }

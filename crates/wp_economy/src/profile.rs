@@ -28,6 +28,10 @@ use serde::{Deserialize, Serialize};
 use wp_contracts::{DamageMode, PlayerId};
 
 use crate::data::Economy;
+
+/// Share of the carried heat that follows a car with fake plates into the next run
+/// ([`Economy::carry_heat_with_plates`]).
+pub const FAKE_PLATES_CARRY_FRAC: f32 = 0.5;
 use crate::ledger::{EconomyEvent, Money, PlayerAccount};
 
 /// `format` field of every career profile.
@@ -231,6 +235,23 @@ impl Economy {
         }
     }
 
+    /// [`Self::carry_heat`] for a car with fake plates fitted (`ToolLoadout::fake_plates`):
+    /// the police cannot match the car to tonight's chase, so only
+    /// [`FAKE_PLATES_CARRY_FRAC`] of the carried heat follows it into the next run. What the
+    /// police saw during the run still counted in full.
+    pub fn carry_heat_with_plates(&self, heat_at_end: f32, end: RunEnd, fake_plates: bool) -> f32 {
+        let h = self.carry_heat(heat_at_end, end);
+        if !fake_plates {
+            return h;
+        }
+        let h = h * FAKE_PLATES_CARRY_FRAC;
+        if h < self.consequences.career.heat_carry_min {
+            0.0
+        } else {
+            h
+        }
+    }
+
     /// Close a finished run on the profile: counters, carried heat, ledger trim, dropped
     /// lattices of cars no longer owned, then one in-game night ([`Economy::end_of_day`]:
     /// insurance premiums, impound storage, auctions). Returns the night's ledger lines.
@@ -364,6 +385,10 @@ mod tests {
         assert_eq!(e.carry_heat(40.0, RunEnd::Wrecked), 0.0);
         assert_eq!(e.carry_heat(40.0, RunEnd::Free), 20.0);
         assert_eq!(e.carry_heat(200.0, RunEnd::Free), 45.0);
+        // Fake plates: half of it carries, below the minimum none.
+        assert_eq!(e.carry_heat_with_plates(200.0, RunEnd::Free, true), 22.5);
+        assert_eq!(e.carry_heat_with_plates(200.0, RunEnd::Free, false), 45.0);
+        assert_eq!(e.carry_heat_with_plates(40.0, RunEnd::Captured, true), 0.0);
         assert_eq!(e.carry_heat(8.0, RunEnd::Free), 0.0);
         assert_eq!(e.carry_heat(f32::NAN, RunEnd::Free), 0.0);
     }

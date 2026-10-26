@@ -129,6 +129,13 @@ pub const STRANDED_GRACE_S: f32 = 20.0;
 /// the Lantern Way junction and lay there, inside the corridor, until the race timed out).
 /// Police units already get the same rule (`wp_police::stuck::FLIPPED_RESET_S`).
 pub const FLIPPED_RESET_S: f32 = 3.0;
+/// An AI racer that has made no course progress (at least [`STUCK_PROGRESS_M`]) for this
+/// long is put back on the course where it stands ([`RaceJudge::set_stranded_reset`]), s,
+/// even inside the corridor: wedged in a pile it cannot reverse out of (Loop 9 → Ashpeak
+/// highway, the Lantern Way turn onto the Route 12 ramp: a car that slid into the inside
+/// barrier there held up the cars behind, they wedged in beside it and three racers stood
+/// there until the race timed out). Long enough that a queue at a red light never trips it.
+pub const STALLED_RESET_S: f32 = 30.0;
 /// Up-axis Z below which a car counts as flipped (as `wp_police::stuck::FLIPPED_UP_Z`).
 pub const FLIPPED_UP_Z: f32 = 0.3;
 
@@ -156,6 +163,8 @@ struct Track {
     progress_tick: u64,
     out_ticks: u64,
     flipped_ticks: u64,
+    /// Tick of the last [`STALLED_RESET_S`] reset (0: none).
+    stall_reset_tick: u64,
     /// Course distance (within the lap) of the last sample inside the corridor, m.
     on_course_m: Option<f32>,
     contacts: u32,
@@ -344,6 +353,7 @@ impl RaceJudge {
             progress_tick: 0,
             out_ticks: 0,
             flipped_ticks: 0,
+            stall_reset_tick: 0,
             on_course_m: None,
             contacts: 0,
             civilian_hits: 0,
@@ -722,6 +732,20 @@ impl RaceJudge {
                 }
             } else {
                 t.flipped_ticks = 0;
+            }
+            // Stalled: no progress for a long time, on the course or off it.
+            let since = t.progress_tick.max(t.stall_reset_tick);
+            if tick > since + ticks_for(STALLED_RESET_S) {
+                t.stall_reset_tick = tick;
+                t.out_ticks = 0;
+                t.flipped_ticks = 0;
+                let along = t.on_course_m.unwrap_or(proj.along_m);
+                let (pos, dir) = self.course.point_at(along);
+                self.resets.push(CourseReset {
+                    racer: t.entry.racer,
+                    pos,
+                    dir,
+                });
             }
         }
     }

@@ -19,7 +19,7 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `engine.rs` | torque curve, idle controller, soft rev limiter, engine braking, turbo lag (`EngineExtras`) |
 | `drivetrain.rs` | gearbox (manual/auto: load-based schedule, kickdown, corner hold, rev-matched clutch shifts, auto-reverse), automatic clutch / launch control, torque converter |
 | `diff.rs` | differentials, axle + AWD centre: open, clutch-pack LSD (1 / 1.5 / 2-way), viscous, helical (torque-sensing), active e-diff, locked; per-car setups from `data/cars/differentials.toml` |
-| `brakes.rs` | bias, ABS Off / Half / Full (~15 Hz release cycle; Half releases at 3× peak slip, Full at 1.4×) |
+| `brakes.rs` | bias, ABS Off / Half / Full (pressure dump / spin-up / adaptive reapply; Half releases at 3× peak slip, Full at 1.4×) and motorsport ABS (`AbsHardware::Motorsport`: per-sub-step slip control at the tyre peak, docs/integration/motorsport-abs.md) |
 | `steering.rs` | slip-targeted lock + rack rate (keyboard/gamepad), self-aligning countersteer help (0–100 % slider), countersteer lock, Ackermann, toe, damage pull, FWD torque steer |
 | `lab_scope.rs` | Drift Lab W "use W handling everywhere": limit the lab overrides (plain / ride / car_lab / drift tuning) to tagged vehicles (`Vehicle::set_lab_tagged`, the player) |
 | `drift.rs` | Drift Lab B / C (rows 90 / 91 / 104 / 106): slide onset tuning + runtime override, intent modes (straighten / hold = countersteer key / angle-up = key into the turn / exceeded), opt-in throttle shaping and lift softening (default off), slide-angle envelope; steering angle (and opt-in throttle) only |
@@ -362,6 +362,14 @@ So the effective split is the bias only when both axles have the **same per-whee
 65/35. With different capacities (as above) the split is `bias·front : (1−bias)·rear` = 77/23.
 Damage `brake_scale` and ABS then modulate per wheel; the handbrake adds
 `handbrake_rear_nm` to each rear wheel.
+
+## Nitrous (`nitrous.rs`, owner 2026-10-26)
+
+One bottle per car, fired by `VehicleInput::tool_use == 1` with the throttle down in a forward
+gear: more engine torque while it burns, refills by itself. AI bottles are scaled (stronger,
+faster refill) by `wp_sim` the further they trail their target. Tuning: `data/tune/nitrous.toml`;
+details in `docs/integration/nitrous.md`. Tests: `nitrous.rs` unit tests and `tests/nitrous.rs`
+(a rolling car gains about 4 m/s more in 6 s of burn; the far-behind AI bottle 1.5 m/s on top).
 
 ## Snapshots and client prediction
 

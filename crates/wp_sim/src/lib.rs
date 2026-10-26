@@ -12,6 +12,7 @@
 
 mod contacts;
 mod crash_mass;
+mod nitrous_link;
 mod parked;
 mod physics;
 mod police_link;
@@ -91,6 +92,21 @@ pub enum VehicleKind {
     Traffic,
 }
 
+/// Multiplier on the contact impulses reaching a vehicle's damage model, from the mode table:
+/// the player's racer `racer_damage_scale`, AI racers `racer_damage_scale ×
+/// ai_racer_damage_mult`, AI police `police_damage_scale`, player cop seats
+/// (`player_driven_police`) and traffic 1.0. Damage only: the rigid-body response is never
+/// scaled.
+pub fn damage_scale(kind: VehicleKind, player_driven_police: bool, mode: &ModeTable) -> f32 {
+    match kind {
+        VehicleKind::Player => mode.racer_damage_scale,
+        VehicleKind::AiRacer => mode.racer_damage_scale * mode.ai_racer_damage_mult,
+        VehicleKind::Police if player_driven_police => 1.0,
+        VehicleKind::Police => mode.police_damage_scale,
+        VehicleKind::Traffic => 1.0,
+    }
+}
+
 /// Hook run on every contact before damage applies it (e.g. the server quantising contacts
 /// so clients can replay them bit-identically, see `wp_net`). Plain function pointer:
 /// deterministic and `wp_sim` does not depend on the caller's crate.
@@ -148,12 +164,17 @@ pub struct SimVehicle {
     /// Run-flat tyres fitted ([`Sim::set_run_flat`]): punctures never deflate a tyre past
     /// [`wp_vehicle::vehicle::RUN_FLAT_MAX_DEFLATION`].
     run_flat: bool,
+    /// Reinforced cooling tier ([`Sim::set_cooling_tier`]): 0 stock; higher tiers slow the
+    /// overheat of a failed radiator ([`COOLING_OVERHEAT_SCALE`]).
+    cooling_tier: u8,
     /// Dormant ([`Sim::set_dormant`]): a fixed body, no vehicle or damage-motion step.
     dormant: bool,
     /// May drive in light mode far from every player ([`Sim::set_light_when_far`]).
     light_when_far: bool,
     /// Light mode now: a kinematic road follower instead of full vehicle physics.
     light: Option<LightState>,
+    /// AI nitrous fires this tick (`nitrous_link`; AI racers and police only).
+    nitrous_fire: bool,
 }
 
 /// A vehicle in light mode ([`Sim::set_light_when_far`]): heading, speed and the chassis
@@ -393,9 +414,11 @@ impl Sim {
             chassis_skips_sidewalks: false,
             ghost_ticks: 0,
             ghost_overstay: 0,
+            nitrous_fire: false,
             tire_condition: None,
             ram: wp_economy::RamProfile::default(),
             run_flat: false,
+            cooling_tier: 0,
             player_steering: None,
             dormant: false,
             light_when_far: false,
@@ -772,6 +795,18 @@ impl Sim {
         Ok(())
     }
 
+    /// Set a car's nitrous bottle scale (the player's Nitrous Kit,
+    /// `wp_vehicle::nitrous::NitrousTune::kit_scale`). AI racers and police get theirs from
+    /// the rubberbanding every tick, which overrides this.
+    pub fn set_nitrous_scale(
+        &mut self,
+        id: EntityId,
+        scale: wp_vehicle::nitrous::NitrousScale,
+    ) -> Result<(), SimError> {
+        self.slot_mut(id)?.vehicle.set_nitrous_scale(scale);
+        Ok(())
+    }
+
     /// Re-apply a vehicle's body inertia (`wp_vehicle::Vehicle::body_inertia`) after a lab
     /// ride override changed it (the hidden tuning panel). Lab-only: not a replay op.
     pub fn refresh_body_inertia(&mut self, id: EntityId) -> Result<(), SimError> {
@@ -933,6 +968,28 @@ impl Sim {
         Ok(())
     }
 
+    /// Set a vehicle's reinforced cooling tier (the career's radiator / oil cooler mods,
+    /// `wp_economy::ToolLoadout::reinforced_cooling`; 0 = stock): a failed radiator heats the
+    /// engine [`COOLING_OVERHEAT_SCALE`] as fast, so the car limps further before it cooks.
+    /// Like mods, not recorded in replays: set it before the first tick of a session.
+    pub fn set_cooling_tier(&mut self, id: EntityId, tier: u8) -> Result<(), SimError> {
+        self.slot_mut(id)?.cooling_tier = tier;
+        Ok(())
+    }
+
+    /// Fit the ABS hardware of a vehicle (the career's `brakes_abs_motorsport` mod,
+    /// `wp_economy::ToolLoadout::motorsport_abs` > 0 → [`wp_vehicle::AbsHardware::Motorsport`]).
+    /// The driver's ABS level still decides whether it works: motorsport ABS replaces ABS Full.
+    /// Like mods, not recorded in replays: set it before the first tick of a session.
+    pub fn set_abs_hardware(
+        &mut self,
+        id: EntityId,
+        hardware: wp_vehicle::AbsHardware,
+    ) -> Result<(), SimError> {
+        self.slot_mut(id)?.vehicle.set_abs_hardware(hardware);
+        Ok(())
+    }
+
     /// Tyre deflation a vehicle drives on (FL, FR, RL, RR; 0 inflated … 1 flat): the worst of
     /// crash damage, spike strips and the career tyre condition, capped by run-flat tyres.
     /// Exactly what the handling uses; for the HUD and audio.
@@ -943,12 +1000,7 @@ impl Sim {
             .find(|v| v.id == id)
             .ok_or(SimError::UnknownEntity(id))?;
         let mut effects = slot.damage.handling_effects();
-        merge_tire_effects(
-            &mut effects,
-            self.police.tire_puncture(id),
-            slot.tire_condition,
-            slot.run_flat,
-        );
+        merge_mod_effects(&mut effects, self.police.tire_puncture(id), slot);
         Ok(effects.tire_puncture)
     }
 
@@ -1327,6 +1379,7 @@ impl Sim {
         self.wake_dormant_near();
         self.update_light_modes();
         if sys.vehicle {
+            self.update_ai_nitrous();
             // Weather reaches every wheel through `weather_at` (the plain world without weather).
             let wx = self.weather.as_ref().map(|w| w.query(&self.world));
             let world_q: &dyn WorldQuery = match &wx {
@@ -1367,7 +1420,7 @@ impl Sim {
                         .unwrap_or(slot.kind == VehicleKind::Player),
                 );
                 slot.vehicle.step_with_ground(
-                    &slot.input,
+                    &nitrous_link::with_nitrous(&slot.input, slot.nitrous_fire),
                     &slot.assists,
                     world_q,
                     &ground,
@@ -1434,13 +1487,12 @@ impl Sim {
             &mut tick_contacts.per_vehicle,
             &mut self.physics.bodies,
         );
-        // Arcade: racers (player and AI) take `racer_damage_scale` of the collision impulse;
-        // traffic and police take it all. Before the filter, so the scaled contacts are the
-        // ones quantised, recorded and replicated.
+        // Arcade: each vehicle kind takes its own share of the collision impulse (player
+        // racer 0.25, AI racers 0.5, AI police 2.0, player cops and traffic all of it). Before the filter, so
+        // the scaled contacts are the ones quantised, recorded and replicated.
         for (slot, contacts) in self.vehicles.iter().zip(&mut tick_contacts.per_vehicle) {
-            if matches!(slot.kind, VehicleKind::Player | VehicleKind::AiRacer) {
-                wp_damage::scale_racer_contacts(contacts, &self.config.mode);
-            }
+            let scale = damage_scale(slot.kind, slot.player_police.is_some(), &self.config.mode);
+            wp_damage::scale_contacts(contacts, scale);
         }
         if let Some(filter) = self.contact_filter {
             for c in tick_contacts.per_vehicle.iter_mut().flatten() {
@@ -1501,12 +1553,7 @@ impl Sim {
                     self.applied_contacts.push((slot.id, contacts.clone()));
                 }
                 let mut effects = slot.damage.handling_effects();
-                merge_tire_effects(
-                    &mut effects,
-                    self.police.tire_puncture(slot.id),
-                    slot.tire_condition,
-                    slot.run_flat,
-                );
+                merge_mod_effects(&mut effects, self.police.tire_puncture(slot.id), slot);
                 slot.vehicle.apply_damage_effects(&effects);
             }
             self.sync_damage_to_physics();
@@ -1753,27 +1800,33 @@ fn hash_nodes_lockstep(hashers: &mut [StateHasher], nodes: &[&[[f32; 3]]]) {
 
 /// Velocity change one tick's contacts give a body of `mass_kg`, m/s: the magnitude of the
 /// summed normal and friction impulses (chassis space) over the mass.
+/// Overheat rate of a failed radiator per reinforced cooling tier (index = tier, clamped):
+/// stock, aluminium radiator / oil cooler, race radiator.
+pub const COOLING_OVERHEAT_SCALE: [f32; 3] = [1.0, 0.7, 0.5];
+
 /// Merge spike-strip deflation (`wp_police`) and the career tyre condition (worn tread grips
-/// less, a flat stays flat) into a vehicle's damage effects, then cap every tyre's deflation
-/// for run-flats ([`wp_vehicle::vehicle::run_flat_deflation`]).
-fn merge_tire_effects(
+/// less, a flat stays flat) into a vehicle's damage effects, cap every tyre's deflation for
+/// run-flats ([`wp_vehicle::vehicle::run_flat_deflation`]) and slow the overheat for
+/// reinforced cooling ([`COOLING_OVERHEAT_SCALE`]).
+fn merge_mod_effects(
     effects: &mut wp_contracts::HandlingEffects,
     spikes: [f32; 4],
-    tire_condition: Option<([f32; 4], [f32; 4])>,
-    run_flat: bool,
+    slot: &SimVehicle,
 ) {
     for (t, s) in effects.tire_puncture.iter_mut().zip(spikes) {
         *t = t.max(s);
     }
-    if let Some((grip, deflation)) = tire_condition {
+    if let Some((grip, deflation)) = slot.tire_condition {
         for w in 0..4 {
             effects.grip_scale[w] *= grip[w];
             effects.tire_puncture[w] = effects.tire_puncture[w].max(deflation[w]);
         }
     }
     for t in &mut effects.tire_puncture {
-        *t = wp_vehicle::vehicle::run_flat_deflation(*t, run_flat);
+        *t = wp_vehicle::vehicle::run_flat_deflation(*t, slot.run_flat);
     }
+    let tier = (slot.cooling_tier as usize).min(COOLING_OVERHEAT_SCALE.len() - 1);
+    effects.overheating *= COOLING_OVERHEAT_SCALE[tier];
 }
 
 fn impact_delta_v(contacts: &[wp_contracts::ContactImpulse], mass_kg: f32) -> f32 {
@@ -1932,24 +1985,28 @@ mod tests {
             .collect()
     }
 
-    /// Contract v0.4.0 (owner, 2026-10-22): in Arcade only racers (player, AI racers) take the
-    /// reduced damage; police and traffic take the same damage as in Simulation. In
-    /// Simulation every kind takes the same damage.
+    /// Contract v0.4.0 (owner, 2026-10-22): in Arcade racers take reduced damage and traffic
+    /// takes the same damage as in Simulation. Owner 2026-10-26: AI racers take 2x the
+    /// player's share and AI police 2x full damage. In Simulation every kind takes the same.
     #[test]
-    fn arcade_reduces_damage_for_racers_only() {
+    fn arcade_scales_damage_per_kind() {
         let arcade = wall_hit_health("modes/arcade.toml");
         let sim = wall_hit_health("modes/sim.toml");
         let lost = |h: &[(VehicleKind, f32)], k: VehicleKind| {
             1.0 - h.iter().find(|(kind, _)| *kind == k).unwrap().1
         };
-        for k in [VehicleKind::Police, VehicleKind::Traffic] {
-            let (a, s) = (lost(&arcade, k), lost(&sim, k));
-            assert!((a - s).abs() < 1e-3, "{k:?} takes full damage: {a} vs {s}");
-        }
+        let (a, s) = (
+            lost(&arcade, VehicleKind::Traffic),
+            lost(&sim, VehicleKind::Traffic),
+        );
+        assert!(
+            (a - s).abs() < 1e-3,
+            "traffic takes full damage: {a} vs {s}"
+        );
         for k in [VehicleKind::Player, VehicleKind::AiRacer] {
             let ratio = lost(&arcade, k) / lost(&sim, k);
             assert!(
-                ratio < 0.4,
+                ratio < 0.6,
                 "{k:?}: Arcade health lost {ratio:.2} of Simulation's"
             );
             assert!(
@@ -1957,11 +2014,46 @@ mod tests {
                 "{k:?}: the Simulation hit does damage"
             );
         }
+        let (player, ai) = (
+            lost(&arcade, VehicleKind::Player),
+            lost(&arcade, VehicleKind::AiRacer),
+        );
+        assert!(
+            ai > 1.4 * player,
+            "AI racer takes about 2x the player's damage: {ai} vs {player}"
+        );
+        let (a, s) = (
+            lost(&arcade, VehicleKind::Police),
+            lost(&sim, VehicleKind::Police),
+        );
+        assert!(
+            a > 1.4 * s,
+            "AI police take about 2x full damage: {a} vs {s}"
+        );
         let sim_lost: Vec<f32> = sim.iter().map(|(_, h)| 1.0 - h).collect();
         assert!(
             sim_lost.windows(2).all(|w| (w[0] - w[1]).abs() < 0.05),
             "Simulation: every kind takes about the same damage {sim_lost:?}"
         );
+    }
+
+    /// Player cop seats keep full damage; only AI police get `police_damage_scale`.
+    #[test]
+    fn damage_scale_by_kind() {
+        let arcade = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        assert_eq!(damage_scale(VehicleKind::Player, false, &arcade), 0.25);
+        assert_eq!(damage_scale(VehicleKind::AiRacer, false, &arcade), 0.5);
+        assert_eq!(damage_scale(VehicleKind::Police, false, &arcade), 2.0);
+        assert_eq!(damage_scale(VehicleKind::Police, true, &arcade), 1.0);
+        assert_eq!(damage_scale(VehicleKind::Traffic, false, &arcade), 1.0);
+        let sim = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        for k in [
+            VehicleKind::Player,
+            VehicleKind::AiRacer,
+            VehicleKind::Police,
+        ] {
+            assert_eq!(damage_scale(k, false, &sim), 1.0);
+        }
     }
 
     /// Two sedans 30 m apart, 10 m/s each, head-on. Returns every event of a 3 s run.

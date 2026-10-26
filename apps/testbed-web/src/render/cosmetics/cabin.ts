@@ -16,6 +16,13 @@ function seatY(c: LookCtx): number {
 /** Cabin floor height. */
 const floorZ = (c: LookCtx) => c.frame.cabin.min.z + 0.04;
 
+/**
+ * Top of the stock interior at (x, y): where a console or parcel-shelf piece stands. Many models
+ * have one dark block for the whole interior; a piece below its top would be hidden inside it.
+ * −Infinity for a model without an `interior` part (pieces then stand on the floor).
+ */
+const interiorTop = (c: LookCtx, x: number, y: number) => c.frame.surfaceZ("interior", x, y, -Infinity, 0.12);
+
 /** Inside of the roof. */
 const roofInZ = (c: LookCtx) => c.frame.roof.min.z - 0.05;
 
@@ -103,16 +110,16 @@ const cage: Builder = (c, p) => {
 /** Short shifter knob, or a sequential lever with its gate. */
 const shifter: Builder = (c, p) => {
   const y = seatY(c) + 0.38;
-  const z = floorZ(c) + 0.25;
+  const z = Math.max(floorZ(c) + 0.25, interiorTop(c, 0, y) - 0.02);
   const g = new THREE.Group();
   if (p.style === "sequential") {
     g.add(box(0.08, 0.16, 0.05, c.kit.black, 0, y, z));
     g.add(tube(V(0, y, z), V(0, y - 0.05, z + 0.28), 0.01, c.kit.alloy));
     g.add(cylY(0.025, 0.06, c.kit.black, V(0, y - 0.05, z + 0.3)));
   } else {
-    g.add(tube(V(0, y, z), V(0, y, z + 0.12), 0.008, c.kit.chrome));
-    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 8), c.kit.red);
-    knob.position.set(0, y, z + 0.14);
+    g.add(tube(V(0, y, z), V(0, y, z + 0.14), 0.01, c.kit.chrome));
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), c.kit.red);
+    knob.position.set(0, y, z + 0.17);
     g.add(knob);
   }
   c.body(g, "Cabin", "shifter");
@@ -121,10 +128,11 @@ const shifter: Builder = (c, p) => {
 /** Hydraulic handbrake: a tall red lever beside the shifter. */
 const hydroHandbrake: Builder = (c) => {
   const y = seatY(c) + 0.2;
-  const z = floorZ(c) + 0.25;
+  const z = Math.max(floorZ(c) + 0.25, interiorTop(c, 0.1, y) - 0.02);
   const g = new THREE.Group();
   g.add(box(0.05, 0.08, 0.06, c.kit.black, 0.1, y, z));
-  g.add(tube(V(0.1, y, z), V(0.1, y + 0.1, z + 0.32), 0.012, c.kit.red));
+  g.add(tube(V(0.1, y, z), V(0.1, y + 0.1, z + 0.36), 0.016, c.kit.red));
+  g.add(cylY(0.022, 0.08, c.kit.black, V(0.1, y + 0.11, z + 0.38)));
   c.body(g, "Cabin", null);
 };
 
@@ -133,12 +141,12 @@ const dashBox: Builder = (c) => {
   const ws = c.frame.windshield;
   if (!ws) return;
   const y = ws.max.y - 0.16;
-  const z = ws.min.z + 0.02;
+  const z = Math.max(ws.min.z + 0.02, interiorTop(c, -0.08, y) + 0.015);
   const lamp = lampMat(0xff3030);
   c.lamp(lamp, 1.5);
   const g = new THREE.Group();
-  g.add(box(0.11, 0.07, 0.03, c.kit.black, -0.08, y, z));
-  g.add(box(0.02, 0.005, 0.01, lamp, -0.06, y - 0.036, z + 0.005));
+  g.add(box(0.14, 0.09, 0.04, c.kit.gunmetal, -0.08, y, z));
+  g.add(box(0.05, 0.006, 0.016, lamp, -0.06, y - 0.046, z + 0.006));
   c.body(g, "Cabin", null);
 };
 
@@ -147,7 +155,7 @@ const nitrous: Builder = (c, p) => {
   const n = p.bottles ?? 1;
   const cab = c.frame.cabin;
   const y = Math.max(cab.min.y + 0.3, seatY(c) - 0.6);
-  const z = floorZ(c) + 0.15;
+  const z = Math.max(floorZ(c) + 0.15, interiorTop(c, 0, y) + 0.09);
   const g = new THREE.Group();
   for (let k = 0; k < n; k++) {
     const yk = y - k * 0.22;

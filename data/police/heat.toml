@@ -176,6 +176,9 @@ per_heat_second = 2.0
 per_race_won_wanted = 500.0
 per_cop_disabled = 250.0
 max_priority_bounty = 20000.0
+# Career bounty (wp_economy, the garage's BOUNTY) brought into a run, police points per
+# career point: a career at 10 000 bounty starts every chase at max reinforcement priority.
+career_carry = 2.0
 
 # Race payout / stake multiplier by phase (night pays more).
 [bounty.payout_scale]

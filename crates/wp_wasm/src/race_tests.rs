@@ -324,7 +324,7 @@ fn map_shows_every_racer_during_a_race() {
     use crate::map::{self, h, racer_flag, HEADER, RACER_STRIDE, TOOL_STRIDE, UNIT_STRIDE};
     let mut s = sprint(true);
     s.run_ticks(240 * 8);
-    let d = map::map_dynamic_for(&s, PLAYER);
+    let d = map::map_dynamic_for(&s, PLAYER, None);
     let n = d[h::N_RACERS] as usize;
     let def = wp_race::catalog::race("grid_highway_sprint").unwrap();
     assert_eq!(n, def.entrants(), "every entrant on the map");

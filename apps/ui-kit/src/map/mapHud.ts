@@ -13,7 +13,7 @@
  */
 import { decodeMapDynamic, EMPTY_FRAME, type MapFrame, type MapStatic, type MapUnit } from "./data";
 import { CITY_NAMES, districtName, zoneAt } from "./districts";
-import { drawPlayer, drawPoi, drawRacer, drawTool, drawUnit, readPalette, ROAD_COLOR, DECK_CASING } from "./draw";
+import { drawPlayer, drawPoi, drawRacer, drawTool, drawToolIcon, drawUnit, readPalette, ROAD_COLOR, DECK_CASING } from "./draw";
 import { drawMarker, type MapExtras, type MapLegendExtra } from "./extras";
 import { FullMapRenderer, type FullMapStats } from "./FullMap";
 import { MinimapRenderer, type MinimapStats } from "./Minimap";
@@ -446,8 +446,10 @@ export class MapHud {
       c.stroke();
     });
     const toolM = (s: number) => [1, 0, 0, -1, s / 2, s / 2] as [number, number, number, number, number, number];
-    row("Roadblock", (c, s) => drawTool(c, { kind: "roadblock", x: 0, y: 0, dir: [1, 0], halfLenM: s * 0.4 }, toolM(s), 1.6, pal));
-    row("Spike strip", (c, s) => drawTool(c, { kind: "spikes", x: 0, y: 0, dir: [1, 0], halfLenM: s * 0.4 }, toolM(s), 1.6, pal));
+    row("Roadblock", (c, s) => drawTool(c, { kind: "roadblock", x: 0, y: 0, dir: [1, 0], halfLenM: s * 0.4, intel: false }, toolM(s), 1.6, pal));
+    row("Spike strip", (c, s) => drawTool(c, { kind: "spikes", x: 0, y: 0, dir: [1, 0], halfLenM: s * 0.4, intel: false }, toolM(s), 1.6, pal));
+    row("Roadblock (scanner)", (c, s) => drawToolIcon(c, "roadblock", s / 2, s / 2, s * 0.3, pal));
+    row("Spike strip (scanner)", (c, s) => drawToolIcon(c, "spikes", s / 2, s / 2, s * 0.3, pal));
     row("Garage", (c, s) => drawPoi(c, "Garage", s / 2, s / 2, s * 0.32, pal));
     row("Safehouse", (c, s) => drawPoi(c, "Safehouse", s / 2, s / 2, s * 0.32, pal));
     row("Police station", (c, s) => drawPoi(c, "PoliceStation", s / 2, s / 2, s * 0.32, pal));

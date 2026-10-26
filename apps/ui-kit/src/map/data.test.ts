@@ -25,6 +25,7 @@ describe("decodeMapDynamic", () => {
         [
           [0, 5, 6, 0, 1, 8],
           [1, 7, 8, 1, 0, 4],
+          [3, 9, 9, 1, 0, 2],
         ],
       ),
     );
@@ -42,8 +43,9 @@ describe("decodeMapDynamic", () => {
     expect(unitBlinks(f.units[0])).toBe(true);
     expect(unitBlinks(f.units[1])).toBe(false);
     expect(f.tools).toEqual([
-      { kind: "roadblock", x: 5, y: 6, dir: [0, 1], halfLenM: 8 },
-      { kind: "spikes", x: 7, y: 8, dir: [1, 0], halfLenM: 4 },
+      { kind: "roadblock", x: 5, y: 6, dir: [0, 1], halfLenM: 8, intel: false },
+      { kind: "spikes", x: 7, y: 8, dir: [1, 0], halfLenM: 4, intel: false },
+      { kind: "spikes", x: 9, y: 9, dir: [1, 0], halfLenM: 2, intel: true },
     ]);
     expect(isWanted(f)).toBe(true);
   });
