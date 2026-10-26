@@ -28,7 +28,8 @@
 //!                5 ghost: u16 ticks (0 = solid again)
 //!                6 dormant: u8 on (0/1)
 //!                7 light when far: u8 on (0/1)
-//!                8 recovered (police sighting where the car now is): –
+//!                8 clear traffic: f32 x, y, radius_m
+//!                9 recovered (police sighting where the car now is): –
 //!              Ops apply before the inputs of the same tick, in file order.
 //! tick hashes  u64 count, then per tick (state after tick i+1): u64 state hash
 //! checkpoints  u32 count, then per checkpoint: u64 tick,
