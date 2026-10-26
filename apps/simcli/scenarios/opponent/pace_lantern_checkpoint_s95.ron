@@ -27,6 +27,8 @@
 // Re-locked 2026-10-26 (nitrous, owner: AI racers burn nitrous behind the player seat, and
 // ahead of it while it is within 40 m; data/tune/nitrous.toml): ai_juno 39.3 s (was 39.5..53.4).
 // The rule on today's time.
+// Re-locked 2026-10-26 (nitrous follow-up on main b6d6d57c: AI racers burn ahead while the
+// player seat is within 40 m): ai_dez 39.8 s. The rule on today's time.
 (
     name: "opponent_pace_lantern_checkpoint_s95",
     seed: 31,
@@ -93,7 +95,7 @@
         metric(name: "finishers", min: 4, max: 4),
         metric(name: "best_ratio", min: 0.97, max: 1.34),
         metric(name: "race_time_s", entity: "ai_juno", min: 33.4, max: 45.2),
-        metric(name: "race_time_s", entity: "ai_dez", min: 41.4, max: 56.0),
+        metric(name: "race_time_s", entity: "ai_dez", min: 33.8, max: 45.7),
         metric(name: "race_time_s", entity: "ai_tito", min: 42.5, max: 57.5),
         metric(name: "race_time_s", entity: "player", min: 43.6, max: 59.0),
     ],
