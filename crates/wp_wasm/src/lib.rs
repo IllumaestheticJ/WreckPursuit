@@ -1738,19 +1738,15 @@ pub fn police_tools() -> Result<Vec<f32>, JsValue> {
 }
 
 /// Tyre deflation per vehicle, 4 floats each (FL, FR, RL, RR; 0 inflated … 1 flat), same order
-/// as `vehicle_states()`: the worse of spike-strip punctures and crash damage to the wheel.
+/// as `vehicle_states()`: what the handling drives on (the worst of spike-strip punctures,
+/// crash damage to the wheel and career tyres, capped by run-flat tyres).
 #[wasm_bindgen]
 pub fn tire_punctures() -> Result<Vec<f32>, JsValue> {
-    use wp_contracts::DamageSim;
     get(|s| {
         let sim = s.sim();
         let mut out = Vec::with_capacity(sim.vehicles().len() * 4);
         for v in sim.vehicles() {
-            let spikes = sim.spike_puncture(v.id);
-            let crash = v.damage.handling_effects().tire_puncture;
-            for i in 0..4 {
-                out.push(spikes[i].max(crash[i]));
-            }
+            out.extend(sim.tire_deflation(v.id).unwrap_or([0.0; 4]));
         }
         out
     })
