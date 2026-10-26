@@ -36,7 +36,8 @@ const bar = (frac: number, colour: string, centred = false): string => {
 /** Nitrous gauge line: the bottle level, magenta while burning, grey until it can fire again
  * (an emptied bottle re-arms at 15 %, `data/tune/nitrous.toml`). */
 export function nitrousGauge(n: Float32Array | null): string {
-  if (!n || n.length < 2) return "";
+  // No Nitrous Kit fitted (`n[4]` = 0): no bottle, no gauge.
+  if (!n || n.length < 2 || n[4] === 0) return "";
   const fill = n[0];
   const burning = n[1] > 0.5;
   const colour = burning ? "#ff40ff" : fill >= 0.15 ? "#40e0ff" : "#667";

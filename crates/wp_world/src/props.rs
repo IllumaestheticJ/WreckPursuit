@@ -30,7 +30,7 @@ pub enum PropKind {
 
 /// Closing speed (towards the rail, along its normal) above which a guard rail section breaks
 /// away from its posts, m/s. Below it the rail holds and redirects the car.
-pub const GUARD_RAIL_BREAK_MPS: f32 = 6.5;
+pub const GUARD_RAIL_BREAK_MPS: f32 = 5.0;
 
 impl PropKind {
     /// For props anchored to the ground: the closing speed (m/s, along the prop's local X
@@ -53,6 +53,11 @@ pub struct StaticProp {
     pub pos: V3,
     /// Yaw about +Z (0 = facing +Y), rad.
     pub yaw: f32,
+    /// Pitch about the prop's own +X axis after the yaw (+ = its +Y end up), rad. Only props
+    /// laid along a slope set it (touge guard rails); on a city with terrain the others are
+    /// seated on the ground under them instead.
+    #[serde(default)]
+    pub pitch: f32,
     /// Half extents in the prop's frame (+X right, +Y forward, +Z up), m.
     pub half_extents: [f32; 3],
     /// Mass, kg.
@@ -257,6 +262,7 @@ pub fn parked_cars_with(map: &CityMap, table: &ParkingTable, seed: u64) -> Vec<S
                         kind: PropKind::ParkedCar,
                         pos: [p[0], p[1], p[2] + 0.75],
                         yaw: geom::yaw_of(tan),
+                        pitch: 0.0,
                         half_extents: [0.95, 2.25, 0.75],
                         mass_kg: 1400.0,
                     });
@@ -308,6 +314,7 @@ pub fn car_park_cars(map: &CityMap, seed: u64) -> Vec<StaticProp> {
                     kind: PropKind::ParkedCar,
                     pos: [b.pos[0], b.pos[1], b.pos[2] + 0.75],
                     yaw: b.heading_rad,
+                    pitch: 0.0,
                     half_extents: [0.95, 2.25, 0.75],
                     mass_kg: 1400.0,
                 });
@@ -323,6 +330,7 @@ pub fn cone(pos: V3, yaw: f32) -> StaticProp {
         kind: PropKind::Cone,
         pos: [pos[0], pos[1], pos[2] + 0.35],
         yaw,
+        pitch: 0.0,
         half_extents: [0.15, 0.15, 0.35],
         mass_kg: 3.0,
     }

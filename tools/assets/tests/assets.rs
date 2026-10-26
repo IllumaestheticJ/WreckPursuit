@@ -286,6 +286,19 @@ fn style_knob_extremes_never_panic() {
             tail_round: 2.0,
             ..base.body.clone()
         });
+        for (arc, rake, valley) in [(5.0f32, 90.0f32, 1.0f32), (-1.0, -10.0, -1.0)] {
+            for &sil in &silhouettes {
+                variants.push(BodyStyle {
+                    silhouette: sil,
+                    roof_arc: arc,
+                    c_pillar_rake_deg: rake,
+                    a_pillar_rake_deg: rake,
+                    hood_valley: valley,
+                    deck_valley: valley,
+                    ..base.body.clone()
+                });
+            }
+        }
         for (i, body) in variants.into_iter().enumerate() {
             let p = BodyProfile::styled(&car.def, &car.lattice, &body);
             let (r0, r1, _, _) = p.roof;
