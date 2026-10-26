@@ -1027,6 +1027,30 @@ impl PoliceSystem {
         Some(unit)
     }
 
+    /// Racer `racer` was put back on the road at `pos` after leaving play (deep water, off the
+    /// map edge, fallen through the world; owner report: water and the map edge were free
+    /// escapes). The police know where it went in, so this counts as a sighting at `pos`:
+    /// last known position and time refreshed, at rest; a pursuit stays on with its escape
+    /// timer back at zero and its breadcrumb trail restarted at `pos` (the old trail led into
+    /// the water). Heat, level and bounty are unchanged. No-op for a racer with no record.
+    pub fn racer_recovered(&mut self, racer: EntityId, pos: [f32; 3]) {
+        let now = self.now;
+        let p = xy(pos);
+        let Some(rec) = self.racers.get_mut(&racer) else {
+            return;
+        };
+        rec.pos = pos;
+        rec.vel = [0.0; 3];
+        rec.last_seen = Some(now);
+        rec.last_known = Some(p);
+        rec.last_known_vel = [0.0; 2];
+        if rec.pursued() {
+            rec.status = PursuitStatus::Pursuit;
+            rec.los_lost_s = 0.0;
+            self.trails.insert(racer, unit::Track::new(vec![p]));
+        }
+    }
+
     /// Every racer's police record, ascending by entity.
     pub fn racers_iter(&self) -> impl Iterator<Item = &RacerRecord> {
         self.racers.values()

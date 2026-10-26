@@ -555,6 +555,15 @@ pub fn apply_op(
         OpKind::Ghost { ticks } => sim.set_ghost(id, u32::from(ticks))?,
         OpKind::Dormant { on } => sim.set_dormant(id, on)?,
         OpKind::LightWhenFar { on } => sim.set_light_when_far(id, on)?,
+        OpKind::Recovered => {
+            let pos = sim
+                .vehicles()
+                .iter()
+                .find(|v| v.id == id)
+                .map(|v| wp_contracts::VehicleSim::state(&v.vehicle).pos)
+                .ok_or(wp_sim::SimError::UnknownEntity(id))?;
+            sim.police_mut().racer_recovered(id, pos);
+        }
     }
     Ok(())
 }

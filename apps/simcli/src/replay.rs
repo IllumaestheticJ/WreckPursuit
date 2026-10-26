@@ -26,6 +26,9 @@
 //!                3 repair: –
 //!                4 reset at: f32 x, y, yaw, near_z, u8 repair (0/1)
 //!                5 ghost: u16 ticks (0 = solid again)
+//!                6 dormant: u8 on (0/1)
+//!                7 light when far: u8 on (0/1)
+//!                8 recovered (police sighting where the car now is): –
 //!              Ops apply before the inputs of the same tick, in file order.
 //! tick hashes  u64 count, then per tick (state after tick i+1): u64 state hash
 //! checkpoints  u32 count, then per checkpoint: u64 tick,
@@ -99,6 +102,10 @@ pub enum OpKind {
         /// Allowed (`true`) or not.
         on: bool,
     },
+    /// `PoliceSystem::racer_recovered` at the car's current position: the car was put back on
+    /// the road after leaving play (deep water, off the map; logged right after its `ResetAt`
+    /// and `Ghost` by the testbed), which the police count as a sighting.
+    Recovered,
 }
 
 /// An op applied before tick `tick`'s inputs.
@@ -263,6 +270,7 @@ impl Replay {
                     w.push(7);
                     w.push(on as u8);
                 }
+                OpKind::Recovered => w.push(8),
             }
         }
         put_u64(&mut w, self.tick_hashes.len() as u64);
@@ -383,6 +391,7 @@ impl Replay {
                     7 => OpKind::LightWhenFar {
                         on: r.take(1)?[0] != 0,
                     },
+                    8 => OpKind::Recovered,
                     k => return Err(RunError::Replay(format!("bad op kind {k}"))),
                 };
                 ops.push(OpEvent { tick, entity, op });
@@ -741,6 +750,11 @@ mod tests {
                     tick: 3,
                     entity: 0,
                     op: OpKind::LightWhenFar { on: false },
+                },
+                OpEvent {
+                    tick: 4,
+                    entity: 0,
+                    op: OpKind::Recovered,
                 },
             ],
             tick_hashes: vec![1, 3],

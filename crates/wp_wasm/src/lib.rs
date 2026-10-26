@@ -49,6 +49,7 @@ pub mod garage_visit;
 pub mod lod;
 pub mod map;
 pub mod mod_visuals;
+pub mod out_of_play;
 pub mod pack;
 pub mod police;
 pub mod props;
@@ -71,6 +72,8 @@ mod career_tests;
 mod collide_tests;
 #[cfg(test)]
 mod crash_replay_tests;
+#[cfg(test)]
+mod out_of_play_tests;
 #[cfg(test)]
 mod police_audio_trace;
 #[cfg(test)]
