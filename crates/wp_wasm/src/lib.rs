@@ -50,6 +50,7 @@ pub mod lod;
 pub mod lots;
 pub mod map;
 pub mod mod_visuals;
+pub mod out_of_play;
 pub mod pack;
 pub mod police;
 pub mod props;
@@ -75,6 +76,8 @@ mod collide_tests;
 mod crash_replay_tests;
 #[cfg(test)]
 mod lots_tests;
+#[cfg(test)]
+mod out_of_play_tests;
 #[cfg(test)]
 mod police_audio_trace;
 #[cfg(test)]

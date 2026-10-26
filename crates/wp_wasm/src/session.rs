@@ -141,6 +141,9 @@ pub struct Session {
     race: Option<RaceRun>,
     /// Honk-to-start race spots (see [`crate::race_spots`]).
     meet_spots: MeetSpots,
+    /// The player's car in deep water or off the map goes back on the road (see
+    /// [`crate::out_of_play`]).
+    out_of_play: crate::out_of_play::Watch,
     /// The player's horn last tick. The one horn edge every challenge reads (owner: one
     /// challenge system on the horn action): a street racer in reach first, else the race
     /// spot the player stands in (see [`Session::observe_horn`]).
@@ -266,6 +269,7 @@ impl Session {
             crash,
             race,
             meet_spots: MeetSpots::default(),
+            out_of_play: Default::default(),
             horn_was: false,
             roam,
             run,
@@ -796,6 +800,33 @@ impl Session {
         )?;
         self.relocate_racer(id);
         Ok(pose)
+    }
+
+    /// Put the player's car back on the road after deep water, the map edge or a fall through
+    /// the world ([`crate::out_of_play`]): the nearest clear lane spot by where it left play,
+    /// at rest, damage kept (logged `ResetAt` + `Ghost`), and a police sighting there
+    /// (`Recovered`: heat and any pursuit carry on). Called after every live tick.
+    fn check_out_of_play(&mut self) {
+        let Some(&player) = self.ids.first() else {
+            return;
+        };
+        if self.visit.is_some() || self.script_running() {
+            return;
+        }
+        let Some(st) = self.vehicle(player).map(|v| v.vehicle.state()) else {
+            return;
+        };
+        let dir = crate::reset::travel_dir(st.rot, st.lin_vel);
+        let Some(r) = self
+            .out_of_play
+            .observe(self.sim.world().map(), st.pos, dir)
+        else {
+            return;
+        };
+        // Only an unknown id fails, and the player is a scenario entity.
+        if self.reset_near(player, r.pos, r.dir, false).is_ok() {
+            let _ = self.log_op(0, OpKind::Recovered);
+        }
     }
 
     /// Tell the race (if any) that `id` was moved on purpose, so the judge does not read the
@@ -1751,6 +1782,7 @@ impl Session {
                 self.reset_onto_course(r.racer, r.pos, r.dir);
             }
             self.check_garage();
+            self.check_out_of_play();
         }
         if self.playback.is_none() {
             if let Some(p) = player {
@@ -2135,6 +2167,7 @@ impl Session {
             career: false,
             race: snap.race.clone(),
             meet_spots: MeetSpots::default(),
+            out_of_play: Default::default(),
             horn_was: false,
             roam: None,
             crash: CrashRecorder::off(),
