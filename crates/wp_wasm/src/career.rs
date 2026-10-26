@@ -2062,6 +2062,16 @@ impl Career {
             scanner: tools.scanner,
             fake_plates: tools.fake_plates > 0,
         }));
+        // Motorsport ABS module: ABS Full becomes per-wheel slip control.
+        let abs = if tools.motorsport_abs > 0 {
+            wp_vehicle::AbsHardware::Motorsport
+        } else {
+            wp_vehicle::AbsHardware::Stock
+        };
+        session
+            .sim_before_start_mut()?
+            .set_abs_hardware(player, abs)
+            .map_err(|e| e.to_string())?;
         Ok((session, player))
     }
 

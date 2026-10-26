@@ -79,6 +79,7 @@ pub mod vehicle;
 use std::collections::BTreeMap;
 
 pub use body::VehicleBody;
+pub use brakes::AbsHardware;
 pub use diff::{AxleDiff, CentreDiff, DiffSetup};
 pub use engine::EngineExtras;
 pub use ground::{ContractGround, FlatGround, GroundHit, RapierGround, WheelCaster, WheelProbe};

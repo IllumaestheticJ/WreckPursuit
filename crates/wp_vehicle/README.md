@@ -19,7 +19,7 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `engine.rs` | torque curve, idle controller, soft rev limiter, engine braking, turbo lag (`EngineExtras`) |
 | `drivetrain.rs` | gearbox (manual/auto: load-based schedule, kickdown, corner hold, rev-matched clutch shifts, auto-reverse), automatic clutch / launch control, torque converter |
 | `diff.rs` | differentials, axle + AWD centre: open, clutch-pack LSD (1 / 1.5 / 2-way), viscous, helical (torque-sensing), active e-diff, locked; per-car setups from `data/cars/differentials.toml` |
-| `brakes.rs` | bias, ABS Off / Half / Full (~15 Hz release cycle; Half releases at 3× peak slip, Full at 1.4×) |
+| `brakes.rs` | bias, ABS Off / Half / Full (pressure dump / spin-up / adaptive reapply; Half releases at 3× peak slip, Full at 1.4×) and motorsport ABS (`AbsHardware::Motorsport`: per-sub-step slip control at the tyre peak, docs/integration/motorsport-abs.md) |
 | `steering.rs` | slip-targeted lock + rack rate (keyboard/gamepad), self-aligning countersteer help (0–100 % slider), countersteer lock, Ackermann, toe, damage pull, FWD torque steer |
 | `lab_scope.rs` | Drift Lab W "use W handling everywhere": limit the lab overrides (plain / ride / car_lab / drift tuning) to tagged vehicles (`Vehicle::set_lab_tagged`, the player) |
 | `drift.rs` | Drift Lab B / C (rows 90 / 91 / 104 / 106): slide onset tuning + runtime override, intent modes (straighten / hold = countersteer key / angle-up = key into the turn / exceeded), opt-in throttle shaping and lift softening (default off), slide-angle envelope; steering angle (and opt-in throttle) only |
