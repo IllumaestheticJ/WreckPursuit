@@ -15,6 +15,10 @@
 //! - [`side_strip`]: a thin shell along the side, split at panel seams and skipping wheel
 //!   arches, each piece skinned to the panel it sits on.
 //!
+//! No two cars share a body or a kit (owner 2026-10-26, "a lot of repeat game models"): the
+//! two European panel vans are a short-bonnet van (`satchel_20`) and a cab-over
+//! (`tumbril_20`), each with its own face.
+//!
 //! Visual-only variants (taxi sign, ladder rack, roof box, liveries, paint) are the browser's
 //! job (`apps/testbed-web/src/render/traffic.ts`); the meshes here are the base bodies.
 
@@ -40,8 +44,8 @@ pub fn style(def: &VehicleDef) -> Option<CarStyle> {
         "furrow_24" => Some(furrow_24()),
         "hauler_1500" => Some(hauler_1500()),
         "drayman_cargo" => Some(drayman_cargo()),
-        "satchel_20" => Some(euro_panel_van(false)),
-        "tumbril_20" => Some(euro_panel_van(true)),
+        "satchel_20" => Some(satchel_20()),
+        "tumbril_20" => Some(tumbril_20()),
         _ => None,
     }
 }
@@ -273,26 +277,72 @@ fn drayman_cargo() -> CarStyle {
     s
 }
 
-/// 2000s European FWD high-roof panel van (`satchel_20`, `tumbril_20`): the [`drayman_cargo`]
-/// van kit on a lower, more raked nose with a transverse I4, strut front and torsion-beam
-/// rear. `tumbril` gets a slightly steeper screen and longer rear overhang.
-fn euro_panel_van(tumbril: bool) -> CarStyle {
+/// 2000s European FWD short-bonnet panel van (`satchel_20`): a rounded, car-like nose with a
+/// stubby bonnet under a steeply raked screen, soft shoulders and a medium roof. Own kit
+/// (swept corner lamps, body-colour bumpers, black cladding, sliding door, barn doors).
+fn satchel_20() -> CarStyle {
     let body = BodyStyle {
-        nose_h: Some(0.95),
-        nose_rake_deg: if tumbril { 26.0 } else { 30.0 },
-        nose_plan_round: 0.26,
-        tail_plan_round: 0.06,
-        hood_crown: 0.03,
-        windshield_rake_deg: Some(if tumbril { 44.0 } else { 40.0 }),
-        tumblehome: Some(0.08),
-        crease_z: 0.55,
-        crease_depth: 0.008,
+        nose_h: Some(0.92),
+        nose_rake_deg: 34.0,
+        nose_plan_round: 0.38,
+        tail_plan_round: 0.10,
+        hood_crown: 0.035,
+        windshield_rake_deg: Some(46.0),
+        a_pillar_rake_deg: 8.0,
+        tumblehome: Some(0.12),
+        roof_crown: 0.045,
+        crease_z: 0.52,
+        crease_depth: 0.0,
+        shoulder_round: 0.10,
+        sill_tuck: 0.08,
+        front_haunch: 0.02,
         flare: 0.01,
         stance_pitch_deg: 0.1,
-        overhang_trim: (0.0, if tumbril { 0.05 } else { 0.02 }),
+        tail_round: 0.10,
+        tail_drop: 0.03,
+        overhang_trim: (0.0, 0.02),
         ..BodyStyle::preset(Silhouette::Van)
     };
-    let mut s = with_kit(body, van_kit);
+    let mut s = with_kit(body, short_nose_van_kit);
+    s.wheel.rim = RimKind::Steel;
+    s.wheel.spokes = 0;
+    s.wheel.cap = CapKind::Small;
+    s.wheel.lugs = 5;
+    s.mechanical.engine = EngineKind::Inline4;
+    s.mechanical.front_suspension = SuspensionKind::Strut;
+    s.mechanical.rear_suspension = SuspensionKind::TorsionBeam;
+    s.mechanical.exhaust = ExhaustKind::Single;
+    s
+}
+
+/// 2000s European FWD cab-over panel van (`tumbril_20`): a flat, upright face with almost no
+/// bonnet, a near-vertical screen, square corners, a tall flat roof and a long rear overhang.
+/// Own kit (low square lamps either side of a full-width black face panel, deep black bumper
+/// with a centre step, ribbed flanks).
+fn tumbril_20() -> CarStyle {
+    let body = BodyStyle {
+        nose_h: Some(1.12),
+        nose_rake_deg: 8.0,
+        nose_plan_round: 0.10,
+        tail_plan_round: 0.05,
+        hood_crown: 0.008,
+        windshield_rake_deg: Some(30.0),
+        a_pillar_rake_deg: 2.0,
+        tumblehome: Some(0.07),
+        roof_crown: 0.02,
+        crease_z: 0.60,
+        crease_depth: 0.010,
+        shoulder_round: 0.025,
+        sill_tuck: 0.03,
+        flare: 0.01,
+        flare_shape: ArchShape::Box,
+        stance_pitch_deg: 0.0,
+        tail_round: 0.05,
+        tail_drop: 0.015,
+        overhang_trim: (-0.04, 0.08),
+        ..BodyStyle::preset(Silhouette::Van)
+    };
+    let mut s = with_kit(body, cabover_van_kit);
     s.wheel.rim = RimKind::Steel;
     s.wheel.spokes = 0;
     s.wheel.cap = CapKind::Small;
@@ -747,6 +797,188 @@ fn van_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
 // =======================================================================================
 // Surface helpers
+/// satchel_20: swept corner lamps wrapping onto the fenders, a slim body-colour grille bar
+/// over a black lower intake, body-colour bumpers with a black valance, black rocker
+/// cladding, sliding-door track, barn doors with a centre seam and small car-like mirrors.
+fn short_nose_van_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
+    let p = ctx.profile;
+    let zn = p.belt(p.y_nose);
+    let zs = p.sill(p.y_nose);
+    let wf = p.half_width(p.y_nose);
+    // Tall swept lamps in the nose corners; the amber signal is their lower section.
+    let (l0, l1) = (zn - 0.30, zn - 0.05);
+    reshape_pair(b, p, "headlight", |t, p, k| {
+        lens_front(
+            t,
+            k,
+            p,
+            -(wf - 0.02),
+            -(wf - 0.26),
+            l0 + 0.08,
+            l1,
+            0.014,
+            0.03,
+        );
+    });
+    reshape_indicators(b, p, true, M::EmissiveAmber, |t, p, k| {
+        lens_front(
+            t,
+            k,
+            p,
+            -(wf - 0.02),
+            -(wf - 0.26),
+            l0,
+            l0 + 0.065,
+            0.014,
+            0.03,
+        );
+    });
+    // Slim grille bar between the lamps, black intake under it.
+    grille(b, p, wf - 0.30, l1 - 0.085, l1 - 0.015, 1, M::Paint);
+    let lower = key("lower_intake", R::FrontBumper, M::Grille);
+    front_box(b, &lower, p, -0.44, 0.44, zs + 0.14, zs + 0.30, 0.004, 0.03);
+    bumper(b, p, true, zs + 0.06, zs + 0.38, 0.07, M::Paint, None);
+    let valance = key("front_valance", R::FrontBumper, M::Trim);
+    front_box(b, &valance, p, -wf, wf, zs, zs + 0.09, 0.055, 0.02);
+    plate_front(b, p, zs + 0.16);
+
+    // Rear: tall narrow lamps standing on the barn-door corners, step bumper.
+    let zt = p.top(p.y_tail + 0.05);
+    let zb = p.sill(p.y_tail);
+    let wt = p.half_width(p.y_tail);
+    let (tx0, tx1) = (-(wt - 0.01), -(wt - 0.11));
+    let (t0, t1) = (zb + 0.42 * (zt - zb), zb + 0.78 * (zt - zb));
+    reshape_pair(b, p, "taillight", |t, p, k| {
+        lens_rear(t, k, p, tx0, tx1, t0 + 0.12, t1, 0.012, 0.03);
+    });
+    reshape_indicators(b, p, false, M::EmissiveAmber, |t, p, k| {
+        lens_rear(t, k, p, tx0, tx1, t0, t0 + 0.11, 0.012, 0.03);
+    });
+    let seam = key("barn_seam", R::Trunk, M::Trim);
+    rear_box(
+        b,
+        &seam,
+        p,
+        -0.006,
+        0.006,
+        zb + 0.30,
+        zt - 0.10,
+        0.004,
+        0.02,
+    );
+    let hd = key("barn_handle", R::Trunk, M::Trim);
+    rear_box(b, &hd, p, 0.03, 0.16, t1 - 0.02, t1 + 0.02, 0.022, 0.0);
+    step_bumper(b, p, zb + 0.04, zb + 0.22, 0.18, M::Paint, false);
+    plate_rear(b, p, zb + 0.26);
+
+    rocker_cladding(b, p, 0.10, M::Trim);
+    sliding_door_track(b, p);
+    black_mirrors(b, p, (0.10, 0.07, 0.20), 0.10);
+    handles(b, p, M::Paint, false);
+    side_markers(b, p, p.z_bumper_top.0 + 0.10);
+    wipers(b, p, 0.34);
+}
+
+/// tumbril_20: a flat cab-over face — square lamps low in the corners either side of a
+/// full-width black face panel with a slim grille slot, a deep black bumper with a centre
+/// step, ribbed flanks, barn doors and tall van mirrors.
+fn cabover_van_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
+    let p = ctx.profile;
+    let zn = p.belt(p.y_nose);
+    let zs = p.sill(p.y_nose);
+    let wf = p.half_width(p.y_nose);
+    // Square lamps low in the corners; the amber signal is their outer end.
+    let (l0, l1) = (zs + 0.26, zs + 0.44);
+    reshape_pair(b, p, "headlight", |t, p, k| {
+        lens_front(t, k, p, -(wf - 0.13), -(wf - 0.40), l0, l1, 0.014, 0.03);
+    });
+    reshape_indicators(b, p, true, M::EmissiveAmber, |t, p, k| {
+        lens_front(t, k, p, -(wf - 0.01), -(wf - 0.12), l0, l1, 0.014, 0.03);
+    });
+    // Full-width black face panel between the lamps and the screen, slim grille slot in it.
+    let face = key("face_panel", R::Hood, M::Trim);
+    front_box(
+        b,
+        &face,
+        p,
+        -wf + 0.02,
+        wf - 0.02,
+        l1 + 0.04,
+        zn - 0.03,
+        0.006,
+        0.02,
+    );
+    grille(b, p, 0.46, l1 + 0.09, l1 + 0.17, 1, M::Trim);
+    bumper(b, p, true, zs, zs + 0.24, 0.085, M::Trim, None);
+    let step = key("front_step", R::FrontBumper, M::Trim);
+    front_box(b, &step, p, -0.24, 0.24, zs + 0.24, zs + 0.265, 0.075, 0.0);
+    plate_front(b, p, zs + 0.07);
+
+    // Rear: tall barn doors with ribs, square lamps standing on the bumper, step bumper.
+    let zt = p.top(p.y_tail + 0.05);
+    let zb = p.sill(p.y_tail);
+    let wt = p.half_width(p.y_tail);
+    let (tx0, tx1) = (-(wt - 0.01), -(wt - 0.12));
+    let (t0, t1) = (zb + 0.24, zb + 0.62);
+    reshape_pair(b, p, "taillight", |t, p, k| {
+        lens_rear(t, k, p, tx0, tx1, t0 + 0.13, t1, 0.012, 0.03);
+    });
+    reshape_indicators(b, p, false, M::EmissiveAmber, |t, p, k| {
+        lens_rear(t, k, p, tx0, tx1, t0, t0 + 0.12, 0.012, 0.03);
+    });
+    let seam = key("barn_seam", R::Trunk, M::Trim);
+    rear_box(
+        b,
+        &seam,
+        p,
+        -0.006,
+        0.006,
+        zb + 0.18,
+        zt - 0.08,
+        0.004,
+        0.02,
+    );
+    let hinge = key("barn_hinge_l", R::Trunk, M::Trim);
+    for f in [0.30f32, 0.78] {
+        let z = zb + f * (zt - zb);
+        rear_box(
+            b,
+            &hinge,
+            p,
+            -(wt - 0.005),
+            -(wt - 0.06),
+            z - 0.05,
+            z + 0.05,
+            0.02,
+            0.01,
+        );
+    }
+    mirror(b, &hinge);
+    let hd = key("barn_handle", R::Trunk, M::Chrome);
+    rear_box(b, &hd, p, 0.03, 0.17, t1 + 0.05, t1 + 0.09, 0.025, 0.0);
+    step_bumper(b, p, zb + 0.02, zb + 0.20, 0.22, M::Trim, false);
+    plate_rear(b, p, zb + 0.24);
+
+    // Ribbed flanks: two thin strips along the panel sides.
+    let (ry0, ry1) = (p.y_tail + 0.22, p.y_fd_hinge + 0.35);
+    let zr = p.z_bumper_top.0;
+    for (i, z) in [zr + 0.16, zr + 0.34].into_iter().enumerate() {
+        side_strip(
+            b,
+            p,
+            &format!("rib_{i}"),
+            M::Paint,
+            (ry0, ry1),
+            (z, z + 0.035),
+            0.010,
+        );
+    }
+    tall_mirrors(b, p, (0.12, 0.08, 0.32), 0.18);
+    handles(b, p, M::Trim, false);
+    side_markers(b, p, zr + 0.06);
+    wipers(b, p, 0.40);
+}
+
 // =======================================================================================
 
 /// A detail key.

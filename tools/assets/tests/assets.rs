@@ -842,11 +842,13 @@ fn lights_move_with_the_front_and_rear_structure() {
 }
 
 /// Full-mesh triangle counts before the turn signals were rebuilt into the lamp clusters
-/// (round 12, playtest row 136); the rebuild may add at most 2 % per car.
+/// (round 12, playtest row 136); the rebuild may add at most 2 % per car. A car that is given
+/// a new body and kit has no older count to compare with: its row is re-taken from the new
+/// mesh (2026-10-26: the eight cars that were sharing another car's body).
 const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
-    ("arashi_t4", 16916),
-    ("brigand_400", 19772),
-    ("bulwark_400", 19186),
+    ("arashi_t4", 16710),
+    ("brigand_400", 18363),
+    ("bulwark_400", 18550),
     ("debug_coupe", 16617),
     ("debug_sedan", 8422),
     ("drayman_cargo", 9435),
@@ -859,20 +861,20 @@ const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
     ("kestrel_ts", 17548),
     ("lindwurm_4t", 16246),
     ("lucciola_350", 17242),
-    ("marten_20", 15796),
+    ("marten_20", 16612),
     ("rampart_50", 18826),
-    ("satchel_20", 8330),
+    ("satchel_20", 8374),
     ("sentinel_bastion", 17191),
     ("sentinel_cruiser", 16963),
     ("sentinel_vigil", 17715),
     ("sentinel_warden", 17770),
-    ("sentinel_wolfhound", 17137),
+    ("sentinel_wolfhound", 17175),
     ("shiro_turbo", 17918),
     ("sperber_32", 17772),
-    ("stoat_16v", 15610),
+    ("stoat_16v", 15334),
     ("talus_20t", 17062),
     ("tansy_13", 7192),
-    ("tumbril_20", 8503),
+    ("tumbril_20", 8624),
     ("vireo_xs", 15731),
 ];
 

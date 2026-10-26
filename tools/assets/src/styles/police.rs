@@ -6,7 +6,7 @@
 //! |---|---|---|---|
 //! | `sentinel_cruiser` | "sedan", 2010s full-size | low LED (L-2010) | `pvpd_bw` black / white doors + roof |
 //! | `sentinel_warden` | "old sedan", boxy 80s | twin rotators (L-80s), 2 spotlights | `pvpd_bw_classic` |
-//! | `sentinel_wolfhound` | "patrol", AWD pursuit sedan | low LED, full width | `pvpd_highway` tan / umber + gold |
+//! | `sentinel_wolfhound` | "patrol", AWD pursuit fastback | low LED, full width | `pvpd_highway` tan / umber + gold |
 //! | `sentinel_bastion` | "SUV" | wide LED, set forward | `pvpd_suv` white + navy + cyan band |
 //! | `sentinel_vigil` | "sports patrol", muscle coupe | slicktop (hidden LEDs) | `pvpd_pursuit` diagonal split |
 //!
@@ -130,32 +130,41 @@ fn warden() -> CarStyle {
     s
 }
 
-/// §1.3 "patrol": AWD twin-turbo V6 pursuit sedan, highway-patrol livery.
+/// §1.3 "patrol": AWD twin-turbo V6 pursuit sedan, highway-patrol livery. Its own
+/// silhouette, not the cruiser's three-box one (owner 2026-10-26, repeat models): the cabin
+/// sits back on a long raked nose under one arched fastback roofline, wide hips and box flares.
 fn wolfhound() -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        nose_h: Some(0.78),
-        nose_rake_deg: 14.0,
-        nose_plan_round: 0.40,
+        cabin_shift_m: -0.14,
+        nose_h: Some(0.70),
+        nose_rake_deg: 26.0,
+        nose_plan_round: 0.42,
         hood_crown: 0.03,
         hood_bulge_h: 0.015,
         hood_bulge_w: 0.60,
-        power_bulge_h: 0.01,
-        windshield_rake_deg: Some(58.0),
-        a_pillar_rake_deg: 8.0,
-        rear_glass_rake_deg: Some(48.0),
-        roof_len_trim: 0.10,
-        roof_dz: 0.0,
-        crease_z: 0.60,
-        crease_depth: 0.018,
-        haunch: 0.04,
-        flare: 0.02,
+        power_bulge_h: 0.025,
+        windshield_rake_deg: Some(64.0),
+        a_pillar_rake_deg: 12.0,
+        roof_arc: 0.55,
+        roof_len_trim: -0.05,
+        roof_dz: -0.02,
+        tumblehome: Some(0.20),
+        crease_z: 0.46,
+        crease_depth: 0.010,
+        shoulder_round: 0.08,
+        haunch: 0.070,
+        front_haunch: 0.045,
+        flare: 0.025,
+        flare_shape: ArchShape::Box,
         ride_dz: 0.02,
-        belt_rake: 0.03,
-        belt_kick: 0.05,
-        ducktail_h: 0.02,
-        tail_round: 0.28,
+        stance_pitch_deg: 0.3,
+        belt_rake: 0.05,
+        belt_kick: 0.03,
+        ducktail_h: 0.03,
+        tail_round: 0.20,
+        tail_drop: 0.05,
         overhang_trim: (0.0, -0.03),
-        ..BodyStyle::preset(Silhouette::Notchback)
+        ..BodyStyle::preset(Silhouette::Fastback)
     });
     s.livery = livery(
         "pvpd_highway",

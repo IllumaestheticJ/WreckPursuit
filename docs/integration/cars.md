@@ -1098,3 +1098,29 @@ Engines changed in `roster_inputs.py` for all five police cars (cruiser 6.2 L su
 unchanged. Measured before → after and the matching `wp_police` change (no pursuit speed cap)
 in `police.md`. H: please review the curves and the shared engine/audio assets (displacements
 changed in `analog_of`).
+## Round "no repeat car models" (2026-10-26) — eight cars given their own body and kit
+Owner: "there's a lot of repeat game models for the cars". Audited every car mesh
+(`node tools/assets/mesh_shots.mjs`, front / side / rear of all 45): seven cars were calling
+another car's `CarStyle` (`arashi_t4` → kestrel, `stoat_16v` / `marten_20` → vireo,
+`bulwark_400` / `brigand_400` → ironside, `satchel_20` / `tumbril_20` → one shared euro-van
+style) and `sentinel_wolfhound` read as `sentinel_cruiser` with another livery. Each now has
+its own `BodyStyle` and its own kit function:
+
+| Car | Archetype it is now |
+|---|---|
+| `arashi_t4` | mid-90s wide-body rally saloon: flat bonnet with louvres, box flares, swan-neck GT wing |
+| `stoat_16v` | early-90s boxy 3-door: square sealed-beam lamps, black bumpers with an accent line |
+| `marten_20` | early-90s rally hatch: round quad lamps, blistered round arches, bulged bonnet |
+| `bulwark_400` | early-70s formal four-door: stacked round lamps, eggcrate grille, chrome blades, vinyl roof |
+| `brigand_400` | mid-70s rounded "fuselage" four-door: one wide grille, full-width tail band, opera window |
+| `satchel_20` | short-bonnet euro van: rounded nose, swept corner lamps, body-colour bumpers |
+| `tumbril_20` | cab-over euro van: flat face, low square lamps, deep black bumper, ribbed flanks |
+| `sentinel_wolfhound` | AWD pursuit fastback: cabin set back, one arched roofline, wide hips |
+
+Visual only: lattices, panel specs, physics and damage are untouched, and no stock kit part
+name changed (`wing`, `splitter`, `skirt_*`, `roof_spoiler`, `exhaust_tip`), so garage
+cosmetics and mod renderers keep working. `TRIS_BEFORE_INTEGRATED_SIGNALS` rows for these
+eight cars were re-taken from the new meshes (a re-bodied car has no older count to compare
+with); every car stays inside `TRI_BUDGET` / `MID_TRI_BUDGET`. Shots:
+`docs/media/cars/lookalikes_{side,front,rear}.png` (before / after) and
+`docs/media/cars/families_{side,front}.png` (each car beside the one it used to copy).

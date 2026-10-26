@@ -1,7 +1,7 @@
 //! Tuners / sport: `kestrel_ts` (rally sedan), `shiro_turbo` (FR drift coupe), `hakone_gt`
-//! (90s twin-turbo GT), `sperber_32` (German I6 sport sedan), `debug_coupe` (sport coupe), plus
-//! `arashi_t4` (mid-90s AWD rally saloon, a variant of the kestrel style) and `talus_20t`
-//! (late-90s AWD rally saloon, its own body and kit).
+//! (90s twin-turbo GT), `sperber_32` (German I6 sport sedan), `debug_coupe` (sport coupe),
+//! `arashi_t4` (mid-90s AWD rally saloon) and `talus_20t` (late-90s AWD rally saloon). Each
+//! has its own body and kit.
 //!
 //! Genre cues (research §3): a big rear wing on tall stands (pedestal / swan-neck GT / hoop),
 //! a dropped stance with flush wheels and rear camber, aftermarket wheels, a body kit (wide
@@ -79,20 +79,158 @@ pub fn kestrel(def: &VehicleDef) -> CarStyle {
     s
 }
 
-/// Mid-90s AWD rally-homologation saloon (`arashi_t4`): the [`kestrel`] family (bonnet scoop,
-/// box flares, pedestal wing, fog lamps, mud flaps) with a shorter roof, white paint, silver
-/// wheels and red calipers. Shares the kestrel body kit.
+/// Mid-90s AWD rally-homologation saloon (`arashi_t4`). Its own body, not the kestrel's: a
+/// sharp-edged compact saloon with a flat bonnet, a near-upright nose, blistered box flares
+/// over all four arches and a chopped tail. Kit: slim rectangular lamps either side of a thin
+/// slot grille over a full-width mesh mouth, bonnet louvres, round driving lamps on the lip,
+/// a twin-plane swan-neck wing and a black tail garnish with rectangular lamps. White paint,
+/// silver multi-spokes, red calipers.
 pub fn arashi(def: &VehicleDef) -> CarStyle {
-    let mut s = kestrel(def);
-    s.body.roof_len_trim = 0.06;
-    s.body.windshield_rake_deg = Some(57.0);
-    s.body.nose_rake_deg = 16.0;
-    s.tints.retain(|t| t.0 != M::Paint);
+    let mut s = CarStyle::with_body(BodyStyle {
+        nose_h: Some(0.65),
+        nose_rake_deg: 12.0,
+        nose_plan_round: 0.14,
+        tail_plan_round: 0.12,
+        hood_crown: 0.006,
+        hood_bulge_h: 0.0,
+        windshield_rake_deg: Some(56.0),
+        a_pillar_rake_deg: 5.0,
+        rear_glass_rake_deg: Some(50.0),
+        roof_len_trim: 0.04,
+        roof_crown: 0.015,
+        tumblehome: Some(0.12),
+        crease_z: 0.52,
+        crease_depth: 0.010,
+        shoulder_round: 0.055,
+        haunch: 0.030,
+        front_haunch: 0.028,
+        flare: 0.022,
+        flare_shape: ArchShape::Box,
+        ride_dz: -0.035,
+        stance_pitch_deg: 0.2,
+        deck_drop: 0.01,
+        ducktail_h: 0.0,
+        belt_rake: -0.01,
+        tail_round: 0.12,
+        tail_drop: 0.03,
+        ..BodyStyle::preset(Silhouette::Notchback)
+    });
+    s.details.push(kit_detail(arashi_kit));
+    wheels(
+        &mut s,
+        def,
+        RimKind::MultiSpoke,
+        10,
+        0.72,
+        M::Metal,
+        CapKind::Centre,
+        (0.035, 0.018),
+        (0.0, 1.2),
+    );
+    let m = &mut s.mechanical;
+    m.engine = EngineKind::Inline4;
+    m.induction = Induction::Turbo;
+    m.front_suspension = SuspensionKind::Strut;
+    m.rear_suspension = SuspensionKind::Multilink;
+    m.caliper_rgb = Some(rgb(0xC81E1E));
+    m.exhaust = ExhaustKind::Single;
+    m.exhaust_tip_r_m = 0.055;
     s.tints.push((M::Paint, rgb(0xEDEDEA)));
     s.wheel.rim_rgb = Some(rgb(0xC9CCD1));
-    s.underglow_rgb = None;
-    s.mechanical.caliper_rgb = Some(rgb(0xC81E1E));
     s
+}
+
+fn arashi_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
+    let mut k = Kit::new(ctx.profile, b);
+    let p = ctx.profile;
+    let wn = k.wn();
+    let wt = k.wt();
+    let (nz0, nz1) = k.nose_z();
+    let (tz0, tz1) = k.tail_z();
+    let fb = BodyRegion::FrontBumper;
+
+    // --- Front: slim rectangular lamps either side of a thin slot grille, full-width mesh
+    //     mouth under it, round driving lamps on the lip.
+    k.grille(
+        "grille",
+        BodyRegion::Hood,
+        0.24,
+        nz1 - 0.075,
+        nz1 - 0.030,
+        0,
+        M::Trim,
+        None,
+    );
+    for sx in SIDES {
+        k.front_cluster(
+            sx,
+            0.26,
+            wn - 0.03,
+            nz1 - 0.085,
+            nz1 - 0.025,
+            0.016,
+            0.008,
+            Seg::Outboard(0.09),
+        );
+    }
+    let (zm0, zm1) = (nz0 + 0.05, nz0 + 0.30);
+    k.mesh_grille("lower_grille", fb, wn - 0.10, zm0, zm1, 2, 5, M::Trim);
+    k.fogs(wn - 0.26, zm0 + 0.06, 0.055);
+    k.splitter(M::Trim, 0.05, 0.08, 0.022, true);
+    k.canards(M::Trim, zm0 + 0.14);
+
+    // --- Bonnet louvres: two panels either side of the centre line.
+    let yv1 = p.y_fw - 0.14;
+    let yv0 = yv1 - 0.28;
+    k.louvres(BodyRegion::Hood, yv0, yv1, 3, 0.10, 0.34, M::Trim);
+
+    // --- Rear: twin-plane swan-neck wing, black garnish across the tail with rectangular
+    //     lamps in it, diffuser.
+    k.wing(Wing {
+        lead: 0.16,
+        chord: 0.24,
+        height: 0.18,
+        half_span: 0.66,
+        thick: 0.030,
+        aoa_deg: 10.0,
+        stand: Stand::SwanNeck(0.46),
+        endplates: Some((0.14, 0.26)),
+        mat: M::Carbon,
+        stand_mat: M::Carbon,
+        gurney: 0.02,
+    });
+    let (pz0, pz1) = (tz1 - 0.165, tz1 - 0.030);
+    k.rear_panel(
+        "tail_panel",
+        BodyRegion::Trunk,
+        wt - 0.02,
+        pz0,
+        pz1,
+        M::Trim,
+    );
+    for sx in SIDES {
+        k.rear_cluster(
+            sx,
+            0.22,
+            wt - 0.05,
+            pz0 + 0.022,
+            pz1 - 0.022,
+            0.018,
+            0.006,
+            Seg::Lower(0.035),
+            M::EmissiveAmber,
+        );
+    }
+    let kp = dkey("plate_recess", BodyRegion::Trunk, M::Trim);
+    k.rear_box(&kp, -0.22, 0.22, tz0 + 0.10, tz0 + 0.22, 0.004, 0.0);
+    k.diffuser(M::Trim, wt - 0.14, 0.14, 4, 0.10);
+
+    k.skirts(M::Paint, 0.016, 0.06);
+    k.mirrors(0.10, 0.11, Some(M::Carbon));
+    k.fender_repeaters();
+    k.door_handles(M::Paint);
+    k.fuel_filler(-1.0, 0.11, M::Paint);
+    k.wipers();
 }
 
 /// Late-90s AWD rally-homologation four-door saloon (`talus_20t`). Its own body, not the
