@@ -2226,7 +2226,8 @@ async function main(): Promise<void> {
           ? { ...app.input, throttle: focusTel[T.inThrottle], brake: focusTel[T.inBrake], steer: focusTel[T.inSteer], handbrake: focusTel[T.inHandbrake] }
           : app.input,
         source: replay ? "replay" : app.source,
-        assists: replay ? null : sim.assists(app.player),
+        // The player's car can leave the world (captured in a race) before the session ends.
+        assists: replay || !app.views.has(app.player) ? null : sim.assists(app.player),
         mode: MODE_NAMES[Math.round(wi[W.mode])] ?? "Arcade",
         rack: focusView ? sim.ffb(app.focus)[0] : 0,
         fps,
