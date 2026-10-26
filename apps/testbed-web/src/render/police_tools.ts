@@ -17,17 +17,39 @@ const STRIP_W = 0.32;
 const STRIP_H = 0.035;
 /** How often the tool list is refreshed, ms. */
 const REFRESH_MS = 200;
+/**
+ * Warning lamps (owner, 2026-10-26: "spike strips need lights to make them easier to spot"):
+ * amber lamps at both ends and about every LAMP_SPACING_M along the strip, unlit-bright with a
+ * glow halo so they read at night and in tunnels. Alternate lamps flash in turn at FLASH_HZ.
+ */
+const LAMP_SPACING_M = 1.5;
+const MAX_LAMPS = MAX_STRIPS * 12;
+const LAMP_R = 0.05;
+const HALO_SIZE_M = 0.9;
+const FLASH_HZ = 2.5;
+const LAMP_ON = 0xffb020;
+const LAMP_OFF = 0x4a3008;
 
 /** Ground height under a sim-space point (m), or null if unknown. */
 export type GroundFn = (x: number, y: number) => number | null;
 
-/** Draws the active spike strips: a dark base with rows of steel teeth and yellow end caps. */
+/**
+ * Draws the active spike strips: a dark base with rows of steel teeth, yellow end caps and
+ * flashing amber warning lamps.
+ */
 export class PoliceToolsView {
   readonly group = new THREE.Group();
   private readonly bases: THREE.Mesh[] = [];
   private readonly teeth: THREE.InstancedMesh;
   private readonly caps: THREE.InstancedMesh;
+  /** Lamp heads in two flash groups (even / odd along each strip) and their halos. */
+  private readonly lamps: [THREE.InstancedMesh, THREE.InstancedMesh];
+  private readonly lampMats: [THREE.MeshBasicMaterial, THREE.MeshBasicMaterial];
+  private readonly halos: THREE.Sprite[] = [];
+  private readonly haloMats: [THREE.SpriteMaterial, THREE.SpriteMaterial];
   private key = "";
+  /** Height under each strip once known (by "x,y"): the ground ray is not cheap. */
+  private readonly zAt = new Map<string, number>();
   private lastMs = -Infinity;
   private readonly m = new THREE.Matrix4();
   private readonly q = new THREE.Quaternion();
@@ -54,6 +76,37 @@ export class PoliceToolsView {
     this.caps.count = 0;
     this.caps.frustumCulled = false;
     this.group.add(this.teeth, this.caps);
+    const lampGeom = new THREE.SphereGeometry(LAMP_R, 8, 6);
+    this.lampMats = [new THREE.MeshBasicMaterial({ color: LAMP_ON }), new THREE.MeshBasicMaterial({ color: LAMP_OFF })];
+    this.lamps = [
+      new THREE.InstancedMesh(lampGeom, this.lampMats[0], MAX_LAMPS),
+      new THREE.InstancedMesh(lampGeom, this.lampMats[1], MAX_LAMPS),
+    ];
+    for (const l of this.lamps) {
+      l.count = 0;
+      l.frustumCulled = false;
+      this.group.add(l);
+    }
+    const glow = haloTexture();
+    const haloMat = () =>
+      new THREE.SpriteMaterial({ map: glow, color: LAMP_ON, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.haloMats = [haloMat(), haloMat()];
+    for (let i = 0; i < MAX_LAMPS; i++) {
+      const h = new THREE.Sprite(this.haloMats[i % 2]);
+      h.scale.set(HALO_SIZE_M, HALO_SIZE_M, 1);
+      h.visible = false;
+      this.halos.push(h);
+      this.group.add(h);
+    }
+  }
+
+  /** Flash the lamps: the two groups take turns. */
+  private flash(nowMs: number): void {
+    const on = Math.floor((nowMs / 1000) * FLASH_HZ * 2) % 2 === 0;
+    this.lampMats[0].color.setHex(on ? LAMP_ON : LAMP_OFF);
+    this.lampMats[1].color.setHex(on ? LAMP_OFF : LAMP_ON);
+    this.haloMats[0].opacity = on ? 1 : 0.08;
+    this.haloMats[1].opacity = on ? 0.08 : 1;
   }
 
   /** Number of spike strips drawn (automation). */
@@ -66,6 +119,7 @@ export class PoliceToolsView {
    * when no police system is running; `ground` seats strips on hilly roads.
    */
   update(read: () => Float32Array, ground: GroundFn, nowMs: number): void {
+    this.flash(nowMs);
     if (nowMs - this.lastMs < REFRESH_MS) return;
     this.lastMs = nowMs;
     let spikes: MapTool[] = [];
@@ -74,12 +128,26 @@ export class PoliceToolsView {
     } catch {
       spikes = [];
     }
-    // Strips are static once placed: rebuild only when the set changes.
-    const key = spikes.map((t) => `${t.x.toFixed(1)},${t.y.toFixed(1)},${t.halfLenM.toFixed(1)}`).join(";");
+    // Strips are static once placed: rebuild only when the set changes, or when the height
+    // under one does (the city greybox loads after a scenario's strip is down: the strip sat at
+    // z = 0, under the road).
+    const zs = spikes.slice(0, MAX_STRIPS).map((t) => {
+      const at = `${t.x.toFixed(1)},${t.y.toFixed(1)}`;
+      let z = this.zAt.get(at);
+      if (z === undefined) {
+        const g = ground(t.x, t.y);
+        if (g !== null) this.zAt.set(at, (z = g));
+      }
+      return z ?? 0;
+    });
+    if (this.zAt.size > 4 * MAX_STRIPS) this.zAt.clear();
+    const key = spikes.map((t, i) => `${t.x.toFixed(1)},${t.y.toFixed(1)},${t.halfLenM.toFixed(1)},${(zs[i] ?? 0).toFixed(1)}`).join(";");
     if (key === this.key) return;
     this.key = key;
     let nTeeth = 0;
     let nCaps = 0;
+    const nLamps = [0, 0];
+    let nHalos = 0;
     for (let i = 0; i < MAX_STRIPS; i++) {
       const base = this.bases[i];
       const t = spikes[i];
@@ -89,7 +157,7 @@ export class PoliceToolsView {
       const dl = Math.hypot(t.dir[0], t.dir[1]) || 1;
       const dx = t.dir[0] / dl;
       const dy = t.dir[1] / dl;
-      const z = ground(t.x, t.y) ?? 0;
+      const z = zs[i];
       // Local +X runs along the strip.
       this.q.setFromAxisAngle(this.zAxis, Math.atan2(dy, dx));
       base.position.set(t.x, t.y, z + STRIP_H / 2);
@@ -109,19 +177,60 @@ export class PoliceToolsView {
         this.p.set(t.x + dx * end * t.halfLenM, t.y + dy * end * t.halfLenM, z + (STRIP_H + 0.03) / 2);
         this.caps.setMatrixAt(nCaps++, this.m.compose(this.p, this.q, this.s));
       }
+      // Lamps: one on each end cap and evenly between them, alternating flash groups.
+      const gaps = Math.max(1, Math.round(len / LAMP_SPACING_M));
+      for (let k = 0; k <= gaps && nHalos < MAX_LAMPS; k++) {
+        const along = -t.halfLenM + (k / gaps) * len;
+        const lz = z + STRIP_H + 0.03 + LAMP_R;
+        this.p.set(t.x + dx * along, t.y + dy * along, lz);
+        const g = k % 2;
+        this.lamps[g].setMatrixAt(nLamps[g]++, this.m.compose(this.p, this.q, this.s));
+        const h = this.halos[nHalos++];
+        h.material = this.haloMats[g];
+        // Raised so the road does not cut off the halo's lower half.
+        h.position.set(this.p.x, this.p.y, lz + HALO_SIZE_M * 0.3);
+        h.visible = true;
+      }
     }
     this.teeth.count = nTeeth;
     this.caps.count = nCaps;
     this.teeth.instanceMatrix.needsUpdate = true;
     this.caps.instanceMatrix.needsUpdate = true;
+    for (let g = 0; g < 2; g++) {
+      this.lamps[g].count = nLamps[g];
+      this.lamps[g].instanceMatrix.needsUpdate = true;
+    }
+    for (let i = nHalos; i < this.halos.length; i++) this.halos[i].visible = false;
   }
 
   /** Hide everything (new session). */
   reset(): void {
     this.key = "";
     this.lastMs = -Infinity;
+    this.zAt.clear();
     for (const b of this.bases) b.visible = false;
     this.teeth.count = 0;
     this.caps.count = 0;
+    for (const l of this.lamps) l.count = 0;
+    for (const h of this.halos) h.visible = false;
   }
+}
+
+/** A soft round glow (white centre fading to clear) for the lamp halos. */
+function haloTexture(): THREE.Texture {
+  const size = 64;
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d");
+  if (g) {
+    const r = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    r.addColorStop(0, "rgba(255,255,255,1)");
+    r.addColorStop(0.25, "rgba(255,255,255,0.55)");
+    r.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = r;
+    g.fillRect(0, 0, size, size);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }

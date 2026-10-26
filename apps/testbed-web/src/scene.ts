@@ -348,8 +348,8 @@ export class SceneView {
 
   /**
    * Height of the shown city's surface under sim-space `(x, y)` (m), by a downward ray against
-   * the greybox; null without a city or a hit. For rarely placed objects (spike strips), not per
-   * frame per car.
+   * the greybox: the topmost surface, or with `nearZ` the one nearest that height; null without
+   * a city or a hit. For rarely placed objects (spike strips), not per frame per car.
    */
   /** Garage workshop: hide the flat ground and grid (the bay has its own floor). */
   setWorkshop(on: boolean): void {
@@ -359,14 +359,20 @@ export class SceneView {
     this.originAxes.visible = !on;
   }
 
-  groundZ(x: number, y: number): number | null {
+  groundZ(x: number, y: number, nearZ?: number): number | null {
     const city = this.cityShown ? this.cities.get(this.cityShown) : null;
     if (!city) return null;
     // Sim (x, y, z) is Three (x, z, -y) (world rotated -90 deg about X).
     groundRay.set(groundFrom.set(x, 2000, -y), groundDown);
     groundRay.far = 4000;
-    const hit = groundRay.intersectObject(city, true)[0];
-    return hit ? hit.point.y : null;
+    const hits = groundRay.intersectObject(city, true);
+    if (hits.length === 0) return null;
+    // Without a reference height the topmost surface; with one, the surface nearest it (a
+    // tunnel's floor, not the hillside over it; the road under a bridge, not the deck).
+    if (nearZ === undefined) return hits[0].point.y;
+    let best = hits[0].point.y;
+    for (const h of hits) if (Math.abs(h.point.y - nearZ) < Math.abs(best - nearZ)) best = h.point.y;
+    return best;
   }
 
   /**
