@@ -202,7 +202,19 @@ fn short_sprint_with_ai_runs_to_results_and_pays_through_the_economy() {
         .map(|l| l.cash_delta)
         .sum();
     assert_eq!(cash, cash0_before_entry + race_cash + others);
-    assert_eq!(p.cash_after, cash);
+    // `cash_after` is the account at payout; run events after the race's last line (a
+    // pursuit escaped after the finish pays its bonus) land on top of it.
+    let last = p.ledger.last().map_or(0, |l| l.seq);
+    let after: i64 = s
+        .run()
+        .unwrap()
+        .ledger()
+        .iter()
+        .map(crate::run::LedgerLine::of)
+        .filter(|l| l.seq > last)
+        .map(|l| l.cash_delta)
+        .sum();
+    assert_eq!(p.cash_after + after, cash);
     assert!(!r.handoff_run_end);
 }
 
