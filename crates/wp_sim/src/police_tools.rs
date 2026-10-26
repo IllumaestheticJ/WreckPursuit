@@ -11,7 +11,7 @@
 
 use rapier3d::math::Rotation;
 use rapier3d::prelude::{ColliderBuilder, Pose, RigidBodyBuilder, RigidBodyHandle, Vector};
-use wp_contracts::ToolId;
+use wp_contracts::{EntityId, ToolId, VehicleSim};
 
 use crate::Sim;
 
@@ -64,14 +64,28 @@ impl Sim {
         }
         self.tool_bodies = keep;
 
-        let new: Vec<(ToolId, wp_police::StaticCollider)> = self
+        let new: Vec<(ToolId, EntityId, wp_police::StaticCollider)> = self
             .police
             .roadblocks()
             .iter()
             .filter(|r| !self.tool_bodies.iter().any(|t| t.tool == r.id))
-            .flat_map(|r| r.barriers.iter().map(move |b| (r.id, *b)))
+            .flat_map(|r| r.barriers.iter().map(move |b| (r.id, r.racer, *b)))
             .collect();
-        for (tool, b) in new {
+        for (tool, racer, mut b) in new {
+            // wp_police puts a barrier's centre its half height above z = 0. On a terrain city
+            // that is under the road (owner, 2026-10-26: an invisible barrier in the Talon
+            // Tunnel; its barriers spawned 34 m under the tunnel floor and fell out of the
+            // world): stand it on the road under it, the surface nearest its racer's height
+            // (the tunnel floor, not the hillside; the road on a bridge, not under it).
+            if self.has_terrain() {
+                let near = self
+                    .vehicles
+                    .iter()
+                    .find(|v| v.id == racer)
+                    .map(|v| v.vehicle.state().pos[2]);
+                let z = self.world.map().ground_height([b.pos[0], b.pos[1]], near);
+                b.pos[2] += z;
+            }
             // Barrier forward (x, y) → yaw about +Z with 0 = +Y.
             let yaw = wp_math::atan2(-b.forward[0], b.forward[1]);
             let (s, c) = wp_math::sin_cos(yaw * 0.5);

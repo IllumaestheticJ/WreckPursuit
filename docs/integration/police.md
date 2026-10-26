@@ -1951,3 +1951,20 @@ Owner: "the spike cop on loop 9 daytime race is spawning, but he's spawning off 
 - Without a race corridor (every other race, free roam, night runs) nothing changes. `place_spikes_at` (scenario placement) is untouched.
 
 **Tests.** `race::tests::loop9_spike_cars_stay_inside_the_highway_paving` (unit). `wp_race/tests/race_picker.rs` (outside my crate, test only): every Loop 9 race checks each spike strip's car once it appears: no edge or median barrier between the strip's site and the car's far side, and its whole width on the paving where a lane runs under it. On main it fails at tick 1 of `loop9_day`.
+
+## Owner bug 2026-10-26: invisible spike strip in the Talon Tunnel (+ "spike strips need lights")
+
+**Cause (browser).** `render/police_tools.ts` seated each strip on `scene.groundZ`, a ray from 2 km up that takes the first greybox hit: in a tunnel that is the hillside over it, so the strip was drawn on the mountain and nothing showed on the tunnel floor (the sim's strip was there and still burst tyres). Same for a strip on a road under a bridge deck.
+
+**Cause (placement).** The Talon, Hollins and Grizzly tunnels are one bore for both carriageways (half width 16.6 / 16.6 / 12.9 m). The captain's spike car at the outer lane edge + 2.5 m stood 18.8 m from the bore's centre (13.2 m in Grizzly), 2.2 m (0.3 m) inside the rock.
+
+**Fix.**
+- Browser: `scene.groundZ(x, y, nearZ)` takes the greybox hit nearest `nearZ`; `main.ts` passes the sim's road height for the strip (`police_tools()` spike records, `MapCity::ground_height`, the same height police cars are put down at).
+- Browser: a strip's height is cached once known, and the rebuild key includes it. The view rebuilt only when the set of strips changed, so a strip laid before the city greybox finished loading stayed at z = 0, under the road (seen in the Talon test scenario).
+- Browser: every strip has amber warning lamps (unlit, with an additive glow halo) on both end caps and about every 1.5 m between, flashing in two alternating groups at 2.5 Hz, so it reads at night and in tunnels.
+- `wp_police` (every pursuit, not only Loop 9): `tunnel_walls` (from the covered spans `for_world` already keeps) clamps a spike car inside the tunnel walls with its half width + 0.5 m, and the captain's strip ends at the wall face. Outside tunnels nothing changes except the Loop 9 paving rule above.
+- `edges_along` (shared by paving and tunnels) now rejects points past a stretch's ends (`closest_on_segment` clamps, so the old check never fired).
+
+**Tests.** `race::tests::spike_cars_stay_inside_tunnel_walls_in_any_pursuit`.
+
+**Roadblock barriers on terrain cities (owner, 2026-10-26: "an invisible barrier in the tunnel").** `roadblock_barriers` puts a barrier's centre its half height above z = 0, and `wp_sim::sync_police_tools` (outside my crate, minimal change) used that as is. On Ashpeak that is far under the road: the Talon Tunnel's barriers spawned 34 m under the floor and fell out of the world, so roadblocks there had no barriers to see (only their cars). `sync_police_tools` now adds the road height under each barrier when the city has terrain (`MapCity::ground_height`, the surface nearest the roadblock's racer). Checked in the browser: a `roadblock_at` in the Talon Tunnel now stands on the tunnel floor.
