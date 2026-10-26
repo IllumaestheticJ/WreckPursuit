@@ -1,6 +1,7 @@
 /** Game menu: main / pause / settings for players (keyboard + gamepad). See GameMenu.tsx. */
 export { GameMenu, mountGameMenu, type GameMenuHost, type GameMenuOptions, type MenuScreen, type PlayChoice } from "./GameMenu";
 export {
+  CAR_DETAILS,
   DRAW_DISTANCES,
   SETTINGS_KEY,
   defaultGameSettings,
@@ -11,6 +12,7 @@ export {
   speedIn,
   unitLabel,
   type AssistSettings,
+  type CarDetail,
   type GameSettings,
   type GfxLevel,
   type SettingsStorage,

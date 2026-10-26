@@ -17,7 +17,7 @@
 import type { ComponentChildren } from "preact";
 import { Fragment, render } from "preact";
 import { keyAction, PadNav, stepIndex, type NavAction } from "./nav";
-import { ASSIST_LEVELS, DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type AssistLevel, type GameSettings, type RadioFilter, type SettingsStorage, type Volumes } from "./settings";
+import { ASSIST_LEVELS, CAR_DETAILS, DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type AssistLevel, type CarDetail, type GameSettings, type RadioFilter, type SettingsStorage, type Volumes } from "./settings";
 import { CONTROL_DEVICES, CONTROL_RANGES, defaultDeviceControls, type ControlDevice, type DeviceControls, type InputProbe } from "./controls";
 import { paintInputBars } from "./bars";
 import { loadMenuMap, saveMenuMap, type MenuMap } from "./maps";
@@ -594,6 +594,15 @@ const ABS_HINT: Record<AssistLevel, string> = {
 };
 
 /** A value picked from a list: click / Enter / Right = next, Left = previous. */
+/** Car detail labels and hints (distances: testbed render/quality.ts `CAR_DETAIL`). */
+const CAR_DETAIL_LABEL: Record<CarDetail, string> = { auto: "From quality", near: "Near", far: "Far", max: "Max" };
+const CAR_DETAIL_HINT: Record<CarDetail, string> = {
+  auto: "Far on High, Near on Low",
+  near: "Detailed cars within 30 m, simple models past 250 m",
+  far: "Detailed cars within 80 m, simple models past 400 m",
+  max: "Detailed cars within 160 m, simple models past 800 m · costs the most",
+};
+
 function Cycle<T extends string | number>(props: { id: string; label: string; value: T; options: { id: T; label: string }[]; onChange: (v: T) => void }) {
   const i = Math.max(
     0,
@@ -712,6 +721,15 @@ function SettingsScreen(props: {
             value={s.drawDistanceM}
             options={DRAW_DISTANCES.map((m) => ({ id: m as number, label: m === 0 ? "From quality" : `${m} m` }))}
             onChange={(drawDistanceM) => change({ ...s, drawDistanceM })}
+          />
+        </Row>
+        <Row label="Car detail" hint={CAR_DETAIL_HINT[s.carDetail]}>
+          <Cycle
+            id="gm-car-detail"
+            label="Car detail"
+            value={s.carDetail}
+            options={CAR_DETAILS.map((d) => ({ id: d, label: CAR_DETAIL_LABEL[d] }))}
+            onChange={(carDetail) => change({ ...s, carDetail })}
           />
         </Row>
         <h3>Audio</h3>
