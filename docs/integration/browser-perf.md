@@ -590,3 +590,30 @@ Read it like this:
 
 The audio e2e runs re-render `docs/media/audio/*` (wav / jpg / README numbers move a little from
 run to run). Those files were restored from HEAD; this pass does not change them.
+
+## Car detail (2026-10-26, owner: "make traffic and other racer LOD render high quality further out")
+
+`render/quality.ts` `CAR_DETAIL`, game menu Settings → Graphics → "Car detail" (`?cardetail=near|far|max`):
+
+| Level | Full per-panel view (promoted traffic, police, roaming street racers) | Mid-LOD instanced mesh |
+|---|---|---|
+| near (old high default) | 30 m | 250 m |
+| far (new high default) | 80 m | 400 m |
+| max | 160 m | 800 m |
+
+"From quality" (default) = far on the high profile (and auto on a hardware GPU); the low,
+software-GL and touch profiles keep 30 m / 120 m (touch: never a view), so `perf_check.mjs`
+(auto under SwiftShader = low) is unchanged. Picker-race AI racers and the player always use
+their full view. Traffic is only a sim vehicle within 80 m of a player (wp_world
+`physical_radius_m`), so a view distance past 80 m only adds police and street racers.
+
+Measured on the combined world (`ashpeak`, 1280×720, headless SwiftShader, gfx=high; A/B in one
+page, so frame times are raster-bound noise here and draw calls / triangles are what count):
+- A car in its full view costs ~50 draw calls and ~13k triangles (free roam with 16 roamers, all
+  in view: 1727 calls / 877k tris vs 907 / 667k in free drive), plus its lattice re-skin.
+- Night-run chase: 30→80 m view distance changed nothing (no traffic within 80 m at 130 km/h);
+  mid mesh 250→400 m: 395k→507k triangles (fleet 31k→145k), draw calls unchanged (instanced);
+  250→500 m: 531k.
+- Free drive at the Port Vesper spawn: 30→80 m added 0–1 views (≈ +20–50 draw calls).
+Worst case on "far": every promoted traffic car (≤ 40 sim slots) plus police near the camera in
+view, ~50 calls each; hence a setting rather than a fixed raise.

@@ -278,6 +278,12 @@ pub struct RaceCard {
     pub terrain: &'static str,
     /// What the player may bet on themselves, with today's odds (empty without a car).
     pub odds: Vec<OddsCard>,
+    /// High-stakes race: career bounty needed to enter (0 = open; career lists only).
+    pub bounty_needed: u32,
+    /// The career's bounty is below `bounty_needed` (the race does not start).
+    pub bounty_locked: bool,
+    /// Purse bonus the career's bounty earns here, fraction of the purse (career lists only).
+    pub bounty_bonus: f32,
 }
 
 /// One bet the player may place on themselves (`race_list`, `race_bet`).
@@ -456,6 +462,9 @@ pub fn race_cards(car: Option<&LoadedCar>, mode: DamageMode) -> Vec<RaceCard> {
                     entry_fee,
                     terrain: d.terrain.key(),
                     odds: car.map_or_else(Vec::new, |c| odds_cards(d, &book_for(econ, d, c))),
+                    bounty_needed: 0,
+                    bounty_locked: false,
+                    bounty_bonus: 0.0,
                 }
             })
             .collect()
@@ -468,6 +477,9 @@ fn phase_of(def: &RaceDef) -> wp_contracts::DayPhase {
 
 /// Ledger note of the adjustment that brings the economy's price to the advertised stake.
 pub const STAKE_NOTE: &str = "race stake (advertised purse / buy-in)";
+
+/// Ledger note of a high-stakes race's purse bonus for the career's bounty.
+pub const BOUNTY_BONUS_NOTE: &str = "high-stakes bounty bonus";
 
 /// `amount × scale`, rounded (how [`wp_race::bridge::economy_race`] scales the economy's
 /// numbers to the advertised stake).
@@ -483,7 +495,7 @@ pub fn stake_settlement(purse: i64, clean_bonus: i64, purse_scale: f32) -> (i64,
     )
 }
 
-/// Advertised stake (`wp_race::bridge::economy_race`, request R5).
+/// Advertised stake (`wp_race::bridge::economy_race_at`, request R5).
 pub(crate) fn advertised(
     econ: &wp_economy::Economy,
     data: &RaceData,
@@ -493,13 +505,22 @@ pub(crate) fn advertised(
     mode: DamageMode,
 ) -> wp_race::bridge::EconomyRace {
     let bracket = data.progression.bracket_for(econ.class_index(&car.def));
-    wp_race::bridge::economy_race(
+    // Priced on the catalog length so the picker card and the run agree; a race paid by
+    // expected finishing time (`[timed_purse]`) gets its purse from that.
+    let stake = data.stakes.race_stake(
+        def.id,
+        def.length_hint_m,
+        def.kind,
+        phase_of(def),
+        bracket,
+        def.legality,
+    );
+    wp_race::bridge::economy_race_at(
         econ,
-        &data.stakes,
+        stake,
         def.kind,
         def.legality,
         car.def.class,
-        bracket,
         length_m,
         phase_of(def),
         mode,
@@ -787,6 +808,11 @@ impl RaceRun {
         }
     }
 
+    /// The race's legality (high-stakes races need a career bounty to start).
+    pub fn legality(&self) -> wp_contracts::Legality {
+        self.setup.legality
+    }
+
     /// `(purse, buy-in)` advertised for the player's car (what the picker card shows).
     pub fn advertised(&self) -> (i64, i64) {
         self.advertised
@@ -1017,6 +1043,8 @@ impl RaceRun {
             return;
         };
         let res = wp_race::bridge::economy_result(&r, run.wanted_level());
+        // The bounty walking in sets the high-stakes bonus (not what this result adds).
+        let bounty_in = run.account().bounty;
         match run.settle_race(&self.setup, &res, entry) {
             Ok(mut p) => {
                 // Pay the advertised stake: purse and clean bonus × purse_scale (the bridge's
@@ -1032,6 +1060,21 @@ impl RaceRun {
                             p.cash_after = run.account().cash;
                         }
                         Err(e) => self.economy_error = Some(format!("payout stake: {e}")),
+                    }
+                }
+                // High-stakes races pay more to a driver with a big bounty.
+                let frac = run
+                    .economy()
+                    .bounty_purse_bonus(bounty_in, self.setup.legality);
+                let bonus = (p.purse as f32 * frac).round() as i64;
+                if bonus > 0 {
+                    match run.adjust(bonus, BOUNTY_BONUS_NOTE) {
+                        Ok(lines) => {
+                            p.ledger.extend(lines);
+                            p.bounty_bonus = bonus;
+                            p.cash_after = run.account().cash;
+                        }
+                        Err(e) => self.economy_error = Some(format!("bounty bonus: {e}")),
                     }
                 }
                 self.payout = Some(p);

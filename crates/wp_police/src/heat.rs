@@ -50,13 +50,18 @@ pub struct BountyRecord {
     pub races_won_wanted: u32,
     /// Police units disabled.
     pub cops_disabled: u32,
+    /// Bounty brought in from the racer's career (already in police bounty points; see
+    /// [`crate::PoliceSystem::carry_career_bounty`]).
+    #[serde(default)]
+    pub carried: f32,
 }
 
 impl BountyRecord {
     /// Bounty value from the ledger.
     pub fn bounty(&self, cfg: &HeatFile) -> f32 {
         let b = &cfg.bounty;
-        self.heat_seconds * b.per_heat_second
+        self.carried
+            + self.heat_seconds * b.per_heat_second
             + self.races_won_wanted as f32 * b.per_race_won_wanted
             + self.cops_disabled as f32 * b.per_cop_disabled
     }

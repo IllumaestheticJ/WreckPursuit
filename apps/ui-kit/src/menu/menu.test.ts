@@ -53,6 +53,12 @@ describe("game settings", () => {
     expect(n.assists.countersteer).toBe(0);
     expect(n.developer).toBe(true);
     expect(n.radioVoice).toBe(true);
+    expect(n.carDetail).toBe("auto");
+  });
+  it("keeps a valid car detail and drops an unknown one", () => {
+    const base = defaultGameSettings(true);
+    expect(normalizeSettings({ carDetail: "max" }, base).carDetail).toBe("max");
+    expect(normalizeSettings({ carDetail: "ultra" }, base).carDetail).toBe("auto");
   });
   it("keeps the police radio voice switch (row 79)", () => {
     const base = defaultGameSettings(true);

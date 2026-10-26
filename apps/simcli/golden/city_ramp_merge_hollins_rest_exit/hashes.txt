@@ -1,4 +1,4 @@
-# simcli hashes scenario=city_ramp_merge_hollins_rest_exit systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=city_ramp_merge_hollins_rest_exit systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 240 0745b9719230ed15
 480 7e0e3bc3ec385c62
 720 83e4f9add2289f99

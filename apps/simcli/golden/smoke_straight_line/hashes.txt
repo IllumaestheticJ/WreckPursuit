@@ -1,4 +1,4 @@
-# simcli hashes scenario=smoke_straight_line systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=smoke_straight_line systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 240 b44651502498ce39
 480 66eb390481f75746
 720 d4fc49253b3c0e7e

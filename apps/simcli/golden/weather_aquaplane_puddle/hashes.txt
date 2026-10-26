@@ -1,4 +1,4 @@
-# simcli hashes scenario=weather_aquaplane_puddle systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=weather_aquaplane_puddle systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 240 b69dd74fd7507fa6
 480 dee8e437fb2c1cc2
 720 d63f582338678e39

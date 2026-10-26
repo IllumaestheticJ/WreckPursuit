@@ -1,4 +1,4 @@
-# simcli hashes scenario=world_traffic_soak_vesper_observer systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=world_traffic_soak_vesper_observer systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 240 d804fa66845504ad
 480 994c084b9706fdd9
 720 83fbdce2f10ce2c8

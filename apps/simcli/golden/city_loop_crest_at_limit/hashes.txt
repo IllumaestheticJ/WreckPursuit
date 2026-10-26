@@ -1,4 +1,4 @@
-# simcli hashes scenario=city_loop_crest_at_limit systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=city_loop_crest_at_limit systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 240 792d749ecf597107
 480 d70912a082459196
 720 cc9bf8bb12b0937b

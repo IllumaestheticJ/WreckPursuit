@@ -619,6 +619,26 @@ fn whitelist_requirements_and_modes_are_enforced() {
         .is_err());
 }
 
+/// The Steering Angle Kit's quicker ratio reaches the rack pads and keys steer through, not
+/// only the force feedback (owner, 2026-10-26: no half-working mods).
+#[test]
+fn steering_angle_kit_quickens_the_rack() {
+    let e = econ();
+    let s = sedan();
+    let p = e
+        .preview(&s.def, &s.lattice, &["susp_angle_kit".to_string()], None)
+        .unwrap();
+    let (base, kit) = (&s.def.steering, &p.applied.vehicle.steering);
+    assert!(kit.ratio < base.ratio);
+    assert!(
+        (kit.rack_speed_rad_per_s * kit.ratio - base.rack_speed_rad_per_s * base.ratio).abs()
+            < 1e-3,
+        "rack {} -> {}",
+        base.rack_speed_rad_per_s,
+        kit.rack_speed_rad_per_s
+    );
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: 96, ..ProptestConfig::default() })]
 

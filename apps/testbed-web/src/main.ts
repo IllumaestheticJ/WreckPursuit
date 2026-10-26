@@ -353,6 +353,8 @@ async function main(): Promise<void> {
     release: (uid) => act(() => sim.careerRelease(uid)),
     insure: (uid, tier) => act(() => sim.careerInsure(uid, tier)),
     nextNight: () => act(() => sim.careerNextNight()),
+    buyInformant: (tier) => act(() => sim.careerBuyInformant(tier)),
+    payOffBounty: () => act(() => sim.careerPayOffBounty()),
     lot: (id) => sim.careerLot(id),
     visitLot: (id) => visitLot(id),
     buyListing: (id, slot) => act(() => sim.careerBuyListing(id, slot)),
@@ -744,6 +746,9 @@ async function main(): Promise<void> {
     plots.clear();
     ui.reset();
     radioStrip.clear();
+    // Career: the car's scanner mod decides what the radio hears (none: no radio at all).
+    const gadgets = sim.playerGadgets();
+    audio.setCareerScanner(gadgets.length ? gadgets[1] : null);
     map.reset();
     runEnd.reset();
     garageView.reset();
@@ -1698,6 +1703,7 @@ async function main(): Promise<void> {
     layers.suppress(dev ? [] : DEBUG_LAYERS);
     // Graphics (an explicit ?gfx= wins on load).
     if (prev || !params.get("gfx")) scene.quality.setMode(next.gfx);
+    scene.quality.setCarDetail(next.carDetail);
     const drawParam = Number(params.get("draw"));
     scene.drawDistanceM = next.drawDistanceM > 0 ? next.drawDistanceM : drawParam > 0 ? drawParam : scene.quality.drawDistanceM;
     weather.rainFraction = scene.quality.rainFraction;
@@ -2023,7 +2029,7 @@ async function main(): Promise<void> {
     // The game UI is hidden during a crash replay (and must not count its events twice).
     if (!crash.playing) {
       ui.frame(wi[W.tick], app.player, events, wi[W.hours], MODE_NAMES[Math.round(wi[W.mode])] ?? "Arcade", map.radar());
-      if (!audio.hearsRadio()) {
+      if (!audio.hearsRadio() && !audio.radioOff()) {
         for (const ev of events as unknown as { Police?: { Radio?: { unit: number | null; text: string } } }[]) {
           const r = ev.Police?.Radio;
           if (!r) continue;
@@ -2159,7 +2165,7 @@ async function main(): Promise<void> {
     lod.update(trafficDraw, policeDraw, app.views, rig.camera, app.views.get(app.player)?.root.position ?? null, tS);
     prof.lap("fleet");
     props.update(sim.propsMoved(), rig.camera);
-    policeTools.update(() => sim.mapDynamic(app.player), (x, y) => scene.groundZ(x, y), now);
+    policeTools.update(() => sim.mapDynamicWorld(app.player), (x, y) => scene.groundZ(x, y), now);
     prof.lap("props");
 
     const inCity = wi[W.city] > 0.5;

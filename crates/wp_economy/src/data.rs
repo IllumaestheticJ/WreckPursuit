@@ -363,6 +363,37 @@ pub struct BountyRules {
     pub cop_share: f32,
     /// Share of the capture reward paid to each assisting cop.
     pub assist_share: f32,
+    /// Paying the bounty off in the garage ([`Economy::pay_off_bounty`]).
+    pub payoff: BountyPayoff,
+    /// High-stakes races: a bounty to get in, a purse bonus for a big one
+    /// ([`Economy::high_stakes_bounty_needed`], [`Economy::bounty_purse_bonus`]).
+    pub high_stakes: HighStakesRules,
+}
+
+/// What clearing the bounty through an informant costs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BountyPayoff {
+    /// Cost = this × the bounty (more than the bail a capture charges, but no fine, impound
+    /// or rep loss).
+    pub cost_frac: f32,
+    /// Never cheaper than this (unless there is no bounty).
+    pub min_cost: Money,
+}
+
+/// High-stakes races (by legality): open only to racers with a bounty, and the bigger the
+/// bounty the bigger the purse.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HighStakesRules {
+    /// Legality keys (`Legality::key`) that count as high stakes.
+    pub legality: Vec<String>,
+    /// Career bounty needed to enter one.
+    pub min_bounty: u32,
+    /// Purse bonus per 1 000 bounty, as a fraction of the purse.
+    pub purse_bonus_per_1000: f32,
+    /// Largest purse bonus, as a fraction of the purse.
+    pub purse_bonus_max: f32,
 }
 
 /// One informant tier.
@@ -932,6 +963,33 @@ impl Economy {
         )?;
         require_frac("stakes.bounty.cop_share", s.bounty.cop_share)?;
         require_frac("stakes.bounty.assist_share", s.bounty.assist_share)?;
+        if !(s.bounty.payoff.cost_frac.is_finite() && s.bounty.payoff.cost_frac >= 0.0) {
+            return Err(invalid("stakes.bounty.payoff.cost_frac", "must be >= 0"));
+        }
+        if s.bounty.payoff.min_cost < 0 {
+            return Err(invalid("stakes.bounty.payoff.min_cost", "must be >= 0"));
+        }
+        let hs = &s.bounty.high_stakes;
+        for k in &hs.legality {
+            if !legality_keys().contains(&k.as_str()) {
+                return Err(invalid(
+                    "stakes.bounty.high_stakes.legality",
+                    format!("unknown legality {k:?}"),
+                ));
+            }
+        }
+        if !(hs.purse_bonus_per_1000.is_finite() && hs.purse_bonus_per_1000 >= 0.0) {
+            return Err(invalid(
+                "stakes.bounty.high_stakes.purse_bonus_per_1000",
+                "must be >= 0",
+            ));
+        }
+        if !(hs.purse_bonus_max.is_finite() && hs.purse_bonus_max >= 0.0) {
+            return Err(invalid(
+                "stakes.bounty.high_stakes.purse_bonus_max",
+                "must be >= 0",
+            ));
+        }
         let kind_keys: Vec<String> = wp_contracts::RaceKind::KEYS
             .iter()
             .map(|k| k.to_string())

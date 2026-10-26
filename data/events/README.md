@@ -7,7 +7,7 @@ data. Design write-up: `crates/wp_race/README.md`.
 | File | Loaded as | What |
 |---|---|---|
 | `rules.toml` | `RulesTable` | per-kind grid, racer limits, time limit, finish window; shared tolerances (clean-race impulse, gate tolerance, corridor margin/grace, teleport speed, countdown); drag / outrun / delivery settings |
-| `stakes.toml` | `StakeTable` | purse, entry fee, heat and police presence keyed by race kind, `DayPhase`, class bracket and legality; `risk_curve` makes purse monotone in risk |
+| `stakes.toml` | `StakeTable` | purse, entry fee, heat and police presence keyed by race kind, `DayPhase`, class bracket and legality; `risk_curve` makes purse monotone in risk; `[timed_purse]` pays listed catalog races (the Loop 9 → Ashpeak highway run) per expected minute instead of the kind's flat purse |
 | `schedule.toml` | `ScheduleRules` | sanctioned day events, night meets, rare illegal daytime races, bracket weights, venue gap, meet heat |
 | `progression.toml` | `ProgressionTable` | class brackets (must match `data/economy/market.toml`), licence tiers by clean races |
 | `racers.toml` | `roster::Roster` | the city's twelve named regulars: car, home turf, specialty, tier, starting form rating, `DriverProfile` (every picker driver comes from here) |

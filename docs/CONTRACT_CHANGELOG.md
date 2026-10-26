@@ -5,6 +5,24 @@
 changed, why, and which workstreams must update. Only the integration lead edits the contract.
 Every session reads this file at start.
 
+## v0.4.2 — applied 2026-10-26 (branch `claude/project-thread-y3sihv`, owner request)
+
+Owner request (project thread "Double AI car damage in Arcade mode", 2026-10-26): "make AI
+police damage 2X current value on arcade mode, make AI racer damage also 2X". Applied by the
+thread session on the owner's direct request rather than by the lead, so it is flagged here.
+`CONTRACT_VERSION` 0.4.1 → **0.4.2** (golden `contract=` headers re-blessed).
+
+**Additive:**
+- `ModeTable::ai_racer_damage_mult: f32` (`#[serde(default)]` = 1.0, must be > 0): extra
+  multiplier for AI racers on top of `racer_damage_scale`. Arcade 2.0 (AI racers 0.5, the
+  player's racer stays 0.25).
+- `ModeTable::police_damage_scale: f32` (`#[serde(default)]` = 1.0, must be > 0): multiplier
+  on the contact impulses reaching AI police cars' damage model. Arcade 2.0. Player cop seats
+  (`Sim::bind_player_police`) keep 1.0.
+- `wp_sim::damage_scale` picks the scale per vehicle; `wp_damage::scale_contacts` applies it.
+  Simulation and Extreme omit both fields, so they are unchanged. Damage only, no physics
+  change (owner rule 2026-10-20).
+
 ## v0.4.1 — applied 2026-10-23 (branch `lead/main-sync`, merge of main into round 12)
 
 One version for the two lines that each bumped the contract on their own: round 12's v0.3.1

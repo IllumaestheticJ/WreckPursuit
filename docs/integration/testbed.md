@@ -1220,3 +1220,20 @@ render, so each one re-resolves its program every frame. They were the garage ma
 (`render/cosmetics/*.ts`), vinyls (`render/mod_parts.ts`) and the helicopter spotlight cone.
 All now `forceSinglePass: true` (flat or additive surfaces, so one pass draws the same); 0
 bumps. New transparent double-sided materials need the same flag.
+
+## Out of play: water and the map edge (2026-10-26, owner report)
+"If I go in the water or off map I can get away from cops." The player's car in deep water
+(river, canal or sea over 1 m deep, chassis under the surface; not on a deck above it nor in a
+tunnel under it), past the edge of the map's ground (3 m inside the terrain grid; flat cities
+300 m past the roads) or 10 m below the map's lowest ground is out of play
+(`wp_wasm::out_of_play`). After 0.75 s out of play the session puts it on the nearest clear lane
+spot by its last pose on a lane (logged `ResetAt`, damage kept, then the 1 s `Ghost`) and logs
+the new op `Recovered` (simcli replay op 9; 8 is ClearTraffic): `PoliceSystem::racer_recovered` counts it as a
+sighting there, so a pursuit carries on with its escape timer at zero and its breadcrumb trail
+restarted at the spot (the old one led into the water); heat, level and bounty are kept.
+Live browser sessions only (playback applies the logged ops). Tests: `out_of_play_tests` (river,
+sea and map edge on the combined Ashpeak map, pursued) and wp_police
+`recovered_racer_is_seen_and_the_pursuit_carries_on`.
+
+**Not covered:** the multiplayer server (`wp_net`) has no out-of-play recovery for player cars
+yet; police units that follow a racer into the water rely on the existing stuck / respawn logic.

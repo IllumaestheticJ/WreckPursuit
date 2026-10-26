@@ -1,4 +1,4 @@
-# simcli hashes scenario=city_hill_road_descent systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=city_hill_road_descent systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 240 3958d4929def7c86
 480 e4e095ac254d52af
 720 2a896fb7ad59469e
