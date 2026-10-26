@@ -194,7 +194,7 @@ impl LiveRace {
             .zip(def.ai)
             .map(|(e, d)| AiEntrant {
                 racer: e.entity,
-                profile: d.profile,
+                profile: def.driver_profile(d),
                 capability: e.capability,
             })
             .collect();
