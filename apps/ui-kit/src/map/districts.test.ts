@@ -26,6 +26,16 @@ describe("districts", () => {
     expect(districtName("procedural_12x12", vesper.zones[1])).toBe("Commercial");
   });
 
+  it("names the combined world's zones: Ashpeak County first, then Port Vesper", () => {
+    const zone = (id: number, kind: MapStatic["zones"][number]["kind"]) => ({ id, kind, poly: [] });
+    expect(districtName("ashpeak", zone(0, "Core"))).toBe("Ashpeak Downtown");
+    expect(districtName("ashpeak", zone(8, "Commercial"))).toBe("Harnell Crossing");
+    expect(districtName("ashpeak", zone(12, "Suburb"))).toBe("Ashpeak Range");
+    expect(districtName("ashpeak", zone(13, "Core"))).toBe("Lantern Row");
+    expect(districtName("ashpeak", zone(14, "Commercial"))).toBe("Midtown");
+    expect(districtName("ashpeak", zone(23, "Suburb"))).toBeNull();
+  });
+
   it("puts a ring zone's label on the ring, not in the hole", () => {
     const labels = districtLabels(vesper);
     expect(labels.map((l) => l.name).sort()).toEqual(["Lantern Row", "Midtown"]);

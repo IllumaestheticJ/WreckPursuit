@@ -134,7 +134,7 @@ export function mockGarage(): GarageCar[] {
 export function mockShops(): ShopView[] {
   return [
     { id: "garage_1", name: "Garage 1 — Midtown Body", kind: "legit", district: "Core", labourMultiplier: 1.25 },
-    { id: "garage_2", name: "Garage 2 — Dockside (no questions)", kind: "crooked", district: "Docks", labourMultiplier: 0.8 },
+    { id: "garage_2", name: "Garage 2 — Dockside (no questions)", kind: "crooked", district: "Port", labourMultiplier: 0.8 },
     { id: "garage_3", name: "Garage 3 — Suburb Auto", kind: "legit", district: "Suburb", labourMultiplier: 1.0 },
   ];
 }

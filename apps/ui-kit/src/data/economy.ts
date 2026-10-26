@@ -23,15 +23,20 @@ export const CLASS_PRICING: Record<VehicleClass, { labour: number; referenceValu
   PoliceSuv: { labour: 100, referenceValue: 45000, towing: 280 },
 };
 
-/** `prices.toml` `[district_labour]`. */
+/** `prices.toml` `[district_labour]` (`wp_contracts::DistrictId` keys; `default` = Residential,
+ * the economy's fallback for an unknown or legacy key). */
 export const DISTRICT_LABOUR: Record<string, number> = {
   default: 1.0,
   Core: 1.25,
+  Commercial: 1.1,
+  Residential: 1.0,
   Suburb: 1.0,
   Industrial: 0.85,
-  Docks: 0.8,
-  Hills: 1.1,
+  Port: 0.8,
 };
+
+/** The districts a repair shop can be in (`DistrictId::ALL` order). */
+export const DISTRICTS = ["Core", "Commercial", "Residential", "Industrial", "Port", "Suburb"] as const;
 
 /** `prices.toml` `[shop]`. */
 export const SHOP = { crookedMarkup: 1.15, crookedWantedMarkup: 1.6 };

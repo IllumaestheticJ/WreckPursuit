@@ -29,6 +29,7 @@ import type {
   RepairItem,
   ShopKind,
   ShopRequest,
+  ShopSite,
   StatsView,
 } from "./types";
 import { pickTextFile } from "./store";
@@ -123,10 +124,25 @@ function CarCard({ car, selected, onSelect }: { car: CarView; selected: boolean;
   );
 }
 
-function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
+/**
+ * The shop the Repair panel starts on: the one the car pulled into (`at`, by name), else the
+ * first shop of the main menu's spawn city, else the first shop. `null` without shops.
+ */
+export function startShop(shops: ShopSite[], at: string | null, homeCity: string | null): ShopSite | null {
+  return shops.find((s) => s.name === at) ?? shops.find((s) => s.city === homeCity) ?? shops[0] ?? null;
+}
+
+function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; at: string | null; run: (f: () => CareerView) => void }) {
   const { car, view, api } = props;
-  const [district, setDistrict] = useState("Residential");
-  const [shop, setShop] = useState<ShopKind>("Legit");
+  // The world's shops when the host lists them (one world since 2026-10-25: each shop has its
+  // district's labour rate and is legit or crooked); else the bare district and shop kind.
+  const shops = view.shops ?? [];
+  const [shopName, setShopName] = useState(() => startShop(shops, props.at, api.homeCity?.() ?? null)?.name ?? "");
+  const site = shops.find((s) => s.name === shopName) ?? null;
+  const [bareDistrict, setDistrict] = useState("Residential");
+  const [bareShop, setShop] = useState<ShopKind>("Legit");
+  const district = site?.district ?? bareDistrict;
+  const shop = site?.kind ?? bareShop;
   const [picked, setPicked] = useState<string[]>([]);
   const [scrapAsk, setScrapAsk] = useState(false);
   if (car.location !== "Garage") return null;
@@ -148,24 +164,42 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; ru
         <p class="wp-dim">Nothing to repair.</p>
       ) : (
         <>
-          <div class="wp-row" style={{ gap: "0.6em", flexWrap: "wrap", marginBottom: "0.5em" }}>
-            <label class="wp-mono wp-dim">
-              district{" "}
-              <select class="wp-select" value={district} onChange={(e) => setDistrict((e.target as HTMLSelectElement).value)} data-testid="repair-district">
-                {view.districts.map((d) => (
-                  <option value={d.id} key={d.id}>
-                    {words(d.id)} ×{d.labour.toFixed(2)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Button size="sm" pressed={shop === "Legit"} onClick={() => setShop("Legit")}>
-              Legit shop
-            </Button>
-            <Button size="sm" pressed={shop === "Crooked"} onClick={() => setShop("Crooked")} title="never reports you; marks up labour, more when you are wanted">
-              Crooked shop
-            </Button>
-          </div>
+          {site ? (
+            <div class="wp-row" style={{ gap: "0.6em", flexWrap: "wrap", marginBottom: "0.5em" }}>
+              <label class="wp-mono wp-dim">
+                shop{" "}
+                <select class="wp-select" value={site.name} onChange={(e) => setShopName((e.target as HTMLSelectElement).value)} data-testid="repair-shop">
+                  {shops.map((s) => (
+                    <option value={s.name} key={s.name}>
+                      {s.name} · {s.city_label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span class="wp-mono wp-dim" data-testid="repair-shop-rate" title={site.kind === "Crooked" ? "never reports you; marks up labour, more when you are wanted" : "normal rates; reports wanted cars"}>
+                {words(site.district)} ×{site.labour.toFixed(2)} · {site.kind === "Crooked" ? "crooked" : "legit"}
+              </span>
+            </div>
+          ) : (
+            <div class="wp-row" style={{ gap: "0.6em", flexWrap: "wrap", marginBottom: "0.5em" }}>
+              <label class="wp-mono wp-dim">
+                district{" "}
+                <select class="wp-select" value={bareDistrict} onChange={(e) => setDistrict((e.target as HTMLSelectElement).value)} data-testid="repair-district">
+                  {view.districts.map((d) => (
+                    <option value={d.id} key={d.id}>
+                      {words(d.id)} ×{d.labour.toFixed(2)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button size="sm" pressed={shop === "Legit"} onClick={() => setShop("Legit")}>
+                Legit shop
+              </Button>
+              <Button size="sm" pressed={shop === "Crooked"} onClick={() => setShop("Crooked")} title="never reports you; marks up labour, more when you are wanted">
+                Crooked shop
+              </Button>
+            </div>
+          )}
           {wanted && shop === "Legit" && <p class="wp-warn">You are wanted ({view.carried_level}): a legit shop will report you.</p>}
           <table class="wp-table" data-testid="repair-lines">
             <thead>
@@ -469,7 +503,7 @@ function TunePage(props: { car: CarView; api: CareerApi; run: (f: () => CareerVi
   );
 }
 
-function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
+function CarsTab(props: { view: CareerView; api: CareerApi; at: string | null; run: (f: () => CareerView) => void }) {
   const { view, api } = props;
   const [sel, setSel] = useState<number | null>(view.active_car);
   const [mods, setMods] = useState(false);
@@ -548,7 +582,7 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
             </p>
           )}
         </Panel>
-        <RepairPanel key={`r${car.uid}`} car={car} view={view} api={api} run={props.run} />
+        <RepairPanel key={`r${car.uid}`} car={car} view={view} api={api} at={props.at} run={props.run} />
         <TiresPanel key={`t${car.uid}`} car={car} view={view} api={api} run={props.run} />
         <InsurancePanel car={car} view={view} api={api} run={props.run} />
       </div>
@@ -823,7 +857,7 @@ function NewCareer(props: { api: CareerApi; run: (f: () => CareerView) => void; 
   );
 }
 
-function GarageScreen(props: { api: CareerApi; initial: CareerView; message: string | null }) {
+function GarageScreen(props: { api: CareerApi; initial: CareerView; message: string | null; at: string | null }) {
   const { api } = props;
   const [view, setView] = useState<CareerView>(props.initial);
   const [tab, setTab] = useState<Tab>(props.initial.cars.length ? "cars" : "lots");
@@ -929,7 +963,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
         onChange={setTab}
       />
       <div style={{ marginTop: "0.8em" }}>
-        {tab === "cars" && <CarsTab view={view} api={api} run={run} />}
+        {tab === "cars" && <CarsTab view={view} api={api} at={props.at} run={run} />}
         {tab === "lots" && <LotsTab view={view} api={api} run={run} />}
         {tab === "pound" && <PoundTab view={view} api={api} run={run} />}
         {tab === "career" && <CareerTab view={view} />}
@@ -951,14 +985,14 @@ export class CareerGarageView {
   ) {}
 
   /** Show the garage (re-reads the career). `message` is shown at the top (e.g. why a run
-   * could not start). */
-  show(message: string | null = null): void {
+   * could not start); `at` names the shop the car pulled into (the Repair panel starts there). */
+  show(message: string | null = null, at: string | null = null): void {
     this.open = true;
     this.key++;
     const view = this.api.view();
     render(
       <div class="wp-ui wp-root" style={{ position: "absolute", inset: 0, pointerEvents: "auto", zIndex: 80 }}>
-        <GarageScreen key={this.key} api={this.api} initial={view} message={message} />
+        <GarageScreen key={this.key} api={this.api} initial={view} message={message} at={at} />
       </div>,
       this.el,
     );

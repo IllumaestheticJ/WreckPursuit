@@ -8,8 +8,8 @@ import type { RepairEstimate, RepairItem, WantedLevel } from "../generated/contr
 import type { BillRequest, GarageCar, RepairBillView, ShopView } from "../model/types";
 import { quoteRepair, repairItemLabel } from "../data/economy";
 
-/** Default request: legit shop, default district, repair everything, uninsured. */
-export const DEFAULT_BILL_REQUEST: BillRequest = { shop: "Legit", district: "default", option: "RepairAll", insurance: null, wanted: "None" };
+/** Default request: legit shop, residential district, repair everything, uninsured. */
+export const DEFAULT_BILL_REQUEST: BillRequest = { shop: "Legit", district: "Residential", option: "RepairAll", insurance: null, wanted: "None" };
 
 /** `wp_economy::QuotedLine` as JSON. */
 interface QuotedLineJson {
@@ -78,7 +78,7 @@ export function mockBill(car: GarageCar, request: BillRequest, mode: "Arcade" | 
     id: "mock",
     name: request.shop,
     kind: request.shop === "Crooked" ? "crooked" : "legit",
-    district: request.district === "default" ? "Suburb" : request.district,
+    district: request.district === "default" ? "Residential" : request.district,
     labourMultiplier: 1,
   };
   const wanted = request.wanted !== ("None" satisfies WantedLevel);

@@ -365,6 +365,8 @@ async function main(): Promise<void> {
     races: () => openCareerPicker("races"),
     touge: () => openCareerPicker("touge"),
     workshop: (uid) => openWorkshop(uid),
+    // Repairs from the menu are priced at a shop in the city the main menu spawns in.
+    homeCity: () => loadMenuMap(menuSpawns),
     close: () => {
       garage.hide();
       app.paused = false;
@@ -485,7 +487,8 @@ async function main(): Promise<void> {
   autoBox.onchange = () => setAutoCrashReplay(autoBox.checked);
   onAutoCrashReplayChange((on) => (autoBox.checked = on));
   /** Garage: ends a career run in progress (its result goes into the career), pauses. */
-  const openGarage = (message: string | null = null) => {
+  /** `at`: the shop the car pulled into (the Repair panel starts on it). */
+  const openGarage = (message: string | null = null, at: string | null = null) => {
     lotView.hide();
     careerPicker = null;
     workshop.close();
@@ -494,7 +497,7 @@ async function main(): Promise<void> {
     persistCareer();
     runEnd.reset();
     app.paused = true;
-    garage.show(message);
+    garage.show(message, at);
   };
   let careerSavedSeq = -1;
   let careerSavedAt = 0;
@@ -567,7 +570,7 @@ async function main(): Promise<void> {
       openGarage();
       if (uid !== null) openWorkshop(uid);
     },
-    garage: (v) => openGarage(v.kind === "Safehouse" ? `Safe at ${v.name} for the night. Your career is saved.` : `Pulled into ${v.name}.`),
+    garage: (v) => (v.kind === "Safehouse" ? openGarage(`Safe at ${v.name} for the night. Your career is saved.`) : openGarage(`Pulled into ${v.name}.`, v.name)),
     leave: () => sim.placeLeave(),
   });
   // The city's regulars remember their results between visits (wp_race::roster records).
