@@ -70,7 +70,7 @@ pub use lots::{
     Listing, ListingGrade, ListingWear, LotDef, LotKind, LotTables, RareVariant, TireTables,
     FACTORY_PAINTS,
 };
-pub use mods::{ModCatalog, ModDef, ModEffect, ModSlot, ToolLoadout};
+pub use mods::{ModCatalog, ModDef, ModEffect, ModSlot, RamFace, RamProfile, RamZone, ToolLoadout};
 pub use parts::{
     CarParts, CatalogEntry, FittedPart, InventoryView, LoosePart, MechanicJob, MechanicRates,
     PartFit, PartGroup, PartSource, PartView, PartsTable, SlotDef, SlotView, StandFit, StandView,

@@ -12,6 +12,9 @@
 //! - [`ModEffect::Cosmetic`] — no gameplay effect, except body-kit pieces become detachable
 //!   regions ([`DetachableRequest`], extension point for prompt 03's `gen-lattice`).
 //! - [`ModEffect::Tool`] — gadgets other systems query via [`ToolLoadout`].
+//! - [`ModEffect::Ram`] — how hits on one face of the car play out: more effective mass in the
+//!   collision, more damage dealt, less damage taken. Collected into a [`RamProfile`] the sim
+//!   applies to car-on-car contacts (`wp_sim::Sim::set_ram_profile`).
 //!
 //! Requirements are satisfied by any installed mod of the **same line and an equal or higher
 //! tier**, so upgrading a prerequisite never breaks its dependents.
@@ -370,6 +373,145 @@ pub enum ModEffect {
         /// Tier 1..=3.
         tier: u8,
     },
+    /// Battering-ram behaviour of one face of the car (bull bars, push bars, armour). Applies
+    /// to hits against other cars on that face; see [`RamProfile`].
+    Ram {
+        /// Which face.
+        zone: RamZone,
+        /// Effective mass multiplier in the collision, ≥ 1: the car shoves and is shoved as if
+        /// it weighed this much more.
+        mass_scale: f32,
+        /// Damage dealt to the car it hits, multiplier ≥ 1.
+        dealt_scale: f32,
+        /// Damage taken on this face, multiplier in (0, 1].
+        taken_scale: f32,
+    },
+}
+
+/// A face of the car for [`ModEffect::Ram`], judged from the contact normal in chassis space.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum RamZone {
+    /// The nose (the other car pushes me backward).
+    Front,
+    /// The tail.
+    Rear,
+    /// Either flank.
+    Side,
+}
+
+impl RamZone {
+    /// All zones, in [`RamProfile::zones`] order.
+    pub const ALL: [RamZone; 3] = [RamZone::Front, RamZone::Rear, RamZone::Side];
+
+    /// The zone a contact normal falls in (`normal_into_me` in chassis space, +Y forward, unit),
+    /// or `None` for a hit from above or below.
+    pub fn of_normal(normal_into_me: [f32; 3]) -> Option<RamZone> {
+        let [x, y, _] = normal_into_me;
+        if y <= -RAM_ZONE_COS {
+            Some(RamZone::Front)
+        } else if y >= RAM_ZONE_COS {
+            Some(RamZone::Rear)
+        } else if x.abs() >= RAM_ZONE_COS {
+            Some(RamZone::Side)
+        } else {
+            None
+        }
+    }
+
+    fn index(self) -> usize {
+        match self {
+            RamZone::Front => 0,
+            RamZone::Rear => 1,
+            RamZone::Side => 2,
+        }
+    }
+}
+
+/// A contact normal within ~60° of a face's axis counts for that face.
+pub const RAM_ZONE_COS: f32 = 0.5;
+/// Most effective-mass multiplier a stack of ram mods gives one face.
+pub const RAM_MAX_MASS_SCALE: f32 = 4.0;
+/// Most damage-dealt multiplier a stack of ram mods gives one face.
+pub const RAM_MAX_DEALT_SCALE: f32 = 4.0;
+/// Least damage-taken multiplier a stack of ram mods gives one face.
+pub const RAM_MIN_TAKEN_SCALE: f32 = 0.25;
+
+/// What one face of the car does in a car-on-car hit ([`ModEffect::Ram`]).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RamFace {
+    /// Effective mass multiplier, 1 = stock.
+    pub mass_scale: f32,
+    /// Damage dealt multiplier, 1 = stock.
+    pub dealt_scale: f32,
+    /// Damage taken multiplier, 1 = stock.
+    pub taken_scale: f32,
+}
+
+impl RamFace {
+    /// A stock face.
+    pub const STOCK: RamFace = RamFace {
+        mass_scale: 1.0,
+        dealt_scale: 1.0,
+        taken_scale: 1.0,
+    };
+}
+
+impl Default for RamFace {
+    fn default() -> Self {
+        Self::STOCK
+    }
+}
+
+/// Every face's [`RamFace`], from the car's ram mods. Effects on one face multiply, clamped to
+/// [`RAM_MAX_MASS_SCALE`], [`RAM_MAX_DEALT_SCALE`] and [`RAM_MIN_TAKEN_SCALE`].
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct RamProfile {
+    /// Faces in [`RamZone::ALL`] order.
+    pub zones: [RamFace; 3],
+}
+
+impl RamProfile {
+    /// One face.
+    pub fn face(&self, zone: RamZone) -> RamFace {
+        self.zones[zone.index()]
+    }
+
+    /// The face a contact normal hits (stock for a hit from above or below).
+    pub fn face_for_normal(&self, normal_into_me: [f32; 3]) -> RamFace {
+        RamZone::of_normal(normal_into_me).map_or(RamFace::STOCK, |z| self.face(z))
+    }
+
+    /// Whether every face is stock.
+    pub fn is_stock(&self) -> bool {
+        self.zones.iter().all(|f| *f == RamFace::STOCK)
+    }
+
+    /// Stack one ram effect onto `zone`.
+    pub fn add(&mut self, zone: RamZone, mass_scale: f32, dealt_scale: f32, taken_scale: f32) {
+        let f = &mut self.zones[zone.index()];
+        f.mass_scale = (f.mass_scale * mass_scale).min(RAM_MAX_MASS_SCALE);
+        f.dealt_scale = (f.dealt_scale * dealt_scale).min(RAM_MAX_DEALT_SCALE);
+        f.taken_scale = (f.taken_scale * taken_scale).max(RAM_MIN_TAKEN_SCALE);
+    }
+
+    /// The profile of a set of mods.
+    pub fn of_mods(mods: &[&ModDef]) -> RamProfile {
+        let mut p = RamProfile::default();
+        for m in mods {
+            for e in &m.effects {
+                if let ModEffect::Ram {
+                    zone,
+                    mass_scale,
+                    dealt_scale,
+                    taken_scale,
+                } = e
+                {
+                    p.add(*zone, *mass_scale, *dealt_scale, *taken_scale);
+                }
+            }
+        }
+        p
+    }
 }
 
 /// One mod definition.
@@ -552,6 +694,31 @@ impl ModDef {
                 ModEffect::Tool { tier, .. } => {
                     if !(1..=3).contains(tier) {
                         return Err(invalid(&w, "tool tier must be 1..=3"));
+                    }
+                }
+                ModEffect::Ram {
+                    mass_scale,
+                    dealt_scale,
+                    taken_scale,
+                    ..
+                } => {
+                    if !(mass_scale.is_finite() && (1.0..=RAM_MAX_MASS_SCALE).contains(mass_scale))
+                    {
+                        return Err(invalid(&w, "ram mass_scale must be 1..=4"));
+                    }
+                    if !(dealt_scale.is_finite()
+                        && (1.0..=RAM_MAX_DEALT_SCALE).contains(dealt_scale))
+                    {
+                        return Err(invalid(&w, "ram dealt_scale must be 1..=4"));
+                    }
+                    if !(taken_scale.is_finite()
+                        && (RAM_MIN_TAKEN_SCALE..=1.0).contains(taken_scale))
+                    {
+                        return Err(invalid(&w, "ram taken_scale must be 0.25..=1"));
+                    }
+                    // A ram face is a heavy bolt-on: it must cost mass.
+                    if self.mass_delta_kg() <= 0.0 {
+                        return Err(invalid(&w, "ram effects must come with added mass"));
                     }
                 }
             }
@@ -878,6 +1045,8 @@ pub struct AppliedMods {
     pub detachable_requests: Vec<DetachableRequest>,
     /// Total mass change, kg.
     pub mass_delta_kg: f32,
+    /// Battering-ram behaviour of each face (stock without ram mods).
+    pub ram: RamProfile,
     /// Non-fatal notes (inactive mods in this mode, targets missing on this lattice...).
     pub warnings: Vec<String>,
 }
@@ -1295,6 +1464,7 @@ pub fn apply_mods(
     }
     Ok(AppliedMods {
         mass_delta_kg: vehicle.mass_kg - base_vehicle.mass_kg,
+        ram: RamProfile::of_mods(&active),
         vehicle,
         lattice,
         tools,

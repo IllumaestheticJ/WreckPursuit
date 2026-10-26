@@ -72,6 +72,14 @@ export type ModEffect =
     }
   | { Cosmetic: { kind: string; value: string } }
   | { Tool: Record<string, unknown> }
+  | {
+      Ram: {
+        zone: "Front" | "Rear" | "Side";
+        mass_scale: number;
+        dealt_scale: number;
+        taken_scale: number;
+      };
+    }
   | Record<string, unknown>;
 
 /** `ModDef` from `wp_economy::mods`. */
