@@ -11,6 +11,7 @@
 #![warn(missing_docs)]
 
 mod contacts;
+mod crash_mass;
 mod parked;
 mod physics;
 mod police_link;
