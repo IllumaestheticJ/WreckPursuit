@@ -328,6 +328,9 @@ pub enum ToolKind {
     FakePlates,
     /// Arcade only: brief torque scale with engine damage risk.
     Nitrous,
+    /// Motorsport ABS module: with the driver's ABS on Full, per-wheel slip control at the
+    /// tyre's peak (`wp_vehicle::AbsHardware::Motorsport`, set by `wp_sim::Sim::set_abs_hardware`).
+    MotorsportAbs,
 }
 
 /// One effect of a mod.
@@ -823,6 +826,9 @@ pub struct ToolLoadout {
     pub fake_plates: u8,
     /// Nitrous tier (0 outside Arcade).
     pub nitrous: u8,
+    /// Motorsport ABS tier (0 = the stock ABS).
+    #[serde(default)]
+    pub motorsport_abs: u8,
 }
 
 impl ToolLoadout {
@@ -834,6 +840,7 @@ impl ToolLoadout {
             ToolKind::ReinforcedCooling => &mut self.reinforced_cooling,
             ToolKind::FakePlates => &mut self.fake_plates,
             ToolKind::Nitrous => &mut self.nitrous,
+            ToolKind::MotorsportAbs => &mut self.motorsport_abs,
         };
         *slot = (*slot).max(tier);
     }

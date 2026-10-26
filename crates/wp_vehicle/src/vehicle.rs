@@ -5,9 +5,9 @@
 //! collisions.
 
 use wp_contracts::{
-    AssistProfile, Component, DriveLayout, EntityId, FfbOutput, HandlingEffects, SimEvent,
-    SurfaceType, SuspensionDef, TireDef, VehicleDef, VehicleInput, VehicleSim, VehicleState,
-    WheelState, WorldQuery, GRAVITY_MPS2, VEHICLE_SUBSTEPS,
+    AbsLevel, AssistProfile, Component, DriveLayout, EntityId, FfbOutput, HandlingEffects,
+    SimEvent, SurfaceType, SuspensionDef, TireDef, VehicleDef, VehicleInput, VehicleSim,
+    VehicleState, WheelState, WorldQuery, GRAVITY_MPS2, VEHICLE_SUBSTEPS,
 };
 
 use crate::aero::aero_forces;
@@ -15,7 +15,10 @@ use crate::assists::{
     btc_rear_authority, esc_reference, filter_pedal, throttle_filter_strength, BtcAxle, Esc, Tcs,
     BTC_MAX_FRAC, TCS_BRAKE_ACTIVE_NM, TCS_BRAKE_HANDOFF,
 };
-use crate::brakes::{service_torques, Abs};
+use crate::brakes::{
+    braking_slip, motorsport_slip_target, service_torques, Abs, AbsHardware, MotorsportAbs,
+    ABS_DRAG_PRESSURE, ABS_FULL_TRIGGER, ABS_MIN_SPEED_MPS,
+};
 use crate::diff::{axle_transfer, centre_transfer, AxleDiff, CentreDiff, DiffInput, DiffSetup};
 use crate::drivetrain::{auto_clutch_update, Converter, Gearbox, ShiftInputs};
 use crate::engine::{Engine, EngineExtras, RPM_PER_RADPS};
@@ -317,6 +320,10 @@ pub struct Vehicle {
     pub(crate) tcs: Tcs,
     pub(crate) esc: Esc,
     pub(crate) abs: Abs,
+    /// ABS hardware fitted (a garage upgrade; configuration, not in the snapshot).
+    pub(crate) abs_hardware: AbsHardware,
+    /// Motorsport ABS set-up for this tick's sub-steps (rebuilt every tick).
+    pub(crate) ms_abs: MotorsportAbs,
     pub(crate) effects: HandlingEffects,
     pub(crate) heat: f32,
     pub(crate) heat_reported: f32,
@@ -459,6 +466,8 @@ impl Vehicle {
             tcs: Tcs::default(),
             esc: Esc::default(),
             abs: Abs::default(),
+            abs_hardware: AbsHardware::Stock,
+            ms_abs: MotorsportAbs::default(),
             effects: HandlingEffects::NEUTRAL,
             heat: 0.0,
             heat_reported: 0.0,
@@ -528,6 +537,24 @@ impl Vehicle {
             *c = conditions;
             self.conditions_source = ConditionsSource::Manual;
         }
+    }
+
+    /// Fit ABS hardware (the garage's "Motorsport ABS" upgrade, or back to stock). Car
+    /// configuration like [`VehicleExtras`]: it stays until changed, survives
+    /// [`Vehicle::reset`] and is not part of [`Vehicle::snapshot`].
+    pub fn set_abs_hardware(&mut self, hardware: AbsHardware) {
+        self.abs_hardware = hardware;
+    }
+
+    /// The ABS hardware fitted.
+    pub fn abs_hardware(&self) -> AbsHardware {
+        self.abs_hardware
+    }
+
+    /// Stock ABS brake pressure per wheel (FL, FR, RL, RR), fraction of the driver's demand
+    /// (1 = not modulating; always 1 with motorsport ABS working). For HUDs and labs.
+    pub fn abs_pressure(&self) -> [f32; 4] {
+        self.abs.pressure
     }
 
     /// Go back to reading the world's weather (`WorldQuery::weather_at` at each contact point,
@@ -656,6 +683,7 @@ impl Vehicle {
         self.tcs = Tcs::default();
         self.esc = Esc::default();
         self.abs = Abs::default();
+        self.ms_abs = MotorsportAbs::default();
         self.heat = 0.0;
         self.heat_reported = 0.0;
         self.fuel = 1.0;
@@ -1833,15 +1861,6 @@ impl Vehicle {
         for (b, s) in brake.iter_mut().zip(eff.brake_scale) {
             *b *= s.max(0.0);
         }
-        {
-            let kappas = std::array::from_fn(|i| self.wheels[i].kappa);
-            let vxs = std::array::from_fn(|i| self.wheels[i].vx);
-            let peaks = std::array::from_fn(|i| self.corners[i].tire.peak_slip_ratio);
-            self.abs
-                .apply(assists.abs, &mut brake, kappas, vxs, peaks, dt);
-        }
-        brake[2] += handbrake * self.def.brakes.handbrake_rear_nm;
-        brake[3] += handbrake * self.def.brakes.handbrake_rear_nm;
         // Brake-based traction control (part of TCS) on driven axles whose diff can slip.
         let dir = if self.gearbox.gear < 0 { -1.0 } else { 1.0 };
         let mut tc_axles = [BtcAxle {
@@ -1901,15 +1920,74 @@ impl Vehicle {
             v_fwd,
             dt,
         );
+        // ABS modulates the whole hydraulic brake (service + ESC + brake-TC; ESC braking a wheel
+        // on ice used to lock it past the ABS), not the handbrake (PR #93: it locks the rears).
         for (i, b) in brake.iter_mut().enumerate() {
             *b += esc_out.brake[i] + tc_brake[i];
+        }
+        // Motorsport ABS (garage upgrade) replaces the stock cycle at ABS Full; it modulates in
+        // the sub-steps below, so the stock state is cleared.
+        let motorsport =
+            self.abs_hardware == AbsHardware::Motorsport && assists.abs == AbsLevel::Full;
+        if motorsport {
+            self.abs = Abs::default();
+        } else {
+            // Wheel speed against this tick's road speed (also off the ground, where the tyre's
+            // κ reads 0: a hopping wheel the brake stopped in the air would land locked).
+            let kappas = std::array::from_fn(|i| {
+                let w = &self.wheels[i];
+                crate::tire::slip_ratio(w.omega, w.r_eff, w.vx)
+            });
+            let vxs = std::array::from_fn(|i| self.wheels[i].vx);
+            let peaks = std::array::from_fn(|i| self.corners[i].tire.peak_slip_ratio);
+            self.abs
+                .apply(assists.abs, &mut brake, kappas, vxs, peaks, dt);
+        }
+        let mut hb_torque = [0.0f32; 4];
+        hb_torque[2] = handbrake * self.def.brakes.handbrake_rear_nm;
+        hb_torque[3] = handbrake * self.def.brakes.handbrake_rear_nm;
+        for (i, b) in brake.iter_mut().enumerate() {
+            *b += hb_torque[i];
             self.wheels[i].brake = *b;
+        }
+        self.ms_abs = MotorsportAbs::default();
+        if motorsport {
+            for i in 0..4 {
+                let w = &self.wheels[i];
+                let tire = &self.corners[i].tire;
+                self.ms_abs.target[i] = motorsport_slip_target(
+                    tire.peak_slip_ratio,
+                    w.alpha_lag,
+                    tire.peak_slip_angle_rad,
+                );
+                self.ms_abs.fixed[i] = hb_torque[i];
+                self.ms_abs.modulated[i] = (brake[i] - hb_torque[i]).max(0.0);
+            }
         }
 
         // --- Sub-stepped drivetrain, wheel spin and tire forces ----------------------------
         let n_sub = VEHICLE_SUBSTEPS.max(1);
         let h = dt / n_sub as f32;
-        let split = if hb_declutch {
+        // ABS drag-torque control (Full and motorsport): while the ABS brakes and a driven wheel
+        // keeps slipping with its brake already released (the engine is dragging it through
+        // the diff: a low gear, split grip, a spin), the driveline is decoupled for the tick, as
+        // with the handbrake declutch.
+        let abs_declutch = self.brake_f > 0.05
+            && (0..4).any(|i| {
+                let w = &self.wheels[i];
+                if base_split[i] <= 0.0 || !w.contact || w.vx.abs() <= ABS_MIN_SPEED_MPS {
+                    return false;
+                }
+                let slip = braking_slip(w.kappa, w.vx);
+                if motorsport {
+                    slip > 2.0 * self.ms_abs.target[i]
+                } else {
+                    assists.abs == AbsLevel::Full
+                        && self.abs.pressure[i] <= ABS_DRAG_PRESSURE
+                        && slip > ABS_FULL_TRIGGER * self.corners[i].tire.peak_slip_ratio
+                }
+            });
+        let split = if hb_declutch || abs_declutch {
             [0.0; 4]
         } else {
             self.drive_split(handbrake)
@@ -2062,7 +2140,7 @@ impl Vehicle {
             clutch_locked: self.clutch_locked,
             steer_rad: self.center_steer,
             tcs_cut: self.tcs.cut,
-            abs_active: self.abs.active(),
+            abs_active: self.abs.active() || self.ms_abs.active,
             esc_active: esc_out.brake.iter().any(|b| *b > 0.0),
             fx: std::array::from_fn(|i| self.wheels[i].fx),
             fy: std::array::from_fn(|i| self.wheels[i].fy),
@@ -2323,6 +2401,9 @@ impl Vehicle {
             let inertia = c.inertia + reflected * share + h * conv_damp * share;
             if !w.contact {
                 let mut om = w.omega + h * drive[i] / inertia;
+                if let Some(b) = self.ms_abs.brake(i, w.vx, om, w.r_eff, inertia, h) {
+                    w.brake = b;
+                }
                 let db = h * w.brake / inertia;
                 om = if om.abs() <= db {
                     0.0
@@ -2375,6 +2456,9 @@ impl Vehicle {
             let k = ((fx_at(w.omega + eps) - fx_at(w.omega - eps)) / (2.0 * eps)).max(0.0);
             let i_eff = inertia + h * k * r;
             let mut om = w.omega + h * (drive[i] - fx0 * r) / i_eff;
+            if let Some(b) = self.ms_abs.brake(i, vx, om, r, i_eff, h) {
+                w.brake = b;
+            }
             let db = h * w.brake / i_eff;
             om = if om.abs() <= db {
                 0.0

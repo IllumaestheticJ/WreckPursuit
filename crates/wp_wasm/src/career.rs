@@ -1941,6 +1941,16 @@ impl Career {
             .sim_before_start_mut()?
             .set_run_flat(player, tools.run_flat > 0)
             .map_err(|e| e.to_string())?;
+        // Motorsport ABS module: ABS Full becomes per-wheel slip control.
+        let abs = if tools.motorsport_abs > 0 {
+            wp_vehicle::AbsHardware::Motorsport
+        } else {
+            wp_vehicle::AbsHardware::Stock
+        };
+        session
+            .sim_before_start_mut()?
+            .set_abs_hardware(player, abs)
+            .map_err(|e| e.to_string())?;
         Ok((session, player))
     }
 

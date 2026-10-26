@@ -56,11 +56,13 @@ fn ram(chase: bool, street_on: bool, extra: usize, warm_s: u32) -> Ram {
         others = others.max(non_traffic(&s));
     }
     let street = s.street().map_or(0, |st| st.roster().len());
-    // Up to three tries, each at the nearest moving traffic car (a car can turn off or stop
-    // before the player reaches it): placed 25 m behind it on its lane, 12 m/s faster.
+    // Up to five tries, each at the nearest moving traffic car (a car can turn off or stop
+    // before the player reaches it): placed 25 m behind it on its lane, 12 m/s faster. Three
+    // were not enough after the ABS rework of 2026-10-26 reshuffled the traffic (the
+    // starved-slots case made no contact in three).
     let mut promoted = false;
     let mut contact = false;
-    for _attempt in 0..3 {
+    for _attempt in 0..5 {
         let pp = s
             .sim()
             .vehicle_states()

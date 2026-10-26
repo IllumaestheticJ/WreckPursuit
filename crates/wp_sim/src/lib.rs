@@ -916,6 +916,19 @@ impl Sim {
         Ok(())
     }
 
+    /// Fit the ABS hardware of a vehicle (the career's `brakes_abs_motorsport` mod,
+    /// `wp_economy::ToolLoadout::motorsport_abs` > 0 → [`wp_vehicle::AbsHardware::Motorsport`]).
+    /// The driver's ABS level still decides whether it works: motorsport ABS replaces ABS Full.
+    /// Like mods, not recorded in replays: set it before the first tick of a session.
+    pub fn set_abs_hardware(
+        &mut self,
+        id: EntityId,
+        hardware: wp_vehicle::AbsHardware,
+    ) -> Result<(), SimError> {
+        self.slot_mut(id)?.vehicle.set_abs_hardware(hardware);
+        Ok(())
+    }
+
     /// Tyre deflation a vehicle drives on (FL, FR, RL, RR; 0 inflated … 1 flat): the worst of
     /// crash damage, spike strips and the career tyre condition, capped by run-flat tyres.
     /// Exactly what the handling uses; for the HUD and audio.
