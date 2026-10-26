@@ -190,6 +190,15 @@ const STREET_SEED_SALT: u64 = 0x057E_E7AC;
 const RECHALLENGE_TICKS: u64 = 20 * 240;
 /// A roaming racer standing still this long is stuck (45 s; a red light is far shorter).
 const STUCK_TICKS: u64 = 45 * 240;
+/// The racer in a street race off the road (beyond the route's lanes and
+/// [`STRANDED_OFF_ROAD_M`]) that has not gained [`STRANDED_GAIN_M`] along the route in this
+/// long is stranded: put back on the route at its progress, at rest (20 s, as the picker
+/// races' `RaceJudge` stranded reset; the player is never moved).
+const STRANDED_TICKS: u64 = 20 * 240;
+/// Progress along the route that counts as moving on, m.
+const STRANDED_GAIN_M: f32 = 5.0;
+/// Beyond the route's lanes by this much the racer is off the road, m.
+const STRANDED_OFF_ROAD_M: f32 = 2.0;
 /// Wrecked or stuck racers are repaired and moved only this far from the player, m.
 const RESPAWN_OUT_OF_SIGHT_M: f32 = 150.0;
 /// An unanswered offer lapses after this many ticks (2 min).
@@ -677,6 +686,10 @@ struct Race {
     limit_tick: u64,
     /// Player's progress along the route, m.
     player_s: f32,
+    /// The racer's best progress along the route so far, m, and the tick it last gained
+    /// [`STRANDED_GAIN_M`] on it (stranded check: [`STRANDED_TICKS`]).
+    racer_best_s: f32,
+    racer_gained_tick: u64,
 }
 
 /// Every street racer of a session, the open offer and the race in progress.
@@ -714,6 +727,39 @@ pub fn pursued(sim: &Sim, player: EntityId) -> bool {
 /// `Searching` (contact lost, the cooldown / escape timer running) do not.
 pub fn blocks_challenges(status: PursuitStatus) -> bool {
     status == PursuitStatus::Pursuit
+}
+
+/// The street race's racer `e` stranded off the road: the move that puts it back on the
+/// route at its progress (centreline, facing along the route, at rest, ghosted a moment).
+/// Updates the progress bookkeeping; `None` while it is on the road or still moving on.
+fn stranded_move(race: &mut Race, e: EntityId, tick: u64) -> Option<Move> {
+    let st = race.field.standings();
+    let racing = st.first().is_some_and(|s| s.status == RacerStatus::Racing);
+    let progress = st.first().map_or(0.0, |s| s.progress_m);
+    if !racing {
+        return None;
+    }
+    if progress > race.racer_best_s + STRANDED_GAIN_M {
+        race.racer_best_s = progress;
+        race.racer_gained_tick = tick;
+        return None;
+    }
+    let d = race.field.debug_of(0);
+    let corridor = race.field.corridor();
+    let (left, right) = corridor.bounds(d.s);
+    let off_road = d.n < -left - STRANDED_OFF_ROAD_M || d.n > right + STRANDED_OFF_ROAD_M;
+    if !off_road || tick < race.racer_gained_tick + STRANDED_TICKS {
+        return None;
+    }
+    let c = corridor.sample((d.s / wp_opponent::CORRIDOR_STEP_M) as isize);
+    Some(Move {
+        entity: e,
+        xy: geom::xy(c.pos),
+        yaw: geom::yaw_of(c.tangent),
+        near_z: c.pos[2],
+        repair: false,
+        ghost_ticks: crate::reset::GHOST_TICKS,
+    })
 }
 
 /// For each waypoint, the index of the nearest point of the route centreline (searched in
@@ -1385,6 +1431,8 @@ impl StreetRacers {
             go_tick,
             limit_tick,
             player_s: 0.0,
+            racer_best_s: 0.0,
+            racer_gained_tick: go_tick,
         });
         let at = |entity, xy| Move {
             entity,
@@ -1530,6 +1578,15 @@ impl StreetRacers {
             if tick < race.go_tick {
                 out.inputs.push((e, stopped()));
             } else {
+                // Stranded off the road (a crash shoved it over a kerb or a verge it cannot
+                // climb back over: `a_racer_never_gives_up_after_a_spin_or_a_crash`, 95 s
+                // nosing at a low edge 15 m off the road): back on the route, as the picker
+                // races put a stranded AI racer back on the course.
+                if let Some(m) = stranded_move(race, e, tick) {
+                    race.field.relocate(e, m.xy);
+                    race.racer_gained_tick = tick;
+                    out.moves.push(m);
+                }
                 out.inputs.extend_from_slice(race.field.tick(
                     sim.world(),
                     &obs,
