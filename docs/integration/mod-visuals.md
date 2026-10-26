@@ -60,3 +60,39 @@ Mod parts add a few hundred vertices per car to the per-frame panel re-skin.
   lower CG and less travel; wheel hub positions do not change).
 - Vinyls are a position-based shader overlay (no UV livery); detached panels drop their vinyl.
 - Only scenario entities carry mods (police / traffic cars the sim spawns are stock).
+
+## Every mod on every car (2026-10-26)
+Owner: every mod should have a visual on every car where it is reasonable. `apps/testbed-web/e2e/
+mod_coverage.mjs` checks it: for each car model (debug / parity models skipped) it renders the
+stock car, then each visible mod of `data/cosmetics/visuals.json` alone (its prerequisites
+installed on both sides, class-limited mods skipped), the way a career car gets it (sim build
+parts + cosmetic look), from eight views (front, rear, side, top, low rear, front wheel, and two
+with the body shell taken off for the engine bay and cabin), and reports the mods that change no
+pixels. `VIEWS=` / `SHOTS_ALL=1` / `SHOTS=dir` make screenshot sheets for a look check.
+
+Fixed from the first run (37 cars x 136 mods):
+- Rear wings stood on the trunk box, which on an upright tailgate (hatchbacks, estates, vans,
+  SUVs, the Erg Hamada) is the back face: the wing ended up inside the spare-wheel cage or the
+  bodywork. Both renderers now put it on the roof's back edge there (on a pickup: the tailgate
+  top), and hide the stock roof / hatch / lip spoilers it replaces.
+- The "Reinforced Front Bumper" bull bar was a thin tube 6 cm in front of the bumper centre,
+  hidden on most noses (corners, lower grilles, skid plates stand further out). It is now a steel
+  beam with a nudge hoop placed in front of the most forward point of the nose (`frontMost`, which
+  also counts grilles, lamps and skid plates). Push bar, radiator guard, fog lamps and fake front
+  plates use the same.
+- Push / bull bars replace the stock police push bar instead of sitting inside it, and are steel
+  or gunmetal instead of black so they read on black police cars; the push bar mod is a heavier
+  bar with headlight hoops so fitting it changes the car.
+- Body kits (front / side / rear) on the career car are drawn by the cosmetic look (a reshaped
+  bumper with intakes, blade and canards) instead of the build's thin lip strip
+  (`LOOK_DRAWS` in vehicle_view.ts).
+- Exhaust tips follow the stock outlet: side exits (rally raider, vans, pickups) get side-pointing
+  tips, cars with tips on both sides keep both; the build's exhaust, diffuser and rear bar stand
+  behind diffuser fins and step bumpers (`rearMost`). A bought diffuser replaces the stock one.
+- Fake plates on cars modelled without plates (on the bumper face); bluer xenon lenses; skid
+  plate lip shows under the nose; cabin pieces (shifter, handbrake, radar box, nitrous) stand on
+  top of the one-block stock interiors instead of inside them.
+
+Known gaps: brake kits are hidden behind closed stock rims (steelies, turbofans); sway bars and
+dampers are under the car; fog lamps are small. Runs take ~2 h for all cars in SwiftShader (three
+workers on 4 cores).

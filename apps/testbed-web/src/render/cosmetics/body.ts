@@ -81,16 +81,13 @@ const diffuser: Builder = (c) => {
 
 /** Rear wings: street lip, ducktail, GT, drift and swan-neck. Hides the model's own wing. */
 const wing: Builder = (c, p) => {
-  const t = c.frame.trunk;
-  const w = t.max.x - t.min.x;
-  const edgeY = t.min.y + 0.06;
-  const topZ = c.frame.surfaceZ("trunk", 0, edgeY + 0.1, t.max.z);
-  c.hide((d) => d.name.startsWith("wing") || d.name === "spoiler");
+  const { y: edgeY, z: topZ, w } = c.frame.wingMount;
+  c.hide((d) => /^(wing|spoiler|roof_spoiler|hatch_spoiler|lip_spoiler)/.test(d.name));
   const g = new THREE.Group();
   switch (p.style) {
     case "ducktail": {
       // Tall at the rear edge, blending into the lid going forward.
-      g.add(wedge(w * 0.92, 0.3, 0.1, 0.02, c.paint).translateY(t.min.y).translateZ(topZ - 0.01));
+      g.add(wedge(w * 0.92, 0.3, 0.1, 0.02, c.paint).translateY(edgeY - 0.06).translateZ(topZ - 0.01));
       break;
     }
     case "street": {
@@ -230,12 +227,14 @@ const fogLights: Builder = (c, p) => {
   for (const sx of [-1, 1]) {
     const x = sx * (f.max.x - f.min.x) * 0.36;
     const z = f.min.z + 0.13;
+    // In front of whatever stands out of the bumper there (a pickup's lower grille).
+    const y = c.frame.frontMost(x - 0.07, x + 0.07, z - 0.05, z + 0.05);
     if (p.style === "led_pods") {
-      g.add(box(0.11, 0.06, 0.06, c.kit.black, x, f.max.y + 0.02, z));
-      g.add(box(0.09, 0.01, 0.04, lens, x, f.max.y + 0.052, z));
+      g.add(box(0.11, 0.06, 0.06, c.kit.black, x, y + 0.02, z));
+      g.add(box(0.09, 0.01, 0.04, lens, x, y + 0.052, z));
     } else {
-      g.add(cylY(0.055, 0.06, c.kit.chrome, V(x, f.max.y + 0.01, z)));
-      g.add(cylY(0.045, 0.01, lens, V(x, f.max.y + 0.043, z)));
+      g.add(cylY(0.055, 0.06, c.kit.chrome, V(x, y + 0.01, z)));
+      g.add(cylY(0.045, 0.01, lens, V(x, y + 0.043, z)));
     }
   }
   c.body(g, "FrontBumper", null);
@@ -283,9 +282,13 @@ const mudFlaps: Builder = (c) => {
   }
 };
 
-/** Exhaust tips at the stock outlet: sport, race (twin), cannon, dual, quad (both sides), burnt titanium. */
+/**
+ * Exhaust tips at the stock outlet: sport, race (twin), cannon, dual, quad (both sides), burnt
+ * titanium. Built pointing back; turned to point out of the side on side-exit cars, and mirrored
+ * to the right when the stock car has tips on both sides.
+ */
 const exhaustTip: Builder = (c, p) => {
-  const { at, radius } = c.frame.exhaustOutlet;
+  const { at, radius, dir, both } = c.frame.exhaustOutlet;
   const style = p.style ?? "sport";
   c.hide((d) => d.name.startsWith("exhaust_tip"));
   const g = new THREE.Group();
@@ -297,16 +300,17 @@ const exhaustTip: Builder = (c, p) => {
   };
   const r0 = Math.max(radius, 0.035);
   const xs = (n: number, gap: number) => Array.from({ length: n }, (_, k) => at.x + (k - (n - 1) / 2) * gap);
+  // Quad: two pairs, one each side of the car (a side exit has only one side: a pair).
+  const quad = style === "quad" && dir === 0;
   switch (style) {
     case "cannon":
       one(at.x, r0 * 1.9, 0.22);
       break;
     case "race":
     case "dual":
-      for (const x of xs(2, r0 * (style === "race" ? 2.9 : 2.5))) one(x, r0 * (style === "race" ? 1.35 : 1.15), 0.16);
-      break;
     case "quad":
-      for (const side of [1, -1]) for (const x of xs(2, r0 * 2.4)) one(side * x, r0 * 1.05, 0.15);
+      if (quad) for (const side of [1, -1]) for (const x of xs(2, r0 * 2.4)) one(side * x, r0 * 1.05, 0.15);
+      else for (const x of xs(2, r0 * (style === "race" ? 2.9 : 2.5))) one(x, r0 * (style === "race" ? 1.35 : 1.15), 0.16);
       break;
     case "burnt":
       one(at.x, r0 * 1.45, 0.18);
@@ -314,7 +318,25 @@ const exhaustTip: Builder = (c, p) => {
     default:
       one(at.x, r0 * 1.35, 0.16);
   }
-  c.body(g, "RearBumper", style === "sport" || style === "race" ? "exhaust" : null);
+  // Side exit: turn the tips about the outlet so they point out of that side.
+  const orient = (o: THREE.Object3D): THREE.Object3D => {
+    if (dir === 0) return o;
+    const pivot = new THREE.Group();
+    pivot.position.copy(at);
+    pivot.rotation.z = (dir * Math.PI) / 2;
+    o.position.set(-at.x, -at.y, -at.z);
+    pivot.add(o);
+    return pivot;
+  };
+  const root = new THREE.Group();
+  root.add(orient(g));
+  if (both && !quad) {
+    const mirror = new THREE.Group();
+    mirror.scale.x = -1;
+    mirror.add(orient(g.clone()));
+    root.add(mirror);
+  }
+  c.body(root, "RearBumper", style === "sport" || style === "race" ? "exhaust" : null);
 };
 
 /** Bull bars on the front: tube, grille guard, ram bar, police push bar. */
@@ -336,7 +358,8 @@ const bullBar: Builder = (c, p) => {
       break;
     }
     case "guard": {
-      const m = c.kit.black;
+      // Bare steel, not black: it has to read on black (police) cars too.
+      const m = c.kit.steel;
       const xo = w * 0.47;
       g.add(bentTube([V(-xo, y - 0.12, z0 + 0.05), V(-xo, y, z0 + 0.12), V(-xo, y, z1), V(xo, y, z1), V(xo, y, z0 + 0.12), V(xo, y - 0.12, z0 + 0.05)], 0.028, m));
       g.add(tube(V(-xo, y, z0 + 0.15), V(xo, y, z0 + 0.15), 0.028, m));
@@ -352,7 +375,7 @@ const bullBar: Builder = (c, p) => {
       break;
     }
     case "ram": {
-      const m = c.kit.black;
+      const m = c.kit.gunmetal;
       const xo = w * 0.36;
       g.add(box(xo * 2, 0.1, 0.12, m, 0, y + 0.02, z0 + 0.12));
       g.add(box(xo * 1.6, 0.08, 0.1, m, 0, y + 0.03, z0 + 0.36));
@@ -364,7 +387,7 @@ const bullBar: Builder = (c, p) => {
     }
     default: {
       // Police push bar: two padded uprights and a cross bar.
-      const m = c.kit.black;
+      const m = c.kit.gunmetal;
       const xo = w * 0.2;
       for (const sx of [-1, 1]) {
         g.add(box(0.08, 0.06, z1 - z0, m, sx * xo, y, (z0 + z1) / 2));
@@ -505,8 +528,17 @@ const antenna: Builder = (c, p) => {
 /** Number plates swapped for fakes: a generic plate in different colours over the stock one. */
 const plates: Builder = (c) => {
   for (const end of ["f", "r"] as const) {
-    const pb = c.frame.part(`plate_${end}`) ?? c.frame.part("plate_recess");
-    if (!pb || (end === "f" && !c.frame.part("plate_f"))) continue;
+    const front = end === "f";
+    // The stock plate (or its recess on the tail); a car modelled without plates gets one in
+    // the middle of the bumper face.
+    let pb = c.frame.part(`plate_${end}`) ?? c.frame.part(front ? "number_plate_front" : "number_plate_rear") ?? (front ? null : c.frame.part("plate_recess"));
+    if (!pb) {
+      // On the face of whatever is outermost there (a bumper blade, a rear fascia).
+      const b = front ? c.frame.bumperFront : c.frame.bumperRear;
+      const zc = b.min.z + (b.max.z - b.min.z) * 0.5;
+      const y = front ? c.frame.frontMost(-0.26, 0.26, zc - 0.06, zc + 0.06) : c.frame.rearMost(-0.26, 0.26, zc - 0.06, zc + 0.06);
+      pb = new THREE.Box3(V(-0.26, y, zc - 0.06), V(0.26, y, zc + 0.06));
+    }
     const cv = document.createElement("canvas");
     cv.width = 256;
     cv.height = 64;
@@ -527,7 +559,6 @@ const plates: Builder = (c) => {
     const w = pb.max.x - pb.min.x;
     const h = pb.max.z - pb.min.z;
     const plate = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m);
-    const front = end === "f";
     // Face out of the bumper with the text upright and reading left to right from outside.
     const basis = new THREE.Matrix4().makeBasis(V(front ? -1 : 1, 0, 0), V(0, 0, 1), V(0, front ? 1 : -1, 0));
     plate.quaternion.setFromRotationMatrix(basis);

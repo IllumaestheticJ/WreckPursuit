@@ -16,6 +16,13 @@ function seatY(c: LookCtx): number {
 /** Cabin floor height. */
 const floorZ = (c: LookCtx) => c.frame.cabin.min.z + 0.04;
 
+/**
+ * Top of the stock interior at (x, y): where a console or parcel-shelf piece stands. Many models
+ * have one dark block for the whole interior; a piece below its top would be hidden inside it.
+ * −Infinity for a model without an `interior` part (pieces then stand on the floor).
+ */
+const interiorTop = (c: LookCtx, x: number, y: number) => c.frame.surfaceZ("interior", x, y, -Infinity, 0.12);
+
 /** Inside of the roof. */
 const roofInZ = (c: LookCtx) => c.frame.roof.min.z - 0.05;
 
@@ -103,7 +110,7 @@ const cage: Builder = (c, p) => {
 /** Short shifter knob, or a sequential lever with its gate. */
 const shifter: Builder = (c, p) => {
   const y = seatY(c) + 0.38;
-  const z = floorZ(c) + 0.25;
+  const z = Math.max(floorZ(c) + 0.25, interiorTop(c, 0, y) - 0.02);
   const g = new THREE.Group();
   if (p.style === "sequential") {
     g.add(box(0.08, 0.16, 0.05, c.kit.black, 0, y, z));
@@ -121,7 +128,7 @@ const shifter: Builder = (c, p) => {
 /** Hydraulic handbrake: a tall red lever beside the shifter. */
 const hydroHandbrake: Builder = (c) => {
   const y = seatY(c) + 0.2;
-  const z = floorZ(c) + 0.25;
+  const z = Math.max(floorZ(c) + 0.25, interiorTop(c, 0.1, y) - 0.02);
   const g = new THREE.Group();
   g.add(box(0.05, 0.08, 0.06, c.kit.black, 0.1, y, z));
   g.add(tube(V(0.1, y, z), V(0.1, y + 0.1, z + 0.32), 0.012, c.kit.red));
@@ -133,7 +140,7 @@ const dashBox: Builder = (c) => {
   const ws = c.frame.windshield;
   if (!ws) return;
   const y = ws.max.y - 0.16;
-  const z = ws.min.z + 0.02;
+  const z = Math.max(ws.min.z + 0.02, interiorTop(c, -0.08, y) + 0.015);
   const lamp = lampMat(0xff3030);
   c.lamp(lamp, 1.5);
   const g = new THREE.Group();
@@ -147,7 +154,7 @@ const nitrous: Builder = (c, p) => {
   const n = p.bottles ?? 1;
   const cab = c.frame.cabin;
   const y = Math.max(cab.min.y + 0.3, seatY(c) - 0.6);
-  const z = floorZ(c) + 0.15;
+  const z = Math.max(floorZ(c) + 0.15, interiorTop(c, 0, y) + 0.09);
   const g = new THREE.Group();
   for (let k = 0; k < n; k++) {
     const yk = y - k * 0.22;
