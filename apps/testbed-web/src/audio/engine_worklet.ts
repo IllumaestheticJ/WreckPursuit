@@ -5,7 +5,7 @@
 //   crank angle advances with rpm → each combustion event (angle, bank, header length and a
 //   fixed per-cylinder trim from wp_audio::engine_model::EngineVoiceSpec) starts an exhaust
 //   blowdown pulse whose strength follows load (weak pumping pulses on overrun, none on a
-//   rev-limiter cut or a misfire) → per-bank header waveguide (comb) → collector (single
+//   soft rev-limiter cut or a misfire) → per-bank header waveguide (comb) → collector (single
 //   exhaust) or separate pipes (dual) → muffler (low-pass + chamber resonance + straight-
 //   through leak) → tailpipe waveguide (quarter-wave resonances) → open-end radiation (d/dt).
 //   Plus intake (airbox resonance excited by the pulses + throttle hiss), mechanical noise
@@ -145,6 +145,17 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
   /** Cycle-to-cycle combustion variation (± half of it), at idle / above. */
   const CYCLE_VAR_IDLE = 0.24;
   const CYCLE_VAR = 0.14;
+  /**
+   * Soft rev limiter, as the physics models it (wp_vehicle `Engine::torque`): fuel fades out
+   * linearly over the last LIMIT_FADE_RPM below the limit, so a held gear settles smoothly
+   * ~30 rpm under it (no bounce). The synth follows the same fade: each event is thinned and
+   * cut at random with a probability that grows with the cut fuel, up to LIMIT_CUT_MAX.
+   * Random per event, never a fixed rhythm: the old fixed 13 Hz on/off chop (from 60 rpm under
+   * the limit) was heard as a pulse while the needle sat steady (owner, Erg Hamada).
+   */
+  const LIMIT_FADE_RPM = 150;
+  const LIMIT_CUT_MAX = 0.3;
+  const LIMIT_THIN = 0.35;
 
   // Exhaust blowdown pulse: fast rise (first 22 %), smooth fall. The rise is a quintic
   // smoothstep (continuous slope and curvature at the onset): after the open end's d/dt a
@@ -299,8 +310,8 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
     private popCount = 0;
     private tick = 0;
     private liftT = 10;
-    private limPhase = 0;
-    private limOn = false;
+    /** Fuel the soft rev limiter leaves, 1 (free) … 0 (at the limit, pedal down). */
+    private limFuel = 1;
     private gearPh = 0;
     private diffPh = 0;
     private scPh = 0;
@@ -505,11 +516,16 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
       amp *= 1 + (this.rand() - 0.5) * (rf < 0.25 ? CYCLE_VAR_IDLE : CYCLE_VAR);
       amp *= this.trim[i] * this.bankGapK[i];
       let unburnt = 0;
-      // Rev limiter: fuel cut pattern while the driver holds it on the limiter.
-      if (this.limOn && this.limPhase < 0.55) {
-        amp = 0.05;
-        unburnt = 0.12;
-        this.counters.cuts++;
+      // Soft rev limiter (LIMIT_FADE_RPM): random cuts and thinner pulses as the fuel fades.
+      if (this.limFuel < 1) {
+        const cut = 1 - this.limFuel;
+        if (this.rand() < LIMIT_CUT_MAX * cut) {
+          amp = 0.05;
+          unburnt = 0.12;
+          this.counters.cuts++;
+        } else {
+          amp *= 1 - LIMIT_THIN * cut;
+        }
       }
       // Misfires on a damaged engine (same curve as wp_audio::engine_model::misfire_probability).
       const h = clamp(this.cur[HEALTH], 0, 1);
@@ -584,7 +600,6 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
       // Throttle lift timer (overrun crackle is likeliest right after a lift).
       if (thr < 0.06) this.liftT += n / this.sr;
       else this.liftT = 0;
-      const limPhaseInc = 13 / this.sr;
       const noiseScaleI = intakeGain * 0.05 * Math.pow(thr, 1.2);
       const blowGain = 0.9;
 
@@ -596,9 +611,7 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
         }
         const rpm = this.rpm;
         const rf = rpm / redline;
-        this.limOn = rpm >= revLimit - 60 && c[PEDAL] > 0.3;
-        this.limPhase += limPhaseInc;
-        if (this.limPhase >= 1) this.limPhase -= 1;
+        this.limFuel = c[PEDAL] > 0.3 ? clamp((revLimit - rpm) / LIMIT_FADE_RPM, 0, 1) : 1;
         const degPerSample = (rpm * 6) / sr;
         if (rpm > 30) {
           this.toNext -= degPerSample;

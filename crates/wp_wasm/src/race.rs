@@ -483,7 +483,7 @@ pub fn stake_settlement(purse: i64, clean_bonus: i64, purse_scale: f32) -> (i64,
     )
 }
 
-/// Advertised stake (`wp_race::bridge::economy_race`, request R5).
+/// Advertised stake (`wp_race::bridge::economy_race_at`, request R5).
 pub(crate) fn advertised(
     econ: &wp_economy::Economy,
     data: &RaceData,
@@ -493,13 +493,22 @@ pub(crate) fn advertised(
     mode: DamageMode,
 ) -> wp_race::bridge::EconomyRace {
     let bracket = data.progression.bracket_for(econ.class_index(&car.def));
-    wp_race::bridge::economy_race(
+    // Priced on the catalog length so the picker card and the run agree; a race paid by
+    // expected finishing time (`[timed_purse]`) gets its purse from that.
+    let stake = data.stakes.race_stake(
+        def.id,
+        def.length_hint_m,
+        def.kind,
+        phase_of(def),
+        bracket,
+        def.legality,
+    );
+    wp_race::bridge::economy_race_at(
         econ,
-        &data.stakes,
+        stake,
         def.kind,
         def.legality,
         car.def.class,
-        bracket,
         length_m,
         phase_of(def),
         mode,
