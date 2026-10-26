@@ -1,8 +1,10 @@
 /**
  * District names and label spots for the full map. The city data has no zone names yet
- * (CITY.md C2 asks for `Zone.name`), so Port Vesper v2's names live here by zone index, from
- * `crates/wp_world/src/vesper.rs` and `docs/design/CITY.md` §2. Other cities fall back to the
- * district kind.
+ * (CITY.md C2 asks for `Zone.name`), so the names live here by zone index: Port Vesper v2's
+ * from `crates/wp_world/src/vesper.rs` and `docs/design/CITY.md` §2, and the combined world's
+ * (`ashpeak`: Ashpeak County's zones first, then Port Vesper's, `vesper.rs` `region.zones()`
+ * then `zones()`) from `crates/wp_world/src/vesper/ashpeak/{metro,farms,mountains}.rs`. Other
+ * cities fall back to the district kind.
  */
 import type { MapStatic, MapZone } from "./data";
 import { pointInPolygon } from "../ui/mapGeometry";
@@ -22,12 +24,37 @@ const VESPER_V2: (string | null)[] = [
   null,
 ];
 
+/** Ashpeak County zone names in the combined world (`ashpeak::zones()` order: metro, farms,
+ * mountains). Port Vesper's zones follow them. */
+const ASHPEAK_COUNTY: string[] = [
+  "Ashpeak Downtown",
+  "Coliseum",
+  "Granite District",
+  "Ashpeak Waterfront",
+  "Ashpeak Docks",
+  "Waterfront Lofts",
+  "Westbrook",
+  "Northgate Heights",
+  "Harnell Crossing",
+  "Harnell Crossing",
+  "Harnell Flats",
+  "Harnell Flats",
+  "Ashpeak Range",
+];
+
+/** Zone names of each city with named zones, by zone index. */
+const ZONE_NAMES: Record<string, (string | null)[]> = {
+  vesper_v2: VESPER_V2,
+  ashpeak: [...ASHPEAK_COUNTY, ...VESPER_V2],
+};
+
 /** City display names. */
-export const CITY_NAMES: Record<string, string> = { vesper_v2: "Port Vesper", procedural_12x12: "Grid City" };
+export const CITY_NAMES: Record<string, string> = { vesper_v2: "Port Vesper", ashpeak: "Ashpeak County", procedural_12x12: "Grid City" };
 
 /** Display name of a zone (`null` = don't label it). */
 export function districtName(city: string, zone: MapZone): string | null {
-  if (city === "vesper_v2") return zone.id < VESPER_V2.length ? VESPER_V2[zone.id] : zone.kind;
+  const names = ZONE_NAMES[city];
+  if (names) return zone.id < names.length ? names[zone.id] : zone.kind;
   return zone.kind;
 }
 

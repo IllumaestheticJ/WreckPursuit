@@ -223,8 +223,8 @@ spike-strip flats.
 Credits are cash; rep is `PlayerAccount::rep`. On top sits a tier ladder decided by *current*
 rep: Unknown (0) → Street (500) → Known (2 000) → Respected (5 000) → Feared (10 000) → Legend
 (20 000). Tiers gate features (city betting at Street, touge at Known, touge betting and boss
-races at Respected, pink slips at Feared) and dealer classes (Sport / Muscle at Known; Exotic is
-open from the start, so only its price holds it back). The first time a tier is reached its bonus is paid once (`career.peak_tier`); a capture
+races at Respected, pink slips at Feared). Dealer classes have no rep gate: every car is for
+sale from the start, so only its price holds it back. The first time a tier is reached its bonus is paid once (`career.peak_tier`); a capture
 can drop you a tier and close what it opened. Bets are capped per tier and at 50 % of cash, and
 refused in debt. The scripted mid-skill racer makes ~250 rep a night: Street after ~2 nights,
 Known ~8, Respected ~20, Feared ~40 (`tests/progression.rs::tier_pacing`). API and ledger notes:

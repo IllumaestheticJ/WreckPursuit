@@ -13,7 +13,7 @@
  */
 import { render, type ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { Badge, Button, Delta, Meter, Money, Panel, severityColor, Stat, Tabs } from "../ui/kit";
+import { Badge, Button, Confirm as ConfirmRow, Delta, isBigSpend, Meter, Money, Panel, severityColor, Stat, Tabs } from "../ui/kit";
 import { pct, words } from "../ui/format";
 import type {
   CareerApi,
@@ -29,6 +29,7 @@ import type {
   RepairItem,
   ShopKind,
   ShopRequest,
+  ShopSite,
   StatsView,
 } from "./types";
 import { pickTextFile } from "./store";
@@ -123,10 +124,25 @@ function CarCard({ car, selected, onSelect }: { car: CarView; selected: boolean;
   );
 }
 
-function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
+/**
+ * The shop the Repair panel starts on: the one the car pulled into (`at`, by name), else the
+ * first shop of the main menu's spawn city, else the first shop. `null` without shops.
+ */
+export function startShop(shops: ShopSite[], at: string | null, homeCity: string | null): ShopSite | null {
+  return shops.find((s) => s.name === at) ?? shops.find((s) => s.city === homeCity) ?? shops[0] ?? null;
+}
+
+function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; at: string | null; run: (f: () => CareerView) => void }) {
   const { car, view, api } = props;
-  const [district, setDistrict] = useState("Residential");
-  const [shop, setShop] = useState<ShopKind>("Legit");
+  // The world's shops when the host lists them (one world since 2026-10-25: each shop has its
+  // district's labour rate and is legit or crooked); else the bare district and shop kind.
+  const shops = view.shops ?? [];
+  const [shopName, setShopName] = useState(() => startShop(shops, props.at, api.homeCity?.() ?? null)?.name ?? "");
+  const site = shops.find((s) => s.name === shopName) ?? null;
+  const [bareDistrict, setDistrict] = useState("Residential");
+  const [bareShop, setShop] = useState<ShopKind>("Legit");
+  const district = site?.district ?? bareDistrict;
+  const shop = site?.kind ?? bareShop;
   const [picked, setPicked] = useState<string[]>([]);
   const [scrapAsk, setScrapAsk] = useState(false);
   if (car.location !== "Garage") return null;
@@ -148,24 +164,42 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; ru
         <p class="wp-dim">Nothing to repair.</p>
       ) : (
         <>
-          <div class="wp-row" style={{ gap: "0.6em", flexWrap: "wrap", marginBottom: "0.5em" }}>
-            <label class="wp-mono wp-dim">
-              district{" "}
-              <select class="wp-select" value={district} onChange={(e) => setDistrict((e.target as HTMLSelectElement).value)} data-testid="repair-district">
-                {view.districts.map((d) => (
-                  <option value={d.id} key={d.id}>
-                    {words(d.id)} ×{d.labour.toFixed(2)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Button size="sm" pressed={shop === "Legit"} onClick={() => setShop("Legit")}>
-              Legit shop
-            </Button>
-            <Button size="sm" pressed={shop === "Crooked"} onClick={() => setShop("Crooked")} title="never reports you; marks up labour, more when you are wanted">
-              Crooked shop
-            </Button>
-          </div>
+          {site ? (
+            <div class="wp-row" style={{ gap: "0.6em", flexWrap: "wrap", marginBottom: "0.5em" }}>
+              <label class="wp-mono wp-dim">
+                shop{" "}
+                <select class="wp-select" value={site.name} onChange={(e) => setShopName((e.target as HTMLSelectElement).value)} data-testid="repair-shop">
+                  {shops.map((s) => (
+                    <option value={s.name} key={s.name}>
+                      {s.name} · {s.city_label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span class="wp-mono wp-dim" data-testid="repair-shop-rate" title={site.kind === "Crooked" ? "never reports you; marks up labour, more when you are wanted" : "normal rates; reports wanted cars"}>
+                {words(site.district)} ×{site.labour.toFixed(2)} · {site.kind === "Crooked" ? "crooked" : "legit"}
+              </span>
+            </div>
+          ) : (
+            <div class="wp-row" style={{ gap: "0.6em", flexWrap: "wrap", marginBottom: "0.5em" }}>
+              <label class="wp-mono wp-dim">
+                district{" "}
+                <select class="wp-select" value={bareDistrict} onChange={(e) => setDistrict((e.target as HTMLSelectElement).value)} data-testid="repair-district">
+                  {view.districts.map((d) => (
+                    <option value={d.id} key={d.id}>
+                      {words(d.id)} ×{d.labour.toFixed(2)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button size="sm" pressed={shop === "Legit"} onClick={() => setShop("Legit")}>
+                Legit shop
+              </Button>
+              <Button size="sm" pressed={shop === "Crooked"} onClick={() => setShop("Crooked")} title="never reports you; marks up labour, more when you are wanted">
+                Crooked shop
+              </Button>
+            </div>
+          )}
           {wanted && shop === "Legit" && <p class="wp-warn">You are wanted ({view.carried_level}): a legit shop will report you.</p>}
           <table class="wp-table" data-testid="repair-lines">
             <thead>
@@ -272,19 +306,9 @@ function TiresPanel(props: { car: CarView; view: CareerView; api: CareerApi; run
   );
 }
 
-/** Inline "are you sure" row for a destructive action (sell, scrap). */
+/** Inline "are you sure" row for a destructive action (sell, scrap, big buys): the kit's, with the garage's test id. */
 function Confirm(props: { text: ComponentChildren; yes: string; onYes: () => void; onNo: () => void }) {
-  return (
-    <div class="wp-row wp-cg-confirm" data-testid="career-confirm" style={{ gap: "0.5em", marginTop: "0.5em", flexWrap: "wrap", alignItems: "center" }}>
-      <span>{props.text}</span>
-      <Button size="sm" variant="danger" onClick={props.onYes}>
-        {props.yes}
-      </Button>
-      <Button size="sm" onClick={props.onNo}>
-        Cancel
-      </Button>
-    </div>
-  );
+  return <ConfirmRow {...props} testid="career-confirm" />;
 }
 
 /** One line per tier, from the data: "Basic: 50 % of the repair bill above $500, $X/night." */
@@ -327,10 +351,15 @@ function InsurancePanel(props: { car: CarView; view: CareerView; api: CareerApi;
 
 const GROUPS: ModOption["group"][] = ["performance", "durability", "tool", "cosmetic"];
 
-function ModTree(props: { car: CarView; api: CareerApi; run: (f: () => CareerView) => void; onBack: () => void }) {
+function ModTree(props: { car: CarView; cash: number; api: CareerApi; run: (f: () => CareerView) => void; onBack: () => void }) {
   const { car, api } = props;
   const [group, setGroup] = useState<ModOption["group"]>("performance");
   const [hover, setHover] = useState<string | null>(null);
+  /** A big install or a removal that throws away a lot of money waits for "are you sure?". */
+  const [ask, setAsk] = useState<{ mod: ModOption; remove: boolean } | null>(null);
+  const install = (m: ModOption) => (isBigSpend(m.price, props.cash) ? setAsk({ mod: m, remove: false }) : props.run(() => api.install(car.uid, m.id)));
+  // Removing refunds 40 %: the other 60 % is the loss.
+  const uninstall = (m: ModOption) => (isBigSpend(m.price * 0.6, props.cash) ? setAsk({ mod: m, remove: true }) : props.run(() => api.uninstall(car.uid, m.id)));
   let tree: ModTreeView | null = null;
   let error: string | null = null;
   try {
@@ -374,11 +403,11 @@ function ModTree(props: { car: CarView; api: CareerApi; run: (f: () => CareerVie
                 </td>
                 <td>
                   {m.installed ? (
-                    <Button size="sm" disabled={!m.allowed} onClick={() => props.run(() => api.uninstall(car.uid, m.id))}>
+                    <Button size="sm" disabled={!m.allowed} onClick={() => uninstall(m)}>
                       Remove
                     </Button>
                   ) : (
-                    <Button size="sm" variant="primary" disabled={!m.allowed} onClick={() => props.run(() => api.install(car.uid, m.id))}>
+                    <Button size="sm" variant="primary" disabled={!m.allowed} onClick={() => install(m)}>
                       {m.replaces ? "Swap" : "Install"}
                     </Button>
                   )}
@@ -387,6 +416,30 @@ function ModTree(props: { car: CarView; api: CareerApi; run: (f: () => CareerVie
             ))}
           </tbody>
         </table>
+        {ask && (
+          <Confirm
+            key={`${ask.mod.id}${ask.remove}`}
+            text={
+              ask.remove ? (
+                <>
+                  Remove {ask.mod.name}? You get back <Money value={Math.round(ask.mod.price * 0.4)} /> of the <Money value={ask.mod.price} /> it cost.
+                </>
+              ) : (
+                <>
+                  {ask.mod.replaces ? "Swap in" : "Install"} {ask.mod.name} for <Money value={ask.mod.price} />? You have <Money value={props.cash} />
+                  {ask.mod.replaces ? `; ${ask.mod.replaces} comes off at 40 % back` : ""}.
+                </>
+              )
+            }
+            yes={ask.remove ? "Remove" : `Buy`}
+            onYes={() => {
+              const { mod, remove } = ask;
+              setAsk(null);
+              props.run(() => (remove ? api.uninstall(car.uid, mod.id) : api.install(car.uid, mod.id)));
+            }}
+            onNo={() => setAsk(null)}
+          />
+        )}
       </Panel>
       {/* Sticky: stays in view while the mod list scrolls (garage.css .wp-cg-mods-effect). */}
       <Panel class="wp-cg-mods-effect" title={focus ? (focus.installed ? `Without ${focus.name}` : `With ${focus.name}`) : "Build"} tag={focus ? `T${focus.tier}` : undefined}>
@@ -469,7 +522,7 @@ function TunePage(props: { car: CarView; api: CareerApi; run: (f: () => CareerVi
   );
 }
 
-function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
+function CarsTab(props: { view: CareerView; api: CareerApi; at: string | null; run: (f: () => CareerView) => void }) {
   const { view, api } = props;
   const [sel, setSel] = useState<number | null>(view.active_car);
   const [mods, setMods] = useState(false);
@@ -488,7 +541,7 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
       </Panel>
     );
   }
-  if (mods && car.location === "Garage") return <ModTree car={car} api={api} run={props.run} onBack={() => setMods(false)} />;
+  if (mods && car.location === "Garage") return <ModTree car={car} cash={view.cash} api={api} run={props.run} onBack={() => setMods(false)} />;
   if (tuning && car.location === "Garage") return <TunePage car={car} api={api} run={props.run} onBack={() => setTuning(false)} />;
   return (
     <div class="wp-cg-cars">
@@ -548,7 +601,7 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
             </p>
           )}
         </Panel>
-        <RepairPanel key={`r${car.uid}`} car={car} view={view} api={api} run={props.run} />
+        <RepairPanel key={`r${car.uid}`} car={car} view={view} api={api} at={props.at} run={props.run} />
         <TiresPanel key={`t${car.uid}`} car={car} view={view} api={api} run={props.run} />
         <InsurancePanel car={car} view={view} api={api} run={props.run} />
       </div>
@@ -823,7 +876,7 @@ function NewCareer(props: { api: CareerApi; run: (f: () => CareerView) => void; 
   );
 }
 
-function GarageScreen(props: { api: CareerApi; initial: CareerView; message: string | null }) {
+function GarageScreen(props: { api: CareerApi; initial: CareerView; message: string | null; at: string | null }) {
   const { api } = props;
   const [view, setView] = useState<CareerView>(props.initial);
   const [tab, setTab] = useState<Tab>(props.initial.cars.length ? "cars" : "lots");
@@ -837,7 +890,9 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
       setError(String((e as Error).message ?? e).replace(/^wp_wasm: /, ""));
     }
   };
+  const [importAsk, setImportAsk] = useState(false);
   const importSave = () => {
+    setImportAsk(false);
     pickTextFile().then(
       (text) => run(() => api.importSave(text)),
       () => {},
@@ -904,7 +959,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
         <Button size="sm" onClick={() => api.exportSave()}>
           Export save
         </Button>
-        <Button size="sm" onClick={importSave}>
+        <Button size="sm" pressed={importAsk} onClick={() => setImportAsk(!importAsk)}>
           Import save
         </Button>
         <Button size="sm" variant="ghost" onClick={() => setFresh(true)}>
@@ -915,6 +970,14 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
         <p class="wp-danger" data-testid="garage-error">
           {error}
         </p>
+      )}
+      {importAsk && (
+        <Confirm
+          text={<>Load a save file? It replaces this career (cash <Money value={view.cash} />). Export first to keep it.</>}
+          yes="Choose file"
+          onYes={importSave}
+          onNo={() => setImportAsk(false)}
+        />
       )}
       {fresh && <NewCareer api={api} run={run} onDone={() => setFresh(false)} />}
       <Tabs
@@ -929,7 +992,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
         onChange={setTab}
       />
       <div style={{ marginTop: "0.8em" }}>
-        {tab === "cars" && <CarsTab view={view} api={api} run={run} />}
+        {tab === "cars" && <CarsTab view={view} api={api} at={props.at} run={run} />}
         {tab === "lots" && <LotsTab view={view} api={api} run={run} />}
         {tab === "pound" && <PoundTab view={view} api={api} run={run} />}
         {tab === "career" && <CareerTab view={view} />}
@@ -951,14 +1014,14 @@ export class CareerGarageView {
   ) {}
 
   /** Show the garage (re-reads the career). `message` is shown at the top (e.g. why a run
-   * could not start). */
-  show(message: string | null = null): void {
+   * could not start); `at` names the shop the car pulled into (the Repair panel starts there). */
+  show(message: string | null = null, at: string | null = null): void {
     this.open = true;
     this.key++;
     const view = this.api.view();
     render(
       <div class="wp-ui wp-root" style={{ position: "absolute", inset: 0, pointerEvents: "auto", zIndex: 80 }}>
-        <GarageScreen key={this.key} api={this.api} initial={view} message={message} />
+        <GarageScreen key={this.key} api={this.api} initial={view} message={message} at={at} />
       </div>,
       this.el,
     );

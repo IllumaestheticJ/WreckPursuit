@@ -740,19 +740,64 @@ impl RaceRun {
 
     /// Charge the buy-in at the advertised stake: G's `enter_race` prices it, an adjustment
     /// line brings it to `entry_fee × entry_scale` (as `wp_race::bridge::economy_race`).
+    /// A buy-in the account cannot pay at the advertised stake is refused before anything is
+    /// charged ([`RaceRun::entry_refused`]). When the advertised buy-in is below G's price the
+    /// adjustment is credited first, so G's own funds check sees the advertised amount.
     fn charge_entry(&mut self, run: &mut PlayerRun) {
+        let fee = run.economy().entry_fee(&self.setup);
+        let want = to_stake(fee, self.stake_scale.1);
+        let cash = run.account().cash;
+        if want > 0 && cash < want {
+            self.economy_error = Some(format!(
+                "buy-in refused: the buy-in is ${want}, you have ${}",
+                cash.max(0)
+            ));
+            return;
+        }
+        let mut lines = Vec::new();
+        let credit = (fee - want).max(0);
+        if credit > 0 {
+            match run.adjust(credit, STAKE_NOTE) {
+                Ok(l) => lines.extend(l),
+                Err(e) => {
+                    self.economy_error = Some(format!("buy-in refused: {e}"));
+                    return;
+                }
+            }
+        }
         match run.enter_race(&self.setup) {
-            Ok((fee, mut lines)) => {
-                let want = to_stake(fee, self.stake_scale.1);
-                if want != fee {
-                    match run.adjust(fee - want, STAKE_NOTE) {
+            Ok((charged, l)) => {
+                lines.extend(l);
+                let rest = charged - credit - want;
+                if rest != 0 {
+                    match run.adjust(rest, STAKE_NOTE) {
                         Ok(l) => lines.extend(l),
                         Err(e) => self.economy_error = Some(format!("buy-in stake: {e}")),
                     }
                 }
                 self.entry = Some((want, lines));
             }
-            Err(e) => self.economy_error = Some(format!("buy-in refused: {e}")),
+            Err(e) => {
+                // Take the credit back: nothing was charged.
+                if credit > 0 {
+                    let _ = run.adjust(-credit, STAKE_NOTE);
+                }
+                self.economy_error = Some(format!("buy-in refused: {e}"));
+            }
+        }
+    }
+
+    /// `(purse, buy-in)` advertised for the player's car (what the picker card shows).
+    pub fn advertised(&self) -> (i64, i64) {
+        self.advertised
+    }
+
+    /// Why the buy-in was refused, when it was (no buy-in charged; never for a touge battle).
+    /// A career run does not start such a race ([`crate::career::Career::start_run`]).
+    pub fn entry_refused(&self) -> Option<&str> {
+        match (&self.touge, &self.entry) {
+            (None, None) => self.economy_error.as_deref(),
+            _ => None,
         }
     }
 
