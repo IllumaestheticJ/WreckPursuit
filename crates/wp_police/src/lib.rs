@@ -1146,6 +1146,18 @@ impl PoliceSystem {
             .bounty = rec;
     }
 
+    /// Bring a racer's career bounty into this run (call before the racer's first step): it
+    /// counts toward the police bounty from the start, so a wanted career gets reinforcements
+    /// sooner and more of them (`presence.reinforcement.priority_*`).
+    pub fn carry_career_bounty(&mut self, racer: EntityId, career_bounty: u32) {
+        let carried = career_bounty as f32 * self.cfg.heat.bounty.career_carry;
+        self.racers
+            .entry(racer)
+            .or_insert_with(|| RacerRecord::new(racer))
+            .bounty
+            .carried = carried;
+    }
+
     /// Record a race won; counts toward bounty only while wanted.
     pub fn record_race_won(&mut self, racer: EntityId) {
         if let Some(r) = self.racers.get_mut(&racer) {

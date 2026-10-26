@@ -359,6 +359,17 @@ pub struct ShopView {
     pub labour: f32,
 }
 
+/// One informant tip on offer (`stakes.toml` `[informant.*]`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct InformantView {
+    /// Tier id for `career_buy_informant`.
+    pub id: String,
+    /// Cost.
+    pub cost: Money,
+    /// Heat points removed from the carried heat.
+    pub heat_reduction: f32,
+}
+
 /// The whole garage screen.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CareerView {
@@ -378,6 +389,14 @@ pub struct CareerView {
     pub bounty: u32,
     /// Net worth (cash + cars).
     pub net_worth: Money,
+    /// What paying the whole bounty off costs now (0 without a bounty).
+    pub bounty_payoff: Money,
+    /// Bail a capture would charge now (`consequences.bail_bounty_frac` × bounty).
+    pub bail_if_busted: Money,
+    /// Career bounty a high-stakes race needs to enter.
+    pub high_stakes_bounty: u32,
+    /// Informant tips: pay to cool the carried heat.
+    pub informants: Vec<InformantView>,
     /// Heat the next run starts with.
     pub carried_heat: f32,
     /// Wanted level the next run starts at.
@@ -775,7 +794,24 @@ impl Career {
             .active_car
             .and_then(|uid| self.profile.account.car(uid))
             .and_then(|car| self.loaded_car(car).ok());
-        crate::race::race_cards(car.as_ref(), self.mode())
+        let bounty = self.profile.account.bounty;
+        let mut cards = crate::race::race_cards(car.as_ref(), self.mode());
+        for c in &mut cards {
+            use wp_contracts::Legality;
+            let Some(legality) = [
+                Legality::Sanctioned,
+                Legality::Street,
+                Legality::IllegalDaytime,
+            ]
+            .into_iter()
+            .find(|l| l.key() == c.legality) else {
+                continue;
+            };
+            c.bounty_needed = self.econ.high_stakes_bounty_needed(legality);
+            c.bounty_locked = bounty < c.bounty_needed;
+            c.bounty_bonus = self.econ.bounty_purse_bonus(bounty, legality);
+        }
+        cards
     }
 
     /// The car's saved lattice damage, if any.
@@ -1290,6 +1326,21 @@ impl Career {
             debt: a.debt(),
             rep: a.rep,
             bounty: a.bounty,
+            bounty_payoff: self.econ.bounty_payoff_cost(a),
+            bail_if_busted: (a.bounty as f32 * self.econ.consequences.bail_bounty_frac).round()
+                as Money,
+            high_stakes_bounty: self.econ.stakes.bounty.high_stakes.min_bounty,
+            informants: self
+                .econ
+                .stakes
+                .informant
+                .iter()
+                .map(|(id, t)| InformantView {
+                    id: id.clone(),
+                    cost: t.cost,
+                    heat_reduction: t.heat_reduction,
+                })
+                .collect(),
             net_worth: self.econ.net_worth(a),
             carried_heat: p.carry.heat,
             carried_level: level_for_heat(p.carry.heat),
@@ -1868,6 +1919,35 @@ impl Career {
         Ok(())
     }
 
+    /// Pay informant `tier` (`stakes.toml` `[informant.*]`): the carried heat drops by its
+    /// heat reduction. Refused when the police are not looking for the car.
+    pub fn buy_informant(&mut self, tier: &str) -> Result<(), String> {
+        self.guard()?;
+        if self.profile.carry.heat <= 0.0 {
+            return Err(
+                "the police are not looking for you: nothing for an informant to do".into(),
+            );
+        }
+        let (cut, ev) = self
+            .econ
+            .buy_informant_tip(&mut self.profile.account, tier)
+            .map_err(e2s)?;
+        self.post(ev);
+        self.profile.carry.heat = (self.profile.carry.heat - cut).max(0.0);
+        Ok(())
+    }
+
+    /// Pay the whole bounty off (`Economy::pay_off_bounty`); returns what it cost.
+    pub fn pay_off_bounty(&mut self) -> Result<Money, String> {
+        self.guard()?;
+        let (cost, ev) = self
+            .econ
+            .pay_off_bounty(&mut self.profile.account)
+            .map_err(e2s)?;
+        self.post(ev);
+        Ok(cost)
+    }
+
     /// Let a night pass without driving (the auction countdown runs, premiums are charged,
     /// carried heat cools as if the run had ended free).
     pub fn next_night(&mut self) -> Result<Vec<EconomyEvent>, String> {
@@ -1911,15 +1991,20 @@ impl Career {
         // No heat on the flat lot or a touge pass (no police there; the carried heat waits
         // for the next city run).
         let touge = crate::touge::setup_for_scenario(&sc.name).is_some();
-        first.police_heat = if sc.city == simcli::scenario::CitySpec::Flat || touge {
-            0.0
-        } else {
-            heat
-        };
+        let police = sc.city != simcli::scenario::CitySpec::Flat && !touge;
+        first.police_heat = if police { heat } else { 0.0 };
         sc.mode = self.mode();
         let (files, tools) = self.car_build(&car)?;
         let mut session = Session::new_with_data(sc, false, &Overlay { files: &files })?;
         let player = *session.entities().first().ok_or("no player entity")?;
+        // The police know the career's bounty: a wanted career gets backup sooner and more of
+        // it from the first call (`PoliceSystem::carry_career_bounty`).
+        if police {
+            session
+                .sim_before_start_mut()?
+                .police_mut()
+                .carry_career_bounty(player, self.profile.account.bounty);
+        }
         if let Some(snap) = self.lattice(uid)? {
             let sim = session.sim_before_start_mut()?;
             // A save that no longer fits the car starts with a pristine body; the unpaid
@@ -1989,6 +2074,15 @@ impl Career {
         // 2026-10-26: 651 cash still raced Loop 9 day). The account is untouched.
         if let Some(why) = session.race().and_then(|r| r.entry_refused()) {
             return Err(why.replace("buy-in refused: ", "Can't race: "));
+        }
+        // High-stakes races are invite only: the police must already want the career.
+        if let Some(race) = session.race() {
+            if let Err(e) = self.econ.require_high_stakes_bounty(acct, race.legality()) {
+                return Err(format!(
+                    "Can't race: {}",
+                    e2s(e).replace("invalid input: ", "")
+                ));
+            }
         }
         self.run = Some(ActiveRun {
             car: uid,
@@ -2586,6 +2680,24 @@ pub fn career_release(uid: u32) -> Result<String, JsValue> {
 pub fn career_insure(uid: u32, tier: &str) -> Result<String, JsValue> {
     with_career(|c| {
         c.insure(CarUid(uid), tier)?;
+        view_json(c)
+    })
+}
+
+/// Pay informant `tier` (carried heat drops); the new view JSON.
+#[wasm_bindgen]
+pub fn career_buy_informant(tier: &str) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.buy_informant(tier)?;
+        view_json(c)
+    })
+}
+
+/// Pay the whole bounty off; the new view JSON.
+#[wasm_bindgen]
+pub fn career_pay_off_bounty() -> Result<String, JsValue> {
+    with_career(|c| {
+        c.pay_off_bounty()?;
         view_json(c)
     })
 }

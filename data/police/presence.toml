@@ -48,8 +48,10 @@ far_margin_m = 250.0
 far_release_s = 20.0
 # Below this level backup comes only from the racer's own district.
 backup_all_districts_level = 2
-# High-bounty racers get reinforcements up to this much sooner.
+# High-bounty racers get reinforcements up to this much sooner ...
 priority_max_reduction = 0.3
+# ... and up to this many more units on them (× priority, rounded; max_ground_units still caps).
+priority_extra_units = 2
 # Reinforcements spawn like responders ([response] window, out of sight); if no hidden spot
 # is in that window: the nearest node at least this far from the racer, out of its sight.
 spawn_min_distance_m = 350.0

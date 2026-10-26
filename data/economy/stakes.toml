@@ -199,6 +199,21 @@ L3 = 1600
 L4 = 3000
 L5 = 6000
 
+# Pay the bounty off from the garage (Police tab): an informant makes the file go away.
+# Dearer than the bail a capture takes (0.5 × bounty), but no fine, impound or rep loss.
+[bounty.payoff]
+cost_frac = 0.75
+min_cost = 100
+
+# High-stakes races (illegal daytime meets): the organisers only invite drivers the police
+# already want (min_bounty ≈ one L3 escape, or two L2 escapes at night), and a big bounty
+# pulls a bigger purse: +10 % per 1 000 bounty, at most +50 % (5 000 bounty).
+[bounty.high_stakes]
+legality = ["illegal_daytime"]
+min_bounty = 500
+purse_bonus_per_1000 = 0.10
+purse_bonus_max = 0.5
+
 [bounty.cop_base_reward]
 None = 0
 L1 = 200
