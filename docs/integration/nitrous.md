@@ -16,19 +16,29 @@ second. An emptied bottle re-arms at `rearm_fill`.
 Rubberbanding: `wp_sim::nitrous_link::update_ai_nitrous` runs every tick before the vehicles
 step. AI racers measure the nearest player's distance ahead along their own heading; AI police
 (not player cop seats) measure the car their `Assignment::target()` names (pursue / intercept).
-The bottle scale goes from `near` (level or ahead) to `far` (`gap_full_m` behind) and the AI
-fires while `fire_gap_m..=max_gap_m` behind on a straight with the throttle down
-(`AiNitrous::wants_fire`). The fire request is added to the input the vehicle steps with only;
+Closer than `fire_gap_m`, level or ahead, an AI has the player's bottle; from `fire_gap_m`
+behind the scale runs `near` .. `far` (at `gap_full_m`). AI fire on a straight with the
+throttle down (`AiNitrous::wants_fire`): racers from `fire_gap_m` to `max_gap_m` behind the player, and
+level or ahead while the player is within `ahead_gap_m` (40 m) behind them (owner 2026-10-26:
+"AI racers can use nitrous if they're ahead (just normal regen)"; a clear leader does not burn,
+or the field splits: with every leader burning, `loop9_ashpeak_highway` had 4 of 6 miss the
+finish window);
+police from `fire_gap_m` behind, and on a call (a target or the siren on) below
+`up_to_speed_mps` to get up to speed (owner 2026-10-26: "cops can use nitrous to get up to
+speed"). A patrolling cop never fires. The fire request is added to the input the vehicle steps with only;
 `SimVehicle::input` is unchanged, so session logs and replays keep the AI's own input and the
 decision is re-derived deterministically on replay. An AI with no player in range never fires,
 so AI-only races and benches keep their old pace.
 
-Nitrous Kit: the garage's `elec_nitrous_1` / `elec_nitrous_2` (`ToolLoadout.nitrous`) upgrade
-the player's stock bottle by `[kit]` (strength and capacity). `Career::nitrous_tier` reads the
-tier with every mod counted (preview mode `None`) and `car_session` sets it with
-`Sim::set_nitrous_scale`, so the kit works the same in Arcade and Simulation even though the shop
-lists it as Arcade only. Owner decision card 2026-10-26: recommended "stock bottle on every car,
-the kit upgrades it" (implemented while the card was open).
+Nitrous Kit (owner decision 2026-10-26, "Kit required for the player"): a player's car has no
+bottle (`Nitrous::fitted = false`, no HUD gauge) until the garage's `elec_nitrous_1` /
+`elec_nitrous_2` (`ToolLoadout.nitrous`) is fitted; tier 1 is the base bottle, tier 2 is ×1.5
+strength and size (`[kit]`). `Sim::set_nitrous_kit` sets it: the career from
+`Career::nitrous_tier`, simcli / free drive from the entity's `mods`. The tier counts every mod
+(preview mode `None`), so the kit works the same in Arcade and Simulation even though the shop
+lists it as Arcade only. AI racers and police always carry a bottle regardless (owner,
+2026-10-26: "make sure AI gets nitrous regardless of if driver has it - only for the purpose of
+catching up").
 
 Physics is identical in Arcade and Simulation (owner rule 2026-10-20). The police change is the
 owner's explicit request (the usual "police AI does not change" rule is waived for this).

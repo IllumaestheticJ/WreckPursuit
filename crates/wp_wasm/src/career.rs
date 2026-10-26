@@ -2065,9 +2065,8 @@ impl Career {
         let sim = session.sim_before_start_mut()?;
         sim.set_tire_condition(player, grip.map(|g| g * wide), flat)
             .map_err(|e| e.to_string())?;
-        // The garage's Nitrous Kit upgrades the stock bottle.
-        let kit = wp_vehicle::nitrous::tune().kit_scale(self.nitrous_tier(uid));
-        sim.set_nitrous_scale(player, kit)
+        // Nitrous only with the garage's Nitrous Kit (owner decision 2026-10-26).
+        sim.set_nitrous_kit(player, self.nitrous_tier(uid))
             .map_err(|e| e.to_string())?;
         // Run-flat inserts: a spiked or flat tyre limps on instead of folding onto the rim.
         sim.set_run_flat(player, tools.run_flat > 0)
