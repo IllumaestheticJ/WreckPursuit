@@ -529,6 +529,8 @@ export const sim = {
   runRepairContinue: (): ContinueReport => JSON.parse(wasm.run_repair_continue()),
   /** Race picker for a player in `car` (`wp_wasm::race::RaceCard[]`). */
   raceList: (car: string, mode: string): RaceCard[] => JSON.parse(wasm.race_list(car, mode)),
+  /** The career garage's race picker: stakes for the active career car with its mods, in the career's mode. */
+  careerRaceList: (): RaceCard[] => JSON.parse(wasm.career_race_list()),
   /** Start a picker race (new session; the account carries over). Returns entity ids, player first. */
   /** Start picker race `id`; `map` (a city id, e.g. the main menu's map) runs it there when it
    * can, else on its own city; "" / omitted = the current session's map. */

@@ -84,3 +84,40 @@ fn night_run_starts_at_the_chosen_city() {
     // An unknown id is ignored.
     assert_eq!(run("atlantis").1, first);
 }
+
+/// The career garage's fixed shop table matches the generated world: same shops in POI order,
+/// same district and kind, and each in the spawn city whose start grid is nearest. Every spawn
+/// city has a shop (the Repair panel starts on it when opened from the menu).
+#[test]
+fn world_shops_match_the_generated_world() {
+    let world = ashpeak();
+    let net = world.network();
+    let grids: Vec<(&str, [f32; 3])> = SPAWNS
+        .iter()
+        .map(|s| (s.id, spawn_grid(net, s.anchor).unwrap().pos))
+        .collect();
+    let city = |p: [f32; 3]| {
+        let d = |g: &[f32; 3]| (g[0] - p[0]).hypot(g[1] - p[1]);
+        grids
+            .iter()
+            .min_by(|a, b| d(&a.1).total_cmp(&d(&b.1)))
+            .unwrap()
+            .0
+    };
+    let generated: Vec<_> = crate::garage_visit::sites(&world)
+        .iter()
+        .map(|g| (g.name.clone(), g.district, g.kind, city(g.pos)))
+        .collect();
+    let table: Vec<_> = crate::garage_visit::WORLD_SHOPS
+        .iter()
+        .map(|w| (w.name.to_string(), w.district, w.kind, w.city))
+        .collect();
+    assert_eq!(table, generated);
+    for s in SPAWNS {
+        assert!(
+            table.iter().any(|t| t.3 == s.id),
+            "{} has a repair shop",
+            s.id
+        );
+    }
+}

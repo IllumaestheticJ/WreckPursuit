@@ -43,6 +43,7 @@ use wp_economy::{
     CarLocation, CarSpec, CarUid, CareerProfile, CareerProgress, Condition, DamageReport, Economy,
     EconomyError, EconomyEvent, EventReason, ImpoundStatus, Listing, ListingGrade, LotKind, Money,
     OwnedCar, ProgressUpdate, RepTier, RepairOption, RepairQuote, RunEnd, ShopContext, ShopKind,
+    ToolLoadout,
 };
 
 use crate::data::mem_data;
@@ -341,6 +342,23 @@ pub struct DistrictView {
     pub labour: f32,
 }
 
+/// A repair shop of the world as the Repair panel offers it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ShopView {
+    /// Shop name.
+    pub name: String,
+    /// `DistrictId` name of the shop's district.
+    pub district: String,
+    /// Legit or crooked.
+    pub kind: ShopKind,
+    /// Spawn city id the shop is in ([`crate::scenario::SPAWNS`]).
+    pub city: String,
+    /// That city's name (the spawn's label).
+    pub city_label: String,
+    /// The district's labour × (before any crooked-shop markup).
+    pub labour: f32,
+}
+
 /// The whole garage screen.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CareerView {
@@ -384,6 +402,8 @@ pub struct CareerView {
     pub insurance: Vec<InsuranceView>,
     /// Districts and labour multipliers.
     pub districts: Vec<DistrictView>,
+    /// The world's repair shops ([`crate::garage_visit::WORLD_SHOPS`]), in POI order.
+    pub shops: Vec<ShopView>,
     /// Career counters.
     pub stats: wp_economy::CareerStats,
     /// Rep tier, next tier, unlocked features and classes, bet limits.
@@ -711,9 +731,14 @@ impl Career {
     /// definitions keep the base ids (no other vehicle uses a roster car's files: police
     /// drive `sentinel_*`, traffic `debug_sedan`, and neither is sold).
     pub fn car_files(&self, car: &OwnedCar) -> Result<BTreeMap<String, String>, String> {
+        Ok(self.car_build(car)?.0)
+    }
+
+    /// [`Self::car_files`] and the gadgets the car's mods fit (run-flat tyres...).
+    fn car_build(&self, car: &OwnedCar) -> Result<(BTreeMap<String, String>, ToolLoadout), String> {
         let mut files = BTreeMap::new();
         if car.mods.is_empty() && self.econ.wear_torque_factor(car) >= 1.0 {
-            return Ok(files);
+            return Ok((files, ToolLoadout::default()));
         }
         let base = base_car(&car.def_id)?;
         let p = self
@@ -730,13 +755,27 @@ impl Career {
             format!("lattices/{}.json", l.id),
             serde_json::to_string(l).map_err(|e| e.to_string())?,
         );
-        Ok(files)
+        Ok((files, p.applied.tools))
     }
 
     /// The car as the sim builds it (mods applied).
     pub fn loaded_car(&self, car: &OwnedCar) -> Result<LoadedCar, String> {
         let files = self.car_files(car)?;
         simcli::data::load_car(&Overlay { files: &files }, &car.def_id).map_err(|e| e.to_string())
+    }
+
+    /// The race picker priced for the active car as it is: its mods move its class index,
+    /// and with it the class bracket the purse and buy-in come from, so the stock car's cards
+    /// would advertise a different stake than the run pays (owner report 2026-10-26). Empty
+    /// stakes when there is no usable active car.
+    pub fn race_cards(&self) -> Vec<crate::race::RaceCard> {
+        let car = self
+            .profile
+            .account
+            .active_car
+            .and_then(|uid| self.profile.account.car(uid))
+            .and_then(|car| self.loaded_car(car).ok());
+        crate::race::race_cards(car.as_ref(), self.mode())
     }
 
     /// The car's saved lattice damage, if any.
@@ -1312,6 +1351,25 @@ impl Career {
                         .unwrap_or(1.0),
                 })
                 .collect(),
+            shops: crate::garage_visit::WORLD_SHOPS
+                .iter()
+                .map(|w| ShopView {
+                    name: w.name.to_string(),
+                    district: format!("{:?}", w.district),
+                    kind: w.kind,
+                    city: w.city.to_string(),
+                    city_label: crate::scenario::spawn(w.city)
+                        .map_or(w.city, |s| s.label)
+                        .to_string(),
+                    labour: self
+                        .econ
+                        .prices
+                        .district_labour
+                        .get(&w.district)
+                        .copied()
+                        .unwrap_or(1.0),
+                })
+                .collect(),
             stats: p.stats.clone(),
             progress: self.econ.career_progress(a),
             captures: a.heat_history.captures,
@@ -1874,7 +1932,7 @@ impl Career {
             heat
         };
         sc.mode = self.mode();
-        let files = self.car_files(&car)?;
+        let (files, tools) = self.car_build(&car)?;
         let mut session = Session::new_with_data(sc, false, &Overlay { files: &files })?;
         let player = *session.entities().first().ok_or("no player entity")?;
         if let Some(snap) = self.lattice(uid)? {
@@ -1898,6 +1956,11 @@ impl Career {
         session
             .sim_before_start_mut()?
             .set_nitrous_scale(player, kit)
+            .map_err(|e| e.to_string())?;
+        // Run-flat inserts: a spiked or flat tyre limps on instead of folding onto the rim.
+        session
+            .sim_before_start_mut()?
+            .set_run_flat(player, tools.run_flat > 0)
             .map_err(|e| e.to_string())?;
         Ok((session, player))
     }
@@ -1943,6 +2006,11 @@ impl Career {
             None
         };
         session.begin_career(run)?;
+        // A picker race the career cannot pay the buy-in for does not start (owner report
+        // 2026-10-26: 651 cash still raced Loop 9 day). The account is untouched.
+        if let Some(why) = session.race().and_then(|r| r.entry_refused()) {
+            return Err(why.replace("buy-in refused: ", "Can't race: "));
+        }
         self.run = Some(ActiveRun {
             car: uid,
             start_seq: acct.next_event_seq,
@@ -2270,6 +2338,13 @@ pub fn career_save_json() -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn career_view_json() -> Result<String, JsValue> {
     with_career(view_json)
+}
+
+/// The career garage's race picker ([`crate::race::RaceCard`] array, as `race_list`): stakes
+/// for the active car with its mods, in the career's mode ([`Career::race_cards`]).
+#[wasm_bindgen]
+pub fn career_race_list() -> Result<String, JsValue> {
+    with_career(|c| Ok(json(&c.race_cards())))
 }
 
 /// The mod tree of car `uid` ([`ModTreeView`] JSON).

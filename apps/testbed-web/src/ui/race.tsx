@@ -91,6 +91,9 @@ export interface BetPick {
 export interface BetStatus {
   max: number;
   lock: string | null;
+  /** Cash on the account the race would charge (career picker): a buy-in above it greys the
+   * card's Race button, and a bet can only use what is left after the buy-in. */
+  cash?: number | null;
 }
 
 /** `wp_wasm::race::ResultRow`. */
@@ -198,7 +201,9 @@ function BetSlip(props: { card: RaceCard; status: BetStatus; pick: BetPick | nul
       </div>
     );
   }
-  const max = Math.max(0, status.max);
+  // The buy-in is taken first, so a bet only has what is left after it.
+  const afterBuyIn = status.cash === undefined || status.cash === null ? Infinity : status.cash - card.entry_fee;
+  const max = Math.max(0, Math.min(status.max, afterBuyIn));
   if (max < BET_MIN) return <div class="wp-dim" style={{ fontSize: "0.8em" }}>Betting: not enough cash for the minimum stake ({BET_MIN}).</div>;
   const label = pick?.label ?? "";
   const step = max >= 5000 ? 500 : 100;
@@ -253,7 +258,10 @@ function Picker(props: { cards: RaceCard[]; status: BetStatus; onStart: (id: str
     <div class="wp-race-picker" data-testid="race-picker">
       <Panel title="Street races" tag={<Button size="sm" variant="ghost" onClick={props.onClose}>close</Button>}>
         <div class="wp-race-cards">
-          {props.cards.map((c) => (
+          {props.cards.map((c) => {
+            const cash = props.status.cash;
+            const short = cash !== undefined && cash !== null && c.entry_fee > cash;
+            return (
             <div class="wp-race-card" key={c.id} data-race={c.id}>
               <div class="wp-spread">
                 <b>{c.name}</b>
@@ -283,16 +291,30 @@ function Picker(props: { cards: RaceCard[]; status: BetStatus; onStart: (id: str
                 ))}
               </div>
               <div class="wp-spread" style={{ marginTop: "0.4em" }}>
-                <span>
-                  Purse <Money value={c.purse} /> · buy-in <Money value={c.entry_fee} />
+                <span title="The winner's purse: 2nd pays half, 3rd a quarter, 4th a tenth; a clean race adds 25%, finishing wanted adds 5-45%.">
+                  Win purse <Money value={c.purse} /> · buy-in <Money value={c.entry_fee} />
                 </span>
-                <Button variant="primary" size="sm" onClick={() => props.onStart(c.id, picks[c.id] ?? null)}>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={short}
+                  title={short ? "Not enough cash for the buy-in" : undefined}
+                  testid="race-start"
+                  onClick={() => props.onStart(c.id, picks[c.id] ?? null)}
+                >
                   Race
                 </Button>
               </div>
-              <BetSlip card={c} status={props.status} pick={picks[c.id] ?? null} onPick={(p) => setPicks({ ...picks, [c.id]: p })} />
+              {short ? (
+                <div class="wp-dim" style={{ fontSize: "0.8em", marginTop: "0.3em" }} data-testid="race-unaffordable">
+                  Can't afford the buy-in: you have <Money value={Math.max(0, cash ?? 0)} />.
+                </div>
+              ) : (
+                <BetSlip card={c} status={props.status} pick={picks[c.id] ?? null} onPick={(p) => setPicks({ ...picks, [c.id]: p })} />
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </Panel>
     </div>

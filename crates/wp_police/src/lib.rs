@@ -539,6 +539,9 @@ pub struct PoliceSystem {
     pub(crate) spawn_watch: Vec<usize>,
     /// Elevated road decks (race stakeouts park on the deck, not under it).
     pub(crate) decks: Vec<race::DeckFoot>,
+    /// Highway paved surfaces (a Loop 9 race keeps its spike cars inside the barriers on
+    /// them). Never changes after construction; shared so clones stay cheap.
+    pub(crate) highway_paving: std::sync::Arc<Vec<race::PavedStrip>>,
     pub(crate) next_tool: u32,
     pub(crate) punctures: BTreeMap<EntityId, Puncture>,
     pub(crate) radio: VecDeque<RadioLine>,
@@ -614,6 +617,20 @@ impl PoliceSystem {
                     z: [d.a[2], d.b[2]],
                     left_m: d.left_m,
                     right_m: d.right_m,
+                })
+                .collect(),
+        );
+        p.set_highway_paving(
+            world
+                .map()
+                .net
+                .surfaces
+                .iter()
+                .filter(|s| s.highway && s.centre.len() >= 2)
+                .map(|s| race::PavedStrip {
+                    centre: s.centre.iter().map(|q| [q[0], q[1]]).collect(),
+                    left_m: s.left_m,
+                    right_m: s.right_m,
                 })
                 .collect(),
         );
@@ -721,6 +738,7 @@ impl PoliceSystem {
             spikes_announced: BTreeSet::new(),
             spawn_watch: Vec::new(),
             decks: Vec::new(),
+            highway_paving: std::sync::Arc::new(Vec::new()),
             spikes: Vec::new(),
             next_tool: 1,
             punctures: BTreeMap::new(),
@@ -1174,6 +1192,13 @@ impl PoliceSystem {
     /// race stakeouts on a viaduct park on the deck, not on the ground under it.
     pub fn set_decks(&mut self, decks: Vec<race::DeckFoot>) {
         self.decks = decks;
+    }
+
+    /// Paved surfaces of the city's highways ([`PoliceSystem::for_world`] sets them from the
+    /// map): in a race with a patrol corridor (Loop 9) a spike car parks on them, inside the
+    /// edge and median barriers, never on the far side of a barrier.
+    pub fn set_highway_paving(&mut self, paving: Vec<race::PavedStrip>) {
+        self.highway_paving = std::sync::Arc::new(paving);
     }
 
     /// Spots `(position, heading)` of tool `tool`'s cars not parked yet: roadblock cars waiting

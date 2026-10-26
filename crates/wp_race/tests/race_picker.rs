@@ -41,6 +41,71 @@ fn assert_strips_manned(sim: &Sim, id: &str) {
     }
 }
 
+/// Whether segments `a`-`b` and `c`-`d` cross (XY).
+fn crosses(a: [f32; 2], b: [f32; 2], c: [f32; 2], d: [f32; 2]) -> bool {
+    let side = |p: [f32; 2], q: [f32; 2], r: [f32; 2]| {
+        (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+    };
+    let (d1, d2) = (side(c, d, a), side(c, d, b));
+    let (d3, d4) = (side(a, b, c), side(a, b, d));
+    d1 * d2 < 0.0 && d3 * d4 < 0.0
+}
+
+/// Loop 9 (owner, 2026-10-26: "the spike cop is spawning off the road behind the wall"): a
+/// spike strip's car stands on the racer's side of every highway barrier (no edge or median
+/// barrier between the strip's site on the racing line and the car's far side) and, where a
+/// lane runs under it (not in a junction box or merge), its whole width is on the paving.
+/// `course` gives the road height, `barriers` the world's edge and median barrier lines. Each
+/// strip is checked once, when it is first seen (`checked`).
+fn assert_spike_cars_on_paving(
+    sim: &Sim,
+    id: &str,
+    course: &[[f32; 3]],
+    barriers: &[Vec<[f32; 3]>],
+    checked: &mut std::collections::BTreeSet<u32>,
+) {
+    let half = wp_police::avoid::UNIT_HALF_WIDTH_M;
+    for s in sim.police().spike_strips() {
+        if !checked.insert(s.id.0) {
+            continue;
+        }
+        let post = s.post.unwrap_or(s.site.pos);
+        let out = [post[0] - s.site.pos[0], post[1] - s.site.pos[1]];
+        let l = out[0].hypot(out[1]).max(1e-3);
+        let far = [post[0] + out[0] / l * half, post[1] + out[1] / l * half];
+        let walled = barriers.iter().any(|line| {
+            line.windows(2)
+                .any(|w| crosses(s.site.pos, far, [w[0][0], w[0][1]], [w[1][0], w[1][1]]))
+        });
+        assert!(
+            !walled,
+            "{id}: spike strip {:?} (scripted: {}) has its car at {post:?} behind a barrier \
+             at tick {}",
+            s.id,
+            s.scripted,
+            sim.tick()
+        );
+        let near = |p: &&[f32; 3]| (p[0] - post[0]).hypot(p[1] - post[1]);
+        let z = course
+            .iter()
+            .min_by(|a, b| near(a).total_cmp(&near(b)))
+            .map_or(0.0, |p| p[2]);
+        let d = s.site.dir;
+        if let Some((lo, hi)) =
+            catalog::paved_span(sim.world(), [post[0], post[1], z], d, [d[1], -d[0]])
+        {
+            assert!(
+                lo <= -half && hi >= half,
+                "{id}: spike strip {:?} (scripted: {}) has its car at {post:?} off the paving \
+                 ({lo:.2}..{hi:.2} m) at tick {}",
+                s.id,
+                s.scripted,
+                sim.tick()
+            );
+        }
+    }
+}
+
 fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -222,6 +287,17 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
     let mut pursuits = 0;
     let mut heat_after_green = Vec::new();
     let mut finished_tick = None;
+    let course_line = live.race().course.polyline.clone();
+    let mut spikes_checked = std::collections::BTreeSet::new();
+    let barriers: Vec<Vec<[f32; 3]>> = if id.starts_with("loop9") {
+        let map = sim.world().map();
+        wp_world::surface::edge_barriers(map)
+            .into_iter()
+            .chain(wp_world::surface::median_barriers(&map.net))
+            .collect()
+    } else {
+        Vec::new()
+    };
     // `WP_RACE_TIME=1`: wall time spent in the race glue (AI field + judge), for the README.
     let timing = std::env::var("WP_RACE_TIME").is_ok();
     let mut glue = std::time::Duration::ZERO;
@@ -245,6 +321,9 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         events = sim.drain_events();
         // Row 165: no spike strip ever lies on the road without its unit beside it.
         assert_strips_manned(&sim, id);
+        if id.starts_with("loop9") {
+            assert_spike_cars_on_paving(&sim, id, &course_line, &barriers, &mut spikes_checked);
+        }
         pursuits += events
             .iter()
             .filter(|e| {

@@ -80,20 +80,24 @@ fn features_follow_current_rep() {
 }
 
 #[test]
-fn dealer_classes_are_gated() {
+fn dealer_classes_have_no_rep_gate() {
     let e = Economy::embedded();
+    // No class has a rep gate: price is the only thing holding a car back.
     let a = account(&e, 0, 100_000);
-    assert!(e.class_unlocked(&a, VehicleClass::Compact));
-    assert!(!e.class_unlocked(&a, VehicleClass::Sport));
-    assert!(matches!(
-        e.require_class(&a, VehicleClass::Sport),
-        Err(EconomyError::Locked { .. })
-    ));
-    // Exotics have no rep gate: price is the only thing holding them back.
-    assert!(e.class_unlocked(&a, VehicleClass::Exotic));
-    e.require_class(&a, VehicleClass::Exotic).unwrap();
+    for class in [
+        VehicleClass::Beater,
+        VehicleClass::Compact,
+        VehicleClass::Truck,
+        VehicleClass::Sport,
+        VehicleClass::Muscle,
+        VehicleClass::Exotic,
+    ] {
+        assert!(e.class_unlocked(&a, class), "{class:?}");
+        e.require_class(&a, class).unwrap();
+    }
+    // Police classes are still never for sale, whatever the rep.
+    assert!(!e.class_unlocked(&a, VehicleClass::PoliceInterceptor));
     let legend = account(&e, 1_000_000, 0);
-    assert!(e.class_unlocked(&legend, VehicleClass::Sport));
     assert!(!e.class_unlocked(&legend, VehicleClass::PoliceInterceptor));
     assert!(matches!(
         e.require_class(&legend, VehicleClass::PoliceCruiser),

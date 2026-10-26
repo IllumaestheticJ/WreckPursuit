@@ -803,3 +803,27 @@ read as Ashpeak County (no Ashcroft exists in the code or data).
   sprint through the `?race=grid_highway_sprint` debug link. All 33 checks pass headless.
 - Known gap: `race_spots.mjs` and `menu.mjs` still expect retired races' spots and cards
   (not in CI); `drift_lab_w.mjs` only uses a `?race=` link, which still works.
+
+## Career buy-in and purse match the picker (2026-10-26, owner report)
+"I had 651 and could still race the Loop 9 day" and "race purse on menu and finishing don't
+match".
+- **Unaffordable buy-in refused.** `RaceRun::charge_entry` checks the advertised buy-in against
+  the account's cash before charging anything; a refused buy-in used to be only an
+  `economy_error` on the results while the race ran for free. `RaceRun::entry_refused` reports
+  it, and `Career::start_run` refuses such a race ("Can't race: the buy-in is $X, you have
+  $Y"), so the testbed goes back to the garage with that message and the account is untouched.
+  Plain (non-career) picker sessions are unchanged: they still run and show the error.
+- **Advertised buy-in below G's price.** The stake credit is posted before G's `enter_race`,
+  so G's funds check sees the advertised amount (before, a player holding exactly the
+  advertised buy-in was refused when G's own price was higher, e.g. Loop 9 day: 1 055 vs 2 458).
+- **Picker priced for the car as it is.** The run prices the career car with its mods, which
+  move its class index and so its class bracket; the career picker priced the stock car
+  (fully modded Kestrel TS: Loop 9 night advertised 3 105 / 342, the run paid 9 660 / 1 063).
+  New `career_race_list()` (`Career::race_cards`) prices the active car with its mods in the
+  career's mode; the testbed's career picker uses it.
+- **Testbed picker** (`ui/race.tsx`): `BetStatus.cash` (career only) greys out the Race button
+  of a race whose buy-in is above the cash ("Can't afford the buy-in"), and caps the bet at the
+  cash left after the buy-in. The card's "Purse" is now "Win purse", with a tooltip for the
+  placement shares, clean bonus and wanted multiplier the finish applies.
+- Tests: `career_tests::a_picker_race_the_career_cannot_afford_is_refused`,
+  `career_tests::the_career_picker_prices_the_modded_car_like_the_run`.

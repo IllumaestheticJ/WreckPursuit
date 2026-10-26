@@ -41,7 +41,7 @@ pub enum RepTier {
     Unknown,
     /// Has a few wins; can bet on city races.
     Street,
-    /// Known around town; touge invitations, sport and muscle cars.
+    /// Known around town; touge invitations.
     Known,
     /// Touge betting and boss races.
     Respected,

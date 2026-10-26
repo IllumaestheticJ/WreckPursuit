@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mockGarage, mockShops } from "../mock/mockData";
 import { CAR_STATS, CARS, MODS, modBlocker, modTree } from "./catalog";
-import { marketPrice, quoteRepair, salePrice, scrapValue } from "./economy";
+import { DISTRICT_LABOUR, DISTRICTS, marketPrice, quoteRepair, salePrice, scrapValue } from "./economy";
 import { bracket, classIndex, estimate, previewBuild, TIRE_GRIP } from "./estimate";
 
 describe("catalog", () => {
@@ -135,5 +135,17 @@ describe("build stats", () => {
     for (const k of ["acceleration", "top_speed", "cornering"] as const) expect(Math.abs(bars[k] - s.bars[k])).toBeLessThan(0.002);
     // A provider-measured build wins.
     expect(buildStats("kestrel_ts", ["tires_semi_slick"], CAR_STATS.vireo_xs)!.source).toBe("measured");
+  });
+});
+
+describe("district labour", () => {
+  it("matches prices.toml [district_labour] and covers every district", () => {
+    const files = import.meta.glob("../../../../data/economy/prices.toml", { eager: true, query: "?raw", import: "default" });
+    const toml = Object.values(files)[0] as string;
+    const section = toml.split("[district_labour]")[1].split(/\n\[/)[0];
+    const table: Record<string, number> = {};
+    for (const m of section.matchAll(/^(\w+)\s*=\s*([\d.]+)/gm)) table[m[1]] = Number(m[2]);
+    expect(Object.keys(table).sort()).toEqual([...DISTRICTS].sort());
+    for (const d of DISTRICTS) expect(DISTRICT_LABOUR[d], d).toBe(table[d]);
   });
 });

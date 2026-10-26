@@ -71,11 +71,12 @@ pink_slips = "Feared"
 street_betting = "Unknown"
 
 # Lowest tier at which the dealer sells each class. Police classes are never for sale.
+# Every class is open from the start (owner calls 2026-10-24 for Exotic, 2026-10-26 for the
+# rest): price is the only gate.
 [class_unlocks]
 Beater = "Unknown"
 Compact = "Unknown"
 Truck = "Unknown"
-Sport = "Known"
-Muscle = "Known"
-# Exotic is open from the start (owner call 2026-10-24): price is the only gate.
+Sport = "Unknown"
+Muscle = "Unknown"
 Exotic = "Unknown"

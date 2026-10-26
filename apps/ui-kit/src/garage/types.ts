@@ -274,6 +274,9 @@ export interface CareerView {
   floor_car: [string, number] | null;
   insurance: { id: string; premium_per_day_frac: number; coverage: number; deductible: number }[];
   districts: { id: string; labour: number }[];
+  /** The world's repair shops (`career::ShopView`, `garage_visit::WORLD_SHOPS`). Older hosts
+   * send none: the Repair panel then offers the bare districts. */
+  shops?: ShopSite[];
   stats: CareerStats;
   progress: CareerProgress;
   captures: number;
@@ -304,6 +307,19 @@ export interface ModTreeView {
   uid: number;
   stats: StatsView;
   mods: ModOption[];
+}
+
+/** `career::ShopView`: a repair shop of the world. */
+export interface ShopSite {
+  name: string;
+  /** `DistrictId` name (labour rate). */
+  district: string;
+  kind: ShopKind;
+  /** Spawn city id (`port_vesper`, `ashpeak_city`, `harnell_crossing`). */
+  city: string;
+  city_label: string;
+  /** The district's labour × before any crooked-shop markup. */
+  labour: number;
 }
 
 /** `career::ShopRequest`. */
@@ -363,6 +379,9 @@ export interface CareerApi {
   touge?(): void;
   /** Open the 3D garage workshop on car `uid` (optional: hosts without one hide the button). */
   workshop?(uid: number): void;
+  /** Spawn city id of the main menu's "Spawn in" (optional): the Repair panel starts on that
+   * city's shop when the garage is opened from the menu. */
+  homeCity?(): string;
   close(): void;
 }
 
