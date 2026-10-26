@@ -161,7 +161,16 @@ fn race_crash_replays_with_the_judge_and_no_crash_on_the_grid() {
         .unwrap();
     live.debug_park_in_front_of(ai, p, 18.0).unwrap();
     let crash = until_crash(&mut live, 240).expect("rear-ending a stopped racer is a big crash");
-    assert_eq!(crash.other, Some(ai.0));
+    // Usually the parked racer; a bolder racer may tuck in right ahead of the player first
+    // (bolder-racer change, docs/integration/opponent.md). Either way an AI racer.
+    assert!(
+        live.entities()[1..]
+            .iter()
+            .any(|e| crash.other == Some(e.0)),
+        "{:?} vs parked {:?}",
+        crash.other,
+        ai
+    );
     live.run_ticks(120);
     let (tick, hash) = (live.tick(), live.sim().state_hash());
     let (mut replay, info) = live.crash_replay(&crash).unwrap();

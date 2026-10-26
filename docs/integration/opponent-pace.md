@@ -1360,3 +1360,63 @@ in. Target: Lantern s50 ≥ 63/64 with no new walls, then weaving v2.
   - a per-race finish window override, `RaceDef::finish_window_s` = 150 s, applied by
     `RaceDef::rules()` in `LiveRace` and in `opponent_pace`.
 - Every other race keeps its kind's window (`None`).
+
+## PR #63 port: bolder racers (2026-10-24, lead)
+
+The owner opened #63 ("Bolder AI racers (traffic, player, police) + settle races at the
+advertised stake"). It was ported onto main 431232c5 + 4a89d0b4 (rolling-time pull-over).
+
+- **Stake settlement: nothing to port.** #63's own main merge (7bd1d3be) had already dropped it:
+  main pays the advertised stake (bb2208ed).
+- **Kept:**
+  - bolder margins and headways round traffic and the player;
+  - rubbing past traffic after waiting longer than the overtake patience;
+  - wanted racers ram moving units and squeeze past standing ones;
+  - only careful drivers (risk under 0.35) yield to a unit;
+  - an out-of-race car rolls on at 60 % pace while it holds up a racer;
+  - a standing police unit is squeezed past at once;
+  - a sim vehicle counts as unstable only past about 19° of slip.
+- **Dropped: #63's tighter racer-to-racer room.** With it, Loop 9 walls went 4 → 69 (s50) and
+  2 → 44 (s95) over 16 seeds, from racer-on-racer hits at circuit speed, and racer contacts
+  0 → 20 / 9. The port keeps the old room between racers:
+  - side gap 0.6 m (`RACER_SIDE_GAP_M`);
+  - the closing-speed margin (0.15 per m/s, up to 1 m);
+  - the wide berth for an unstable racer (1.5 m, headway × 1.6).
+
+16 seeds, police off, before (4a89d0b4) → after:
+
+| race | skill | finishers | mean s | walls |
+|---|---|---|---|---|
+| Hollins | 0.5 / 0.95 | 64/64, 64/64 → unchanged | 59.1 / 54.4 → unchanged | 62 / 16 → unchanged |
+| Lantern | 0.5 | 64/64 → 64/64 | 80.1 → 76.1 | 0 → 0 |
+| Lantern | 0.95 | 64/64 → 62/64 | 74.3 → 72.0 | 0 → 0 (3 civ contacts) |
+| Loop 9 | 0.5 | 96/96 → 96/96 | 240.1 → 234.5 | 4 → 19 |
+| Loop 9 | 0.95 | 95/96 → 95/96 | 230.9 → 226.4 | 2 → 7 |
+
+The lead accepted the Lantern s95 −2 (one borderline seed) for the gains.
+`pace_lantern_checkpoint_s50` was re-locked by the rule: on its seed the front pair meets a
+downtown civilian queue that the old timing missed.
+
+`live_police_chase` now checks that a busted car stops within 40 s of its bust, over the whole
+run. Before, it checked that the car stood still at the last tick. A car pulling over may still
+be rolling then, and police tweaks move that moment (E, row 168).
+
+### Follow-ups (before weaving v2)
+
+1. **Loop 9 s50 seed 3, rampart_50, 13 walls (one incident).**
+   - At 44 m/s it starts a pass on the left of civilian 20 (21 m/s, Kinematic → Physical).
+   - The civilian drifts left across it towards an exit (heading −1.00,0.07 → −0.95,0.30).
+   - Its pass target swings back towards the civilian's lane. It brakes 44 → 24 m/s, touches
+     the civilian (the first two "wall" contacts, at n −2.8, are that body), and spins into the
+     median wall at n −8.2 (impulse 13 126).
+   - Ten more wall touches follow in rejoin/reverse cycles against the median.
+   - Likely fix: keep #63's tighter civilian margins at city speed and blend back to the old
+     ones above about 35 m/s. A civilian changing lanes at 2× my closing speed needs the
+     old room.
+2. **Lantern s95 seed 5: sperber_32 and lindwurm_4t miss the window.**
+   - Winner 48.1 s, window closes at 108 s. Before the port they finished at 100.3 / 101.7 s.
+   - sperber_32 stands about 15 s in civilian queues at two lights (s 67–73, s 270–276), then
+     follows civilian 85 for 22 s at 5–9 m/s on a two-lane street, s 465–560.
+   - The opposing lane is offered (risk ≥ 0.5) but the pass is refused: NoRoom and LaneAhead,
+     with oncoming traffic. lindwurm_4t queues behind it (racer 80.6 s).
+   - Same pattern as Lantern s50 seed 16: a borderline traffic seed.
