@@ -118,6 +118,8 @@ await page.evaluate(() => {
 await page.waitForSelector("text=Sell", { timeout: 20000 });
 const cars0 = await page.evaluate(() => window.__wp.careerApi.view().cars.length);
 await page.click('button:has-text("Sell")');
+// The row focuses Cancel and takes its keys in an effect (after the render): wait for it.
+await page.waitForFunction(() => document.activeElement?.getAttribute("data-confirm") === "no", null, { timeout: 5000 }).catch(() => {});
 const sellAsk = await page.locator('[data-testid="career-confirm"]').count();
 const sellFocus = await page.evaluate(() => document.activeElement?.getAttribute("data-confirm"));
 check(sellAsk === 1 && sellFocus === "no", `Sell asks first, Cancel focused (${sellAsk}, ${sellFocus})`);
@@ -127,6 +129,7 @@ const afterEsc = await page.evaluate(() => ({ rows: document.querySelectorAll('[
 const cars1 = await page.evaluate(() => window.__wp.careerApi.view().cars.length);
 check(afterEsc.rows === 0 && afterEsc.garage && afterEsc.menu === "closed" && cars1 === cars0, `Esc cancels the sell and keeps the garage (${JSON.stringify(afterEsc)}, cars ${cars0} → ${cars1})`);
 await page.click('button:has-text("Import save")');
+await page.waitForFunction(() => document.activeElement?.getAttribute("data-confirm") === "no", null, { timeout: 5000 }).catch(() => {});
 const importAsk = await page.locator('[data-testid="career-confirm"]').textContent();
 check(/replaces this career/.test(importAsk ?? ""), `Import save asks first (${importAsk})`);
 await page.keyboard.press("KeyN");

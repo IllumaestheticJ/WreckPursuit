@@ -939,7 +939,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
       )}
       {importAsk && (
         <Confirm
-          text={<>Load a save file? It replaces this career (day {view.day}, <Money value={view.cash} />). Export first to keep it.</>}
+          text={<>Load a save file? It replaces this career (cash <Money value={view.cash} />). Export first to keep it.</>}
           yes="Choose file"
           onYes={importSave}
           onNo={() => setImportAsk(false)}
