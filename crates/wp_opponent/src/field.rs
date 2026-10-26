@@ -672,6 +672,8 @@ struct Civ {
 const CREEP_MPS: f32 = 2.5;
 /// Gap a creeping racer always keeps to the parked car it is steering round, m.
 const CREEP_STOP_GAP_M: f32 = 1.0;
+/// Bumper gap below which a car ahead counts as pressed against, not queued behind, m.
+const PRESSED_GAP_M: f32 = 0.3;
 /// Lateral clearance to a parked car's body that lets a creeping racer roll on alongside it
 /// inside the stop gap, m.
 const CREEP_CLEAR_M: f32 = 0.15;
@@ -2457,9 +2459,13 @@ fn decide_racer(
                 r.wants_room = false;
             }
             let wants_to_move = v_line(r.s) > 3.0 || clearing_line;
+            // A car I am pressed up against is not holding me in a queue (a queue stops
+            // `CREEP_STOP_GAP_M` short): I am stuck against it (grid_highway_sprint, police:
+            // a cruiser braked across the lane, pushed along at 0.2 m/s on full throttle
+            // until the racer was captured).
             let held_by_car = rel
                 .iter()
-                .any(|x| x.ds > 0.0 && x.gap < 4.0 && x.o.v_s.abs() < 1.0);
+                .any(|x| x.ds > 0.0 && x.gap > PRESSED_GAP_M && x.gap < 4.0 && x.o.v_s.abs() < 1.0);
             // Nose to nose in the opposing lanes (passed into a lane a car then stopped in,
             // facing me): nobody can move until I back out into my own lane.
             // Or in my own lane facing a standing car that faces me (a civilian waiting to
