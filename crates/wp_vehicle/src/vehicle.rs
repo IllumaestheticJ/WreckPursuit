@@ -240,6 +240,10 @@ pub struct Telemetry {
     /// A slide is confirmed ([`crate::steering::SlideGate`], row 102): the steering's slide
     /// help is acting. The Drift Lab readout's "sliding: yes / no".
     pub sliding: bool,
+    /// Nitrous bottle level 0 (empty) ..= 1 (full) ([`crate::nitrous`]).
+    pub nitrous_fill: f32,
+    /// Nitrous burning this tick.
+    pub nitrous_on: bool,
 }
 
 /// A punctured tyre's radius loss at full deflation, × the tyre radius (playtest row 132):
@@ -366,6 +370,8 @@ pub struct Vehicle {
     /// Grip-balance lab: how long the countersteer key has been held, s (the held-key slide
     /// lock, `grip_lab::GripBalance::slide_lock_after_s`).
     lab_counter_s: f32,
+    /// Nitrous bottle ([`crate::nitrous`]); in snapshots.
+    pub(crate) nitrous: crate::nitrous::Nitrous,
 }
 
 impl Vehicle {
@@ -499,6 +505,7 @@ impl Vehicle {
             lab_slip_prev: 0.0,
             lab_slip_rate: 0.0,
             lab_counter_s: 0.0,
+            nitrous: crate::nitrous::Nitrous::full(),
             corners,
         };
         v.converter = def
@@ -697,6 +704,27 @@ impl Vehicle {
         self.key_steer = 0.0;
         self.hb_held_s = 0.0;
         self.stalled = false;
+        self.nitrous = crate::nitrous::Nitrous {
+            scale: self.nitrous.scale,
+            ..crate::nitrous::Nitrous::full()
+        };
+    }
+
+    /// The nitrous bottle ([`crate::nitrous`]).
+    pub fn nitrous(&self) -> crate::nitrous::Nitrous {
+        self.nitrous
+    }
+
+    /// Set the nitrous bottle's scale (AI rubberbanding, [`crate::nitrous::AiNitrous::scale`]);
+    /// [`crate::nitrous::NitrousScale::PLAYER`] by default. `wp_sim` sets it every tick.
+    pub fn set_nitrous_scale(&mut self, scale: crate::nitrous::NitrousScale) {
+        self.nitrous.scale = scale;
+    }
+
+    /// Set the nitrous bottle level, 0..=1 (scenarios, save games).
+    pub fn set_nitrous_fill(&mut self, fill: f32) {
+        self.nitrous.fill = fill.clamp(0.0, 1.0);
+        self.nitrous.armed = self.nitrous.fill > 0.0;
     }
 
     /// Forget the chassis's previous motion for the contact launch limiter
@@ -1509,6 +1537,15 @@ impl Vehicle {
             self.stalled = true;
         }
         let power_scale = if self.stalled { 0.0 } else { power_scale };
+        // Nitrous (tool 1, `crate::nitrous`): more engine torque while it burns.
+        let nitrous_gain = self.nitrous.step(
+            &crate::nitrous::tune().bottle,
+            input.tool_use == crate::nitrous::NITROUS_TOOL,
+            thr_in,
+            power_scale > 0.0 && self.gearbox.gear > 0,
+            dt,
+        );
+        let power_scale = power_scale * nitrous_gain;
 
         // --- Assists ----------------------------------------------------------------------
         let peak_slip = (0..4)
@@ -2153,6 +2190,8 @@ impl Vehicle {
             stalled: self.stalled,
             drift: drift_tel,
             sliding: self.slide_gate.sliding(),
+            nitrous_fill: self.nitrous.fill,
+            nitrous_on: self.nitrous.burning,
         };
     }
 

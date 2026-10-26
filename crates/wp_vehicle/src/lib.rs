@@ -59,6 +59,7 @@ pub mod lab_scope;
 pub mod launch;
 pub mod math;
 pub mod metrics;
+pub mod nitrous;
 pub mod pivot;
 pub mod plain;
 pub mod presets;

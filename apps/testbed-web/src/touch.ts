@@ -5,7 +5,7 @@
 // buttons; the finger's position across them is the analogue value, so sliding inwards steers
 // less) or tilt-to-steer; brake and throttle pedals bottom-right (analogue by the finger's
 // height on the pedal: low = light, high = full; slide to modulate); handbrake next to the
-// pedals; map / pause top-right; camera / reset / horn / steering mode above the steering
+// pedals; map / pause top-right; camera / reset / horn / nitrous / steering mode above the steering
 // (the horn also challenges a street racer you are right behind, src/ui/street.ts). Portrait shows a
 // "rotate your phone" hint.
 //
@@ -186,6 +186,9 @@ export class TouchControls {
   /** Horn held (the 📯 button). */
   private horn = false;
   private readonly hornEl: HTMLElement;
+  /** Nitrous held (the 🔥 button). */
+  private nitrous = false;
+  private readonly nitrousEl: HTMLElement;
   /** Slewed steering sent to the sim. */
   private steer = 0;
   private tiltSteer = 0;
@@ -279,6 +282,30 @@ export class TouchControls {
     this.hornEl.addEventListener("pointercancel", hornUp);
     this.hornEl.addEventListener("lostpointercapture", hornUp);
     this.hornEl.addEventListener("contextmenu", (ev) => ev.preventDefault());
+    // Nitrous (held), like the horn.
+    this.nitrousEl = el("tc", "🔥", side);
+    this.nitrousEl.dataset.touch = "nitrous";
+    this.nitrousEl.title = "nitrous (hold, with the gas down)";
+    const nitrousUp = (e: PointerEvent) => {
+      if (!this.nitrous) return;
+      e.preventDefault();
+      this.setNitrous(false);
+    };
+    this.nitrousEl.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        this.nitrousEl.setPointerCapture(e.pointerId);
+      } catch {
+        // synthetic events without an active pointer
+      }
+      this.touchedThisFrame = true;
+      this.setNitrous(true);
+    });
+    this.nitrousEl.addEventListener("pointerup", nitrousUp);
+    this.nitrousEl.addEventListener("pointercancel", nitrousUp);
+    this.nitrousEl.addEventListener("lostpointercapture", nitrousUp);
+    this.nitrousEl.addEventListener("contextmenu", (ev) => ev.preventDefault());
     this.modeEl = el("tc mode", "", side);
     this.modeEl.dataset.touch = "steerMode";
     this.modeEl.title = "steering: buttons or tilt";
@@ -468,9 +495,15 @@ export class TouchControls {
     this.hornEl.classList.toggle("on", on);
   }
 
+  private setNitrous(on: boolean): void {
+    this.nitrous = on;
+    this.nitrousEl.classList.toggle("on", on);
+  }
+
   /** Let go of everything (blur, tab hidden, controls hidden). */
   releaseAll(): void {
     this.setHorn(false);
+    this.setNitrous(false);
     for (const id of this.fingers.keys()) {
       for (const e of [this.steerEl, this.throttleEl, this.brakeEl, this.hbrakeEl]) {
         try {
@@ -505,9 +538,10 @@ export class TouchControls {
       gearDown: false,
       horn: this.horn,
       headlights: false,
+      nitrous: this.nitrous,
     };
     const tilting = this.mode === "tilt" && this.driving && this.tiltSteer !== 0;
-    const active = this.touchedThisFrame || this.fingers.size > 0 || tilting || this.horn;
+    const active = this.touchedThisFrame || this.fingers.size > 0 || tilting || this.horn || this.nitrous;
     this.touchedThisFrame = false;
     const edges = this.edges.splice(0);
     return { input, active, edges };

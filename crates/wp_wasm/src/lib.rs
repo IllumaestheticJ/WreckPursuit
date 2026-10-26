@@ -2121,6 +2121,26 @@ pub fn ffb(entity: u32) -> Result<Vec<f32>, JsValue> {
     })
 }
 
+/// Nitrous bottle `[fill 0..1, burning 0/1, strength, refill]` (`wp_vehicle::nitrous`):
+/// the HUD gauge. Strength / refill are the bottle's scale (1 for the player; AI rubberbanding
+/// raises them). Fire it with tool 1 in `set_input` (`[..., tool_use = 1]`).
+#[wasm_bindgen]
+pub fn nitrous(entity: u32) -> Result<Vec<f32>, JsValue> {
+    with(|s| {
+        s.vehicle(EntityId(entity))
+            .map(|v| {
+                let n = v.vehicle.nitrous();
+                vec![
+                    n.fill,
+                    if n.burning { 1.0 } else { 0.0 },
+                    n.scale.strength,
+                    n.scale.refill,
+                ]
+            })
+            .ok_or_else(|| format!("unknown entity {entity}"))
+    })
+}
+
 /// Traffic / police intent arrows, 8 floats each: `[entity, kind, from xyz, to xyz]`
 /// (kind 0 = traffic route, 1 = police target). **Placeholder hook**: empty until the
 /// lead exposes intents (request TB-5, deferred).
