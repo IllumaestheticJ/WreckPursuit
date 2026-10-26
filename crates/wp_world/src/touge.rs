@@ -85,6 +85,9 @@ pub const RAIL_H_M: f32 = 0.8;
 /// Guard rail section mass, kg: the steel beam and its posts once they have snapped. Light
 /// next to a car, so a car that breaks through carries it along instead of stopping.
 pub const RAIL_MASS_KG: f32 = 120.0;
+/// Length of the flare where a guard rail swings out from its verge to the back of a runoff
+/// apron (or back in), m along the road.
+pub const RAIL_FLARE_M: f32 = 24.0;
 /// Gap between the paved edge and the guard rail's face, m.
 pub const RAIL_GAP_M: f32 = 0.3;
 /// Level verge behind a guard rail before the fill slope drops away, m from the paved edge.
@@ -989,33 +992,59 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
         });
     }
 
-    // Guard rails along every downhill rail run, and at the back of downhill runoff aprons.
-    // Sections follow the rail's own line (longer than the centreline outside a bend), the
-    // beam (local −X) towards the road.
+    // Guard rails along every downhill rail run, and at the back of downhill runoff aprons,
+    // as one continuous line per stretch: where a rail run meets a runoff apron the rail
+    // flares out to the apron's back (and back in) over [`RAIL_FLARE_M`] instead of stopping.
+    // Sections follow the rail's own line (longer than the centreline outside a bend), share
+    // their end points with their neighbours (in plan and in height, pitched to the grade),
+    // and stand on the ground; the beam (local −X) faces the road.
     let mut rails = Vec::new();
+    let flare = (0.5 * RAIL_FLARE_M / STEP_M).round() as usize;
     for side in [-1.0f32, 1.0] {
+        let lat_of = |k: usize| match edge_of(k, side) {
+            EdgeKind::Rail => Some(half + RAIL_GAP_M + 0.5 * RAIL_W_M),
+            EdgeKind::Runoff if low[k] == side => Some(half + RUNOFF_W_M - 0.5 * RAIL_W_M),
+            _ => None,
+        };
         let mut k = 0;
         while k < nc {
-            let kind = edge_of(k, side);
-            let rail_lat = match kind {
-                EdgeKind::Rail => Some(half + RAIL_GAP_M + 0.5 * RAIL_W_M),
-                EdgeKind::Runoff if low[k] == side => Some(half + RUNOFF_W_M - 0.5 * RAIL_W_M),
-                _ => None,
-            };
+            if lat_of(k).is_none() {
+                k += 1;
+                continue;
+            }
             let mut j = k;
-            while j < nc && edge_of(j, side) == kind && (low[j] == side) == (low[k] == side) {
+            while j < nc && lat_of(j).is_some() {
                 j += 1;
             }
-            let Some(lat) = rail_lat else {
-                k = j;
-                continue;
-            };
-            let ks: Vec<usize> = (k..j.min(nc)).collect();
-            let line = offset_line(&centre, |q| surf.z_at(q, side * half), side * lat, &ks);
+            // Offset at each sample: the mean over ±`flare` samples within the run, so a step
+            // between the verge and the apron becomes a straight flare.
+            let line: Vec<V3> = (k..j)
+                .map(|q| {
+                    let (a, b) = (q.saturating_sub(flare).max(k), (q + flare).min(j - 1));
+                    let lat = (a..=b).filter_map(lat_of).sum::<f32>() / (b - a + 1) as f32;
+                    let r = geom::right_of(seg_dir(&centre, q));
+                    let p = geom::add(geom::xy(centre[q]), geom::scale(r, side * lat));
+                    let foot = rail_foot_z(
+                        surf.z_at(q, side * half),
+                        hf.height_on_triangles(p),
+                        lat - half,
+                    );
+                    [p[0], p[1], foot]
+                })
+                .collect();
             k = j;
             if line.len() < 2 {
                 continue;
             }
+            // Where the foot stands on the ground, average out the terrain's small bumps over
+            // ±4 m so neighbouring sections don't kink up and down.
+            let line: Vec<V3> = (0..line.len())
+                .map(|i| {
+                    let (a, b) = (i.saturating_sub(2), (i + 2).min(line.len() - 1));
+                    let z = line[a..=b].iter().map(|p| p[2]).sum::<f32>() / (b - a + 1) as f32;
+                    [line[i][0], line[i][1], z]
+                })
+                .collect();
             let lcum = geom::cumulative(&line);
             let run = *lcum.last().unwrap_or(&0.0);
             if run < 0.5 * RAIL_LEN_M {
@@ -1023,22 +1052,51 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
             }
             let count = (run / RAIL_LEN_M).round().max(1.0) as usize;
             let pitch = run / count as f32;
+            let ends: Vec<V3> = (0..=count)
+                .map(|c| geom::point_at(&line, &lcum, c as f32 * pitch).0)
+                .collect();
             for c in 0..count {
-                let (pa, _) = geom::point_at(&line, &lcum, c as f32 * pitch);
-                let (pb, _) = geom::point_at(&line, &lcum, (c + 1) as f32 * pitch);
-                let (pm, _) = geom::point_at(&line, &lcum, (c as f32 + 0.5) * pitch);
-                let along = geom::normalize(geom::sub(geom::xy(pb), geom::xy(pa)));
-                let facing = if side > 0.0 {
-                    along
-                } else {
-                    geom::scale(along, -1.0)
+                let (pa, pb) = (ends[c], ends[c + 1]);
+                // Forward (local +Y) runs with the road on the right side, against it on the
+                // left, so the beam (local −X) faces the road on both.
+                let (from, to) = if side > 0.0 { (pa, pb) } else { (pb, pa) };
+                let flat = geom::dist(geom::xy(from), geom::xy(to)).max(0.1);
+                let rise = to[2] - from[2];
+                let len = (flat * flat + rise * rise).sqrt();
+                let facing = geom::scale(geom::sub(geom::xy(to), geom::xy(from)), 1.0 / flat);
+                // Each end reaches past the joint by half the beam's mitre gap (its face is
+                // ~0.2 m off the line, so a bend opens a wedge there), plus 2 cm.
+                let turn_at = |e: usize| {
+                    if e == 0 || e == count {
+                        return 0.0;
+                    }
+                    let d0 = geom::normalize(geom::sub(geom::xy(ends[e]), geom::xy(ends[e - 1])));
+                    let d1 = geom::normalize(geom::sub(geom::xy(ends[e + 1]), geom::xy(ends[e])));
+                    let cross = d0[0] * d1[1] - d0[1] * d1[0];
+                    let dot = d0[0] * d1[0] + d0[1] * d1[1];
+                    wp_math::atan2(cross, dot).abs()
                 };
-                let len = geom::dist(geom::xy(pa), geom::xy(pb)).max(0.5);
+                let mitre = 0.25 * RAIL_W_M * turn_at(c).max(turn_at(c + 1));
+                let pitch_rad = wp_math::atan2(rise, flat);
+                let (sp, cp) = wp_math::sin_cos(pitch_rad);
+                // Box centre: the middle of the foot line, raised half the rail's height along
+                // its (pitched) up axis.
+                let up = [-sp * facing[0], -sp * facing[1], cp];
+                let mid = [
+                    0.5 * (pa[0] + pb[0]),
+                    0.5 * (pa[1] + pb[1]),
+                    0.5 * (pa[2] + pb[2]),
+                ];
                 rails.push(StaticProp {
                     kind: PropKind::GuardRail,
-                    pos: [pm[0], pm[1], pm[2] - CARVE_BELOW_M + RAIL_H_M * 0.5],
+                    pos: [
+                        mid[0] + up[0] * 0.5 * RAIL_H_M,
+                        mid[1] + up[1] * 0.5 * RAIL_H_M,
+                        mid[2] + up[2] * 0.5 * RAIL_H_M,
+                    ],
                     yaw: geom::yaw_of(facing),
-                    half_extents: [RAIL_W_M * 0.5, len * 0.5 + 0.02, RAIL_H_M * 0.5],
+                    pitch: pitch_rad,
+                    half_extents: [RAIL_W_M * 0.5, len * 0.5 + 0.02 + mitre, RAIL_H_M * 0.5],
                     mass_kg: RAIL_MASS_KG,
                 });
             }
@@ -1205,6 +1263,17 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
     TougeBuild { net, rails, track }
 }
 
+/// Height of a guard rail's foot `out` m beyond the paved edge (height `edge`), over terrain
+/// height `ground`: on the verge it follows the paved edge's line (less [`CARVE_BELOW_M`]),
+/// smooth along the road where the terrain triangles dip into the carve beside the paving;
+/// further out (a flare towards a runoff apron's back, the apron itself) it stands on the
+/// ground.
+fn rail_foot_z(edge: f32, ground: f32, out: f32) -> f32 {
+    let line = edge - CARVE_BELOW_M;
+    let w = smoothstep(1.5, RAIL_VERGE_M + 0.5, out);
+    line + (ground - line) * w
+}
+
 /// Unit XY direction of centreline segment `k`.
 fn seg_dir(pts: &[V3], k: usize) -> V2 {
     let k = k.min(pts.len() - 2);
@@ -1259,6 +1328,81 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{}: {e}", b.track.id));
             assert_eq!(b.net.surfaces.len(), 1, "{}", b.track.id);
             assert_eq!(b.net.pois.len(), 4, "{}", b.track.id);
+        }
+    }
+
+    /// Ends of rail section `r`'s foot line (its box's bottom edge along the middle), m.
+    fn rail_ends(r: &StaticProp) -> (V3, V3) {
+        let (sy, cy) = wp_math::sin_cos(r.yaw);
+        let (sp, cp) = wp_math::sin_cos(r.pitch);
+        let fwd = [-sy * cp, cy * cp, sp];
+        let up = [sy * sp, -cy * sp, cp];
+        let h = r.half_extents[1];
+        let foot = |k: f32| -> V3 {
+            [
+                r.pos[0] - up[0] * r.half_extents[2] + fwd[0] * h * k,
+                r.pos[1] - up[1] * r.half_extents[2] + fwd[1] * h * k,
+                r.pos[2] - up[2] * r.half_extents[2] + fwd[2] * h * k,
+            ]
+        };
+        (foot(-1.0), foot(1.0))
+    }
+
+    #[test]
+    fn guard_rail_sections_join_end_to_end() {
+        // Owner 2026-10-26: "the touge guardrails need to be connected together properly".
+        // Consecutive sections of a stretch meet (in plan and in height, on every grade);
+        // where a rail run meets a runoff apron the rail flares out to it instead of stopping
+        // (that left 7.6 m gaps); a stretch only ends where the rail does (a bank, a drop,
+        // the high side).
+        for b in all() {
+            let id = &b.track.id;
+            let mut stretches = 1;
+            for w in b.rails.windows(2) {
+                let (a0, a1) = rail_ends(&w[0]);
+                let (b0, b1) = rail_ends(&w[1]);
+                let d3 = |p: V3, q: V3| {
+                    let d = [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
+                    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+                };
+                let gap = [d3(a0, b0), d3(a0, b1), d3(a1, b0), d3(a1, b1)]
+                    .into_iter()
+                    .fold(f32::INFINITY, f32::min);
+                if gap > 20.0 {
+                    stretches += 1;
+                    continue;
+                }
+                // The joint: each end reaches 2 cm (plus its mitre) past it.
+                assert!(
+                    gap < 0.15,
+                    "{id}: rail sections at {:?} and {:?} are {gap:.2} m apart",
+                    w[0].pos,
+                    w[1].pos
+                );
+                // Neighbours line up: the beam doesn't kink by more than a bend's worth.
+                let dyaw = (w[0].yaw - w[1].yaw).rem_euclid(core::f32::consts::TAU);
+                let dyaw = dyaw.min(core::f32::consts::TAU - dyaw);
+                assert!(dyaw < 0.6, "{id}: kink {dyaw:.2} rad at {:?}", w[1].pos);
+                assert!(
+                    (w[0].pitch - w[1].pitch).abs() < 0.12,
+                    "{id}: pitch step at {:?}",
+                    w[1].pos
+                );
+            }
+            // Each stretch is a run of rail, runoff and flare between banks and drops.
+            let ends = b
+                .track
+                .edges
+                .iter()
+                .filter(|e| matches!(e.kind, EdgeKind::Bank | EdgeKind::Drop))
+                .count();
+            assert!(
+                stretches <= ends + 2,
+                "{id}: {stretches} stretches, {ends} bank/drop runs"
+            );
+            // On the pass's steepest grades the sections are pitched with it.
+            let steepest = b.rails.iter().map(|r| r.pitch.abs()).fold(0.0, f32::max);
+            assert!(steepest > 0.06, "{id}: steepest rail pitch {steepest:.3}");
         }
     }
 

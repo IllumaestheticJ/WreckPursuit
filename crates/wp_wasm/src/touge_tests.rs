@@ -149,6 +149,30 @@ fn a_square_hit_breaks_through_the_guard_rail() {
 }
 
 #[test]
+fn a_hard_angled_hit_breaks_rail_sections_off() {
+    // Owner 2026-10-26: guard rails must "be able to be broken off". 20° into the rail at
+    // 25 m/s (~8.6 m/s into its face, a typical overcooked corner) knocks sections loose.
+    let st = setup("touge_mistral_ridge", "up", "challenger");
+    let mut s = battle(&st, false, Wager::None, None);
+    s.run_ticks(240 * 4);
+    let (at, side) = longest(&s, EdgeKind::Rail);
+    launch(&mut s, PLAYER, at - 40.0, side, 20.0, 25.0);
+    s.run_ticks(240 * 3);
+    let loose = (0..s.sim().prop_count())
+        .filter(|&i| {
+            s.sim().prop_kind(i) == Some(wp_world::props::PropKind::GuardRail)
+                && s.sim().prop_pose(i).is_some_and(|(p, _)| {
+                    let r = s.sim().world().static_props().nth(i).unwrap();
+                    (p[0] - r.pos[0]).hypot(p[1] - r.pos[1]) > 0.3
+                })
+        })
+        .count();
+    assert!(loose >= 1, "no guard rail section broke off");
+    // Only the sections around the impact, not the whole run.
+    assert!(loose <= 8, "{loose} sections broke off");
+}
+
+#[test]
 fn the_guard_rail_holds_a_glancing_scrape() {
     let st = setup("touge_mistral_ridge", "up", "challenger");
     let mut s = battle(&st, false, Wager::None, None);
