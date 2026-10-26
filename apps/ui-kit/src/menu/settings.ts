@@ -15,6 +15,13 @@ export type GfxLevel = "auto" | "high" | "low";
 /** City draw distance choices, m (`0` = the quality level's own distance). */
 export const DRAW_DISTANCES = [0, 300, 600, 900, 1500, 3000] as const;
 
+/** How far traffic, police and roaming racers keep their detailed models (the testbed's
+ * `render/quality.ts` `CAR_DETAIL`): "auto" = the quality level's own distances. */
+export type CarDetail = "auto" | "near" | "far" | "max";
+
+/** Car detail choices, in menu order. */
+export const CAR_DETAILS: readonly CarDetail[] = ["auto", "near", "far", "max"];
+
 /** Speed units. */
 export type SpeedUnits = "kmh" | "mph";
 
@@ -70,6 +77,8 @@ export interface GameSettings {
   gfx: GfxLevel;
   /** m; 0 = from the quality level. */
   drawDistanceM: number;
+  /** Car model detail distance (owner request 2026-10-26: high-quality cars further out). */
+  carDetail: CarDetail;
   volumes: Volumes;
   /** Speak police radio lines (browser speech; owner playtest row 79). Off = squelch, static
    * and the radio strip's text only. The volume is the Police radio slider. */
@@ -101,6 +110,7 @@ export function defaultGameSettings(developer = true): GameSettings {
     version: 1,
     gfx: "auto",
     drawDistanceM: 0,
+    carDetail: "auto",
     volumes: { master: 0.8, engine: 1, effects: 1, police: 1, ambience: 0.5 },
     radioVoice: true,
     radioFilter: "all",
@@ -145,6 +155,7 @@ export function normalizeSettings(raw: unknown, base: GameSettings): GameSetting
     version: 1,
     gfx: oneOf(r.gfx, ["auto", "high", "low"] as const, base.gfx),
     drawDistanceM: dd,
+    carDetail: oneOf(r.carDetail, CAR_DETAILS, base.carDetail),
     volumes: {
       master: clamp01(v.master, base.volumes.master),
       engine: clamp01(v.engine, base.volumes.engine),

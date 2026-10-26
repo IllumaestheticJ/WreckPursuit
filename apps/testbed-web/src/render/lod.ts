@@ -180,8 +180,8 @@ export class LodDirector {
   /** Promoted traffic / police sim vehicles farther than this from the camera (m) are drawn by
    * the fleet (one instanced draw for all of them, mid-LOD mesh) instead of their own view
    * (full detailed mesh, ~40 draw calls each, per panel, skinned to the lattice: dents and
-   * crumple show). Every graphics profile sets it (render/quality.ts: ~30 m; 0 on touch =
-   * always the fleet); the player and AI racers always use their view. `VIEW_LOD_BAND_M` of
+   * crumple show). Every graphics profile sets it (render/quality.ts `CAR_DETAIL`: 80 m on
+   * high, 30 m on low, 0 on touch = always the fleet; the game menu's "Car detail" overrides); the player and AI racers always use their view. `VIEW_LOD_BAND_M` of
    * hysteresis so a car on the boundary does not flip drawers every frame. */
   viewDrawM = Infinity;
   /** Roaming street racers (AI-racer sim vehicles, src/ui/street.ts): handed to the fleet by

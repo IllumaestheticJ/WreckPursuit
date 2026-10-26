@@ -1698,6 +1698,7 @@ async function main(): Promise<void> {
     layers.suppress(dev ? [] : DEBUG_LAYERS);
     // Graphics (an explicit ?gfx= wins on load).
     if (prev || !params.get("gfx")) scene.quality.setMode(next.gfx);
+    scene.quality.setCarDetail(next.carDetail);
     const drawParam = Number(params.get("draw"));
     scene.drawDistanceM = next.drawDistanceM > 0 ? next.drawDistanceM : drawParam > 0 ? drawParam : scene.quality.drawDistanceM;
     weather.rainFraction = scene.quality.rainFraction;
