@@ -64,7 +64,7 @@ import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
 import { LotVisitView } from "../../ui-kit/src/garage/LotVisit";
 import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
-import { RaceView, racesForMap, type BetPick, type RaceFrame } from "./ui/race";
+import { RaceView, racesForMap, type BetPick, type BetStatus, type RaceFrame } from "./ui/race";
 import { GarageVisitView } from "./ui/garageVisit";
 import { PlaceVisitView } from "./ui/placeVisit";
 import { TougeView, type TougeChoice, type Wager } from "./ui/touge";
@@ -524,12 +524,13 @@ async function main(): Promise<void> {
       }
     },
     freeDrive: () => startFreeDrive(undefined, undefined, true),
-    // From the career garage: priced for the career car and its damage mode. Either way the
+    // From the career garage: priced for the career car as it is (mods move its class bracket)
+    // and its damage mode. Either way the
     // picker lists the races of the chosen map (main menu "Map", or the panel's city box).
     list: () =>
       racesForMap(
         racesUseCareer()
-          ? sim.raceList(careerCar(), sim.careerView().mode)
+          ? sim.careerRaceList()
           : sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value),
         citySel.value,
       ),
@@ -885,11 +886,13 @@ async function main(): Promise<void> {
     return WORLD_ID;
   };
   /** Career betting limits for the picker (`CareerProgress`: city bets need the Street tier). */
-  const careerBetStatus = (): { max: number; lock: string | null } => {
+  const careerBetStatus = (): BetStatus => {
     const p = sim.careerView().progress;
     const f = p.features.find((x) => x.feature === "city_betting");
     const lock = f && !f.unlocked ? `betting on races opens at ${f.needs} (${f.needed_rep} rep; you have ${p.rep})` : null;
-    return { max: lock ? 0 : p.max_bet_city, lock };
+    // The cash the race would be charged on: the live run's account mid-run, else the career's.
+    const cash = (sim.careerRunActive() ? sim.runAccount()?.cash : undefined) ?? p.credits;
+    return { max: lock ? 0 : p.max_bet_city, lock, cash };
   };
   /** Open the race or touge picker from the career garage. */
   const openCareerPicker = (which: "races" | "touge") => {

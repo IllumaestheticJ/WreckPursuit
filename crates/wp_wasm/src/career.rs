@@ -745,6 +745,20 @@ impl Career {
         simcli::data::load_car(&Overlay { files: &files }, &car.def_id).map_err(|e| e.to_string())
     }
 
+    /// The race picker priced for the active car as it is: its mods move its class index,
+    /// and with it the class bracket the purse and buy-in come from, so the stock car's cards
+    /// would advertise a different stake than the run pays (owner report 2026-10-26). Empty
+    /// stakes when there is no usable active car.
+    pub fn race_cards(&self) -> Vec<crate::race::RaceCard> {
+        let car = self
+            .profile
+            .account
+            .active_car
+            .and_then(|uid| self.profile.account.car(uid))
+            .and_then(|car| self.loaded_car(car).ok());
+        crate::race::race_cards(car.as_ref(), self.mode())
+    }
+
     /// The car's saved lattice damage, if any.
     pub fn lattice(&self, uid: CarUid) -> Result<Option<FullDamageSnapshot>, String> {
         self.profile
@@ -1933,6 +1947,11 @@ impl Career {
             None
         };
         session.begin_career(run)?;
+        // A picker race the career cannot pay the buy-in for does not start (owner report
+        // 2026-10-26: 651 cash still raced Loop 9 day). The account is untouched.
+        if let Some(why) = session.race().and_then(|r| r.entry_refused()) {
+            return Err(why.replace("buy-in refused: ", "Can't race: "));
+        }
         self.run = Some(ActiveRun {
             car: uid,
             start_seq: acct.next_event_seq,
@@ -2260,6 +2279,13 @@ pub fn career_save_json() -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn career_view_json() -> Result<String, JsValue> {
     with_career(view_json)
+}
+
+/// The career garage's race picker ([`crate::race::RaceCard`] array, as `race_list`): stakes
+/// for the active car with its mods, in the career's mode ([`Career::race_cards`]).
+#[wasm_bindgen]
+pub fn career_race_list() -> Result<String, JsValue> {
+    with_career(|c| Ok(json(&c.race_cards())))
 }
 
 /// The mod tree of car `uid` ([`ModTreeView`] JSON).
