@@ -471,7 +471,7 @@ fn preview_reports_sensible_numbers() {
         )
         .unwrap();
     assert!(caged.applied.lattice.beams.len() > s.lattice.beams.len());
-    assert!((caged.mass_kg - s.def.mass_kg - 45.0).abs() < 1e-3);
+    assert!((caged.mass_kg - s.def.mass_kg - 68.0).abs() < 1e-3);
     assert_eq!(caged.applied.detachable_requests.len(), 1);
     assert_eq!(
         caged.applied.detachable_requests[0].region,
@@ -480,7 +480,7 @@ fn preview_reports_sensible_numbers() {
 
     // Lattice node mass grows by the durability mass.
     let node_mass = |l: &wp_contracts::LatticeDef| l.nodes.iter().map(|n| n.mass_kg).sum::<f32>();
-    assert!((node_mass(&caged.applied.lattice) - node_mass(&s.lattice) - 45.0).abs() < 0.01);
+    assert!((node_mass(&caged.applied.lattice) - node_mass(&s.lattice) - 68.0).abs() < 0.01);
 }
 
 #[test]

@@ -18,6 +18,10 @@ Effects (externally tagged JSON):
   add mass; weakening (`scale < 1`) must not.
 - `{"Cosmetic": {"kind": "BodyKitFront", "value": "lip_a"}}` — body kits become detachable regions.
 - `{"Tool": {"kind": "RadarDetector", "tier": 1}}`.
+- `{"Ram": {"zone": "Front" | "Rear" | "Side", "mass_scale": 2.6, "dealt_scale": 2.2,
+  "taken_scale": 0.45}}` — battering ram on one face of the car in car-on-car hits: effective
+  mass multiplier (1..=4), damage dealt (1..=4), damage taken (0.25..=1). The mod must add mass.
+  Faces stack by multiplying. Applied by `wp_sim` (`ram.rs`, `docs/integration/ram-mods.md`).
 
 `visuals` (optional): parts the mod bolts on that you can see, beyond what its effects already say
 (`Cosmetic` effects and `wheels.tire_id` are drawn without it):

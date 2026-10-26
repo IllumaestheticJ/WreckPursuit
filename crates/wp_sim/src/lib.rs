@@ -18,6 +18,7 @@ mod physics;
 mod police_link;
 mod police_tools;
 mod props;
+mod ram;
 mod systems;
 mod traffic_link;
 mod weather_link;
@@ -158,6 +159,8 @@ pub struct SimVehicle {
     /// Tyre condition set by the career ([`Sim::set_tire_condition`]): per-wheel grip
     /// multiplier and deflation, applied on top of damage every tick.
     tire_condition: Option<([f32; 4], [f32; 4])>,
+    /// Battering-ram faces from its mods ([`Sim::set_ram_profile`]); stock by default.
+    ram: wp_economy::RamProfile,
     /// Run-flat tyres fitted ([`Sim::set_run_flat`]): punctures never deflate a tyre past
     /// [`wp_vehicle::vehicle::RUN_FLAT_MAX_DEFLATION`].
     run_flat: bool,
@@ -413,6 +416,7 @@ impl Sim {
             ghost_overstay: 0,
             nitrous_fire: false,
             tire_condition: None,
+            ram: wp_economy::RamProfile::default(),
             run_flat: false,
             cooling_tier: 0,
             player_steering: None,
@@ -942,6 +946,18 @@ impl Sim {
         Ok(())
     }
 
+    /// Set a vehicle's battering-ram faces (its mods' `wp_economy::AppliedMods::ram`): more
+    /// effective mass and damage dealt, less damage taken, in car-on-car hits on those faces
+    /// (see `ram.rs`). Like mods, not recorded in replays: set it before the first tick.
+    pub fn set_ram_profile(
+        &mut self,
+        id: EntityId,
+        profile: wp_economy::RamProfile,
+    ) -> Result<(), SimError> {
+        self.slot_mut(id)?.ram = profile;
+        Ok(())
+    }
+
     /// Fit or remove run-flat tyres on a vehicle (the career's `tires_runflat` mod,
     /// `wp_economy::ToolLoadout::run_flat` > 0). Spike strips, crash damage and a carried
     /// flat still puncture the tyres, but the handling never sees more than
@@ -1454,6 +1470,23 @@ impl Sim {
             &infos,
         );
         out.extend(std::mem::take(&mut tick_contacts.events));
+        // Battering-ram mods: effective mass (body impulses, before the vehicles read their
+        // bodies) and damage dealt / taken in car-on-car hits. On the solver's impulses, before
+        // any damage scaling below.
+        let ram_cars: Vec<ram::RamCar> = self
+            .vehicles
+            .iter()
+            .map(|v| ram::RamCar {
+                id: v.id,
+                body: v.body.body,
+                profile: v.ram,
+            })
+            .collect();
+        ram::apply(
+            &ram_cars,
+            &mut tick_contacts.per_vehicle,
+            &mut self.physics.bodies,
+        );
         // Arcade: each vehicle kind takes its own share of the collision impulse (player
         // racer 0.25, AI racers 0.5, AI police 2.0, player cops and traffic all of it). Before the filter, so
         // the scaled contacts are the ones quantised, recorded and replicated.

@@ -61,6 +61,8 @@ struct CarBuild {
     tools: ToolLoadout,
     /// Tyre width over stock, m.
     tire_width_delta_m: f32,
+    /// Battering-ram faces the mods give the car.
+    ram: wp_economy::RamProfile,
 }
 
 /// RNG salt of a career run's economy (capture consequences), mixed with the in-game day so
@@ -775,6 +777,7 @@ impl Career {
                 files,
                 tools: ToolLoadout::default(),
                 tire_width_delta_m: 0.0,
+                ram: wp_economy::RamProfile::default(),
             });
         }
         let base = base_car(&car.def_id)?;
@@ -797,6 +800,7 @@ impl Career {
             files,
             tools: p.applied.tools,
             tire_width_delta_m: width(v) - width(&base.def),
+            ram: p.applied.ram,
         })
     }
 
@@ -2068,6 +2072,9 @@ impl Career {
         // The garage's Nitrous Kit upgrades the stock bottle.
         let kit = wp_vehicle::nitrous::tune().kit_scale(self.nitrous_tier(uid));
         sim.set_nitrous_scale(player, kit)
+            .map_err(|e| e.to_string())?;
+        // Bull bars, push bars and armour hit like a battering ram.
+        sim.set_ram_profile(player, build.ram)
             .map_err(|e| e.to_string())?;
         // Run-flat inserts: a spiked or flat tyre limps on instead of folding onto the rim.
         sim.set_run_flat(player, tools.run_flat > 0)

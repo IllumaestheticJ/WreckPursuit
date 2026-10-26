@@ -205,6 +205,21 @@ pub fn load_modded_car(
     resolve(src, applied.vehicle, applied.lattice)
 }
 
+/// The battering-ram faces of `mods` on a car of `class` (`wp_economy::RamProfile`; mods
+/// inactive in `mode` do not count), for `wp_sim::Sim::set_ram_profile`.
+pub fn ram_profile(
+    catalog: &wp_economy::ModCatalog,
+    class: wp_contracts::VehicleClass,
+    mods: &[String],
+    mode: DamageMode,
+) -> Result<wp_economy::RamProfile, RunError> {
+    let set = catalog
+        .validate_set(class, mods)
+        .map_err(|e| RunError::Scenario("mods".into(), e.to_string()))?;
+    let active: Vec<_> = set.into_iter().filter(|m| m.allows_mode(mode)).collect();
+    Ok(wp_economy::RamProfile::of_mods(&active))
+}
+
 /// Load the mode table for a damage mode.
 pub fn load_mode(src: &dyn DataSource, mode: DamageMode) -> Result<ModeTable, RunError> {
     let rel = match mode {
