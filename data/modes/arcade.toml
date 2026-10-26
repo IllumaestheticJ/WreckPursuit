@@ -1,4 +1,4 @@
-# Arcade damage table = Simulation (sim.toml) with racer cars taking 20 % of the damage.
+# Arcade damage table = Simulation (sim.toml) with per-kind damage scales (see below).
 # Same code path, different numbers. Owned by workstream 03 (damage) for tuning.
 #
 # Owner request 2026-10-22: "make arcade damage 20% of what it is now ... for the player and AI
@@ -13,7 +13,13 @@
 # 12 % / 19 %; plastic (crumple) energy 18-23 %. At 0.2 it was only 12-16 %. Light-hit and
 # limp-mode rules are the same as Simulation.
 mode = "Arcade"
-racer_damage_scale = 0.25              # racers take ~20 % of the damage; traffic/police full
+racer_damage_scale = 0.25              # racers take ~20 % of the damage; traffic full
+# Owner request 2026-10-26: "make AI police damage 2X current value on arcade mode, make AI racer
+# damage also 2X". AI racers take racer_damage_scale x ai_racer_damage_mult of the impulse
+# (0.5); the player's racer keeps 0.25. AI police take police_damage_scale (2.0, they had full
+# 1.0). Set either back to 1.0 to undo. Damage only: physics is untouched.
+ai_racer_damage_mult = 2.0             # AI racers: 2x the player's share
+police_damage_scale = 2.0              # AI police: 2x full damage
 impulse_to_lattice_scale = 0.45
 plasticity_scale = 0.8
 beam_break_scale = 1.5

@@ -2074,6 +2074,12 @@ export interface MaterialDef {
  */
 export interface ModeTable {
   /**
+   * Extra multiplier for *AI* racers on top of `racer_damage_scale` (the player's racer
+   * does not get it). Arcade uses 2.0: AI racers take twice the player's share of a hit;
+   * omitted = 1.0.
+   */
+  ai_racer_damage_mult?: number;
+  /**
    * Multiplier on beam failure strain and detachable break impulses (higher = tougher).
    */
   beam_break_scale: number;
@@ -2107,10 +2113,16 @@ export interface ModeTable {
    */
   plasticity_scale: number;
   /**
+   * Multiplier on the contact impulses that reach the damage model of AI police cars.
+   * Arcade uses 2.0 (police wreck about twice as fast); omitted = 1.0 (full damage).
+   */
+  police_damage_scale?: number;
+  /**
    * Multiplier on the contact impulses that reach the damage model of *racer* cars (the
-   * player's racer and AI racers). Traffic and police (AI or player-driven) always take
-   * 1.0. Arcade uses 0.25, which leaves racers about 20 % of the damage (the lattice takes
-   * the first part of a hit elastically); omitted = 1.0.
+   * player's racer and AI racers; AI racers also get `ai_racer_damage_mult`). Traffic and
+   * player-driven police always take 1.0, AI police `police_damage_scale`. Arcade uses
+   * 0.25, which leaves racers about 20 % of the damage (the lattice takes the first part
+   * of a hit elastically); omitted = 1.0.
    */
   racer_damage_scale?: number;
   /**

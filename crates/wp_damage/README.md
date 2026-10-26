@@ -16,8 +16,11 @@ Simulation table plus `racer_damage_scale = 0.25`: [`scale_racer_contacts`] scal
 impulses of racer cars (the player's racer, AI racers) to 25 %, which leaves about 20 % of the
 damage (health lost, plastic energy; `data/modes/arcade.toml` has the sweep), before
 `apply_contacts`, which
-`wp_sim` does per `VehicleKind`; traffic and police cars take full (Simulation) damage. The
-barrier harness treats its car as a racer.
+`wp_sim` does per `VehicleKind`; traffic cars take full (Simulation) damage. Since contract
+v0.4.2 (owner request 2026-10-26) Arcade also has `ai_racer_damage_mult = 2.0` (AI racers take
+0.5 of the impulse, the player's racer 0.25) and `police_damage_scale = 2.0` (AI police; player
+cop seats stay at 1.0); `wp_sim::damage_scale` picks the scale and [`scale_contacts`] applies
+it. The barrier harness treats its car as a player racer.
 
 ```rust
 let mut dm = DamageModel::new(&car.lattice, &car.materials); // implements DamageSim

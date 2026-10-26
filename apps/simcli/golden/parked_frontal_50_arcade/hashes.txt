@@ -1,4 +1,4 @@
-# simcli hashes scenario=parked_frontal_50_arcade systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=parked_frontal_50_arcade systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 60 80bf18e86a44036b
 120 a63aa40bc3ea1b20
 180 e1609c25b5b6e48a

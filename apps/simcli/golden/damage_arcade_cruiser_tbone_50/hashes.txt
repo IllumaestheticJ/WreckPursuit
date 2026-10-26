@@ -1,4 +1,4 @@
-# simcli hashes scenario=damage_arcade_cruiser_tbone_50 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=damage_arcade_cruiser_tbone_50 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 60 b27ba32645422322
 120 8dfed6caa88906e3
 180 45974ae7a45df2bf
