@@ -1,5 +1,5 @@
-//! Standalone single-vehicle stepper: a Rapier world with a ground slab (top at z = 0) and one
-//! vehicle, configured and stepped **exactly** like `wp_sim` (same slab, same priming, same
+//! Standalone single-vehicle stepper: a Rapier world with a ground plane (z = 0) and one
+//! vehicle, configured and stepped **exactly** like `wp_sim` (same ground, same priming, same
 //! per-tick order), so a lone car on flat ground produces bit-identical states in both — this
 //! is the client-side prediction stepper for `wp_net` (NET-N2), and backs [`crate::metrics`],
 //! tests and the benchmark. Rewind with [`Rig::snapshot`] / [`Rig::restore`].
@@ -60,15 +60,19 @@ impl WorldQuery for FlatWorld {
     }
 }
 
-/// Half extents of the ground slab (identical to `wp_sim::PhysicsWorld`), m.
-pub const GROUND_HALF_EXTENTS: [f32; 3] = [5000.0, 5000.0, 0.5];
-
-/// The static ground collider used by `wp_sim` and the rig: a slab whose top face is z = 0.
+/// The static ground collider used by `wp_sim` and the rig: the half-space below the plane
+/// z = 0 (its collider translation is the plane height).
+///
+/// It was a 10 km × 10 km cuboid slab. In f32 its corners sit at ±5000 m, where one ulp is
+/// ≈ 0.5 mm, so Rapier's GJK between a chassis hull and the slab could not resolve a contact
+/// within half a millimetre of the surface: a crushed hull's corner touching the ground got a
+/// contact normal that was nearly horizontal (a wall), and its impulse of 10+ kN·s stopped
+/// the car dead or flipped it. In a crash the heavy car hit this as often as the light one,
+/// so momentum stopped following the cars' mass ratio (owner, 2026-10-26: "I'm in a much
+/// heavier ERG Shimada hitting NPC cars and I'm the one getting thrown around"). A half-space
+/// is an exact plane: Rapier and Parry handle it in closed form.
 pub fn ground_collider() -> Collider {
-    let [x, y, z] = GROUND_HALF_EXTENTS;
-    ColliderBuilder::cuboid(x, y, z)
-        .translation(Vector::new(0.0, 0.0, -z))
-        .build()
+    ColliderBuilder::halfspace(rapier3d::na::Unit::new_unchecked(Vector::Z)).build()
 }
 
 /// One vehicle in its own Rapier world. `W` supplies surfaces, limits and time of day

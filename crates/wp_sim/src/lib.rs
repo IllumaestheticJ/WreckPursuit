@@ -11,6 +11,7 @@
 #![warn(missing_docs)]
 
 mod contacts;
+mod crash_mass;
 mod nitrous_link;
 mod parked;
 mod physics;

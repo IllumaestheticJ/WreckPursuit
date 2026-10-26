@@ -860,10 +860,20 @@ impl Session {
         }
     }
 
-    /// Set a vehicle's assists (logged op).
-    pub fn set_assists(&mut self, id: EntityId, profile: AssistProfile) -> Result<(), String> {
+    /// Set a vehicle's assists (logged op). The car a race's autopilot drives keeps automatic
+    /// gears whatever the preset says: the AI driver has no shifter (grid_highway_sprint e2e,
+    /// on the testbed's manual-gear preset: the autopilot ran the whole race in 1st on the
+    /// limiter, and could not select reverse to back off a police car it was pinned against).
+    pub fn set_assists(&mut self, id: EntityId, mut profile: AssistProfile) -> Result<(), String> {
         self.live_check()?;
         let idx = self.idx(id)?;
+        if self
+            .race
+            .as_ref()
+            .is_some_and(|r| r.live().autopilot() && r.live().player() == id)
+        {
+            profile.auto_gears = true;
+        }
         self.log_op(idx, OpKind::Assists(profile))
     }
 

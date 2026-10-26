@@ -217,10 +217,9 @@ impl PhysicsWorld {
                 ..CityColliders::default()
             };
         };
-        // Park the slab.
-        let hz = wp_vehicle::rig::GROUND_HALF_EXTENTS[2];
+        // Park the ground plane.
         if let Some(c) = self.colliders.get_mut(self.ground) {
-            c.set_translation(Vector::new(0.0, 0.0, SAFETY_FLOOR_Z - hz));
+            c.set_translation(Vector::new(0.0, 0.0, SAFETY_FLOOR_Z));
             c.set_collision_groups(terrain_groups());
         }
         added.push(self.ground);
@@ -787,9 +786,8 @@ fn mesh_tile_colliders(
 /// The flat slab as [`PhysicsWorld::set_city_ground`] parks it under a city with terrain (a
 /// safety floor at [`SAFETY_FLOOR_Z`] in the terrain group). For client prediction rigs.
 pub fn parked_slab_collider() -> Collider {
-    let hz = wp_vehicle::rig::GROUND_HALF_EXTENTS[2];
     let mut c = wp_vehicle::rig::ground_collider();
-    c.set_translation(Vector::new(0.0, 0.0, SAFETY_FLOOR_Z - hz));
+    c.set_translation(Vector::new(0.0, 0.0, SAFETY_FLOOR_Z));
     c.set_collision_groups(terrain_groups());
     c
 }

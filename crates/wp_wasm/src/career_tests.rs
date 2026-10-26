@@ -1226,6 +1226,32 @@ fn the_career_picker_prices_the_modded_car_like_the_run() {
     }
 }
 
+/// The autopilot drives the player's car on automatic gears even when the player's preset is
+/// a manual box (grid_highway_sprint e2e: on the testbed's manual preset it ran in 1st all
+/// race and, pinned against a police car, could not select reverse and was captured).
+#[test]
+fn the_autopilot_keeps_automatic_gears_on_a_manual_preset() {
+    let def = wp_race::catalog::race("grid_highway_sprint").unwrap();
+    let manual = wp_contracts::AssistProfile {
+        auto_gears: false,
+        ..wp_contracts::AssistProfile::keyboard_default()
+    };
+    for autopilot in [true, false] {
+        let city = crate::race::race_city(&def, "");
+        let sc =
+            crate::race::race_scenario_in(&def, "lindwurm_4t", DamageMode::Arcade, autopilot, city)
+                .unwrap();
+        let mut s = crate::session::Session::new(sc, false).unwrap();
+        s.set_assists(wp_contracts::EntityId(1), manual).unwrap();
+        s.run_ticks(1);
+        let player = s.sim().vehicles().iter().find(|v| v.id.0 == 1).unwrap();
+        assert_eq!(
+            player.assists.auto_gears, autopilot,
+            "autopilot {autopilot}"
+        );
+    }
+}
+
 /// A high-stakes (illegal daytime) meet is invite only: the career needs a bounty to start it,
 /// the picker card says so, and a bigger bounty advertises a bigger purse bonus.
 #[test]

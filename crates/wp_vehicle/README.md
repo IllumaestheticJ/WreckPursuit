@@ -468,8 +468,9 @@ Scenarios live in
 `cargo run --release -p wp_vehicle --example bench` (cloud container, 3 runs, 2026-10-19). The
 24-car numbers are vehicle-only (flat-ground probe, no Rapier); about 8× under budget. Round
 12b (2026-10-20): the four tyre sweeps (cylinder shape casts) cost ≈ 2.5 µs each against the
-rig's 10 km ground slab; with a half-space ground the rig measured 15.5 µs/tick (suggested to
-the lead, not changed: `wp_sim` parks the slab under hilly cities).
+rig's 10 km ground slab; with a half-space ground the rig measured 15.5 µs/tick. The ground is
+a half-space since 2026-10-26 (`rig::ground_collider`, `docs/integration/crash-mass.md`: the
+slab's f32 precision gave crushed hulls sideways ground contacts in crashes).
 
 **Sim perf pass (`lead/sim-perf`, 2026-10-20, `docs/integration/sim-perf.md`).** In the city
 the 12b tyre sweep cost ~7 µs per wheel (Rapier GJK against every road / kerb triangle and

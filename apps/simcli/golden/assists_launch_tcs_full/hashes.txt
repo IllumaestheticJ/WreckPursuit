@@ -1,5 +1,5 @@
 # simcli hashes scenario=assists_launch_tcs_full systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
-240 69c48c9e64c49083
-480 c05d384488e2d99d
-720 02b18ee208417856
-960 714e7cca366071d6
+240 53c9f035d926622c
+480 9426dece26757bc3
+720 6ac0c35047a063b4
+960 9058f3845c5150cb
