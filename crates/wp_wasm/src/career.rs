@@ -43,6 +43,7 @@ use wp_economy::{
     CarLocation, CarSpec, CarUid, CareerProfile, CareerProgress, Condition, DamageReport, Economy,
     EconomyError, EconomyEvent, EventReason, ImpoundStatus, Listing, ListingGrade, LotKind, Money,
     OwnedCar, ProgressUpdate, RepTier, RepairOption, RepairQuote, RunEnd, ShopContext, ShopKind,
+    ToolLoadout,
 };
 
 use crate::data::mem_data;
@@ -711,9 +712,14 @@ impl Career {
     /// definitions keep the base ids (no other vehicle uses a roster car's files: police
     /// drive `sentinel_*`, traffic `debug_sedan`, and neither is sold).
     pub fn car_files(&self, car: &OwnedCar) -> Result<BTreeMap<String, String>, String> {
+        Ok(self.car_build(car)?.0)
+    }
+
+    /// [`Self::car_files`] and the gadgets the car's mods fit (run-flat tyres...).
+    fn car_build(&self, car: &OwnedCar) -> Result<(BTreeMap<String, String>, ToolLoadout), String> {
         let mut files = BTreeMap::new();
         if car.mods.is_empty() && self.econ.wear_torque_factor(car) >= 1.0 {
-            return Ok(files);
+            return Ok((files, ToolLoadout::default()));
         }
         let base = base_car(&car.def_id)?;
         let p = self
@@ -730,7 +736,7 @@ impl Career {
             format!("lattices/{}.json", l.id),
             serde_json::to_string(l).map_err(|e| e.to_string())?,
         );
-        Ok(files)
+        Ok((files, p.applied.tools))
     }
 
     /// The car as the sim builds it (mods applied).
@@ -1859,7 +1865,7 @@ impl Career {
             heat
         };
         sc.mode = self.mode();
-        let files = self.car_files(&car)?;
+        let (files, tools) = self.car_build(&car)?;
         let mut session = Session::new_with_data(sc, false, &Overlay { files: &files })?;
         let player = *session.entities().first().ok_or("no player entity")?;
         if let Some(snap) = self.lattice(uid)? {
@@ -1878,6 +1884,11 @@ impl Career {
                 .set_tire_condition(player, grip, flat)
                 .map_err(|e| e.to_string())?;
         }
+        // Run-flat inserts: a spiked or flat tyre limps on instead of folding onto the rim.
+        session
+            .sim_before_start_mut()?
+            .set_run_flat(player, tools.run_flat > 0)
+            .map_err(|e| e.to_string())?;
         Ok((session, player))
     }
 

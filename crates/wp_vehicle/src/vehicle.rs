@@ -251,6 +251,22 @@ pub const RIM_GRIP: f32 = 0.35;
 /// pulls toward it).
 pub const FLAT_ROLLING_RESISTANCE: f32 = 4.0;
 
+/// Deflation a run-flat tyre (the `tires_runflat` mod) never goes past: its stiff sidewall
+/// carries the car, so a punctured run-flat sits a little low, grips a little less and drags a
+/// little, but never folds onto its rim (well under [`RIM_FROM`]).
+pub const RUN_FLAT_MAX_DEFLATION: f32 = 0.2;
+
+/// Deflation the tyre model sees for a tyre at deflation `p` (0..=1): `p` itself, or capped at
+/// [`RUN_FLAT_MAX_DEFLATION`] when the car has run-flat tyres.
+pub fn run_flat_deflation(p: f32, run_flat: bool) -> f32 {
+    let p = p.clamp(0.0, 1.0);
+    if run_flat {
+        p.min(RUN_FLAT_MAX_DEFLATION)
+    } else {
+        p
+    }
+}
+
 /// Grip factor of a tyre at deflation `p` (0..=1): `1 − p / 2`, the rim's [`RIM_GRIP`] from
 /// [`RIM_FROM`].
 pub fn puncture_grip(p: f32) -> f32 {
