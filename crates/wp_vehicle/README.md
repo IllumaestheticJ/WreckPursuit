@@ -363,6 +363,14 @@ So the effective split is the bias only when both axles have the **same per-whee
 Damage `brake_scale` and ABS then modulate per wheel; the handbrake adds
 `handbrake_rear_nm` to each rear wheel.
 
+## Nitrous (`nitrous.rs`, owner 2026-10-26)
+
+One bottle per car, fired by `VehicleInput::tool_use == 1` with the throttle down in a forward
+gear: more engine torque while it burns, refills by itself. AI bottles are scaled (stronger,
+faster refill) by `wp_sim` the further they trail their target. Tuning: `data/tune/nitrous.toml`;
+details in `docs/integration/nitrous.md`. Tests: `nitrous.rs` unit tests and `tests/nitrous.rs`
+(a rolling car gains about 4 m/s more in 6 s of burn; the far-behind AI bottle 1.5 m/s on top).
+
 ## Snapshots and client prediction
 
 `Vehicle::snapshot()` / `restore()` capture the **full** dynamic state as an opaque ~0.9 kB

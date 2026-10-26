@@ -16,6 +16,10 @@
 # at least `min_throttle`, the steering at most `max_steer` and the car faster than
 # `min_speed_mps`. An AI with no target in range never fires.
 #
+# `[kit]` is the garage's Nitrous Kit (`elec_nitrous_1` / `elec_nitrous_2`): the player's
+# bottle × `strength` (torque gain) and × `capacity` (burn time). Without a kit the car keeps
+# the stock bottle above. The kit's tier counts the same in every damage mode.
+#
 # Physics is the same in every damage mode (owner rule 2026-10-20); nothing here depends on it.
 
 [bottle]
@@ -25,6 +29,10 @@ refill_delay_s = 2.0
 torque_gain = 0.40
 min_throttle = 0.5
 rearm_fill = 0.15
+
+[kit]
+tier1 = { strength = 1.25, capacity = 1.25 }
+tier2 = { strength = 1.50, capacity = 1.50 }
 
 [racer]
 fire_gap_m = 8.0

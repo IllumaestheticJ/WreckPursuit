@@ -1145,6 +1145,21 @@ impl Career {
         Ok(paid)
     }
 
+    /// Nitrous Kit tier fitted to car `uid` (0 = the stock bottle). Read in every damage
+    /// mode: the owner rule (2026-10-20) keeps physics the same in Arcade and Simulation, so
+    /// the kit's shop-side "Arcade only" does not switch the bottle off.
+    pub fn nitrous_tier(&self, uid: CarUid) -> u8 {
+        let Some(c) = self.profile.account.car(uid) else {
+            return 0;
+        };
+        let Ok(base) = base_car(&c.def_id) else {
+            return 0;
+        };
+        self.econ
+            .preview(&base.def, &base.lattice, &c.mods, None)
+            .map_or(0, |p| p.applied.tools.nitrous)
+    }
+
     /// Grip and deflation of car `uid`'s tyres for the sim.
     pub fn tire_effects(&self, uid: CarUid) -> Option<([f32; 4], [f32; 4])> {
         let c = self.profile.account.car(uid)?;
@@ -1878,6 +1893,12 @@ impl Career {
                 .set_tire_condition(player, grip, flat)
                 .map_err(|e| e.to_string())?;
         }
+        // The garage's Nitrous Kit upgrades the stock bottle.
+        let kit = wp_vehicle::nitrous::tune().kit_scale(self.nitrous_tier(uid));
+        session
+            .sim_before_start_mut()?
+            .set_nitrous_scale(player, kit)
+            .map_err(|e| e.to_string())?;
         Ok((session, player))
     }
 

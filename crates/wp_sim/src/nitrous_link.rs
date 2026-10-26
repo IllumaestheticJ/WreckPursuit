@@ -57,7 +57,10 @@ impl Sim {
                 VehicleKind::AiRacer => {
                     let p = slot.vehicle.chassis().pos.to_array();
                     let nearest = players.iter().copied().min_by(|a, b| {
-                        let d = |q: &[f32; 3]| (q[0] - p[0]).powi(2) + (q[1] - p[1]).powi(2);
+                        let d = |q: &[f32; 3]| {
+                            let (dx, dy) = (q[0] - p[0], q[1] - p[1]);
+                            dx * dx + dy * dy
+                        };
                         d(a).total_cmp(&d(b))
                     });
                     (&tune.racer, nearest)

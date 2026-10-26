@@ -1118,3 +1118,32 @@ fn stopping_in_a_garage_or_safehouse_on_a_career_run_opens_the_place() {
     let close = c.finish_run(&mut s).unwrap();
     assert_eq!(close.end, RunEnd::Free);
 }
+
+/// The garage's Nitrous Kit upgrades the career car's bottle, in both damage modes (owner
+/// rule: physics never differs by mode); a stock car keeps the stock bottle.
+#[test]
+fn nitrous_kit_upgrades_the_career_bottle() {
+    for mode in [DamageMode::Arcade, DamageMode::Simulation] {
+        let (mut c, uid) = career_with("kestrel_ts", 40_000, mode);
+        let scale = |c: &mut Career| {
+            let s = c.start_run(free_drive("kestrel_ts", mode, false)).unwrap();
+            let n = s.vehicle(player(&s)).unwrap().vehicle.nitrous();
+            c.finish_run(&mut { s }).unwrap();
+            n.scale
+        };
+        assert_eq!(c.nitrous_tier(uid), 0);
+        assert_eq!(scale(&mut c), wp_vehicle::nitrous::NitrousScale::PLAYER);
+        c.profile_mut().account.cash = 40_000;
+        c.install_mod(uid, "engine_fuel_system").unwrap();
+        // The shop marks the kit Arcade only; fit it in Arcade for the Simulation career too.
+        if mode == DamageMode::Simulation {
+            c.profile_mut().mode = DamageMode::Arcade;
+        }
+        c.install_mod(uid, "elec_nitrous_1").unwrap();
+        c.profile_mut().mode = mode;
+        assert_eq!(c.nitrous_tier(uid), 1, "{mode:?}");
+        let kit = scale(&mut c);
+        assert_eq!(kit, wp_vehicle::nitrous::tune().kit_scale(1), "{mode:?}");
+        assert!(kit.strength > 1.0 && kit.capacity > 1.0);
+    }
+}

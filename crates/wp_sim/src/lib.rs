@@ -767,6 +767,18 @@ impl Sim {
         Ok(())
     }
 
+    /// Set a car's nitrous bottle scale (the player's Nitrous Kit,
+    /// `wp_vehicle::nitrous::NitrousTune::kit_scale`). AI racers and police get theirs from
+    /// the rubberbanding every tick, which overrides this.
+    pub fn set_nitrous_scale(
+        &mut self,
+        id: EntityId,
+        scale: wp_vehicle::nitrous::NitrousScale,
+    ) -> Result<(), SimError> {
+        self.slot_mut(id)?.vehicle.set_nitrous_scale(scale);
+        Ok(())
+    }
+
     /// Re-apply a vehicle's body inertia (`wp_vehicle::Vehicle::body_inertia`) after a lab
     /// ride override changed it (the hidden tuning panel). Lab-only: not a replay op.
     pub fn refresh_body_inertia(&mut self, id: EntityId) -> Result<(), SimError> {

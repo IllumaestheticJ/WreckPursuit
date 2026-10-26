@@ -83,6 +83,7 @@ impl AiNitrous {
         NitrousScale {
             strength: self.strength.at(t),
             refill: self.refill.at(t),
+            capacity: 1.0,
         }
     }
 
@@ -98,12 +99,34 @@ impl AiNitrous {
     }
 }
 
+/// One Nitrous Kit tier's bottle multipliers.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KitTier {
+    /// Torque gain multiplier.
+    pub strength: f32,
+    /// Burn time multiplier (bottle size).
+    pub capacity: f32,
+}
+
+/// The garage's Nitrous Kit tiers (`wp_economy::ToolLoadout::nitrous`).
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KitTiers {
+    /// `elec_nitrous_1`.
+    pub tier1: KitTier,
+    /// `elec_nitrous_2`.
+    pub tier2: KitTier,
+}
+
 /// `data/tune/nitrous.toml`.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NitrousTune {
     /// The bottle.
     pub bottle: BottleDef,
+    /// Nitrous Kit tiers (player bottle upgrades).
+    pub kit: KitTiers,
     /// AI street racers.
     pub racer: AiNitrous,
     /// AI police.
@@ -137,7 +160,30 @@ impl NitrousTune {
                 }
             }
         }
+        let (k1, k2) = (t.kit.tier1, t.kit.tier2);
+        if !(1.0 <= k1.strength
+            && k1.strength <= k2.strength
+            && 1.0 <= k1.capacity
+            && k1.capacity <= k2.capacity)
+        {
+            return Err("kit: need 1 <= tier1 <= tier2 (strength and capacity)".into());
+        }
         Ok(t)
+    }
+
+    /// The player's bottle scale with Nitrous Kit `tier` fitted (0 = stock bottle; above 2
+    /// counts as 2).
+    pub fn kit_scale(&self, tier: u8) -> NitrousScale {
+        let k = match tier {
+            0 => return NitrousScale::PLAYER,
+            1 => self.kit.tier1,
+            _ => self.kit.tier2,
+        };
+        NitrousScale {
+            strength: k.strength,
+            refill: 1.0,
+            capacity: k.capacity,
+        }
     }
 }
 
@@ -157,13 +203,16 @@ pub struct NitrousScale {
     pub strength: f32,
     /// Refill speed multiplier.
     pub refill: f32,
+    /// Bottle size (burn time) multiplier: the Nitrous Kit.
+    pub capacity: f32,
 }
 
 impl NitrousScale {
-    /// The unscaled bottle.
+    /// The unscaled (stock) bottle.
     pub const PLAYER: Self = Self {
         strength: 1.0,
         refill: 1.0,
+        capacity: 1.0,
     };
 }
 
@@ -196,7 +245,7 @@ impl Default for Nitrous {
 
 impl Nitrous {
     /// Number of floats in [`Nitrous::to_array`].
-    pub const LEN: usize = 6;
+    pub const LEN: usize = 7;
 
     /// A full, armed bottle at the player's scale.
     pub fn full() -> Self {
@@ -225,7 +274,7 @@ impl Nitrous {
         self.burning =
             request && can_burn && self.armed && self.fill > 0.0 && throttle >= def.min_throttle;
         if self.burning {
-            self.fill = (self.fill - dt / def.burn_s).max(0.0);
+            self.fill = (self.fill - dt / (def.burn_s * self.scale.capacity)).max(0.0);
             if self.fill <= 0.0 {
                 self.armed = false;
             }
@@ -249,6 +298,7 @@ impl Nitrous {
             self.since_burn_s,
             self.scale.strength,
             self.scale.refill,
+            self.scale.capacity,
         ]
     }
 
@@ -262,6 +312,7 @@ impl Nitrous {
             scale: NitrousScale {
                 strength: a[4],
                 refill: a[5],
+                capacity: a[6],
             },
         }
     }
@@ -385,6 +436,26 @@ mod tests {
     }
 
     #[test]
+    fn kit_tiers_make_a_bigger_stronger_bottle() {
+        let t = tune();
+        assert_eq!(t.kit_scale(0), NitrousScale::PLAYER);
+        let (k1, k2) = (t.kit_scale(1), t.kit_scale(2));
+        assert!(k1.strength > 1.0 && k2.strength > k1.strength);
+        assert_eq!(t.kit_scale(5), k2);
+        let b = t.bottle;
+        let mut stock = Nitrous::full();
+        let mut kit = Nitrous {
+            scale: k2,
+            ..Nitrous::full()
+        };
+        let gain = run(&mut kit, true, b.burn_s);
+        run(&mut stock, true, b.burn_s);
+        assert_eq!(stock.fill, 0.0);
+        assert!((kit.fill - (1.0 - 1.0 / k2.capacity)).abs() < 0.01);
+        assert!((gain - (1.0 + b.torque_gain * k2.strength)).abs() < 1e-6);
+    }
+
+    #[test]
     fn rejects_an_ai_weaker_than_the_player() {
         let bad = NITROUS_TOML.replace("near = 1.10", "near = 0.90");
         assert!(NitrousTune::parse(&bad).is_err());
@@ -400,6 +471,7 @@ mod tests {
             scale: NitrousScale {
                 strength: 1.2,
                 refill: 2.0,
+                capacity: 1.0,
             },
         };
         assert_eq!(Nitrous::from_array(n.to_array()), n);
