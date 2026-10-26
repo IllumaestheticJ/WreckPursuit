@@ -158,11 +158,14 @@ mod tests {
         assert!(behind.scale.strength > nitrous::tune().racer.strength.near);
         assert!(behind.scale.refill > nitrous::tune().racer.refill.near);
         assert_eq!(h, ai_bottle(VehicleKind::AiRacer, 120.0).1, "deterministic");
-        // The player behind the AI (it leads): it may still burn, with the player's bottle
+        // The player just behind the AI (it leads): it may still burn, with the player's bottle
         // (owner 2026-10-26: "AI racers can use nitrous if they're ahead (just normal regen)").
-        let (ahead, _) = ai_bottle(VehicleKind::AiRacer, -120.0);
+        let (ahead, _) = ai_bottle(VehicleKind::AiRacer, -20.0);
         assert!(ahead.fill < 1.0, "burned: {}", ahead.fill);
         assert_eq!(ahead.scale, wp_vehicle::nitrous::NitrousScale::PLAYER);
+        // A clear leader (the player beyond `ahead_gap_m` behind) does not burn.
+        let (clear, _) = ai_bottle(VehicleKind::AiRacer, -120.0);
+        assert_eq!(clear.fill, 1.0, "clear leader burned: {}", clear.fill);
     }
 
     /// A player's car burns nitrous only with the Nitrous Kit (owner decision 2026-10-26).
