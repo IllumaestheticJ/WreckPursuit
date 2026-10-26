@@ -462,6 +462,10 @@ export const sim = {
   mapStaticJson: (): string => wasm.map_static_json(),
   /** Per-frame map data for `player` (units, tools, search zone; layout in ui-kit `src/map/data.ts`). */
   mapDynamic: (player: number): Float32Array => wasm.map_dynamic(player),
+  /** map_dynamic() with every police unit and tool, whatever the career car's gadgets (3D world). */
+  mapDynamicWorld: (player: number): Float32Array => wasm.map_dynamic_world(player),
+  /** Career gadgets `[radar, scanner, fake_plates]` (mod tiers), empty outside a career run. */
+  playerGadgets: (): Float32Array => wasm.player_gadgets(),
   stateHash: (): string => wasm.state_hash(),
   latticeNodes: (entity: number): Float32Array => wasm.lattice_nodes(entity),
   latticeRest: (entity: number): Float32Array => wasm.lattice_rest(entity),

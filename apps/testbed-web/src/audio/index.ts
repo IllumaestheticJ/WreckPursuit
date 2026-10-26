@@ -71,6 +71,8 @@ export class AudioSystem {
   private lastStats: DirectorStats | null = null;
   /** Scanner tier the director was given last ("None" hears nothing). */
   private tier = "Pro";
+  /** The career car's scanner tier (setCareerScanner), null outside a career run. */
+  private careerTier: string | null = null;
   /** Shows every line the scanner says (the radio strip, main.ts); `tier` = police priority
    * tier (row 144), 0 unknown. */
   onRadioSay: ((unit: number, text: string, tier: number) => void) | null = null;
@@ -322,7 +324,20 @@ export class AudioSystem {
    * radio strip through RadioSay, in sync with the voice. Otherwise the strip shows police
    * events directly. */
   hearsRadio(): boolean {
-    return !this.failed && this.ctx?.state === "running" && !!this.scanner && this.tier !== "None";
+    return !this.failed && this.ctx?.state === "running" && !!this.scanner && (this.careerTier ?? this.tier) !== "None";
+  }
+
+  /** A career car without a police scanner: no radio at all (not even on the strip). */
+  radioOff(): boolean {
+    return this.careerTier === "None";
+  }
+
+  /** The career car's police scanner mod tier (0 none, 1 Police Scanner, 2 Decrypting
+   * Scanner), or null outside a career run. In a career run the car's scanner sets the tier
+   * (wp_wasm `career_scanner_tier`: Pro / Elite) and the panel's choice waits for the sandbox. */
+  setCareerScanner(modTier: number | null): void {
+    this.careerTier = modTier === null ? null : modTier <= 0 ? "None" : modTier === 1 ? "Pro" : "Elite";
+    this.safe(() => audioBridge.setScannerTier(this.careerTier ?? this.tier));
   }
 
   /** speechSynthesis.speak calls so far (e2e) and whether speech exists in this browser. */

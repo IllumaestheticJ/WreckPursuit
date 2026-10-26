@@ -144,6 +144,9 @@ pub struct SimVehicle {
     /// Run-flat tyres fitted ([`Sim::set_run_flat`]): punctures never deflate a tyre past
     /// [`wp_vehicle::vehicle::RUN_FLAT_MAX_DEFLATION`].
     run_flat: bool,
+    /// Reinforced cooling tier ([`Sim::set_cooling_tier`]): 0 stock; higher tiers slow the
+    /// overheat of a failed radiator ([`COOLING_OVERHEAT_SCALE`]).
+    cooling_tier: u8,
     /// Dormant ([`Sim::set_dormant`]): a fixed body, no vehicle or damage-motion step.
     dormant: bool,
     /// May drive in light mode far from every player ([`Sim::set_light_when_far`]).
@@ -391,6 +394,7 @@ impl Sim {
             ghost_overstay: 0,
             tire_condition: None,
             run_flat: false,
+            cooling_tier: 0,
             player_steering: None,
             dormant: false,
             light_when_far: false,
@@ -916,6 +920,15 @@ impl Sim {
         Ok(())
     }
 
+    /// Set a vehicle's reinforced cooling tier (the career's radiator / oil cooler mods,
+    /// `wp_economy::ToolLoadout::reinforced_cooling`; 0 = stock): a failed radiator heats the
+    /// engine [`COOLING_OVERHEAT_SCALE`] as fast, so the car limps further before it cooks.
+    /// Like mods, not recorded in replays: set it before the first tick of a session.
+    pub fn set_cooling_tier(&mut self, id: EntityId, tier: u8) -> Result<(), SimError> {
+        self.slot_mut(id)?.cooling_tier = tier;
+        Ok(())
+    }
+
     /// Tyre deflation a vehicle drives on (FL, FR, RL, RR; 0 inflated … 1 flat): the worst of
     /// crash damage, spike strips and the career tyre condition, capped by run-flat tyres.
     /// Exactly what the handling uses; for the HUD and audio.
@@ -926,12 +939,7 @@ impl Sim {
             .find(|v| v.id == id)
             .ok_or(SimError::UnknownEntity(id))?;
         let mut effects = slot.damage.handling_effects();
-        merge_tire_effects(
-            &mut effects,
-            self.police.tire_puncture(id),
-            slot.tire_condition,
-            slot.run_flat,
-        );
+        merge_mod_effects(&mut effects, self.police.tire_puncture(id), slot);
         Ok(effects.tire_puncture)
     }
 
@@ -1467,12 +1475,7 @@ impl Sim {
                     self.applied_contacts.push((slot.id, contacts.clone()));
                 }
                 let mut effects = slot.damage.handling_effects();
-                merge_tire_effects(
-                    &mut effects,
-                    self.police.tire_puncture(slot.id),
-                    slot.tire_condition,
-                    slot.run_flat,
-                );
+                merge_mod_effects(&mut effects, self.police.tire_puncture(slot.id), slot);
                 slot.vehicle.apply_damage_effects(&effects);
             }
             self.sync_damage_to_physics();
@@ -1719,27 +1722,33 @@ fn hash_nodes_lockstep(hashers: &mut [StateHasher], nodes: &[&[[f32; 3]]]) {
 
 /// Velocity change one tick's contacts give a body of `mass_kg`, m/s: the magnitude of the
 /// summed normal and friction impulses (chassis space) over the mass.
+/// Overheat rate of a failed radiator per reinforced cooling tier (index = tier, clamped):
+/// stock, aluminium radiator / oil cooler, race radiator.
+pub const COOLING_OVERHEAT_SCALE: [f32; 3] = [1.0, 0.7, 0.5];
+
 /// Merge spike-strip deflation (`wp_police`) and the career tyre condition (worn tread grips
-/// less, a flat stays flat) into a vehicle's damage effects, then cap every tyre's deflation
-/// for run-flats ([`wp_vehicle::vehicle::run_flat_deflation`]).
-fn merge_tire_effects(
+/// less, a flat stays flat) into a vehicle's damage effects, cap every tyre's deflation for
+/// run-flats ([`wp_vehicle::vehicle::run_flat_deflation`]) and slow the overheat for
+/// reinforced cooling ([`COOLING_OVERHEAT_SCALE`]).
+fn merge_mod_effects(
     effects: &mut wp_contracts::HandlingEffects,
     spikes: [f32; 4],
-    tire_condition: Option<([f32; 4], [f32; 4])>,
-    run_flat: bool,
+    slot: &SimVehicle,
 ) {
     for (t, s) in effects.tire_puncture.iter_mut().zip(spikes) {
         *t = t.max(s);
     }
-    if let Some((grip, deflation)) = tire_condition {
+    if let Some((grip, deflation)) = slot.tire_condition {
         for w in 0..4 {
             effects.grip_scale[w] *= grip[w];
             effects.tire_puncture[w] = effects.tire_puncture[w].max(deflation[w]);
         }
     }
     for t in &mut effects.tire_puncture {
-        *t = wp_vehicle::vehicle::run_flat_deflation(*t, run_flat);
+        *t = wp_vehicle::vehicle::run_flat_deflation(*t, slot.run_flat);
     }
+    let tier = (slot.cooling_tier as usize).min(COOLING_OVERHEAT_SCALE.len() - 1);
+    effects.overheating *= COOLING_OVERHEAT_SCALE[tier];
 }
 
 fn impact_delta_v(contacts: &[wp_contracts::ContactImpulse], mass_kg: f32) -> f32 {
