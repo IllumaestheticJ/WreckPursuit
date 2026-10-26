@@ -55,8 +55,9 @@ pub enum Role {
     JsonSchema,
 )]
 pub enum DamageMode {
-    /// Forgiving: the Simulation table with racer cars (player and AI racers) taking about 20 %
-    /// of the damage (`ModeTable::racer_damage_scale`); traffic and police take full damage.
+    /// Forgiving: the Simulation table with the player's racer taking about 20 % of the damage
+    /// (`ModeTable::racer_damage_scale`), AI racers twice that (`ai_racer_damage_mult`), AI
+    /// police twice full damage (`police_damage_scale`) and traffic full damage.
     #[default]
     Arcade,
     /// Punishing but survivable; one hard hit degrades, several end the car.

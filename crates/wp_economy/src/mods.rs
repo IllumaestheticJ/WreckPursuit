@@ -1073,7 +1073,11 @@ pub fn apply_vehicle_effects(
     d.drag_cd_a_m2 *= acc.get(P::BodyDragScale, 1.0);
     d.aero_downforce_coeffs[0] += acc.get(P::AeroDownforceFront, 0.0);
     d.aero_downforce_coeffs[1] += acc.get(P::AeroDownforceRear, 0.0);
-    d.steering.ratio *= acc.get(P::SteeringRatioScale, 1.0);
+    // A quicker ratio turns the road wheels further per turn of the steering wheel, so the
+    // rack (what pads and keys steer through) reaches lock sooner too.
+    let ratio = acc.get(P::SteeringRatioScale, 1.0).max(0.1);
+    d.steering.ratio *= ratio;
+    d.steering.rack_speed_rad_per_s /= ratio;
     let mass_delta = acc.get(P::BodyMassKg, 0.0) + 4.0 * wheel_mass + durability_mass;
     let new_mass = (base.mass_kg + mass_delta).max(base.mass_kg * 0.5);
     if new_mass > base.mass_kg + mass_delta {

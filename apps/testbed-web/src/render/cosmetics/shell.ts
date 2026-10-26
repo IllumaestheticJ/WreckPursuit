@@ -265,7 +265,7 @@ const bumper: Builder = (c, p) => {
   const geo = shellOf(f, panelOf(region), warp);
   if (!geo) return;
   // The cover and its trim, lamps and grilles go; the number plate moves over to the new cover.
-  c.hide((d) => d.wheel == null && d.region === region && !d.name.startsWith("plate"));
+  c.hide((d) => d.wheel == null && d.kind !== "mod" && d.region === region && !d.name.startsWith("plate"));
   const g = new THREE.Group();
   g.add(new THREE.Mesh(geo, c.paint));
   geo.computeBoundingBox();
@@ -346,7 +346,7 @@ const carbon: Builder = (c, p) => {
   g.add(new THREE.Mesh(geo, carbonFibre()));
   // Stock plain-black carbon trim on the lid (the Shiro Turbo's hood cover, its wing) would sit
   // over the new weave and look stock: redraw it in the weave too.
-  const trimOf = (m: MeshPartJson) => m.wheel == null && m.region === region && m.material === "carbon";
+  const trimOf = (m: MeshPartJson) => m.wheel == null && m.kind !== "mod" && m.region === region && m.material === "carbon";
   const trim = shellOf(c.frame, trimOf);
   if (trim) {
     topUV(trim);

@@ -1,4 +1,4 @@
-# simcli hashes scenario=smoke_subset_systems systems=world,vehicle hash_spec=4 contract=0.4.1
+# simcli hashes scenario=smoke_subset_systems systems=world,vehicle hash_spec=4 contract=0.4.2
 60 d197037f903f4ed0
 120 d9cfbc1b2176e735
 180 df0cf71c272f2b5d

@@ -50,6 +50,7 @@ pub mod lod;
 pub mod lots;
 pub mod map;
 pub mod mod_visuals;
+pub mod out_of_play;
 pub mod pack;
 pub mod police;
 pub mod props;
@@ -75,6 +76,8 @@ mod collide_tests;
 mod crash_replay_tests;
 #[cfg(test)]
 mod lots_tests;
+#[cfg(test)]
+mod out_of_play_tests;
 #[cfg(test)]
 mod police_audio_trace;
 #[cfg(test)]
@@ -950,10 +953,18 @@ pub fn map_static_json() -> Result<String, JsValue> {
 /// zone, escape progress, sight ranges, player pose, racer count), then every police unit
 /// (`map::UNIT_STRIDE` floats), every roadblock / spike strip (`map::TOOL_STRIDE`) and,
 /// during a race, every racer in position order (`map::RACER_STRIDE`). Without police in
-/// the session there are no units or tools.
+/// the session there are no units or tools. In a career run only the units and tools the
+/// player knows about (plain sight, radar detector, scanner: [`session::PlayerGadgets`]).
 #[wasm_bindgen]
 pub fn map_dynamic(player: u32) -> Result<Vec<f32>, JsValue> {
-    get(|s| map::map_dynamic_for(s, EntityId(player)))
+    get(|s| map::map_dynamic_for(s, EntityId(player), s.gadgets()))
+}
+
+/// [`map_dynamic`] with every unit and tool whatever the player's gadgets: for the 3D world
+/// (spike strips on the road are there whether the map knows of them or not).
+#[wasm_bindgen]
+pub fn map_dynamic_world(player: u32) -> Result<Vec<f32>, JsValue> {
+    get(|s| map::map_dynamic_for(s, EntityId(player), None))
 }
 
 /// Helicopters tracking a racer, 8 floats each: `[x, y, z, aim_x, aim_y, aim_z,
@@ -1734,6 +1745,18 @@ pub fn police_tools() -> Result<Vec<f32>, JsValue> {
             out.extend_from_slice(&[1.0, c[0], c[1], z, 0.0, 0.0, sn, cs, half_len, 0.22, 0.03]);
         }
         out
+    })
+}
+
+/// The player's career gadgets as `[radar, scanner, fake_plates]` (mod tiers, 0 = not fitted;
+/// fake plates 0 / 1), or empty outside a career run (sandbox: every unit on the map, the radio
+/// as the audio panel picks). In a career run the scanner tier also drives the audio scanner.
+#[wasm_bindgen]
+pub fn player_gadgets() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        s.gadgets().map_or(Vec::new(), |g| {
+            vec![g.radar as f32, g.scanner as f32, g.fake_plates as u8 as f32]
+        })
     })
 }
 

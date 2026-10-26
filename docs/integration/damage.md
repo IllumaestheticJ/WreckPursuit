@@ -877,6 +877,22 @@ fail threshold, which is what made hard hits never end the car. The cruiser's "e
 `apps/simcli/examples/damage_toughness.rs` (measurement only), two new
 `apps/simcli/scenarios/damage/*.ron` + goldens, `docs/integration/cars.md` (request row).
 
+## Contract v0.4.2 — AI racers and AI police take 2x in Arcade (owner request, 2026-10-26)
+
+Owner: "make AI police damage 2X current value on arcade mode, make AI racer damage also 2X".
+
+- `data/modes/arcade.toml`: `ai_racer_damage_mult = 2.0` (AI racers 0.25 × 2 = 0.5 of the
+  impulse; the player's racer keeps 0.25) and `police_damage_scale = 2.0` (AI police; they had
+  1.0). Set either to 1.0 to undo. Simulation and Extreme omit them (= 1.0).
+- `wp_sim::damage_scale(kind, player_driven_police, mode)` picks the scale per vehicle;
+  `wp_damage::scale_contacts` applies it (closing speed kept). Player cop seats stay at 1.0.
+- Measured (`arcade_scales_damage_per_kind`, debug_sedan into a wall at 56 km/h, health lost):
+  Simulation 11.6 % for every kind; Arcade player 1.5 %, AI racer 4.9 %, AI police 26.2 %,
+  traffic 11.6 %. Health lost grows faster than the impulse because the lattice takes the
+  first part of a hit elastically, so 2x the impulse is ~2.3–3x the health lost.
+- Tests: `arcade_scales_damage_per_kind`, `damage_scale_by_kind` (wp_sim); mode table tests in
+  wp_damage and wp_contracts.
+
 ## Contract v0.4.0 — Arcade / Simulation / Extreme (owner request, 2026-10-22)
 
 Owner: "Make arcade damage 20% of what it is now, set current arcade damage to simulation

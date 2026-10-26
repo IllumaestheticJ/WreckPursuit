@@ -17,7 +17,14 @@ use crate::vec3::{self, V3};
 /// of the damage, while traffic and police (whose contacts are not scaled) take it all.
 /// The closing speed is kept, so the light-hit threshold still sees the real hit. No-op at 1.0.
 pub fn scale_racer_contacts(contacts: &mut [ContactImpulse], mode: &ModeTable) {
-    let s = mode.racer_damage_scale;
+    scale_contacts(contacts, mode.racer_damage_scale);
+}
+
+/// Scale contacts (normal and friction impulse, closing speed kept) by `s` before they reach
+/// [`DamageModel`]. `wp_sim` picks `s` per vehicle kind from the [`ModeTable`]: the player's
+/// racer `racer_damage_scale`, AI racers `racer_damage_scale × ai_racer_damage_mult`, AI police
+/// `police_damage_scale`, traffic 1.0. No-op at 1.0.
+pub fn scale_contacts(contacts: &mut [ContactImpulse], s: f32) {
     if s == 1.0 {
         return;
     }

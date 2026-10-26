@@ -115,7 +115,8 @@ export class PoliceToolsView {
   }
 
   /**
-   * Refresh from `map_dynamic(player)` (throttled). `read` returns the raw floats or throws
+   * Refresh from `map_dynamic_world(player)` (throttled; every strip, whatever the career car's
+   * gadgets show on the map). `read` returns the raw floats or throws
    * when no police system is running; `ground` seats strips on hilly roads.
    */
   update(read: () => Float32Array, ground: GroundFn, nowMs: number): void {

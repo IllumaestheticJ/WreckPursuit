@@ -8,7 +8,7 @@
 // atlas UVs and tints as the full panel mesh a promoted car's VehicleView shows, ~3–6k
 // triangles instead of 8–20k, merged and undeformed; the full mesh if the mid file is missing),
 // with the same livery colour as the car will have once promoted, so the swap to a full
-// VehicleView (render/lod.ts `viewDrawM`, ~30–40 m) does not pop. Far cars, and cars whose
+// VehicleView (render/lod.ts `viewDrawM`, 30–80 m by profile) does not pop. Far cars, and cars whose
 // mesh has not arrived yet, use a low-poly proxy of the model's body size. Coordinates: sim
 // space (+Z up), parented under SceneView.world.
 //

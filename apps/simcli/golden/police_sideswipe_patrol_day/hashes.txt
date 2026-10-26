@@ -1,4 +1,4 @@
-# simcli hashes scenario=police_sideswipe_patrol_day systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=police_sideswipe_patrol_day systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 24 a731b86488b8fc0f
 48 ba05950b9caf9e3b
 72 6a52e4bc65f64d96

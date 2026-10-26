@@ -3041,14 +3041,18 @@ impl PoliceSystem {
     }
 
     /// Ground units wanted on `racer`: `units_per_level` for its level, plus
-    /// `search_extra_units` while it is lost (row 84).
+    /// `priority_extra_units` × its bounty priority, plus `search_extra_units` while it is
+    /// lost (row 84).
     pub(crate) fn wanted_units(&self, racer: EntityId) -> u32 {
         let Some(rec) = self.racers.get(&racer) else {
             return 0;
         };
         let rc = &self.cfg.presence.reinforcement;
         let li = rec.level.table_index();
+        let bounty_extra =
+            (rec.bounty.priority(&self.cfg.heat) * rc.priority_extra_units as f32).round() as u32;
         rc.units_per_level[li]
+            + bounty_extra
             + if rec.status == PursuitStatus::Searching {
                 rc.search_extra_units[li]
             } else {

@@ -15,7 +15,8 @@
 //         mid-LOD car meshes within 120 m, parked-car proxies within 120 m, lamps within 300 m,
 //         promoted traffic / police always drawn by the fleet (only the player and AI racers
 //         keep their full per-panel view), 20 % rain, governor down to 0.3× (target 30 fps).
-// Car LOD on every profile: see VIEW_DRAW_M below.
+// Car LOD on every profile: see VIEW_DRAW_M and CAR_DETAIL below (high: detailed cars within
+// 80 m, mid meshes within 400 m; low: 30 m / 120 m; "Car detail" in the game menu overrides).
 // MSAA is a WebGL context attribute: changing it needs a reload.
 //
 // Effects quality (`?fx=low|med|high`, else the stored choice `wp.fx`, else low on the low
@@ -117,16 +118,44 @@ interface Profile {
 
 /**
  * Car LOD (every profile): the player and AI racers always draw their full detailed per-panel
- * view; promoted traffic / police cars draw theirs within VIEW_DRAW_M of the camera (the cars
- * you see crumple; handed to the instanced fleet past VIEW_DRAW_M + render/lod.ts
- * VIEW_LOD_BAND_M, back within VIEW_DRAW_M), touch: never (the phone is draw-call bound).
- * Everything the fleet / parked props draw uses the mid-LOD mesh within `fullLodM` and the
- * low proxy beyond. */
+ * view; promoted traffic / police cars and roaming street racers draw theirs within `viewDrawM`
+ * of the camera (the cars you see crumple; handed to the instanced fleet past `viewDrawM` +
+ * render/lod.ts VIEW_LOD_BAND_M, back within `viewDrawM`), touch: never (the phone is
+ * draw-call bound). Everything the fleet / parked props draw uses the mid-LOD mesh within
+ * `fullLodM` and the low proxy beyond. The high profile uses the "far" car detail, low the
+ * "near" view distance; the game menu's "Car detail" overrides both ([`Quality.setCarDetail`]).
+ */
 const VIEW_DRAW_M = 30;
+
+/** Car detail level (game menu "Car detail", `?cardetail=`): "auto" = the profile's distances. */
+export type CarDetail = "auto" | "near" | "far" | "max";
+const CAR_DETAILS: CarDetail[] = ["auto", "near", "far", "max"];
+
+/**
+ * Car LOD distances per car detail level, m (owner request 2026-10-26: traffic and racers in
+ * high quality further out). Measured on the combined world (ashpeak, 1280×720, headless
+ * SwiftShader, docs/integration/browser-perf.md "Car detail"): each extra car in its full view
+ * costs ~50 draw calls and ~13k triangles plus its lattice re-skin; the mid mesh to 400 m
+ * instead of 250 m added ~115k triangles (no draw calls: instanced) in the night-run chase.
+ * Traffic is only promoted to a sim vehicle (and so a view) within 80 m of a player
+ * (wp_world `physical_radius_m`), so past "far" `viewDrawM` only adds police and street racers.
+ */
+export const CAR_DETAIL: Record<Exclude<CarDetail, "auto">, { viewDrawM: number; fullLodM: number }> = {
+  near: { viewDrawM: VIEW_DRAW_M, fullLodM: 250 },
+  far: { viewDrawM: 80, fullLodM: 400 },
+  max: { viewDrawM: 160, fullLodM: 800 },
+};
+
+/** The car detail level from the URL (`?cardetail=`), or null. */
+function carDetailParam(): CarDetail | null {
+  const p = new URLSearchParams(location.search).get("cardetail") as CarDetail | null;
+  return p && CAR_DETAILS.includes(p) ? p : null;
+}
 
 function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
   const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity, propProxyM: 300, lampDrawM: Infinity, viewDrawM: VIEW_DRAW_M, signalM: 450, cityDetailM: Infinity, cityTileM: CITY_TILE_M };
-  const high = { ...common, antialias: true, backdropBlur: true, rain: 1, scale: 1, minScale: 1, drawM: Infinity, adaptive: false };
+  // High: the "far" car detail (a hardware GPU has the draw-call and triangle headroom).
+  const high = { ...common, ...CAR_DETAIL.far, antialias: true, backdropBlur: true, rain: 1, scale: 1, minScale: 1, drawM: Infinity, adaptive: false };
   // Low: a weak or no GPU (software rasterizers are vertex / draw-call bound: fewer, cheaper
   // car meshes and lamps matter more than pixels). Mid-LOD car meshes within 120 m (proxies
   // beyond), parked-car proxies within 150 m (two-box cars beyond; every prop stays drawn: no
@@ -194,7 +223,9 @@ export class Quality {
   cityDetailM: number;
   /** City tile edge, m, for cities loaded from now on (a loaded city keeps its tiles). */
   cityTileM: number;
-  /** Called after `setMode` changed the profile (main re-applies the LOD distances). */
+  /** Car detail level (game menu); "auto" = the profile's `viewDrawM` / `fullLodM`. */
+  carDetail: CarDetail = "auto";
+  /** Called after `setMode` / `setCarDetail` changed the profile (main re-applies the LOD distances). */
   onChange: (() => void) | null = null;
   readonly rendererName: string;
   readonly antialias: boolean;
@@ -226,6 +257,7 @@ export class Quality {
     this.trafficDrawM = this.fullLodM = this.propFullMax = this.propDrawM = this.propProxyM = this.lampDrawM = this.viewDrawM = 0;
     this.signalDrawM = this.cityDetailM = 0;
     this.cityTileM = CITY_TILE_M;
+    this.carDetail = carDetailParam() ?? "auto";
     this.applyLod();
     this.antialias = this.profile.antialias;
     this.lite = !this.profile.backdropBlur;
@@ -247,6 +279,19 @@ export class Quality {
     this.signalDrawM = this.profile.signalM;
     this.cityDetailM = this.profile.cityDetailM;
     this.cityTileM = this.profile.cityTileM;
+    if (this.carDetail !== "auto") {
+      this.viewDrawM = CAR_DETAIL[this.carDetail].viewDrawM;
+      this.fullLodM = CAR_DETAIL[this.carDetail].fullLodM;
+    }
+  }
+
+  /** Set the car detail level now (game menu; an explicit `?cardetail=` wins). Calls `onChange`. */
+  setCarDetail(level: CarDetail): void {
+    const next = carDetailParam() ?? level;
+    if (next === this.carDetail) return;
+    this.carDetail = next;
+    this.applyLod();
+    this.onChange?.();
   }
 
   /** Native pixel ratio cap. */

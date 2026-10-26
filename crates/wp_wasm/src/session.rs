@@ -94,6 +94,21 @@ pub struct Playback {
     pub drift_count: u64,
 }
 
+/// Gadgets on the player's career car (`wp_economy::ToolLoadout`, 0 = not fitted). They
+/// change what the player knows about the police, not the physics: the radar detector shows
+/// patrolling and chasing units on the map beyond plain sight, the scanner sets how soon (and
+/// whether) the police radio is heard, and the decrypting scanner (tier 2) puts every
+/// roadblock and spike strip on the map. Fake plates cut the heat carried to the next run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PlayerGadgets {
+    /// Radar detector tier.
+    pub radar: u8,
+    /// Police scanner tier.
+    pub scanner: u8,
+    /// Fake plates fitted.
+    pub fake_plates: bool,
+}
+
 /// One simulation session (live or replay).
 pub struct Session {
     sc: Scenario,
@@ -137,10 +152,16 @@ pub struct Session {
     /// This is a career run (machine G, [`crate::career`]): the player drives a career car
     /// and the account belongs to the career.
     career: bool,
+    /// Gadgets the player's career car carries ([`Session::set_gadgets`]); `None` outside the
+    /// career (sandbox scenarios show every police unit and hear every radio line).
+    gadgets: Option<PlayerGadgets>,
     /// A picker race (scenario `race_<id>`, live or replayed; see [`crate::race`]).
     race: Option<RaceRun>,
     /// Honk-to-start race spots (see [`crate::race_spots`]).
     meet_spots: MeetSpots,
+    /// The player's car in deep water or off the map goes back on the road (see
+    /// [`crate::out_of_play`]).
+    out_of_play: crate::out_of_play::Watch,
     /// The player's horn last tick. The one horn edge every challenge reads (owner: one
     /// challenge system on the horn action): a street racer in reach first, else the race
     /// spot the player stands in (see [`Session::observe_horn`]).
@@ -266,10 +287,12 @@ impl Session {
             crash,
             race,
             meet_spots: MeetSpots::default(),
+            out_of_play: Default::default(),
             horn_was: false,
             roam,
             run,
             career: false,
+            gadgets: None,
             garages,
             visit: None,
             garage_armed: false,
@@ -798,6 +821,33 @@ impl Session {
         Ok(pose)
     }
 
+    /// Put the player's car back on the road after deep water, the map edge or a fall through
+    /// the world ([`crate::out_of_play`]): the nearest clear lane spot by where it left play,
+    /// at rest, damage kept (logged `ResetAt` + `Ghost`), and a police sighting there
+    /// (`Recovered`: heat and any pursuit carry on). Called after every live tick.
+    fn check_out_of_play(&mut self) {
+        let Some(&player) = self.ids.first() else {
+            return;
+        };
+        if self.visit.is_some() || self.script_running() {
+            return;
+        }
+        let Some(st) = self.vehicle(player).map(|v| v.vehicle.state()) else {
+            return;
+        };
+        let dir = crate::reset::travel_dir(st.rot, st.lin_vel);
+        let Some(r) = self
+            .out_of_play
+            .observe(self.sim.world().map(), st.pos, dir)
+        else {
+            return;
+        };
+        // Only an unknown id fails, and the player is a scenario entity.
+        if self.reset_near(player, r.pos, r.dir, false).is_ok() {
+            let _ = self.log_op(0, OpKind::Recovered);
+        }
+    }
+
     /// Tell the race (if any) that `id` was moved on purpose, so the judge does not read the
     /// jump as a teleport.
     fn relocate_racer(&mut self, id: EntityId) {
@@ -889,6 +939,16 @@ impl Session {
     }
 
     // ----- career (machine G; see `crate::career`) -----------------------------------------
+
+    /// Fit the player's gadgets (the career car's mods). Not recorded in replays.
+    pub fn set_gadgets(&mut self, gadgets: Option<PlayerGadgets>) {
+        self.gadgets = gadgets;
+    }
+
+    /// The player's gadgets; `None` outside the career.
+    pub fn gadgets(&self) -> Option<PlayerGadgets> {
+        self.gadgets
+    }
 
     /// This session is a career run.
     pub fn is_career(&self) -> bool {
@@ -1488,6 +1548,9 @@ impl Session {
         let run = self.run.as_mut().ok_or("no economy run in this session")?;
         let player = run.player();
         let report = run.repair_and_continue()?;
+        // A capture cleared the bounty: the police forget what the career brought in.
+        let bounty = run.account().bounty;
+        self.sim.police_mut().carry_career_bounty(player, bounty);
         let idx = self.idx(player)?;
         self.log_op(idx, OpKind::Repair)?;
         self.release_player(idx);
@@ -1751,6 +1814,7 @@ impl Session {
                 self.reset_onto_course(r.racer, r.pos, r.dir);
             }
             self.check_garage();
+            self.check_out_of_play();
         }
         if self.playback.is_none() {
             if let Some(p) = player {
@@ -2133,8 +2197,10 @@ impl Session {
             outcome: None,
             run: None,
             career: false,
+            gadgets: None,
             race: snap.race.clone(),
             meet_spots: MeetSpots::default(),
+            out_of_play: Default::default(),
             horn_was: false,
             roam: None,
             crash: CrashRecorder::off(),

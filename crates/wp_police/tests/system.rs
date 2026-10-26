@@ -1267,6 +1267,31 @@ fn pursued_at(hour: f32, seed: u64, heat: f32) -> Harness {
     h
 }
 
+/// Owner report 2026-10-26 (water and the map edge were free escapes): a racer put back on
+/// the road after leaving play counts as seen there. The pursuit stays on, its escape timer
+/// starts again and the police know the spot; heat is untouched. Unknown racers are ignored.
+#[test]
+fn recovered_racer_is_seen_and_the_pursuit_carries_on() {
+    let mut h = pursued_at(23.0, 5, 40.0);
+    {
+        let rec = h.police.racer(RACER).unwrap();
+        assert!(rec.pursued());
+    }
+    let heat0 = h.police.racer(RACER).unwrap().heat;
+    let at = h.racer_view().pos;
+    let spot = [at[0] + 5.0, at[1] - 3.0, at[2]];
+    h.police.racer_recovered(RACER, spot);
+    let rec = h.police.racer(RACER).unwrap();
+    assert_eq!(rec.status, PursuitStatus::Pursuit);
+    assert_eq!(rec.los_lost_s, 0.0);
+    assert_eq!(rec.last_known, Some([spot[0], spot[1]]));
+    assert_eq!(rec.last_seen, Some(h.police.now()));
+    assert_eq!(rec.heat, heat0);
+    // A racer the police never saw: nothing happens.
+    h.police.racer_recovered(EntityId(999), spot);
+    assert!(h.police.racer(EntityId(999)).is_none());
+}
+
 /// Owner playtest row 64: once a pursuit is on, idle and patrolling units nearby join it at
 /// once (driving to the racer's predicted position) and the level's cap (L1 2, L2 4, L3 6)
 /// is reached, never passed.

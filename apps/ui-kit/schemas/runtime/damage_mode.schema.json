@@ -4,7 +4,7 @@
   "description": "Damage mode. Every mode runs the same code path with a different [`crate::ModeTable`].",
   "oneOf": [
     {
-      "description": "Forgiving: the Simulation table with racer cars (player and AI racers) taking about 20 %\nof the damage (`ModeTable::racer_damage_scale`); traffic and police take full damage.",
+      "description": "Forgiving: the Simulation table with the player's racer taking about 20 % of the damage\n(`ModeTable::racer_damage_scale`), AI racers twice that (`ai_racer_damage_mult`), AI\npolice twice full damage (`police_damage_scale`) and traffic full damage.",
       "type": "string",
       "const": "Arcade"
     },

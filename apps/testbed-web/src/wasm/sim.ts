@@ -462,6 +462,10 @@ export const sim = {
   mapStaticJson: (): string => wasm.map_static_json(),
   /** Per-frame map data for `player` (units, tools, search zone; layout in ui-kit `src/map/data.ts`). */
   mapDynamic: (player: number): Float32Array => wasm.map_dynamic(player),
+  /** map_dynamic() with every police unit and tool, whatever the career car's gadgets (3D world). */
+  mapDynamicWorld: (player: number): Float32Array => wasm.map_dynamic_world(player),
+  /** Career gadgets `[radar, scanner, fake_plates]` (mod tiers), empty outside a career run. */
+  playerGadgets: (): Float32Array => wasm.player_gadgets(),
   stateHash: (): string => wasm.state_hash(),
   latticeNodes: (entity: number): Float32Array => wasm.lattice_nodes(entity),
   latticeRest: (entity: number): Float32Array => wasm.lattice_rest(entity),
@@ -627,6 +631,8 @@ export const sim = {
   careerRelease: (uid: number): CareerView => JSON.parse(wasm.career_release(uid)),
   careerInsure: (uid: number, tier: string): CareerView => JSON.parse(wasm.career_insure(uid, tier)),
   careerNextNight: (): CareerView => JSON.parse(wasm.career_next_night()),
+  careerBuyInformant: (tier: string): CareerView => JSON.parse(wasm.career_buy_informant(tier)),
+  careerPayOffBounty: (): CareerView => JSON.parse(wasm.career_pay_off_bounty()),
   // ----- car lots (crates/wp_wasm/src/lots.rs) ----------------------------------------------
   careerLot: (lotId: string): LotStockView => JSON.parse(wasm.career_lot_json(lotId)),
   careerBuyListing: (lotId: string, slot: number): CareerView => JSON.parse(wasm.career_buy_listing(lotId, slot)),

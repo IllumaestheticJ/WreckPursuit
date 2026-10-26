@@ -1,4 +1,4 @@
-# simcli hashes scenario=race_city_sprint_police systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=race_city_sprint_police systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 240 97b960427c04c03a
 480 df9fd2500928bc60
 720 f4d97e1eba70717b

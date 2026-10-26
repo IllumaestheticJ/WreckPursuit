@@ -117,6 +117,9 @@ export interface MapTool {
   y: number;
   dir: [number, number];
   halfLenM: number;
+  /** Reported by the player's decrypting scanner (career): drawn with an icon so it reads at
+   * any zoom (`kind` bit 1 in the layout, `wp_wasm::map::TOOL_INTEL`). */
+  intel: boolean;
 }
 
 /** One decoded `map_dynamic()` frame. */
@@ -182,7 +185,8 @@ export function decodeMapDynamic(a: ArrayLike<number>): MapFrame {
   }
   const tools: MapTool[] = [];
   for (let i = 0; i < nTools; i++, o += DYN.TOOL_STRIDE) {
-    tools.push({ kind: a[o] === 1 ? "spikes" : "roadblock", x: a[o + 1], y: a[o + 2], dir: [a[o + 3], a[o + 4]], halfLenM: a[o + 5] });
+    const kind = a[o] | 0;
+    tools.push({ kind: kind & 1 ? "spikes" : "roadblock", x: a[o + 1], y: a[o + 2], dir: [a[o + 3], a[o + 4]], halfLenM: a[o + 5], intel: (kind & 2) !== 0 });
   }
   const racers: MapRacer[] = [];
   for (let i = 0; i < nRacers && o + DYN.RACER_STRIDE <= a.length; i++, o += DYN.RACER_STRIDE) {
