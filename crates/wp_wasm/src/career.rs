@@ -341,6 +341,23 @@ pub struct DistrictView {
     pub labour: f32,
 }
 
+/// A repair shop of the world as the Repair panel offers it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ShopView {
+    /// Shop name.
+    pub name: String,
+    /// `DistrictId` name of the shop's district.
+    pub district: String,
+    /// Legit or crooked.
+    pub kind: ShopKind,
+    /// Spawn city id the shop is in ([`crate::scenario::SPAWNS`]).
+    pub city: String,
+    /// That city's name (the spawn's label).
+    pub city_label: String,
+    /// The district's labour × (before any crooked-shop markup).
+    pub labour: f32,
+}
+
 /// The whole garage screen.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CareerView {
@@ -384,6 +401,8 @@ pub struct CareerView {
     pub insurance: Vec<InsuranceView>,
     /// Districts and labour multipliers.
     pub districts: Vec<DistrictView>,
+    /// The world's repair shops ([`crate::garage_visit::WORLD_SHOPS`]), in POI order.
+    pub shops: Vec<ShopView>,
     /// Career counters.
     pub stats: wp_economy::CareerStats,
     /// Rep tier, next tier, unlocked features and classes, bet limits.
@@ -1293,6 +1312,25 @@ impl Career {
                         .prices
                         .district_labour
                         .get(d)
+                        .copied()
+                        .unwrap_or(1.0),
+                })
+                .collect(),
+            shops: crate::garage_visit::WORLD_SHOPS
+                .iter()
+                .map(|w| ShopView {
+                    name: w.name.to_string(),
+                    district: format!("{:?}", w.district),
+                    kind: w.kind,
+                    city: w.city.to_string(),
+                    city_label: crate::scenario::spawn(w.city)
+                        .map_or(w.city, |s| s.label)
+                        .to_string(),
+                    labour: self
+                        .econ
+                        .prices
+                        .district_labour
+                        .get(&w.district)
                         .copied()
                         .unwrap_or(1.0),
                 })

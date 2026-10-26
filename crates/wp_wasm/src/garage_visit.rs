@@ -39,6 +39,57 @@ const LEGIT_SHOPS: [&str; 3] = [
     "Northfield Tire & Service",
 ];
 
+/// A repair shop of the combined world (`ashpeak`) as the career garage's Repair panel offers
+/// it: the shop's name, its district (labour rate), legit or crooked, and the spawn city
+/// ([`crate::scenario::SPAWNS`] id) it belongs to. The garage screen has no world loaded, so
+/// this is a fixed table; `spawn_tests::world_shops_match_the_generated_world` checks it against
+/// [`sites`] of the generated world (nearest spawn grid = the city).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorldShop {
+    /// Shop name (the `Garage` POI's name).
+    pub name: &'static str,
+    /// District the shop is in.
+    pub district: DistrictId,
+    /// Legit or crooked ([`shop_kind`]).
+    pub kind: ShopKind,
+    /// Spawn city id (`port_vesper`, `ashpeak_city`, `harnell_crossing`).
+    pub city: &'static str,
+}
+
+/// Every repair shop of the combined world, in POI order.
+pub const WORLD_SHOPS: [WorldShop; 5] = [
+    WorldShop {
+        name: "Meridian Motorworks",
+        district: DistrictId::Core,
+        kind: ShopKind::Legit,
+        city: "port_vesper",
+    },
+    WorldShop {
+        name: "Sal's Paint & Panel",
+        district: DistrictId::Suburb,
+        kind: ShopKind::Crooked,
+        city: "port_vesper",
+    },
+    WorldShop {
+        name: "Gantry Garage",
+        district: DistrictId::Port,
+        kind: ShopKind::Crooked,
+        city: "port_vesper",
+    },
+    WorldShop {
+        name: "Spire Auto Body",
+        district: DistrictId::Core,
+        kind: ShopKind::Legit,
+        city: "ashpeak_city",
+    },
+    WorldShop {
+        name: "Harnell Feed & Tractor",
+        district: DistrictId::Suburb,
+        kind: ShopKind::Legit,
+        city: "harnell_crossing",
+    },
+];
+
 /// One repair shop on the map (JSON for the testbed's markers; `garages_json`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct GarageSite {
