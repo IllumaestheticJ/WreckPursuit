@@ -37,6 +37,7 @@
     "brakes_kit_1": [{"piece": "brakes", "level": 1}],
     "brakes_kit_2": [{"piece": "brakes", "level": 2}],
     "brakes_bias_valve": {"none": "a valve in the brake lines under the dash"},
+    "brakes_abs_motorsport": {"none": "a control unit under the dash and sensors at the hubs"},
     "brakes_hydro_handbrake": [{"piece": "hydro_handbrake"}],
     "cooling_radiator_1": [{"piece": "radiator", "style": "alloy"}],
     "cooling_radiator_2": [{"piece": "radiator", "style": "race"}],

@@ -27,6 +27,10 @@
 // Re-locked 2026-10-25 (PR #94, RaceConfig::ram_traffic on the trained racers, main 244023bf):
 // ai_juno no longer queues behind highway traffic, 34.4 s (was locked round 46.8), the rule
 // (-15 % .. +20 %) on today's time. The other three are in range and keep their locks.
+// Re-locked 2026-10-26 (nitrous, data/tune/nitrous.toml): the AI racers burn rubberbanded
+// nitrous while behind the player seat (an AI-driven player car here, so it counts). ai_vic
+// 48.8 -> 36.4 s and the player seat 50.5 -> 37.9 s (it runs in the faster field); the rule
+// (-15 % .. +20 %) on today's time for those two. ai_juno / ai_tito stay in range.
 (
     name: "opponent_pace_grid_highway_sprint_s50",
     seed: 7,
@@ -94,9 +98,9 @@
     expect_pending: [
         metric(name: "finishers", min: 4, max: 4),
         metric(name: "best_ratio", min: 0.97, max: 1.65),
-        metric(name: "race_time_s", entity: "ai_vic", min: 38.8, max: 54.8),
+        metric(name: "race_time_s", entity: "ai_vic", min: 31.0, max: 43.7),
         metric(name: "race_time_s", entity: "ai_juno", min: 29.2, max: 41.2),
         metric(name: "race_time_s", entity: "ai_tito", min: 38.5, max: 54.4),
-        metric(name: "race_time_s", entity: "player", min: 40.6, max: 57.4),
+        metric(name: "race_time_s", entity: "player", min: 32.2, max: 45.5),
     ],
 )

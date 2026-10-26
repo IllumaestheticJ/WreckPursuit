@@ -197,7 +197,47 @@ pub struct RaceDef {
     pub finish_window_s: Option<f32>,
 }
 
+/// The Loop 9 races (night, day, the Ashpeak highway run): their fields drive sharpened
+/// ([`sharpened`]).
+const LOOP9_RACES: [&str; 3] = ["loop9_circuit", "loop9_day", "loop9_ashpeak_highway"];
+
+/// A regular's profile sharpened for the Loop 9 races (owner, 2026-10-26: "make the loop 9
+/// opponents more aggressive and smarter across the board"). Every driver moves up, each
+/// keeping their own character relative to the others:
+/// - `skill` +0.15 (to 0.95 at most): more of the car's grip and braking used, braking at the
+///   point instead of early, a nearer, sharper look-ahead, quicker pedal work;
+/// - `aggression` +0.3, at least 0.75: shorter following gap, tighter passing margin,
+///   less patience behind a slower car, side by side for longer into a braking zone, and a
+///   defensive move when attacked;
+/// - `consistency` +0.15 (to 0.95 at most): fewer braking and line errors, less rattled by a
+///   car close behind;
+/// - `awareness` +0.15, at least 0.85: traffic, spike strips and rivals noticed further out.
+///
+/// `risk` stays each driver's own: raised with the rest, the day race (heavy police, traffic)
+/// lost most of its finishers to civilian hits and police stops. Who rams the police is
+/// unchanged too (aggression + risk), apart from the higher aggression.
+pub fn sharpened(p: DriverProfile) -> DriverProfile {
+    DriverProfile {
+        skill: (p.skill + 0.15).min(0.95).max(p.skill),
+        aggression: (p.aggression + 0.3).max(0.75),
+        consistency: (p.consistency + 0.15).min(0.95),
+        risk: p.risk,
+        awareness: (p.awareness + 0.15).max(0.85),
+    }
+    .clamped()
+}
+
 impl RaceDef {
+    /// How regular `d` drives in this race: their own profile, [`sharpened`] in the Loop 9
+    /// races. The betting market keeps rating them from their record (`data/events`).
+    pub fn driver_profile(&self, d: &AiDriverDef) -> DriverProfile {
+        if LOOP9_RACES.contains(&self.id) {
+            sharpened(d.profile)
+        } else {
+            d.profile
+        }
+    }
+
     /// The race's rules: its kind's (`data/events/rules.toml`) with this race's overrides
     /// ([`RaceDef::finish_window_s`]).
     pub fn rules(&self) -> crate::rules::RaceRules {

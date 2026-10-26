@@ -59,6 +59,7 @@ pub mod lab_scope;
 pub mod launch;
 pub mod math;
 pub mod metrics;
+pub mod nitrous;
 pub mod pivot;
 pub mod plain;
 pub mod presets;
@@ -79,6 +80,7 @@ pub mod vehicle;
 use std::collections::BTreeMap;
 
 pub use body::VehicleBody;
+pub use brakes::AbsHardware;
 pub use diff::{AxleDiff, CentreDiff, DiffSetup};
 pub use engine::EngineExtras;
 pub use ground::{ContractGround, FlatGround, GroundHit, RapierGround, WheelCaster, WheelProbe};

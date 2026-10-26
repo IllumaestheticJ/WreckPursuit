@@ -18,6 +18,7 @@ export type ActionId =
   | "gearUp"
   | "gearDown"
   | "horn"
+  | "nitrous"
   | "lookBack"
   | "cameraCycle"
   | "reset"
@@ -71,6 +72,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "gearUp", label: "shift up", kind: "edge" },
   { id: "gearDown", label: "shift down", kind: "edge" },
   { id: "horn", label: "horn", kind: "held" },
+  { id: "nitrous", label: "nitrous (hold)", kind: "held" },
   { id: "lookBack", label: "look back (hold)", kind: "held" },
   { id: "cameraCycle", label: "next camera", kind: "edge" },
   { id: "reset", label: "reset car", kind: "edge" },
@@ -100,6 +102,8 @@ export function defaultBindings(): Bindings {
       gearUp: ["ShiftLeft", "ShiftRight"],
       gearDown: ["ControlLeft", "ControlRight"],
       horn: ["KeyQ"],
+      // N for nitrous: the rebindable action wins over the "inputs" debug layer's N.
+      nitrous: ["KeyN"],
       lookBack: ["KeyV"],
       cameraCycle: ["F3"],
       reset: ["KeyR"],
@@ -125,6 +129,8 @@ export function defaultBindings(): Bindings {
       gearUp: [{ button: 5 }],
       gearDown: [{ button: 4 }],
       horn: [{ button: 10 }],
+      // B (circle): the one face button left free.
+      nitrous: [{ button: 1 }],
       lookBack: [{ button: 11 }],
       cameraCycle: [{ button: 8 }],
       reset: [{ button: 3 }],

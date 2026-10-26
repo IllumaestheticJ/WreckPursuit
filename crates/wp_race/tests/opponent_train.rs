@@ -827,7 +827,10 @@ fn full_race(id: &str, seed: u64, traffic: LearnedTraffic) -> RaceOutcome {
                 .unwrap();
         }
         let profile = if i > 0 {
-            def.ai.get(i - 1).map(|a| a.profile).unwrap_or_default()
+            def.ai
+                .get(i - 1)
+                .map(|a| def.driver_profile(a))
+                .unwrap_or_default()
         } else {
             DriverProfile::default()
         };

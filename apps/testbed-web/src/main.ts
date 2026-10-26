@@ -19,7 +19,7 @@
 // ?roam=N opens main's free roam (wp_opponent::roam, N roamers; dev only and dormant: the
 // street racers of free drive / night run are the game's racer population, main-sync.md).
 import { assistLevel, loadWasm, sim, type AssistProfile, type CarStatsTable, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
-import { DRAW_STRIDE, META_STRIDE, MODE_NAMES, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
+import { DRAW_STRIDE, META_STRIDE, MODE_NAMES, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, TL, TOOL_KIND, TOOL_STRIDE, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
 import {
   actionHeld,
@@ -112,6 +112,20 @@ const DEFAULT_CAR = "lindwurm_4t";
  * 2026-10-21: "$150K so I can test all features"). `?cash=<n>` picks another amount and
  * `?cash=market` uses the real economy's starting cash (data/economy/market.toml). */
 const DEMO_CASH = 150_000;
+
+/**
+ * The sim's road height under the spike strip centred at `(x, y)` (police_tools() records, which
+ * sit 0.03 m above the road), or undefined when no strip is there. The greybox ray looks for
+ * the surface nearest it, so a strip in the Talon Tunnel lies on the tunnel floor, not on the
+ * hillside over it (owner, 2026-10-26: "invisible spike strip in talon tunnel").
+ */
+function spikeRoadZ(tools: Float32Array, x: number, y: number): number | undefined {
+  for (let o = 0; o + TOOL_STRIDE <= tools.length; o += TOOL_STRIDE) {
+    if (tools[o + TL.kind] !== TOOL_KIND.spikes) continue;
+    if (Math.abs(tools[o + TL.x] - x) < 0.5 && Math.abs(tools[o + TL.y] - y) < 0.5) return tools[o + TL.z] - 0.03;
+  }
+  return undefined;
+}
 function newCareer(mode: string): CareerView {
   const p = params.get("cash");
   if (p === "market") return sim.careerNew(mode);
@@ -246,6 +260,8 @@ async function main(): Promise<void> {
   const driftLabW = new DriftLabWPanel(overlay, sim, scene.world, () => app.player, (car) => startDriftLabW(car));
   // Spike strips on the road (playtest row 88).
   const policeTools = new PoliceToolsView();
+  /** Last police_tools() records (barrier poses, spike strips with their road height). */
+  let policeToolRecords: Float32Array = new Float32Array(0);
   scene.world.add(policeTools.group);
   // Crash effects (owner row 69): sparks, smoke, glass, skid marks, debris (render/fx/).
   const fx = new CrashFx(scene.quality.fx);
@@ -2101,7 +2117,8 @@ async function main(): Promise<void> {
     scene.updateHelicopterBeams(helis, wi[W.night]);
     // The rotor in the world (PR #32): same rows, no extra wasm call.
     audio.setHelicopters(helis);
-    scene.updatePoliceTools(sim.policeTools(), tS);
+    policeToolRecords = sim.policeTools();
+    scene.updatePoliceTools(policeToolRecords, tS);
     const wx = sim.weatherInfo();
     scene.setTimeOfDay(wi[W.night], wx[0] > 0.5 ? wx[7] : 1);
     prof.lap("traffic");
@@ -2165,7 +2182,10 @@ async function main(): Promise<void> {
     lod.update(trafficDraw, policeDraw, app.views, rig.camera, app.views.get(app.player)?.root.position ?? null, tS);
     prof.lap("fleet");
     props.update(sim.propsMoved(), rig.camera);
-    policeTools.update(() => sim.mapDynamicWorld(app.player), (x, y) => scene.groundZ(x, y), now);
+    policeTools.update(() => sim.mapDynamicWorld(app.player), (x, y) => {
+      const roadZ = spikeRoadZ(policeToolRecords, x, y);
+      return scene.groundZ(x, y, roadZ) ?? roadZ ?? null;
+    }, now);
     prof.lap("props");
 
     const inCity = wi[W.city] > 0.5;
@@ -2206,7 +2226,8 @@ async function main(): Promise<void> {
           ? { ...app.input, throttle: focusTel[T.inThrottle], brake: focusTel[T.inBrake], steer: focusTel[T.inSteer], handbrake: focusTel[T.inHandbrake] }
           : app.input,
         source: replay ? "replay" : app.source,
-        assists: replay ? null : sim.assists(app.player),
+        // The player's car can leave the world (captured in a race) before the session ends.
+        assists: replay || !app.views.has(app.player) ? null : sim.assists(app.player),
         mode: MODE_NAMES[Math.round(wi[W.mode])] ?? "Arcade",
         rack: focusView ? sim.ffb(app.focus)[0] : 0,
         fps,
@@ -2226,6 +2247,7 @@ async function main(): Promise<void> {
         rest: focusView ? restCache(app.focus) : null,
         camera: cameraLabel(rig.mode) + (rig.lookBack && rig.mode !== "orbit" && rig.mode !== "cinematic" ? " (look back)" : ""),
         units: gameSettings?.units,
+        nitrous: focusView ? sim.nitrous(app.focus) : null,
       });
       updatePanels(replay);
     }
