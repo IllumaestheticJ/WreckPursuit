@@ -36,7 +36,7 @@ import { pickTextFile } from "./store";
 import { isStockTune, normalizeTune, STOCK_TUNE, TUNE_SLIDERS, TUNE_STEPS, tuneSummary } from "./tune";
 import "./garage.css";
 
-type Tab = "cars" | "lots" | "pound" | "career" | "ledger";
+type Tab = "cars" | "lots" | "pound" | "police" | "career" | "ledger";
 
 const itemKey = (i: RepairItem) => JSON.stringify(i);
 const fmt = {
@@ -63,6 +63,8 @@ const REASON: Record<string, string> = {
   Bail: "Bail",
   Towing: "Towing",
   Escape: "Escape",
+  BountyCleared: "Bounty cleared",
+  InformantTip: "Informant",
   InsurancePurchased: "Insurance",
   InsurancePremium: "Premium",
   InsuranceLapsed: "Insurance ended",
@@ -771,6 +773,71 @@ const FEATURE: Record<CareerFeature, string> = {
   street_betting: "Street racer challenges",
 };
 
+/** Bounty and heat: what the police hold against the career, and the informants who make it
+ * go away (`career_pay_off_bounty`, `career_buy_informant`). */
+function PoliceTab(props: { view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
+  const { view, api } = props;
+  const payoff = view.bounty_payoff ?? 0;
+  const invite = view.high_stakes_bounty ?? 0;
+  return (
+    <>
+      <Panel title="Bounty" tag={view.bounty > 0 ? "wanted" : "clean"}>
+        <div class="wp-cg-hero">
+          <Stat label="Bounty" value={view.bounty.toLocaleString("en-US")} tone={view.bounty > 0 ? "warn" : "ok"} />
+          <Stat label="Bail if busted" value={<Money value={view.bail_if_busted ?? Math.round(view.bounty / 2)} />} />
+          <Stat label="Carried heat" value={view.carried_heat.toFixed(0)} unit={view.carried_level !== "None" ? view.carried_level : undefined} />
+        </div>
+        <ul class="wp-dim" style={{ fontSize: "0.85em", margin: "0.4em 0 0.6em", paddingLeft: "1.2em" }}>
+          <li>Escapes and races won while wanted raise it. Getting busted costs half of it as bail, then clears it.</li>
+          <li>The police know it: the bigger it is, the sooner backup arrives and the more cars come.</li>
+          <li>
+            Illegal daytime meets are invite only{invite > 0 ? ` (bounty ${invite.toLocaleString("en-US")})` : ""}, and pay a bigger purse the bigger your bounty.
+          </li>
+        </ul>
+        <Button
+          variant="primary"
+          disabled={view.bounty === 0 || view.cash < payoff}
+          title={view.bounty === 0 ? "No bounty" : view.cash < payoff ? "Not enough cash" : undefined}
+          testid="pay-off-bounty"
+          onClick={() => props.run(() => api.payOffBounty!())}
+        >
+          Pay it off (<Money value={payoff} />)
+        </Button>
+        <span class="wp-dim" style={{ fontSize: "0.8em", marginLeft: "0.6em" }}>
+          Clears the bounty. Dearer than bail, but no fine, impound or lost rep. Also closes the invite-only meets.
+        </span>
+      </Panel>
+      {api.buyInformant && (view.informants?.length ?? 0) > 0 && (
+        <Panel title="Informants" tag="heat">
+          <p class="wp-dim" style={{ fontSize: "0.85em" }}>
+            Pay to make the police forget the car: the heat the next run starts with drops.
+          </p>
+          <table class="wp-table" data-testid="informants">
+            <tbody>
+              {view.informants!.map((i) => (
+                <tr key={i.id}>
+                  <td>{words(i.id)}</td>
+                  <td class="num">−{i.heat_reduction.toFixed(0)} heat</td>
+                  <td class="num">
+                    <Button
+                      size="sm"
+                      disabled={view.carried_heat <= 0 || view.cash < i.cost}
+                      title={view.carried_heat <= 0 ? "The police are not looking for you" : view.cash < i.cost ? "Not enough cash" : undefined}
+                      onClick={() => props.run(() => api.buyInformant!(i.id))}
+                    >
+                      Pay <Money value={i.cost} />
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Panel>
+      )}
+    </>
+  );
+}
+
 function CareerTab({ view }: { view: CareerView }) {
   const p = view.progress;
   return (
@@ -985,6 +1052,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
           { id: "cars", label: `Cars (${view.cars.length})` },
           { id: "lots", label: "Car lots" },
           { id: "pound", label: pound ? `Impound (${pound})` : "Impound" },
+          ...(api.payOffBounty ? [{ id: "police" as const, label: view.bounty > 0 ? "Police · bounty" : "Police" }] : []),
           { id: "career", label: "Career" },
           { id: "ledger", label: "Ledger" },
         ]}
@@ -995,6 +1063,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
         {tab === "cars" && <CarsTab view={view} api={api} at={props.at} run={run} />}
         {tab === "lots" && <LotsTab view={view} api={api} run={run} />}
         {tab === "pound" && <PoundTab view={view} api={api} run={run} />}
+        {tab === "police" && <PoliceTab view={view} api={api} run={run} />}
         {tab === "career" && <CareerTab view={view} />}
         {tab === "ledger" && <LedgerTab view={view} />}
       </div>

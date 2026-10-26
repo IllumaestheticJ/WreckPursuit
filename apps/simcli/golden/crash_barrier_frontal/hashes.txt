@@ -1,4 +1,4 @@
-# simcli hashes scenario=crash_barrier_frontal systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=crash_barrier_frontal systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 60 2f4be0584b1bf444
 120 91408dd980227cc7
 180 67dc406f006980d5

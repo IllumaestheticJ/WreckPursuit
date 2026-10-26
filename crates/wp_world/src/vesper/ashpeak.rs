@@ -223,4 +223,175 @@ mod tests {
                 .collect::<Vec<_>>()
         );
     }
+
+    /// Points every 2 m along every lane: (lane, position, unit heading).
+    fn lane_samples(net: &RoadNetwork) -> Vec<(usize, V3, V2)> {
+        let mut out = Vec::new();
+        for (i, l) in net.lanes.iter().enumerate() {
+            let cum = geom::cumulative(&l.polyline);
+            let len = cum[cum.len() - 1];
+            let mut s = 0.5;
+            while s < len - 0.5 {
+                let (p, d) = geom::point_at(&l.polyline, &cum, s);
+                out.push((i, p, d));
+                s += 2.0;
+            }
+        }
+        out
+    }
+
+    /// Samples bucketed into `cell` m squares.
+    fn bucket<T: Copy>(items: &[(V2, T)], cell: f32) -> BTreeMap<(i32, i32), Vec<T>> {
+        let mut g: BTreeMap<(i32, i32), Vec<T>> = BTreeMap::new();
+        for (p, t) in items {
+            let k = ((p[0] / cell).floor() as i32, (p[1] / cell).floor() as i32);
+            g.entry(k).or_default().push(*t);
+        }
+        g
+    }
+
+    #[test]
+    fn no_two_lanes_of_opposite_directions_overlap() {
+        // Where Route 7 and Route 12 end at at-grade junctions (Northline Parkway, Port
+        // Vesper's Uptown Connector and Lantern Way) the carriageways once closed right onto
+        // the line: the two directions' lanes lay on top of each other for ~100 m.
+        let (net, _) = city();
+        let samples = lane_samples(net);
+        let keyed: Vec<(V2, usize)> = samples
+            .iter()
+            .enumerate()
+            .map(|(k, s)| (geom::xy(s.1), k))
+            .collect();
+        let grid = bucket(&keyed, 10.0);
+        let mut bad = Vec::new();
+        for (key, here) in &grid {
+            for dx in -1..=1 {
+                for dy in -1..=1 {
+                    let Some(there) = grid.get(&(key.0 + dx, key.1 + dy)) else {
+                        continue;
+                    };
+                    for &a in here {
+                        for &b in there {
+                            let ((la, pa, da), (lb, pb, db)) = (samples[a], samples[b]);
+                            if la >= lb {
+                                continue;
+                            }
+                            let lim = 0.5 * (net.lanes[la].width_m + net.lanes[lb].width_m) - 0.5;
+                            if geom::dist(geom::xy(pa), geom::xy(pb)) < lim
+                                && (pa[2] - pb[2]).abs() < 1.5
+                                && geom::dot(da, db) < 0.3
+                            {
+                                bad.push((la, lb, pa));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "{} overlaps, first {:?}",
+            bad.len(),
+            bad.first()
+        );
+    }
+
+    #[test]
+    fn no_median_barrier_stands_on_a_lane() {
+        // The forward carriageway's left edge (its median barrier) swept across the other
+        // carriageway's lanes at those freeway ends.
+        let (net, _) = city();
+        let samples = lane_samples(net);
+        let keyed: Vec<(V2, usize)> = samples
+            .iter()
+            .enumerate()
+            .map(|(k, s)| (geom::xy(s.1), k))
+            .collect();
+        let grid = bucket(&keyed, 10.0);
+        let mut bad = Vec::new();
+        for line in crate::surface::median_barriers(net) {
+            for w in line.windows(2) {
+                let n = (geom::dist(geom::xy(w[0]), geom::xy(w[1])) / 1.0)
+                    .ceil()
+                    .max(1.0) as usize;
+                for k in 0..=n {
+                    let t = k as f32 / n as f32;
+                    let q = [
+                        w[0][0] + (w[1][0] - w[0][0]) * t,
+                        w[0][1] + (w[1][1] - w[0][1]) * t,
+                        w[0][2] + (w[1][2] - w[0][2]) * t,
+                    ];
+                    let key = ((q[0] / 10.0).floor() as i32, (q[1] / 10.0).floor() as i32);
+                    let on = (-1..=1)
+                        .flat_map(|dx| (-1..=1).map(move |dy| (dx, dy)))
+                        .any(|(dx, dy)| {
+                            grid.get(&(key.0 + dx, key.1 + dy)).is_some_and(|v| {
+                                v.iter().any(|&s| {
+                                    let (l, p, d) = samples[s];
+                                    let off = geom::sub(geom::xy(q), geom::xy(p));
+                                    let lat = geom::dot(off, geom::right_of(d)).abs();
+                                    let along = geom::dot(off, d).abs();
+                                    along < 1.0
+                                        && lat < 0.5 * net.lanes[l].width_m - 0.3
+                                        && (q[2] - p[2]).abs() < 1.5
+                                })
+                            })
+                        });
+                    if on {
+                        bad.push(q);
+                    }
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "{} barrier points on lanes, first {:?}",
+            bad.len(),
+            bad.first()
+        );
+    }
+
+    #[test]
+    fn no_building_stands_on_a_lane() {
+        // Meridian Plaza's plinth (a 4 m slab) once covered the plaza-side lane of all four
+        // streets round it.
+        let (net, _) = city();
+        let mut boxes: Vec<(V2, usize)> = Vec::new();
+        for (i, b) in net.buildings.iter().enumerate() {
+            let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+            for q in &b.footprint {
+                lo = [lo[0].min(q[0]), lo[1].min(q[1])];
+                hi = [hi[0].max(q[0]), hi[1].max(q[1])];
+            }
+            let mut x = (lo[0] / 25.0).floor() * 25.0;
+            while x <= hi[0] {
+                let mut y = (lo[1] / 25.0).floor() * 25.0;
+                while y <= hi[1] {
+                    boxes.push(([x + 1.0, y + 1.0], i));
+                    y += 25.0;
+                }
+                x += 25.0;
+            }
+        }
+        let grid = bucket(&boxes, 25.0);
+        let mut bad = Vec::new();
+        for (l, p, _) in lane_samples(net) {
+            let key = ((p[0] / 25.0).floor() as i32, (p[1] / 25.0).floor() as i32);
+            for &bi in grid.get(&key).into_iter().flatten() {
+                let b = &net.buildings[bi];
+                if b.base_z_m < p[2] + 2.0
+                    && b.roof_z() > p[2]
+                    && geom::point_in_polygon(geom::xy(p), &b.footprint)
+                {
+                    bad.push((l, p, bi));
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "{} lane points inside buildings, first {:?}",
+            bad.len(),
+            bad.first()
+        );
+    }
 }

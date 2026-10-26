@@ -1,9 +1,9 @@
-# simcli hashes scenario=vehicle_kerb_strike_30 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
-240 1608723e461d897f
-480 cb33556429ace569
-720 7ab8bbb6e7fc8974
-960 ba28c2379e65a8ec
-1200 9fa78f20a973a385
-1440 d8739c019e67f723
-1680 e7f802d0406d1588
-1920 585fffc8757af2cf
+# simcli hashes scenario=vehicle_kerb_strike_30 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
+240 3020b7ead676ed02
+480 9efc5c9859f756f3
+720 7c32390f26742aee
+960 91e4c6dd70ad1d59
+1200 f0f1ed16fad1aa2e
+1440 d0467068f87d2e96
+1680 f533b97ad010e1ad
+1920 08a10c98bea88506

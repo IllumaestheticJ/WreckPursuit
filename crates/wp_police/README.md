@@ -405,7 +405,9 @@ captain's, parks on the paved highway inside its edge and median barriers
 (`PoliceSystem::set_highway_paving`, from the map's highway surfaces in `for_world`), and the
 captain's strip ends stop at the paved edge: the graph's lane count overstates some Loop 9
 carriageways and the shoulder ends at a barrier, so the old "outer lane edge + 2.5 m" post put
-the car behind the wall (owner, 2026-10-26).
+the car behind the wall (owner, 2026-10-26). In every pursuit a spike car in a tunnel stays
+inside the tunnel walls (`tunnel_walls`, from the covered spans) and the captain's strip ends
+at the wall face: the shoulder spot was in the rock in the Talon, Hollins and Grizzly tunnels.
 
 ### Captain (`captain.rs`)
 `CaptainCommand` (assign unit, roadblock, spikes, helicopter, priority target, call off) is

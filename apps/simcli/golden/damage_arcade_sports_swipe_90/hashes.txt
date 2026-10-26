@@ -1,13 +1,13 @@
-# simcli hashes scenario=damage_arcade_sports_swipe_90 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
-60 bd7db384252eeff4
-120 5104e057669bd935
-180 681050d0aa70c1b8
-240 021035fde7568257
-300 9c9981dceee98fd6
-360 d38d0c258b6ec100
-420 7d4edf7770b9fb1a
-480 bb8a1c52d364b765
-540 9f6b3fddb0157533
-600 a3a5a5979dbec819
-660 730627e88d10f7f2
-720 9a336468c4df469c
+# simcli hashes scenario=damage_arcade_sports_swipe_90 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
+60 bd918cc0c58ddf1f
+120 b28d8d0d1a2c979e
+180 482e512e16775021
+240 2e77fbb946240413
+300 428f7b97cb7fcdad
+360 a5ab8864193b5c2f
+420 e29956dd84efb167
+480 03cdbc7a001b73f0
+540 630fd95eacadd0d6
+600 50c8d5a2e180b188
+660 2f467a3dbe090446
+720 ad9b1e835bc0d70c

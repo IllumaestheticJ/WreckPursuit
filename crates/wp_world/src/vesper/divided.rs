@@ -15,7 +15,8 @@
 
 use super::*;
 
-/// Length over which the carriageways fan in to a [`FreewayEnd::Fan`] end node, m.
+/// Length over which the carriageways close up (lanes meeting on the line) towards a
+/// [`FreewayEnd::Fan`] end node, m.
 pub(super) const FAN_M: f32 = 140.0;
 /// Length of a link beside a carriageway from its gore (taper + parallel lane), m.
 pub(super) const LINK_PARALLEL_M: f32 = 70.0;
@@ -707,6 +708,12 @@ pub(super) fn divide_freeways(
         let ring = &lines[k];
         let total = ring.total();
         let o = f.offset();
+        // A fan closes the carriageways up until their lanes meet on the line (the median
+        // shoulders and barrier go), never further: the end points alone sit on the end node
+        // and the junction there trims the rest. Fanning them right onto the line overlapped
+        // the two directions' lanes for the last ~100 m, the forward median barrier walling
+        // the backward lanes off where Route 7 and Route 12 meet Northline Parkway.
+        let close = 0.5 * f.st.fwd as f32 * HW_LANE_M;
         let fan = |s: f32| {
             let a = if f.ends[0] == FreewayEnd::Fan {
                 smoothstep(0.0, FAN_M, s)
@@ -739,7 +746,7 @@ pub(super) fn divide_freeways(
                 };
                 let pts: Vec<V3> = samples
                     .iter()
-                    .map(|s| ring.offset(*s, side * o * fan(*s)))
+                    .map(|s| ring.offset(*s, side * (close + (o - close) * fan(*s))))
                     .collect();
                 let bank: Vec<f32> = samples.iter().map(|s| side * ring.at(*s).3).collect();
                 let (a, b) = if side > 0.0 { (n_a, n_b) } else { (n_b, n_a) };

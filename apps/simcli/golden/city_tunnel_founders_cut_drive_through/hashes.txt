@@ -1,4 +1,4 @@
-# simcli hashes scenario=city_tunnel_founders_cut_drive_through systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=city_tunnel_founders_cut_drive_through systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 240 19a0ae0ee2f68e63
 480 f24237d541d1e0ca
 720 3c5ed7426f24f88c

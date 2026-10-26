@@ -1111,12 +1111,43 @@ fn stopping_in_a_garage_or_safehouse_on_a_career_run_opens_the_place() {
     assert_eq!(close.end, RunEnd::Free);
 }
 
+/// The garage's Nitrous Kit upgrades the career car's bottle, in both damage modes (owner
+/// rule: physics never differs by mode); a stock car keeps the stock bottle.
+#[test]
+fn nitrous_kit_upgrades_the_career_bottle() {
+    for mode in [DamageMode::Arcade, DamageMode::Simulation] {
+        let (mut c, uid) = career_with("kestrel_ts", 40_000, mode);
+        let scale = |c: &mut Career| {
+            let s = c.start_run(free_drive("kestrel_ts", mode, false)).unwrap();
+            let n = s.vehicle(player(&s)).unwrap().vehicle.nitrous();
+            c.finish_run(&mut { s }).unwrap();
+            n.scale
+        };
+        assert_eq!(c.nitrous_tier(uid), 0);
+        assert_eq!(scale(&mut c), wp_vehicle::nitrous::NitrousScale::PLAYER);
+        c.profile_mut().account.cash = 40_000;
+        c.install_mod(uid, "engine_fuel_system").unwrap();
+        // The shop marks the kit Arcade only; fit it in Arcade for the Simulation career too.
+        if mode == DamageMode::Simulation {
+            c.profile_mut().mode = DamageMode::Arcade;
+        }
+        c.install_mod(uid, "elec_nitrous_1").unwrap();
+        c.profile_mut().mode = mode;
+        assert_eq!(c.nitrous_tier(uid), 1, "{mode:?}");
+        let kit = scale(&mut c);
+        assert_eq!(kit, wp_vehicle::nitrous::tune().kit_scale(1), "{mode:?}");
+        assert!(kit.strength > 1.0 && kit.capacity > 1.0);
+    }
+}
+
 /// Owner report 2026-10-26: with 651 cash the Loop 9 day race still started. A career race
 /// whose buy-in the account cannot pay is refused before the run starts, and nothing is
 /// charged.
 #[test]
 fn a_picker_race_the_career_cannot_afford_is_refused() {
     let (mut c, uid) = career_with("kestrel_ts", 50_000, DamageMode::Arcade);
+    // Loop 9 day is a high-stakes meet: invite only.
+    c.profile_mut().account.bounty = 5_000;
     let def = wp_race::catalog::race("loop9_day").unwrap();
     let sc =
         crate::race::race_scenario_in(&def, "ignored", DamageMode::Arcade, false, def.city.id())
@@ -1149,6 +1180,8 @@ fn a_picker_race_the_career_cannot_afford_is_refused() {
 fn the_career_picker_prices_the_modded_car_like_the_run() {
     let (mut c, uid) = career_with("kestrel_ts", 5_000_000, DamageMode::Arcade);
     c.profile_mut().account.rep = 1_000_000;
+    // Every race, high-stakes meets too.
+    c.profile_mut().account.bounty = 5_000;
     for _ in 0..6 {
         let tree = c.mod_tree(uid).unwrap();
         for m in tree.mods.iter().filter(|m| m.allowed && !m.installed) {
@@ -1217,4 +1250,78 @@ fn the_autopilot_keeps_automatic_gears_on_a_manual_preset() {
             "autopilot {autopilot}"
         );
     }
+}
+
+/// A high-stakes (illegal daytime) meet is invite only: the career needs a bounty to start it,
+/// the picker card says so, and a bigger bounty advertises a bigger purse bonus.
+#[test]
+fn high_stakes_races_need_a_bounty_and_pay_a_bonus_for_it() {
+    let (mut c, _) = career_with("kestrel_ts", 50_000, DamageMode::Arcade);
+    let need = c.economy().stakes.bounty.high_stakes.min_bounty;
+    assert!(need > 0);
+    let card = |c: &Career, id: &str| c.race_cards().into_iter().find(|r| r.id == id).unwrap();
+    let day = card(&c, "loop9_day");
+    assert_eq!(day.bounty_needed, need);
+    assert!(day.bounty_locked);
+    assert_eq!(day.bounty_bonus, 0.0);
+    let street = card(&c, "loop9_circuit");
+    assert_eq!(street.bounty_needed, 0);
+    assert!(!street.bounty_locked);
+    let def = wp_race::catalog::race("loop9_day").unwrap();
+    let sc =
+        crate::race::race_scenario_in(&def, "ignored", DamageMode::Arcade, false, def.city.id())
+            .unwrap();
+    let cash = c.profile().account.cash;
+    let err = c.start_run(sc.clone()).map(|_| ()).unwrap_err();
+    assert!(err.contains("invite only"), "{err}");
+    assert_eq!(c.profile().account.cash, cash, "nothing charged");
+    assert!(!c.run_active());
+    c.profile_mut().account.bounty = need;
+    let small = card(&c, "loop9_day");
+    assert!(!small.bounty_locked);
+    c.profile_mut().account.bounty = 4 * need;
+    let big = card(&c, "loop9_day");
+    assert!(big.bounty_bonus > small.bounty_bonus, "{big:?}");
+    assert_eq!(card(&c, "loop9_circuit").bounty_bonus, 0.0);
+    let mut s = c.start_run(sc).unwrap();
+    c.finish_run(&mut s).unwrap();
+}
+
+/// The garage's Police tab: pay the bounty off (dearer than bail), and informants cool the
+/// carried heat (refused when there is none).
+#[test]
+fn pay_off_the_bounty_and_buy_an_informant() {
+    let (mut c, _) = career_with("kestrel_ts", 20_000, DamageMode::Arcade);
+    assert!(c.pay_off_bounty().is_err(), "no bounty to pay");
+    c.profile_mut().account.bounty = 2_000;
+    c.profile_mut().account.cash = 20_000;
+    let v = c.view();
+    assert!(v.bounty_payoff > v.bail_if_busted && v.bail_if_busted > 0);
+    let cost = c.pay_off_bounty().unwrap();
+    assert_eq!(cost, v.bounty_payoff);
+    assert_eq!(c.profile().account.bounty, 0);
+    assert_eq!(c.profile().account.cash, 20_000 - cost);
+
+    let tier = v.informants.first().expect("informant tiers").clone();
+    assert!(c.buy_informant(&tier.id).is_err(), "no heat to cool");
+    c.profile_mut().carry.heat = 30.0;
+    let cash = c.profile().account.cash;
+    c.buy_informant(&tier.id).unwrap();
+    assert_eq!(c.profile().account.cash, cash - tier.cost);
+    let left = (30.0 - tier.heat_reduction).max(0.0);
+    assert!((c.profile().carry.heat - left).abs() < 1e-4);
+}
+
+/// The police know the career's bounty from the first tick of a city run.
+#[test]
+fn the_career_bounty_is_carried_into_the_chase() {
+    let (mut c, _) = career_with("kestrel_ts", 20_000, DamageMode::Arcade);
+    c.profile_mut().account.bounty = 3_000;
+    let mut sc = night_run_in("ignored", DamageMode::Arcade, procedural_city());
+    sc.entities[0].speed_mps = 0.0;
+    let mut s = c.start_run(sc).unwrap();
+    let id = player(&s);
+    let carry = s.sim().police().config().heat.bounty.career_carry;
+    assert!((s.sim().police().bounty(id) - 3_000.0 * carry).abs() < 1e-3);
+    c.finish_run(&mut s).unwrap();
 }

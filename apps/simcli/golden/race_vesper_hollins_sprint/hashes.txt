@@ -1,4 +1,4 @@
-# simcli hashes scenario=race_vesper_hollins_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=race_vesper_hollins_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 240 f02c685be3710530
 480 6ff6928729f164a6
 720 568b75bc98de0af3

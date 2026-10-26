@@ -24,7 +24,10 @@ use crate::vehicle::{Chassis, Vehicle, Wheel};
 /// owner row 109; round12 used 9 for that on A's lineage). Format 13: plus the plain keyboard
 /// steering state (lift / reversal / slide-crossing timers, last key and slide side, slip rate
 /// and countersteer timers, rack yield), now part of the shipped player handling (unify, 2026-10-21).
-const FORMAT: u8 = 13;
+/// Format 14: the ABS state is a pressure cycle (pressure, lock pressure, releasing per wheel;
+/// was one release timer), 2026-10-26.
+/// Format 15: plus the nitrous bottle (`crate::nitrous`, 2026-10-26).
+const FORMAT: u8 = 15;
 
 /// Opaque full-state snapshot of one [`Vehicle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -213,7 +216,9 @@ impl Vehicle {
             self.tcs.cut,
         ]);
         w.f(self.esc.reference);
-        w.fs(&self.abs.release);
+        w.fs(&self.abs.pressure);
+        w.fs(&self.abs.lock_pressure);
+        w.fs(&self.abs.releasing);
         w.fs(&self.tcs.brake);
         w.fs(&[self.heat, self.heat_reported, self.fuel, self.awd_coupling]);
         w.v(self.force);
@@ -247,6 +252,7 @@ impl Vehicle {
         w.f(self.key_steer);
         w.f(self.hb_held_s);
         w.fs(&self.plain_state());
+        w.fs(&self.nitrous.to_array());
         VehicleSnapshot { bytes: w.0 }
     }
 
@@ -320,6 +326,8 @@ impl Vehicle {
         let misc = r.f4()?;
         let esc_reference = r.f()?;
         let abs = r.f4()?;
+        let abs_lock = r.f4()?;
+        let abs_releasing = r.f4()?;
         let tcs_brake = r.f4()?;
         let heat = r.f4()?;
         let force = r.v()?;
@@ -365,6 +373,10 @@ impl Vehicle {
         for p in &mut plain {
             *p = r.f()?;
         }
+        let mut nitrous = [0.0f32; crate::nitrous::Nitrous::LEN];
+        for n in &mut nitrous {
+            *n = r.f()?;
+        }
         if !r.0.is_empty() {
             return Err(SnapshotError::Malformed);
         }
@@ -394,7 +406,9 @@ impl Vehicle {
             self.tcs.cut,
         ] = misc;
         self.esc.reference = esc_reference;
-        self.abs.release = abs;
+        self.abs.pressure = abs;
+        self.abs.lock_pressure = abs_lock;
+        self.abs.releasing = abs_releasing;
         self.tcs.brake = tcs_brake;
         [self.heat, self.heat_reported, self.fuel, self.awd_coupling] = heat;
         self.force = force;
@@ -411,6 +425,7 @@ impl Vehicle {
         self.key_steer = key_steer;
         self.hb_held_s = hb_held_s;
         self.set_plain_state(plain);
+        self.nitrous = crate::nitrous::Nitrous::from_array(nitrous);
         Ok(())
     }
 }

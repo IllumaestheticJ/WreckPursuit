@@ -613,12 +613,17 @@ fn mode_tables_load_and_derive_from_each_other() {
     let same = ModeTable {
         mode: DamageMode::Simulation,
         racer_damage_scale: 1.0,
+        ai_racer_damage_mult: 1.0,
+        police_damage_scale: 1.0,
         ..arcade.clone()
     };
     assert_eq!(
         same, a,
-        "Arcade differs from Simulation only by racer_damage_scale"
+        "Arcade differs from Simulation only by its per-kind damage scales"
     );
+    // Owner 2026-10-26: AI racers and AI police take 2x their damage in Arcade.
+    assert_eq!(arcade.ai_racer_damage_mult, 2.0);
+    assert_eq!(arcade.police_damage_scale, 2.0);
     assert!((a.impulse_to_lattice_scale - 0.45 * s.impulse_to_lattice_scale).abs() < 1e-6);
     assert!(
         (a.component_fail_threshold_scale - 4.0 * s.component_fail_threshold_scale).abs() < 1e-6

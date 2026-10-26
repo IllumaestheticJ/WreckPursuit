@@ -214,7 +214,7 @@ fn assists_override() -> Option<wp_contracts::AssistProfile> {
 fn personality(id: &str, i: usize) -> DriverProfile {
     catalog::race(id)
         .filter(|_| i > 0)
-        .and_then(|d| d.ai.get(i - 1).map(|a| a.profile))
+        .and_then(|d| d.ai.get(i - 1).map(|a| d.driver_profile(a)))
         .unwrap_or_default()
 }
 

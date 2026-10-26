@@ -371,7 +371,8 @@ export function drawRacer(ctx: Ctx, r: MapRacer, x: number, y: number, rot: numb
   ctx.restore();
 }
 
-/** Roadblock (thick red/white barrier line) or spike strip (yellow teeth), world matrix `m`. */
+/** Roadblock (thick red/white barrier line) or spike strip (yellow teeth), world matrix `m`;
+ * one the decrypting scanner reported (`intel`) also gets its icon ([`drawToolIcon`]). */
 export function drawTool(ctx: Ctx, t: MapTool, m: Mat, k: number, pal: MapPalette): void {
   const a = apply(m, t.x - t.dir[0] * t.halfLenM, t.y - t.dir[1] * t.halfLenM);
   const b = apply(m, t.x + t.dir[0] * t.halfLenM, t.y + t.dir[1] * t.halfLenM);
@@ -398,6 +399,49 @@ export function drawTool(ctx: Ctx, t: MapTool, m: Mat, k: number, pal: MapPalett
     ctx.setLineDash([w * 0.8, w * 0.6]);
     ctx.lineWidth = w * 1.6;
     line(ctx, a, b);
+  }
+  ctx.restore();
+  if (t.intel) drawToolIcon(ctx, t.kind, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, Math.max(7, 6 * k), pal);
+}
+
+/** Map icon of a police tool at `(x, y)` screen px, half-size `s`: a roadblock is a red
+ * "road closed" disc with a white bar, a spike strip a yellow warning triangle with black
+ * teeth. Drawn for the tools the decrypting scanner reports, so they read on the minimap
+ * where the barrier line itself is a few pixels long. */
+export function drawToolIcon(ctx: Ctx, kind: MapTool["kind"], x: number, y: number, s: number, pal: MapPalette): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.setLineDash([]);
+  ctx.lineWidth = Math.max(1, s * 0.18);
+  ctx.strokeStyle = "#000";
+  if (kind === "roadblock") {
+    ctx.fillStyle = pal.danger;
+    ctx.beginPath();
+    ctx.arc(0, 0, s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(-s * 0.62, -s * 0.2, s * 1.24, s * 0.4);
+  } else {
+    ctx.fillStyle = pal.warn;
+    ctx.beginPath();
+    ctx.moveTo(0, -s * 1.05);
+    ctx.lineTo(s * 1.05, s * 0.8);
+    ctx.lineTo(-s * 1.05, s * 0.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Teeth: a zig-zag along the base.
+    ctx.lineWidth = Math.max(1, s * 0.16);
+    ctx.beginPath();
+    const n = 3;
+    for (let i = 0; i <= 2 * n; i++) {
+      const px = -s * 0.6 + (s * 1.2 * i) / (2 * n);
+      const py = i % 2 === 0 ? s * 0.55 : s * 0.1;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
   }
   ctx.restore();
 }

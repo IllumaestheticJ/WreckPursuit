@@ -13,12 +13,14 @@
 
 use serde::Serialize;
 use wp_contracts::{DistrictId, EntityId};
-use wp_police::unit::Assignment;
+use wp_police::unit::{Assignment, Unit};
 use wp_police::{PoliceSystem, PursuitStatus, UnitKind};
 use wp_race::live::Standing;
 use wp_race::{DnfReason, RacerStatus};
 use wp_world::network::{LaneKind, PoiKind};
 use wp_world::{CityMap, RoadGraphView};
+
+use crate::session::PlayerGadgets;
 
 /// Static map of one city (JSON for the UI kit's `MapStatic`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -209,9 +211,18 @@ pub const VERSION: f32 = 2.0;
 pub const HEADER: usize = 21;
 /// Floats per unit: `[id, x, y, yaw, speed_mps, flags, target_x, target_y]`.
 pub const UNIT_STRIDE: usize = 8;
-/// Floats per tool: `[kind (0 roadblock, 1 spike strip), x, y, dir_x, dir_y, half_len_m]`;
-/// the line is drawn from `(x, y) - dir * half_len` to `(x, y) + dir * half_len`.
+/// Floats per tool: `[kind, x, y, dir_x, dir_y, half_len_m]`; the line is drawn from
+/// `(x, y) - dir * half_len` to `(x, y) + dir * half_len`. `kind` = 0 roadblock, 1 spike strip,
+/// plus [`TOOL_INTEL`] when the player's decrypting scanner reported it (drawn with an icon).
 pub const TOOL_STRIDE: usize = 6;
+/// Added to a tool's `kind` when the decrypting scanner (scanner tier 2) reported it.
+pub const TOOL_INTEL: f32 = 2.0;
+/// In the career, police units and tools closer than this to the player are on the map
+/// without any gadget (plain sight), m. Farther ones need a radar detector (moving units) or
+/// the decrypting scanner (roadblocks and spike strips).
+pub const PLAIN_SIGHT_M: f32 = 120.0;
+/// Scanner tier that decrypts the police tool calls (the Decrypting Scanner).
+pub const SCANNER_INTEL_TIER: u8 = 2;
 /// Floats per racer (after the tools): `[entity, x, y, yaw, position (1-based), flags]`
 /// ([`racer_flag`]), in race-position order.
 pub const RACER_STRIDE: usize = 6;
@@ -381,12 +392,14 @@ pub fn pose_of(st: &wp_contracts::VehicleState) -> [f32; 4] {
 
 /// The per-frame map array for `player` (pose from the sim, `None` = no player vehicle;
 /// `police` `None` = the session runs without police: no units or tools; `racers` empty
-/// outside a race).
+/// outside a race; `gadgets` `None` outside the career = every unit and tool, else only what
+/// plain sight, the radar detector and the scanner reveal).
 pub fn map_dynamic(
     police: Option<&PoliceSystem>,
     player: EntityId,
     pose: Option<[f32; 4]>,
     racers: &[MapRacer],
+    gadgets: Option<PlayerGadgets>,
 ) -> Vec<f32> {
     let mut out = vec![0.0; HEADER];
     out[h::VERSION] = VERSION;
@@ -398,7 +411,8 @@ pub fn map_dynamic(
         out[h::HAS_PLAYER] = 1.0;
     }
     if let Some(p) = police {
-        police_part(p, player, &mut out);
+        let seen = Seen::new(p, pose.map(|q| [q[0], q[1]]), gadgets);
+        police_part(p, player, &seen, &mut out);
     }
     for r in racers {
         out.extend_from_slice(&[
@@ -416,7 +430,11 @@ pub fn map_dynamic(
 
 /// [`map_dynamic`] for `player` in a live session: its police (when the session runs them),
 /// the player's pose and, during a picker race, every racer.
-pub fn map_dynamic_for(s: &crate::session::Session, player: EntityId) -> Vec<f32> {
+pub fn map_dynamic_for(
+    s: &crate::session::Session,
+    player: EntityId,
+    gadgets: Option<PlayerGadgets>,
+) -> Vec<f32> {
     let states = s.sim().vehicle_states();
     let pose = |e: EntityId| {
         states
@@ -429,10 +447,71 @@ pub fn map_dynamic_for(s: &crate::session::Session, player: EntityId) -> Vec<f32
         .race()
         .map(|r| racers_of(&r.standings(), player, &pose))
         .unwrap_or_default();
-    map_dynamic(police, player, pose(player), &racers)
+    map_dynamic(police, player, pose(player), &racers, gadgets)
 }
 
-fn police_part(p: &PoliceSystem, player: EntityId, out: &mut Vec<f32>) {
+/// Which police units and tools the player knows about ([`map_dynamic`]'s `gadgets`).
+struct Seen {
+    /// `None`: everything (outside the career, or no player car).
+    career: Option<CareerSight>,
+}
+
+struct CareerSight {
+    pos: [f32; 2],
+    /// Units the radar detector picks up.
+    radar: Vec<wp_police::UnitId>,
+    /// The decrypting scanner reports every roadblock and spike strip.
+    intel: bool,
+}
+
+impl Seen {
+    fn new(p: &PoliceSystem, pos: Option<[f32; 2]>, gadgets: Option<PlayerGadgets>) -> Self {
+        let career = match (gadgets, pos) {
+            (Some(g), Some(pos)) => Some(CareerSight {
+                pos,
+                radar: if g.radar > 0 {
+                    p.radar([pos[0], pos[1], 0.0], g.radar as usize)
+                        .iter()
+                        .map(|b| b.unit)
+                        .collect()
+                } else {
+                    Vec::new()
+                },
+                intel: g.scanner >= SCANNER_INTEL_TIER,
+            }),
+            _ => None,
+        };
+        Self { career }
+    }
+
+    fn near(c: &CareerSight, at: [f32; 2]) -> bool {
+        (at[0] - c.pos[0]).hypot(at[1] - c.pos[1]) <= PLAIN_SIGHT_M
+    }
+
+    /// A unit is on the map: in plain sight, on the player (sirens behind), a helicopter
+    /// (loud, spotlight) or on the radar detector.
+    fn unit(&self, u: &Unit, on_player: bool) -> bool {
+        let Some(c) = &self.career else {
+            return true;
+        };
+        on_player
+            || u.kind == UnitKind::Helicopter
+            || Self::near(c, u.body.pos)
+            || c.radar.contains(&u.id)
+    }
+
+    /// A roadblock / spike strip at `at` is on the map, and its `kind` offset
+    /// ([`TOOL_INTEL`] when the decrypting scanner reported it).
+    fn tool(&self, at: [f32; 2]) -> Option<f32> {
+        match &self.career {
+            None => Some(0.0),
+            Some(c) if c.intel => Some(TOOL_INTEL),
+            Some(c) => Self::near(c, at).then_some(0.0),
+        }
+    }
+}
+
+fn police_part(p: &PoliceSystem, player: EntityId, seen: &Seen, out: &mut Vec<f32>) {
     let cfg = p.config();
     let phase = p.phase();
     let car_sight = cfg.pursuit.los_range_m.get(phase);
@@ -470,6 +549,9 @@ fn police_part(p: &PoliceSystem, player: EntityId, out: &mut Vec<f32>) {
         let b = &u.body;
         let a = &u.assignment;
         let on_player = a.target() == Some(player);
+        if !seen.unit(u, on_player) {
+            continue;
+        }
         let (target, has_target) = match a {
             Assignment::Intercept { point, .. } => (*point, true),
             Assignment::HeloTrack { target } => p
@@ -525,14 +607,27 @@ fn police_part(p: &PoliceSystem, player: EntityId, out: &mut Vec<f32>) {
                 (d[0] * dir[0] + d[1] * dir[1]).abs() + c.half_extents_m[0]
             })
             .fold(4.0f32, f32::max);
-        out.extend_from_slice(&[0.0, s.pos[0], s.pos[1], dir[0], dir[1], half]);
+        let Some(intel) = seen.tool(s.pos) else {
+            continue;
+        };
+        out.extend_from_slice(&[intel, s.pos[0], s.pos[1], dir[0], dir[1], half]);
         n_tools += 1;
     }
     for sp in p.spike_strips() {
         let d = [sp.b[0] - sp.a[0], sp.b[1] - sp.a[1]];
         let len = (d[0] * d[0] + d[1] * d[1]).sqrt().max(1e-3);
         let mid = [(sp.a[0] + sp.b[0]) * 0.5, (sp.a[1] + sp.b[1]) * 0.5];
-        out.extend_from_slice(&[1.0, mid[0], mid[1], d[0] / len, d[1] / len, len * 0.5]);
+        let Some(intel) = seen.tool(mid) else {
+            continue;
+        };
+        out.extend_from_slice(&[
+            1.0 + intel,
+            mid[0],
+            mid[1],
+            d[0] / len,
+            d[1] / len,
+            len * 0.5,
+        ]);
         n_tools += 1;
     }
     out[h::N_UNITS] = n_units as f32;
@@ -616,7 +711,7 @@ mod tests {
             .unwrap()
             .1;
         let pose = pose_of(&st);
-        let d = map_dynamic(Some(s.sim().police()), p, Some(pose), &[]);
+        let d = map_dynamic(Some(s.sim().police()), p, Some(pose), &[], None);
         assert_eq!(d[h::VERSION], VERSION);
         let n = d[h::N_UNITS] as usize;
         let t = d[h::N_TOOLS] as usize;
@@ -656,6 +751,80 @@ mod tests {
         }
     }
 
+    /// Career gadgets (owner, 2026-10-26: "check for other no-op mods"): without a radar
+    /// detector only police in plain sight (or on the player, or in the air) are on the map;
+    /// the detector adds moving units within its range; outside the career, every unit.
+    #[test]
+    fn career_map_shows_police_by_sight_and_radar_detector() {
+        let mut s = chase("vesper_v2");
+        let p = EntityId(1);
+        s.run_ticks(240);
+        let st = s
+            .sim()
+            .vehicle_states()
+            .into_iter()
+            .find(|(e, _)| *e == p)
+            .unwrap()
+            .1;
+        let pose = pose_of(&st);
+        let police = s.sim().police();
+        let units = |g: Option<PlayerGadgets>| -> Vec<(u32, f32, u32)> {
+            let d = map_dynamic(Some(police), p, Some(pose), &[], g);
+            let n = d[h::N_UNITS] as usize;
+            d[HEADER..HEADER + n * UNIT_STRIDE]
+                .chunks(UNIT_STRIDE)
+                .map(|u| {
+                    let dist = (u[1] - pose[0]).hypot(u[2] - pose[1]);
+                    (u[0] as u32, dist, u[5] as u32)
+                })
+                .collect()
+        };
+        let all = units(None);
+        let bare = units(Some(PlayerGadgets::default()));
+        let radar = units(Some(PlayerGadgets {
+            radar: 2,
+            ..Default::default()
+        }));
+        assert_eq!(all.len(), police.units().len());
+        assert!(
+            bare.len() < all.len(),
+            "a night city has police out of sight: {} of {}",
+            bare.len(),
+            all.len()
+        );
+        for (id, dist, f) in &bare {
+            assert!(
+                *dist <= PLAIN_SIGHT_M || f & (flag::ON_PLAYER | flag::HELI) != 0,
+                "unit {id} {dist:.0} m away without a detector"
+            );
+        }
+        let range = police.config().tools.gadgets.radar_range_m[2];
+        assert!(radar.len() >= bare.len());
+        for (id, dist, f) in &radar {
+            assert!(
+                *dist <= range.max(PLAIN_SIGHT_M) || f & (flag::ON_PLAYER | flag::HELI) != 0,
+                "unit {id} {dist:.0} m away beyond the detector's {range} m"
+            );
+        }
+        // Roadblocks and spike strips: plain sight, or anywhere with the decrypting scanner
+        // (then with the icon flag).
+        let seen = |g: PlayerGadgets| Seen::new(police, Some([0.0, 0.0]), Some(g));
+        let far = [PLAIN_SIGHT_M * 3.0, 0.0];
+        let near = [PLAIN_SIGHT_M * 0.5, 0.0];
+        let basic = PlayerGadgets {
+            scanner: 1,
+            ..Default::default()
+        };
+        let decrypt = PlayerGadgets {
+            scanner: SCANNER_INTEL_TIER,
+            ..Default::default()
+        };
+        assert_eq!(seen(basic).tool(far), None);
+        assert_eq!(seen(basic).tool(near), Some(0.0));
+        assert_eq!(seen(decrypt).tool(far), Some(TOOL_INTEL));
+        assert_eq!(Seen::new(police, Some([0.0; 2]), None).tool(far), Some(0.0));
+    }
+
     #[test]
     fn racer_block_follows_the_tools_in_position_order() {
         use wp_race::DqReason;
@@ -683,7 +852,7 @@ mod tests {
         let pose = |e: EntityId| (e.0 != 6).then(|| [e.0 as f32 * 10.0, -(e.0 as f32), 0.5, 20.0]);
         let racers = racers_of(&standings, EntityId(1), &pose);
         assert_eq!(racers.len(), 5);
-        let d = map_dynamic(None, EntityId(1), pose(EntityId(1)), &racers);
+        let d = map_dynamic(None, EntityId(1), pose(EntityId(1)), &racers, None);
         assert_eq!(d[h::VERSION], 2.0);
         assert_eq!(d[h::N_RACERS], 5.0);
         assert_eq!((d[h::N_UNITS], d[h::N_TOOLS]), (0.0, 0.0));
@@ -723,7 +892,7 @@ mod tests {
             p,
             &pose,
         );
-        let d = map_dynamic(Some(s.sim().police()), p, None, &one);
+        let d = map_dynamic(Some(s.sim().police()), p, None, &one, None);
         let n = d[h::N_UNITS] as usize;
         let t = d[h::N_TOOLS] as usize;
         assert!(n > 0);
@@ -739,9 +908,9 @@ mod tests {
         assert!(search_radius(10.0) > search_radius(5.0));
         assert_eq!(search_radius(1e4), SEARCH_MAX_M);
         let p = PoliceSystem::new();
-        let d = map_dynamic(Some(&p), EntityId(1), None, &[]);
+        let d = map_dynamic(Some(&p), EntityId(1), None, &[], None);
         assert_eq!(d.len(), HEADER);
-        let none = map_dynamic(None, EntityId(1), Some([1.0, 2.0, 0.5, 3.0]), &[]);
+        let none = map_dynamic(None, EntityId(1), Some([1.0, 2.0, 0.5, 3.0]), &[], None);
         assert_eq!(none.len(), HEADER);
         assert_eq!(none[h::PLAYER_Y], 2.0);
         assert_eq!(d[h::HAS_PLAYER], 0.0);

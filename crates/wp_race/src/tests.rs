@@ -351,6 +351,50 @@ fn a_flipped_ai_racer_is_righted_on_the_course_and_the_player_is_not() {
 }
 
 #[test]
+fn a_stalled_ai_racer_is_put_back_on_the_course_and_the_player_is_not() {
+    // Standing still on the course (wedged in a pile, never off it or flipped): only the AI
+    // entrant is reset, once per `STALLED_RESET_S` without progress.
+    let mut j = judge(RaceKind::Sprint, sprint_course());
+    j.set_stranded_reset(&[EntityId(1)]);
+    for id in [1, 2] {
+        j.enter(RacerEntry {
+            racer: EntityId(id),
+            redline_rpm: 0.0,
+        })
+        .unwrap();
+    }
+    let green = j.start(0).unwrap();
+    let at = |id: u32| RacerSample {
+        racer: EntityId(id),
+        pos: [0.5, 120.0, 0.0],
+        vel: [0.0, 0.0, 0.0],
+        speed_mps: 0.0,
+        throttle: 0.0,
+        gear: 1,
+        engine_rpm: 1000.0,
+        up_z: 1.0,
+    };
+    for id in [1, 2] {
+        j.relocate(EntityId(id), [0.5, 120.0, 0.0], green);
+    }
+    let limit = (crate::judge::STALLED_RESET_S / wp_contracts::PHYSICS_DT) as u64;
+    let mut resets = Vec::new();
+    for k in 0..=2 * limit + 240 {
+        j.observe(green + k, &[at(1), at(2)], &[]);
+        let r = j.drain_resets();
+        if !r.is_empty() {
+            assert!(k > limit, "reset at tick {k}, limit {limit}");
+        }
+        resets.extend(r.into_iter().map(|r| (k, r)));
+    }
+    // Once per stall period: at ~limit and again ~limit later, never every tick.
+    assert_eq!(resets.len(), 2, "{resets:?}");
+    assert!(resets.iter().all(|(_, r)| r.racer == EntityId(1)));
+    assert!(resets[1].0 > resets[0].0 + limit, "{resets:?}");
+    assert!((resets[0].1.pos[1] - 120.0).abs() < 1e-3, "{resets:?}");
+}
+
+#[test]
 fn reset_mode_puts_an_off_course_racer_back_instead_of_a_dq() {
     let mut j = judge(RaceKind::Sprint, sprint_course());
     j.set_reset_off_course(true);

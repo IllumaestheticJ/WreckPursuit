@@ -19,7 +19,7 @@
 // ?roam=N opens main's free roam (wp_opponent::roam, N roamers; dev only and dormant: the
 // street racers of free drive / night run are the game's racer population, main-sync.md).
 import { assistLevel, loadWasm, sim, type AssistProfile, type CarStatsTable, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
-import { DRAW_STRIDE, META_STRIDE, MODE_NAMES, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
+import { DRAW_STRIDE, META_STRIDE, MODE_NAMES, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, TL, TOOL_KIND, TOOL_STRIDE, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
 import {
   actionHeld,
@@ -112,6 +112,20 @@ const DEFAULT_CAR = "lindwurm_4t";
  * 2026-10-21: "$150K so I can test all features"). `?cash=<n>` picks another amount and
  * `?cash=market` uses the real economy's starting cash (data/economy/market.toml). */
 const DEMO_CASH = 150_000;
+
+/**
+ * The sim's road height under the spike strip centred at `(x, y)` (police_tools() records, which
+ * sit 0.03 m above the road), or undefined when no strip is there. The greybox ray looks for
+ * the surface nearest it, so a strip in the Talon Tunnel lies on the tunnel floor, not on the
+ * hillside over it (owner, 2026-10-26: "invisible spike strip in talon tunnel").
+ */
+function spikeRoadZ(tools: Float32Array, x: number, y: number): number | undefined {
+  for (let o = 0; o + TOOL_STRIDE <= tools.length; o += TOOL_STRIDE) {
+    if (tools[o + TL.kind] !== TOOL_KIND.spikes) continue;
+    if (Math.abs(tools[o + TL.x] - x) < 0.5 && Math.abs(tools[o + TL.y] - y) < 0.5) return tools[o + TL.z] - 0.03;
+  }
+  return undefined;
+}
 function newCareer(mode: string): CareerView {
   const p = params.get("cash");
   if (p === "market") return sim.careerNew(mode);
@@ -246,6 +260,8 @@ async function main(): Promise<void> {
   const driftLabW = new DriftLabWPanel(overlay, sim, scene.world, () => app.player, (car) => startDriftLabW(car));
   // Spike strips on the road (playtest row 88).
   const policeTools = new PoliceToolsView();
+  /** Last police_tools() records (barrier poses, spike strips with their road height). */
+  let policeToolRecords: Float32Array = new Float32Array(0);
   scene.world.add(policeTools.group);
   // Crash effects (owner row 69): sparks, smoke, glass, skid marks, debris (render/fx/).
   const fx = new CrashFx(scene.quality.fx);
@@ -353,6 +369,8 @@ async function main(): Promise<void> {
     release: (uid) => act(() => sim.careerRelease(uid)),
     insure: (uid, tier) => act(() => sim.careerInsure(uid, tier)),
     nextNight: () => act(() => sim.careerNextNight()),
+    buyInformant: (tier) => act(() => sim.careerBuyInformant(tier)),
+    payOffBounty: () => act(() => sim.careerPayOffBounty()),
     lot: (id) => sim.careerLot(id),
     visitLot: (id) => visitLot(id),
     buyListing: (id, slot) => act(() => sim.careerBuyListing(id, slot)),
@@ -744,6 +762,9 @@ async function main(): Promise<void> {
     plots.clear();
     ui.reset();
     radioStrip.clear();
+    // Career: the car's scanner mod decides what the radio hears (none: no radio at all).
+    const gadgets = sim.playerGadgets();
+    audio.setCareerScanner(gadgets.length ? gadgets[1] : null);
     map.reset();
     runEnd.reset();
     garageView.reset();
@@ -1698,6 +1719,7 @@ async function main(): Promise<void> {
     layers.suppress(dev ? [] : DEBUG_LAYERS);
     // Graphics (an explicit ?gfx= wins on load).
     if (prev || !params.get("gfx")) scene.quality.setMode(next.gfx);
+    scene.quality.setCarDetail(next.carDetail);
     const drawParam = Number(params.get("draw"));
     scene.drawDistanceM = next.drawDistanceM > 0 ? next.drawDistanceM : drawParam > 0 ? drawParam : scene.quality.drawDistanceM;
     weather.rainFraction = scene.quality.rainFraction;
@@ -2023,7 +2045,7 @@ async function main(): Promise<void> {
     // The game UI is hidden during a crash replay (and must not count its events twice).
     if (!crash.playing) {
       ui.frame(wi[W.tick], app.player, events, wi[W.hours], MODE_NAMES[Math.round(wi[W.mode])] ?? "Arcade", map.radar());
-      if (!audio.hearsRadio()) {
+      if (!audio.hearsRadio() && !audio.radioOff()) {
         for (const ev of events as unknown as { Police?: { Radio?: { unit: number | null; text: string } } }[]) {
           const r = ev.Police?.Radio;
           if (!r) continue;
@@ -2095,7 +2117,8 @@ async function main(): Promise<void> {
     scene.updateHelicopterBeams(helis, wi[W.night]);
     // The rotor in the world (PR #32): same rows, no extra wasm call.
     audio.setHelicopters(helis);
-    scene.updatePoliceTools(sim.policeTools(), tS);
+    policeToolRecords = sim.policeTools();
+    scene.updatePoliceTools(policeToolRecords, tS);
     const wx = sim.weatherInfo();
     scene.setTimeOfDay(wi[W.night], wx[0] > 0.5 ? wx[7] : 1);
     prof.lap("traffic");
@@ -2159,7 +2182,10 @@ async function main(): Promise<void> {
     lod.update(trafficDraw, policeDraw, app.views, rig.camera, app.views.get(app.player)?.root.position ?? null, tS);
     prof.lap("fleet");
     props.update(sim.propsMoved(), rig.camera);
-    policeTools.update(() => sim.mapDynamic(app.player), (x, y) => scene.groundZ(x, y), now);
+    policeTools.update(() => sim.mapDynamicWorld(app.player), (x, y) => {
+      const roadZ = spikeRoadZ(policeToolRecords, x, y);
+      return scene.groundZ(x, y, roadZ) ?? roadZ ?? null;
+    }, now);
     prof.lap("props");
 
     const inCity = wi[W.city] > 0.5;
@@ -2220,6 +2246,7 @@ async function main(): Promise<void> {
         rest: focusView ? restCache(app.focus) : null,
         camera: cameraLabel(rig.mode) + (rig.lookBack && rig.mode !== "orbit" && rig.mode !== "cinematic" ? " (look back)" : ""),
         units: gameSettings?.units,
+        nitrous: focusView ? sim.nitrous(app.focus) : null,
       });
       updatePanels(replay);
     }

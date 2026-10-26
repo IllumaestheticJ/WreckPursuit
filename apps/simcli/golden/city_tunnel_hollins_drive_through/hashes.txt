@@ -1,4 +1,4 @@
-# simcli hashes scenario=city_tunnel_hollins_drive_through systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+# simcli hashes scenario=city_tunnel_hollins_drive_through systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
 240 9b115a126691f93f
 480 25836b51c1dab006
 720 c123277c0e03d556

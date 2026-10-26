@@ -43,6 +43,12 @@ export interface RaceCard {
   entry_fee: number;
   terrain: string;
   odds: OddsCard[];
+  /** High-stakes race: career bounty needed to enter (0 = open). Older hosts send none. */
+  bounty_needed?: number;
+  /** The career's bounty is too small: the race does not start. */
+  bounty_locked?: boolean;
+  /** Purse bonus the career's bounty earns here (fraction). */
+  bounty_bonus?: number;
 }
 
 /** `wp_wasm::race::OddsCard`: a bet on yourself. */
@@ -120,6 +126,8 @@ export interface RacePayout {
   clean_bonus: number;
   rep: number;
   bounty: number;
+  /** High-stakes purse bonus for the career's bounty. */
+  bounty_bonus?: number;
   cash_after: number;
   ledger: LedgerLine[];
 }
@@ -261,6 +269,7 @@ function Picker(props: { cards: RaceCard[]; status: BetStatus; onStart: (id: str
           {props.cards.map((c) => {
             const cash = props.status.cash;
             const short = cash !== undefined && cash !== null && c.entry_fee > cash;
+            const invite = !!c.bounty_locked;
             return (
             <div class="wp-race-card" key={c.id} data-race={c.id}>
               <div class="wp-spread">
@@ -293,19 +302,28 @@ function Picker(props: { cards: RaceCard[]; status: BetStatus; onStart: (id: str
               <div class="wp-spread" style={{ marginTop: "0.4em" }}>
                 <span title="The winner's purse: 2nd pays half, 3rd a quarter, 4th a tenth; a clean race adds 25%, finishing wanted adds 5-45%.">
                   Win purse <Money value={c.purse} /> · buy-in <Money value={c.entry_fee} />
+                  {(c.bounty_bonus ?? 0) > 0 && (
+                    <span class="wp-ok" data-testid="bounty-bonus" title="High-stakes meet: your bounty adds this to the purse you win">
+                      {" "}· +{Math.round((c.bounty_bonus ?? 0) * 100)}% bounty bonus
+                    </span>
+                  )}
                 </span>
                 <Button
                   variant="primary"
                   size="sm"
-                  disabled={short}
-                  title={short ? "Not enough cash for the buy-in" : undefined}
+                  disabled={short || invite}
+                  title={invite ? "Invite only: the police must want you first" : short ? "Not enough cash for the buy-in" : undefined}
                   testid="race-start"
                   onClick={() => props.onStart(c.id, picks[c.id] ?? null)}
                 >
                   Race
                 </Button>
               </div>
-              {short ? (
+              {invite ? (
+                <div class="wp-dim" style={{ fontSize: "0.8em", marginTop: "0.3em" }} data-testid="race-invite-only">
+                  Invite only: needs a bounty of {(c.bounty_needed ?? 0).toLocaleString("en-US")}. Lose the cops a few times first.
+                </div>
+              ) : short ? (
                 <div class="wp-dim" style={{ fontSize: "0.8em", marginTop: "0.3em" }} data-testid="race-unaffordable">
                   Can't afford the buy-in: you have <Money value={Math.max(0, cash ?? 0)} />.
                 </div>
@@ -467,6 +485,12 @@ function Results(props: { report: RaceReport; onAgain: () => void; onPicker: () 
               <span class="wp-dim">Rep</span>
               <span class="wp-mono">{p.rep > 0 ? `+${p.rep}` : p.rep}</span>
             </div>
+            {(p.bounty_bonus ?? 0) > 0 && (
+              <div class="wp-spread">
+                <span class="wp-dim">Bounty bonus</span>
+                <Money value={p.bounty_bonus ?? 0} tone />
+              </div>
+            )}
             {p.bounty > 0 && (
               <div class="wp-spread">
                 <span class="wp-dim">Bounty</span>

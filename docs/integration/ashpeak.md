@@ -39,6 +39,23 @@ Eight new race goldens in `apps/simcli/golden/` (`race_ashpeak_downtown_checkpoi
 `race_grizzly_grade_sprint`, `race_harnell_dirt_run`, `race_route7_tunnel_sprint`,
 `race_waterfront_drag`). No existing golden changed.
 
+## Fixes 2026-10-26 (owner: raised road blocking a direction, dividers, tunnel)
+- **Meridian Plaza plinth over the streets.** `metro::landmarks` sized the plaza's 4 m paved
+  plinth with `interior` marches that ran up Meridian Avenue / Grand Promenade into the T
+  junction mouths (no road surface near), so it stopped 2 m from the street centrelines and
+  covered the plaza-side lane of 5th St, 7th St, Ember St and Crowfoot Ave. Now `fit_rect`
+  (clear of paved edges and junction discs): ~140 m square.
+- **Freeway fan ends.** `divided.rs` fanned both carriageways right onto the line over
+  `FAN_M`, so at Route 7 / Route 12's at-grade ends (Northline Parkway; Uptown Connector and
+  Lantern Way in Port Vesper) opposing lanes overlapped for ~100 m and the forward median
+  barrier crossed the backward lanes. Carriageways now close only until their lanes meet on
+  the line; `surface::median_barrier_lines` drops any stretch of median edge lying on other
+  paving (`inside_other_paving`), so the barrier ends where the carriageways close up.
+- Talon Tunnel: a physics sweep (rays along every lane at 0.45 m / 1 m against all static
+  colliders) found nothing solid in any tunnel lane.
+- Regression tests in `vesper::ashpeak::tests`: no opposing lanes overlap, no median barrier
+  on a lane, no building on a lane. Greyboxes regenerated (`vesper_v2` unchanged).
+
 ## Known gaps
 - Harnell Flats farmland uses `DistrictId::Suburb` (no farm district in the contract).
 - The greybox (`data/city/ashpeak.greybox.glb`) is about 25 MB.
