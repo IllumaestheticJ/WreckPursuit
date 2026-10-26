@@ -919,6 +919,62 @@ fn stake_table_feel() {
     assert!(night.entry_fee > 0 && night.entry_fee < night.purse / 5);
 }
 
+/// Owner, 2026-10-26: the Loop 9 → Ashpeak highway run ("Ashcroft") pays by its expected
+/// finishing time.
+#[test]
+fn highway_run_purse_follows_expected_time() {
+    let s = &data().stakes;
+    let timed = s
+        .timed_purse
+        .as_ref()
+        .expect("[timed_purse] in stakes.toml");
+    let price = |def: &crate::catalog::RaceDef, length_m: f32, bracket| {
+        let phase = wp_contracts::TimeOfDay::from_hours(def.time_of_day_h).phase();
+        s.race_stake(def.id, length_m, def.kind, phase, bracket, def.legality)
+    };
+    let hw = crate::catalog::race("loop9_ashpeak_highway").unwrap();
+    let night = crate::catalog::race("loop9_circuit").unwrap();
+    let minutes = timed.expected_min(hw.id, hw.length_hint_m).unwrap();
+    // ~446 s winning lap measured (race_picker::loop9_ashpeak_highway).
+    assert!((6.5..8.5).contains(&minutes), "{minutes} min");
+    // Races not listed keep the flat kind purse.
+    assert!(timed.expected_min(night.id, night.length_hint_m).is_none());
+    for b in ClassBracket::ALL {
+        let flat = price(&night, night.length_hint_m, b);
+        let phase = wp_contracts::TimeOfDay::from_hours(night.time_of_day_h).phase();
+        assert_eq!(flat, s.stake(night.kind, phase, b, night.legality));
+        let long = price(&hw, hw.length_hint_m, b);
+        // Same kind, phase and legality as Loop 9 night, about twice the time: more pay, a
+        // bigger buy-in, and the same heat and police.
+        assert!(
+            long.purse as f32 > 1.6 * flat.purse as f32,
+            "{b:?}: {long:?} vs {flat:?}"
+        );
+        assert!(long.entry_fee > flat.entry_fee);
+        assert_eq!((long.heat, long.police), (flat.heat, flat.police));
+        // Linear in expected time.
+        let half = price(&hw, hw.length_hint_m / 2.0, b);
+        assert!(
+            (half.purse * 2 - long.purse).abs() <= 2,
+            "{half:?} vs {long:?}"
+        );
+        assert!(long.entry_fee > 0 && long.entry_fee < long.purse / 5);
+    }
+    // The bracket ladder still applies on top.
+    let d = price(&hw, hw.length_hint_m, ClassBracket::D).purse;
+    let x = price(&hw, hw.length_hint_m, ClassBracket::X).purse;
+    assert!(x > 4 * d, "{d} → {x}");
+}
+
+/// Every race in `[timed_purse]` is a catalog race (a typo would silently pay the flat purse).
+#[test]
+fn timed_purse_races_exist() {
+    let s = &data().stakes;
+    for id in s.timed_purse.iter().flat_map(|t| t.races.keys()) {
+        assert!(crate::catalog::race(id).is_some(), "timed_purse.races.{id}");
+    }
+}
+
 // ---------------------------------------------------------------- scheduler
 
 fn venues() -> Vec<Venue> {

@@ -4149,10 +4149,7 @@ impl PoliceSystem {
         // vehicles) where the car may appear ([`Self::spike_post_ok`]: out of sight, or very
         // far out on a straight): the car and strip appear there together. No such site: no
         // spikes this time (the captain tries again next think).
-        let post_of = |site: &ToolSite| {
-            let span = self.tool_span(site);
-            span.at(site.pos, span.outer + SPIKE_CAR_SHOULDER_M)
-        };
+        let post_of = |site: &ToolSite| self.spike_post(site, &self.tool_span(site));
         let hidden = |site: &ToolSite| {
             let post = post_of(site);
             self.spot_clear(post) && self.spike_post_ok(world, post, SPIKE_PICK_MARGIN_M)
@@ -4176,10 +4173,12 @@ impl PoliceSystem {
         // spans that carriageway, lane edge to median. Nothing is on the road yet: the strip
         // waits for its car (`SpikeRun`, decided on the next think, which has the world).
         let span = self.tool_span(&site);
-        let post = span.at(site.pos, span.outer + SPIKE_CAR_SHOULDER_M);
+        let post = self.spike_post(&site, &span);
         let expires = now.plus(lifetime);
         let strip = if span.oneway {
-            let (a, b) = (span.at(site.pos, span.inner), span.at(site.pos, span.outer));
+            let end =
+                |off: f32| span.at(site.pos, self.strip_end_on_paving(site.pos, span.flow, off));
+            let (a, b) = (end(span.inner), end(span.outer));
             SpikeStrip::between(id, racer, site, a, b, None, expires)
         } else {
             SpikeStrip::across(id, racer, site, length, None, expires)
@@ -4194,6 +4193,15 @@ impl PoliceSystem {
         self.stats.spikes += 1;
         self.stats.tool_sight_m.push(site.sight_m);
         Ok(id)
+    }
+
+    /// Where the AI captain's spike car parks beside a strip at `site`: on the right
+    /// shoulder of the racer's carriageway ([`SPIKE_CAR_SHOULDER_M`] past `span`'s outer edge),
+    /// kept on the paved highway in a Loop 9 race ([`Self::spike_car_on_paving`]: the lane
+    /// count overstates some carriageways and their shoulder ends at a barrier).
+    fn spike_post(&self, site: &ToolSite, span: &ToolSpan) -> [f32; 2] {
+        let off = span.outer + SPIKE_CAR_SHOULDER_M;
+        span.at(site.pos, self.spike_car_on_paving(site.pos, span.flow, off))
     }
 
     /// The traffic flow and lateral span a tool at `site` may use (row 133, see

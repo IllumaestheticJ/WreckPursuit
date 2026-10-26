@@ -223,6 +223,29 @@ Owner: "street race bets don't go to career". Base `origin/main` `431232c5`.
   quick-play race flows untick the box first (the touch check keeps it ticked: it only
   declines).
 
+## Round 5: district modifiers after the one-world merge (2026-10-26)
+
+Owner: "check district modifiers while in the menu and make sure that still makes sense".
+
+- **Repair panel (career garage):** the free "district ×labour" picker plus Legit / Crooked
+  buttons let any repair be priced in any district (always Port ×0.80), unrelated to the
+  world. It now lists the world's real repair shops (`garage_visit::WORLD_SHOPS`, sent as
+  `CareerView.shops`): name, spawn city, district rate, legit / crooked. It starts on the shop
+  the car pulled into (`CareerGarageView.show(message, at)`), else the first shop of the main
+  menu's "Spawn in" city (`CareerApi.homeCity`), else the first. Hosts that send no shops keep
+  the old district picker. `WORLD_SHOPS` is a fixed table (the garage screen has no world
+  loaded); `spawn_tests::world_shops_match_the_generated_world` checks it against the
+  generated `ashpeak` world (names, districts, kinds, nearest spawn grid) and that every spawn
+  city has a shop.
+- **Map district names:** minimap caption and full-map labels showed the bare kind ("CORE",
+  "SUBURB") in the combined world, because names were keyed on `vesper_v2` only. `ashpeak`
+  zones are now named (Ashpeak County's 13 zones first, then Port Vesper's 11), and the map
+  title says "Ashpeak County".
+- **Developer repair-bill overlay and the UI kit's price table:** listed `default`, `Docks`,
+  `Hills` (legacy keys the economy maps to Residential / Port / Suburb) and missed Commercial,
+  Residential and Port; `DISTRICT_LABOUR` had stale rates (Hills ×1.1). Both now follow
+  `prices.toml [district_labour]`; a vitest checks the table against the TOML.
+
 ## Contract change requests
 
 | # | Change | Why | Who is affected | Status |

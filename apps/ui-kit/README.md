@@ -181,7 +181,7 @@ const menu = mountGameMenu(overlayEl, {
   settings: loadGameSettings(defaultGameSettings(/* developer panels by default */ true)),
   cameras: [{ id: "chase", label: "near chase" }, ...],
   countersteer: false, // slider disabled until the host can set it
-  host: { play, restart, garage, quitToMain, openControls, controlsOpen, apply, onOpenChange },
+  host: { play, restart, garage, quitToMain, confirmText, openControls, controlsOpen, apply, onOpenChange },
 });
 menu.openMain();   // title screen (Night run, Rainy night, Street races, Free drive, Garage, Settings, Controls)
 menu.openPause();  // Resume, Restart, Garage, Settings, Controls, Quit to main menu
@@ -197,6 +197,16 @@ menu.openPause();  // Resume, Restart, Garage, Settings, Controls, Quit to main 
   back. Gamepad (standard mapping, first pad, polled by the menu): d-pad or left stick, A select,
   B back, Start resume; directions repeat while held. A button held when the menu opens does not
   fire. While open the menu takes every keydown (capture phase), so no game key leaks through.
+- **"Are you sure?"** (owner request 2026-10-26): pause → Restart, Garage and Quit to main menu,
+  and Settings → Reset to defaults, show a confirm card first. Cancel is focused (a stray Enter /
+  A does nothing harmful); Y or the Yes item confirms, N / Esc / B cancel and refocus the item
+  that asked. `host.confirmText?(action)` returns the line to ask with, `null` to skip the
+  question (nothing would be lost, e.g. restarting a free drive) or `undefined` for the menu's
+  own line; `menu.confirming` is the open question's action.
+- Garage screens use the kit's inline `Confirm` row (`src/ui/kit.tsx`: Cancel focused, Y / N,
+  Esc cancels without closing the screen behind) for selling or scrapping a car, importing a save,
+  buying a car on a lot, and any purchase `isBigSpend` flags ($5,000+, or half your cash): mods
+  (and removals that throw away that much), workshop catalog parts and mechanic jobs.
 - `controlsOpen()` lets the host's rebinding panel sit on top: the menu hides and comes back when
   the panel closes.
 - **Controls** section (per-device input shaping, `src/menu/controls.ts`): a device cycle

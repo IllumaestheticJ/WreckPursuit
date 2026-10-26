@@ -319,8 +319,10 @@ panel: **engines: modelled / layers** (persisted). The impact / horn work on
   airbox resonance excited by the pulses, throttle hiss. Mechanical: valvetrain tick per event,
   broadband rattle, gearbox whine by gear, differential whine by road speed. Turbo whistle by
   boost + blow-off burst (director counter), supercharger whine. Crackle: overrun after a lift
-  (sporty classes / exhaust mods), rev-limiter fuel cut (13 Hz cut pattern while the pedal holds
-  the limiter), misfires below 70 % engine health (`misfire_probability`, same curve both
+  (sporty classes / exhaust mods), soft rev limiter (follows the physics' linear fuel fade over
+  the last 150 rpm: random per-event cuts up to 30 % and thinner pulses, no fixed rhythm; the
+  old 13 Hz on/off chop from 60 rpm under the limit was heard as a pulse while a held gear sat
+  steady under it), misfires below 70 % engine health (`misfire_probability`, same curve both
   sides). Interior (camera `cockpit` 1, `hood` 0.35, `bumper` 0.15; `AudioSystem.update` takes
   the camera mode): exhaust through the body (low-pass + cabin boom), intake and mechanical
   noise forward; exterior: exhaust dominant. Distance, air absorption, panning and Doppler

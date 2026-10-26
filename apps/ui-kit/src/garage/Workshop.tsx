@@ -18,7 +18,7 @@
  */
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { Badge, Button, Meter, Money, Panel, severityColor, Tabs } from "../ui/kit";
+import { Badge, Button, Confirm, isBigSpend, Meter, Money, Panel, severityColor, Tabs } from "../ui/kit";
 import { PaintShop } from "./PaintShop";
 import type {
   CatalogEntry,
@@ -308,6 +308,13 @@ function Catalog(props: {
   const first = props.kind ? props.screen.catalog.find((c) => c.kind === props.kind)?.group : undefined;
   const [group, setGroup] = useState<PartGroup>(first ?? groups[0] ?? "Body");
   const [kind, setKind] = useState<string | null>(props.kind);
+  /** A big buy (or buy + labour) waits for "are you sure?". */
+  const [ask, setAsk] = useState<{ c: CatalogEntry; mechanic: boolean } | null>(null);
+  const buyNow = (c: CatalogEntry) => props.run(() => props.api.buy(c.kind, c.grade));
+  const hireNow = (c: CatalogEntry) => {
+    const t = target(c.kind);
+    if (t) (props.hire(t.id, { buy: c.grade }, c.count > 1 ? `${c.name} ×${c.count}` : c.name), props.onClose());
+  };
   const rows = props.screen.catalog.filter((c) => c.group === group && (!kind || c.kind === kind));
   const byKind = new Map<string, CatalogEntry[]>();
   for (const r of rows) byKind.set(r.kind, [...(byKind.get(r.kind) ?? []), r]);
@@ -367,7 +374,7 @@ function Catalog(props: {
                     variant="primary"
                     disabled={!!c.reason || c.price > props.screen.cash}
                     title={c.reason ?? "into the inventory, to fit yourself"}
-                    onClick={() => props.run(() => props.api.buy(c.kind, c.grade))}
+                    onClick={() => (isBigSpend(c.price, props.screen.cash) ? setAsk({ c, mechanic: false }) : buyNow(c))}
                   >
                     Buy
                   </Button>
@@ -376,7 +383,7 @@ function Catalog(props: {
                     testid="ws-cat-mechanic"
                     disabled={!t || !!c.reason || c.price + c.install_fee > props.screen.cash}
                     title={c.reason ?? (t ? `bought and fitted by the mechanic: labour $${c.install_fee.toLocaleString()}` : "the part it goes in is not on the car")}
-                    onClick={() => t && (props.hire(t.id, { buy: c.grade }, c.count > 1 ? `${c.name} ×${c.count}` : c.name), props.onClose())}
+                    onClick={() => t && (isBigSpend(c.price + c.install_fee, props.screen.cash) ? setAsk({ c, mechanic: true }) : hireNow(c))}
                   >
                     Fit for me <Money value={c.price + c.install_fee} />
                   </Button>
@@ -386,6 +393,26 @@ function Catalog(props: {
             </div>
           ))}
         </div>
+        {ask && (
+          <Confirm
+            key={`${ask.c.kind}:${ask.c.grade}:${ask.mechanic}`}
+            testid="ws-confirm"
+            text={
+              <>
+                {ask.mechanic ? "Buy and have the mechanic fit" : "Buy"} {ask.c.name} for <Money value={ask.c.price + (ask.mechanic ? ask.c.install_fee : 0)} />? You have{" "}
+                <Money value={props.screen.cash} />.
+              </>
+            }
+            yes="Buy"
+            onYes={() => {
+              const { c, mechanic } = ask;
+              setAsk(null);
+              if (mechanic) hireNow(c);
+              else buyNow(c);
+            }}
+            onNo={() => setAsk(null)}
+          />
+        )}
       </Panel>
     </div>
   );
