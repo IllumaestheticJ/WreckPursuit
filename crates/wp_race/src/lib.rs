@@ -73,7 +73,7 @@ pub use result::{DnfReason, DqReason, RacerResult, RacerStatus};
 pub use rules::{RaceRules, RulesTable};
 pub use schedule::{DayCalendar, MeetHeat, ScheduleRules, ScheduledEvent, Scheduler, Venue};
 pub use signals::{PolicePresence, RaceSignal};
-pub use stakes::{Stake, StakeTable};
+pub use stakes::{Stake, StakeTable, TimedPurse, TimedRace};
 pub use territory::Territory;
 
 #[cfg(test)]

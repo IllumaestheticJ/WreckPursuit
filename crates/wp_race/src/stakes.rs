@@ -8,6 +8,18 @@
 //! heat  = kind.heat + phase.heat + legality.heat   (0 when police presence is None)
 //! ```
 //!
+//! A race listed under `[timed_purse.races]` is paid by its expected finishing time instead of
+//! `kind.base_purse` (owner, 2026-10-26: "make the ashcroft race payout a function of expected
+//! finishing time"):
+//!
+//! ```text
+//! expected_min = course length / race.pace_kmh                          (minutes)
+//! purse        = timed_purse.per_minute × expected_min × bracket.purse × risk_curve(risk)
+//! ```
+//!
+//! The expected time is the course's (the field's winning pace), not the player's actual
+//! time, so the picker can advertise it before the start and a faster car is not paid less.
+//!
 //! `risk_curve` is a piecewise-linear, strictly increasing table, so for a fixed kind and
 //! bracket the purse is monotone in risk by construction (property-tested).
 //! `wp_economy` still owns the money: these numbers are what the lobby advertises and what the
@@ -70,6 +82,33 @@ pub struct LegalityStake {
     pub police: PolicePresence,
 }
 
+/// One race paid by expected finishing time.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TimedRace {
+    /// Expected winning average speed over the course, km/h.
+    pub pace_kmh: f32,
+}
+
+/// Purses paid by expected finishing time (`[timed_purse]`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TimedPurse {
+    /// Winner purse per expected minute at risk-curve 1.0 and bracket D, money.
+    pub per_minute: f32,
+    /// Keyed by race id (`wp_race::catalog`).
+    pub races: BTreeMap<String, TimedRace>,
+}
+
+impl TimedPurse {
+    /// Expected finishing time of `race_id` over `length_m`, minutes (`None` when the race is
+    /// not paid by time).
+    pub fn expected_min(&self, race_id: &str, length_m: f32) -> Option<f32> {
+        let r = self.races.get(race_id)?;
+        Some(length_m / (r.pace_kmh / 3.6) / 60.0)
+    }
+}
+
 /// The whole `stakes.toml`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -85,6 +124,9 @@ pub struct StakeTable {
     pub brackets: BTreeMap<String, BracketStake>,
     /// Keyed by [`Legality::key`].
     pub legality: BTreeMap<String, LegalityStake>,
+    /// Races paid by expected finishing time (none when the section is absent).
+    #[serde(default)]
+    pub timed_purse: Option<TimedPurse>,
 }
 
 /// Everything an event puts at stake.
@@ -172,6 +214,16 @@ impl StakeTable {
         if self.legality[Legality::IllegalDaytime.key()].police != PolicePresence::Max {
             return bad("legality.illegal_daytime.police", "must be Max");
         }
+        if let Some(t) = &self.timed_purse {
+            if t.per_minute <= 0.0 {
+                return bad("timed_purse.per_minute", "must be > 0");
+            }
+            for (id, r) in &t.races {
+                if r.pace_kmh <= 0.0 {
+                    return bad(&format!("timed_purse.races.{id}.pace_kmh"), "must be > 0");
+                }
+            }
+        }
         Ok(())
     }
 
@@ -188,6 +240,35 @@ impl StakeTable {
             }
         }
         c[c.len() - 1][1]
+    }
+
+    /// The stake for catalog race `race_id` over a `length_m` course: [`StakeTable::stake`],
+    /// except that a race listed under `[timed_purse]` is paid by its expected finishing time
+    /// (the buy-in, heat and police follow from that purse as usual).
+    pub fn race_stake(
+        &self,
+        race_id: &str,
+        length_m: f32,
+        kind: RaceKind,
+        phase: DayPhase,
+        bracket: ClassBracket,
+        legality: Legality,
+    ) -> Stake {
+        let mut stake = self.stake(kind, phase, bracket, legality);
+        let Some(t) = &self.timed_purse else {
+            return stake;
+        };
+        let Some(minutes) = t.expected_min(race_id, length_m) else {
+            return stake;
+        };
+        let k = &self.kinds[kind.key()];
+        let p = &self.phases[&phase];
+        let b = &self.brackets[bracket.letter()];
+        let l = &self.legality[legality.key()];
+        stake.purse =
+            (t.per_minute * minutes * b.purse * self.risk_multiplier(stake.risk)).round() as i64;
+        stake.entry_fee = (stake.purse as f32 * k.entry_frac * p.entry * l.entry).round() as i64;
+        stake
     }
 
     /// The stake for an event.
