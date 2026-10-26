@@ -686,26 +686,21 @@ fn the_workshop_shows_the_car_as_it_is_even_with_parts_missing() {
 }
 
 #[test]
-fn rep_tiers_gate_the_dealer_and_pay_their_bonus_once() {
+fn every_dealer_car_is_open_at_zero_rep_and_tier_bonuses_pay_once() {
     let mut c = Career::new(econ(), DamageMode::Arcade);
     c.profile_mut().account.cash = 500_000;
     let view = c.view();
     assert_eq!(view.progress.tier, wp_economy::RepTier::Unknown);
+    // No class has a rep gate: the whole dealer is open from the first night.
+    assert!(!view.dealer.is_empty());
+    assert!(view.dealer.iter().all(|d| !d.locked));
     let sport = view
         .dealer
         .iter()
         .find(|d| d.class == wp_contracts::VehicleClass::Sport)
         .unwrap()
         .clone();
-    assert!(sport.locked);
-    assert!(view.dealer.iter().any(|d| !d.locked));
-    // Exotics have no rep gate: open at the dealer from the first night.
-    assert!(view
-        .dealer
-        .iter()
-        .any(|d| d.class == wp_contracts::VehicleClass::Exotic && !d.locked));
-    let err = c.buy_car(&sport.def_id, Condition::New).unwrap_err();
-    assert!(err.contains("locked"), "{err}");
+    c.buy_car(&sport.def_id, Condition::New).unwrap();
 
     // Rep earned on the night pays each tier's bonus the first time only.
     let feared = econ()
@@ -723,10 +718,7 @@ fn rep_tiers_gate_the_dealer_and_pay_their_bonus_once() {
     assert!(paid >= bonuses - 1_000, "paid {paid}, bonuses {bonuses}");
     let view = c.view();
     assert_eq!(view.progress.tier, wp_economy::RepTier::Feared);
-    assert!(!view
-        .dealer
-        .iter()
-        .any(|d| d.def_id == sport.def_id && d.locked));
+    assert!(view.dealer.iter().all(|d| !d.locked));
     c.buy_car(&sport.def_id, Condition::Worn).unwrap();
     let cash = c.profile().account.cash;
     c.next_night().unwrap();
