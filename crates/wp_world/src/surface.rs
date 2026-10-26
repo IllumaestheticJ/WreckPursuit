@@ -2047,15 +2047,64 @@ pub fn median_barriers(net: &RoadNetwork) -> Vec<Vec<V3>> {
         .collect()
 }
 
-/// The median lines themselves, one per surface flagged [`RoadSurface::median_barrier`],
-/// without the crossover openings (where the median runs, whether or not a barrier stands
-/// on it).
+/// The median lines themselves: the left paved edge of every surface flagged
+/// [`RoadSurface::median_barrier`], without the crossover openings (where the median runs,
+/// whether or not a barrier stands on it). The edge is left out where it lies on another
+/// surface's paving ([`inside_other_paving`]): where a freeway's carriageways close up to
+/// meet a junction at its end, the forward one's left edge runs over the other's lanes, and
+/// a barrier there would wall that direction off.
 pub fn median_barrier_lines(net: &RoadNetwork) -> Vec<Vec<V3>> {
-    net.surfaces
-        .iter()
-        .filter(|s| s.median_barrier && s.centre.len() >= 2)
-        .map(|s| surface_edges(s).0)
-        .collect()
+    let mut out = Vec::new();
+    for (si, s) in net.surfaces.iter().enumerate() {
+        if !s.median_barrier || s.centre.len() < 2 {
+            continue;
+        }
+        let edge = surface_edges(s).0;
+        let inside: Vec<bool> = edge
+            .iter()
+            .map(|p| inside_other_paving(net, si, *p))
+            .collect();
+        if !inside.contains(&true) {
+            out.push(edge);
+            continue;
+        }
+        // Where the edge crosses into or out of other paving between two vertices.
+        let crossing = |a: V3, b: V3, inside_a: bool| -> V3 {
+            let at = |t: f32| {
+                [
+                    a[0] + (b[0] - a[0]) * t,
+                    a[1] + (b[1] - a[1]) * t,
+                    a[2] + (b[2] - a[2]) * t,
+                ]
+            };
+            let (mut lo, mut hi) = (0.0f32, 1.0f32);
+            for _ in 0..12 {
+                let mid = 0.5 * (lo + hi);
+                if inside_other_paving(net, si, at(mid)) == inside_a {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            at(hi)
+        };
+        let mut piece: Vec<V3> = Vec::new();
+        for k in 0..edge.len() {
+            if k > 0 && inside[k] != inside[k - 1] {
+                let c = crossing(edge[k - 1], edge[k], inside[k - 1]);
+                piece.push(c);
+                if inside[k] {
+                    out.push(std::mem::take(&mut piece));
+                }
+            }
+            if !inside[k] {
+                piece.push(edge[k]);
+            }
+        }
+        out.push(piece);
+    }
+    out.retain(|l| l.len() >= 2 && *geom::cumulative(l).last().unwrap() >= 0.5);
+    out
 }
 
 /// Half width of a concrete barrier (Jersey base), m: [`edge_barriers`] lines run this far
