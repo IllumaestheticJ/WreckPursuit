@@ -54,10 +54,16 @@ A stake is also capped at 50 % of cash on hand, and betting is refused while in 
 | `CityRaces` | Unknown |
 | `CityBetting` | Street |
 | `TougeRaces` | Known |
-| `TougeBetting` | Respected |
+| `TougeBetting` | Known, at 2 500 rep (`[unlock_rep]`; was Respected / 5 000 until 2026-10-26) |
 | `BossRaces` | Respected |
-| `PinkSlips` | Feared |
+| `PinkSlips` | Respected, 5 000 rep (was Feared / 10 000 until 2026-10-26) |
 | `StreetBetting` | Unknown (lead/round12 port: the roaming street racers' horn challenges stay open from the start; venue `Street` is capped by cash and the racer's level range only, not by the tier's `max_bet`) |
+
+`[unlock_rep]` (optional) pins a feature's gate to an exact rep inside its `unlocks` tier, for a
+gate between two tier thresholds; `validate` refuses one outside the tier. Read the gate with
+`progression.feature_min_rep(f)` (tests too), not `tier_def(feature_tier(f)).min_rep`.
+`CareerState::last_rep` (serde-default `None`) lets `update_progression` report a feature that
+opens or closes inside a tier.
 
 Dealer: every class at Unknown; police classes never. Exotic had a Feared gate until 2026-10-24
 and Sport / Muscle a Known gate until 2026-10-26; the owner dropped both, so cash is the only

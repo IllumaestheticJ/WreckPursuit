@@ -1279,7 +1279,7 @@ mod tests {
     /// Rep that opens `f` in the shipped career tiers (tuning lives in `career.toml`).
     fn rep_for(f: Feature) -> i64 {
         let p = &Economy::embedded().progression;
-        p.tier_def(p.feature_tier(f)).min_rep
+        p.feature_min_rep(f)
     }
 
     /// Rep to race challengers only.
@@ -1287,14 +1287,14 @@ mod tests {
         rep_for(Feature::TougeRaces)
     }
 
-    /// Rep to race bosses and bet, not yet pink slips.
+    /// Rep to race bosses and bet.
     fn respected() -> i64 {
         rep_for(Feature::BossRaces).max(rep_for(Feature::TougeBetting))
     }
 
     /// Rep for everything, pink slips included.
     fn feared() -> i64 {
-        rep_for(Feature::PinkSlips)
+        rep_for(Feature::PinkSlips).max(respected())
     }
 
     fn account(rep: i64, cash: Money) -> (Economy, PlayerAccount, CarUid) {
@@ -1336,10 +1336,17 @@ mod tests {
         assert!(m.race.unlocked && !m.side_bet.unlocked && !m.pink_slip.unlocked);
         assert!(!wager_menu(&econ, &known, &table, &boss).race.unlocked);
 
-        let (econ, respected, _) = account(respected(), 10_000);
-        let m = wager_menu(&econ, &respected, &table, &boss);
+        // Side bets open before pink slips and bosses (career.toml `unlock_rep`).
+        let bet_rep = rep_for(Feature::TougeBetting);
+        let (econ, better, _) = account(bet_rep, 10_000);
+        let m = wager_menu(&econ, &better, &table, &ch);
         assert!(m.race.unlocked && m.side_bet.unlocked && !m.pink_slip.unlocked);
         assert!(m.max_stake > 0);
+        let (econ, short, _) = account(bet_rep - 1, 10_000);
+        assert!(!wager_menu(&econ, &short, &table, &ch).side_bet.unlocked);
+
+        let (econ, pink, _) = account(rep_for(Feature::PinkSlips) - 1, 10_000);
+        assert!(!wager_menu(&econ, &pink, &table, &ch).pink_slip.unlocked);
 
         let (econ, feared, _) = account(feared(), 10_000);
         let m = wager_menu(&econ, &feared, &table, &boss);

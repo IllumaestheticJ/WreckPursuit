@@ -19,11 +19,7 @@ fn setup(map: &str, dir: &str, opponent: &str) -> TougeSetup {
 
 /// Rep that opens `f` in the shipped career tiers (`data/economy/career.toml`).
 fn rep_for(f: Feature) -> i64 {
-    crate::garage::with_economy(|e| {
-        e.progression
-            .tier_def(e.progression.feature_tier(f))
-            .min_rep
-    })
+    crate::garage::with_economy(|e| e.progression.feature_min_rep(f))
 }
 
 fn battle(setup: &TougeSetup, autopilot: bool, wager: Wager, rep: Option<i64>) -> Session {
