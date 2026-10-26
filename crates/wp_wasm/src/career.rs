@@ -48,7 +48,20 @@ use wp_economy::{
 
 use crate::data::mem_data;
 use crate::run::{LedgerLine, PlayerRun, RunOutcome, PLAYER_ACCOUNT};
-use crate::session::Session;
+use crate::session::{PlayerGadgets, Session};
+
+/// Grip gained per metre of extra tyre width over stock (the Wider Tires mod's +2 cm: +4 %).
+const WIDTH_GRIP_PER_M: f32 = 2.0;
+
+/// A career car as the sim builds it ([`Career::car_build`]).
+struct CarBuild {
+    /// Overlay files (empty for a stock car).
+    files: BTreeMap<String, String>,
+    /// Gadgets the mods fit.
+    tools: ToolLoadout,
+    /// Tyre width over stock, m.
+    tire_width_delta_m: f32,
+}
 
 /// RNG salt of a career run's economy (capture consequences), mixed with the in-game day so
 /// each night rolls differently.
@@ -731,14 +744,19 @@ impl Career {
     /// definitions keep the base ids (no other vehicle uses a roster car's files: police
     /// drive `sentinel_*`, traffic `debug_sedan`, and neither is sold).
     pub fn car_files(&self, car: &OwnedCar) -> Result<BTreeMap<String, String>, String> {
-        Ok(self.car_build(car)?.0)
+        Ok(self.car_build(car)?.files)
     }
 
-    /// [`Self::car_files`] and the gadgets the car's mods fit (run-flat tyres...).
-    fn car_build(&self, car: &OwnedCar) -> Result<(BTreeMap<String, String>, ToolLoadout), String> {
+    /// [`Self::car_files`], the gadgets the car's mods fit (run-flat tyres...) and how much
+    /// wider its tyres are than stock.
+    fn car_build(&self, car: &OwnedCar) -> Result<CarBuild, String> {
         let mut files = BTreeMap::new();
         if car.mods.is_empty() && self.econ.wear_torque_factor(car) >= 1.0 {
-            return Ok((files, ToolLoadout::default()));
+            return Ok(CarBuild {
+                files,
+                tools: ToolLoadout::default(),
+                tire_width_delta_m: 0.0,
+            });
         }
         let base = base_car(&car.def_id)?;
         let p = self
@@ -755,7 +773,12 @@ impl Career {
             format!("lattices/{}.json", l.id),
             serde_json::to_string(l).map_err(|e| e.to_string())?,
         );
-        Ok((files, p.applied.tools))
+        let width = |d: &wp_contracts::VehicleDef| d.wheels.first().map_or(0.0, |w| w.width_m);
+        Ok(CarBuild {
+            files,
+            tools: p.applied.tools,
+            tire_width_delta_m: width(v) - width(&base.def),
+        })
     }
 
     /// The car as the sim builds it (mods applied).
@@ -1917,8 +1940,15 @@ impl Career {
             heat
         };
         sc.mode = self.mode();
-        let (files, tools) = self.car_build(&car)?;
-        let mut session = Session::new_with_data(sc, false, &Overlay { files: &files })?;
+        let build = self.car_build(&car)?;
+        let tools = build.tools;
+        let mut session = Session::new_with_data(
+            sc,
+            false,
+            &Overlay {
+                files: &build.files,
+            },
+        )?;
         let player = *session.entities().first().ok_or("no player entity")?;
         if let Some(snap) = self.lattice(uid)? {
             let sim = session.sim_before_start_mut()?;
@@ -1929,18 +1959,24 @@ impl Career {
                 .map_err(|e| e.to_string())?
                 .restore_full(&snap);
         }
-        // Worn or flat tyres drive like it.
-        if let Some((grip, flat)) = self.tire_effects(uid) {
-            session
-                .sim_before_start_mut()?
-                .set_tire_condition(player, grip, flat)
-                .map_err(|e| e.to_string())?;
-        }
-        // Run-flat inserts: a spiked or flat tyre limps on instead of folding onto the rim.
-        session
-            .sim_before_start_mut()?
-            .set_run_flat(player, tools.run_flat > 0)
+        // Worn or flat tyres drive like it; wider tyres grip a little more.
+        let wide = 1.0 + WIDTH_GRIP_PER_M * build.tire_width_delta_m.max(0.0);
+        let (grip, flat) = self.tire_effects(uid).unwrap_or(([1.0; 4], [0.0; 4]));
+        let sim = session.sim_before_start_mut()?;
+        sim.set_tire_condition(player, grip.map(|g| g * wide), flat)
             .map_err(|e| e.to_string())?;
+        // Run-flat inserts: a spiked or flat tyre limps on instead of folding onto the rim.
+        sim.set_run_flat(player, tools.run_flat > 0)
+            .map_err(|e| e.to_string())?;
+        // Radiators / oil cooler: a holed radiator cooks the engine more slowly.
+        sim.set_cooling_tier(player, tools.reinforced_cooling)
+            .map_err(|e| e.to_string())?;
+        // Radar detector, scanner, fake plates: what the player knows about the police.
+        session.set_gadgets(Some(PlayerGadgets {
+            radar: tools.radar_detector,
+            scanner: tools.scanner,
+            fake_plates: tools.fake_plates > 0,
+        }));
         Ok((session, player))
     }
 
@@ -2079,6 +2115,9 @@ impl Career {
             .close_run(&mut self.profile, end, heat, bounty_cash, driven_ticks);
         if touge {
             self.profile.carry.heat = carried;
+        } else if s.gadgets().is_some_and(|g| g.fake_plates) {
+            // Fake plates: the police cannot tie the car to tonight's chase.
+            self.profile.carry.heat = self.econ.carry_heat_with_plates(heat, end, true);
         }
         let (progress, _) = self.update_progression();
         let ledger = self
@@ -2135,7 +2174,10 @@ impl Career {
                     driven_ticks: s.tick(),
                 });
             } else if !over {
-                p.carry.heat = self.econ.carry_heat(r.heat, RunEnd::Free);
+                let plates = s.gadgets().is_some_and(|g| g.fake_plates);
+                p.carry.heat = self
+                    .econ
+                    .carry_heat_with_plates(r.heat, RunEnd::Free, plates);
             }
         }
         self.econ.tidy_profile(&mut p);

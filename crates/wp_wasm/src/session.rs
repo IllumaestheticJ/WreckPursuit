@@ -94,6 +94,21 @@ pub struct Playback {
     pub drift_count: u64,
 }
 
+/// Gadgets on the player's career car (`wp_economy::ToolLoadout`, 0 = not fitted). They
+/// change what the player knows about the police, not the physics: the radar detector shows
+/// patrolling and chasing units on the map beyond plain sight, the scanner sets how soon (and
+/// whether) the police radio is heard, and the decrypting scanner (tier 2) puts every
+/// roadblock and spike strip on the map. Fake plates cut the heat carried to the next run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PlayerGadgets {
+    /// Radar detector tier.
+    pub radar: u8,
+    /// Police scanner tier.
+    pub scanner: u8,
+    /// Fake plates fitted.
+    pub fake_plates: bool,
+}
+
 /// One simulation session (live or replay).
 pub struct Session {
     sc: Scenario,
@@ -137,6 +152,9 @@ pub struct Session {
     /// This is a career run (machine G, [`crate::career`]): the player drives a career car
     /// and the account belongs to the career.
     career: bool,
+    /// Gadgets the player's career car carries ([`Session::set_gadgets`]); `None` outside the
+    /// career (sandbox scenarios show every police unit and hear every radio line).
+    gadgets: Option<PlayerGadgets>,
     /// A picker race (scenario `race_<id>`, live or replayed; see [`crate::race`]).
     race: Option<RaceRun>,
     /// Honk-to-start race spots (see [`crate::race_spots`]).
@@ -270,6 +288,7 @@ impl Session {
             roam,
             run,
             career: false,
+            gadgets: None,
             garages,
             visit: None,
             garage_armed: false,
@@ -889,6 +908,16 @@ impl Session {
     }
 
     // ----- career (machine G; see `crate::career`) -----------------------------------------
+
+    /// Fit the player's gadgets (the career car's mods). Not recorded in replays.
+    pub fn set_gadgets(&mut self, gadgets: Option<PlayerGadgets>) {
+        self.gadgets = gadgets;
+    }
+
+    /// The player's gadgets; `None` outside the career.
+    pub fn gadgets(&self) -> Option<PlayerGadgets> {
+        self.gadgets
+    }
 
     /// This session is a career run.
     pub fn is_career(&self) -> bool {
@@ -2133,6 +2162,7 @@ impl Session {
             outcome: None,
             run: None,
             career: false,
+            gadgets: None,
             race: snap.race.clone(),
             meet_spots: MeetSpots::default(),
             horn_was: false,
