@@ -17,6 +17,7 @@ mod physics;
 mod police_link;
 mod police_tools;
 mod props;
+mod ram;
 mod systems;
 mod traffic_link;
 mod weather_link;
@@ -142,6 +143,8 @@ pub struct SimVehicle {
     /// Tyre condition set by the career ([`Sim::set_tire_condition`]): per-wheel grip
     /// multiplier and deflation, applied on top of damage every tick.
     tire_condition: Option<([f32; 4], [f32; 4])>,
+    /// Battering-ram faces from its mods ([`Sim::set_ram_profile`]); stock by default.
+    ram: wp_economy::RamProfile,
     /// Dormant ([`Sim::set_dormant`]): a fixed body, no vehicle or damage-motion step.
     dormant: bool,
     /// May drive in light mode far from every player ([`Sim::set_light_when_far`]).
@@ -388,6 +391,7 @@ impl Sim {
             ghost_ticks: 0,
             ghost_overstay: 0,
             tire_condition: None,
+            ram: wp_economy::RamProfile::default(),
             player_steering: None,
             dormant: false,
             light_when_far: false,
@@ -903,6 +907,18 @@ impl Sim {
         Ok(())
     }
 
+    /// Set a vehicle's battering-ram faces (its mods' `wp_economy::AppliedMods::ram`): more
+    /// effective mass and damage dealt, less damage taken, in car-on-car hits on those faces
+    /// (see `ram.rs`). Like mods, not recorded in replays: set it before the first tick.
+    pub fn set_ram_profile(
+        &mut self,
+        id: EntityId,
+        profile: wp_economy::RamProfile,
+    ) -> Result<(), SimError> {
+        self.slot_mut(id)?.ram = profile;
+        Ok(())
+    }
+
     /// Set the input a vehicle uses from the next tick on.
     pub fn set_input(&mut self, id: EntityId, input: VehicleInput) -> Result<(), SimError> {
         self.slot_mut(id)?.input = input;
@@ -1368,6 +1384,23 @@ impl Sim {
             &infos,
         );
         out.extend(std::mem::take(&mut tick_contacts.events));
+        // Battering-ram mods: effective mass (body impulses, before the vehicles read their
+        // bodies) and damage dealt / taken in car-on-car hits. On the solver's impulses, before
+        // any damage scaling below.
+        let ram_cars: Vec<ram::RamCar> = self
+            .vehicles
+            .iter()
+            .map(|v| ram::RamCar {
+                id: v.id,
+                body: v.body.body,
+                profile: v.ram,
+            })
+            .collect();
+        ram::apply(
+            &ram_cars,
+            &mut tick_contacts.per_vehicle,
+            &mut self.physics.bodies,
+        );
         // Arcade: racers (player and AI) take `racer_damage_scale` of the collision impulse;
         // traffic and police take it all. Before the filter, so the scaled contacts are the
         // ones quantised, recorded and replicated.

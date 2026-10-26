@@ -1878,6 +1878,20 @@ impl Career {
                 .set_tire_condition(player, grip, flat)
                 .map_err(|e| e.to_string())?;
         }
+        // Bull bars, push bars and armour hit like a battering ram.
+        if !car.mods.is_empty() {
+            let base = base_car(&car.def_id)?;
+            let ram = self
+                .econ
+                .preview(&base.def, &base.lattice, &car.mods, Some(self.mode()))
+                .map_err(e2s)?
+                .applied
+                .ram;
+            session
+                .sim_before_start_mut()?
+                .set_ram_profile(player, ram)
+                .map_err(|e| e.to_string())?;
+        }
         Ok((session, player))
     }
 

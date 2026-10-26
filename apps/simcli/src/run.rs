@@ -11,7 +11,9 @@ use wp_contracts::{
 };
 use wp_sim::{Sim, SimConfig, Systems};
 
-use crate::data::{load_car, load_mod_catalog, load_modded_car, load_mode, load_world, DataSource};
+use crate::data::{
+    load_car, load_mod_catalog, load_modded_car, load_mode, load_world, ram_profile, DataSource,
+};
 use crate::replay::{Checkpoint, EntityCheckpoint, InputEvent, OpEvent, OpKind, Replay};
 use crate::scenario::{tick_of, CitySpec, Driver, Expect, OrderKind, Scenario};
 use crate::RunError;
@@ -371,6 +373,8 @@ pub fn build_sim(
             Some(catalog) if !spec.mods.is_empty() => {
                 let car = load_modded_car(data, catalog, &spec.car, &spec.mods, sc.mode)?;
                 let id = sim.spawn_vehicle_tuned(&car, spec.pos, spec.yaw, spec.tune)?;
+                let ram = ram_profile(catalog, car.def.class, &spec.mods, sc.mode)?;
+                sim.set_ram_profile(id, ram)?;
                 modded.insert(id, car);
                 id
             }
