@@ -192,6 +192,10 @@ pub struct ProgressionRules {
     pub tiers: Vec<TierDef>,
     /// Lowest tier at which each feature opens.
     pub unlocks: BTreeMap<Feature, RepTier>,
+    /// Optional exact rep at which a feature opens, inside its `unlocks` tier (missing = the
+    /// tier's `min_rep`). Lets a gate sit between two tier thresholds.
+    #[serde(default)]
+    pub unlock_rep: BTreeMap<Feature, i64>,
     /// Lowest tier at which the dealer sells each class (missing = never for sale).
     pub class_unlocks: BTreeMap<VehicleClass, RepTier>,
 }
@@ -230,6 +234,17 @@ impl ProgressionRules {
         for f in Feature::ALL {
             if !self.unlocks.contains_key(&f) {
                 return Err(invalid("career.unlocks", format!("missing {}", f.id())));
+            }
+        }
+        for (&f, &rep) in &self.unlock_rep {
+            let t = self.unlocks[&f];
+            let lo = self.tier_def(t).min_rep;
+            let hi = t.next().map_or(i64::MAX, |n| self.tier_def(n).min_rep);
+            if !(lo..hi).contains(&rep) {
+                return Err(invalid(
+                    "career.unlock_rep",
+                    format!("{} = {rep} must lie in its {t:?} tier ({lo}..{hi})", f.id()),
+                ));
             }
         }
         for v in [BetVenue::City, BetVenue::Touge] {
@@ -277,6 +292,14 @@ impl ProgressionRules {
         self.unlocks[&feature]
     }
 
+    /// Rep at which a feature opens: its `unlock_rep` entry, else its tier's `min_rep`.
+    pub fn feature_min_rep(&self, feature: Feature) -> i64 {
+        self.unlock_rep
+            .get(&feature)
+            .copied()
+            .unwrap_or_else(|| self.tier_def(self.feature_tier(feature)).min_rep)
+    }
+
     /// Lowest tier at which the dealer sells a class (`None` = never for sale).
     pub fn class_tier(&self, class: VehicleClass) -> Option<RepTier> {
         self.class_unlocks.get(&class).copied()
@@ -291,6 +314,9 @@ pub struct CareerState {
     pub peak_tier: RepTier,
     /// Tier at the last [`Economy::update_progression`] (to report promotions / demotions).
     pub last_tier: RepTier,
+    /// Rep at the last [`Economy::update_progression`] (to report features whose gate sits
+    /// inside a tier). `None` in saves from before it existed: `last_tier`'s `min_rep` is used.
+    pub last_rep: Option<i64>,
 }
 
 /// What [`Economy::update_progression`] changed.
@@ -346,7 +372,7 @@ pub struct FeatureView {
     pub unlocked: bool,
     /// Tier that opens it.
     pub needs: RepTier,
-    /// Rep that tier starts at.
+    /// Rep that opens it (the tier's start, or the feature's `unlock_rep`).
     pub needed_rep: i64,
 }
 
@@ -426,11 +452,11 @@ fn note(text: String) -> EventReason {
     EventReason::Adjustment { note: text }
 }
 
-fn locked(rules: &ProgressionRules, what: String, needs: RepTier, rep: i64) -> EconomyError {
+fn locked(what: String, needs: RepTier, needed_rep: i64, rep: i64) -> EconomyError {
     EconomyError::Locked {
         what,
         needs,
-        needed_rep: rules.tier_def(needs).min_rep,
+        needed_rep,
         rep,
     }
 }
@@ -438,7 +464,11 @@ fn locked(rules: &ProgressionRules, what: String, needs: RepTier, rep: i64) -> E
 /// Move the account's career state to its current rep, paying first-time tier rewards.
 fn progress_in(tx: &mut Txn, rules: &ProgressionRules) -> ProgressUpdate {
     let state = tx.acct.career;
-    let after = rules.tier_for_rep(tx.acct.rep);
+    let rep = tx.acct.rep;
+    let rep_before = state
+        .last_rep
+        .unwrap_or_else(|| rules.tier_def(state.last_tier).min_rep);
+    let after = rules.tier_for_rep(rep);
     let mut up = ProgressUpdate {
         before: state.last_tier,
         after,
@@ -460,16 +490,17 @@ fn progress_in(tx: &mut Txn, rules: &ProgressionRules) -> ProgressUpdate {
         );
     }
     for f in Feature::ALL {
-        let need = rules.feature_tier(f);
-        if need > up.before && need <= after {
+        let need = rules.feature_min_rep(f);
+        if need > rep_before && need <= rep {
             up.unlocked.push(f);
-        } else if need > after && need <= up.before {
+        } else if need > rep && need <= rep_before {
             up.relocked.push(f);
         }
     }
     tx.acct.career = CareerState {
         peak_tier: state.peak_tier.max(after),
         last_tier: after,
+        last_rep: Some(rep),
     };
     up
 }
@@ -480,9 +511,9 @@ impl Economy {
         self.progression.tier_for_rep(acct.rep)
     }
 
-    /// True when the player's current tier opens `feature`.
+    /// True when the player's current rep opens `feature` (its tier, or its `unlock_rep`).
     pub fn is_unlocked(&self, acct: &PlayerAccount, feature: Feature) -> bool {
-        self.rep_tier(acct) >= self.progression.feature_tier(feature)
+        acct.rep >= self.progression.feature_min_rep(feature)
     }
 
     /// `Ok` when `feature` is open, else [`EconomyError::Locked`] naming the tier needed.
@@ -494,11 +525,10 @@ impl Economy {
         if self.is_unlocked(acct, feature) {
             return Ok(());
         }
-        let needs = self.progression.feature_tier(feature);
         Err(locked(
-            &self.progression,
             feature.id().to_string(),
-            needs,
+            self.progression.feature_tier(feature),
+            self.progression.feature_min_rep(feature),
             acct.rep,
         ))
     }
@@ -526,9 +556,9 @@ impl Economy {
             return Ok(());
         }
         Err(locked(
-            &self.progression,
             format!("{class:?} cars"),
             needs,
+            self.progression.tier_def(needs).min_rep,
             acct.rep,
         ))
     }
@@ -682,12 +712,12 @@ impl Economy {
             features: Feature::ALL
                 .iter()
                 .map(|&f| {
-                    let needs = rules.feature_tier(f);
+                    let needed_rep = rules.feature_min_rep(f);
                     FeatureView {
                         feature: f,
-                        unlocked: tier >= needs,
-                        needs,
-                        needed_rep: rules.tier_def(needs).min_rep,
+                        unlocked: acct.rep >= needed_rep,
+                        needs: rules.feature_tier(f),
+                        needed_rep,
                     }
                 })
                 .collect(),
