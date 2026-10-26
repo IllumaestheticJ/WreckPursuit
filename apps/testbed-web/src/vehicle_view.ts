@@ -79,10 +79,17 @@ export function healthColour(h: number, out = tmpColor): THREE.Color {
 /** Lamp lens looks of the light mods: lens colour, glow colour, tail lens colour. */
 const LAMP_STYLES: Record<string, { lens?: number; glow?: number; tail?: number }> = {
   smoked: { lens: 0x30343a, tail: 0x2a0d0d },
-  xenon: { lens: 0xe8f1ff, glow: 0xdcebff },
+  xenon: { lens: 0xa9c8ff, glow: 0xc4dcff },
   amber: { lens: 0xffd27a, glow: 0xffc24a },
   halo: {},
 };
+
+/**
+ * Build part kinds the cosmetic look draws instead of the build (`setLook`): the look reshapes
+ * the stock bumper and sill covers (render/cosmetics/shell.ts: intakes, lamps, blades, canards),
+ * where the build only bolts a strip on, so a body kit reads as a new bumper on every model.
+ */
+const LOOK_DRAWS: ReadonlySet<string> = new Set(["FrontBumperKit", "SideKit", "RearBumperKit"]);
 
 interface WheelView {
   pivot: THREE.Group; // positioned at the hub, rotated by steer
@@ -868,12 +875,16 @@ export class VehicleView {
     if (!mods?.length) return;
     this.panels.whenReady(() => {
       const drawn = new Set(this.fitted?.drawn ?? []);
-      const byBuild = new Set((this.build?.parts ?? []).filter((p) => drawn.has(p.part)).map((p) => p.mod_id));
+      const parts = (this.build?.parts ?? []).filter((p) => drawn.has(p.part));
+      const byBuild = new Set(parts.filter((p) => !LOOK_DRAWS.has(p.part)).map((p) => p.mod_id));
       const rest = mods.filter((m) => !byBuild.has(m));
       if (!rest.length) return;
       void CarLook.build(this.lookHost(), rest).then((look) => {
         if (!look) return;
         if (gen !== this.lookGen) return look.dispose();
+        // The look redraws these kinds: the build's own pieces of them go.
+        const replaced = new Set(parts.filter((p) => LOOK_DRAWS.has(p.part) && rest.includes(p.mod_id)).flatMap((p) => this.fitted?.pieces[p.part] ?? []));
+        if (replaced.size) this.panels.hideParts((def) => replaced.has(def.name));
         look.showcase = showcase;
         look.setLights(false);
         this.look = look;

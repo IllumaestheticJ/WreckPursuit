@@ -142,6 +142,8 @@ class BodyProbe {
   /** Bounds of the body (paint + trim parts), metres. */
   readonly all: Box;
   private readonly regionBoxes = new Map<string, Box>();
+  /** Boxes of the named body parts (details too: grilles, lamp pods, skid plates). */
+  private readonly partBoxes = new Map<string, { box: Box; region: string | null }>();
 
   constructor(mesh: CarMeshJson) {
     const pos: number[] = [];
@@ -149,6 +151,11 @@ class BodyProbe {
     const all = new THREE.Box3();
     for (const p of mesh.parts) {
       if (p.wheel != null) continue;
+      if (p.kind === "detail" || p.kind === "light") {
+        const box = new THREE.Box3();
+        for (let i = 0; i < p.positions_mm.length; i += 3) box.expandByPoint(V(p.positions_mm[i] * 1e-3, p.positions_mm[i + 1] * 1e-3, p.positions_mm[i + 2] * 1e-3));
+        this.partBoxes.set(p.name, { box: { min: box.min, max: box.max }, region: p.region });
+      }
       const solid = p.kind === "panel" || p.kind === "body" || p.kind === "light" || p.kind === "glass";
       if (!solid) continue;
       const base = pos.length / 3;
@@ -186,6 +193,39 @@ class BodyProbe {
       min: V(at(fallback[0], min.x, max.x), at(fallback[1], min.y, max.y), at(fallback[2], min.z, max.z)),
       max: V(at(fallback[3], min.x, max.x), at(fallback[4], min.y, max.y), at(fallback[5], min.z, max.z)),
     };
+  }
+
+  /** Box of a named detail or lamp part (null when the model has none). */
+  part(name: string): Box | null {
+    return this.partBoxes.get(name)?.box ?? null;
+  }
+
+  /**
+   * Most forward point of the nose over x in [x0, x1], z in [z0, z1]: the body surface, and the
+   * details standing in front of it (grilles, lamp pods, skid plates; not the police push bar
+   * and light bars, which mods replace or leave alone).
+   */
+  frontMost(x0: number, x1: number, z0: number, z1: number): number {
+    let y = -Infinity;
+    for (let k = 0; k <= 8; k++) for (const z of [z0, (z0 + z1) / 2, z1]) y = Math.max(y, this.front(x0 + ((x1 - x0) * k) / 8, z));
+    for (const { box, region } of this.partBoxes.values()) {
+      if (region === "Accessory" || box.min.y < 0) continue;
+      if (box.max.x < x0 || box.min.x > x1 || box.max.z < z0 || box.min.z > z1) continue;
+      y = Math.max(y, box.max.y);
+    }
+    return y;
+  }
+
+  /** Most rearward point of the tail over x in [x0, x1], z in [z0, z1] (as `frontMost`). */
+  rearMost(x0: number, x1: number, z0: number, z1: number): number {
+    let y = Infinity;
+    for (let k = 0; k <= 8; k++) for (const z of [z0, (z0 + z1) / 2, z1]) y = Math.min(y, this.rear(x0 + ((x1 - x0) * k) / 8, z));
+    for (const { box, region } of this.partBoxes.values()) {
+      if (region === "Accessory" || box.max.y > 0) continue;
+      if (box.max.x < x0 || box.min.x > x1 || box.max.z < z0 || box.min.z > z1) continue;
+      y = Math.min(y, box.min.y);
+    }
+    return y;
   }
 
   private cast(origin: THREE.Vector3, dir: THREE.Vector3): number | null {
@@ -253,6 +293,27 @@ type Builder = (c: Ctx, style: string) => { name: string; material: PartMaterial
 
 const SIDES = [-1, 1] as const;
 
+/**
+ * Where along the car a rear wing stands. A trunk lid: near its back edge. An upright tailgate
+ * (hatchback, estate, van, SUV) has no lid to stand on, so the wing goes on the back edge of the
+ * roof, where the stock roof spoilers are; a pickup (roof far ahead of the tailgate): on top of
+ * the tailgate.
+ */
+function wingY(trunk: Box, roof: Box): number {
+  const depth = trunk.max.y - trunk.min.y;
+  if (depth >= 0.25) return trunk.min.y + Math.min(0.16, depth * 0.25);
+  if (roof.min.y - trunk.min.y < 1.2) return roof.min.y + 0.06;
+  return trunk.min.y + 0.04;
+}
+
+/** Stock parts a mod part takes the place of (by name), so the two are not drawn together. */
+const REPLACES: Record<string, RegExp> = {
+  RearWing: /^(wing|spoiler|roof_spoiler|hatch_spoiler|lip_spoiler)/,
+  Diffuser: /^diffuser/,
+  BullBar: /^pushbar/,
+  PushBar: /^pushbar/,
+};
+
 const BUILDERS: Record<string, Builder> = {
   FrontSplitter: ({ b, hw, front }, style) => {
     const yF = b.front(0, front.min.z + 0.05);
@@ -267,9 +328,9 @@ const BUILDERS: Record<string, Builder> = {
     return [{ name: "splitter", material: "carbon", geo: g }];
   },
 
-  RearWing: ({ b, hw, trunk }, style) => {
+  RearWing: ({ b, hw, trunk, roof }, style) => {
     const gt = style === "gt";
-    const y = trunk.min.y + Math.min(0.16, (trunk.max.y - trunk.min.y) * 0.25);
+    const y = wingY(trunk, roof);
     const span = Math.min(hw * 2 * (gt ? 0.96 : 0.84), 2.2);
     const chord = gt ? 0.3 : 0.2;
     const rise = gt ? 0.3 : 0.11;
@@ -304,7 +365,8 @@ const BUILDERS: Record<string, Builder> = {
   },
 
   Diffuser: ({ b, hw, rear }) => {
-    const yR = b.rear(0, rear.min.z + 0.05);
+    // Behind anything already under the tail (a stock diffuser it replaces, a rear fascia).
+    const yR = b.rearMost(-hw * 0.75, hw * 0.75, rear.min.z - 0.05, rear.min.z + 0.1) + 0.02;
     const z = rear.min.z - 0.004;
     const len = 0.36;
     // Ramp rising toward the back, with vertical strakes.
@@ -475,57 +537,83 @@ const BUILDERS: Record<string, Builder> = {
   },
 
   BullBar: ({ b, hw, front }) => {
-    const z0 = front.min.z + 0.1;
-    const z1 = Math.min(front.min.z + 0.32, front.max.z - 0.05);
-    const x = hw * 0.72;
-    const y = Math.max(b.front(0, z0), b.front(x, z0)) + 0.06;
-    const g = new Geo().tube(V(-x, y, z0), V(x, y, z0), 0.03).tube(V(-x * 0.9, y, z1), V(x * 0.9, y, z1), 0.026);
+    // Reinforced bumper: a steel beam across the lower bumper, standing proud of its most
+    // forward point (bumpers curve back at the corners and dip at the grille), with a nudge hoop
+    // up over the lower grille, so it reads on every nose from a sports car to a van.
+    const z0 = front.min.z + 0.12;
+    const z1 = Math.min(front.min.z + 0.42, front.max.z - 0.04);
+    const x = hw * 0.78;
+    const y = b.frontMost(-x, x, z0 - 0.06, z1) + 0.07;
+    const g = new Geo().box(V(0, y, z0), [x * 2, 0.09, 0.12]);
     for (const s of SIDES) {
-      g.tube(V(s * x * 0.55, y, z0), V(s * x * 0.55, y, z1), 0.024);
-      g.tube(V(s * x * 0.55, y, z0), V(s * x * 0.55, b.front(s * x * 0.55, z0) - 0.03, z0), 0.026);
+      // End caps wrap back toward the corners; hoop uprights; struts back into the bumper.
+      g.box(V(s * (x + 0.02), y - 0.06, z0), [0.06, 0.18, 0.12]);
+      g.tube(V(s * x * 0.45, y, z0 + 0.05), V(s * x * 0.45, y, z1), 0.028);
+      g.tube(V(s * x * 0.6, y - 0.04, z0), V(s * x * 0.6, b.front(s * x * 0.6, z0) - 0.03, z0), 0.03);
     }
+    g.tube(V(-x * 0.45, y, z1), V(x * 0.45, y, z1), 0.028);
     return [{ name: "bull_bar", material: "steel", geo: g }];
   },
 
   RearBar: ({ b, hw, rear }) => {
     const z = rear.min.z + 0.16;
     const x = hw * 0.7;
-    const y = Math.min(b.rear(0, z), b.rear(x, z)) - 0.05;
+    const y = b.rearMost(-x, x, z - 0.04, z + 0.04) - 0.06;
     const g = new Geo().tube(V(-x, y, z), V(x, y, z), 0.028);
     for (const s of SIDES) g.tube(V(s * x * 0.6, y, z), V(s * x * 0.6, b.rear(s * x * 0.6, z) + 0.03, z), 0.024);
     return [{ name: "rear_bar", material: "steel", geo: g }];
   },
 
   PushBar: ({ b, hw, front }) => {
+    // Heavy-duty push bumper: padded uprights and cross bars over the grille, and a hoop round
+    // each headlight. Bigger than the stock police bars it replaces (REPLACES), so it shows.
     const z0 = front.min.z + 0.08;
-    const z1 = front.max.z + 0.12;
+    const z1 = front.max.z + 0.16;
     const xr = hw * 0.32;
-    const y = b.front(0, (z0 + z1) / 2) + 0.12;
+    const xl = hw * 0.72;
+    const y = b.frontMost(-xr, xr, z0, z1) + 0.12;
     const g = new Geo();
+    const pads = new Geo();
     for (const s of SIDES) {
-      g.box(V(s * xr, y, (z0 + z1) / 2), [0.05, 0.05, z1 - z0]);
-      g.box(V(s * xr, y + 0.035, (z0 + z1) / 2), [0.06, 0.025, (z1 - z0) * 0.8]);
-      g.box(V(s * xr, (y + b.front(s * xr, z0 + 0.1)) / 2, z0 + 0.1), [0.04, y - b.front(s * xr, z0 + 0.1) + 0.04, 0.05]);
+      g.box(V(s * xr, y, (z0 + z1) / 2), [0.06, 0.06, z1 - z0]);
+      pads.box(V(s * xr, y + 0.04, (z0 + z1) / 2), [0.07, 0.03, (z1 - z0) * 0.85]);
+      g.box(V(s * xr, (y + b.front(s * xr, z0 + 0.1)) / 2, z0 + 0.1), [0.05, y - b.front(s * xr, z0 + 0.1) + 0.04, 0.06]);
+      // Headlight hoop: out from the upright, round the lamp corner and back to the bumper.
+      const yl = b.front(s * xl, z1 - 0.12);
+      g.path([V(s * xr, y, z1 - 0.04), V(s * xl, Math.max(yl + 0.08, y - 0.06), z1 - 0.04), V(s * xl, Math.max(yl + 0.08, y - 0.06), z0 + 0.1), V(s * xr, y, z0 + 0.1)], 0.022);
     }
-    for (const t of [0.2, 0.55, 0.95]) g.box(V(0, y, z0 + (z1 - z0) * t), [xr * 2 + 0.05, 0.04, 0.035]);
-    return [{ name: "push_bar", material: "steel", geo: g }];
+    for (const t of [0.15, 0.5, 0.9]) g.box(V(0, y, z0 + (z1 - z0) * t), [xr * 2 + 0.06, 0.05, 0.04]);
+    return [
+      { name: "push_bar", material: "steel", geo: g },
+      { name: "push_bar_pads", material: "rubber", geo: pads },
+    ];
   },
 
   SkidPlate: ({ b, hw, floor, wheels, front }) => {
     const y0 = Math.max(wheels[0].position_m[1], wheels[1].position_m[1]) - 0.3;
-    const y1 = b.front(0, front.min.z + 0.05) - 0.12;
+    const yF = b.front(0, front.min.z + 0.05);
+    const y1 = yF - 0.12;
     const g = new Geo().box(V(0, (y0 + y1) / 2, floor - 0.012), [hw * 1.2, Math.max(y1 - y0, 0.2), 0.012]);
+    // Leading edge turned up to the bumper's lower lip, so the plate shows under the nose.
+    const zA = floor - 0.012;
+    const zB = Math.max(front.min.z - 0.015, zA + 0.02);
+    g.box(V(0, (y1 + yF) / 2, (zA + zB) / 2), [hw * 1.1, Math.hypot(yF - y1, zB - zA), 0.012], new THREE.Euler(Math.atan2(zB - zA, yF - y1), 0, 0));
     return [{ name: "skid_plate", material: "metal", geo: g }];
   },
 
   RadiatorGuard: ({ b, hw, front }) => {
-    const za = front.min.z + 0.08;
-    const zb = Math.min(front.min.z + 0.3, front.max.z - 0.05);
-    const xa = hw * 0.36;
-    const y = b.front(0, (za + zb) / 2) + 0.012;
+    // Over the grille (the stock `grille` part where the model has one), clear of anything
+    // standing in front of it, with a frame round the mesh.
+    const grille = b.part("grille");
+    const za = grille ? grille.min.z - 0.02 : front.min.z + 0.08;
+    const zb = grille ? grille.max.z + 0.02 : Math.min(front.min.z + 0.3, front.max.z - 0.05);
+    const xa = grille ? Math.max(-grille.min.x, grille.max.x) + 0.02 : hw * 0.36;
+    const y = b.frontMost(-xa, xa, za, zb) + 0.02;
     const g = new Geo();
-    for (let i = 0; i <= 8; i++) g.box(V(-xa + (2 * xa * i) / 8, y, (za + zb) / 2), [0.008, 0.008, zb - za]);
-    for (let i = 0; i <= 3; i++) g.box(V(0, y + 0.004, za + ((zb - za) * i) / 3), [2 * xa, 0.008, 0.008]);
+    for (let i = 0; i <= 10; i++) g.box(V(-xa + (2 * xa * i) / 10, y, (za + zb) / 2), [0.01, 0.01, zb - za]);
+    for (let i = 0; i <= 4; i++) g.box(V(0, y + 0.006, za + ((zb - za) * i) / 4), [2 * xa, 0.01, 0.01]);
+    g.box(V(0, y, za), [2 * xa + 0.04, 0.03, 0.03]).box(V(0, y, zb), [2 * xa + 0.04, 0.03, 0.03]);
+    for (const s of SIDES) g.box(V(s * xa, y, (za + zb) / 2), [0.03, 0.03, zb - za]);
     return [{ name: "radiator_guard", material: "steel", geo: g }];
   },
 
@@ -557,7 +645,8 @@ const BUILDERS: Record<string, Builder> = {
     const g = new Geo();
     const caps = new Geo();
     for (const x of xs) {
-      const y1 = b.rear(x, z + 0.06) - 0.04;
+      // Out past whatever is behind the bumper there (diffuser fins, a step bumper).
+      const y1 = b.rearMost(x - r, x + r, z - r, z + r) - 0.04;
       const tip = new THREE.CylinderGeometry(r, r * 0.92, 0.16, 12, 1, true);
       g.add(tip, new THREE.Matrix4().compose(V(x, y1 + 0.08, z), new THREE.Quaternion().setFromUnitVectors(UP, V(0, -1, 0)), V(1, 1, 1)));
       caps.add(new THREE.CircleGeometry(r * 0.85, 12).rotateX(Math.PI / 2), new THREE.Matrix4().makeTranslation(x, y1 + 0.03, z));
@@ -901,6 +990,8 @@ export function fitBuild(panels: PanelBody, build: BuildVisuals, wheels: WheelIn
   for (const part of build.parts) {
     const builder = BUILDERS[part.part];
     if (!builder) continue;
+    const replaces = REPLACES[part.part];
+    if (replaces) panels.hideParts((def) => def.kind !== "mod" && replaces.test(def.name));
     for (const p of builder(ctx, part.style)) {
       if (p.geo.empty) continue;
       // Sided pieces only bind to regions on their side.
