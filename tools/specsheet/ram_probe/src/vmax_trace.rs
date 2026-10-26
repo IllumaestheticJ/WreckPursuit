@@ -6,7 +6,7 @@
 //! ```
 //! The metric runs full throttle from 30 m/s until the speed gains < 0.04 m/s in 2 s or 150 s
 //! pass. A slow car (the 207 kW, 2.5 t van) is still gaining at ~95 s, by which time it has
-//! covered the 5 km half-length of the rig's ground slab (`rig::GROUND_HALF_EXTENTS`) and falls
+//! covered the 5 km half-length of the rig's ground slab (5 km; the ground is a plane now) and falls
 //! off the world: the metric then reports the free-fall speed (295 km/h for the van). Same
 //! rig, start, assists and stop rule here, plus a stop 200 m before the slab edge. Prints
 //! `<id> <km/h> <converged|edge>`; `--trace` also prints speed, gear, rpm and height every
@@ -14,7 +14,11 @@
 
 use wp_contracts::VehicleInput;
 use wp_vehicle::metrics::metric_assists;
-use wp_vehicle::rig::{Rig, GROUND_HALF_EXTENTS};
+use wp_vehicle::rig::Rig;
+
+/// Half-length of the old ground slab, m. The rig's ground is an endless plane since
+/// 2026-10-26, but the trace keeps the old 5 km stop so its results stay comparable.
+const SLAB_HALF_LENGTH_M: f32 = 5000.0;
 
 /// Top speed (km/h) and whether the stop rule was met before the slab edge.
 fn top_speed(path: &str, trace: bool) -> (String, f32, bool) {
@@ -26,7 +30,7 @@ fn top_speed(path: &str, trace: bool) -> (String, f32, bool) {
         throttle: 1.0,
         ..Default::default()
     };
-    let edge = GROUND_HALF_EXTENTS[1] - 200.0;
+    let edge = SLAB_HALF_LENGTH_M - 200.0;
     let (mut best, mut last) = (0.0f32, 0.0f32);
     for tick in 0..150 * 240 {
         rig.step(&input, &a);

@@ -350,13 +350,15 @@ fn roster_diff_hashes_are_pinned() {
     // owner rows physics-4 / physics-5): spin-model tyres, grip balance and ride (yaw inertia
     // × 1.35, softer springs / bars); tyre / suspension changes, not a differential change.
     // Lead 2026-10-24: G merged with the police power package; only the wolfhound (new engine) moves.
+    // Re-recorded [bless] 2026-10-26: the ground is a half-space, not a 10 km slab (exact wheel
+    // probes on flat ground; a ground change, not a differential change).
     let pinned: [(&str, u64); 6] = [
-        ("shiro_turbo", 0xcf5038b3b584291d),
-        ("hakone_gt", 0xae7c1261e524a821),
-        ("sperber_32", 0xf336e9adc929d2fc),
-        ("lindwurm_4t", 0x64ff111bc78a5d44),
-        ("sentinel_wolfhound", 0x3d259ef535818131),
-        ("junkyard_beater", 0x6bd2bd830746706f),
+        ("shiro_turbo", 0x52e101609cc95e81),
+        ("hakone_gt", 0xbb2c0603887cfc3c),
+        ("sperber_32", 0x30f9296dacc9ea65),
+        ("lindwurm_4t", 0x362470541268a0c6),
+        ("sentinel_wolfhound", 0x4b0032981d8c489e),
+        ("junkyard_beater", 0xd73d91888133cd86),
     ];
     let mut got = Vec::new();
     for (id, _) in pinned {

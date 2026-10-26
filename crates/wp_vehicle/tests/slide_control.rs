@@ -191,11 +191,13 @@ fn wheel_profile_is_bit_identical_to_the_plain_model() {
     // not a slide-code change).
     // Re-recorded [bless] lucciola_350 for the unify: its per-car fix moved into data/cars
     // (rear springs × 0.65 with the ride height kept, yaw inertia × 1.2; a car-data change).
+    // Re-recorded [bless] 2026-10-26: the ground is a half-space, not a 10 km slab (exact
+    // wheel probes and chassis contacts on flat ground; a ground change, not a slide-code change).
     let cases = [
-        ("rampart_50", 0.5, 0.3, 0x8a3f232189b4d668_u64),
-        ("rampart_50", 0.7, 0.8, 0x07e331d34bf80532),
-        ("lucciola_350", 0.5, 0.3, 0xab36bbeebaf7cf1c),
-        ("lucciola_350", 0.7, 0.8, 0xbffb037f974823bc),
+        ("rampart_50", 0.5, 0.3, 0x0fecba8d6969bb9c_u64),
+        ("rampart_50", 0.7, 0.8, 0x9aa2906cc2a42a4b),
+        ("lucciola_350", 0.5, 0.3, 0x2360c7511ccb305c),
+        ("lucciola_350", 0.7, 0.8, 0xca2fea271789643c),
     ];
     for (id, lat_g, react, hash) in cases {
         // The steering-lock data change (playtest item 6b) is not a code change: pin the lock

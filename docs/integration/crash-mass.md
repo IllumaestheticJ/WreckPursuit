@@ -54,3 +54,13 @@ the old slab (Arcade T-bone ratio 0.95) and passes with the half-space.
 Road and terrain meshes far from the origin (Ashpeak's metro is ~4.6 km out) have the same f32
 magnitude. No bad contact showed up there in these crash tests, but meshes are not immune; if
 it ever does, the fix is the same idea (collider-local vertex coordinates per tile).
+
+## Re-blessed (`[bless]` commit)
+The plane changes flat-ground wheel probes and chassis contacts by float noise, so every
+flat-ground determinism record moved; terrain-city goldens (Port Vesper / Ashpeak) did not:
+- simcli goldens (`just bless`): the flat-ground scenarios.
+- `data/stats/cars.json` (`just car-stats`): menu stat bars, within ~2 % (top speed of the
+  fastest cars rose a little: they no longer near the slab's 5 km edge in the metric).
+- `wp_opponent` capability table (`WP_WRITE_CAPS=1`): merlo_20t, morrigan_55.
+- Pinned hashes: `wp_vehicle/tests/differentials.rs`, `wp_vehicle/tests/slide_control.rs`.
+- `tools/specsheet/ram_probe` vmax-trace keeps its old 5 km stop as a local constant.
