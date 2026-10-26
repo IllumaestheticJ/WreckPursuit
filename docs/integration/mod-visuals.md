@@ -93,6 +93,14 @@ Fixed from the first run (37 cars x 136 mods):
   plate lip shows under the nose; cabin pieces (shifter, handbrake, radar box, nitrous) stand on
   top of the one-block stock interiors instead of inside them.
 
+Result on the fixed build (37 cars × 136 mods): 116 of ~5000 car/mod pairs under the
+threshold, almost all small cabin details. The short shifter knob (every car) and the radar
+detector (most cars) are drawn but smaller than the test's 300 px threshold from the outside
+views; the hydraulic handbrake was enlarged and now passes. Remaining scattered misses: sport
+tyres on low-profile exotics (sidewall already looks the same), fuel rail under mid-engine
+covers, sway bars under vans/trucks, bucket seats and sequential shifters behind van and truck
+cabins, the halo ring on the Ombra's lamps, turbo 1 on the Mesquite.
+
 Known gaps: brake kits are hidden behind closed stock rims (steelies, turbofans); sway bars and
 dampers are under the car; fog lamps are small. Runs take ~2 h for all cars in SwiftShader (three
 workers on 4 cores).
