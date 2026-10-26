@@ -75,6 +75,13 @@ pub struct Scenario {
     /// (`Sim::set_traffic_cars`) instead of one police and one traffic car. Needs a city.
     #[serde(default, skip_serializing_if = "is_false")]
     pub car_mix: bool,
+    /// AI police drive the heat-keyed five-model fleet ([`crate::run::CAR_MIX_POLICE`]) with
+    /// every car picked as if the racers were at least this wanted level (1..=5;
+    /// `Sim::set_police_fleet_floor`): 5 = only the top-tier models (a race's `unit_level`,
+    /// `data/police/races.toml`). Traffic is not changed. `None` = `car_mix` decides. Needs a
+    /// city.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub police_unit_level: Option<u8>,
     /// Expensive to simulate (minutes of a full city): debug `cargo test` skips it, as it skips
     /// `scenarios/soak/`; the release CI jobs (`simcli goldens`, `simcli determinism`, the
     /// wasm compare) still run it.
@@ -671,9 +678,20 @@ impl Scenario {
             .expect("scenario serializes")
     }
 
+    /// Whether AI police drive the multi-model fleet ([`crate::run::CAR_MIX_POLICE`]):
+    /// `car_mix`, or a `police_unit_level`.
+    pub fn police_fleet(&self) -> bool {
+        self.car_mix || self.police_unit_level.is_some()
+    }
+
     /// Check internal consistency (positive duration, unique entity ids, sorted keyframes,
     /// expectations naming existing entities).
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(l) = self.police_unit_level {
+            if !(1..=5).contains(&l) {
+                return Err(format!("police_unit_level {l} outside 1..=5"));
+            }
+        }
         if !(self.duration_s.is_finite() && self.duration_s > 0.0) {
             return Err(format!("duration_s = {} must be > 0", self.duration_s));
         }

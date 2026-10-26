@@ -420,8 +420,9 @@ pub fn build_sim(
             if sc.police_cars {
                 sim.set_police(police_for_city(sc, sim.world(), &ids));
                 sim.set_police_car(load_car(data, POLICE_CAR)?);
-                if sc.car_mix {
+                if sc.police_fleet() {
                     sim.set_police_cars(car_mix_police(data)?);
+                    sim.set_police_fleet_floor(sc.police_unit_level.unwrap_or(0));
                 }
             } else {
                 let quiet = Scenario {

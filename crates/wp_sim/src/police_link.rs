@@ -152,6 +152,13 @@ impl Sim {
         self.police_unit_models.clear();
     }
 
+    /// Pick fleet models ([`Sim::set_police_cars`]) as if the racers' wanted level were at
+    /// least `level` (0..=5; 0 = their level alone). A race whose police are its hardest sets
+    /// 5, so every unit, patrols on the grid included, is one of the top-tier models.
+    pub fn set_police_fleet_floor(&mut self, level: u8) {
+        self.police_fleet_floor = level.min(5);
+    }
+
     /// The multi-model fleet ([`Sim::set_police_cars`]), in index order.
     pub fn police_fleet(&self) -> &[PoliceModel] {
         &self.police_fleet
@@ -189,7 +196,7 @@ impl Sim {
         if new.is_empty() {
             return;
         }
-        let level = self.police_dispatch_level();
+        let level = self.police_dispatch_level().max(self.police_fleet_floor);
         for unit in new {
             let m = pick_police_model(&self.police_fleet, level, self.config.seed, unit);
             self.police_unit_models.insert(unit, m);
@@ -532,6 +539,10 @@ mod tests {
     }
 
     fn city_run(fleet: Option<Vec<PoliceModel>>, ticks: u32) -> Sim {
+        city_run_floor(fleet, ticks, 0)
+    }
+
+    fn city_run_floor(fleet: Option<Vec<PoliceModel>>, ticks: u32, floor: u8) -> Sim {
         let player = car("debug_sedan");
         let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
@@ -544,6 +555,7 @@ mod tests {
         if let Some(f) = fleet {
             sim.set_police_cars(f);
         }
+        sim.set_police_fleet_floor(floor);
         sim.set_world(World::procedural(
             &wp_world::procgen::ProcGenConfig::small(),
             wp_world::WorldConfig::default(),
@@ -605,6 +617,26 @@ mod tests {
             .collect();
         assert!(!models.is_empty());
         assert!(models.iter().all(|m| *m <= 1), "{models:?}");
+    }
+
+    #[test]
+    fn a_fleet_floor_gives_every_unit_a_top_tier_car() {
+        // A race whose police are the hardest in the game (`unit_level = 5`, Loop 9 day): even
+        // the patrols out before anybody is wanted are Wolfhounds and Vigils.
+        let mut sim = city_run_floor(Some(fleet()), 0, 5);
+        sim.set_input(EntityId(1), VehicleInput::default()).unwrap();
+        for _ in 0..1200 {
+            sim.step_fixed();
+        }
+        assert_eq!(sim.police_dispatch_level(), 0);
+        let models: Vec<usize> = sim
+            .police()
+            .units()
+            .iter()
+            .filter_map(|u| sim.police_unit_model(u.id))
+            .collect();
+        assert!(!models.is_empty());
+        assert!(models.iter().all(|m| *m >= 3), "{models:?}");
     }
 
     #[test]

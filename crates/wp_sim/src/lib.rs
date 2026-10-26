@@ -269,6 +269,9 @@ pub struct Sim {
     police_fleet: Vec<police_link::PoliceModel>,
     /// Fleet index chosen for each police car unit (assigned once, in unit order).
     police_unit_models: std::collections::BTreeMap<wp_police::UnitId, usize>,
+    /// Lowest wanted level fleet models are picked at ([`Sim::set_police_fleet_floor`]; 0 =
+    /// the racers' level alone).
+    police_fleet_floor: u8,
     /// Physical traffic models ([`Sim::set_traffic_cars`]); agent → `wp_world` model index.
     traffic_cars: Vec<LoadedCar>,
     /// `TrafficConfig::max_physical` as configured, before [`Sim::cap_traffic_promotion`] caps
@@ -316,6 +319,7 @@ impl Sim {
             police_car_limits: None,
             police_fleet: Vec::new(),
             police_unit_models: std::collections::BTreeMap::new(),
+            police_fleet_floor: 0,
             traffic_cars: Vec::new(),
             traffic_physical_base: None,
             record_contacts: false,

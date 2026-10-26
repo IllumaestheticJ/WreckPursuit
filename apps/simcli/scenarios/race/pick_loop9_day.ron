@@ -18,6 +18,7 @@
     assists: ai,
     traffic_density: 0.5,
     police_presence: 6.5,
+    police_unit_level: 5,
     panels: true,
     entities: [
         (

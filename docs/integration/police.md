@@ -1968,3 +1968,15 @@ Owner: "the spike cop on loop 9 daytime race is spawning, but he's spawning off 
 **Tests.** `race::tests::spike_cars_stay_inside_tunnel_walls_in_any_pursuit`.
 
 **Roadblock barriers on terrain cities (owner, 2026-10-26: "an invisible barrier in the tunnel").** `roadblock_barriers` puts a barrier's centre its half height above z = 0, and `wp_sim::sync_police_tools` (outside my crate, minimal change) used that as is. On Ashpeak that is far under the road: the Talon Tunnel's barriers spawned 34 m under the floor and fell out of the world, so roadblocks there had no barriers to see (only their cars). `sync_police_tools` now adds the road height under each barrier when the city has terrain (`MapCity::ground_height`, the surface nearest the roadblock's racer). Checked in the browser: a `roadblock_at` in the Talon Tunnel now stands on the tunnel floor.
+
+## Owner 2026-10-26: "loop 9 day should also have the hardest cops"
+
+Loop 9 day (`loop9_day`, the "Daylight dragnet") is now the hardest police response in the game. Only its table in `data/police/races.toml` changed; every other race's police are untouched.
+
+- **Top-tier cars only.** New profile field `unit_level` (1..=5): the race's police cars come from the heat-keyed five-model fleet (`simcli::run::CAR_MIX_POLICE`: Warden, Cruiser, Bastion, Wolfhound, Vigil) picked as if the racers were at least that wanted level. `loop9_day` sets 5, so every unit — including the patrols already on the loop when the lights go green — is a Wolfhound or a Vigil, instead of the one standard Cruiser every race used before. Plumbing: `RaceDef::police_unit_level` → `Scenario::police_unit_level` (new, `Option<u8>`, written into `scenarios/race/pick_*.ron`) → `Sim::set_police_fleet_floor`, which raises the level `pick_police_model` picks at. `RaceProfile::apply` does not touch it (it is a sim-side choice, not a `PoliceConfig` value); the browser's `race_scenario_in` sets it from the profile. Unset = the old single Cruiser, so no other race or scenario moves.
+- **More of everything:** backup ×2 → ×2.5 (L2 backup 8 → 10 units), ground cap 36 → 40, helicopters 2 → 3.
+- **Tools earlier:** captain roadblocks from L1 (was L2), spikes from L2 (was L3), rolling blocks and box-ins from L1, and a second scripted spike strip at 85 % of the lap on the inner half (the 55 % one covers the outer half).
+- **Rams:** new unlock overrides `ram_level` (sets `rear_ram_level` and `flank_level`) and `hard_ram_level`; the dragnet rams and side-slams from L1 and hard-rams from L2 (normally L2/L3). PIT is 220 km/h at every level and `speed_margin` 0.35 → 0.4.
+- Unchanged: `patrol_corridor_m = 60` (owner rule: Loop 9 cops never spawn off the highway) and the `spike_car_on_paving` clamp above.
+
+**Tests.** `race::tests::loop9_day_is_the_heaviest_police_in_the_picker` (extended: `unit_level`, ram levels, PIT speeds, no other race with more backup), `wp_sim::police_link::tests::a_fleet_floor_gives_every_unit_a_top_tier_car`, `wp_race/tests/race_picker.rs::loop9_day` (full race), golden `race_loop9_day` re-blessed.

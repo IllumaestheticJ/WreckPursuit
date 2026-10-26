@@ -51,6 +51,7 @@ fn main() {
         police_presence: Some(1.0),
         dense_patrols: false,
         car_mix: false,
+        police_unit_level: None,
         systems: None,
         barriers: Vec::new(),
         parked: Vec::new(),

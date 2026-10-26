@@ -244,8 +244,8 @@ pub struct SessionModels {
     /// Physical traffic models in `model` order of [`traffic_draw`] (`car_mix`: simcli's
     /// `CAR_MIX_TRAFFIC`; otherwise just [`SessionModels::traffic`]).
     pub traffic_models: Vec<String>,
-    /// Police fleet models in `model` order of [`police_draw`] (`car_mix`: simcli's
-    /// `CAR_MIX_POLICE`; otherwise empty — one model, [`SessionModels::police`]).
+    /// Police fleet models in `model` order of [`police_draw`] (`car_mix` or
+    /// `police_unit_level`: simcli's `CAR_MIX_POLICE`; otherwise empty — one model, [`SessionModels::police`]).
     pub police_models: Vec<String>,
     /// Model parked cars are drawn as and dent with (`Sim::set_parked_car`), when the session
     /// has parked cars (city kerbs or the scenario's `parked`).
@@ -263,7 +263,7 @@ pub fn session_car_models(sc: &simcli::Scenario, has_city: bool) -> SessionModel
             .collect(),
         (true, false) => vec![simcli::run::TRAFFIC_CAR.to_string()],
     };
-    let police_models: Vec<String> = if has_city && sc.police_cars && mix {
+    let police_models: Vec<String> = if has_city && sc.police_cars && sc.police_fleet() {
         simcli::run::CAR_MIX_POLICE
             .iter()
             .map(|m| m.0.to_string())
