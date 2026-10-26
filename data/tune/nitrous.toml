@@ -1,0 +1,47 @@
+# Nitrous: read by `wp_vehicle::nitrous` (embedded at build time). Owner request 2026-10-26.
+#
+# Every car carries one bottle. Holding the nitrous key (tool 1 of `VehicleInput::tool_use`)
+# with the throttle down in a forward gear burns it: the engine makes `torque_gain` more
+# torque while it burns. The bottle refills by itself once the key has been let go for
+# `refill_delay_s`. An emptied bottle only fires again once it is back to `rearm_fill`.
+#
+# `[bottle]` is the player's bottle. AI racers and police use the same bottle, scaled by
+# their `[racer]` / `[police]` table: that is the rubberbanding. The scale runs from `near`
+# (the AI level with the player, or ahead) to `far` (the AI `gap_full_m` or more behind its
+# target), linearly in between. `strength` multiplies `torque_gain`; `refill` divides
+# `refill_s` (2.0 = refills twice as fast).
+#
+# AI fire only while they are at least `fire_gap_m` behind their target (the nearest player
+# for racers, the car they chase for police), no further than `max_gap_m`, with the throttle
+# at least `min_throttle`, the steering at most `max_steer` and the car faster than
+# `min_speed_mps`. An AI with no target in range never fires.
+#
+# Physics is the same in every damage mode (owner rule 2026-10-20); nothing here depends on it.
+
+[bottle]
+burn_s = 6.0
+refill_s = 40.0
+refill_delay_s = 2.0
+torque_gain = 0.40
+min_throttle = 0.5
+rearm_fill = 0.15
+
+[racer]
+fire_gap_m = 8.0
+gap_full_m = 150.0
+max_gap_m = 500.0
+min_throttle = 0.9
+max_steer = 0.25
+min_speed_mps = 12.0
+strength = { near = 1.10, far = 1.60 }
+refill = { near = 1.50, far = 4.00 }
+
+[police]
+fire_gap_m = 15.0
+gap_full_m = 200.0
+max_gap_m = 600.0
+min_throttle = 0.9
+max_steer = 0.25
+min_speed_mps = 12.0
+strength = { near = 1.15, far = 1.75 }
+refill = { near = 1.75, far = 4.50 }

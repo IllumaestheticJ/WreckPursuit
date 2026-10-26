@@ -11,6 +11,7 @@
 #![warn(missing_docs)]
 
 mod contacts;
+mod nitrous_link;
 mod parked;
 mod physics;
 mod police_link;
@@ -147,6 +148,8 @@ pub struct SimVehicle {
     light_when_far: bool,
     /// Light mode now: a kinematic road follower instead of full vehicle physics.
     light: Option<LightState>,
+    /// AI nitrous fires this tick (`nitrous_link`; AI racers and police only).
+    nitrous_fire: bool,
 }
 
 /// A vehicle in light mode ([`Sim::set_light_when_far`]): heading, speed and the chassis
@@ -386,6 +389,7 @@ impl Sim {
             chassis_skips_sidewalks: false,
             ghost_ticks: 0,
             ghost_overstay: 0,
+            nitrous_fire: false,
             tire_condition: None,
             player_steering: None,
             dormant: false,
@@ -1277,6 +1281,7 @@ impl Sim {
         self.wake_dormant_near();
         self.update_light_modes();
         if sys.vehicle {
+            self.update_ai_nitrous();
             // Weather reaches every wheel through `weather_at` (the plain world without weather).
             let wx = self.weather.as_ref().map(|w| w.query(&self.world));
             let world_q: &dyn WorldQuery = match &wx {
@@ -1317,7 +1322,7 @@ impl Sim {
                         .unwrap_or(slot.kind == VehicleKind::Player),
                 );
                 slot.vehicle.step_with_ground(
-                    &slot.input,
+                    &nitrous_link::with_nitrous(&slot.input, slot.nitrous_fire),
                     &slot.assists,
                     world_q,
                     &ground,

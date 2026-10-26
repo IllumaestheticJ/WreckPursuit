@@ -2186,6 +2186,7 @@ async function main(): Promise<void> {
         rest: focusView ? restCache(app.focus) : null,
         camera: cameraLabel(rig.mode) + (rig.lookBack && rig.mode !== "orbit" && rig.mode !== "cinematic" ? " (look back)" : ""),
         units: gameSettings?.units,
+        nitrous: focusView ? sim.nitrous(app.focus) : null,
       });
       updatePanels(replay);
     }
