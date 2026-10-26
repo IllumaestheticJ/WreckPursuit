@@ -172,7 +172,10 @@ fn pursuit_params_lap_a_circuit_faster_than_civilian() {
     );
     assert!(t_civ.is_finite() && t_pur.is_finite());
     assert!(t_pur < t_civ * 0.9);
-    assert!(ct_civ < 1.5 && ct_pur < 2.0);
+    // Pursuit peak 1.81 m on the old 10 km ground slab, 2.04 m on the half-space ground (same
+    // lap time to 0.1 s; the slab's bogus contact normals nudged the car): still well on the
+    // road, whose lanes are 3.5 m.
+    assert!(ct_civ < 1.5 && ct_pur < 2.2);
 }
 
 // ---------------------------------------------------------------------------------------------
