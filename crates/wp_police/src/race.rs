@@ -113,6 +113,30 @@ impl DeckFoot {
     }
 }
 
+/// A spike car parked beside a Loop 9 strip keeps its side this far inside the paved edge
+/// (the barrier's face), m.
+const PAVED_EDGE_CLEAR_M: f32 = 0.5;
+
+/// A highway surface runs along a tool's flow when |cos| between them is at least this.
+const PAVED_ALONG_MIN_COS: f32 = 0.9;
+
+/// A point this far outside a surface's paved edge still counts as on it (rounding at a
+/// carriageway's edge), m.
+const PAVED_EDGE_SLACK_M: f32 = 0.5;
+
+/// Plan view of one highway's paved surface ([`PoliceSystem::set_highway_paving`]): its
+/// centreline and the paved width either side. The edge and median barriers stand on these
+/// edges, so a car inside them is on the right side of every barrier.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PavedStrip {
+    /// Centreline points, m (XY).
+    pub centre: Vec<[f32; 2]>,
+    /// Paved width left of the centreline (travelling along `centre`), m.
+    pub left_m: f32,
+    /// Paved width right of the centreline, m.
+    pub right_m: f32,
+}
+
 const BUILTIN_RACES: &str = include_str!("../../../data/police/races.toml");
 
 fn default_one() -> f32 {
@@ -715,7 +739,8 @@ impl PoliceSystem {
             }
         }
         for s in &profile.spikes {
-            if let Some(id) = self.place_course_spikes(course, s, owner, expires) {
+            let on_paving = profile.patrol_corridor_m > 0.0;
+            if let Some(id) = self.place_course_spikes(course, s, on_paving, owner, expires) {
                 plan.spikes.push(id);
             }
         }
@@ -927,6 +952,80 @@ impl PoliceSystem {
     fn set_sprung(&mut self, k: usize) {
         if let Some(rp) = self.race.as_mut() {
             rp.stakeouts[k].sprung = true;
+        }
+    }
+
+    /// Lateral offsets `(lo, hi)` (+ right of `flow`, m) from `p` to the left and right paved
+    /// edges of the highway surface under `p` that runs along `flow`; `None` off the highways
+    /// (or with no city paving known).
+    pub(crate) fn paved_edges(&self, p: [f32; 2], flow: [f32; 2]) -> Option<(f32, f32)> {
+        let mut best: Option<(f32, (f32, f32))> = None;
+        for strip in self.highway_paving.iter() {
+            for w in strip.centre.windows(2) {
+                let e = sub(w[1], w[0]);
+                if len(e) < 1e-3 {
+                    continue;
+                }
+                let t = normalize(e);
+                let along = dot(t, flow);
+                if along.abs() < PAVED_ALONG_MIN_COS {
+                    continue;
+                }
+                let (u, q) = closest_on_segment(w[0], w[1], p);
+                if !(0.0..=1.0).contains(&u) {
+                    continue;
+                }
+                let lat = dot(sub(p, q), [t[1], -t[0]]);
+                if lat < -strip.left_m - PAVED_EDGE_SLACK_M
+                    || lat > strip.right_m + PAVED_EDGE_SLACK_M
+                {
+                    continue;
+                }
+                let d = dist(p, q);
+                if best.is_some_and(|(bd, _)| bd <= d) {
+                    continue;
+                }
+                // Edges at surface laterals -left_m and right_m, seen from `p` across `flow`.
+                let sign = if along > 0.0 { 1.0 } else { -1.0 };
+                let (l, r) = (sign * (-strip.left_m - lat), sign * (strip.right_m - lat));
+                best = Some((d, (l.min(r), l.max(r))));
+            }
+        }
+        best.map(|(_, e)| e)
+    }
+
+    /// A spike car's lateral spot `off` (+ right of `flow`, m, from `p`) kept on the paved
+    /// highway in a race with a patrol corridor (Loop 9: the owner's highway races), so the car
+    /// stands inside the edge and median barriers, never behind one. Elsewhere, and off the
+    /// highways, `off` as given.
+    pub(crate) fn spike_car_on_paving(&self, p: [f32; 2], flow: [f32; 2], off: f32) -> f32 {
+        if self.race_corridor().is_none() {
+            return off;
+        }
+        self.spike_car_within_paving(p, flow, off)
+    }
+
+    /// [`Self::spike_car_on_paving`] without the race check.
+    fn spike_car_within_paving(&self, p: [f32; 2], flow: [f32; 2], off: f32) -> f32 {
+        match self.paved_edges(p, flow) {
+            Some((lo, hi)) => {
+                let m = crate::avoid::UNIT_HALF_WIDTH_M + PAVED_EDGE_CLEAR_M;
+                off.min(hi - m).max(lo + m)
+            }
+            None => off,
+        }
+    }
+
+    /// A strip end's lateral spot `off` (+ right of `flow`, m, from `p`) kept on the paved
+    /// highway in a Loop 9 race (see [`Self::spike_car_on_paving`]): no strip runs through a
+    /// barrier.
+    pub(crate) fn strip_end_on_paving(&self, p: [f32; 2], flow: [f32; 2], off: f32) -> f32 {
+        if self.race_corridor().is_none() {
+            return off;
+        }
+        match self.paved_edges(p, flow) {
+            Some((lo, hi)) => off.min(hi).max(lo),
+            None => off,
         }
     }
 
@@ -1228,11 +1327,13 @@ impl PoliceSystem {
     /// A scripted spike strip over part of the course, with its own unit parked on the
     /// shoulder beside it (row 165: no strip without its unit). The unit is placed at race
     /// setup through the row 158 view check; when a racer could already see its spot, neither
-    /// the unit nor the strip is placed (`None`).
+    /// the unit nor the strip is placed (`None`). `on_paving` (a race with a patrol corridor:
+    /// Loop 9) keeps the unit on the paved highway, inside its barriers.
     fn place_course_spikes(
         &mut self,
         course: &RaceCourse,
         sp: &SpikeSpec,
+        on_paving: bool,
         owner: EntityId,
         expires: crate::time::SimTime,
     ) -> Option<ToolId> {
@@ -1251,7 +1352,15 @@ impl PoliceSystem {
         } else {
             scale(perp_left(dir), -1.0)
         };
-        let post = add(centre, scale(side, hw + SHOULDER_CLEAR_M));
+        let mut post = add(centre, scale(side, hw + SHOULDER_CLEAR_M));
+        if on_paving {
+            let right = [dir[1], -dir[0]];
+            let off = dot(sub(post, centre), right);
+            post = add(
+                centre,
+                scale(right, self.spike_car_within_paving(centre, dir, off)),
+            );
+        }
         if self.warmed_up && self.in_racer_view_opt(None, post, true) {
             return None;
         }
@@ -1521,6 +1630,47 @@ mod tests {
                 assert!(corridor.nodes.contains(&dest), "patrols to {dest:?}");
             }
         }
+    }
+
+    #[test]
+    fn loop9_spike_cars_stay_inside_the_highway_paving() {
+        let mut police =
+            PoliceSystem::with_city(PoliceConfig::builtin(), highway(), PoliceSetup::default());
+        // The eastbound carriageway's paving: 12 m wide around y = -8 (y -14 .. -2), its barriers
+        // on those edges.
+        police.set_highway_paving(vec![PavedStrip {
+            centre: vec![[0.0, -8.0], [1600.0, -8.0]],
+            left_m: 6.0,
+            right_m: 6.0,
+        }]);
+        let (p, east) = ([800.0, -6.0], [1.0, 0.0]);
+        assert_eq!(police.paved_edges(p, east), Some((-4.0, 8.0)));
+        // Seen the other way round, the edges swap sides.
+        assert_eq!(police.paved_edges(p, [-1.0, 0.0]), Some((-8.0, 4.0)));
+        assert_eq!(police.paved_edges([800.0, 40.0], east), None);
+        assert_eq!(police.paved_edges(p, [0.0, 1.0]), None);
+        // No race (or a race without a patrol corridor): the shoulder spot as given.
+        assert_eq!(police.spike_car_on_paving(p, east, 12.0), 12.0);
+        let prof = RaceProfiles::builtin().get("loop9_day").unwrap().clone();
+        let prof = RaceProfile {
+            route_blocks: Vec::new(),
+            side_blocks: Vec::new(),
+            spikes: Vec::new(),
+            stakeouts: Vec::new(),
+            ..prof
+        };
+        let c = RaceCourse::new(&[[0.0, -7.75], [1600.0, -7.75]]);
+        police.start_race("loop9_day", &prof, &c, &[EntityId(1)]);
+        // Loop 9: a spot past the outer edge comes back inside it with the car's half width and
+        // a margin to spare; one past the median edge likewise; one on the paving stays.
+        let m = crate::avoid::UNIT_HALF_WIDTH_M + PAVED_EDGE_CLEAR_M;
+        assert!((police.spike_car_on_paving(p, east, 12.0) - (8.0 - m)).abs() < 1e-4);
+        assert!((police.spike_car_on_paving(p, east, -9.0) - (-4.0 + m)).abs() < 1e-4);
+        assert_eq!(police.spike_car_on_paving(p, east, 3.0), 3.0);
+        // Strip ends stop at the paved edge.
+        assert_eq!(police.strip_end_on_paving(p, east, 9.25), 8.0);
+        // Off the highway paving nothing changes.
+        assert_eq!(police.spike_car_on_paving([800.0, 40.0], east, 12.0), 12.0);
     }
 
     #[test]
