@@ -27,6 +27,9 @@ import "./menu.css";
 /** What the main menu can start. */
 export type PlayChoice = "chase" | "chaseRain" | "races" | "touge" | "free" | "garage";
 
+/** Menu actions that can ask "are you sure?" first (they end a session or wipe choices). */
+export type MenuConfirm = "restart" | "garage" | "quit" | "resetSettings";
+
 /** Which screen is showing ("closed" = none). */
 export type MenuScreen = "closed" | "main" | "pause" | "settings";
 
@@ -43,6 +46,12 @@ export interface GameMenuHost {
   canGarage?(): boolean;
   /** Pause → Quit to main menu: end the run (the main menu is shown next). */
   quitToMain(): void;
+  /**
+   * The "are you sure?" line for `action`: a string to ask with it, null to act at once (nothing
+   * would be lost, e.g. restarting a free drive), undefined for the menu's own line. Leave the
+   * method out to always ask with the menu's lines.
+   */
+  confirmText?(action: MenuConfirm): string | null | undefined;
   /** Open the controls (rebinding) panel; the menu hides until `controlsOpen()` turns false. */
   openControls(): void;
   /** Is the controls panel still open? */
@@ -78,6 +87,14 @@ export interface GameMenuOptions {
   mapLabel?: string;
 }
 
+/** The menu's own "are you sure?" wording per action (the host may replace the line). */
+const CONFIRM: Record<MenuConfirm, { title: string; text: string; yes: string }> = {
+  restart: { title: "Restart?", text: "Progress in this session is lost.", yes: "Restart" },
+  garage: { title: "Go to the garage?", text: "This ends the current session.", yes: "Go to garage" },
+  quit: { title: "Quit to main menu?", text: "Progress in this session is lost.", yes: "Quit" },
+  resetSettings: { title: "Reset all settings?", text: "Graphics, audio, assists, controls and camera all go back to their defaults.", yes: "Reset" },
+};
+
 /** Element that Left / Right adjust (cycle buttons, toggles). */
 type Steppable = HTMLElement & { wpStep?: (dir: 1 | -1) => void };
 
@@ -102,6 +119,8 @@ export class GameMenu {
   /** "Test input": navigation keys are ignored (except Esc) so driving keys move the bars. */
   private testInput = false;
   private lastProbeDevice: ControlDevice | null = null;
+  /** An open "are you sure?": what it asks, what Yes runs, and the item to refocus on Cancel. */
+  private ask: { action: MenuConfirm; text: string; run: () => void; from: string } | null = null;
   private readonly onKey = (e: KeyboardEvent) => this.key(e);
 
   constructor(
@@ -145,6 +164,11 @@ export class GameMenu {
     this.draw();
   }
 
+  /** The open "are you sure?" question's action, or null. */
+  get confirming(): MenuConfirm | null {
+    return this.ask?.action ?? null;
+  }
+
   /** A screen is showing (the controls panel opened from the menu counts as open). */
   get isOpen(): boolean {
     return this.screen !== "closed";
@@ -170,6 +194,7 @@ export class GameMenu {
   close(): void {
     if (this.screen === "closed") return;
     this.screen = "closed";
+    this.ask = null;
     this.suspended = false;
     this.testInput = false;
     this.detach();
@@ -213,6 +238,7 @@ export class GameMenu {
       if (p) this.controlsDevice = p.device;
     }
     this.screen = screen;
+    this.ask = null;
     this.suspended = false;
     this.testInput = false;
     this.focusId = focus;
@@ -283,6 +309,11 @@ export class GameMenu {
       } else if (keyAction(e.code) || e.code === "Tab") e.preventDefault();
       return;
     }
+    if (this.ask && (e.code === "KeyY" || e.code === "KeyN")) {
+      e.preventDefault();
+      if (!e.repeat) this.answer(e.code === "KeyY");
+      return;
+    }
     let a = keyAction(e.code);
     if (e.code === "Tab") a = e.shiftKey ? "up" : "down";
     if (!a) return;
@@ -297,6 +328,10 @@ export class GameMenu {
     if (this.testInput) {
       // The pad drives the bars; B / Start end the test.
       if (a === "back" || a === "start") this.setTestInput(false);
+      return;
+    }
+    if (this.ask && (a === "back" || a === "start")) {
+      this.answer(false);
       return;
     }
     const items = this.items();
@@ -375,11 +410,44 @@ export class GameMenu {
     f();
   }
 
+  /** Run `run` for `action`, asking "are you sure?" first unless the host says nothing is lost.
+   * `from` is the item that asked (focused again on Cancel). */
+  private confirm(action: MenuConfirm, from: string, run: () => void): void {
+    let text: string | null | undefined;
+    try {
+      text = this.opts.host.confirmText?.(action);
+    } catch {
+      text = undefined;
+    }
+    if (text === null) return run();
+    this.ask = { action, text: text ?? CONFIRM[action].text, run, from };
+    this.focusId = "gm-confirm-no";
+    this.draw();
+    this.focusFirst();
+  }
+
+  /** Answer the open question: Yes runs the action, Cancel goes back to where it was asked. */
+  private answer(yes: boolean): void {
+    const a = this.ask;
+    if (!a) return;
+    this.ask = null;
+    this.focusId = a.from;
+    if (yes) a.run();
+    // Still on the same screen (Cancel, or an action that stays, like resetting settings).
+    if (this.isOpen && !this.ask) {
+      this.draw();
+      this.focusFirst();
+    }
+  }
+
   private draw(): void {
     if (this.screen === "closed") return;
     const h = this.opts.host;
     let body: ComponentChildren;
-    if (this.screen === "main") {
+    if (this.ask) {
+      const c = CONFIRM[this.ask.action];
+      body = <ConfirmScreen title={c.title} text={this.ask.text} yes={c.yes} answer={(yes) => this.answer(yes)} />;
+    } else if (this.screen === "main") {
       body = (
         <MainScreen
           maps={this.opts.maps ?? []}
@@ -396,14 +464,16 @@ export class GameMenu {
         <PauseScreen
           garage={h.canGarage ? h.canGarage() : true}
           resume={() => this.close()}
-          restart={() => this.act(() => h.restart())}
-          openGarage={() => this.act(() => h.garage())}
+          restart={() => this.confirm("restart", "gm-restart", () => this.act(() => h.restart()))}
+          openGarage={() => this.confirm("garage", "gm-garage", () => this.act(() => h.garage()))}
           settings={() => this.openSettings("pause")}
           controls={() => this.controls()}
-          quit={() => {
-            h.quitToMain();
-            this.openMain();
-          }}
+          quit={() =>
+            this.confirm("quit", "gm-quit", () => {
+              h.quitToMain();
+              this.openMain();
+            })
+          }
         />
       );
     } else {
@@ -413,7 +483,7 @@ export class GameMenu {
           cameras={this.opts.cameras ?? []}
           countersteer={this.countersteer}
           change={(s) => this.change(s)}
-          reset={() => this.change(defaultGameSettings(this.opts.developerDefault ?? true))}
+          reset={() => this.confirm("resetSettings", "gm-reset", () => this.change(defaultGameSettings(this.opts.developerDefault ?? true)))}
           device={this.controlsDevice}
           editDevice={(d) => this.editDevice(d)}
           testInput={this.testInput}
@@ -560,6 +630,22 @@ function PauseScreen(props: {
         <Item id="gm-quit" label="Quit to main menu" danger onClick={props.quit} />
       </nav>
       <div class="wp-gm-foot wp-mono">Esc / Start resume · ↑↓ move · Enter / A select</div>
+    </div>
+  );
+}
+
+/** "Are you sure?" card: Cancel is focused first, so a stray Enter / A does nothing harmful. */
+function ConfirmScreen(props: { title: string; text: string; yes: string; answer: (yes: boolean) => void }) {
+  return (
+    <div class="wp-gm-card wp-gm-pause wp-gm-confirm" role="alertdialog" aria-label={props.title} data-testid="gm-confirm">
+      <div class="wp-mono wp-gm-kicker">// ARE YOU SURE?</div>
+      <h2 class="wp-gm-confirm-title">{props.title}</h2>
+      <p class="wp-gm-tag">{props.text}</p>
+      <nav class="wp-gm-list" aria-label={props.title}>
+        <Item id="gm-confirm-yes" label={`${props.yes} (Y)`} danger onClick={() => props.answer(true)} />
+        <Item id="gm-confirm-no" label="Cancel (N)" onClick={() => props.answer(false)} />
+      </nav>
+      <div class="wp-gm-foot wp-mono">Y yes · N / Esc / B cancel · ↑↓ move · Enter / A select</div>
     </div>
   );
 }

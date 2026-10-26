@@ -142,6 +142,9 @@ pub struct SimVehicle {
     /// Tyre condition set by the career ([`Sim::set_tire_condition`]): per-wheel grip
     /// multiplier and deflation, applied on top of damage every tick.
     tire_condition: Option<([f32; 4], [f32; 4])>,
+    /// Run-flat tyres fitted ([`Sim::set_run_flat`]): punctures never deflate a tyre past
+    /// [`wp_vehicle::vehicle::RUN_FLAT_MAX_DEFLATION`].
+    run_flat: bool,
     /// Dormant ([`Sim::set_dormant`]): a fixed body, no vehicle or damage-motion step.
     dormant: bool,
     /// May drive in light mode far from every player ([`Sim::set_light_when_far`]).
@@ -388,6 +391,7 @@ impl Sim {
             ghost_ticks: 0,
             ghost_overstay: 0,
             tire_condition: None,
+            run_flat: false,
             player_steering: None,
             dormant: false,
             light_when_far: false,
@@ -901,6 +905,35 @@ impl Sim {
     ) -> Result<(), SimError> {
         self.slot_mut(id)?.tire_condition = Some((grip, deflation));
         Ok(())
+    }
+
+    /// Fit or remove run-flat tyres on a vehicle (the career's `tires_runflat` mod,
+    /// `wp_economy::ToolLoadout::run_flat` > 0). Spike strips, crash damage and a carried
+    /// flat still puncture the tyres, but the handling never sees more than
+    /// [`wp_vehicle::vehicle::RUN_FLAT_MAX_DEFLATION`]: the car limps on instead of riding on
+    /// its rims. Like mods, not recorded in replays: set it before the first tick of a session.
+    pub fn set_run_flat(&mut self, id: EntityId, fitted: bool) -> Result<(), SimError> {
+        self.slot_mut(id)?.run_flat = fitted;
+        Ok(())
+    }
+
+    /// Tyre deflation a vehicle drives on (FL, FR, RL, RR; 0 inflated … 1 flat): the worst of
+    /// crash damage, spike strips and the career tyre condition, capped by run-flat tyres.
+    /// Exactly what the handling uses; for the HUD and audio.
+    pub fn tire_deflation(&self, id: EntityId) -> Result<[f32; 4], SimError> {
+        let slot = self
+            .vehicles
+            .iter()
+            .find(|v| v.id == id)
+            .ok_or(SimError::UnknownEntity(id))?;
+        let mut effects = slot.damage.handling_effects();
+        merge_tire_effects(
+            &mut effects,
+            self.police.tire_puncture(id),
+            slot.tire_condition,
+            slot.run_flat,
+        );
+        Ok(effects.tire_puncture)
     }
 
     /// Set the input a vehicle uses from the next tick on.
@@ -1435,18 +1468,12 @@ impl Sim {
                     self.applied_contacts.push((slot.id, contacts.clone()));
                 }
                 let mut effects = slot.damage.handling_effects();
-                // Spike strips (wp_police) deflate tires on top of damage.
-                let spikes = self.police.tire_puncture(slot.id);
-                for (t, s) in effects.tire_puncture.iter_mut().zip(spikes) {
-                    *t = t.max(s);
-                }
-                // Career tyres: worn tread grips less, a flat stays flat.
-                if let Some((grip, deflation)) = slot.tire_condition {
-                    for w in 0..4 {
-                        effects.grip_scale[w] *= grip[w];
-                        effects.tire_puncture[w] = effects.tire_puncture[w].max(deflation[w]);
-                    }
-                }
+                merge_tire_effects(
+                    &mut effects,
+                    self.police.tire_puncture(slot.id),
+                    slot.tire_condition,
+                    slot.run_flat,
+                );
                 slot.vehicle.apply_damage_effects(&effects);
             }
             self.sync_damage_to_physics();
@@ -1693,6 +1720,29 @@ fn hash_nodes_lockstep(hashers: &mut [StateHasher], nodes: &[&[[f32; 3]]]) {
 
 /// Velocity change one tick's contacts give a body of `mass_kg`, m/s: the magnitude of the
 /// summed normal and friction impulses (chassis space) over the mass.
+/// Merge spike-strip deflation (`wp_police`) and the career tyre condition (worn tread grips
+/// less, a flat stays flat) into a vehicle's damage effects, then cap every tyre's deflation
+/// for run-flats ([`wp_vehicle::vehicle::run_flat_deflation`]).
+fn merge_tire_effects(
+    effects: &mut wp_contracts::HandlingEffects,
+    spikes: [f32; 4],
+    tire_condition: Option<([f32; 4], [f32; 4])>,
+    run_flat: bool,
+) {
+    for (t, s) in effects.tire_puncture.iter_mut().zip(spikes) {
+        *t = t.max(s);
+    }
+    if let Some((grip, deflation)) = tire_condition {
+        for w in 0..4 {
+            effects.grip_scale[w] *= grip[w];
+            effects.tire_puncture[w] = effects.tire_puncture[w].max(deflation[w]);
+        }
+    }
+    for t in &mut effects.tire_puncture {
+        *t = wp_vehicle::vehicle::run_flat_deflation(*t, run_flat);
+    }
+}
+
 fn impact_delta_v(contacts: &[wp_contracts::ContactImpulse], mass_kg: f32) -> f32 {
     if mass_kg <= 0.0 {
         return 0.0;

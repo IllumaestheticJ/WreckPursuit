@@ -10,9 +10,9 @@ import { useSend, useSlice } from "../../model/GameModel";
 import type { BillRequest } from "../../model/types";
 import { Badge, Button, ChoiceField, Money, Panel, severityColor, useEscape } from "../../ui/kit";
 import { pct } from "../../ui/format";
+import { DISTRICTS, DISTRICT_LABOUR } from "../../data/economy";
 import "./garage.css";
 
-const DISTRICTS = ["default", "Core", "Suburb", "Industrial", "Docks", "Hills"];
 const WANTED: BillRequest["wanted"][] = ["None", "L1", "L2", "L3", "L4", "L5"];
 
 /** Repair-bill overlay screen. */
@@ -84,7 +84,7 @@ export function RepairBill() {
             <select class="wp-select" value={r.district} aria-label="District" onChange={(e) => ask({ district: (e.target as HTMLSelectElement).value })}>
               {DISTRICTS.map((d) => (
                 <option key={d} value={d}>
-                  {d}
+                  {d} ×{DISTRICT_LABOUR[d].toFixed(2)}
                 </option>
               ))}
             </select>

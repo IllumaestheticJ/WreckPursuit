@@ -400,6 +400,12 @@ side roads off it, spike strips over part of the course, and stakeout units that
 chase when a racer passes. Scripted tools outlive a racer's pursuit and do not use the AI
 captain's budget. Styles: Lantern "Downtown lockdown", Loop 9 "Highway interceptors"
 (pursuit only), Hollins "Summit trap", Grid "Speed trap" (see `docs/integration/police.md`).
+In a race with a patrol corridor (the Loop 9 races) every spike car, scripted or the AI
+captain's, parks on the paved highway inside its edge and median barriers
+(`PoliceSystem::set_highway_paving`, from the map's highway surfaces in `for_world`), and the
+captain's strip ends stop at the paved edge: the graph's lane count overstates some Loop 9
+carriageways and the shoulder ends at a barrier, so the old "outer lane edge + 2.5 m" post put
+the car behind the wall (owner, 2026-10-26).
 
 ### Captain (`captain.rs`)
 `CaptainCommand` (assign unit, roadblock, spikes, helicopter, priority target, call off) is

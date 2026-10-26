@@ -12,7 +12,7 @@ use crate::course::{Course, Gate};
 use crate::kind::{ClassBracket, DistrictId, Legality, RaceKind, VenueId};
 use crate::result::{RacerResult, RacerStatus};
 use crate::schedule::{ScheduledEvent, TrafficMode, Venue};
-use crate::stakes::StakeTable;
+use crate::stakes::{Stake, StakeTable};
 
 /// Build a judged course from a `wp_world` route (`World::plan_route*`, `plan_circuit`).
 /// Gates are the route's checkpoints; the corridor is half the widest gate plus
@@ -236,12 +236,37 @@ pub fn economy_race(
     phase: DayPhase,
     mode: DamageMode,
 ) -> EconomyRace {
+    let stake = stakes.stake(kind, phase, bracket, legality);
+    economy_race_at(
+        econ,
+        stake,
+        kind,
+        legality,
+        class,
+        route_length_m,
+        phase,
+        mode,
+    )
+}
+
+/// [`economy_race`] for an already-priced `stake` (for example
+/// [`StakeTable::race_stake`], which pays some catalog races by expected finishing time).
+#[allow(clippy::too_many_arguments)]
+pub fn economy_race_at(
+    econ: &Economy,
+    stake: Stake,
+    kind: RaceKind,
+    legality: Legality,
+    class: VehicleClass,
+    route_length_m: f32,
+    phase: DayPhase,
+    mode: DamageMode,
+) -> EconomyRace {
     let setup = economy_setup(kind, legality, class, route_length_m, phase, mode);
     let arcade = RaceSetup {
         mode: DamageMode::Arcade,
         ..setup.clone()
     };
-    let stake = stakes.stake(kind, phase, bracket, legality);
     let ratio = |want: i64, have: Money| {
         if have > 0 {
             want as f32 / have as f32
