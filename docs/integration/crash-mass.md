@@ -61,6 +61,8 @@ flat-ground determinism record moved; terrain-city goldens (Port Vesper / Ashpea
 - simcli goldens (`just bless`): the flat-ground scenarios.
 - `data/stats/cars.json` (`just car-stats`): menu stat bars, within ~2 % (top speed of the
   fastest cars rose a little: they no longer near the slab's 5 km edge in the metric).
-- `wp_opponent` capability table (`WP_WRITE_CAPS=1`): merlo_20t, morrigan_55.
+- `wp_opponent` capability table: only the merlo_20t and morrigan_55 rows (the two the test
+  flagged, out of its 2 % tolerance). Rewriting every row with `WP_WRITE_CAPS=1` nudged all
+  racers' pace and the `loop9_ashpeak_highway` race dropped to 3 of 6 finishers (needs 4).
 - Pinned hashes: `wp_vehicle/tests/differentials.rs`, `wp_vehicle/tests/slide_control.rs`.
 - `tools/specsheet/ram_probe` vmax-trace keeps its old 5 km stop as a local constant.
