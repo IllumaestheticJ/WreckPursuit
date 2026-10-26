@@ -6,6 +6,13 @@
 //! long-roof fastback (small shift). Mechanical parts come from `mechanical::spec` (table);
 //! the styles here only add caliper / spring colours on top of it.
 //!
+//! Each car also has its own silhouette (owner 2026-10-26, "the exotic cars all basically look
+//! like each other"): Halberd a rounded body under a teardrop canopy (`roof_arc`,
+//! `c_pillar_rake_deg`) with a fastback tail; Ombra a very low, flat, sharp-cornered wedge with
+//! a long shallow engine cover; Ostwind a tall one-arc fastback roof with fender tops standing
+//! above a low front lid (`hood_valley`) and wide hips; Kagero a notchback with an upright rear
+//! glass between flying buttresses and a rising belt.
+//!
 //! Each car has its own body kit and its own night identifier (tail-lamp pattern):
 //! - Halberd: one hair-thin full-width LED line over an exposed black rear mesh.
 //! - Ombra: a sideways-Y lamp at each corner in an angular black housing.
@@ -119,7 +126,12 @@ fn fender_outlet(k: &mut Kit, slats: usize, slat_mat: M) {
 /// roof edges, `off` above the paint, `mat`.
 fn roof_sheet(k: &mut Kit, name: &str, inset: f32, off: f32, mat: M) {
     let (r0, r1, _, _) = k.p.roof;
-    let hw = k.roof_edge(0.5 * (r0 + r1)) - inset;
+    // Narrowest roof width along the sheet, so a tapered (canopy) roof never overhangs it.
+    let hw = [r0 + 0.02, 0.5 * (r0 + r1), r1 - 0.02]
+        .iter()
+        .map(|&y| k.roof_edge(y))
+        .fold(f32::MAX, f32::min)
+        - inset;
     let key = dkey(name, BodyRegion::Roof, mat);
     k.patch(
         &key,
@@ -139,29 +151,33 @@ fn roof_sheet(k: &mut Kit, name: &str, inset: f32, off: f32, mat: M) {
 pub fn halberd(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         cabin_shift_m: 0.42,
-        nose_h: Some(0.50),
-        nose_rake_deg: 42.0,
-        nose_plan_round: 0.24,
-        tail_plan_round: 0.16,
-        hood_crown: 0.018,
-        windshield_rake_deg: Some(66.0),
-        a_pillar_rake_deg: 20.0,
-        rear_glass_rake_deg: Some(66.0),
-        roof_len_trim: 0.12,
+        nose_h: Some(0.46),
+        nose_rake_deg: 40.0,
+        nose_plan_round: 0.45,
+        tail_plan_round: 0.42,
+        hood_crown: 0.022,
+        hood_valley: 0.02,
+        windshield_rake_deg: Some(64.0),
+        a_pillar_rake_deg: 25.0,
+        c_pillar_rake_deg: 25.0,
+        roof_arc: 0.85,
         tumblehome: Some(0.30),
         crease_z: 0.44,
-        crease_depth: 0.020,
-        haunch: 0.060,
-        front_haunch: 0.035,
-        flare: 0.018,
+        crease_depth: 0.0,
+        shoulder_round: 0.10,
+        sill_tuck: 0.09,
+        haunch: 0.075,
+        front_haunch: 0.050,
+        flare: 0.0,
         ride_dz: -0.01,
         stance_pitch_deg: 0.2,
         ducktail_h: 0.020,
-        belt_kick: 0.07,
-        belt_rake: 0.03,
-        tail_round: 0.12,
-        tail_drop: 0.03,
-        ..BodyStyle::preset(Silhouette::Wedge)
+        rear_glass_bow: 0.02,
+        belt_kick: 0.0,
+        belt_rake: 0.02,
+        tail_round: 0.25,
+        tail_drop: 0.06,
+        ..BodyStyle::preset(Silhouette::Fastback)
     });
     s.details.push(kit_detail(halberd_kit));
     wheels(
@@ -398,21 +414,6 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
     }
 
-    // --- Flying-buttress hint: a carbon fin along each rear-glass edge, from the roof corner
-    //     down onto the deck.
-    let yb = p.y_deck - 0.12;
-    for sx in SIDES {
-        let kf = sided(
-            &dkey("buttress_l", BodyRegion::RearLeftQuarter, M::Carbon),
-            sx,
-        );
-        let xa = k.roof_edge(r0) + 0.01;
-        let xb = p.half_width(yb) - 0.24;
-        let a = [sx * xa, r0 - 0.03, k.top_z(r0 - 0.03, sx * xa)];
-        let c = [sx * xb, yb, k.top_z(yb, sx * xb) + 0.01];
-        stroke(&mut k, &kf, a, c, [sx * 0.6, 0.0, 0.8], 0.07, 0.03);
-    }
-
     // --- Flat full-width active wing raised on carbon stands from the deck.
     k.wing(Wing {
         lead: 0.34,
@@ -491,30 +492,35 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 /// cover, Y-shaped tails, quad centre exhaust in a hexagonal surround.
 pub fn ombra(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        cabin_shift_m: 0.45,
-        nose_h: Some(0.48),
-        nose_rake_deg: 50.0,
-        nose_plan_round: 0.12,
-        tail_plan_round: 0.10,
-        hood_crown: 0.012,
-        windshield_rake_deg: Some(67.0),
-        a_pillar_rake_deg: 16.0,
-        rear_glass_rake_deg: Some(68.0),
-        roof_len_trim: 0.16,
+        cabin_shift_m: 0.42,
+        nose_h: Some(0.44),
+        nose_rake_deg: 58.0,
+        nose_plan_round: 0.08,
+        tail_plan_round: 0.08,
+        hood_crown: 0.008,
+        cowl_h: 0.02,
+        windshield_rake_deg: Some(66.0),
+        a_pillar_rake_deg: 20.0,
+        c_pillar_rake_deg: 12.0,
+        rear_glass_rake_deg: Some(70.0),
+        roof_len_trim: 0.0,
         tumblehome: Some(0.30),
-        crease_z: 0.46,
+        crease_z: 0.42,
         crease_depth: 0.030,
-        haunch: 0.065,
+        shoulder_round: 0.02,
+        sill_tuck: 0.03,
+        haunch: 0.070,
         front_haunch: 0.030,
-        flare: 0.020,
+        flare: 0.025,
         flare_shape: ArchShape::Box,
-        ride_dz: -0.015,
+        ride_dz: -0.02,
         stance_pitch_deg: 0.3,
-        ducktail_h: 0.010,
-        belt_kick: 0.08,
-        belt_rake: 0.035,
-        tail_round: 0.06,
-        tail_drop: 0.02,
+        ducktail_h: 0.0,
+        deck_valley: 0.03,
+        belt_kick: 0.04,
+        belt_rake: 0.06,
+        tail_round: 0.05,
+        tail_drop: 0.0,
         ..BodyStyle::preset(Silhouette::Wedge)
     });
     s.details.push(kit_detail(ombra_kit));
@@ -914,29 +920,34 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 /// raised lip spoiler, full-width light bar, twin rectangular tips in the valance.
 pub fn ostwind(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        cabin_shift_m: 0.12,
-        nose_h: Some(0.60),
-        nose_rake_deg: 38.0,
-        nose_plan_round: 0.30,
-        tail_plan_round: 0.22,
-        hood_crown: 0.030,
-        windshield_rake_deg: Some(62.0),
-        a_pillar_rake_deg: 18.0,
-        rear_glass_rake_deg: Some(70.0),
-        roof_len_trim: 0.0,
-        tumblehome: Some(0.24),
+        cabin_shift_m: 0.10,
+        nose_h: Some(0.58),
+        nose_rake_deg: 30.0,
+        nose_plan_round: 0.32,
+        tail_plan_round: 0.30,
+        hood_crown: 0.020,
+        hood_valley: 0.060,
+        windshield_rake_deg: Some(60.0),
+        a_pillar_rake_deg: 10.0,
+        c_pillar_rake_deg: 6.0,
+        roof_arc: 1.0,
+        tumblehome: Some(0.22),
+        rear_glass_bow: 0.03,
         crease_z: 0.50,
-        crease_depth: 0.010,
-        haunch: 0.070,
-        front_haunch: 0.055,
-        flare: 0.012,
+        crease_depth: 0.0,
+        shoulder_round: 0.08,
+        sill_tuck: 0.07,
+        haunch: 0.080,
+        front_haunch: 0.060,
+        flare: 0.0,
         ride_dz: -0.005,
         stance_pitch_deg: 0.1,
-        ducktail_h: 0.025,
-        belt_kick: 0.04,
-        belt_rake: 0.02,
-        tail_round: 0.14,
-        tail_drop: 0.04,
+        ducktail_h: 0.030,
+        deck_drop: 0.06,
+        belt_kick: 0.0,
+        belt_rake: 0.0,
+        tail_round: 0.35,
+        tail_drop: 0.10,
         ..BodyStyle::preset(Silhouette::Fastback)
     });
     s.details.push(kit_detail(ostwind_kit));
@@ -995,16 +1006,19 @@ fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             (-0.045, 0.05),
             (0.045, 0.05),
         ] {
-            let c = [pt[0] + dx, pt[1] + dy, k.top_z(pt[1] + dy, pt[0] + dx)];
+            // On the bowl's plane (tangent at `pt`), so the dots stay proud of the bowl where
+            // the fender top curves into the hood valley.
+            let dz = -(n[0] * dx + n[1] * dy) / n[2].max(0.2);
+            let c = [pt[0] + dx, pt[1] + dy, pt[2] + dz];
             let c0 = [
-                c[0] + n[0] * 0.012,
-                c[1] + n[1] * 0.012,
-                c[2] + n[2] * 0.012,
+                c[0] + n[0] * 0.016,
+                c[1] + n[1] * 0.016,
+                c[2] + n[2] * 0.016,
             ];
             let c1 = [
-                c[0] + n[0] * 0.032,
-                c[1] + n[1] * 0.032,
-                c[2] + n[2] * 0.032,
+                c[0] + n[0] * 0.045,
+                c[1] + n[1] * 0.045,
+                c[2] + n[2] * 0.045,
             ];
             k.b.cylinder(&hk, c0, c1, 0.03, 0.03, 10, true);
         }
@@ -1268,30 +1282,32 @@ fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 /// tails over a black mesh, quad exhaust in a carbon tray, blue hybrid accent strips.
 pub fn kagero(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        cabin_shift_m: 0.40,
-        nose_h: Some(0.54),
-        nose_rake_deg: 44.0,
-        nose_plan_round: 0.16,
+        cabin_shift_m: 0.38,
+        nose_h: Some(0.56),
+        nose_rake_deg: 38.0,
+        nose_plan_round: 0.22,
         tail_plan_round: 0.12,
-        hood_crown: 0.016,
-        windshield_rake_deg: Some(64.0),
-        a_pillar_rake_deg: 18.0,
-        rear_glass_rake_deg: Some(62.0),
-        roof_len_trim: 0.14,
-        tumblehome: Some(0.26),
-        crease_z: 0.47,
+        hood_crown: 0.025,
+        hood_valley: 0.02,
+        windshield_rake_deg: Some(62.0),
+        a_pillar_rake_deg: 14.0,
+        rear_glass_rake_deg: Some(30.0),
+        roof_arc: 0.35,
+        roof_len_trim: 0.05,
+        tumblehome: Some(0.24),
+        crease_z: 0.48,
         crease_depth: 0.028,
         haunch: 0.050,
         front_haunch: 0.030,
-        flare: 0.016,
+        flare: 0.010,
         ride_dz: -0.01,
         stance_pitch_deg: 0.2,
-        ducktail_h: 0.020,
-        belt_kick: 0.07,
-        belt_rake: 0.03,
+        ducktail_h: 0.030,
+        belt_kick: 0.03,
+        belt_rake: 0.05,
         tail_round: 0.08,
         tail_drop: 0.02,
-        ..BodyStyle::preset(Silhouette::Wedge)
+        ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.details.push(kit_detail(kagero_kit));
     wheels(

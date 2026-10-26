@@ -1,6 +1,11 @@
 //! Wave-3 race cars: `morrigan_55` (front-engine GT endurance racer), `nyx_proto`
 //! (closed-cockpit sports prototype) and `merlo_20t` (FWD touring-car racer).
 //!
+//! Silhouettes (2026-10-26): Morrigan sits its cabin well back (`cabin_shift_m` −0.22) for a
+//! long-hood front-engine fastback; Nyx is a narrow teardrop canopy (`c_pillar_rake_deg`)
+//! between fender pods (`hood_valley` / `deck_valley`); Merlo an upright four-door sedan
+//! greenhouse (small tumblehome, gentle rakes).
+//!
 //! Race cars share a vocabulary: low ride height, big splitters and wings, flat floors with
 //! diffusers, centre-lock wheels, tow straps, roof scoops, door number panels, a windscreen
 //! sun strip and a central rain light. Mechanical parts (engine, brakes, wheels, exhaust)
@@ -113,15 +118,18 @@ fn number_panel(k: &mut Kit, sx: f32, y0: f32, y1: f32, z0: f32, z1: f32) {
 /// Yellow with black (carbon) accents and white number panels.
 pub fn morrigan(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        nose_h: Some(0.52),
-        nose_rake_deg: 40.0,
+        cabin_shift_m: -0.22,
+        nose_h: Some(0.50),
+        nose_rake_deg: 45.0,
         nose_plan_round: 0.18,
         tail_plan_round: 0.10,
         hood_crown: 0.025,
+        power_bulge_h: 0.04,
         windshield_rake_deg: Some(62.0),
-        a_pillar_rake_deg: 16.0,
-        rear_glass_rake_deg: Some(68.0),
-        tumblehome: Some(0.26),
+        a_pillar_rake_deg: 14.0,
+        c_pillar_rake_deg: 10.0,
+        roof_arc: 0.60,
+        tumblehome: Some(0.24),
         crease_z: 0.46,
         crease_depth: 0.020,
         haunch: 0.075,
@@ -131,7 +139,7 @@ pub fn morrigan(def: &VehicleDef) -> CarStyle {
         ride_dz: -0.03,
         stance_pitch_deg: 0.4,
         ducktail_h: 0.015,
-        belt_kick: 0.05,
+        belt_kick: 0.04,
         belt_rake: 0.02,
         tail_round: 0.05,
         tail_drop: 0.01,
@@ -400,9 +408,12 @@ pub fn nyx(def: &VehicleDef) -> CarStyle {
         nose_plan_round: 0.10,
         tail_plan_round: 0.04,
         hood_crown: 0.040,
+        hood_valley: 0.060,
         windshield_rake_deg: Some(64.0),
         a_pillar_rake_deg: 22.0,
+        c_pillar_rake_deg: 18.0,
         rear_glass_rake_deg: Some(74.0),
+        roof_arc: 0.70,
         roof_len_trim: 0.25,
         tumblehome: Some(0.36),
         crease_z: 0.36,
@@ -413,6 +424,7 @@ pub fn nyx(def: &VehicleDef) -> CarStyle {
         ride_dz: -0.03,
         stance_pitch_deg: 0.5,
         ducktail_h: 0.0,
+        deck_valley: 0.05,
         overhang_trim: (0.03, 0.08),
         belt_kick: 0.04,
         belt_rake: 0.02,
@@ -762,14 +774,17 @@ fn nyx_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 pub fn merlo(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         nose_h: Some(0.62),
-        nose_rake_deg: 30.0,
+        nose_rake_deg: 22.0,
         nose_plan_round: 0.22,
         tail_plan_round: 0.14,
         hood_crown: 0.020,
-        windshield_rake_deg: Some(60.0),
-        a_pillar_rake_deg: 14.0,
-        rear_glass_rake_deg: Some(62.0),
-        tumblehome: Some(0.20),
+        windshield_rake_deg: Some(56.0),
+        a_pillar_rake_deg: 6.0,
+        c_pillar_rake_deg: 4.0,
+        rear_glass_rake_deg: Some(56.0),
+        roof_arc: 0.30,
+        roof_len_trim: 0.05,
+        tumblehome: Some(0.14),
         crease_z: 0.55,
         crease_depth: 0.015,
         haunch: 0.040,
@@ -779,8 +794,8 @@ pub fn merlo(def: &VehicleDef) -> CarStyle {
         ride_dz: -0.04,
         stance_pitch_deg: 0.3,
         ducktail_h: 0.0,
-        belt_kick: 0.03,
-        belt_rake: 0.02,
+        belt_kick: 0.02,
+        belt_rake: 0.01,
         tail_round: 0.06,
         tail_drop: 0.0,
         ..BodyStyle::preset(Silhouette::Notchback)

@@ -1,5 +1,9 @@
-//! Mid-engine: `lucciola_350` (90s doorstop wedge exotic) and `fulmine_v10` (2010s V10
+//! Mid-engine: `lucciola_350` (90s rounded mid-engine berlinetta) and `fulmine_v10` (2010s V10
 //! supercar).
+//!
+//! Silhouettes (owner 2026-10-26: "the exotic cars all basically look like each other"): the
+//! Lucciola is a soft-nosed notchback with an upright rear glass between flying-buttress sails
+//! and a rounded tail; the Fulmine a low knife-edge wedge with sharp plan corners and box arches.
 //!
 //! Both lattices carry a front-engine cabin, so the cab-forward look comes from
 //! `cabin_shift_m` (+0.40 / +0.45 m forward: roof centre ≈ 46 % of the length from the nose,
@@ -28,35 +32,38 @@ fn at(k: &Kit, f: f32) -> f32 {
     k.yn - f * (k.yn - k.yt)
 }
 
-/// 90s mid-engine doorstop wedge: closed pop-up lamp pods, slatted nose, side intake with
-/// strakes, louvred deck, quad round tails (outer amber-ringed) in a black rear mesh panel.
+/// 90s mid-engine berlinetta: soft round nose, rounded roof, upright rear glass between
+/// flying-buttress sails, closed pop-up lamp pods, slatted nose, side intake with strakes,
+/// louvred deck, quad round tails (outer amber-ringed) in a black rear mesh panel.
 pub fn lucciola(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        cabin_shift_m: 0.40,
-        nose_h: Some(0.55),
-        nose_rake_deg: 55.0,
-        nose_plan_round: 0.15,
-        tail_plan_round: 0.12,
-        hood_crown: 0.010,
-        windshield_rake_deg: Some(64.0),
-        a_pillar_rake_deg: 14.0,
-        rear_glass_rake_deg: Some(65.0),
-        roof_len_trim: 0.15,
-        tumblehome: Some(0.24),
-        crease_z: 0.50,
-        crease_depth: 0.020,
-        haunch: 0.040,
-        flare: 0.015,
-        flare_shape: ArchShape::Box,
+        cabin_shift_m: 0.38,
+        nose_h: Some(0.50),
+        nose_rake_deg: 48.0,
+        nose_plan_round: 0.32,
+        tail_plan_round: 0.26,
+        hood_crown: 0.022,
+        windshield_rake_deg: Some(62.0),
+        a_pillar_rake_deg: 12.0,
+        rear_glass_rake_deg: Some(38.0),
+        roof_arc: 0.55,
+        tumblehome: Some(0.22),
+        crease_z: 0.46,
+        crease_depth: 0.012,
+        shoulder_round: 0.08,
+        haunch: 0.045,
+        front_haunch: 0.030,
+        flare: 0.008,
         ride_dz: -0.01,
         stance_pitch_deg: 0.3,
-        ducktail_h: -0.02,
+        ducktail_h: 0.025,
+        deck_valley: 0.02,
         overhang_trim: (0.0, -0.03),
-        belt_kick: 0.06,
-        belt_rake: 0.04,
-        tail_round: 0.08,
-        tail_drop: 0.02,
-        ..BodyStyle::preset(Silhouette::Wedge)
+        belt_kick: 0.03,
+        belt_rake: 0.03,
+        tail_round: 0.22,
+        tail_drop: 0.06,
+        ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.details.push(kit_detail(lucciola_kit));
     wheels(
@@ -196,6 +203,15 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let half = p.half_width(0.5 * (ld0 + ld1)) - 0.28;
     k.louvres(BodyRegion::Trunk, ld1, ld0, 8, 0.0, half, M::Paint);
 
+    // --- Flying buttresses: body-colour sails from the roof's rear corners down to the tail,
+    //     either side of the upright rear glass and the louvred deck.
+    let r0 = p.roof.0;
+    let xs = k.roof_edge(r0 + 0.02) - 0.03;
+    for sx in SIDES {
+        let ks = sided(&dkey("sail_l", BodyRegion::RearLeftQuarter, M::Paint), sx);
+        k.sail(&ks, sx, r0 + 0.02, k.yt + 0.30, xs, 0.07, 0.035);
+    }
+
     // --- Rear: black mesh panel between quad round lamps.
     let (pz0, pz1) = (tz1 - 0.22, tz1 - 0.025);
     k.rear_panel(
@@ -258,28 +274,33 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 pub fn fulmine(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         cabin_shift_m: 0.45,
-        nose_h: Some(0.52),
+        nose_h: Some(0.48),
         nose_rake_deg: 45.0,
-        nose_plan_round: 0.20,
-        tail_plan_round: 0.14,
-        hood_crown: 0.020,
-        windshield_rake_deg: Some(65.0),
+        nose_plan_round: 0.12,
+        tail_plan_round: 0.06,
+        hood_crown: 0.012,
+        windshield_rake_deg: Some(66.0),
         a_pillar_rake_deg: 18.0,
+        c_pillar_rake_deg: 8.0,
+        roof_arc: 0.40,
+        tumblehome: Some(0.27),
+        crease_z: 0.40,
+        crease_depth: 0.030,
+        shoulder_round: 0.025,
+        sill_tuck: 0.04,
+        haunch: 0.050,
+        front_haunch: 0.025,
+        flare: 0.015,
+        flare_shape: ArchShape::Box,
+        ride_dz: -0.015,
+        stance_pitch_deg: 0.3,
+        ducktail_h: 0.020,
+        deck_drop: 0.0,
         rear_glass_rake_deg: Some(64.0),
-        roof_len_trim: 0.15,
-        tumblehome: Some(0.28),
-        crease_z: 0.45,
-        crease_depth: 0.025,
-        haunch: 0.060,
-        front_haunch: 0.030,
-        flare: 0.020,
-        ride_dz: -0.01,
-        stance_pitch_deg: 0.2,
-        ducktail_h: 0.030,
-        belt_kick: 0.08,
-        belt_rake: 0.03,
-        tail_round: 0.10,
-        tail_drop: 0.02,
+        belt_kick: 0.0,
+        belt_rake: 0.045,
+        tail_round: 0.05,
+        tail_drop: 0.0,
         ..BodyStyle::preset(Silhouette::Wedge)
     });
     s.details.push(kit_detail(fulmine_kit));

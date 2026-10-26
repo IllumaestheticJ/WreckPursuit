@@ -53,7 +53,9 @@ built in another worktree with a shared `CARGO_TARGET_DIR` writes into *that* wo
   panel mesh covers its lattice region's zone; doors and the trunk start at their hinge line, the
   hood at the windshield base. `cabin_shift_m` / `hood_length` move the visual hood rear edge and
   the rear-glass base on purpose (the panel still pivots on its lattice hinge nodes; at most 0.6 m
-  away, checked by `tests/assets.rs`). `cabin_shift_m` spans −0.6…+0.6 m: the mid-engine cars use
+  away, checked by `tests/assets.rs`). Greenhouse / top shape: `roof_arc` (0 = straight
+  windshield, flat roof, straight rear glass; 1 = one smooth arc), `c_pillar_rake_deg` (teardrop
+  canopy), `hood_valley` / `deck_valley` (centre sunk between fender / haunch tops). `cabin_shift_m` spans −0.6…+0.6 m: the mid-engine cars use
   +0.40 / +0.45 for a cab-forward roof (centre ≈ 46 % of the length from the nose).
 - **Loft** (`mesh.rs`): cross-section rings of 18 points per side (sill tuck, rocker, character
   crease, shoulder, belt ledge, 3-point greenhouse, 7-point crowned top / open bed) at adaptive
