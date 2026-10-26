@@ -121,3 +121,20 @@ risk = 2.5
 entry = 1.5
 heat = 4.0
 police = "Max"
+
+# Purses paid by expected finishing time instead of kinds.base_purse (owner, 2026-10-26:
+# "make the ashcroft race payout a function of expected finishing time"):
+#
+#   expected_min = catalog length / races.<id>.pace_kmh
+#   purse        = per_minute × expected_min × brackets.purse × risk_curve(risk)
+#
+# The bracket ladder, risk curve, buy-in, heat and police are the same as for any other race.
+# per_minute matches what Loop 9 night pays for its time: base 2 000 for a ~215 s winning lap
+# is ~560 per minute.
+[timed_purse]
+per_minute = 560.0
+
+# Loop 9 → Ashpeak highway run, 17.9 km: the field's winning pace without police is ~145 km/h
+# (2026-10-24, seed 29: winner 446 s), so ~7.4 expected minutes.
+[timed_purse.races.loop9_ashpeak_highway]
+pace_kmh = 145.0

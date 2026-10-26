@@ -827,3 +827,22 @@ match".
   placement shares, clean bonus and wanted multiplier the finish applies.
 - Tests: `career_tests::a_picker_race_the_career_cannot_afford_is_refused`,
   `career_tests::the_career_picker_prices_the_modded_car_like_the_run`.
+
+## Highway run paid by expected finishing time (2026-10-26, owner request)
+"Make the ashcroft race payout a function of expected finishing time" ("Ashcroft" is the
+Loop 9 → Ashpeak highway run, `loop9_ashpeak_highway`).
+- `data/events/stakes.toml [timed_purse]`: `per_minute` (560, bracket D, risk-curve 1.0: what
+  Loop 9 night pays for its ~215 s lap) and per race a `pace_kmh` (the highway run: 145 km/h,
+  the field's measured winning pace, so 17.9 km is ~7.4 expected minutes).
+- `StakeTable::race_stake(id, length_m, kind, phase, bracket, legality)`: for a listed race,
+  purse = `per_minute × expected minutes × bracket.purse × risk_curve(risk)`; the buy-in
+  follows from that purse with the usual `entry_frac` × phase × legality; heat and police are
+  unchanged. Unlisted races get `StakeTable::stake` exactly.
+- The expected time is the course's, not the player's actual time, so the picker can show it
+  before the start and is the same at the finish. The car's class bracket (with mods, PR #97)
+  still multiplies it.
+- `bridge::economy_race_at` takes an already-priced stake; `economy_race` is now a wrapper.
+  `wp_wasm::race::advertised` prices with `race_stake` on the catalog length
+  (`length_hint_m`), so the picker card and the run agree.
+- Highway run, bracket D: 2 300 → ~4 780 win purse (buy-in 253 → ~525).
+- Tests: `tests::highway_run_purse_follows_expected_time`, `tests::timed_purse_races_exist`.
