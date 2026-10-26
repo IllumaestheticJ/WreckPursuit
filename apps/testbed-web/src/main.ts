@@ -353,6 +353,8 @@ async function main(): Promise<void> {
     release: (uid) => act(() => sim.careerRelease(uid)),
     insure: (uid, tier) => act(() => sim.careerInsure(uid, tier)),
     nextNight: () => act(() => sim.careerNextNight()),
+    buyInformant: (tier) => act(() => sim.careerBuyInformant(tier)),
+    payOffBounty: () => act(() => sim.careerPayOffBounty()),
     lot: (id) => sim.careerLot(id),
     visitLot: (id) => visitLot(id),
     buyListing: (id, slot) => act(() => sim.careerBuyListing(id, slot)),

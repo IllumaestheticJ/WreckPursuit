@@ -260,6 +260,14 @@ export interface CareerView {
   debt: number;
   rep: number;
   bounty: number;
+  /** What paying the whole bounty off costs now (0 without a bounty). Older hosts send none. */
+  bounty_payoff?: number;
+  /** Bail a capture would charge now. */
+  bail_if_busted?: number;
+  /** Career bounty a high-stakes (illegal daytime) race needs. */
+  high_stakes_bounty?: number;
+  /** Informant tips on offer: pay to cool the carried heat. */
+  informants?: { id: string; cost: number; heat_reduction: number }[];
   net_worth: number;
   carried_heat: number;
   carried_level: WantedLevel;
@@ -359,6 +367,10 @@ export interface CareerApi {
   release(uid: number): CareerView;
   insure(uid: number, tier: string): CareerView;
   nextNight(): CareerView;
+  /** Pay informant `tier`: the carried heat drops (optional: hosts without it hide the tab). */
+  buyInformant?(tier: string): CareerView;
+  /** Pay the whole bounty off. */
+  payOffBounty?(): CareerView;
   /** Today's stock of a lot. */
   lot(lotId: string): LotStockView;
   /** Drive to the lot: leaves the garage and loads the lot itself. */

@@ -1548,6 +1548,9 @@ impl Session {
         let run = self.run.as_mut().ok_or("no economy run in this session")?;
         let player = run.player();
         let report = run.repair_and_continue()?;
+        // A capture cleared the bounty: the police forget what the career brought in.
+        let bounty = run.account().bounty;
+        self.sim.police_mut().carry_career_bounty(player, bounty);
         let idx = self.idx(player)?;
         self.log_op(idx, OpKind::Repair)?;
         self.release_player(idx);

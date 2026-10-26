@@ -325,6 +325,15 @@ pub struct BountyConfig {
     pub payout_scale: PhaseTable<f32>,
     /// Bounty at which a racer gets maximum reinforcement priority.
     pub max_priority_bounty: f32,
+    /// Police bounty points per point of career bounty a racer brings into a run
+    /// ([`crate::PoliceSystem::carry_career_bounty`]): a wanted career gets backup sooner and
+    /// heavier from the first call.
+    #[serde(default = "default_career_carry")]
+    pub career_carry: f32,
+}
+
+fn default_career_carry() -> f32 {
+    1.0
 }
 
 /// Contents of `data/police/heat.toml`.
@@ -380,6 +389,10 @@ pub struct ReinforcementConfig {
     /// per level L1..L5 (owner playtest row 84: "more cops should spawn and go to the site").
     #[serde(default = "default_search_extra_units")]
     pub search_extra_units: [u32; 5],
+    /// Extra units on a max-priority (high bounty) racer, on top of `units_per_level`; scaled
+    /// by the racer's priority (0..=1) and rounded.
+    #[serde(default)]
+    pub priority_extra_units: u32,
 }
 
 /// Dispatch-driven response to reckless-driving calls (owner playtest 2026-10-20: "spawn them
