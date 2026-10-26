@@ -434,8 +434,48 @@ impl BodyProfile {
     }
 
     /// Top of the body at `y` on the centre line, before crowns: the roof, glass slopes, the
-    /// deck, or just above the belt (hood).
+    /// deck, or just above the belt (hood). [`BodyStyle::roof_arc`] blends the greenhouse
+    /// toward one smooth arc.
     pub fn top(&self, y: f32) -> f32 {
+        let lin = self.top_straight(y);
+        match self.arc_top(y) {
+            Some(arc) => {
+                let k = self.style.roof_arc.clamp(0.0, 1.0);
+                lerp(lin, arc, k).max(self.belt(y) + 0.015)
+            }
+            None => lin,
+        }
+    }
+
+    /// The greenhouse arc of [`BodyStyle::roof_arc`] at `y`: two parabolas meeting flat at the
+    /// roof middle, one down to the windshield base, one down to the rear glass base (or the
+    /// fastback / hatch line's end at the tail). `None` outside that span or when the knob is 0.
+    fn arc_top(&self, y: f32) -> Option<f32> {
+        if self.style.roof_arc <= 0.0 || y >= self.y_fw {
+            return None;
+        }
+        let (r0, r1, rz, _) = self.roof;
+        let yc = 0.5 * (r0 + r1);
+        let (ye, ze) = match self.rear_line() {
+            Some((_, end)) => end,
+            None => (self.y_deck, self.deck_top(self.y_deck)),
+        };
+        if y <= ye {
+            return None;
+        }
+        let z = if y >= yc {
+            let zf = self.belt(self.y_fw) + 0.015;
+            let t = (y - yc) / (self.y_fw - yc).max(0.05);
+            rz - (rz - zf) * t * t
+        } else {
+            let t = (yc - y) / (yc - ye).max(0.05);
+            rz - (rz - ze) * t * t
+        };
+        Some(z)
+    }
+
+    /// [`Self::top`] with the straight greenhouse (windshield line, flat roof, rear glass).
+    fn top_straight(&self, y: f32) -> f32 {
         let (r0, r1, rz, _) = self.roof;
         if y >= self.y_fw {
             self.belt(y) + 0.015
@@ -468,7 +508,9 @@ impl BodyProfile {
     pub fn roof_half_w(&self, y: f32) -> f32 {
         let taper = tan_deg(self.style.a_pillar_rake_deg.clamp(0.0, 25.0))
             * (y - (self.roof.1 - 0.2)).max(0.0);
-        (self.roof_half - taper).max(0.45 * self.roof_half)
+        let taper_rear = tan_deg(self.style.c_pillar_rake_deg.clamp(0.0, 25.0))
+            * ((self.roof.0 + 0.2) - y).max(0.0);
+        (self.roof_half - taper - taper_rear).max(0.45 * self.roof_half)
     }
 
     /// True inside the open pickup bed (strictly between its end walls).
@@ -547,6 +589,13 @@ impl BodyProfile {
             z += (s.hood_bulge_h.clamp(0.0, 0.08) + s.power_bulge_h.clamp(0.0, 0.10) * rear)
                 * band
                 * fade;
+        }
+        // Valleys: the centre sinks, the outer edge (fender / haunch tops) stays.
+        let valley_band = 1.0 - smoothstep((u - 0.55) / 0.35);
+        if y >= self.y_fw {
+            z -= s.hood_valley.clamp(0.0, 0.08) * valley_band * (1.0 - self.nose_t(y));
+        } else if y <= self.y_deck {
+            z -= s.deck_valley.clamp(0.0, 0.08) * valley_band * (1.0 - self.tail_t(y));
         }
         z
     }
