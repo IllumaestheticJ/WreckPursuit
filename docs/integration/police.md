@@ -1938,3 +1938,16 @@ The city total per phase must stay ≥ 1: `PoliceSystem::unit_cap` reads a zero 
 - `escape_break_contact_night`: 7 escapes in 10, max 6 → 9.
 - With fewer pool units, more calls go to spawned responders and some are not met within the 60 s run (61 = never). `response_day_core` max 15 → 25 s (presence.toml's target). `response_day_suburb` mean 28 → 40 s, max 38 → 61. `response_night_core` 25 s reached 0.85 → 0.6, mean 17 → 30 s, max 40 → 61.
 - **Outside wp_police (test only):** `crates/wp_sim/tests/police_passby.rs` builds its police with the old dense table so it still finds a cop on a straight.
+
+## Owner bug 2026-10-26: Loop 9 day spike cop behind the wall
+
+Owner: "the spike cop on loop 9 daytime race is spawning, but he's spawning off the road behind the wall".
+
+**Cause.** The AI captain's spike car (`PoliceSystem::place_spikes`) parks `SPIKE_CAR_SHOULDER_M` (2.5 m) past the carriageway's outer lane edge, and that edge comes from the police graph's lane count (`RoadGraph::carriageway_m`). On Loop 9 the count overstates the carriageway (outer edge 9.25 m from the lane line where the paving ends at 8.05 m), and the edge barrier stands on the paved edge, so the car appeared about 3.5 m behind the barrier. The strip's outer end ran through the barrier too. The scripted strip at 55 % of the lap stood half off the paving (no barrier at that spot, but the same idea). This is not from the median crossovers (PR #92): the median lines are unchanged and the posts are on the outer side.
+
+**Fix (Loop 9 races only: races with `patrol_corridor_m`).**
+- `PoliceSystem::for_world` keeps the map's highway surfaces (`race::PavedStrip`, `set_highway_paving`). `paved_edges` gives the paved edges either side of a point along a flow.
+- `spike_car_on_paving`: in a corridor race, the car's lateral spot is clamped to the paving, its half width (`avoid::UNIT_HALF_WIDTH_M`) plus `PAVED_EDGE_CLEAR_M` (0.5 m) inside each edge. Used by the captain's `spike_post` (both the "is the post hidden" search and the actual post) and by the scripted `place_course_spikes`. `strip_end_on_paving` stops the captain's strip ends at the paved edge.
+- Without a race corridor (every other race, free roam, night runs) nothing changes. `place_spikes_at` (scenario placement) is untouched.
+
+**Tests.** `race::tests::loop9_spike_cars_stay_inside_the_highway_paving` (unit). `wp_race/tests/race_picker.rs` (outside my crate, test only): every Loop 9 race checks each spike strip's car once it appears: no edge or median barrier between the strip's site and the car's far side, and its whole width on the paving where a lane runs under it. On main it fails at tick 1 of `loop9_day`.
