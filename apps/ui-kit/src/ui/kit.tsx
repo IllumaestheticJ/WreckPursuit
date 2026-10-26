@@ -222,6 +222,66 @@ export function Modal(props: { title: string; onClose: () => void; children?: Co
   );
 }
 
+/**
+ * A purchase big enough to ask "are you sure?" first: $5,000 or more, or half the cash on hand.
+ * Cheap, routine buys go straight through.
+ */
+export const BIG_SPEND = 5000;
+
+/** Does spending `price` with `cash` on hand deserve a confirmation? */
+export function isBigSpend(price: number, cash: number): boolean {
+  return price > 0 && (price >= BIG_SPEND || price >= cash / 2);
+}
+
+/**
+ * Inline "are you sure?" row for an action that is hard to undo (sell, scrap, a big purchase,
+ * replacing a save). Keyboard: focus starts on Cancel (so a stray Enter does nothing harmful),
+ * Tab / arrows move, Enter presses, Y confirms, N / Esc cancel. Esc is taken in the capture
+ * phase so it does not also close the screen behind.
+ */
+export function Confirm(props: { text: ComponentChildren; yes: string; onYes: () => void; onNo: () => void; testid?: string }) {
+  const root = useRef<HTMLDivElement>(null);
+  const cb = useRef(props);
+  cb.current = props;
+  useEffect(() => {
+    root.current?.querySelector<HTMLButtonElement>("[data-confirm=no]")?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      let f: (() => void) | null = null;
+      if (e.code === "Escape" || e.code === "KeyN") f = cb.current.onNo;
+      else if (e.code === "KeyY") f = cb.current.onYes;
+      else if (e.code === "ArrowLeft" || e.code === "ArrowRight") {
+        const btns = [...(root.current?.querySelectorAll<HTMLButtonElement>("[data-confirm]") ?? [])];
+        const i = btns.indexOf(document.activeElement as HTMLButtonElement);
+        if (i < 0) return;
+        btns[(i + (e.code === "ArrowRight" ? 1 : btns.length - 1)) % btns.length].focus();
+        // Not also a screen's own arrow keys (the car lot browses with them).
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      } else return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      f();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+  return (
+    <div ref={root} class="wp-row wp-confirm" role="alertdialog" data-testid={props.testid ?? "confirm"} style={{ gap: "0.5em", marginTop: "0.5em", flexWrap: "wrap", alignItems: "center" }}>
+      <span>{props.text}</span>
+      <button type="button" class="wp-btn wp-btn--sm wp-btn--danger" data-confirm="yes" onClick={() => props.onYes()}>
+        {props.yes}
+        <span class="wp-kbd">Y</span>
+      </button>
+      <button type="button" class="wp-btn wp-btn--sm" data-confirm="no" onClick={() => props.onNo()}>
+        Cancel
+        <span class="wp-kbd">N</span>
+      </button>
+    </div>
+  );
+}
+
 /** Standard screen header: kicker, title, right-side account readout, back button. */
 export function ScreenHead(props: { kicker: string; title: string; back?: ScreenId | "back"; children?: ComponentChildren }) {
   const send = useSend();

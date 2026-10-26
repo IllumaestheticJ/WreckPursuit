@@ -63,6 +63,16 @@
 .wp-gm-pause .wp-gm-brand h1 {
   font-size: 2.2em;
 }
+.wp-gm-confirm {
+  width: min(28em, 100%);
+}
+.wp-gm-confirm-title {
+  margin: 0.15em 0 0;
+  font-size: 1.6em;
+  font-weight: 800;
+  font-style: italic;
+  text-transform: uppercase;
+}
 .wp-gm-tag {
   margin: 0.5em 0 1em;
   color: var(--ink-2);

@@ -7,7 +7,7 @@
  */
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { Badge, Button, Meter, Money, Panel, severityColor, Stat } from "../ui/kit";
+import { Badge, Button, Confirm, Meter, Money, Panel, severityColor, Stat } from "../ui/kit";
 import { pct, words } from "../ui/format";
 import type { CareerView, ListingView, LotKind, LotStockView } from "./types";
 import "./garage.css";
@@ -91,8 +91,11 @@ function LotScreen({ api }: { api: LotVisitApi }) {
   const unsold = stock.cars.filter((c) => !c.sold);
   const [slot, setSlot] = useState<number | null>(unsold[0]?.slot ?? null);
   const [msg, setMsg] = useState<string | null>(null);
+  /** Buying a car always asks first (browsing with the arrows makes a stray click easy). */
+  const [ask, setAsk] = useState(false);
   const car = stock.cars.find((c) => c.slot === slot) ?? null;
   const pick = (s: number) => {
+    setAsk(false);
     setSlot(s);
     setMsg(null);
     api.focus(s);
@@ -118,6 +121,7 @@ function LotScreen({ api }: { api: LotVisitApi }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   const buy = () => {
+    setAsk(false);
     if (!car) return;
     try {
       setView(api.buy(car.slot));
@@ -179,8 +183,9 @@ function LotScreen({ api }: { api: LotVisitApi }) {
             <Button
               variant="primary"
               disabled={car.locked || car.price > view.cash || view.run_active}
-              onClick={buy}
-              data-testid="lot-buy"
+              pressed={ask}
+              onClick={() => setAsk(!ask)}
+              testid="lot-buy"
               title={car.locked ? `needs ${car.unlock_tier} rep tier` : undefined}
             >
               Buy <Money value={car.price} />
@@ -189,6 +194,20 @@ function LotScreen({ api }: { api: LotVisitApi }) {
               ▶
             </Button>
           </div>
+          {ask && (
+            <Confirm
+              key={car.slot}
+              testid="lot-confirm"
+              text={
+                <>
+                  Buy the {car.name} for <Money value={car.price} />? You have <Money value={view.cash} />; there are no refunds, only resale.
+                </>
+              }
+              yes="Buy"
+              onYes={buy}
+              onNo={() => setAsk(false)}
+            />
+          )}
         </Panel>
       )}
       {msg && (

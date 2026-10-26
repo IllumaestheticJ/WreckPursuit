@@ -55,7 +55,7 @@ import { UiOverlay } from "./ui/overlay";
 import { MapOverlay } from "./ui/map";
 import { HudLayout } from "./ui/layout";
 import { DRIFT_LAB_W, DRIFT_LAB_W_CAR, DriftLabWPanel, driftLabWScenario } from "./drift_lab_w";
-import { defaultGameSettings, hasStoredSettings, loadGameSettings, loadMenuMap, mountGameMenu, type ControlDevice, type GameSettings, type PlayChoice } from "../../ui-kit/src/live";
+import { defaultGameSettings, hasStoredSettings, loadGameSettings, loadMenuMap, mountGameMenu, type ControlDevice, type GameSettings, type MenuConfirm, type PlayChoice } from "../../ui-kit/src/live";
 import { gfxMode } from "./render/quality";
 import { RunEndView } from "./ui/runEnd";
 import { ModShop } from "./ui/modShop";
@@ -1732,7 +1732,34 @@ async function main(): Promise<void> {
   };
   /** Something else owns the screen or the Esc key right now. */
   // Photo mode takes Esc (and gamepad Start) to leave itself, so no pause menu meanwhile.
-  const canOpenMenu = () => !photo.active && !menu?.isOpen && !map.isOpen && !controls.isOpen && !garage.open && !workshop.active && !runEnd.open && !raceView.cards && !isReplay();
+  // An open "are you sure?" row (garage, lot, workshop) takes Esc as Cancel.
+  const canOpenMenu = () => !document.querySelector(".wp-confirm") && !photo.active && !menu?.isOpen && !map.isOpen && !controls.isOpen && !garage.open && !workshop.active && !runEnd.open && !raceView.cards && !isReplay();
+  /**
+   * Pause menu "are you sure?" lines: what leaving the running session now would lose, or null
+   * when nothing would (free drive, the test pad, a finished race, a replay).
+   */
+  const leaveText = (action: MenuConfirm): string | null | undefined => {
+    if (action === "resetSettings") return undefined;
+    if (isReplay()) return null;
+    const sc = sim.scenario();
+    const career = sim.careerRunActive();
+    const touge = raceView.raceId.startsWith("touge:");
+    const racing = !!raceView.raceId && !raceView.report;
+    const what = touge ? "battle" : "race";
+    const run = sc.name.startsWith("night_run");
+    if (action === "restart") {
+      // A career race or battle restarts from the garage (restartRun).
+      if (career && raceView.raceId) return racing ? `Leave this career ${what} for the garage? The ${what} so far is lost.` : null;
+      if (racing) return `Restart the ${what}? Your progress in it is lost.`;
+      if (career) return "Restart the career run? This run ends here and a new one starts.";
+      if (run) return "Restart the night run? Your heat and progress are lost.";
+      return null;
+    }
+    if (career) return "This ends the current career run.";
+    if (racing) return `Your progress in the ${what} is lost.`;
+    if (run) return "Your heat and progress in the night run are lost.";
+    return null;
+  };
   let menuPausedBefore = false;
   let menuShown = false;
   menu = mountGameMenu(overlay, {
@@ -1766,6 +1793,7 @@ async function main(): Promise<void> {
       },
       restart: () => restartRun(),
       garage: () => openGarage(),
+      confirmText: leaveText,
       quitToMain: () => {
         if (sim.careerRunActive()) sim.careerEndRun();
         persistCareer();
