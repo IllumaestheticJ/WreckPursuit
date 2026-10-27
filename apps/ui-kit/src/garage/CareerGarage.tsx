@@ -357,11 +357,11 @@ function ModTree(props: { car: CarView; cash: number; api: CareerApi; run: (f: (
   const { car, api } = props;
   const [group, setGroup] = useState<ModOption["group"]>("performance");
   const [hover, setHover] = useState<string | null>(null);
-  /** A big install or a removal that throws away a lot of money waits for "are you sure?". */
-  const [ask, setAsk] = useState<{ mod: ModOption; remove: boolean } | null>(null);
-  const install = (m: ModOption) => (isBigSpend(m.price, props.cash) ? setAsk({ mod: m, remove: false }) : props.run(() => api.install(car.uid, m.id)));
+  /** A removal that throws away a lot of money waits for "are you sure?" (installs never ask: owner, 2026-10-27). */
+  const [ask, setAsk] = useState<{ mod: ModOption } | null>(null);
+  const install = (m: ModOption) => props.run(() => api.install(car.uid, m.id));
   // Removing refunds 40 %: the other 60 % is the loss.
-  const uninstall = (m: ModOption) => (isBigSpend(m.price * 0.6, props.cash) ? setAsk({ mod: m, remove: true }) : props.run(() => api.uninstall(car.uid, m.id)));
+  const uninstall = (m: ModOption) => (isBigSpend(m.price * 0.6, props.cash) ? setAsk({ mod: m }) : props.run(() => api.uninstall(car.uid, m.id)));
   let tree: ModTreeView | null = null;
   let error: string | null = null;
   try {
@@ -420,24 +420,17 @@ function ModTree(props: { car: CarView; cash: number; api: CareerApi; run: (f: (
         </table>
         {ask && (
           <Confirm
-            key={`${ask.mod.id}${ask.remove}`}
+            key={ask.mod.id}
             text={
-              ask.remove ? (
-                <>
-                  Remove {ask.mod.name}? You get back <Money value={Math.round(ask.mod.price * 0.4)} /> of the <Money value={ask.mod.price} /> it cost.
-                </>
-              ) : (
-                <>
-                  {ask.mod.replaces ? "Swap in" : "Install"} {ask.mod.name} for <Money value={ask.mod.price} />? You have <Money value={props.cash} />
-                  {ask.mod.replaces ? `; ${ask.mod.replaces} comes off at 40 % back` : ""}.
-                </>
-              )
+              <>
+                Remove {ask.mod.name}? You get back <Money value={Math.round(ask.mod.price * 0.4)} /> of the <Money value={ask.mod.price} /> it cost.
+              </>
             }
-            yes={ask.remove ? "Remove" : `Buy`}
+            yes="Remove"
             onYes={() => {
-              const { mod, remove } = ask;
+              const { mod } = ask;
               setAsk(null);
-              props.run(() => (remove ? api.uninstall(car.uid, mod.id) : api.install(car.uid, mod.id)));
+              props.run(() => api.uninstall(car.uid, mod.id));
             }}
             onNo={() => setAsk(null)}
           />
