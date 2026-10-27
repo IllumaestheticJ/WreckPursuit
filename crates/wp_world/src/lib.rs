@@ -561,7 +561,8 @@ impl World {
         routes::plan_route_between_pois(&self.map, start_poi, finish_poi)
     }
 
-    /// Plan a lane-legal route between two points.
+    /// Plan a lane-legal route between two points, keeping to its lanes
+    /// ([`routes::plan_route`]; AI racers use [`World::plan_route_via`], which changes lanes).
     pub fn plan_route(
         &self,
         start: [f32; 3],
