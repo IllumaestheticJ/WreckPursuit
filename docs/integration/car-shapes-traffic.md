@@ -129,7 +129,19 @@ car-assets` (all pass; seven `TRIS_BEFORE_INTEGRATED_SIGNALS` rows rebased), `va
 Mod coverage: see "Mod coverage" below.
 
 ## Mod coverage
-Run in progress at this commit; results follow in the next commit.
+`node e2e/mod_coverage.mjs <my 7 cars>` on the final meshes: 19 car/mod pairs show nothing, all
+of kinds already on the known list in `mod-visuals.md` (and the same as phase 1's hauler run):
+short / sequential shifter and bucket seats behind van / truck cabins (drayman, satchel, tumbril,
+and the short shifter on every car), the radar (drayman, hauler), sway bars under the car
+(drayman, hauler, satchel, tansy, tumbril). Wings, lips, skirts, bumpers, bull bars and vinyls
+show on all seven; a look check (`SHOTS_ALL`, front / rear) of the wing, ram bull bar, side
+skirts and stripes on satchel_20, hauler_1500 and tansy_13 has them sitting on the new bodies
+(the van wing on the roof's rear edge above the flush barn doors, the hauler's on the tailgate).
+
+## Rule 9 check (brand cues)
+No real names anywhere; grilles are generic bar / slat / mesh patterns, badges are blank
+rectangles, lamp outlines are generic (square, stacked, teardrop, swept trapezoid); nothing is
+a maker's signature shape.
 
 ## Shots
 `docs/media/car-shapes/traffic/<car>_before_after.jpg` (front 3/4, rear 3/4, side; before row
