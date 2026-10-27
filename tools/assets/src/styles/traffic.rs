@@ -707,6 +707,7 @@ fn supermini_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     ];
     // Projected onto the nose and wrapped 20 degrees round the corner, in a black bezel.
     proj_lamps(b, p, true, &[lamp.to_vec()], 20.0, 0.03, 0.014);
+    head_lamp_bowls(b, p, &lamp, 20.0, 0.03, &[[-(wf - 0.13), h1 - 0.055]], 0.03);
     // Amber signal under the lamp's outer half, in the same bezel line.
     let sig = [
         [-(wf - 0.05), h0 + 0.012],
@@ -1241,6 +1242,16 @@ fn satchel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         [-(wf - 0.02), l1],
     ];
     proj_lamps(b, p, true, &[lamp.to_vec()], 25.0, 0.08, 0.014);
+    // Twin projector bowls in the swept lamp.
+    head_lamp_bowls(
+        b,
+        p,
+        &lamp,
+        25.0,
+        0.08,
+        &[[-(wf - 0.11), l1 - 0.06], [-(wf - 0.24), l1 - 0.06]],
+        0.032,
+    );
     let sig = [
         [-(wf - 0.015), l0 - 0.01],
         [-0.62, l0 + 0.005],
@@ -1281,6 +1292,16 @@ fn tumbril_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         10.0,
         0.08,
         0.012,
+    );
+    // A big round reflector in each square lamp.
+    head_lamp_bowls(
+        b,
+        p,
+        &rect(-(wf - 0.10), -0.52, l0, l1),
+        10.0,
+        0.08,
+        &[[-(wf - 0.205), 0.5 * (l0 + l1)]],
+        0.055,
     );
     proj_signals(
         b,
@@ -2730,5 +2751,58 @@ fn conform_to_faces(b: &mut Builder, p: &BodyProfile) {
                 [q[0], q[1] - dir * back[i] * w, q[2]]
             },
         );
+    }
+}
+
+/// Inner elements of a projected head lamp drawn by [`proj_lamps`] (same LEFT `outline`, `yaw`
+/// and `step`), mirrored per side: projector bowls (at `bowls`, radius `r`) in the lamp's own
+/// part, each with a chrome reflector ring (`lamp_ring_*` on the front frame).
+fn head_lamp_bowls(
+    b: &mut Builder,
+    p: &BodyProfile,
+    outline: &[[f32; 2]],
+    yaw: f32,
+    step: f32,
+    bowls: &[[f32; 2]],
+    r: f32,
+) {
+    use crate::lamp::{element, Element};
+    let ring_l = key("lamp_ring_l", R::FrameFront, M::Chrome);
+    let ring_r = ring_l.mirrored();
+    let keys = b.keys();
+    let (Some(kl), Some(kr)) = (
+        keys.iter().find(|k| k.name == "headlight_l").cloned(),
+        keys.iter().find(|k| k.name == "headlight_r").cloned(),
+    ) else {
+        return;
+    };
+    for (k, rk, sx) in [(&kl, &ring_l, 1.0f32), (&kr, &ring_r, -1.0)] {
+        let pts: Vec<[f32; 2]> = outline.iter().map(|q| [sx * q[0], q[1]]).collect();
+        let l = lamp_of(crate::lamp::LampView::Front, &pts, yaw, step);
+        for at in bowls {
+            let at = [sx * at[0], at[1]];
+            element(
+                b,
+                p,
+                k,
+                &l,
+                at,
+                &Element::Bowl {
+                    r_m: r,
+                    h_m: 0.6 * r,
+                },
+            );
+            element(
+                b,
+                p,
+                rk,
+                &l,
+                at,
+                &Element::Ring {
+                    r_m: r + 0.006,
+                    w_m: 0.006,
+                },
+            );
+        }
     }
 }
