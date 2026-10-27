@@ -46,10 +46,12 @@ Merged `ws/car-shapes` (phase 3) and reworked all seven again:
   the bumper (0.92 satchel, 0.95 tumbril), the hauler's nose 0.96.
 - tansy: shorter overhangs (−8 cm each end), rounder section (bulge 0.03 at 60 %, rockers in).
 - hauler: crisp full-length shoulder line (`side_sculpt`, +2 cm band under the belt).
-- Phase 3b part 1 (merged `b10e5e14`): tansy gets a raked bumper face (22°) with a chin, a
-  leaning tailgate (12°), a slightly bowed nose in plan, a roof narrowing to the rear
+- Phase 3b part 1 (merged `b10e5e14`): tansy gets a raked bumper face (22°), a slightly bowed nose in plan, a roof narrowing to the rear
   (`roof_plan_taper` 0.08) and a tucked lower body; the European vans get raked plastic
-  bumpers with a chin (satchel 16° / 6 cm, tumbril 8° / 4 cm). A local `conform_to_faces`
+  bumpers (satchel 16°, tumbril 8°). Chins (tansy 5 cm, satchel 6 cm, tumbril 4 cm) and tansy's
+  12° tailgate lean were tried and are off until the generator's face-bottom clipping fix (the
+  lead's spike warning); a low-angle check of all seven (front and rear 3/4 at 0.3 m) shows no
+  spikes with them off. A local `conform_to_faces`
   slides the kit's end-mounted parts (grilles, plates, intakes, fog lamps, lips) back onto the
   raked face. Projector bowls with chrome reflector rings (`lamp::element`) in tansy's and
   satchel's lamps (one / two) and a big round reflector in tumbril's square lamps.
@@ -64,10 +66,8 @@ Merged `ws/car-shapes` (phase 3) and reworked all seven again:
   0.42 tumbril); tansy's window line kicks up at the rear (`dlo_kink_m` 0.06).
 
 ## Per car
-Headline counts are pass 2; final pass 3 counts (full / mid): drayman 10931 / 5651, furrow
-10006 / 4954, hauler 10999 / 5909, beater 9136 / 4471, satchel 10627 / 5161, tansy 10076 /
-4164, tumbril 10668 / 5125 (all within traffic 11k / mid 7k; drayman now on 14 wheel
-segments, hauler on 12).
+Headline counts are pass 2; final pass 3 counts (full / mid): see the table under "Final
+counts" at the end (all within traffic 11k / mid 7k; drayman on 14 wheel segments, hauler on 12).
 
 Reference descriptions are generic (no real names). Triangle counts: full (phase 1) / mid
 (phase 1). Budgets: traffic 4k–11k, mid 2k–7k.
@@ -200,3 +200,14 @@ over after row) and `overview_front.jpg` (all seven, before / after).
 - (Done in phase 3 / addenda: tumblehome range, van deck near the tail, hood height, arch
   shapes and cladding.) Open: a painted rear-door panel mode for vans (glass only where a
   window is drawn), so `van_box`'s door skin could go.
+
+## Final counts (after the phase 3 addenda)
+| car | full | mid |
+|---|---|---|
+| drayman_cargo | 10929 | 5657 |
+| furrow_24 | 10006 | 4954 |
+| hauler_1500 | 10999 | 5909 |
+| junkyard_beater | 9136 | 4471 |
+| satchel_20 | 10627 | 5177 |
+| tansy_13 | 10106 | 4336 |
+| tumbril_20 | 10640 | 5125 |
