@@ -17,6 +17,7 @@
 //! sides independently. Unit-number decal carriers (`decal_unit_l/_r`, `decal_roof`,
 //! `decal_trunk`) are thin `livery` patches the renderer re-maps onto a per-unit number texture.
 
+pub mod body;
 pub mod kit;
 
 use wp_contracts::{BodyRegion, VehicleDef};
@@ -24,19 +25,27 @@ use wp_contracts::{BodyRegion, VehicleDef};
 use crate::mesh::{MaterialSlot, PartKind};
 use crate::style::{
     ArchShape, BodyStyle, CapKind, CarStyle, Detail, EngineKind, ExhaustKind, Induction,
-    LiveryHint, RimKind, Shape, Silhouette, SuspensionKind,
+    LiveryHint, RimKind, Shape, SideSculpt, Silhouette, SuspensionKind, TrimFinish,
 };
 
 /// Style for a police car id, or `None` if this module does not own it.
 pub fn style(def: &VehicleDef) -> Option<CarStyle> {
-    let mut s = match def.id.as_str() {
-        "sentinel_cruiser" => cruiser(),
-        "sentinel_warden" => warden(),
-        "sentinel_wolfhound" => wolfhound(),
-        "sentinel_bastion" => bastion(),
-        "sentinel_vigil" => vigil(),
+    let (mut s, body_kit): (CarStyle, crate::style::DetailFn) = match def.id.as_str() {
+        "sentinel_cruiser" => (cruiser(), body::cruiser),
+        "sentinel_warden" => (warden(), body::warden),
+        "sentinel_wolfhound" => (wolfhound(), body::wolfhound),
+        "sentinel_bastion" => (bastion(), body::bastion),
+        "sentinel_vigil" => (vigil(), body::vigil),
         _ => return None,
     };
+    // The car's own body kit (lamps, grille, bumpers, mirrors) goes first; the police
+    // equipment sits on top of it.
+    s.details.push(Detail::new(
+        "body_kit",
+        BodyRegion::Cabin,
+        MaterialSlot::Trim,
+        Shape::Custom(body_kit),
+    ));
     add_kit(&mut s, &kit::kit(&def.id));
     Some(s)
 }
@@ -59,21 +68,49 @@ const BLACK_CALIPER: [u8; 3] = [24, 24, 26];
 /// §1.1 "sedan": 2010s full-size RWD V8 sedan.
 fn cruiser() -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
+        cabin_shift_m: -0.20,
         nose_h: Some(0.74),
-        nose_rake_deg: 8.0,
-        nose_plan_round: 0.30,
-        hood_crown: 0.025,
-        windshield_rake_deg: Some(60.0),
+        nose_rake_deg: 4.0,
+        nose_plan_round: 0.20,
+        tail_plan_round: 0.22,
+        hood_crown: 0.02,
+        hood_bulge_h: 0.012,
+        hood_bulge_w: 0.50,
+        windshield_rake_deg: Some(62.0),
         a_pillar_rake_deg: 6.0,
-        rear_glass_rake_deg: Some(52.0),
-        crease_z: 0.58,
-        crease_depth: 0.012,
-        haunch: 0.02,
-        flare: 0.01,
+        rear_glass_rake_deg: Some(63.0),
+        roof_dz: -0.06,
+        belt_dz: 0.08,
+        tumblehome: Some(0.14),
+        crease_z: 0.60,
+        crease_depth: 0.015,
+        haunch: 0.04,
+        flare: 0.012,
         ride_dz: 0.01,
-        ducktail_h: 0.015,
-        belt_kick: 0.03,
+        ducktail_h: 0.02,
+        belt_kick: 0.07,
+        tail_round: 0.18,
+        tail_drop: 0.04,
         overhang_trim: (0.0, 0.03),
+        c_pillar_w_m: 0.20,
+        a_sail_len_m: 0.12,
+        roof_len_trim: -0.05,
+        // Phase 3: rounded section, tucked sill, rear hips, a crisp shoulder line.
+        side_bulge_m: 0.02,
+        rocker_in_m: 0.03,
+        rear_fender_rise_m: 0.03,
+        side_sculpt: vec![SideSculpt {
+            y0_m: -2.4,
+            y1_m: 2.4,
+            z0_m: 0.87,
+            z1_m: 0.9,
+            dx_m: 0.02,
+            falloff_m: 0.035,
+        }],
+        // Phase 3b: raked bumper face with a chin undercut, roof narrowing to the rear glass.
+        nose_face_rake_deg: 18.0,
+        nose_chin_m: 0.06,
+        roof_plan_taper: 0.10,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.livery = livery(
@@ -82,6 +119,9 @@ fn cruiser() -> CarStyle {
         &["POLICE", "PORT VESPER", "DIAL 911"],
     );
     steel_wheels(&mut s, 5, CapKind::Small);
+    // 21 segments (hero default 24): keeps the car inside the 22k budget after the shared
+    // car-shapes regeneration; smooth shading hides the difference.
+    s.wheel.segments = 21;
     s.mechanical.engine = EngineKind::V8;
     s.mechanical.exhaust = ExhaustKind::Dual;
     s.mechanical.caliper_rgb = Some(BLACK_CALIPER);
@@ -92,26 +132,42 @@ fn cruiser() -> CarStyle {
 fn warden() -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         nose_h: Some(0.76),
-        nose_rake_deg: 2.0,
-        nose_plan_round: 0.08,
-        tail_plan_round: 0.08,
+        nose_rake_deg: 1.0,
+        nose_plan_round: 0.04,
+        tail_plan_round: 0.04,
         hood_crown: 0.005,
-        windshield_rake_deg: Some(52.0),
-        rear_glass_rake_deg: Some(30.0),
+        windshield_rake_deg: Some(54.0),
+        rear_glass_rake_deg: Some(32.0),
         roof_dz: -0.02,
-        roof_crown: 0.01,
-        tumblehome: Some(0.11),
+        roof_crown: 0.008,
+        tumblehome: Some(0.10),
         glass_inset: 0.07,
         crease_z: 0.56,
         crease_depth: 0.006,
-        sill_tuck: 0.03,
-        shoulder_round: 0.025,
+        sill_tuck: 0.025,
+        shoulder_round: 0.015,
         flare_shape: ArchShape::Box,
         ride_dz: 0.03,
         stance_pitch_deg: -0.3,
-        tail_round: 0.10,
-        tail_drop: 0.03,
+        tail_round: 0.05,
+        tail_drop: 0.02,
         overhang_trim: (0.05, 0.06),
+        a_pillar_w_m: 0.065,
+        c_pillar_w_m: 0.24,
+        drip_rail: TrimFinish::Chrome,
+        end_round_m: 0.012,
+        arch_lip_m: 0.010,
+        glass_frame_m: 0.022,
+        // Phase 3: slab sides with a sharp shoulder crease and a slightly tucked sill.
+        rocker_in_m: 0.02,
+        side_sculpt: vec![SideSculpt {
+            y0_m: -2.9,
+            y1_m: 2.5,
+            z0_m: 0.79,
+            z1_m: 0.82,
+            dx_m: 0.015,
+            falloff_m: 0.03,
+        }],
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.livery = livery(
@@ -133,28 +189,43 @@ fn warden() -> CarStyle {
 /// §1.3 "patrol": AWD twin-turbo V6 pursuit sedan, highway-patrol livery.
 fn wolfhound() -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        nose_h: Some(0.78),
-        nose_rake_deg: 14.0,
-        nose_plan_round: 0.40,
+        nose_h: Some(0.86),
+        nose_rake_deg: 10.0,
+        nose_plan_round: 0.28,
         hood_crown: 0.03,
-        hood_bulge_h: 0.015,
+        hood_bulge_h: 0.012,
         hood_bulge_w: 0.60,
-        power_bulge_h: 0.01,
         windshield_rake_deg: Some(58.0),
-        a_pillar_rake_deg: 8.0,
-        rear_glass_rake_deg: Some(48.0),
-        roof_len_trim: 0.10,
-        roof_dz: 0.0,
-        crease_z: 0.60,
-        crease_depth: 0.018,
-        haunch: 0.04,
-        flare: 0.02,
+        a_pillar_rake_deg: 7.0,
+        rear_glass_rake_deg: Some(50.0),
+        roof_len_trim: 0.12,
+        roof_dz: -0.07,
+        belt_dz: 0.08,
+        tumblehome: Some(0.15),
+        crease_z: 0.62,
+        crease_depth: 0.015,
+        haunch: 0.025,
+        flare: 0.015,
         ride_dz: 0.02,
-        belt_rake: 0.03,
-        belt_kick: 0.05,
-        ducktail_h: 0.02,
-        tail_round: 0.28,
+        belt_rake: 0.02,
+        belt_kick: 0.04,
+        ducktail_h: 0.04,
+        tail_round: 0.22,
+        tail_drop: 0.05,
         overhang_trim: (0.0, -0.03),
+        c_pillar_w_m: 0.22,
+        cabin_shift_m: 0.10,
+        // Phase 3: tall rounded 2010s section, tucked sill, nose and tail taper in plan.
+        side_bulge_m: 0.03,
+        side_bulge_z: 0.6,
+        rocker_in_m: 0.04,
+        plan_width: vec![[-2.635, 0.94], [-1.86, 1.0], [1.86, 1.0], [2.485, 0.93]],
+        // Phase 3b: raked, plan-bowed (rounded) nose with a chin, slight roof taper.
+        nose_face_rake_deg: 22.0,
+        nose_chin_m: 0.05,
+        nose_plan_bow_m: 0.15,
+        nose_tip_w: 0.85,
+        roof_plan_taper: 0.08,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.livery = livery(
@@ -163,6 +234,9 @@ fn wolfhound() -> CarStyle {
         &["HIGHWAY PATROL", "PORT VESPER"],
     );
     steel_wheels(&mut s, 5, CapKind::Small);
+    // 21 segments (hero default 24): keeps the car inside the 22k budget after the shared
+    // car-shapes regeneration; smooth shading hides the difference.
+    s.wheel.segments = 21;
     s.mechanical.engine = EngineKind::V6;
     s.mechanical.induction = Induction::Turbo;
     s.mechanical.exhaust = ExhaustKind::Dual;
@@ -173,19 +247,41 @@ fn wolfhound() -> CarStyle {
 /// §1.4 "SUV": full-size body-on-frame SUV.
 fn bastion() -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        nose_rake_deg: 4.0,
-        nose_plan_round: 0.25,
-        hood_crown: 0.03,
-        hood_bulge_h: 0.02,
-        hood_bulge_w: 0.55,
-        windshield_rake_deg: Some(58.0),
-        a_pillar_rake_deg: 5.0,
-        crease_z: 0.59,
+        nose_h: Some(1.17),
+        nose_rake_deg: 3.0,
+        nose_plan_round: 0.08,
+        tail_plan_round: 0.10,
+        hood_crown: 0.012,
+        hood_bulge_h: 0.015,
+        hood_bulge_w: 0.70,
+        windshield_rake_deg: Some(57.0),
+        a_pillar_rake_deg: 2.0,
+        rear_glass_rake_deg: Some(12.0),
+        roof_crown: 0.015,
+        tumblehome: Some(0.06),
+        crease_z: 0.95,
         crease_depth: 0.012,
+        sill_tuck: 0.04,
+        shoulder_round: 0.04,
         haunch: 0.02,
-        flare: 0.03,
+        flare: 0.045,
         ride_dz: 0.04,
-        belt_kick: 0.02,
+        tail_round: 0.05,
+        tail_drop: 0.02,
+        end_round_m: 0.02,
+        c_pillar_w_m: 0.14,
+        a_sail_len_m: 0.16,
+        // Phase 3: near-vertical side glass, fender shoulders over the hood, doors set in a
+        // little between the flared fenders.
+        tumblehome_m: Some(0.05),
+        glass_inset: 0.04,
+        front_fender_rise_m: 0.04,
+        plan_width: vec![[-1.0, 1.0], [-0.55, 0.965], [0.55, 0.965], [1.0, 1.0]],
+        // Phase 3 addenda: the tall, flat truck hood (nose above the lattice hood line), black
+        // lower cladding and black arch lips.
+        hood_dz: (0.0, 0.10),
+        cladding_z_m: 0.45,
+        arch_lip_finish: TrimFinish::Black,
         ..BodyStyle::preset(Silhouette::Suv)
     });
     s.livery = livery(
@@ -206,28 +302,56 @@ fn bastion() -> CarStyle {
 /// §1.5 "sports patrol": modern muscle-coupe pursuit car, slicktop.
 fn vigil() -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        nose_h: Some(0.66),
-        nose_rake_deg: 12.0,
-        nose_plan_round: 0.38,
-        hood_crown: 0.03,
-        hood_bulge_h: 0.035,
-        hood_bulge_w: 0.45,
-        power_bulge_h: 0.04,
-        hood_scoop: crate::style::HoodScoop::Vents,
-        hood_scoop_h: 0.06,
+        cabin_shift_m: -0.28,
+        nose_h: Some(0.64),
+        nose_rake_deg: 4.0,
+        nose_plan_round: 0.18,
+        tail_plan_round: 0.18,
+        hood_crown: 0.02,
+        hood_bulge_h: 0.045,
+        hood_bulge_w: 0.40,
         windshield_rake_deg: Some(64.0),
-        a_pillar_rake_deg: 9.0,
-        roof_dz: -0.03,
-        tumblehome: Some(0.17),
-        crease_z: 0.57,
+        a_pillar_rake_deg: 10.0,
+        roof_len_trim: -0.05,
+        roof_dz: -0.10,
+        belt_dz: 0.05,
+        tumblehome: Some(0.20),
+        crease_z: 0.58,
         crease_depth: 0.02,
-        haunch: 0.06,
+        haunch: 0.09,
         front_haunch: 0.02,
-        flare: 0.03,
+        flare: 0.025,
         ride_dz: -0.02,
-        belt_kick: 0.04,
+        stance_pitch_deg: 0.2,
+        belt_kick: 0.06,
         ducktail_h: 0.03,
+        tail_round: 0.14,
+        tail_drop: 0.03,
         overhang_trim: (-0.02, -0.04),
+        c_pillar_w_m: 0.22,
+        // Phase 3: coke-bottle waist, raised front fenders and rear haunches, a cove behind the
+        // front wheel.
+        plan_width: vec![[-1.0, 1.0], [-0.6, 0.95], [0.5, 0.95], [0.95, 1.0]],
+        front_fender_rise_m: 0.03,
+        rear_fender_rise_m: 0.05,
+        side_bulge_m: 0.02,
+        side_sculpt: vec![SideSculpt {
+            y0_m: 0.35,
+            y1_m: 0.9,
+            z0_m: 0.3,
+            z1_m: 0.55,
+            dx_m: -0.035,
+            falloff_m: 0.12,
+        }],
+        // Phase 3b: forward-leaning shark nose with a deep chin, fastback roof narrowing to
+        // the rear, lower body leaning in under the crease.
+        nose_face_rake_deg: -10.0,
+        nose_chin_m: 0.10,
+        roof_plan_taper: 0.15,
+        lower_lean_in_m: 0.03,
+        // Phase 3 addenda: one even fastback curve from just behind the header.
+        roof_arc: 0.9,
+        roof_arc_rear_exp: 1.4,
         ..BodyStyle::preset(Silhouette::Fastback)
     });
     s.livery = livery(
@@ -241,6 +365,9 @@ fn vigil() -> CarStyle {
     s.wheel.cap = CapKind::Small;
     s.wheel.face_depth_m = 0.035;
     s.wheel.rim_radius_m = None;
+    // 21 segments (hero default 24): keeps the car inside the 22k budget after the shared
+    // car-shapes regeneration; smooth shading hides the difference.
+    s.wheel.segments = 21;
     s.mechanical.engine = EngineKind::V8;
     s.mechanical.induction = Induction::Blower;
     s.mechanical.exhaust = ExhaustKind::Quad;
@@ -457,7 +584,7 @@ mod tests {
                 assert!(has(n), "{id}: missing {n}");
             }
             assert!(
-                (8000..=20000).contains(&m.tri_count),
+                (8000..=22000).contains(&m.tri_count),
                 "{id}: {} tris",
                 m.tri_count
             );
