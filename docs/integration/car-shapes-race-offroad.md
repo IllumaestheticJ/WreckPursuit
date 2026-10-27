@@ -30,7 +30,7 @@ Triangles: full mesh (hero budget 22k) / mid LOD (7k).
   spare-bay cover with a louvred outlet (`RearGlass` region). Tails moved off the (now absent)
   glass onto the tail frame uprights. The amber strip under the slim lamps is now the front turn
   signal and the slim lamps are part of the head-lamp part. One wiper, black handles, no fuel door.
-- **Tris:** 19 872 → 20 486 / mid 5 912 → 6 397.
+- **Tris:** 19 872 → 20 054 / mid 5 912 → 6 135.
 
 ### `mesquite_pr` (pre-runner pickup)
 - **Reference:** 2010s American full-size off-road performance pickup: tall slab sides and a high,
@@ -44,7 +44,7 @@ Triangles: full mesh (hero budget 22k) / mid LOD (7k).
   windshield, side character line; new front: tall lamp clusters (projector lens + outboard
   amber signal + C running light), wide mesh grille with frame, body-colour crossbar and blank
   badge; sliding rear window on the cab-back wall; black mirrors and handles, fuel door left.
-- **Tris:** 20 223 → 20 923 / mid 6 530 → 6 740.
+- **Tris:** 20 223 → 20 835 / mid 6 530 → 6 980.
 
 ### `morrigan_55` (front-engine GT endurance racer)
 - **Reference:** 2010s front-mid-engine GT endurance car on a production coupe: long hood with
@@ -56,7 +56,7 @@ Triangles: full mesh (hero budget 22k) / mid LOD (7k).
   swept back along the fender peaks; hood louvres over the wheel wells only (the clashing
   fender-top vents are gone); new fender exit vents with carbon blades; body-colour B-pillar,
   wider C-pillar, one wiper, no handles or fuel door (race car).
-- **Tris:** 20 454 → 20 426 / mid 5 648 → 5 506.
+- **Tris:** 20 454 → 20 682 / mid 5 648 → 6 002.
 
 ### `nyx_proto` (closed-cockpit sports prototype)
 - **Reference:** 2010s closed-cockpit endurance prototype (≈4.75 × 1.9 × 1.05 m, 1 m front
@@ -67,7 +67,7 @@ Triangles: full mesh (hero budget 22k) / mid LOD (7k).
   either side of the fin; deeper engine-cover valley; slimmer A-pillars, body-colour B-pillar,
   one wiper, no handles / fuel door. `hood_valley` stays at 0.06: deeper hides part of the head
   lamps (`lights_sit_outside_the_shell`).
-- **Tris:** 19 674 → 19 838 / mid 6 025 → 6 169.
+- **Tris:** 19 674 → 19 446 / mid 6 025 → 6 114.
 
 ### `merlo_20t` (touring-car racer)
 - **Reference:** 2010s European touring-car racer on a current four-door sedan: 1.95 m wide on
@@ -78,10 +78,30 @@ Triangles: full mesh (hero budget 22k) / mid LOD (7k).
   character line, small ducktail; slim lamps on the nose top plus a face lens with the amber
   signal cut out of it and an LED brow; slimmer two-piece tails with a corner hook and a
   full-width red light bar on the lid; one wiper.
-- **Tris:** 19 317 → 19 869 / mid 5 151 → 5 209.
+- **Tris:** 19 317 → 20 162 / mid 5 151 → 5 234.
 
 All five race cars share `sun_strip` (race.rs): its patch now has a finer grid across (2 × 10),
 because the coarse one cut under the crowned windshield and flickered.
+
+## Second pass (lead feedback 2026-10-27: "bolder, change proportions")
+- **All:** stance and overhangs pushed to the knob limits. Race cars: `ride_dz` −0.05, roofs
+  4–6 cm lower, rounder section (`sill_tuck` / `shoulder_round` ~0.10), wider flares and haunches,
+  longer splitter and tail overhangs (Morrigan +0.10 / +0.06 m, Nyx +0.07 / +0.05 m, Merlo +0.06 /
+  +0.03 m). Off-road: `ride_dz` +0.08 / +0.06 and `arch_gap` 0.15 / 0.13 (long-travel gap over
+  the tyres), overhangs trimmed (Mesquite −0.15 / −0.12 m, Erg −0.10 / −0.06 m).
+- **Shaped lamps:** the race cars' rectangular `top_lamp` lenses are replaced by convex polygon
+  slab lenses that follow the nose-top surface (`top_lens` / `shaped_lamp` in race.rs, with a
+  dark housing grown around each outline): Morrigan a long swept blade, Nyx a swept main unit
+  plus a short lower blade, Merlo an angular slit.
+- **Mesquite:** boxed fibreglass fenders 17–18 cm out (black, with a flat fender top at the
+  front and orange lips round the openings), black lower cladding over the door and quarter so
+  the body reads lifted high over the tyres, exposed bed cage (stays from the hoop to the tail,
+  tail hoop) over the spare and a fuel cell. The black hood stripes and side bands are gone
+  (the cladding takes over as the dark accent; also needed to keep the mid LOD under 7k).
+- **Erg:** body-colour pontoon fenders (boxed, navy lips) 14 cm out; taller stance.
+- **Morrigan:** carbon sill pods between the wheels.
+- Not done on purpose: a cab-forward canopy on Morrigan (front-engine GT, long hood per its
+  spec) and Merlo (four-door touring sedan). Only Nyx has the canopy.
 
 ## Checks
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p car-assets`
@@ -96,14 +116,38 @@ excepted: merlo, mesquite, erg), sequential shifter + radar + turbo 1 on the Mes
 cabin / known), front sway bar on the Nyx (under the car). Look check (`SHOTS_ALL=1`, wing 2,
 side skirts, tube bull bar, stripes vinyl on Erg and Mesquite): the wing sits on the roof edge,
 the bull bar in front of the new noses, skirts and vinyls follow the new panels.
+After the second pass, wings (2, swan neck), front lip, side skirts, rear bumper, tube bull bar,
+stripes and race-number vinyls show on all five cars (`MODS=...`, 0 missing).
 
 ## Generator requests
-None needed. Possible later: a shared "cover glass with paint" helper (the local `glass_cover` /
-painted top patches here) for two-door bodies on four-door lattices and closed engine covers.
+Sent to the lead on 2026-10-27. Each item is a limit the per-car styles cannot get past:
+1. **Plan-view width curve:** the loft's half-width is the lattice width everywhere; only
+   `nose_plan_round` / `tail_plan_round` round the corners. Wanted: a per-station width scale
+   (e.g. `plan_width: Vec<(y, scale)>`) for a nose narrower than the body, a Coke-bottle waist,
+   or pickup fenders wider than the cab.
+2. **Section shape per station:** the ring's side wall is fixed (sill tuck, crease, shoulder);
+   the only per-station swell is `haunch` / `front_haunch` at the arches (max 0.08). Wanted: a
+   side offset over a y-range and z-band (dx) for sidepods that step in behind the front wheels,
+   door scallops, and pontoon fenders standing proud of the cabin. Today these are bolt-on
+   detail boxes (`skirts`, `box_flare`).
+3. **Fender height independent of the hood centre:** `hood_valley` is capped at 0.08, and
+   deeper hides kit head lamps (`lights_sit_outside_the_shell`; Nyx stays at 0.06). Wanted:
+   separate front / rear fender-top heights (prototype wheel pods, GT fender peaks).
+4. **Overhangs:** `overhang_trim` is clamped to −0.15…+0.10 off the bumper nodes; the pickup's
+   front overhang cannot get shorter.
+5. **Lens outlines on the curved loft:** the kit has box, round and top-patch lenses. The local
+   `top_lens` lays a polygon slab corner by corner on the top surface, which is fine for small
+   convex lamps. A builder helper for a `surface_patch` with a polygon outline (top or face)
+   would allow concave and wrapped lamp graphics.
+6. Wheel size and track come from the car def (physics, frozen); only the arch gap and flares
+   change how much tyre shows.
+Also useful: a shared "cover glass with paint" helper (the local `glass_cover` / painted top
+patches here) for two-door bodies on four-door lattices and closed engine covers.
 
 ## Known gaps
 - Erg keeps a rear door seam and handle on the painted rear side panel (generic trim follows the
   lattice doors).
 - The loft's flat shading shows a stipple on the big curved haunches (pre-existing, every car).
 - Mesquite's hood front cannot rise above the lattice hood-front height, so the nose is a little
-  lower than a real full-size truck's.
+  lower than a real full-size truck's; its mid LOD sits at 6 980 of 7 000.
+- Body sides are still slab-sided between the arches (generator requests 1–2).

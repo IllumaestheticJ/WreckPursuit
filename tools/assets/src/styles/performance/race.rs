@@ -25,7 +25,9 @@ use crate::style::{
     ArchShape, BodyStyle, CapKind, CarStyle, DetailCtx, FuelDoor, RimKind, Silhouette, TrimFinish,
 };
 
-use super::kit::{dkey, lkey, sided, taillight_key, top_band, Kit, Seg, Stand, Wing, SIDES};
+use super::kit::{
+    dkey, headlight_key, lkey, sided, taillight_key, top_band, Kit, Seg, Stand, Wing, SIDES,
+};
 use super::{kit_detail, rgb, wheels};
 
 // ---------------------------------------------------------------------- shared helpers
@@ -49,6 +51,58 @@ fn sided_vent(
     let region = key.region.unwrap_or(region_l);
     let (a, c) = (sx * xin, sx * xout);
     k.top_vent(&key.name, region, y0, y1, a.min(c), a.max(c), slats, mat);
+}
+
+/// Slab lens lying on the top surface: `outline` = convex (|x|, y) points on side `sx`, the
+/// slab `thick` m deep standing `lift` m off the surface (each corner follows the surface).
+fn top_lens(k: &mut Kit, key: &PartKey, sx: f32, outline: &[[f32; 2]], lift: f32, thick: f32) {
+    let lo: Vec<[f32; 3]> = outline
+        .iter()
+        .map(|q| [sx * q[0], q[1], k.top_z(q[1], sx * q[0]) + lift])
+        .collect();
+    let hi: Vec<[f32; 3]> = lo.iter().map(|q| [q[0], q[1], q[2] + thick]).collect();
+    let n = lo.len() as f32;
+    let cx = lo.iter().map(|q| q[0]).sum::<f32>() / n;
+    let cy = lo.iter().map(|q| q[1]).sum::<f32>() / n;
+    k.b.poly_facing(key, &hi, [0.0, 0.0, 1.0]);
+    k.b.poly_facing(key, &lo, [0.0, 0.0, -1.0]);
+    for i in 0..lo.len() {
+        let j = (i + 1) % lo.len();
+        let out = [
+            0.5 * (lo[i][0] + lo[j][0]) - cx,
+            0.5 * (lo[i][1] + lo[j][1]) - cy,
+            0.0,
+        ];
+        k.b.poly_facing(key, &[lo[i], lo[j], hi[j], hi[i]], out);
+    }
+}
+
+/// Shaped head lamp on the nose top (side `sx`): a dark housing `border` m larger than the
+/// lens outline (|x|, y, convex) and the lens itself in the head-lamp part. Replaces the
+/// kit's rectangular `top_lamp` so each car gets its own lamp graphic.
+fn shaped_lamp(k: &mut Kit, sx: f32, outline: &[[f32; 2]], border: f32) {
+    let n = outline.len() as f32;
+    let c = [
+        outline.iter().map(|q| q[0]).sum::<f32>() / n,
+        outline.iter().map(|q| q[1]).sum::<f32>() / n,
+    ];
+    let grow: Vec<[f32; 2]> = outline
+        .iter()
+        .map(|q| {
+            let (dx, dy) = (q[0] - c[0], q[1] - c[1]);
+            let l = (dx * dx + dy * dy).sqrt().max(1e-4);
+            [
+                q[0] + dx / l * border,
+                (q[1] + dy / l * border).min(k.yn - 0.005),
+            ]
+        })
+        .collect();
+    let kh = sided(
+        &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
+        sx,
+    );
+    top_lens(k, &kh, sx, &grow, 0.001, 0.008);
+    top_lens(k, &headlight_key(sx), sx, outline, 0.004, 0.012);
 }
 
 /// Windscreen sun strip: a band `depth` m long (in plan) across the top of the windscreen.
@@ -120,6 +174,9 @@ fn number_panel(k: &mut Kit, sx: f32, y0: f32, y1: f32, z0: f32, z1: f32) {
 pub fn morrigan(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         cabin_shift_m: -0.22,
+        overhang_trim: (0.10, 0.06),
+        roof_dz: -0.06,
+        sill_tuck: 0.10,
         nose_h: Some(0.44),
         nose_rake_deg: 52.0,
         nose_plan_round: 0.30,
@@ -137,12 +194,12 @@ pub fn morrigan(def: &VehicleDef) -> CarStyle {
         glass_inset: 0.13,
         crease_z: 0.44,
         crease_depth: 0.020,
-        shoulder_round: 0.08,
+        shoulder_round: 0.11,
         haunch: 0.080,
-        front_haunch: 0.075,
-        flare: 0.050,
+        front_haunch: 0.080,
+        flare: 0.070,
         flare_shape: ArchShape::Round,
-        ride_dz: -0.03,
+        ride_dz: -0.05,
         stance_pitch_deg: 0.4,
         ducktail_h: 0.03,
         belt_kick: 0.05,
@@ -196,7 +253,13 @@ fn morrigan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     // --- Nose: slim swept lamps on the corners, endurance lamp pod, big mesh mouth, ducts.
     // Long, slim lamps swept back along the fender peaks (signals: `signals_beside_lamps`).
     for sx in SIDES {
-        k.top_lamp(sx, yn - 0.46, yn - 0.12, wn - 0.25, wn - 0.10, 0.022);
+        let lamp = [
+            [wn - 0.30, yn - 0.20],
+            [wn - 0.09, yn - 0.10],
+            [wn - 0.10, yn - 0.38],
+            [wn - 0.22, yn - 0.50],
+        ];
+        shaped_lamp(&mut k, sx, &lamp, 0.022);
     }
     let kp = dkey("endurance_pod", fb, M::Trim);
     let (pz0, pz1) = (nz1 - 0.12, nz1 - 0.025);
@@ -351,6 +414,8 @@ fn morrigan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             true,
         );
     }
+    // Carbon sill pods between the wheels (the GT class's deep side skirts).
+    k.skirts(M::Carbon, 0.08, 0.16);
     k.mirrors(0.16, 0.10, Some(M::Carbon));
 
     // --- Rear: swan-neck wing on big end plates, black fascia, twin-bar tails, diffuser.
@@ -447,12 +512,15 @@ pub fn nyx(def: &VehicleDef) -> CarStyle {
         crease_depth: 0.030,
         haunch: 0.080,
         front_haunch: 0.080,
-        flare: 0.030,
-        ride_dz: -0.03,
+        flare: 0.050,
+        sill_tuck: 0.10,
+        shoulder_round: 0.10,
+        roof_dz: -0.04,
+        ride_dz: -0.05,
         stance_pitch_deg: 0.5,
         ducktail_h: 0.0,
         deck_valley: 0.08,
-        overhang_trim: (0.03, 0.08),
+        overhang_trim: (0.07, 0.05),
         a_pillar_w_m: 0.05,
         b_pillar: TrimFinish::Body,
         rear_glass_wrap_m: 0.0,
@@ -530,8 +598,21 @@ fn nyx_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         (2, 0),
     );
     for sx in SIDES {
-        k.top_lamp(sx, yn - 0.42, yn - 0.33, wn - 0.30, wn - 0.05, 0.02);
-        k.top_lamp(sx, yn - 0.27, yn - 0.18, wn - 0.27, wn - 0.06, 0.02);
+        // Angular lamp units: a swept main lens and a short lower blade ahead of it.
+        let main = [
+            [wn - 0.30, yn - 0.30],
+            [wn - 0.06, yn - 0.22],
+            [wn - 0.06, yn - 0.34],
+            [wn - 0.20, yn - 0.42],
+        ];
+        shaped_lamp(&mut k, sx, &main, 0.02);
+        let blade = [
+            [wn - 0.24, yn - 0.18],
+            [wn - 0.07, yn - 0.13],
+            [wn - 0.07, yn - 0.18],
+            [wn - 0.22, yn - 0.22],
+        ];
+        shaped_lamp(&mut k, sx, &blade, 0.015);
     }
     k.mesh_grille(
         "nose_intake",
@@ -843,11 +924,15 @@ pub fn merlo(def: &VehicleDef) -> CarStyle {
         tumblehome: Some(0.19),
         crease_z: 0.58,
         crease_depth: 0.018,
-        haunch: 0.040,
-        front_haunch: 0.040,
-        flare: 0.075,
+        haunch: 0.060,
+        front_haunch: 0.060,
+        flare: 0.080,
         flare_shape: ArchShape::Box,
-        ride_dz: -0.04,
+        roof_dz: -0.04,
+        sill_tuck: 0.09,
+        shoulder_round: 0.09,
+        overhang_trim: (0.06, 0.03),
+        ride_dz: -0.05,
         stance_pitch_deg: 0.3,
         ducktail_h: 0.02,
         belt_kick: 0.03,
@@ -896,7 +981,13 @@ fn merlo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     // signal as the outboard end of the face lens and an LED brow), big trapezoid grille mesh,
     // lower intake, deep splitter.
     for sx in SIDES {
-        k.top_lamp(sx, yn - 0.17, yn - 0.04, wn - 0.34, wn - 0.07, 0.018);
+        let lamp = [
+            [wn - 0.36, yn - 0.13],
+            [wn - 0.07, yn - 0.04],
+            [wn - 0.07, yn - 0.12],
+            [wn - 0.28, yn - 0.19],
+        ];
+        shaped_lamp(&mut k, sx, &lamp, 0.018);
         let kh = sided(
             &dkey(
                 "headlamp_face_housing_l",
