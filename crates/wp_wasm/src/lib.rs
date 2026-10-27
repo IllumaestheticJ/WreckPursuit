@@ -30,7 +30,7 @@
 //! | drift lab B (lead) | `drift_tuning_json()`, `drift_tuning_defaults_json()`, `drift_tuning_set(json)`, `drift_readout(entity)` — see [`drift_lab`] |
 //! | mods | `mod_catalog_json(car)`, `build_visuals_json(car, mods)`, `entity_visuals_json(entity)` — see [`mod_visuals`]; install with `EntitySpec::mods` in the scenario |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)`, `debug_place(entity, x, y, yaw, speed)` — see [`run`] |
-//! | garages (lead) | `garages_json()`, `garage_visit_json()`, `garage_repair()`, `garage_leave()`; career places `safehouses_json()`, `place_json()`, `place_leave()` — see [`garage_visit`] |
+//! | garages (lead) | `garages_json()`, `garage_visit_json()`, `garage_repair()`, `garage_leave()`; career places `safehouses_json()`, `place_json()`, `place_leave()`, `places_json()`, `gps_route()` — see [`garage_visit`] |
 //! | audio (13) | `audio_library()`, `audio_frame(listener, events_json, focus)`, `audio_set_siren`, `audio_set_scanner_tier`, `audio_radio`, `audio_reset()` — see [`audio`] |
 
 #![warn(missing_docs)]
@@ -1367,6 +1367,21 @@ pub fn garage_leave() -> Result<(), JsValue> {
 #[wasm_bindgen]
 pub fn safehouses_json() -> Result<String, JsValue> {
     get(|s| json(&s.safehouses()))
+}
+
+/// Every drive-to place of the session as JSON ([`garage_visit::MapPlace`] array: repair
+/// shops, and in career runs safehouses, car lots and the player's garages), for the map
+/// markers and the waypoint.
+#[wasm_bindgen]
+pub fn places_json() -> Result<String, JsValue> {
+    get(|s| json(&s.map_places()))
+}
+
+/// The GPS line from the player's car to `(x, y)`: flat `[x0, y0, x1, y1, …]` along the lanes
+/// (empty without a route).
+#[wasm_bindgen]
+pub fn gps_route(x: f32, y: f32) -> Result<Vec<f32>, JsValue> {
+    get(|s| s.gps_route([x, y]).into_iter().flatten().collect())
 }
 
 /// Career places as JSON ([`garage_visit::PlaceStatus`]): the open garage / safehouse visit
