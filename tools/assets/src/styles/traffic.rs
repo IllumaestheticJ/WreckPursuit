@@ -188,6 +188,16 @@ fn tansy_13() -> CarStyle {
         // Short supermini overhangs.
         overhang_trim: (-0.08, -0.08),
         end_round_m: 0.04,
+        // Phase 3b: raked bumper face with a chin, leaning tailgate, rounded nose in plan, roof
+        // narrowing to the rear, lower body tucked in.
+        nose_face_rake_deg: 22.0,
+        nose_chin_m: 0.05,
+        tail_face_rake_deg: 12.0,
+        tail_chin_m: 0.04,
+        nose_plan_bow_m: 0.18,
+        nose_tip_w: 0.88,
+        roof_plan_taper: 0.08,
+        lower_lean_in_m: 0.02,
         fuel_door: FuelDoor::Left,
         ..BodyStyle::preset(Silhouette::Hatch)
     };
@@ -347,6 +357,8 @@ fn drayman_cargo() -> CarStyle {
         ..BodyStyle::preset(Silhouette::Van)
     };
     let mut s = with_kit(body, drayman_kit);
+    // 14 wheel segments keep the long van (projected lamps) under the 11k traffic budget.
+    s.wheel.segments = 14;
     s.wheel.rim = RimKind::Steel;
     s.wheel.spokes = 0;
     s.wheel.cap = CapKind::Small;
@@ -391,6 +403,9 @@ fn euro_panel_van(tumbril: bool) -> CarStyle {
         mirrors: TrimFinish::Black,
         door_handles: TrimFinish::Black,
         fuel_door: FuelDoor::Left,
+        // Phase 3b: raked plastic bumper with a chin (more on the rounder satchel).
+        nose_face_rake_deg: if tumbril { 8.0 } else { 16.0 },
+        nose_chin_m: if tumbril { 0.04 } else { 0.06 },
         ..BodyStyle::preset(Silhouette::Van)
     };
     let mut s = with_kit(body, if tumbril { tumbril_kit } else { satchel_kit });
@@ -799,8 +814,8 @@ fn supermini_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let bl = light("brake_lamp_c", R::Roof, M::Taillight);
     b.cuboid(
         &bl,
-        [-0.20, r0 - 0.135, zr - 0.04],
-        [0.20, r0 - 0.11, zr - 0.022],
+        [-0.20, r0 - 0.145, zr - 0.05],
+        [0.20, r0 - 0.105, zr - 0.012],
     );
     let wip = key("rear_wiper", R::Trunk, M::Trim);
     let yw = p.y_deck + 0.10;
@@ -838,6 +853,7 @@ fn supermini_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         0.004,
     );
     mirror(b, &rp);
+    conform_to_faces(b, p);
 }
 
 /// furrow_24 (90s compact regular-cab pickup): square lamps with wraparound amber corners in
@@ -860,8 +876,8 @@ fn compact_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         p,
         true,
         M::EmissiveAmber,
-        &rect(-(wf - 0.015), -(wf - 0.105), l0, l1),
-        12.0,
+        &rect(-(wf - 0.025), -(wf - 0.105), l0, l1),
+        6.0,
         0.08,
     );
     let bez = key("lamp_bezel_l", R::FrontLeftFender, M::Chrome);
@@ -1245,6 +1261,7 @@ fn satchel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     front_box(b, &intake, p, -0.45, 0.45, 0.42, 0.52, 0.065, 0.0);
     plate_on_face(b, p, true, 0.575, 0.0);
     euro_van_common(b, p, false);
+    conform_to_faces(b, p);
 }
 
 /// tumbril_20 (squarer 2000s European panel van): upright square lamps with amber outer
@@ -1324,6 +1341,7 @@ fn tumbril_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     plate_on_face(b, p, true, 0.495, 0.08);
     sliding_door_track_at(b, p, p.z_belt + 0.02);
     euro_van_common(b, p, true);
+    conform_to_faces(b, p);
 }
 
 /// Shared rear and sides of the two European panel vans.
@@ -2638,4 +2656,79 @@ fn proj_signals(
 /// Rectangle outline `[x0, x1] × [z0, z1]` for a projected lamp.
 fn rect(x0: f32, x1: f32, z0: f32, z1: f32) -> Vec<[f32; 2]> {
     vec![[x0, z0], [x1, z0], [x1, z1], [x0, z1]]
+}
+
+/// Slide the kit's end-mounted parts (grilles, plates, intakes, bumper bars, fog lamps …) back
+/// onto a raked / chinned end face (`nose_face_rake_deg`, `nose_chin_m`, tail likewise): the
+/// kit helpers place them on a vertical face at `y_nose` / `y_tail`. The face's set-back per
+/// height is measured from the body panels near the centre line, capped at the profile's face
+/// depth; vertices fade from full shift at the end to none 0.3 m in. Projected lamps (which
+/// already follow the surface) and body / glass parts are left alone. Call it last in a kit.
+fn conform_to_faces(b: &mut Builder, p: &BodyProfile) {
+    const BIN: f32 = 0.02;
+    const NB: usize = 160;
+    for front in [true, false] {
+        let depth = p.face_depth(front);
+        if depth <= 0.005 {
+            continue;
+        }
+        let end = if front { p.y_nose } else { p.y_tail };
+        let dir = if front { 1.0 } else { -1.0 };
+        // Outermost body point (along the end direction) per height bin, near the centre line.
+        let mut reach = [f32::NAN; NB];
+        for k in b.keys() {
+            if k.wheel.is_some() || !matches!(k.kind, PartKind::Panel | PartKind::Body) {
+                continue;
+            }
+            let Some((pos, _, _)) = b.geometry(&k.name) else {
+                continue;
+            };
+            for q in pos {
+                if q[0].abs() > 0.4 || dir * (end - q[1]) > 0.6 {
+                    continue;
+                }
+                let i = ((q[2] / BIN) as usize).min(NB - 1);
+                let v = dir * q[1];
+                if reach[i].is_nan() || v > reach[i] {
+                    reach[i] = v;
+                }
+            }
+        }
+        // Set-back per bin (0 = on the end plane), gaps filled from the nearest bin below.
+        let mut back = [0.0f32; NB];
+        let mut last = 0.0f32;
+        for i in 0..NB {
+            if !reach[i].is_nan() {
+                last = (dir * end - reach[i]).clamp(0.0, depth + 0.02);
+            }
+            back[i] = last;
+        }
+        let projected = |n: &str| {
+            [
+                "headlight",
+                "taillight",
+                "indicator_",
+                "headlamp_bezel",
+                "taillamp_bezel",
+            ]
+            .iter()
+            .any(|s| n.starts_with(s))
+        };
+        b.transform(
+            |k| {
+                k.wheel.is_none()
+                    && matches!(k.kind, PartKind::Detail | PartKind::Light)
+                    && !projected(&k.name)
+            },
+            |q| {
+                let into = dir * (end - q[1]);
+                if into > 0.3 {
+                    return q;
+                }
+                let i = ((q[2].max(0.0) / BIN) as usize).min(NB - 1);
+                let w = 1.0 - smoothstep((into - 0.1) / 0.2);
+                [q[0], q[1] - dir * back[i] * w, q[2]]
+            },
+        );
+    }
 }
