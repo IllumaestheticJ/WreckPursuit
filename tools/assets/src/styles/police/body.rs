@@ -30,7 +30,7 @@
 use wp_contracts::BodyRegion;
 
 use crate::builder::{Builder, PartKey};
-use crate::mesh::MaterialSlot as M;
+use crate::mesh::{MaterialSlot as M, INDICATOR_SEAM_M};
 use crate::style::DetailCtx;
 use crate::styles::performance::kit::{
     dkey, headlight_key, indicator_front_key, indicator_rear_key, lkey, sided, taillight_key,
@@ -120,6 +120,108 @@ fn rocker_strip(k: &mut Kit, mat: M, h: f32, out: f32) {
     }
 }
 
+/// Clip a convex (|x|, z) outline to `x0 <= |x| <= x1` (both vertical cuts); stays convex.
+fn clip_x(pts: &[[f32; 2]], x0: f32, x1: f32) -> Vec<[f32; 2]> {
+    let mut out: Vec<[f32; 2]> = pts.to_vec();
+    for (edge, keep_above) in [(x0, true), (x1, false)] {
+        let inside = |q: [f32; 2]| {
+            if keep_above {
+                q[0] >= edge
+            } else {
+                q[0] <= edge
+            }
+        };
+        let src = std::mem::take(&mut out);
+        let n = src.len();
+        for i in 0..n {
+            let a = src[i];
+            let c = src[(i + 1) % n];
+            if inside(a) {
+                out.push(a);
+            }
+            if inside(a) != inside(c) {
+                let t = (edge - a[0]) / (c[0] - a[0]);
+                out.push([edge, a[1] + t * (c[1] - a[1])]);
+            }
+        }
+    }
+    out
+}
+
+/// Shaped lens / panel on the nose (`front`) or tail face: a convex (|x|, z) outline on side
+/// `sx`, standing `proud` out of the face (2 cm buried behind it).
+fn face_poly(k: &mut Kit, key: &PartKey, front: bool, sx: f32, pts: &[[f32; 2]], proud: f32) {
+    if pts.len() < 3 {
+        return;
+    }
+    let prof: Vec<[f32; 2]> = pts.iter().map(|q| [sx * q[0], q[1]]).collect();
+    if front {
+        let y = k.yn;
+        k.prism_y(key, &prof, y - 0.02, y + proud);
+    } else {
+        let y = k.yt;
+        k.prism_y(key, &prof, y + 0.02, y - proud);
+    }
+}
+
+/// A shaped lamp cluster: the convex outline `pts` (|x|, z) on side `sx`, cut at |x| = `cut`
+/// into the lamp (`lamp`) and the turn signal (`sig`), outboard of the cut when `sig_out`, with
+/// the seam between them; a dark housing `border` larger behind it.
+fn shaped_cluster(
+    k: &mut Kit,
+    front: bool,
+    sx: f32,
+    pts: &[[f32; 2]],
+    cut: f32,
+    sig_out: bool,
+    sig_mat: M,
+    proud: f32,
+    border: f32,
+) {
+    let (lamp, sig) = if front {
+        (headlight_key(sx), indicator_front_key(sx))
+    } else {
+        (taillight_key(sx), indicator_rear_key(sx, sig_mat))
+    };
+    let g = INDICATOR_SEAM_M;
+    let (lp, sp) = if sig_out {
+        (clip_x(pts, 0.0, cut - g), clip_x(pts, cut, 9.0))
+    } else {
+        (clip_x(pts, cut + g, 9.0), clip_x(pts, 0.0, cut))
+    };
+    face_poly(k, &lamp, front, sx, &lp, proud);
+    face_poly(k, &sig, front, sx, &sp, proud);
+    if border > 0.0 {
+        let (cx, cz) = {
+            let n = pts.len() as f32;
+            (
+                pts.iter().map(|q| q[0]).sum::<f32>() / n,
+                pts.iter().map(|q| q[1]).sum::<f32>() / n,
+            )
+        };
+        let grow: Vec<[f32; 2]> = pts
+            .iter()
+            .map(|q| {
+                let (dx, dz) = (q[0] - cx, q[1] - cz);
+                let l = (dx * dx + dz * dz).sqrt().max(1e-4);
+                [q[0] + border * dx / l, q[1] + border * dz / l]
+            })
+            .collect();
+        let region = if front {
+            BodyRegion::FrontLeftFender
+        } else {
+            BodyRegion::Trunk
+        };
+        let name = if front {
+            "headlamp_housing_l"
+        } else {
+            "taillamp_housing_l"
+        };
+        let hk = sided(&dkey(name, region, M::Trim), sx);
+        face_poly(k, &hk, front, sx, &grow, proud - 0.012);
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 // sentinel_cruiser
 // ---------------------------------------------------------------------------------------
@@ -154,54 +256,52 @@ pub fn cruiser(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.016,
             0.005,
         );
-        // Narrow slit lamp across the upper corner of the face in a black housing that runs
-        // back over the nose top; amber outboard segment, LED eyebrow under it.
+        // Swept slit lamp: pointed inboard end toward the grille, taller outboard end with
+        // the amber signal, in a black housing that also runs back over the nose top.
+        let t = nz1;
+        let outline = [
+            [0.50, t - 0.06],
+            [0.60, t - 0.088],
+            [wn - 0.03, t - 0.088],
+            [wn - 0.03, t - 0.012],
+            [0.57, t - 0.028],
+        ];
+        shaped_cluster(
+            &mut k,
+            true,
+            sx,
+            &outline,
+            wn - 0.11,
+            true,
+            M::EmissiveAmber,
+            0.022,
+            0.016,
+        );
         let hk = sided(
             &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
             sx,
-        );
-        let (h0, h1) = (sx * 0.51, sx * (wn - 0.02));
-        k.front_box(
-            &hk,
-            h0.min(h1),
-            h0.max(h1),
-            nz1 - 0.115,
-            nz1 + 0.004,
-            0.010,
-            0.006,
         );
         k.patch(
             &hk,
             yn - 0.10,
             yn - 0.01,
-            top_band(sx * 0.51, sx * (wn - 0.03)),
+            top_band(sx * 0.53, sx * (wn - 0.03)),
             0.002,
             0.006,
             (1, 2),
         );
-        k.front_cluster(
-            sx,
-            0.53,
-            wn - 0.04,
-            nz1 - 0.085,
-            nz1 - 0.012,
-            0.020,
-            0.006,
-            Seg::Outboard(0.07),
-        );
+        // LED eyebrow under the lamp.
         let drl = sided(
             &lkey("drl_l", BodyRegion::FrontLeftFender, M::Headlight),
             sx,
         );
-        k.front_box(
-            &drl,
-            sx * 0.55,
-            sx * (wn - 0.12),
-            nz1 - 0.105,
-            nz1 - 0.093,
-            0.018,
-            0.0,
-        );
+        let brow = [
+            [0.60, t - 0.112],
+            [wn - 0.05, t - 0.112],
+            [wn - 0.05, t - 0.100],
+            [0.62, t - 0.100],
+        ];
+        face_poly(&mut k, &drl, true, sx, &brow, 0.020);
         // Fog lamp pod in the lower bumper corner.
         let pod = sided(&dkey("fog_pod_l", FB, M::Grille), sx);
         k.front_box(
@@ -259,6 +359,18 @@ pub fn cruiser(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.004,
             Seg::Outboard(0.16),
             M::Taillight,
+        );
+        // Dark core inside the band: the lit lens reads as a ring ("racetrack").
+        let core = sided(&dkey("taillight_core_l", BodyRegion::Trunk, M::Grille), sx);
+        let (c0, c1) = (sx * 0.05, sx * (wt - 0.24));
+        k.rear_box(
+            &core,
+            c0.min(c1),
+            c0.max(c1),
+            lz0 + 0.045,
+            lz1 - 0.045,
+            0.026,
+            0.0,
         );
         let rev = sided(&lkey("reverse_lamp_l", BodyRegion::Trunk, M::Headlight), sx);
         let (r0, r1) = (sx * 0.30, sx * 0.40);
@@ -332,52 +444,39 @@ pub fn wolfhound(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         k.front_box(&bars, -hw, hw, z - h, z + h, 0.020, 0.005);
     }
     for sx in SIDES {
-        // Swept lamp: a black housing over the face's upper corner and back over the nose
-        // top, the lens with an amber outboard end, its inboard end kicked down beside the
-        // grille.
+        // Swept lamp: a long pentagon rising from the grille corner to the fender, amber
+        // outboard end, black housing that also runs back over the nose top.
+        let t = nz1;
+        let outline = [
+            [0.535, t - 0.15],
+            [wn - 0.03, t - 0.10],
+            [wn - 0.03, t - 0.015],
+            [0.58, t - 0.015],
+            [0.535, t - 0.04],
+        ];
+        shaped_cluster(
+            &mut k,
+            true,
+            sx,
+            &outline,
+            wn - 0.11,
+            true,
+            M::EmissiveAmber,
+            0.022,
+            0.016,
+        );
         let hk = sided(
             &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
             sx,
         );
-        let (h0, h1) = (sx * 0.535, sx * (wn - 0.02));
-        k.front_box(
-            &hk,
-            h0.min(h1),
-            h0.max(h1),
-            nz1 - 0.15,
-            nz1 + 0.004,
-            0.010,
-            0.008,
-        );
         k.patch(
             &hk,
-            yn - 0.16,
+            yn - 0.14,
             yn - 0.01,
-            top_band(sx * 0.535, sx * (wn - 0.03)),
+            top_band(sx * 0.56, sx * (wn - 0.03)),
             0.002,
             0.006,
             (2, 2),
-        );
-        k.front_cluster(
-            sx,
-            0.55,
-            wn - 0.04,
-            nz1 - 0.10,
-            nz1 - 0.015,
-            0.020,
-            0.008,
-            Seg::Outboard(0.08),
-        );
-        let hl = headlight_key(sx);
-        let (a, c) = (sx * 0.55, sx * 0.66);
-        k.front_box(
-            &hl,
-            a.min(c),
-            a.max(c),
-            nz1 - 0.14,
-            nz1 - 0.09,
-            0.020,
-            0.006,
         );
         // Lower corner intake with a round fog lamp.
         let pod = sided(&dkey("fog_pod_l", FB, M::Grille), sx);
@@ -407,30 +506,23 @@ pub fn wolfhound(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     // --- Rear: wide lamps on the face corners joined by a bright garnish, reverse lamps.
     let (lz0, lz1) = (tz1 - 0.20, tz1 - 0.03);
     for sx in SIDES {
-        let hk = sided(
-            &dkey("taillamp_housing_l", BodyRegion::Trunk, M::Grille),
+        // Lamp wrapping the corner: wider at the top, amber outboard end.
+        let outline = [
+            [0.42, lz0 + 0.02],
+            [wt - 0.07, lz0 + 0.05],
+            [wt - 0.03, lz1 - 0.01],
+            [0.40, lz1 - 0.01],
+        ];
+        shaped_cluster(
+            &mut k,
+            false,
             sx,
-        );
-        let (h0, h1) = (sx * 0.40, sx * (wt - 0.02));
-        k.rear_box(
-            &hk,
-            h0.min(h1),
-            h0.max(h1),
-            lz0 - 0.01,
-            lz1 + 0.01,
-            0.010,
-            0.006,
-        );
-        k.rear_cluster(
-            sx,
-            0.42,
-            wt - 0.04,
-            lz0 + 0.01,
-            lz1 - 0.01,
-            0.024,
-            0.006,
-            Seg::Lower(0.05),
+            &outline,
+            wt - 0.15,
+            true,
             M::EmissiveAmber,
+            0.024,
+            0.016,
         );
         let rev = sided(&lkey("reverse_lamp_l", BodyRegion::Trunk, M::Headlight), sx);
         let (r0, r1) = (sx * 0.43, sx * 0.55);
@@ -828,29 +920,25 @@ pub fn vigil(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.mesh_grille("grille", FB, 0.42, sz0, sz1, 2, 10, M::Trim);
     for sx in SIDES {
         // Lamp lens in line with the slot, on the face (housing dark), amber inboard.
-        let hk = sided(
-            &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
+        // Slim, angry lamp: the top edge drops toward the slot, the outer end is taller;
+        // amber inboard segment, dark housing.
+        let outline = [
+            [0.46, sz0 + 0.004],
+            [wn - 0.04, sz0 + 0.018],
+            [wn - 0.04, sz1 + 0.006],
+            [0.50, sz1 - 0.008],
+            [0.46, sz1 - 0.025],
+        ];
+        shaped_cluster(
+            &mut k,
+            true,
             sx,
-        );
-        let (h0, h1) = (sx * 0.44, sx * (wn - 0.03));
-        k.front_box(
-            &hk,
-            h0.min(h1),
-            h0.max(h1),
-            sz0 - 0.01,
-            sz1 + 0.012,
-            0.010,
-            0.006,
-        );
-        k.front_cluster(
-            sx,
-            0.46,
-            wn - 0.05,
-            sz0 + 0.005,
-            sz1,
-            0.020,
-            0.006,
-            Seg::Inboard(0.06),
+            &outline,
+            0.53,
+            false,
+            M::EmissiveAmber,
+            0.022,
+            0.012,
         );
         // Hockey-stick LED blade below the lamp.
         let drl = sided(

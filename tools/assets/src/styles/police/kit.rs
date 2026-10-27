@@ -152,7 +152,7 @@ pub fn kit(id: &str) -> Kit {
             chrome: false,
         },
         pucks: &[(0.08, -0.56), (0.08, 0.56), (0.22, -0.56)],
-        whips: &[(0.90, 0.35, 0.75)],
+        whips: &[(0.90, 0.35, 0.66)],
         visor: false,
         rear_bar: false,
         advisor: true,

@@ -12,6 +12,9 @@
 - **Physics:** untouched (no change to `data/cars`, `data/lattices`, panel specs or sim code).
 
 ## What changed for every police car
+- Lamps are shaped clusters, not boxes: `body.rs` clips a convex outline into the lamp and
+  its turn-signal segment (`shaped_cluster`, `face_poly`, local helpers) with a dark housing
+  behind it.
 - Each car now has its own body kit (`body.rs`, one `body_kit` detail pushed before the police
   equipment): grille, head lamps with the front turn signal cut out of the same lens, tail lamps
   with the rear signal (amber or red-on-red), bumpers / valances, licence plates, reverse lamps,
@@ -23,6 +26,8 @@
   - `grille_leds` no longer draws its own black box over the nose (it hid the new grilles); the
     LED modules now sit on two small black mounting plates, proud of the car's grille.
   - Spotlights sit closer to the A-pillar on a thicker bracket (they read as floating before).
+  - The cruiser's trunk whip is 0.66 m (was 0.75 m): with the higher deck it broke the
+    mesh-size check.
   - The vigil's pedestal wing is now a low decklid wing (about 6 cm up, the stock
     performance-pack look); its red / blue LED strip is kept.
 - Kept and checked: light bars (LED, rotators, slicktop hidden LEDs), push bars / bumper guards,
@@ -36,26 +41,29 @@
   5.1 × 1.9 × 1.48 m on a 3.05 m wheelbase: long hood, high belt, short chopped greenhouse with
   a thick sloping C-pillar, wide crosshair grille, narrow slit head lamps with an LED eyebrow,
   one full-width "racetrack" tail lamp, dual exhaust.
-- **Changed:** cabin 8 cm back (longer hood), roof 2 cm lower and belt 2 cm higher (chopped
-  look), 62° windshield / 58° rear glass, 16 cm C-pillars, tighter plan rounding. Kit: wide mesh
-  grille with a bright crosshair and surround, slit lamps in black housings that run back over
-  the nose top with amber outboard ends and LED eyebrows, lower intake, fog lamps in black pods,
-  chin lip; full-width racetrack tail lamp (red-on-red outer signals) on a dark band, reverse
+- **Changed:** cabin 20 cm back (long hood, short deck), roof 6 cm lower and belt 8 cm higher
+  (chopped, slit-window look), 62° windshield / 63° fast rear glass, shorter roof, 20 cm
+  C-pillars, a 7 cm belt kick at the C-pillar, tighter plan rounding. Kit: wide mesh
+  grille with a bright crosshair and surround, swept slit lamps (shaped lens, pointed inboard
+  end, amber outboard end) in black housings that run back over the nose top, LED eyebrows, lower intake, fog lamps in black pods,
+  chin lip; full-width racetrack tail lamp (a lit ring round a dark core, red-on-red outer signals) on a
+  dark band, reverse
   lamps, rear plate, black valance, small body-colour decklid lip; black rockers.
-- **Triangles:** 20375 full (was 18497), 5361 mid (was 4728).
+- **Triangles:** 20287 full (was 18497), 5300 mid (was 4728).
 
 ### `sentinel_wolfhound` (police "patrol")
 - **Reference:** 2010s American AWD police pursuit sedan built on a large FWD-platform saloon,
   about 5.05 × 1.94 × 1.55 m on a 2.87 m wheelbase: tall body, very high belt and a short
   greenhouse, big trapezoid grille with three wide bright bars, swept head lamps, round fogs in
   lower corner intakes, wide tail lamps joined by a bright garnish over the plate.
-- **Changed:** nose up to 0.82 m, roof 3 cm lower, belt 3 cm higher with a slight rake, 60° /
-  56° glass, 20 cm C-pillars. Kit: trapezoid grille (narrows downward) with three chrome bars
-  and a dark frame, swept lamps whose inboard ends kick down beside the grille, amber outboard
-  ends, fog pods, lower intake, front plate; tail lamps with an amber lower strip in dark
-  housings, chrome garnish between them, reverse lamps, plate, rear reflectors, valance; black
+- **Changed:** cabin 10 cm forward (shorter hood) with a 12 cm longer roof, nose up to 0.86 m,
+  belt 8 cm higher and roof 7 cm lower (tall body, short glass), 58° windshield, upright 50°
+  rear glass over a tall deck with a 4 cm ducktail, 22 cm C-pillars. Kit: trapezoid grille (narrows downward) with three chrome bars
+  and a dark frame, swept pentagon lamps rising from the grille corner to the fender (shaped lens, amber outboard
+  end, black housing over the nose top), fog pods, lower intake, front plate; corner-wrapping tail lamps, wider at the top, with amber outboard
+  ends in dark housings, chrome garnish between them, reverse lamps, plate, rear reflectors, valance; black
   rockers.
-- **Triangles:** 21025 full (was 18626), 5974 mid (was 5183).
+- **Triangles:** 20226 full (was 18626), 5667 mid (was 5183).
 
 ### `sentinel_bastion` (police "SUV")
 - **Reference:** 2010s American full-size body-on-frame SUV, about 5.18 × 2.04 × 1.89 m on a
@@ -64,13 +72,14 @@
   projectors, near-vertical tailgate with tall vertical tail lamps on the corners, running
   boards, black lower cladding, big mirrors, hitch receiver.
 - **Changed:** nose raised to the lattice hood height (the hood is now nearly flat), 57°
-  windshield, near-vertical rear glass (12°), tighter plan rounding, squarer tail, 14 cm
+  windshield with a near-upright A-pillar, near-vertical rear glass (12°), squarer plan (8 %
+  rounding), boxier greenhouse (less tumblehome), bigger box flares, squarer tail, 14 cm
   D-pillars. Kit: two-tier mesh grille with a chrome cross bar and frame, stacked lamps (two
   projector rings over an amber strip, DRL line above), dark front valance with fogs and a skid
   plate, front plate; vertical tail lamps (amber lower section, reverse lamp inset), black
   bumper step, tailgate handle, plate, hitch; running boards, black rocker cladding, large
   black-capped mirrors.
-- **Triangles:** 20443 full (was 18932), 6181 mid (was 5346).
+- **Triangles:** 20441 full (was 18932), 6190 mid (was 5346).
 
 ### `sentinel_warden` (police "old sedan")
 - **Reference:** late-80s American full-size body-on-frame RWD sedan, about 5.4 × 1.98 × 1.43 m
@@ -94,15 +103,16 @@
   "gun-slit" greenhouse with wide C-pillars, slim upper grille slot in line with slim head
   lamps, big lower intake with a body-colour bar, brake-cooling inlets, twin horizontal tail
   lamps per side in a dark band, quad tips, side skirts.
-- **Changed:** cabin 28 cm back (long hood), roof 6 cm lower and belt 4 cm higher (narrow side
-  glass), 64° windshield, 22 cm C-pillars, stronger rear haunches, 0.2° nose-down stance; the
+- **Changed:** cabin 28 cm back (long hood), nose down to 0.64 m, roof 10 cm lower and belt
+  5 cm higher (gun-slit side glass), 64° windshield, 22 cm C-pillars, big rear haunches, 0.2° nose-down stance; the
   generic hood vent boxes are replaced by the kit's vents. Kit: slim upper slot grille, slim
-  lamps in black housings with amber inboard segments and LED blades, brake ducts, big lower
+  "angry" lamps (shaped lens, top edge dropping toward the slot, amber inboard segment) in
+  dark housings, LED blades, brake ducts, big lower
   intake with a body-colour bar; two hood extractor vents; dark tail band with an inner lamp
   (red-on-red signal) and an outer lamp ring with a dark core per side, centre reverse lamps,
   plate, dark diffuser valance; side skirts, faux quarter vents, mirrors. Police kit: low decklid
   wing.
-- **Triangles:** 19823 full (was 19100), 5482 mid (was 4994).
+- **Triangles:** 19472 full (was 19100), 5469 mid (was 4994).
 
 All five are inside the hero budget (22k) and the mid budget (7k).
 
@@ -135,7 +145,13 @@ All five are inside the hero budget (22k) and the mid budget (7k).
 - The police test's triangle range in `police.rs` is now 8k–22k (the hero budget).
 
 ## Generator requests
-None.
+Sent to the lead (none blocking; this pass works inside the current generator):
+1. Nose height above the lattice hood-front node: `profile.rs` clamps `z_nose` to `z_hood.1`, so
+   the SUV's nose still falls ~9 cm (a knob allowing up to +0.10 m over it would give the flat,
+   tall truck hood).
+2. A face-following lens / panel primitive: a polygon outline projected onto the nose / tail face
+   (respecting nose rake and plan rounding), like `surface_patch` for the end faces.
+3. Greenhouse plan taper toward the rear, independent of tumblehome.
 
 ## Known gaps
 - The hood of the SUV still falls about 9 cm from the cowl to the nose: the nose height is
