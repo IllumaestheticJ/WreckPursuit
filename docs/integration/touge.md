@@ -75,6 +75,19 @@
   `carry.heat` as it was (the police never saw the pass). Touched outside the touge files:
   `wp_wasm/src/session.rs` (run gate), `wp_wasm/src/career.rs` (heat in/out).
 
+## Guard rails joined and breakable (2026-10-26, owner: "connected together properly and able to be broken off")
+- `wp_world::touge`: one continuous rail line per stretch of rail + downhill runoff; where a rail
+  run meets a runoff apron the rail flares out to the apron's back over `RAIL_FLARE_M` (24 m)
+  instead of stopping (that left 7.6 m gaps). Sections share end points with their neighbours
+  in plan and height, are pitched to the grade (`StaticProp::pitch`, new, `#[serde(default)]`),
+  and stand on the paved edge's line on the verge, on the ground further out
+  (`rail_foot_z`). Test `guard_rail_sections_join_end_to_end`.
+- `wp_sim::Sim::insert_prop`: guard rails keep their laid-out pose (yaw + pitch) instead of
+  being seated on the ground under their middle (which tilted and rolled each one off the line).
+- `GUARD_RAIL_BREAK_MPS` 6.5 → 5.0 m/s: a 12° hit at 30 m/s now snaps sections loose; an 8°
+  scrape at 25 m/s still holds. Test `a_hard_angled_hit_breaks_rail_sections_off`.
+- Screenshot script: `apps/testbed-web/e2e/guardrail_shots.mjs`.
+
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
@@ -88,7 +101,7 @@
 - The boundary is 4 m below the road beside the car or `COURSE_EXTENT_M` (20 m) beyond the paved
   edge, each car judged within 40 m of road of where it last was; a car hung up on the verge
   past a broken rail is not out until it falls (the judge's stuck rule ends it).
-- Guard rail breakaway is a closing-speed gate (6.5 m/s into the face), not a force model:
+- Guard rail breakaway is a closing-speed gate (5.0 m/s into the face), not a force model:
   rails do not bend, and once loose a 120 kg section is a light box the car carries along.
 - AI drivers do not know about drops or rails. Autopilot-vs-boss sweep (8 battles, all passes
   both ways, release): dry 0/8 off the mountain; rain 8/8 before `Surface::ai_grip` (the race AI

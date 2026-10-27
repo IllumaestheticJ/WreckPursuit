@@ -332,6 +332,19 @@ impl<'a> Kit<'a> {
         self.b.poly_facing(k, &e1, [d, 0.0, 0.0]);
     }
 
+    /// Flying buttress (sail panel) on side `sx`: a vertical fin `w` thick centred at |x| = `x`,
+    /// whose top runs straight from the top surface at `y0` (the roof's rear corner) to
+    /// `h_end` above the top surface at `y1` (on the deck), its foot buried in the body.
+    #[allow(clippy::too_many_arguments)]
+    pub fn sail(&mut self, k: &PartKey, sx: f32, y0: f32, y1: f32, x: f32, w: f32, h_end: f32) {
+        let zt0 = self.top_z(y0, sx * x);
+        let zt1 = self.top_z(y1, sx * x) + h_end;
+        let zb0 = zt0 - 0.08;
+        let zb1 = self.top_z(y1, sx * x) - 0.03;
+        let prof = [[y0, zb0], [y1, zb1], [y1, zt1], [y0, zt0]];
+        self.prism_x(k, &prof, sx * (x - 0.5 * w), sx * (x + 0.5 * w));
+    }
+
     /// Convex prism: `prof` = (x, z) outline, swept along y from `y0` to `y1`.
     pub fn prism_y(&mut self, k: &PartKey, prof: &[[f32; 2]], y0: f32, y1: f32) {
         let n = prof.len();

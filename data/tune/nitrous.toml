@@ -11,14 +11,23 @@
 # target), linearly in between. `strength` multiplies `torque_gain`; `refill` divides
 # `refill_s` (2.0 = refills twice as fast).
 #
-# AI fire only while they are at least `fire_gap_m` behind their target (the nearest player
-# for racers, the car they chase for police), no further than `max_gap_m`, with the throttle
-# at least `min_throttle`, the steering at most `max_steer` and the car faster than
-# `min_speed_mps`. An AI with no target in range never fires.
+# The scale applies from `fire_gap_m` behind the target (the nearest player for racers, the
+# car they chase for police); closer, level or ahead an AI has the player's bottle (normal
+# strength and refill). AI fire with the throttle at least `min_throttle`, the steering at
+# most `max_steer` and the car faster than `min_speed_mps`, and only within `max_gap_m` of the
+# target:
+# - from `fire_gap_m` behind (catching up), and also level or ahead while the target is at most
+#   `ahead_gap_m` behind (racers defending a lead, owner 2026-10-26: "AI racers can use nitrous
+#   if they're ahead (just normal regen)"). A clear leader does not burn: with every leader
+#   burning, Loop 9 fields split so far that 4 of 6 missed the finish window;
+# - on a call (a target or the siren on) below `up_to_speed_mps`, to get up to speed (police,
+#   owner 2026-10-26: "cops can use nitrous to get up to speed").
+# An AI racer with no player in range never fires; a patrolling cop never does.
 #
 # `[kit]` is the garage's Nitrous Kit (`elec_nitrous_1` / `elec_nitrous_2`): the player's
-# bottle × `strength` (torque gain) and × `capacity` (burn time). Without a kit the car keeps
-# the stock bottle above. The kit's tier counts the same in every damage mode.
+# bottle × `strength` (torque gain) and × `capacity` (burn time). A player's car has no nitrous
+# at all without the kit (owner decision 2026-10-26); AI racers and police always carry the
+# bottle above, for catching up only. The kit's tier counts the same in every damage mode.
 #
 # Physics is the same in every damage mode (owner rule 2026-10-20); nothing here depends on it.
 
@@ -31,13 +40,15 @@ min_throttle = 0.5
 rearm_fill = 0.15
 
 [kit]
-tier1 = { strength = 1.25, capacity = 1.25 }
+tier1 = { strength = 1.00, capacity = 1.00 }
 tier2 = { strength = 1.50, capacity = 1.50 }
 
 [racer]
 fire_gap_m = 8.0
 gap_full_m = 150.0
 max_gap_m = 500.0
+ahead_gap_m = 40.0
+up_to_speed_mps = 0.0
 min_throttle = 0.9
 max_steer = 0.25
 min_speed_mps = 12.0
@@ -48,8 +59,10 @@ refill = { near = 1.50, far = 4.00 }
 fire_gap_m = 15.0
 gap_full_m = 200.0
 max_gap_m = 600.0
+ahead_gap_m = 0.0
+up_to_speed_mps = 30.0
 min_throttle = 0.9
 max_steer = 0.25
-min_speed_mps = 12.0
+min_speed_mps = 3.0
 strength = { near = 1.15, far = 1.75 }
 refill = { near = 1.75, far = 4.50 }

@@ -494,7 +494,7 @@ export const sim = {
   telemetry: (entity: number): Float32Array => wasm.telemetry(entity),
   telemetryNames: (): string[] => JSON.parse(wasm.telemetry_names()),
   ffb: (entity: number): Float32Array => wasm.ffb(entity),
-  /** Nitrous bottle `[fill 0..1, burning 0/1, strength, refill]` (HUD gauge). */
+  /** Nitrous bottle `[fill 0..1, burning 0/1, strength, refill, fitted 0/1]` (HUD gauge). */
   nitrous: (entity: number): Float32Array => wasm.nitrous(entity),
   intents: (): Float32Array => wasm.intents(),
   recordStart: (): void => wasm.record_start(),

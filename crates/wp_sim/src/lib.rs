@@ -175,6 +175,8 @@ pub struct SimVehicle {
     light: Option<LightState>,
     /// AI nitrous fires this tick (`nitrous_link`; AI racers and police only).
     nitrous_fire: bool,
+    /// Nitrous Kit tier of a player's car ([`Sim::set_nitrous_kit`]; 0 = no bottle).
+    nitrous_kit: u8,
 }
 
 /// A vehicle in light mode ([`Sim::set_light_when_far`]): heading, speed and the chassis
@@ -415,6 +417,7 @@ impl Sim {
             ghost_ticks: 0,
             ghost_overstay: 0,
             nitrous_fire: false,
+            nitrous_kit: 0,
             tire_condition: None,
             ram: wp_economy::RamProfile::default(),
             run_flat: false,
@@ -478,6 +481,7 @@ impl Sim {
             kind: wp_world::props::PropKind::ParkedCar,
             pos: [pos[0], pos[1], pos[2] + hz],
             yaw,
+            pitch: 0.0,
             half_extents: parked::PARKED_CAR_HALF_EXTENTS,
             mass_kg: parked::PARKED_CAR_MASS_KG,
         };
@@ -492,7 +496,8 @@ impl Sim {
 
     /// One prop as a fixed Rapier box (see [`Sim::set_world`]), at `seated` if given (a parked
     /// car seated on the ground colliders), else at its laid-out position (on a city with
-    /// terrain: on the ground under it, pitched to the road).
+    /// terrain: on the ground under it, pitched to the road; guard rails keep their laid-out
+    /// pose).
     fn insert_prop(
         &mut self,
         prop: &wp_world::props::StaticProp,
@@ -501,14 +506,20 @@ impl Sim {
         use rapier3d::math::Rotation;
         use rapier3d::prelude::{ColliderBuilder, Pose, RigidBodyBuilder, Vector};
         let hilly = self.world.network().terrain.is_some();
-        let (s, c) = wp_math::sin_cos(prop.yaw * 0.5);
+        // Yaw about +Z, then pitch about the prop's own +X: q = q_z(yaw) · q_x(pitch).
+        let (sz, cz) = wp_math::sin_cos(prop.yaw * 0.5);
+        let (sx, cx) = wp_math::sin_cos(prop.pitch * 0.5);
         let mut pose = Pose::from_parts(
             Vector::from_array(prop.pos),
-            Rotation::from_xyzw(0.0, 0.0, s, c),
+            Rotation::from_xyzw(cz * sx, sz * sx, sz * cx, cz * cx),
         );
+        // Guard rails are laid out on their own line (pitched to the grade, ends shared with
+        // their neighbours): seating each on the ground under its middle would tilt and roll
+        // it off that line.
+        let laid_out = prop.kind == wp_world::props::PropKind::GuardRail;
         if let Some(p) = seated {
             pose = p;
-        } else if hilly {
+        } else if hilly && !laid_out {
             // Flush with the (sloped, banked) surface under it and asleep until something
             // hits it: thousands of parked cars otherwise keep settling on the road mesh.
             let (pos, rot) = ground_pose(
@@ -795,15 +806,11 @@ impl Sim {
         Ok(())
     }
 
-    /// Set a car's nitrous bottle scale (the player's Nitrous Kit,
-    /// `wp_vehicle::nitrous::NitrousTune::kit_scale`). AI racers and police get theirs from
-    /// the rubberbanding every tick, which overrides this.
-    pub fn set_nitrous_scale(
-        &mut self,
-        id: EntityId,
-        scale: wp_vehicle::nitrous::NitrousScale,
-    ) -> Result<(), SimError> {
-        self.slot_mut(id)?.vehicle.set_nitrous_scale(scale);
+    /// Set the Nitrous Kit tier of a player's car (0 = none, the default: a player's car has
+    /// no nitrous without the kit; owner decision 2026-10-26). AI racers and police always
+    /// carry a bottle, scaled by the rubberbanding (`nitrous_link`), whatever this says.
+    pub fn set_nitrous_kit(&mut self, id: EntityId, tier: u8) -> Result<(), SimError> {
+        self.slot_mut(id)?.nitrous_kit = tier;
         Ok(())
     }
 

@@ -31,6 +31,9 @@
 // nitrous while behind the player seat (an AI-driven player car here, so it counts). ai_vic
 // 48.8 -> 36.4 s and the player seat 50.5 -> 37.9 s (it runs in the faster field); the rule
 // (-15 % .. +20 %) on today's time for those two. ai_juno / ai_tito stay in range.
+// Re-locked 2026-10-26 (nitrous, owner: AI racers burn nitrous behind the player seat, and
+// ahead of it while it is within 40 m; data/tune/nitrous.toml): ai_tito 34.9 s (was 38.5..54.4).
+// The rule on today's time.
 (
     name: "opponent_pace_grid_highway_sprint_s50",
     seed: 7,
@@ -100,7 +103,7 @@
         metric(name: "best_ratio", min: 0.97, max: 1.65),
         metric(name: "race_time_s", entity: "ai_vic", min: 31.0, max: 43.7),
         metric(name: "race_time_s", entity: "ai_juno", min: 29.2, max: 41.2),
-        metric(name: "race_time_s", entity: "ai_tito", min: 38.5, max: 54.4),
+        metric(name: "race_time_s", entity: "ai_tito", min: 29.7, max: 41.9),
         metric(name: "race_time_s", entity: "player", min: 32.2, max: 45.5),
     ],
 )

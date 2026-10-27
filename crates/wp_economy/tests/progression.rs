@@ -23,8 +23,8 @@ fn embedded_table_is_valid_and_ordered() {
     }
     assert_eq!(r.tier_for_rep(i64::MAX), RepTier::Legend);
     // The juiced loop: touge betting and pink slips sit above plain touge racing.
-    assert!(r.feature_tier(Feature::TougeBetting) > r.feature_tier(Feature::TougeRaces));
-    assert!(r.feature_tier(Feature::PinkSlips) >= r.feature_tier(Feature::TougeBetting));
+    assert!(r.feature_min_rep(Feature::TougeBetting) > r.feature_min_rep(Feature::TougeRaces));
+    assert!(r.feature_min_rep(Feature::PinkSlips) >= r.feature_min_rep(Feature::TougeBetting));
     assert!(r.feature_tier(Feature::CityBetting) > RepTier::Unknown);
 }
 
@@ -52,11 +52,7 @@ fn broken_tables_are_refused() {
 #[test]
 fn features_follow_current_rep() {
     let e = Economy::embedded();
-    let need = |f| {
-        e.progression
-            .tier_def(e.progression.feature_tier(f))
-            .min_rep
-    };
+    let need = |f| e.progression.feature_min_rep(f);
     let pink = need(Feature::PinkSlips);
     let low = account(&e, pink - 1, 10_000);
     assert!(!e.is_unlocked(&low, Feature::PinkSlips));
@@ -67,7 +63,7 @@ fn features_follow_current_rep() {
             rep,
             ..
         }) => {
-            assert_eq!(needs, RepTier::Feared);
+            assert_eq!(needs, e.progression.feature_tier(Feature::PinkSlips));
             assert_eq!(needed_rep, pink);
             assert_eq!(rep, pink - 1);
         }
@@ -77,6 +73,57 @@ fn features_follow_current_rep() {
     assert!(e.is_unlocked(&high, Feature::PinkSlips));
     e.require_unlocked(&high, Feature::PinkSlips).unwrap();
     assert!(e.is_unlocked(&account(&e, 0, 0), Feature::CityRaces));
+}
+
+#[test]
+fn unlock_rep_opens_a_feature_inside_its_tier() {
+    let e = Economy::embedded();
+    let r = &e.progression;
+    let f = Feature::TougeBetting;
+    let tier = r.feature_tier(f);
+    let need = r.feature_min_rep(f);
+    // Owner call 2026-10-26: side bets open at half their old 5 000 rep, inside Known.
+    assert_eq!(need, 2_500);
+    assert!(need > r.tier_def(tier).min_rep);
+    assert_eq!(r.tier_for_rep(need), tier);
+    assert_eq!(r.feature_min_rep(Feature::PinkSlips), 5_000);
+
+    let short = account(&e, need - 1, 10_000);
+    assert_eq!(e.rep_tier(&short), tier);
+    assert!(!e.is_unlocked(&short, f));
+    assert_eq!(e.max_bet(&short, BetVenue::Touge), 0);
+    match e.require_unlocked(&short, f) {
+        Err(EconomyError::Locked {
+            needs, needed_rep, ..
+        }) => {
+            assert_eq!(needs, tier);
+            assert_eq!(needed_rep, need);
+        }
+        other => panic!("expected Locked, got {other:?}"),
+    }
+    let view = e.career_progress(&short);
+    let fv = view.features.iter().find(|v| v.feature == f).unwrap();
+    assert!(!fv.unlocked);
+    assert_eq!(fv.needed_rep, need);
+
+    // Crossing the gate inside the tier is reported, and so is dropping back under it.
+    let mut a = short.clone();
+    e.update_progression(&mut a).unwrap();
+    let (up, _) = e.award_rep(&mut a, 1, "test").unwrap();
+    assert!(!up.promoted());
+    assert_eq!(up.unlocked, vec![f]);
+    assert!(e.max_bet(&a, BetVenue::Touge) > 0);
+    let (up, _) = e.award_rep(&mut a, -1, "test").unwrap();
+    assert_eq!(up.relocked, vec![f]);
+
+    // A gate outside its tier is refused.
+    let mut bad = r.clone();
+    bad.unlock_rep.insert(f, r.tier_def(tier).min_rep - 1);
+    assert!(bad.validate().is_err());
+    let mut bad = r.clone();
+    bad.unlock_rep
+        .insert(f, r.tier_def(tier.next().unwrap()).min_rep);
+    assert!(bad.validate().is_err());
 }
 
 #[test]
@@ -258,7 +305,8 @@ fn progress_view() {
     assert_eq!(n.tier, RepTier::Respected);
     assert_eq!(n.rep_needed, resp - a.rep);
     assert!((p.tier_fraction - 0.5).abs() < 0.01);
-    assert_eq!(p.max_bet_touge, 0);
+    let touge_bets = a.rep >= r.feature_min_rep(Feature::TougeBetting);
+    assert_eq!(p.max_bet_touge > 0, touge_bets);
     assert!(p.max_bet_city > 0);
     assert!(p
         .features

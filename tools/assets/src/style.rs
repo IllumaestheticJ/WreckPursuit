@@ -125,6 +125,12 @@ pub struct BodyStyle {
     /// Raises the hood's rear edge (cowl) toward the windshield, m (cab-forward look).
     /// Range −0.05…+0.25. Default 0.
     pub cowl_h: f32,
+    /// Hood centre sunk below the front fender tops, m (raised "fender peaks" either side of a
+    /// low hood). Fades out toward the nose. Range 0…0.08. Default 0.
+    pub hood_valley: f32,
+    /// Engine cover / deck centre sunk between the rear haunches, m. Fades out toward the
+    /// tail. Range 0…0.08. Default 0.
+    pub deck_valley: f32,
 
     // --- Greenhouse ---
     /// Windshield angle from vertical, degrees. `None` = measured (≈58). Range 45…72.
@@ -150,6 +156,14 @@ pub struct BodyStyle {
     pub glass_inset: f32,
     /// Convex bow of the rear glass / fastback line, m (+ = bulges up). Range −0.03…+0.10.
     pub rear_glass_bow: f32,
+    /// Side-view roundness of the greenhouse top, 0…1: 0 = straight windshield, flat roof and
+    /// straight rear glass (the original trapezoid); 1 = one smooth arc from the windshield
+    /// base over the roof to the rear glass base (or, for `Fastback` / `Hatch`, to the tail).
+    /// Default 0.
+    pub roof_arc: f32,
+    /// Plan-view inward lean of the C-pillars, degrees: the greenhouse narrows toward the rear
+    /// glass (teardrop / canopy cabin). Range 0…25. Default 0.
+    pub c_pillar_rake_deg: f32,
 
     // --- Sides ---
     /// Belt-line (door top / shoulder) offset, m. Range −0.06…+0.08.
@@ -222,6 +236,8 @@ impl Default for BodyStyle {
             hood_scoop: HoodScoop::None,
             hood_scoop_h: 0.06,
             cowl_h: 0.0,
+            hood_valley: 0.0,
+            deck_valley: 0.0,
             windshield_rake_deg: None,
             a_pillar_rake_deg: 0.0,
             rear_glass_rake_deg: None,
@@ -231,6 +247,8 @@ impl Default for BodyStyle {
             tumblehome: None,
             glass_inset: 0.10,
             rear_glass_bow: 0.0,
+            roof_arc: 0.0,
+            c_pillar_rake_deg: 0.0,
             belt_dz: 0.0,
             belt_rake: 0.0,
             belt_kick: 0.0,

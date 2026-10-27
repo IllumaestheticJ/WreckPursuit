@@ -428,9 +428,9 @@ there are no solid walls along it.
   stacked legs the grounds of both meet smoothly and never rise above another leg's paving or
   undermine its verge (`LEG_CUT_SLOPE`). Runoff aprons and drops are dirt zones
   (`DistrictKind::Industrial`, `surface_at` = dirt).
-- **Guard rails:** 4 m × 0.4 m × 0.8 m, 120 kg, the beam (local −X) towards the road. In
+- **Guard rails:** 4 m × 0.4 m × 0.8 m, 120 kg, the beam (local −X) towards the road, one continuous line per stretch (flaring out to a runoff apron's back over `RAIL_FLARE_M`), each section pitched to the grade with its ends on its neighbours'. In
   `wp_sim` they stay fixed while a car slides along them and break away only when a car closes
-  on their face faster than `GUARD_RAIL_BREAK_MPS` (6.5 m/s; `PropKind::breakaway_mps`), then a
+  on their face faster than `GUARD_RAIL_BREAK_MPS` (5.0 m/s; `PropKind::breakaway_mps`), then a
   car carries them along. Whether a car went off the mountain is judged in
   `wp_race::touge::Boundary`.
 - **Forest:** pine trees (`DecorKind::PineTree`) on slopes under ~44°, patchy, clear of the

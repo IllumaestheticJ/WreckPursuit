@@ -590,6 +590,7 @@ pub fn driveway_cars(map: &CityMap, seed: u64) -> Vec<StaticProp> {
             kind: PropKind::ParkedCar,
             pos: [p[0], p[1], z + 0.75],
             yaw: geom::yaw_of(if nose_in { dir } else { geom::scale(dir, -1.0) }),
+            pitch: 0.0,
             half_extents: [0.95, 2.25, 0.75],
             mass_kg: 1400.0,
         });
