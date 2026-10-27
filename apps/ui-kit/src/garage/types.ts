@@ -306,6 +306,8 @@ export interface ModOption {
   allowed: boolean;
   reason: string | null;
   replaces: string | null;
+  /** Installed mods of other lines it takes off because it does their job (coilovers replace dampers). */
+  removes: string[];
   stats_after: StatsView | null;
   requires: string[];
 }
@@ -492,6 +494,8 @@ export interface CatalogEntry {
   reason: string | null;
   /** What the mechanic charges to fit it (the whole set for a set). */
   install_fee: number;
+  /** Names of installed mods fitting it takes off because it does their job (coilovers replace dampers). */
+  replaces?: string[];
 }
 
 /** `career_workshop_json` (`WorkshopScreen`). */
