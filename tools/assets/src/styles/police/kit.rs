@@ -646,12 +646,22 @@ pub fn push_bar(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
 /// Red (left) / blue (right) LED modules in the grille just below the nose top, each on a
 /// small black mounting plate standing proud of the car's own grille (`body.rs`).
 pub fn grille_leds(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
+    use crate::lamp::{lens, Lamp, LampView};
     let p = ctx.profile;
-    let yn = p.y_nose;
     let zt = p.z_nose - 0.05;
+    // Projected onto the nose (car-shapes phase 3), so they sit on a raked or curved face.
+    let rect = |x0: f32, x1: f32, z0: f32, z1: f32, proud: f32| {
+        let mut l = Lamp::new(
+            LampView::Front,
+            vec![[x0, z0], [x1, z0], [x1, z1], [x0, z1]],
+        );
+        l.proud_m = proud;
+        l.step_m = 0.08;
+        l
+    };
     for sx in [-1.0f32, 1.0] {
         let (x0, x1) = xs(sx, 0.06, 0.27);
-        b.cuboid(k0, [x0, yn - 0.03, zt - 0.085], [x1, yn + 0.032, zt - 0.03]);
+        lens(b, p, k0, &rect(x0, x1, zt - 0.085, zt - 0.03, 0.022));
     }
     for (side, sx) in [("l", -1.0f32), ("r", 1.0)] {
         let colour = if sx < 0.0 {
@@ -667,11 +677,7 @@ pub fn grille_leds(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
         );
         for (a, c) in [(0.08f32, 0.13f32), (0.17, 0.25)] {
             let (x0, x1) = xs(sx, a, c);
-            b.cuboid(
-                &led,
-                [x0, yn - 0.02, zt - 0.075],
-                [x1, yn + 0.040, zt - 0.04],
-            );
+            lens(b, p, &led, &rect(x0, x1, zt - 0.075, zt - 0.04, 0.03));
         }
     }
 }

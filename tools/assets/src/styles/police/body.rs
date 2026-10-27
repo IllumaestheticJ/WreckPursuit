@@ -29,10 +29,11 @@
 use wp_contracts::BodyRegion;
 
 use crate::builder::{Builder, PartKey};
+use crate::lamp::{self, Element, Lamp, LampView};
 use crate::mesh::MaterialSlot as M;
 use crate::style::DetailCtx;
 use crate::styles::performance::kit::{
-    dkey, headlight_key, indicator_front_key, lkey, sided, top_band, Kit, Seg, SIDES,
+    dkey, headlight_key, indicator_front_key, lkey, sided, Kit, Seg, SIDES,
 };
 
 const FB: BodyRegion = BodyRegion::FrontBumper;
@@ -79,17 +80,12 @@ fn plate(k: &mut Kit, front: bool, z: f32) {
     let kr = dkey(&format!("{name}_recess"), region, M::Grille);
     let (hw, hh) = (0.26, 0.075);
     if front {
-        k.front_box(
-            &kr,
-            -hw - 0.02,
-            hw + 0.02,
-            z - hh - 0.02,
-            z + hh + 0.02,
-            0.006,
-            0.0,
-        );
-        k.front_box(&kp, -hw, hw, z - hh, z + hh, 0.012, 0.004);
+        // Projected: follows a raked nose face.
+        let (x, zr) = ((-hw - 0.02, hw + 0.02), (z - hh - 0.02, z + hh + 0.02));
+        proj_rect(k, &kr, true, x, zr, 0.004);
+        proj_rect(k, &kp, true, (-hw, hw), (z - hh, z + hh), 0.012);
     } else {
+        // The tails are upright: plain boxes are cheaper.
         k.rear_box(
             &kr,
             -hw - 0.02,
@@ -124,13 +120,89 @@ fn face_poly(k: &mut Kit, key: &PartKey, front: bool, sx: f32, pts: &[[f32; 2]],
     if pts.len() < 3 {
         return;
     }
-    let prof: Vec<[f32; 2]> = pts.iter().map(|q| [sx * q[0], q[1]]).collect();
-    if front {
-        let y = k.yn;
-        k.prism_y(key, &prof, y - 0.02, y + proud);
+    let signed: Vec<[f32; 2]> = pts.iter().map(|q| [sx * q[0], q[1]]).collect();
+    proj(k, key, front, &signed, proud);
+}
+
+/// Projected panel / lens: a signed-x `[x, z]` outline cast onto the nose (`front`) or tail
+/// face ([`crate::lamp::lens`]), its face `proud` m (2…30 mm) over the surface, so it follows a
+/// raked or curved face.
+fn proj(k: &mut Kit, key: &PartKey, front: bool, pts: &[[f32; 2]], proud: f32) -> Lamp {
+    let view = if front {
+        LampView::Front
     } else {
-        let y = k.yt;
-        k.prism_y(key, &prof, y + 0.02, y - proud);
+        LampView::Rear
+    };
+    let mut lamp = Lamp::new(view, pts.to_vec());
+    lamp.proud_m = proud.clamp(0.002, 0.03);
+    // Flat panels and grilles need no fine grid (the lamps keep the default 4 cm).
+    lamp.step_m = 0.08;
+    lamp::lens(k.b, k.p, key, &lamp);
+    lamp
+}
+
+/// [`proj`] of the rectangle `x0..x1 × z0..z1` (signed x).
+fn proj_rect(k: &mut Kit, key: &PartKey, front: bool, x: (f32, f32), z: (f32, f32), proud: f32) {
+    let (x0, x1) = (x.0.min(x.1), x.0.max(x.1));
+    proj(
+        k,
+        key,
+        front,
+        &[[x0, z.0], [x1, z.0], [x1, z.1], [x0, z.1]],
+        proud,
+    );
+}
+
+/// Projected mesh grille on the nose: a dark insert `|x| < half`, `z0..z1`, with `rows - 1`
+/// horizontal and `cols - 1` vertical bars as surface strips (`{name}_mesh`, `bar_mat`).
+fn proj_mesh_grille(
+    k: &mut Kit,
+    name: &str,
+    half: f32,
+    z0: f32,
+    z1: f32,
+    rows: usize,
+    cols: usize,
+    bar_mat: M,
+) {
+    let g = dkey(name, FB, M::Grille);
+    let pts = [[-half, z0], [half, z0], [half, z1], [-half, z1]];
+    let l = proj(k, &g, true, &pts, 0.006);
+    let kb = dkey(&format!("{name}_mesh"), FB, bar_mat);
+    for i in 1..rows.max(1) {
+        let z = z0 + (z1 - z0) * i as f32 / rows as f32;
+        strip(k, &kb, &l, vec![[-half + 0.01, z], [half - 0.01, z]], 0.010);
+    }
+    for i in 1..cols.max(1) {
+        let x = -half + 2.0 * half * i as f32 / cols as f32;
+        strip(k, &kb, &l, vec![[x, z0 + 0.008], [x, z1 - 0.008]], 0.010);
+    }
+}
+
+/// A bar following the surface over lens `l` (an [`Element::Strip`]).
+fn strip(k: &mut Kit, key: &PartKey, l: &Lamp, pts: Vec<[f32; 2]>, w: f32) {
+    lamp::element(
+        k.b,
+        k.p,
+        key,
+        l,
+        [0.0, 0.0],
+        &Element::Strip { pts, w_m: w },
+    );
+}
+
+/// Round fog lamps at ±x, z, radius r, projected onto the nose (in a black ring when `ring`).
+fn proj_fogs(k: &mut Kit, x: f32, z: f32, r: f32, ring: bool) {
+    for sx in SIDES {
+        let kf = sided(&lkey("fog_l", FB, M::Headlight), sx);
+        let kr = sided(&dkey("fog_ring_l", FB, M::Trim), sx);
+        let mut l = Lamp::new(LampView::Front, lamp::ellipse([sx * x, z], [r, r], 14));
+        l.proud_m = 0.012;
+        l.step_m = 0.08;
+        if ring {
+            lamp::bezel(k.b, k.p, &kr, &l, 0.014);
+        }
+        lamp::lens(k.b, k.p, &kf, &l);
     }
 }
 
@@ -187,7 +259,8 @@ fn shaped_cluster_yaw(
 /// The fleet's fictional maker identity (no real brand's grille or badge): a hexagonal
 /// "shield" grille, widest at `zm`, with a frame in `frame` a little larger behind it.
 /// `half` = (top, widest, bottom) half widths; `rows` horizontal slats and `cols` vertical bars
-/// in `bar_mat`. Each car uses its own proportions and fill.
+/// in `bar_mat` (surface strips, or boxes on the upright face when `flat`: cheaper). Each car
+/// uses its own proportions and fill.
 fn shield_grille(
     k: &mut Kit,
     name: &str,
@@ -199,6 +272,7 @@ fn shield_grille(
     cols: usize,
     bar_mat: M,
     frame: M,
+    flat: bool,
 ) {
     let (ht, hm, hb) = half;
     let outline = |grow: f32| {
@@ -211,11 +285,13 @@ fn shield_grille(
             [-hm - grow, zm],
         ]
     };
-    let y = k.yn;
     let kf = dkey(&format!("{name}_frame"), FB, frame);
-    k.prism_y(&kf, &outline(0.022), y - 0.02, y + 0.014);
     let kg = dkey(name, FB, M::Grille);
-    k.prism_y(&kg, &outline(0.0), y - 0.02, y + 0.018);
+    let mut l = Lamp::new(LampView::Front, outline(0.0));
+    l.proud_m = 0.012;
+    l.step_m = 0.08;
+    lamp::bezel(k.b, k.p, &kf, &l, 0.022);
+    lamp::lens(k.b, k.p, &kg, &l);
     // Half width of the opening at height z.
     let hw = |z: f32| {
         if z >= zm {
@@ -227,8 +303,12 @@ fn shield_grille(
     let kb = dkey(&format!("{name}_bars"), FB, bar_mat);
     for i in 1..=rows {
         let z = z0 + (z1 - z0) * i as f32 / (rows + 1) as f32;
-        let w = hw(z) - 0.01;
-        k.front_box(&kb, -w, w, z - 0.006, z + 0.006, 0.026, 0.0);
+        let w = hw(z) - 0.015;
+        if flat {
+            k.front_box(&kb, -w, w, z - 0.006, z + 0.006, 0.026, 0.0);
+        } else {
+            strip(k, &kb, &l, vec![[-w, z], [w, z]], 0.012);
+        }
     }
     for i in 1..=cols {
         let x = -hm + 2.0 * hm * i as f32 / (cols + 1) as f32;
@@ -241,15 +321,19 @@ fn shield_grille(
             zb = zm + (z1 - zm) * (1.0 - ((x.abs() - ht) / (hm - ht).max(1e-3)).clamp(0.0, 1.0));
         }
         if zb - za > 0.03 {
-            k.front_box(
-                &kb,
-                x - 0.006,
-                x + 0.006,
-                za + 0.005,
-                zb - 0.005,
-                0.026,
-                0.0,
-            );
+            if flat {
+                k.front_box(
+                    &kb,
+                    x - 0.006,
+                    x + 0.006,
+                    za + 0.008,
+                    zb - 0.008,
+                    0.026,
+                    0.0,
+                );
+            } else {
+                strip(k, &kb, &l, vec![[x, za + 0.008], [x, zb - 0.008]], 0.012);
+            }
         }
     }
 }
@@ -261,13 +345,7 @@ fn badge(k: &mut Kit, front: bool, z: f32, size: f32) {
     let kb = dkey(name, region, M::Chrome);
     let (w, h) = (0.5 * size, 0.6 * size);
     let prof = [[-w, z + h], [w, z + h], [w, z], [0.0, z - h], [-w, z]];
-    if front {
-        let y = k.yn;
-        k.prism_y(&kb, &prof, y - 0.01, y + 0.034);
-    } else {
-        let y = k.yt;
-        k.prism_y(&kb, &prof, y + 0.01, y - 0.03);
-    }
+    proj(k, &kb, front, &prof, 0.024);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -278,7 +356,6 @@ fn badge(k: &mut Kit, front: bool, z: f32, size: f32) {
 pub fn cruiser(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
     let p = ctx.profile;
-    let yn = k.yn;
     let wn = k.wn();
     let wt = k.wt();
     let (nz0, nz1) = k.nose_z();
@@ -294,10 +371,11 @@ pub fn cruiser(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         gz0,
         gz0 + 0.10,
         gz1,
-        4,
+        2,
         0,
         M::Trim,
         M::Chrome,
+        false,
     );
     badge(&mut k, true, gz1 - 0.02, 0.07);
     for sx in SIDES {
@@ -322,19 +400,6 @@ pub fn cruiser(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.022,
             0.016,
         );
-        let hk = sided(
-            &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
-            sx,
-        );
-        k.patch(
-            &hk,
-            yn - 0.10,
-            yn - 0.01,
-            top_band(sx * 0.53, sx * (wn - 0.03)),
-            0.002,
-            0.006,
-            (1, 2),
-        );
         // LED eyebrow under the lamp.
         let drl = sided(
             &lkey("drl_l", BodyRegion::FrontLeftFender, M::Headlight),
@@ -347,38 +412,17 @@ pub fn cruiser(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [0.62, t - 0.100],
         ];
         face_poly(&mut k, &drl, true, sx, &brow, 0.020);
-        // Fog lamp pod in the lower bumper corner.
-        let pod = sided(&dkey("fog_pod_l", FB, M::Grille), sx);
-        k.front_box(
-            &pod,
-            sx * (wn - 0.28),
-            sx * (wn - 0.08),
-            nz0 + 0.09,
-            nz0 + 0.19,
-            0.006,
-            0.01,
-        );
     }
-    k.fogs(wn - 0.18, nz0 + 0.14, 0.035);
-    k.mesh_grille(
+    proj_fogs(&mut k, wn - 0.18, nz0 + 0.14, 0.035, false);
+    proj_mesh_grille(
+        &mut k,
         "lower_intake",
-        FB,
         0.52,
         nz0 + 0.07,
         nz0 + 0.20,
-        2,
-        10,
+        1,
+        1,
         M::Trim,
-    );
-    let chin = dkey("chin_lip", FB, M::Grille);
-    k.front_box(
-        &chin,
-        -wn + 0.10,
-        wn - 0.10,
-        nz0 - 0.005,
-        nz0 + 0.03,
-        0.03,
-        0.006,
     );
 
     // --- Rear: per side a boomerang lamp (a long bar along the deck edge with a drop at the
@@ -459,7 +503,6 @@ pub fn cruiser(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 pub fn wolfhound(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
     let p = ctx.profile;
-    let yn = k.yn;
     let yt = k.yt;
     let wn = k.wn();
     let wt = k.wt();
@@ -467,7 +510,7 @@ pub fn wolfhound(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let (tz0, tz1) = k.tail_z();
 
     // --- Front: the fleet's shield grille, tall here, filled with fine vertical bars, badge.
-    let (gz0, gz1) = (nz1 - 0.30, nz1 - 0.03);
+    let (gz0, gz1) = (nz1 - 0.32, nz1 - 0.06);
     shield_grille(
         &mut k,
         "grille",
@@ -476,9 +519,10 @@ pub fn wolfhound(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         gz0 + 0.17,
         gz1,
         0,
-        11,
+        5,
         M::Trim,
         M::Chrome,
+        false,
     );
     badge(&mut k, true, gz1 - 0.035, 0.08);
     for sx in SIDES {
@@ -486,57 +530,43 @@ pub fn wolfhound(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         // outboard end, black housing that also runs back over the nose top.
         let t = nz1;
         let outline = [
-            [0.535, t - 0.15],
-            [wn - 0.03, t - 0.10],
-            [wn - 0.03, t - 0.015],
-            [0.58, t - 0.015],
-            [0.535, t - 0.04],
+            [0.50, t - 0.19],
+            [wn - 0.06, t - 0.14],
+            [wn - 0.06, t - 0.05],
+            [0.55, t - 0.05],
+            [0.50, t - 0.08],
         ];
         shaped_cluster(
             &mut k,
             true,
             sx,
             &outline,
-            wn - 0.11,
+            wn - 0.135,
             true,
             M::EmissiveAmber,
             0.022,
             0.016,
         );
-        let hk = sided(
-            &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
-            sx,
-        );
-        k.patch(
-            &hk,
-            yn - 0.14,
-            yn - 0.01,
-            top_band(sx * 0.56, sx * (wn - 0.03)),
-            0.002,
-            0.006,
-            (2, 2),
-        );
         // Lower corner intake with a round fog lamp.
         let pod = sided(&dkey("fog_pod_l", FB, M::Grille), sx);
-        k.front_box(
+        proj_rect(
+            &mut k,
             &pod,
-            sx * (wn - 0.30),
-            sx * (wn - 0.06),
-            nz0 + 0.08,
-            nz0 + 0.22,
+            true,
+            (sx * (wn - 0.30), sx * (wn - 0.06)),
+            (nz0 + 0.08, nz0 + 0.22),
             0.006,
-            0.02,
         );
     }
-    k.fogs(wn - 0.18, nz0 + 0.15, 0.04);
-    k.mesh_grille(
+    proj_fogs(&mut k, wn - 0.18, nz0 + 0.15, 0.04, true);
+    proj_mesh_grille(
+        &mut k,
         "lower_intake",
-        FB,
         0.42,
         nz0 + 0.06,
         nz0 + 0.17,
         1,
-        8,
+        5,
         M::Trim,
     );
     plate(&mut k, true, nz0 + 0.27);
@@ -637,6 +667,7 @@ pub fn bastion(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         7,
         M::Trim,
         M::Chrome,
+        true,
     );
     badge(&mut k, true, nz1 - 0.10, 0.10);
     for sx in SIDES {
@@ -978,25 +1009,23 @@ pub fn vigil(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             &lkey("drl_l", BodyRegion::FrontLeftFender, M::Headlight),
             sx,
         );
-        k.front_box(
+        proj_rect(
+            &mut k,
             &drl,
-            sx * 0.60,
-            sx * (wn - 0.05),
-            sz0 - 0.03,
-            sz0 - 0.017,
+            true,
+            (sx * 0.60, sx * (wn - 0.05)),
+            (sz0 - 0.03, sz0 - 0.017),
             0.016,
-            0.0,
         );
         // Brake-cooling inlets at the lower corners.
         let duct = sided(&dkey("brake_duct_l", FB, M::Grille), sx);
-        k.front_box(
+        proj_rect(
+            &mut k,
             &duct,
-            sx * (wn - 0.20),
-            sx * (wn - 0.06),
-            nz0 + 0.06,
-            nz0 + 0.20,
+            true,
+            (sx * (wn - 0.20), sx * (wn - 0.06)),
+            (nz0 + 0.06, nz0 + 0.20),
             0.008,
-            0.01,
         );
     }
     let (mz0, mz1) = (nz0 + 0.05, nz1 - 0.03);
@@ -1007,10 +1036,11 @@ pub fn vigil(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         mz0,
         mz0 + 0.45 * (mz1 - mz0),
         mz1,
+        2,
         5,
-        13,
         M::Trim,
         M::Grille,
+        false,
     );
     badge(&mut k, true, mz1 - 0.03, 0.06);
 

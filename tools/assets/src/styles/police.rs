@@ -107,6 +107,10 @@ fn cruiser() -> CarStyle {
             dx_m: 0.02,
             falloff_m: 0.035,
         }],
+        // Phase 3b: raked bumper face with a chin undercut, roof narrowing to the rear glass.
+        nose_face_rake_deg: 18.0,
+        nose_chin_m: 0.06,
+        roof_plan_taper: 0.10,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.livery = livery(
@@ -213,6 +217,12 @@ fn wolfhound() -> CarStyle {
         side_bulge_z: 0.6,
         rocker_in_m: 0.04,
         plan_width: vec![[-2.635, 0.94], [-1.86, 1.0], [1.86, 1.0], [2.485, 0.93]],
+        // Phase 3b: raked, plan-bowed (rounded) nose with a chin, slight roof taper.
+        nose_face_rake_deg: 22.0,
+        nose_chin_m: 0.05,
+        nose_plan_bow_m: 0.15,
+        nose_tip_w: 0.85,
+        roof_plan_taper: 0.08,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.livery = livery(
@@ -322,6 +332,12 @@ fn vigil() -> CarStyle {
             dx_m: -0.035,
             falloff_m: 0.12,
         }],
+        // Phase 3b: forward-leaning shark nose with a deep chin, fastback roof narrowing to
+        // the rear, lower body leaning in under the crease.
+        nose_face_rake_deg: -10.0,
+        nose_chin_m: 0.10,
+        roof_plan_taper: 0.15,
+        lower_lean_in_m: 0.03,
         ..BodyStyle::preset(Silhouette::Fastback)
     });
     s.livery = livery(
