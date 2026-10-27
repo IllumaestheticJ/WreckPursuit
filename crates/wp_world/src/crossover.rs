@@ -227,6 +227,58 @@ mod tests {
     }
 
     #[test]
+    fn barrier_ends_at_each_opening_slope_down_to_the_road() {
+        // Owner 2026-10-27: a car drifting into an opening met the far barrier end head-on
+        // and stopped dead. Each end facing an opening is a sloped terminal; the barrier
+        // stands at full height everywhere else.
+        use crate::surface::{median_barrier_profiles, BARRIER_TERMINAL_M, BARRIER_TIP_FRACTION};
+        let profiles = median_barrier_profiles(net());
+        for (i, x) in crossovers(net()).iter().enumerate() {
+            let q = geom::xy(*x);
+            let mut ends = 0;
+            for prof in &profiles {
+                for (end, inner) in [(0usize, 1usize), (prof.len() - 1, prof.len() - 2)] {
+                    let (p, f) = prof[end];
+                    if (geom::dist(geom::xy(p), q) - 0.5 * GAP_M).abs() > 0.5 {
+                        continue;
+                    }
+                    ends += 1;
+                    assert!(
+                        (f - BARRIER_TIP_FRACTION).abs() < 1e-4,
+                        "crossover {i}: end stands {f} of full height"
+                    );
+                    assert!(prof[inner].1 > f, "crossover {i}: terminal does not rise");
+                }
+            }
+            assert_eq!(ends, 2, "crossover {i}: {ends} barrier ends at the opening");
+        }
+        // Full height a terminal length in from every end, and at least most of the barrier.
+        let mut full = 0.0;
+        let mut total = 0.0;
+        for prof in &profiles {
+            let pts: Vec<V3> = prof.iter().map(|(p, _)| *p).collect();
+            let cum = geom::cumulative(&pts);
+            let len = cum[cum.len() - 1];
+            for (k, (_, f)) in prof.iter().enumerate() {
+                if cum[k] >= BARRIER_TERMINAL_M && len - cum[k] >= BARRIER_TERMINAL_M {
+                    assert_eq!(*f, 1.0);
+                }
+            }
+            for (k, w) in prof.windows(2).enumerate() {
+                let d = cum[k + 1] - cum[k];
+                total += d;
+                if w[0].1 == 1.0 && w[1].1 == 1.0 {
+                    full += d;
+                }
+            }
+        }
+        assert!(
+            full > 0.95 * total,
+            "only {full} of {total} m at full height"
+        );
+    }
+
+    #[test]
     fn cities_without_crossovers_are_unchanged() {
         let grid = crate::procgen::generate(&Default::default());
         assert!(crossovers(&grid).is_empty());
