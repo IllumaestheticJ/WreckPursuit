@@ -383,6 +383,11 @@ pub fn build_sim(
         if spec.speed_mps != 0.0 {
             sim.place_vehicle(id, spec.pos, spec.yaw, spec.speed_mps)?;
         }
+        // A player's car has nitrous only with the Nitrous Kit among its mods (counted in every
+        // damage mode; AI racers and police carry theirs regardless).
+        if let Some(catalog) = catalog.as_ref().filter(|_| !spec.mods.is_empty()) {
+            sim.set_nitrous_kit(id, nitrous_kit_tier(catalog, &cars[&spec.car], &spec.mods))?;
+        }
         sim.set_assists(id, spec.assists.unwrap_or(sc.assists).profile())?;
         // Player steering aids: a live-driven entity only (see `EntitySpec::player_steering`).
         let live = matches!(spec.driver, Driver::Scripted) && spec.inputs.is_empty();
@@ -1992,6 +1997,19 @@ impl EvalCtx<'_> {
             None => ("never".to_string(), false),
         }
     }
+}
+
+/// Nitrous Kit tier among `mods` (0 = none), with every mod counted whatever the damage mode.
+fn nitrous_kit_tier(
+    catalog: &wp_economy::ModCatalog,
+    car: &wp_contracts::LoadedCar,
+    mods: &[String],
+) -> u8 {
+    catalog
+        .validate_set(car.def.class, mods)
+        .ok()
+        .and_then(|set| wp_economy::mods::apply_mods(&car.def, &car.lattice, &set, None).ok())
+        .map_or(0, |a| a.tools.nitrous)
 }
 
 #[cfg(test)]

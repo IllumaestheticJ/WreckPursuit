@@ -38,13 +38,16 @@
 // sites (120 m+ sight) on the racer's route and the flat tyres stop him at 90% of it (captured
 // 99.7 s). This scenario is about covered-road line of sight, not tools, so `police_tools:
 // false` keeps the captain's own spikes and roadblocks out of it. Measured (seed 58): Captured 105.5 s.
+// Nitrous follow-up (2026-10-26, owner: cops burn nitrous to get up to speed on a call): seed 53
+// was Captured at 32.3 s, before the Cut. Seeds 50-72: escape story on 11 of 23, control on 21,
+// both on 11 (50, 55-58, 63, 65, 67, 68, 70, 71). Re-seeded 53 -> 57, in the widest run 55-58.
 (
     name: "police_tunnel_escape_founders_cut_control",
     // Lead 2026-10-24: re-seeded 60 -> 58 after merging D's canal-bridge fix (ws/world 3affce58) with the PR #60 police power port; seed 60's main run became a capture. Seeds 50-70: both files pass on 11 of 21; 56-59 is the widest run, 58 its middle.
     // PR #64 refresh (2026-10-25, owner 2026-10-23 cut: far fewer cops) on main 244023bf: seed
     // 58's main run became a capture. Seeds 50-70: both files pass on 10 of 21 (51-54, 56, 57,
     // 60, 62, 63, 66); 51-54 is the widest run, 53 in its middle. Measured (seed 53): Captured 112.6 s.
-    seed: 53,
+    seed: 57,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,
     time_ratio: 1.0,

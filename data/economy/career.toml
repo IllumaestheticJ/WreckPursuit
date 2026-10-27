@@ -63,12 +63,18 @@ max_bet = 60000
 city_races = "Unknown"
 city_betting = "Street"
 touge_races = "Known"
-touge_betting = "Respected"
+touge_betting = "Known"
 boss_races = "Respected"
-pink_slips = "Feared"
+pink_slips = "Respected"
 # Head-to-head bets with the roaming street racers (honk to challenge). Open from the start
 # (round12 player flow); the racer's level sets the stake range, cash is the only other cap.
 street_betting = "Unknown"
+
+# Exact rep for a feature whose gate sits inside its tier (must be within that tier's range).
+# Owner call 2026-10-26: touge side bets and pink slips open at half their old rep, side bets
+# at 2 500 (was Respected, 5 000) and pink slips at 5 000 (Respected; was Feared, 10 000).
+[unlock_rep]
+touge_betting = 2500
 
 # Lowest tier at which the dealer sells each class. Police classes are never for sale.
 # Every class is open from the start (owner calls 2026-10-24 for Exotic, 2026-10-26 for the

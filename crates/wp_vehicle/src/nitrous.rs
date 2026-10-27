@@ -58,28 +58,41 @@ impl Band {
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiNitrous {
-    /// Fire only at least this far behind the target, m.
+    /// From this far behind the target the bottle is rubberbanded (stronger, faster refill);
+    /// closer, level or ahead it is the player's ([`NitrousScale::PLAYER`]), m.
     pub fire_gap_m: f32,
     /// Gap at which the scale reaches `far`, m.
     pub gap_full_m: f32,
-    /// Never fire further behind than this (not racing that target any more), m.
+    /// Never fire further from the target than this, ahead or behind (not racing it any
+    /// more), m.
     pub max_gap_m: f32,
+    /// Also fire level with or ahead of the target while it is at most this far behind, at
+    /// the player's scale (racers defending a lead, owner 2026-10-26), m. 0 = only from
+    /// `fire_gap_m` behind. A leader further ahead never burns, so it cannot run away.
+    pub ahead_gap_m: f32,
+    /// On a call (a target, or the siren on) fire below this speed to get up to speed
+    /// (police: owner 2026-10-26), m/s. 0 = off.
+    pub up_to_speed_mps: f32,
     /// Throttle the AI must be giving, 0..=1.
     pub min_throttle: f32,
     /// Largest |steer| the AI may be giving (no nitrous mid-corner).
     pub max_steer: f32,
     /// Slowest speed to fire at, m/s.
     pub min_speed_mps: f32,
-    /// Torque gain multiplier.
+    /// Torque gain multiplier, `near` at `fire_gap_m` behind.
     pub strength: Band,
-    /// Refill speed multiplier.
+    /// Refill speed multiplier, `near` at `fire_gap_m` behind.
     pub refill: Band,
 }
 
 impl AiNitrous {
-    /// The bottle scale for an AI `gap_m` behind its target (negative = ahead of it).
+    /// The bottle scale for an AI `gap_m` behind its target (negative = ahead of it): the
+    /// player's bottle closer than `fire_gap_m`, then `near` .. `far` by `gap_full_m`.
     pub fn scale(&self, gap_m: f32) -> NitrousScale {
-        let t = gap_m / self.gap_full_m.max(1.0);
+        if gap_m < self.fire_gap_m {
+            return NitrousScale::PLAYER;
+        }
+        let t = (gap_m - self.fire_gap_m) / (self.gap_full_m - self.fire_gap_m).max(1.0);
         NitrousScale {
             strength: self.strength.at(t),
             refill: self.refill.at(t),
@@ -87,15 +100,26 @@ impl AiNitrous {
         }
     }
 
-    /// Whether an AI `gap_m` behind its target, driving `input` at `speed_mps`, burns now.
-    pub fn wants_fire(&self, gap_m: f32, input: &VehicleInput, speed_mps: f32) -> bool {
-        gap_m >= self.fire_gap_m
-            && gap_m <= self.max_gap_m
-            && input.throttle >= self.min_throttle
+    /// Whether an AI burns now: `gap_m` behind its target (`None` = no target), `on_call`
+    /// (a target or the siren on), driving `input` at `speed_mps`.
+    pub fn wants_fire(
+        &self,
+        gap_m: Option<f32>,
+        on_call: bool,
+        input: &VehicleInput,
+        speed_mps: f32,
+    ) -> bool {
+        let driving = input.throttle >= self.min_throttle
             && input.steer.abs() <= self.max_steer
             && input.brake <= 0.0
             && input.handbrake <= 0.0
-            && speed_mps >= self.min_speed_mps
+            && speed_mps >= self.min_speed_mps;
+        let racing = gap_m.is_some_and(|g| {
+            (self.fire_gap_m..=self.max_gap_m).contains(&g)
+                || (self.ahead_gap_m > 0.0 && g < self.fire_gap_m && -g <= self.ahead_gap_m)
+        });
+        let launching = on_call && speed_mps < self.up_to_speed_mps;
+        driving && (racing || launching)
     }
 }
 
@@ -171,8 +195,9 @@ impl NitrousTune {
         Ok(t)
     }
 
-    /// The player's bottle scale with Nitrous Kit `tier` fitted (0 = stock bottle; above 2
-    /// counts as 2).
+    /// The player's bottle scale with Nitrous Kit `tier` fitted (tier 1 and 0 = the base
+    /// bottle; above 2 counts as 2). Without a kit a player's car has no bottle at all
+    /// ([`Nitrous::fitted`]).
     pub fn kit_scale(&self, tier: u8) -> NitrousScale {
         let k = match tier {
             0 => return NitrousScale::PLAYER,
@@ -235,6 +260,9 @@ pub struct Nitrous {
     pub since_burn_s: f32,
     /// Current scale (set by `wp_sim` every tick for AI).
     pub scale: NitrousScale,
+    /// A bottle is fitted. AI always carry one; a player's car only with the garage's Nitrous
+    /// Kit (owner decision 2026-10-26, set by `wp_sim`).
+    pub fitted: bool,
 }
 
 impl Default for Nitrous {
@@ -245,9 +273,9 @@ impl Default for Nitrous {
 
 impl Nitrous {
     /// Number of floats in [`Nitrous::to_array`].
-    pub const LEN: usize = 7;
+    pub const LEN: usize = 8;
 
-    /// A full, armed bottle at the player's scale.
+    /// A full, armed, fitted bottle at the player's scale.
     pub fn full() -> Self {
         Self {
             fill: 1.0,
@@ -255,6 +283,7 @@ impl Nitrous {
             armed: true,
             since_burn_s: f32::MAX,
             scale: NitrousScale::PLAYER,
+            fitted: true,
         }
     }
 
@@ -271,8 +300,12 @@ impl Nitrous {
         if !self.armed && self.fill >= def.rearm_fill {
             self.armed = true;
         }
-        self.burning =
-            request && can_burn && self.armed && self.fill > 0.0 && throttle >= def.min_throttle;
+        self.burning = self.fitted
+            && request
+            && can_burn
+            && self.armed
+            && self.fill > 0.0
+            && throttle >= def.min_throttle;
         if self.burning {
             self.fill = (self.fill - dt / (def.burn_s * self.scale.capacity)).max(0.0);
             if self.fill <= 0.0 {
@@ -299,6 +332,7 @@ impl Nitrous {
             self.scale.strength,
             self.scale.refill,
             self.scale.capacity,
+            f32::from(u8::from(self.fitted)),
         ]
     }
 
@@ -314,6 +348,7 @@ impl Nitrous {
                 refill: a[5],
                 capacity: a[6],
             },
+            fitted: a[7] != 0.0,
         }
     }
 }
@@ -381,11 +416,12 @@ mod tests {
     #[test]
     fn ai_scale_grows_with_the_gap_and_never_drops_below_the_player() {
         for ai in [tune().racer, tune().police] {
-            let ahead = ai.scale(-50.0);
-            let level = ai.scale(0.0);
+            // Ahead, level or close: the player's bottle (normal refill).
+            assert_eq!(ai.scale(-50.0), NitrousScale::PLAYER);
+            assert_eq!(ai.scale(0.0), NitrousScale::PLAYER);
+            let level = ai.scale(ai.fire_gap_m);
             let mid = ai.scale(ai.gap_full_m * 0.5);
             let far = ai.scale(ai.gap_full_m * 3.0);
-            assert_eq!(ahead, level);
             assert!(level.strength >= 1.0 && level.refill >= 1.0);
             assert!(mid.strength > level.strength && mid.refill > level.refill);
             assert!(far.strength > mid.strength && far.refill > mid.refill);
@@ -414,25 +450,63 @@ mod tests {
     }
 
     #[test]
-    fn ai_fires_only_when_trailing_on_a_straight() {
+    fn racers_fire_on_a_straight_ahead_or_behind() {
         let ai = tune().racer;
         let flat_out = VehicleInput {
             throttle: 1.0,
             ..Default::default()
         };
-        assert!(ai.wants_fire(ai.fire_gap_m + 1.0, &flat_out, 30.0));
-        assert!(!ai.wants_fire(0.0, &flat_out, 30.0), "level");
-        assert!(!ai.wants_fire(-20.0, &flat_out, 30.0), "ahead");
+        let fire = |g: Option<f32>, i: &VehicleInput, v: f32| ai.wants_fire(g, g.is_some(), i, v);
+        assert!(fire(Some(ai.fire_gap_m + 1.0), &flat_out, 30.0), "behind");
+        assert!(fire(Some(0.0), &flat_out, 30.0), "level");
         assert!(
-            !ai.wants_fire(ai.max_gap_m + 1.0, &flat_out, 30.0),
+            fire(Some(-20.0), &flat_out, 30.0),
+            "ahead (owner 2026-10-26)"
+        );
+        assert!(!fire(None, &flat_out, 30.0), "no player near");
+        assert!(
+            !fire(Some(ai.max_gap_m + 1.0), &flat_out, 30.0),
             "out of range"
         );
-        assert!(!ai.wants_fire(50.0, &flat_out, 3.0), "too slow");
+        assert!(
+            !fire(Some(-ai.ahead_gap_m - 1.0), &flat_out, 30.0),
+            "a clear leader"
+        );
+        assert!(!fire(Some(50.0), &flat_out, 3.0), "too slow");
         let cornering = VehicleInput {
             steer: 0.6,
             ..flat_out
         };
-        assert!(!ai.wants_fire(50.0, &cornering, 30.0));
+        assert!(!fire(Some(50.0), &cornering, 30.0));
+    }
+
+    #[test]
+    fn police_fire_to_get_up_to_speed_and_to_catch_up() {
+        let ai = tune().police;
+        let flat_out = VehicleInput {
+            throttle: 1.0,
+            ..Default::default()
+        };
+        let slow = ai.min_speed_mps + 1.0;
+        assert!(slow < ai.up_to_speed_mps);
+        assert!(
+            ai.wants_fire(None, true, &flat_out, slow),
+            "siren on, pulling away"
+        );
+        assert!(
+            ai.wants_fire(Some(-30.0), true, &flat_out, slow),
+            "intercepting, slow"
+        );
+        assert!(!ai.wants_fire(None, false, &flat_out, slow), "patrolling");
+        let fast = ai.up_to_speed_mps + 5.0;
+        assert!(
+            !ai.wants_fire(Some(0.0), true, &flat_out, fast),
+            "up to speed, level"
+        );
+        assert!(
+            ai.wants_fire(Some(ai.fire_gap_m + 1.0), true, &flat_out, fast),
+            "behind"
+        );
     }
 
     #[test]
@@ -440,7 +514,7 @@ mod tests {
         let t = tune();
         assert_eq!(t.kit_scale(0), NitrousScale::PLAYER);
         let (k1, k2) = (t.kit_scale(1), t.kit_scale(2));
-        assert!(k1.strength > 1.0 && k2.strength > k1.strength);
+        assert!(k1.strength >= 1.0 && k2.strength > k1.strength && k2.capacity > k1.capacity);
         assert_eq!(t.kit_scale(5), k2);
         let b = t.bottle;
         let mut stock = Nitrous::full();
@@ -453,6 +527,18 @@ mod tests {
         assert_eq!(stock.fill, 0.0);
         assert!((kit.fill - (1.0 - 1.0 / k2.capacity)).abs() < 0.01);
         assert!((gain - (1.0 + b.torque_gain * k2.strength)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn no_bottle_never_burns() {
+        let b = tune().bottle;
+        let mut n = Nitrous {
+            fitted: false,
+            ..Nitrous::full()
+        };
+        assert_eq!(n.step(&b, true, 1.0, true, DT), 1.0);
+        assert!(!n.burning);
+        assert_eq!(n.fill, 1.0);
     }
 
     #[test]
@@ -473,6 +559,7 @@ mod tests {
                 refill: 2.0,
                 capacity: 1.0,
             },
+            fitted: false,
         };
         assert_eq!(Nitrous::from_array(n.to_array()), n);
     }
