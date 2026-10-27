@@ -160,6 +160,28 @@ edge pops up by `pop_m`. The renderer keeps the largest shortening / pull-back p
 metal does not spring back) and clears it when every bound node is back at rest (repair).
 `car_assets::skin::deform_detail` and `car_assets::crumple::render_part` are the Rust reference
 of `render/panels.ts`.
+### Greenhouse and common trim (car-shapes, 2026-10-27)
+
+Same format 4; these parts come from the generator for every car (knobs in
+`car_assets::style::BodyStyle`, see `tools/assets/README.md`):
+
+| part | region / kind / material | what |
+|---|---|---|
+| `windshield`, `rear_glass`, `door_f?_glass`, `door_r?_glass`, `quarter_glass` | as before (`glass`) | glass panels now sit `glass_recess_m` behind the surface and `glass_frame_m` inside their opening; they still hide on `GlassShattered` of their region |
+| `<glass part>_seal` (`windshield_seal`, `door_fl_glass_seal`, …) | the glass part's region / `body` / `trim` | black step round each glass panel; stays when the glass shatters, swings and detaches with a door |
+| `body` (A- / C-pillars, roof rail) | `Cabin` / `body` / `livery` | body-colour pillars between the side glass and the windshield / rear glass |
+| `cowl` | `Cabin` / `body` / `trim` | black cowl / wiper panel at the windshield base |
+| `a_sail`, `b_pillar` | `Cabin` / `body` / `trim` | black sail at the A-pillar foot, black B-pillar (body colour when the knob says so: then part of `body`) |
+| `mirror_l/_r`, `mirror_base_l/_r`, `mirror_glass_l/_r` | front doors / `mirror` + `detail` | mirror housing (body colour), black base and arm, mirror glass, on the sail |
+| `door_handle_{f,r}_l/_r`, `door_handle_recess_{f,r}_l/_r` | doors / `detail` | grab bar on a black recess |
+| `seam_<n>_l/_r` | the panel outlined / `detail` / `trim` | door cut lines, hood / trunk shut lines, bumper splits (1.8 mm proud strips) |
+| `fuel_door_{l,r}`, `fuel_door_gap_{l,r}` | rear quarter / `detail` | fuel filler flap (paint) on a dark gap ring |
+| `arch_lip_{f,r}_l/_r`, `arch_liner_{f,r}_l/_r` | front fender / rear quarter | body-colour lip round the wheel opening, black liner inside the arch |
+| `roof_rail_line_l/_r`, `wipers` | `Roof` / `Windshield` / `detail` | drip-rail line along the roof edge and pillars, parked wipers |
+
+The mid LOD keeps the pillars, cowl, sail, B-pillar, mirrors and arch liners; its glass is flush
+(no seals) and it has no seams, handles, fuel door, lips, drip rail or wipers.
+
 ### Head / tail lamps (from round 12's format 3)
 
 `headlight_l/_r` and `taillight_l/_r` (`kind: light`, materials `headlight` / `taillight`) have
