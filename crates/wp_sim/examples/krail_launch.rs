@@ -79,7 +79,7 @@ fn main() {
     let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
     println!("car {car_path}, {} sites", sites.len());
     println!(
-        "kind   site                 side  v   ang | rise_m vz_max roll_deg pitch_deg air_s end_v"
+        "kind   site                 side  v   ang | rise_m vz_max tilt_deg rate_dps air_s end_v"
     );
     let mut worst: f32 = 0.0;
     let (mut bad, mut runs) = (0usize, 0usize);
@@ -123,7 +123,6 @@ fn main() {
                         },
                     )
                     .unwrap();
-                    let z0 = sim.vehicle_states()[0].1.pos[2];
                     let (mut rise, mut vz, mut roll, mut pitch, mut air) =
                         (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0usize);
                     let mut end_v = 0.0;
@@ -133,16 +132,13 @@ fn main() {
                         let st = &sim.vehicle_states()[0].1;
                         let pr = geom::project(line, &cum, [st.pos[0], st.pos[1]]);
                         let (gp, _) = geom::point_at(line, &cum, pr.s);
-                        let _ = z0;
+                        // Centre of mass above the barrier foot, less its ride height.
                         rise = rise.max(st.pos[2] - gp[2] - 0.5);
                         vz = vz.max(st.lin_vel[2]);
-                        let [x, y, z, w] = st.rot;
-                        // Body up axis tilt components.
-                        let upx = 2.0 * (x * z + w * y);
-                        let upy = 2.0 * (y * z - w * x);
+                        // Tilt of the body's up axis off vertical.
+                        let [x, y, _, _] = st.rot;
                         let upz = 1.0 - 2.0 * (x * x + y * y);
                         let tilt = upz.clamp(-1.0, 1.0).acos().to_degrees();
-                        let _ = (upx, upy);
                         roll = roll.max(tilt);
                         pitch =
                             pitch.max(st.ang_vel[0].abs().max(st.ang_vel[1].abs()).to_degrees());

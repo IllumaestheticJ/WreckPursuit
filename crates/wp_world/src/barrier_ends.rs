@@ -253,15 +253,51 @@ pub fn water_barrel(foot: V3, mass_kg: f32) -> StaticProp {
 }
 
 /// A cushion of water barrels ([`CUSHION_ROWS`]) in front of every [`exposed_ends`] end, centred
-/// on the barrier's line, in end order.
+/// on the barrier's line (or moved up to [`MAX_SHIFT_M`] off it, away from the lane running at
+/// the end, where it would stand in that lane; in single file, as heavy, where even that is
+/// too tight), in end order.
 pub fn water_barrels(map: &CityMap) -> Vec<StaticProp> {
     let mut out = Vec::new();
+    let widest = CUSHION_ROWS.iter().map(|r| r.0).max().unwrap_or(1);
+    let half_span = (widest as f32 - 1.0) * 0.5 * BARREL_PITCH_M + BARREL_RADIUS_M;
     for e in exposed_ends(map) {
         let side = geom::right_of(e.out);
+        // The lane's side of the end (+1: along `side`), and how far its paint is from the end.
+        let lane = &map.net.lanes[e.lane];
+        let cum = geom::cumulative(&lane.polyline);
+        let pr = geom::project(&lane.polyline, &cum, geom::xy(e.pos));
+        let (lp, _) = geom::point_at(&lane.polyline, &cum, pr.s);
+        let to_lane = geom::sub(geom::xy(lp), geom::xy(e.pos));
+        let lane_side = if to_lane[0] * side[0] + to_lane[1] * side[1] >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        // Room between the barrier line and the lane's paint, the tightest along the cushion
+        // (a lane curving towards a gore closes in on it).
+        let depth = cushion_depth_m();
+        let room = (0..=4)
+            .map(|k| {
+                let a = depth * k as f32 / 4.0;
+                let q = [e.pos[0] + e.out[0] * a, e.pos[1] + e.out[1] * a];
+                geom::project(&lane.polyline, &cum, q).dist
+            })
+            .fold(f32::INFINITY, f32::min)
+            - 0.5 * lane.width_m
+            - LANE_CLEAR_M;
+        // Too tight for two abreast: one file, each barrel as heavy as the row it stands for.
+        let single = room + MAX_SHIFT_M < half_span;
+        let span = if single { BARREL_RADIUS_M } else { half_span };
+        let shift = -lane_side * (span - room).clamp(0.0, MAX_SHIFT_M);
         for (row, &(count, mass_kg)) in CUSHION_ROWS.iter().enumerate() {
             let ahead = BARREL_RADIUS_M + 0.1 + row as f32 * BARREL_PITCH_M;
+            let (count, mass_kg) = if single {
+                (1, mass_kg * count as f32)
+            } else {
+                (count, mass_kg)
+            };
             for k in 0..count {
-                let across = (k as f32 - (count as f32 - 1.0) * 0.5) * BARREL_PITCH_M;
+                let across = (k as f32 - (count as f32 - 1.0) * 0.5) * BARREL_PITCH_M + shift;
                 out.push(water_barrel(
                     [
                         e.pos[0] + e.out[0] * ahead + side[0] * across,
@@ -274,4 +310,99 @@ pub fn water_barrels(map: &CityMap) -> Vec<StaticProp> {
         }
     }
     out
+}
+
+/// Gap kept between a cushion and the paint of the lane beside it, m.
+const LANE_CLEAR_M: f32 = 0.1;
+/// Furthest a cushion moves off its barrier's line to keep out of a lane, m (the barrier end,
+/// 0.5 m wide, still lies behind its wide rows).
+pub const MAX_SHIFT_M: f32 = 0.45;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vesper::{generate, VesperConfig};
+
+    fn map() -> CityMap {
+        CityMap::new(generate(&VesperConfig::default()))
+    }
+
+    #[test]
+    fn every_crossover_opening_has_a_cushion_at_both_barrier_ends() {
+        let map = map();
+        let ends = exposed_ends(&map);
+        let points = crate::crossover::crossovers(&map.net);
+        assert!(!points.is_empty());
+        for (i, x) in points.iter().enumerate() {
+            // Each barrier end at the opening faces the traffic running at it.
+            let at = ends
+                .iter()
+                .filter(|e| e.kind == BarrierKind::Median)
+                .filter(|e| {
+                    (geom::dist(geom::xy(e.pos), geom::xy(*x)) - 0.5 * crate::crossover::GAP_M)
+                        .abs()
+                        < 0.5
+                })
+                .count();
+            assert_eq!(at, 2, "crossover {i}: {at} cushioned ends");
+        }
+        // And more: the edge barriers that start after gaps along the highways.
+        assert!(ends.len() > 2 * points.len(), "{} ends", ends.len());
+    }
+
+    #[test]
+    fn barrels_stay_off_the_lanes_and_clear_of_each_other() {
+        let map = map();
+        let barrels = water_barrels(&map);
+        let per_end: usize = CUSHION_ROWS.iter().map(|r| r.0).sum();
+        let n_ends = exposed_ends(&map).len();
+        assert!(barrels.len() >= n_ends * CUSHION_ROWS.len() && barrels.len() <= n_ends * per_end);
+        for (i, b) in barrels.iter().enumerate() {
+            let q = geom::xy(b.pos);
+            for lane in map
+                .net
+                .lanes
+                .iter()
+                .filter(|l| l.kind == LaneKind::Highway && l.speed_limit_mps >= FAST_LANE_MPS)
+            {
+                let cum = geom::cumulative(&lane.polyline);
+                let pr = geom::project(&lane.polyline, &cum, q);
+                let (lp, _) = geom::point_at(&lane.polyline, &cum, pr.s);
+                if (lp[2] - b.pos[2]).abs() > SAME_LEVEL_M + BARREL_HEIGHT_M {
+                    continue;
+                }
+                assert!(
+                    pr.dist >= 0.5 * lane.width_m + BARREL_RADIUS_M - 0.05,
+                    "barrel {i} at {q:?} stands in a lane ({:.2} m from its centre)",
+                    pr.dist
+                );
+            }
+            for (j, o) in barrels.iter().enumerate().skip(i + 1) {
+                let d = geom::dist(q, geom::xy(o.pos));
+                assert!(d > 1.9 * BARREL_RADIUS_M, "barrels {i} and {j} {d} m apart");
+            }
+        }
+    }
+
+    #[test]
+    fn crossover_cones_stand_beyond_the_barrels() {
+        let w = crate::World::vesper(&VesperConfig::default(), Default::default());
+        let props: Vec<&StaticProp> = w.static_props().collect();
+        let cones: Vec<_> = props.iter().filter(|p| p.kind == PropKind::Cone).collect();
+        let barrels: Vec<_> = props
+            .iter()
+            .filter(|p| p.kind == PropKind::WaterBarrel)
+            .collect();
+        assert!(!cones.is_empty() && !barrels.is_empty());
+        for c in &cones {
+            for b in &barrels {
+                let d = geom::dist(geom::xy(c.pos), geom::xy(b.pos));
+                assert!(
+                    d > BARREL_RADIUS_M + 0.3,
+                    "cone {:?} in a cushion ({d} m)",
+                    c.pos
+                );
+            }
+        }
+    }
 }
