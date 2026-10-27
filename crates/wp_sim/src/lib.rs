@@ -547,7 +547,10 @@ impl Sim {
             .friction(0.6)
             .user_data(physics::PROP_USER_BIT)
             .build();
-        if hilly {
+        let barrel = prop.kind == wp_world::props::PropKind::WaterBarrel;
+        if barrel {
+            col.set_collision_groups(physics::barrel_groups(hilly));
+        } else if hilly {
             // Resting on the road mesh: no pairs with the terrain tiles under it (thousands
             // of them otherwise cost ~0.6 ms per frame); restored when it wakes.
             col.set_collision_groups(physics::resting_prop_groups());
@@ -634,7 +637,16 @@ impl Sim {
                 return true;
             }
             if let Some(col) = colliders.get_mut(*c) {
-                col.set_collision_groups(rapier3d::prelude::InteractionGroups::all());
+                let barrel = col
+                    .collision_groups()
+                    .memberships
+                    .contains(physics::BARREL_GROUP)
+                    && col.collision_groups().memberships != rapier3d::prelude::Group::ALL;
+                col.set_collision_groups(if barrel {
+                    physics::barrel_groups(false)
+                } else {
+                    rapier3d::prelude::InteractionGroups::all()
+                });
             }
             false
         });
@@ -1395,9 +1407,14 @@ impl Sim {
             };
             // Wheel rays never land on a ghost's chassis; a ghost's own wheels only see static
             // world geometry (not other cars, debris or props), like its chassis.
+            // No wheel lands on a barrier or rail either: a tyre swept onto a K-rail's top edge
+            // read 0.8 m of sudden ground and the suspension threw the car up and over it
+            // (owner 2026-10-27 "the loop9 k rails launch cars too easily"). The chassis box
+            // alone meets barriers, so a car scrapes along them.
             let not_ghost = |_: rapier3d::prelude::ColliderHandle,
                              c: &rapier3d::prelude::Collider| {
                 c.user_data & physics::GHOST_USER_BIT == 0
+                    && c.user_data != physics::BARRIER_USER_DATA
             };
             let ghost_sees = |_: rapier3d::prelude::ColliderHandle,
                               c: &rapier3d::prelude::Collider| {

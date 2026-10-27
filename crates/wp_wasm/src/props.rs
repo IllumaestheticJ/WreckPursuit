@@ -32,6 +32,8 @@ pub const KIND_CONE: f32 = 1.0;
 pub const KIND_KRAIL: f32 = 2.0;
 /// See [`KIND_PARKED_CAR`].
 pub const KIND_GUARD_RAIL: f32 = 3.0;
+/// See [`KIND_PARKED_CAR`].
+pub const KIND_WATER_BARREL: f32 = 4.0;
 
 /// Position change below which a prop counts as not moved, m.
 const MOVE_EPS_M: f32 = 1e-4;
@@ -45,6 +47,7 @@ pub fn kind_code(kind: PropKind) -> f32 {
         PropKind::Cone => KIND_CONE,
         PropKind::KRail => KIND_KRAIL,
         PropKind::GuardRail => KIND_GUARD_RAIL,
+        PropKind::WaterBarrel => KIND_WATER_BARREL,
     }
 }
 
