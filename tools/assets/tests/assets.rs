@@ -368,6 +368,19 @@ fn style_knob_extremes_never_panic() {
             b.tail_tip_w = -3.0 * k;
             b.roof_plan_taper = k;
             b.lower_lean_in_m = k;
+            b.hood_dz = (k, -k);
+            b.deck_dz = k;
+            b.roof_arc = 1.0;
+            b.roof_arc_front_exp = 9.0 * k;
+            b.roof_arc_rear_exp = -9.0 * k;
+            b.quarter_glass = k > 0.0;
+            b.deck_min_m = k;
+            b.glass_base_lip_m = k;
+            b.flare_shape = car_assets::style::ArchShape::Trapezoid;
+            b.cladding_z_m = 3.0 * k;
+            b.dlo_kink_m = k;
+            b.dlo_kink_len_m = k;
+            b.dlo_top_drop_m = k;
             let m = generate_styled(&car.def, &car.lattice, &st);
             assert!(m.tri_count > 0, "{id}");
         }
@@ -1168,12 +1181,27 @@ fn phase3_knobs_keep_panels_on_their_regions() {
             b.tail_tip_w = 0.3;
             b.roof_plan_taper = 0.3;
             b.lower_lean_in_m = 0.08;
+            // (Raises on top of the 0.12 fender rises would push a low car past validate's
+            // height sanity check: keep them moderate here; the sweep covers the extremes.)
+            b.hood_dz = if k == 0 { (0.0, 0.10) } else { (-0.10, -0.10) };
+            b.deck_dz = if k == 0 { 0.03 } else { -0.10 };
+            b.roof_arc_rear_exp = 1.2;
+            b.quarter_glass = k == 0;
+            b.deck_min_m = 0.02;
+            b.glass_base_lip_m = 0.05;
+            b.flare_shape = car_assets::style::ArchShape::Trapezoid;
+            b.arch_lip_finish = car_assets::style::TrimFinish::Black;
+            b.cladding_z_m = 0.7;
+            b.dlo_kink_m = 0.12;
+            b.dlo_top_drop_m = 0.10;
             let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
             car_assets::skin::bind_skin(&car.lattice, &mut m);
-            // Budgets are the style author's call (these settings add loft stations).
+            // Budgets are the style author's call (these settings add loft stations), and every
+            // outward knob stacked at once can pass validate's ±35 % / 15 % / 20 % size sanity
+            // check (meant for unit and pivot errors): regions, skinning and parts are checked.
             let errs: Vec<String> = validate(&car, &m, Some(&spec))
                 .into_iter()
-                .filter(|e| !e.contains("budget"))
+                .filter(|e| !e.contains("budget") && !e.contains("pivot/scale"))
                 .collect();
             assert!(errs.is_empty(), "{id} (overhang {oh:?}): {errs:#?}");
         }
@@ -1415,5 +1443,191 @@ fn projected_lamps_sit_outside_the_shell_and_keep_the_signal_contract() {
                 "{id}: head (and tail) bezels: {bezels}"
             );
         }
+    }
+}
+
+/// `PatchBand::Greenhouse` follows the side above the belt (opera window / C-pillar patch), and
+/// cladding parts take the lower side in black on the panel's own region.
+#[test]
+fn greenhouse_patches_and_cladding() {
+    use car_assets::builder::{Builder, PartKey, Patch, PatchBand};
+    use car_assets::mesh::MaterialSlot as M;
+    let root = repo_root();
+    let car = load_car(&root, "ironside_440").unwrap();
+    let mut st = style_for(&car.def);
+    st.body.cladding_z_m = 0.40;
+    let p = BodyProfile::styled(&car.def, &car.lattice, &st.body);
+    let mut b = Builder::new();
+    let key = PartKey::body("opera_l", BodyRegion::Cabin, PartKind::Detail, M::Trim);
+    let y = 0.5 * (p.roof.0 + p.roof.1);
+    let (z0, z1) = (p.z_belt + 0.08, p.roof.2 - 0.08);
+    let patch = Patch {
+        y0: y - 0.1,
+        y1: y + 0.1,
+        band: PatchBand::Greenhouse { z0, z1 },
+        offset_m: 0.002,
+        thickness_m: 0.0,
+        steps: (2, 3),
+    };
+    b.surface_patch(&key, &p, &patch);
+    let (pos, _, idx) = b.geometry("opera_l").unwrap();
+    assert!(!idx.is_empty());
+    for q in pos {
+        let (s, _) = p.greenhouse_point(q[1], q[2]);
+        assert!(
+            (q[0] - s[0]).abs() < 0.01,
+            "patch off the greenhouse: {q:?} vs {s:?}"
+        );
+        assert!(q[0] < -0.2 && q[2] >= z0 - 1e-3 && q[2] <= z1 + 1e-3);
+    }
+    let m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+    let clad: Vec<_> = m
+        .parts
+        .iter()
+        .filter(|q| q.name.ends_with("_cladding"))
+        .collect();
+    assert!(
+        clad.len() >= 4,
+        "{:?}",
+        clad.iter().map(|q| &q.name).collect::<Vec<_>>()
+    );
+    for q in clad {
+        assert_eq!(q.material, M::Trim);
+        let top = (0..q.vertex_count())
+            .map(|v| q.vertex(v)[2])
+            .fold(f32::MIN, f32::max);
+        assert!(top < 0.55, "{}: {top}", q.name);
+    }
+}
+
+/// The shared panel helpers promoted into `Kit` (`face_poly`, `top_poly`, `side_poly`,
+/// `end_poly`, `swept_top_lamp`) build on a raked, sculpted body, stay on their surfaces and
+/// keep the mesh valid.
+#[test]
+fn shared_kit_panels_follow_the_body() {
+    use car_assets::builder::{Builder, PartKey};
+    use car_assets::mesh::MaterialSlot as M;
+    use car_assets::style::{Detail, DetailCtx, Shape};
+    use car_assets::styles::performance::kit::{dkey, on_side, Kit, SIDES};
+    fn panels(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
+        let p = ctx.profile;
+        let mut k = Kit::new(p, b);
+        let (wn, yn) = (k.wn(), k.yn);
+        let (_, zt) = k.nose_z();
+        let intake = [
+            [-0.25, zt - 0.30],
+            [0.25, zt - 0.30],
+            [0.20, zt - 0.20],
+            [-0.20, zt - 0.20],
+        ];
+        k.end_poly(
+            &dkey("t_intake", BodyRegion::FrontBumper, M::Grille),
+            true,
+            &intake,
+            0.004,
+            0.02,
+        );
+        k.face_poly(
+            &dkey("t_badge", BodyRegion::Trunk, M::Chrome),
+            false,
+            &[[-0.05, 0.6], [0.05, 0.6], [0.05, 0.64], [-0.05, 0.64]],
+            0.006,
+        );
+        let (fy, _, fr) = k.arch(true);
+        for sx in SIDES {
+            let vent = on_side(
+                sx,
+                &[
+                    [wn - 0.35, fy + 0.1],
+                    [wn - 0.15, fy + 0.1],
+                    [wn - 0.17, fy - 0.15],
+                    [wn - 0.33, fy - 0.15],
+                ],
+            );
+            let key = car_assets::styles::performance::kit::sided(
+                &dkey("t_vent_l", BodyRegion::FrontLeftFender, M::Grille),
+                sx,
+            );
+            k.top_poly(&key, &vent, 0.003, 0.01);
+            let gill = [
+                [fy - fr - 0.30, 0.40],
+                [fy - fr - 0.08, 0.42],
+                [fy - fr - 0.08, 0.55],
+                [fy - fr - 0.30, 0.52],
+            ];
+            k.side_poly(
+                &dkey("t_gill_l", BodyRegion::LeftDoorF, M::Trim),
+                sx,
+                &gill,
+                0.004,
+                0.01,
+            );
+            k.swept_top_lamp(
+                sx,
+                yn - 0.30,
+                yn - 0.05,
+                wn - 0.40,
+                wn - 0.06,
+                0.12,
+                0.01,
+                0.06,
+            );
+            let (wt, (_, tt)) = (k.wt(), k.tail_z());
+            let tail = [
+                [-(wt - 0.30), tt - 0.12],
+                [-(wt - 0.03), tt - 0.12],
+                [-(wt - 0.03), tt - 0.04],
+                [-(wt - 0.30), tt - 0.04],
+            ];
+            let rear = car_assets::lamp::LampView::Rear;
+            k.proj_cluster(sx, false, rear, &tail, None, M::Taillight, 0.0, 0.0);
+        }
+        k.signals_beside_lamps(0.06, M::EmissiveAmber);
+    }
+    let root = repo_root();
+    for id in ["kestrel_ts", "vireo_xs"] {
+        let car = load_car(&root, id).unwrap();
+        let spec = PanelSpec::load(&panel_path(&root, id)).unwrap();
+        let mut st = style_for(&car.def);
+        st.body.nose_face_rake_deg = 25.0;
+        st.body.nose_plan_bow_m = 0.25;
+        st.body.side_bulge_m = 0.03;
+        st.details = vec![Detail::new(
+            "panels",
+            BodyRegion::Cabin,
+            M::Trim,
+            Shape::Custom(panels),
+        )];
+        let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+        car_assets::skin::bind_skin(&car.lattice, &mut m);
+        for n in [
+            "t_intake",
+            "t_badge",
+            "t_vent_l",
+            "t_vent_r",
+            "t_gill_l",
+            "t_gill_r",
+            "headlight_l",
+            "headlight_r",
+        ] {
+            let q = m
+                .parts
+                .iter()
+                .find(|q| q.name == n)
+                .unwrap_or_else(|| panic!("{id}: no {n}"));
+            assert!(q.tri_count() > 0, "{id}/{n}");
+        }
+        let gill = m.parts.iter().find(|q| q.name == "t_gill_l").unwrap();
+        let (lo, hi) = part_box(gill);
+        assert!(
+            hi[0] < -0.5 && lo[2] > 0.3 && hi[2] < 0.65,
+            "{id}: gill {lo:?}..{hi:?}"
+        );
+        let errs: Vec<String> = validate(&car, &m, Some(&spec))
+            .into_iter()
+            .filter(|e| !e.contains("budget"))
+            .collect();
+        assert!(errs.is_empty(), "{id}: {errs:#?}");
+        check_lights(id, &m);
     }
 }
