@@ -600,9 +600,12 @@ fn classify_left(p: &BodyProfile, win: &Windows, y: f32, z: f32, seg: Seg, j: us
                 } else {
                     p.z_bumper_top.1
                 };
-                // A raked end face lowers the bumper's top locally.
-                let top = p.face_band(y).map_or(top, |(_, hi)| top.min(hi));
                 clad = clad.min(0.5 * (p.z_floor + top));
+                // Inside a raked / undercut face the bumper's upper points collapse onto the
+                // face line: keep its faces painted there.
+                if p.face_band(y).is_some() {
+                    clad = 0.0;
+                }
             }
             if clad > 0.0 && z < clad {
                 return PartKey::body(
@@ -700,13 +703,19 @@ fn classify_left(p: &BodyProfile, win: &Windows, y: f32, z: f32, seg: Seg, j: us
 /// True for a rear-facing loft face of a raked tail face on a tailgate car (no trunk lid, no
 /// open bed), above the rear bumper: it is the tailgate, as the end cap's upper part is
 /// (`tail_face_rake_deg` / `tail_chin_m` turn the end cap into loft faces). `q` = the face's
-/// corners (ring point j, j + 1 at station s, ring point j at station s + 1), LEFT side.
-fn tailgate_face(p: &BodyProfile, y: f32, z: f32, q: [[f32; 3]; 3]) -> bool {
+/// corners (ring point j, j + 1 at station s, ring point j and j + 1 at station s + 1), LEFT
+/// side. The face's top corner is tested against the bumper top (a coarse loft step can be
+/// longer than the face is deep, so one face spans the collapsed tail edge up to the tailgate
+/// top: its middle sits low; the mid LOD kept no trunk part with the middle tested).
+fn tailgate_face(p: &BodyProfile, y: f32, q: [[f32; 3]; 4]) -> bool {
     let depth = p.face_depth(false);
-    if p.trunk_lid || p.bed.is_some() || depth <= 1e-4 || y > p.y_tail + depth + 0.01 {
+    // The face's tail-side edge inside the face zone (a coarse step can be longer than the face).
+    let near = q.iter().map(|c| c[1]).fold(y, f32::min);
+    if p.trunk_lid || p.bed.is_some() || depth <= 1e-4 || near > p.y_tail + depth + 0.01 {
         return false;
     }
-    if z <= p.z_bumper_top.1 + 0.04 {
+    let top = q.iter().map(|c| c[2]).fold(f32::MIN, f32::max);
+    if top <= p.z_bumper_top.1 + 0.04 {
         return false;
     }
     // Outward normal of the left-side face: (a1 − a0) × (b0 − a0).
@@ -1012,6 +1021,8 @@ pub fn generate_lod(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle, lo
     for d in &style.details {
         emit_detail(&ctx, d, &mut b);
     }
+    // Kit parts on a raked / undercut end face sit on it (no-op without a face profile).
+    crate::lamp::follow_end_faces(&mut b, &p);
     // Mid LOD: traffic-tier (coarse) mechanical and wheel detail.
     let mech_tier = if mid { Tier::Traffic } else { style.tier };
     let car_spec = crate::mechanical::car_spec(def, &style.mechanical, mech_tier);
@@ -1169,7 +1180,7 @@ fn loft(
                         MaterialSlot::Livery,
                     )
                 }
-            } else if tailgate_face(p, ym, zm, [a0, a1, b0]) {
+            } else if tailgate_face(p, ym, [a0, a1, b0, b1]) {
                 key_for(BodyRegion::Trunk, PartKind::Panel)
             } else {
                 classify_left(p, win, ym, zm, seg, j)

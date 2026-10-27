@@ -342,6 +342,32 @@ top-view swept lamps, wraparound tails, on a sedan, a hatch, the prototype, the 
 police sedan: lights check, turn-signal contract, end-lamp binding, bezels); `lamp.rs` unit
 tests (split / clip, resample, a lens proud of a box).
 
+### Raked-face fixes (phase 3b queue a–d)
+- (a) **Kit parts follow a raked / undercut face:** `lamp::follow_end_faces` (run by
+  `mesh::generate_lod` after the style details) moves every detail / light vertex from 8 cm behind
+  to 30 cm ahead of the old vertical end plane along y by the face's set-back at its x / z (cast
+  onto the built body): `front_box` / `rear_box` / `round_lamp` / `face_poly` parts, grilles,
+  generic lamps, bumpers, push bars, splitters, badges. Vertices already on the surface (projected
+  lenses, bezels, panels, elements, surface patches: `Builder::mark_placed`) are left alone, so the
+  groups' local `follow_faces` helpers can go (keeping them would shift parts twice).
+- (b) **Projected lenses on raked faces:** they always landed on the drawn face; the 5 cm "lens
+  inside the face" case was a second shift by a local follow pass. Also: front / rear casts can't
+  land further than the face zone (a point above a lowered tailgate no longer lands on the cab
+  wall), and a point whose cast and centroid both miss is pulled toward the face's mid height.
+- (c) **Mid LOD trunk on a raked tailgate:** tailgate faces are judged by their top corner and
+  their tail-side edge (a coarse mid-LOD step can be longer than the face is deep).
+- (d) **Spikes at a raked face's bottom:** points clamped onto the face line also move inside the
+  ring's own side outline at their new height (the face edge follows the sill chamfer). On an open
+  pickup bed the tail face stops at the bed start, so the tailgate keeps its height.
+- (e) **Jagged rear side glass with `roof_plan_taper` + `dlo_top_drop_m`:** the jagged band is
+  the painted sail behind the glass (triangle sawtooth, faint on the base car too); it is item (f)
+  and goes with item 9 into the all-cars regeneration commit.
+- Tests: `end_face_kit_parts_follow_a_raked_face` (5 cars, back-lean + chin and forward lean: no
+  kit part's gap to the shell grows past its upright gap + 3 cm; lights visible),
+  `raked_tailgate_keeps_its_trunk_in_both_lods` (4 tailgate cars, 4 rakes, full + mid),
+  `projected_lamps_…` now also runs on raked / undercut faces; `greenhouse_patches_and_cladding`'s
+  bound is relative to the car's belt.
+
 ### Smoother bodies (item 6): smooth shading in the renderer (phase 3b)
 No mesh changes (more loft rings would cost ≈ 70 triangles per station against hero cars at up to
 21.0k of 22k, and the fine step already covers ≈ 65 % of each car). Most of the faceting was
