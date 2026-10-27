@@ -128,5 +128,31 @@ What limited this group (sent to the lead 2026-10-27 for a shared generator phas
    Wanted a tailgate lean (lower tailgate panel raked) and a kick / lip at the glass base.
 5. **Quarter glass:** an explicit knob to suppress or size the quarter window (now only reachable
    by shortening the roof).
+## Pass 2 plan (after the phase-3 generator lands on ws/car-shapes)
+Merge `ws/car-shapes` into this branch, then per car, using the new plan-width curve, side
+sculpting (tumblehome / bulge), independent fender tops, overhangs and projected lamp outlines:
+
+- **All four:** curved side sections (side bulge peaking at the door handles, tucking hard into
+  the sill); plan taper at the nose (hatches narrow ~8–10 cm per side over the front overhang)
+  and a lighter taper at the tail; lamps as outlines projected onto the curved nose / tail
+  instead of face prisms (retire the local `face_poly` where the shared one fits); check every
+  side strip, skirt and bumper wrap again on the new sections.
+- **vireo_xs (late-90s Japanese hatch):** the most rounded of the four: soft bulged sides,
+  strong tumblehome (~0.16 m), noticeable plan taper so the nose is a rounded wedge; fender
+  tops level with a slightly lower hood; teardrop lamps swept back along the fender top to the
+  hood shut line; oval lower mouth; tail clusters following the plan-rounded corners.
+- **stoat_16v (early-90s boxy European hatch):** keep it the squarest: near-flat sides with a
+  small bulge at the belt, little tumblehome (~0.10 m), almost no plan taper, square corners; the
+  boxiness is its identity. Fender tops a touch above the hood (flat bonnet between fenders),
+  slight wheel-arch flares; front band stays rectangular.
+- **marten_20 (early-90s wedge European hatch):** wedge plan and section: sides that lean in
+  above the moulding, pointed plan nose, hood and fender tops falling together to a low lip;
+  slim lamps projected along the falling nose top so they read from above; red tail band
+  wrapping the corners.
+- **lindwurm_4t (2010s AWD hatch):** muscular and wide: a crisp shoulder with the side drawn in
+  under it (concave lower door), strong rear haunches over the arches, fender tops raised above
+  the hood (power-dome look), slight plan taper; LED lamps as swept outlines running from the
+  grille into the fender; tail lamps split across the hatch and quarter following the corner.
+
 ## Contract change requests
 None.
