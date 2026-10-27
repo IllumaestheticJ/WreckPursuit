@@ -220,6 +220,9 @@ pub struct Kit<'a> {
     pub yn: f32,
     /// Tail face y.
     pub yt: f32,
+    /// Lens grid step of [`Kit::proj_cluster`] lamps, m (0.01…0.08, see
+    /// [`crate::lamp::Lamp::step_m`]): coarser for cars near their triangle budget. Default 0.04.
+    pub lens_step_m: f32,
 }
 
 impl<'a> Kit<'a> {
@@ -245,6 +248,7 @@ impl<'a> Kit<'a> {
             b,
             yn: p.y_nose,
             yt: p.y_tail,
+            lens_step_m: 0.04,
         }
     }
 
@@ -684,7 +688,9 @@ impl<'a> Kit<'a> {
     /// view y with `Lower` the leading strip). Without `seg` the kit must add the signal
     /// itself (e.g. [`Kit::signals_beside_lamps`]). `bezel_w` > 0 adds a black bezel that wide
     /// (`headlamp_bezel_l` / `taillamp_bezel_l` details on the frame). `yaw_deg` swings a
-    /// front / rear cast round the corner (wraparound lamps).
+    /// front / rear cast round the corner (wraparound lamps). The lens grid step is
+    /// [`Kit::lens_step_m`]. A top-view outline moves back to end 1 cm short of a raked end
+    /// face's top edge.
     pub fn proj_cluster(
         &mut self,
         sx: f32,
@@ -698,12 +704,44 @@ impl<'a> Kit<'a> {
     ) {
         use crate::lamp::{bezel, clip_outline, lens, Lamp, LampView};
         let right = sx > 0.0;
-        let (view, pts): (LampView, Vec<[f32; 2]>) = match view {
+        let (view, mut pts): (LampView, Vec<[f32; 2]>) = match view {
             LampView::Side { .. } => (LampView::Side { right }, outline.to_vec()),
             v => (v, outline.iter().map(|q| [sx * q[0].abs(), q[1]]).collect()),
         };
+        // A top-view lamp near a raked end face moves back (or forward, at the tail) until it
+        // ends 1 cm short of the edge where the top meets the face: past it the outline ran down
+        // the face, and the lens there sat under the body top's edge seen from ahead. Shape
+        // kept. No-op without a face rake.
+        if view == LampView::Top {
+            let p = self.p;
+            let depth = p.face_depth(front);
+            if depth > 1e-4 {
+                let y_ref = if front {
+                    p.y_nose - depth - 0.05
+                } else {
+                    p.y_tail + depth + 0.05
+                };
+                let z_top = pts
+                    .iter()
+                    .map(|q| p.top_point(y_ref, q[0]).0[2])
+                    .fold(f32::MIN, f32::max);
+                let set = p.face_setback(front, z_top);
+                let over = if front {
+                    pts.iter().map(|q| q[1]).fold(f32::MIN, f32::max) - (p.y_nose - set - 0.01)
+                } else {
+                    (p.y_tail + set + 0.01) - pts.iter().map(|q| q[1]).fold(f32::MAX, f32::min)
+                };
+                if set > 1e-4 && over > 0.0 {
+                    let dy = if front { -over } else { over };
+                    for q in &mut pts {
+                        q[1] += dy;
+                    }
+                }
+            }
+        }
         let mut lamp = Lamp::new(view, pts.clone());
         lamp.yaw_deg = yaw_deg;
+        lamp.step_m = self.lens_step_m;
         let (lamp_key, sig_key, region) = if front {
             (
                 headlight_key(sx),

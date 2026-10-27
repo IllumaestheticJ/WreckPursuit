@@ -1415,6 +1415,171 @@ fn chins_leave_no_overlapping_end_faces() {
     }
 }
 
+/// Share of the camera-facing triangles of part `name` that the body shell does not hide from a
+/// camera ahead of the nose, `elev_deg` above horizontal (rays through their centroids, as
+/// `check_lights`).
+fn seen_from_ahead(m: &car_assets::mesh::CarMesh, name: &str, elev_deg: f32) -> f32 {
+    let e = elev_deg.to_radians();
+    let to_cam = [0.0, e.cos(), e.sin()];
+    let (mut faces, mut seen) = (0, 0);
+    for p in m.parts.iter().filter(|p| p.name == name) {
+        for t in p.indices.chunks(3) {
+            let (a, b, c) = (
+                p.vertex(t[0] as usize),
+                p.vertex(t[1] as usize),
+                p.vertex(t[2] as usize),
+            );
+            let n = cross3(sub3(b, a), sub3(c, a));
+            let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            if l < 1e-9 || (n[0] * to_cam[0] + n[1] * to_cam[1] + n[2] * to_cam[2]) / l < 0.3 {
+                continue;
+            }
+            faces += 1;
+            let cen = [
+                (a[0] + b[0] + c[0]) / 3.0,
+                (a[1] + b[1] + c[1]) / 3.0,
+                (a[2] + b[2] + c[2]) / 3.0,
+            ];
+            let o = [cen[0], cen[1] + 3.0 * to_cam[1], cen[2] + 3.0 * to_cam[2]];
+            let d = [0.0, -to_cam[1], -to_cam[2]];
+            // Seen unless the body shell is in front (a grille's own slats may be).
+            let hit = first_hit(m, o, d);
+            let shell = hit
+                .as_deref()
+                .and_then(|h| m.parts.iter().find(|q| q.name == h))
+                .is_some_and(|q| matches!(q.kind, PartKind::Panel | PartKind::Body));
+            if !shell {
+                seen += 1;
+            }
+        }
+    }
+    if faces == 0 {
+        0.0
+    } else {
+        seen as f32 / faces as f32
+    }
+}
+
+/// Race-car noses (morrigan / nyx kits) with a raked face over a chin: with `nose_chin_h`
+/// keeping the undercut under the lower face, the mouth grille and the brake / nose ducts on it
+/// stay in view from ahead (straight and 12° above) about as well as without a chin. At the
+/// default 0.4 the undercut reaches up behind them and the upper face's overhang hides them
+/// from every normal camera height (race-offroad report).
+#[test]
+fn race_nose_parts_stay_visible_over_a_low_chin() {
+    let root = repo_root();
+    for (id, parts) in [
+        (
+            "morrigan_55",
+            ["front_mouth", "brake_duct_l", "brake_duct_r"],
+        ),
+        ("nyx_proto", ["nose_intake", "nose_duct_l", "nose_duct_r"]),
+    ] {
+        let car = load_car(&root, id).unwrap();
+        let mut st = style_for(&car.def);
+        st.body.nose_face_rake_deg = 20.0;
+        st.body.nose_chin_m = 0.0;
+        let open = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+        st.body.nose_chin_m = 0.08;
+        st.body.nose_chin_h = 0.15;
+        let low = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+        for name in parts {
+            for elev in [0.0f32, 12.0] {
+                let (a, b) = (
+                    seen_from_ahead(&open, name, elev),
+                    seen_from_ahead(&low, name, elev),
+                );
+                assert!(
+                    a > 0.2,
+                    "{id}/{name} at {elev}°: hidden even without a chin ({a:.2})"
+                );
+                assert!(
+                    b >= 0.7 * a,
+                    "{id}/{name} at {elev}°: {b:.2} of its faces seen over a low chin, {a:.2} without"
+                );
+            }
+        }
+    }
+}
+
+/// A top-view head lamp near the nose (nyx's fender-pod lamp, on the race-offroad nyx nose)
+/// with the face raked 20–40° and no chin: the outline moves back to end short of the face's
+/// top edge, so no lens sits under the body top seen from ahead
+/// (`lights_sit_outside_the_shell` failed at 20–25°, race-offroad report).
+#[test]
+fn top_view_lamps_stay_on_top_of_a_raked_nose() {
+    use car_assets::builder::{Builder, PartKey};
+    use car_assets::lamp::{ellipse, LampView};
+    use car_assets::mesh::MaterialSlot as M;
+    use car_assets::style::{Detail, DetailCtx, Shape};
+    use car_assets::styles::performance::kit::{Kit, Seg, SIDES};
+    fn pod_lamps(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
+        let p = ctx.profile;
+        let mut k = Kit::new(p, b);
+        let (wn, yn) = (p.half_width(p.y_nose), p.y_nose);
+        let (wt, zt) = (p.half_width(p.y_tail), p.belt(p.y_tail));
+        for sx in SIDES {
+            let tail = ellipse([-(wt - 0.20), zt - 0.10], [0.12, 0.05], 12);
+            k.proj_cluster(
+                sx,
+                false,
+                LampView::Rear,
+                &tail,
+                Some(Seg::Inboard(0.06)),
+                M::EmissiveAmber,
+                0.0,
+                0.0,
+            );
+            // Its tip nearer the nose than nyx's (12 cm): over a 20–40° rake it reaches past
+            // the face's top edge.
+            let lamp = [
+                [-(wn - 0.03), yn - 0.04],
+                [-(wn - 0.26), yn - 0.12],
+                [-(wn - 0.24), yn - 0.32],
+                [-(wn - 0.05), yn - 0.25],
+            ];
+            k.proj_cluster(
+                sx,
+                true,
+                LampView::Top,
+                &lamp,
+                Some(Seg::Outboard(0.08)),
+                M::EmissiveAmber,
+                0.0,
+                0.0,
+            );
+        }
+        // As the nyx kit: turn signals beside the lamps too.
+        k.signals_beside_lamps(0.06, M::EmissiveAmber);
+    }
+    let root = repo_root();
+    for id in ["nyx_proto", "morrigan_55"] {
+        let car = load_car(&root, id).unwrap();
+        for rake in [20.0f32, 25.0, 40.0] {
+            let mut st = style_for(&car.def);
+            // The race-offroad nyx nose: fender pods standing over a low, rounded nose.
+            st.body.front_fender_rise_m = 0.11;
+            st.body.rear_fender_rise_m = 0.09;
+            st.body.fender_peak_w = 0.68;
+            st.body.nose_h = Some(0.40);
+            st.body.nose_rake_deg = 30.0;
+            st.body.nose_plan_round = 0.10;
+            st.body.nose_face_rake_deg = rake;
+            st.body.nose_chin_m = 0.0;
+            // Only these lamps (the car's kit would cover the pods with its own parts).
+            st.details = vec![Detail::new(
+                "pod_lamps",
+                BodyRegion::FrameFront,
+                M::Trim,
+                Shape::Custom(pod_lamps),
+            )];
+            let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+            car_assets::skin::bind_skin(&car.lattice, &mut m);
+            check_lights(&format!("{id} rake {rake}"), &m);
+        }
+    }
+}
+
 /// Painted van rear doors (`rear_door_windows`): the rear glass area becomes body-colour door
 /// skin, glass only in the two drawn windows (a seal round each), on both LODs; the car still
 /// validates, inside its budget, with its lamps visible.

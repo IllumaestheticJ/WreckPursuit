@@ -156,7 +156,8 @@ change.
 | `fender_peak_w` | fraction | 0.5…0.95 | 0.80 | where the fender peak starts (of the body half width) |
 | `overhang_trim` (range widened) | m | −0.35…+0.25 each (`OVERHANG_RANGE`) | (0, 0) | was −0.15…+0.10 |
 | `nose_face_rake_deg` / `tail_face_rake_deg` | ° | −15…60 | 0 | side-view lean of the end face (+ top back / tailgate lean, − shark nose) |
-| `nose_chin_m` / `tail_chin_m` | m | 0…0.25 | 0 | undercut of the lower 40 % of the face |
+| `nose_chin_m` / `tail_chin_m` | m | 0…0.25 | 0 | undercut of the lower part of the face (`*_chin_h` of its height) |
+| `nose_chin_h` / `tail_chin_h` | share | 0.05…0.6 | 0.4 | how far up the face the chin sweeps; keep it under kit parts on the lower face |
 | `nose_plan_bow_m` / `tail_plan_bow_m` | m | 0…0.5 | 0 | plan-view bow length of the end (elliptical) |
 | `nose_tip_w` / `tail_tip_w` | fraction | 0.1…1.0 | 0.6 | half width left at the very end with a bow |
 | `roof_plan_taper` | fraction | 0…0.3 | 0 | roof narrows header → rear glass (greenhouse plan taper) |
@@ -466,6 +467,47 @@ inboard, only on rings a chin reaches (defaults byte-identical, `gen-car-mesh --
   than the same car without a chin (+2 cm²). It fails without the fix.
 - Sheet `docs/media/car-shapes/phase3/chin_overlap.jpg` (game renderer, marten, low views).
   `e2e/smooth_shots.mjs` takes `SHOT_VIEW="name|eye: [..], at: [..]"` for an extra view.
+
+### Raked-face folds found on the integrated branch (hatch marten, tuner kestrel)
+`chins_leave_no_overlapping_end_faces` failed on lead/car-shapes-int (marten 176 cm² with a chin
+against 104 without). The overlap was real, not kit parts: all of it was body / panel loft and
+cap faces. Four causes, all only where a face profile (rake / chin) reaches, so default meshes
+stay byte-identical:
+- the band of a raked face over a chin closed before the tip, so two whole rings collapsed
+  flat onto the underside (a zero-thickness fin on the underbody): `face_band` now keeps at
+  least `FACE_BAND_MIN_M` (12 mm) of height, a small step at the tip;
+- with the tip ring collapsed, the chin run of `round_ends` spanned the whole ring and pushed
+  the top points outboard (they must turn back inboard): the run stops at the shoulder;
+- rounding moved the points clamped onto the band's upper edge apart (top down, sides not), so
+  the tip ring went up and back down and its cap folded: they keep the highest height;
+- points clamped onto one edge kept their own x or took the side outline's, so their |x|
+  zigzagged at one height (folds in the face plane, also without a chin): every clamped run
+  in `ring()` and the upper run of `round_ends` now rise to one |x| peak and fall after it
+  (`profile::unimodal_x`).
+On lead/car-shapes-int + this commit, with every mesh regenerated (the raked-face cars of
+the groups change; parity copies too): the whole car-assets suite, validate and `--check` pass.
+
+### Race-offroad findings: chin over lower-face kit parts, top lamps on a raked nose, lens step
+- **Chin hides the mouth / ducts.** `follow_end_faces` does put them on the chinned surface, but
+  a chin is an undercut: with the default chin height (the lower 40 % of the face) the mouth
+  grille, brake ducts and intakes on the lower face sit under the upper face's overhang and
+  vanish from every normal camera height. New `nose_chin_h` / `tail_chin_h` (share of the face
+  height the chin sweeps, 0.05–0.6, default 0.4 = unchanged) keep the undercut below them:
+  morrigan / nyx at rake 20, chin 0.08 with `nose_chin_h` 0.15 show their mouth and ducts as
+  without a chin. Test `race_nose_parts_stay_visible_over_a_low_chin` (shell-hidden share of the
+  parts' camera-facing faces from ahead, 0° and 12° up, against the same car without a chin;
+  fails at 0.4).
+- **Top-view lamps past a raked face's edge.** `Kit::proj_cluster` moves a `LampView::Top`
+  outline back (forward at the tail) until it ends 1 cm short of the edge where the top meets the
+  raked face (`BodyProfile::face_setback`, new and public), shape kept (a clip lost the lamp
+  at steep rakes). Checked on the race-offroad nyx (its kit at 10707697, nose rake 25, no chin):
+  `lights_sit_outside_the_shell` failed there without it (`indicator_front_r` under the hood) and
+  passes with it. Test `top_view_lamps_stay_on_top_of_a_raked_nose` (nyx-style fender-pod lamp
+  + beside-lamp signals on the race-offroad nyx nose, rake 20 / 25 / 40, morrigan and nyx) is
+  a guard only: this branch's older nyx kit does not reproduce the failure without the fix.
+- **Lens step.** `Kit::lens_step_m` (default 0.04, unchanged meshes) sets the `proj_cluster`
+  lens grid step (0.01–0.08) for cars near their budget; a `Kit` built by struct literal (the
+  phase-3 demo) needs the field.
 
 ### Painted van rear doors (`rear_door_windows`, traffic group request)
 `BodyStyle::rear_door_windows: Option<RearDoorWindows>` (default `None`, meshes unchanged). On a

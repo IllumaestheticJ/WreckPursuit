@@ -24,6 +24,29 @@ pub const CABIN_SHIFT_RANGE: (f32, f32) = (-0.60, 0.60);
 pub const RING_POINTS: usize = 18;
 /// Ring index of the shoulder point (top of the side, at the belt).
 pub const RING_SHOULDER: usize = 7;
+
+/// Make the |x| of a run of LEFT ring points (x ≤ 0) rise to one peak and fall after it,
+/// flattening any zigzag (points at one height whose |x| goes back and forth fold the loft
+/// strips between them). Runs shorter than 3 points are left as they are.
+pub fn unimodal_x(run: &mut [RingPt]) {
+    let n = run.len();
+    if n < 3 {
+        return;
+    }
+    let peak = (0..n)
+        .max_by(|&a, &b| (-run[a].p[0]).total_cmp(&-run[b].p[0]).then(b.cmp(&a)))
+        .unwrap_or(0);
+    for i in 1..=peak {
+        run[i].p[0] = run[i].p[0].min(run[i - 1].p[0]);
+    }
+    for i in peak + 1..n {
+        run[i].p[0] = run[i].p[0].max(run[i - 1].p[0]);
+    }
+}
+
+/// Smallest height of an end face's band ([`BodyProfile::face_band`]): the step left at the tip
+/// of a raked / chinned face, m.
+pub const FACE_BAND_MIN_M: f32 = 0.012;
 /// Station offset of the paired stations that make vertical pickup-bed walls, m.
 pub const BED_WALL_EPS: f32 = 0.004;
 /// Greenhouse height over the flat top above which a ring takes the greenhouse layout, m.
@@ -506,6 +529,34 @@ impl BodyProfile {
         (rake, chin * k, zb, zt)
     }
 
+    /// Share of an end face's height its chin sweeps ([`BodyStyle::nose_chin_h`] /
+    /// `tail_chin_h`), clamped.
+    fn chin_h(&self, front: bool) -> f32 {
+        if front {
+            self.style.nose_chin_h.clamp(0.05, 0.6)
+        } else {
+            self.style.tail_chin_h.clamp(0.05, 0.6)
+        }
+    }
+
+    /// How far the nose (`front`) or tail face is set back from the end at height `z`, m (rake
+    /// plus chin, as [`BodyProfile::face_band`] uses it; 0 without a face profile). The top of
+    /// the body meets a raked face at `y_nose − face_setback(true, top height)`.
+    pub fn face_setback(&self, front: bool, z: f32) -> f32 {
+        if self.face_depth(front) <= 1e-4 {
+            return 0.0;
+        }
+        let (rake, chin, zb, zt) = self.face_params(front);
+        let r = tan_deg(rake);
+        let zc = zb + self.chin_h(front) * (zt - zb).max(0.05);
+        let rk = if r >= 0.0 {
+            r * (z - zb).max(0.0)
+        } else {
+            -r * (zt - z).max(0.0)
+        };
+        rk + chin * smoothstep((zc - z) / (zc - zb).max(0.02))
+    }
+
     /// Allowed height band (lo, hi) of the loft at `y` from the end face profiles, or `None`
     /// where no face knob reaches. A point at height z is behind the face when its set-back
     /// (rake: from the face bottom up, or from the top down when leaning forward; chin: the
@@ -524,7 +575,7 @@ impl BodyProfile {
             }
             let (rake, chin, zb, zt) = self.face_params(front);
             let r = tan_deg(rake);
-            let zc = zb + 0.4 * (zt - zb).max(0.05);
+            let zc = zb + self.chin_h(front) * (zt - zb).max(0.05);
             let setback = |z: f32| -> f32 {
                 let rk = if r >= 0.0 {
                     r * (z - zb).max(0.0)
@@ -579,7 +630,10 @@ impl BodyProfile {
                 None => (lo, hi),
             });
         }
-        band
+        // Never closed: a ring collapsed to one height at the tip makes the side and top strips
+        // run onto the same line, so they lie in one plane facing opposite ways (depth-fight);
+        // a small step at the tip keeps them a wedge.
+        band.map(|(lo, hi)| (lo, hi.max(lo + FACE_BAND_MIN_M)))
     }
 
     /// Plan-width scale at `y` from [`BodyStyle::plan_width`] (1 when empty): smoothstep
@@ -1305,13 +1359,30 @@ impl BodyProfile {
                     -orig[RING_SHOULDER][0]
                 }
             };
-            for pt in pts.iter_mut() {
+            // Which edge each point was clamped onto (−1 lower, 1 upper, 0 none).
+            let mut edge = vec![0i8; pts.len()];
+            for (j, pt) in pts.iter_mut().enumerate() {
                 let z = pt.p[2];
                 let zc = z.max(lo).min(hi);
                 if zc != z {
                     pt.p[2] = zc;
                     pt.p[0] = pt.p[0].max(-side_x(zc));
+                    edge[j] = if zc == lo { -1 } else { 1 };
                 }
+            }
+            // A run of points clamped onto one edge lies at one height: its |x| must rise to
+            // one peak and fall after it (a zigzag folds the strips between them, faces in one
+            // plane facing opposite ways).
+            let mut j = 0;
+            while j < pts.len() {
+                let mut k = j + 1;
+                while k < pts.len() && edge[j] != 0 && edge[k] == edge[j] {
+                    k += 1;
+                }
+                if edge[j] != 0 {
+                    unimodal_x(&mut pts[j..k]);
+                }
+                j = k;
             }
         }
         debug_assert_eq!(pts.len(), RING_POINTS);
