@@ -368,6 +368,40 @@ pub struct BodyStyle {
     /// Where the fender peak starts, as a fraction of the half width from the centre line (the
     /// rise fades in over 0.3 of the half width inboard of it). Range 0.5…0.95. Default 0.80.
     pub fender_peak_w: f32,
+    /// Side-view lean of the nose face from vertical, degrees. + leans the top back (raked
+    /// bumper, up to 60), − leans it forward (shark nose, down to −15: the bottom sets back).
+    /// The face runs from the nose's underside to its leading edge (`nose_h`); loft points ahead
+    /// of the face are clamped onto it. The face (rake + chin) never reaches further back than
+    /// 0.10 m ahead of the windshield base; the tail face stops 0.03 m behind the deck / rear
+    /// glass start (a hatch's tailgate lean is limited by its short tail section): deeper
+    /// settings are scaled down to fit. Default 0 (the vertical face).
+    pub nose_face_rake_deg: f32,
+    /// Chin / undercut: how far the lower 40 % of the nose face sweeps back at the bottom, m.
+    /// Range 0…0.25. Default 0.
+    pub nose_chin_m: f32,
+    /// Side-view lean of the tail face, degrees: + leans the top forward (tailgate lean, up to
+    /// 60), − leans it rearward (the bottom tucks forward, down to −15). Default 0.
+    pub tail_face_rake_deg: f32,
+    /// Undercut of the lower 40 % of the tail face (diffuser tuck), m. Range 0…0.25. Default 0.
+    pub tail_chin_m: f32,
+    /// Plan-view bow of the nose: over this length the half width follows an elliptical arc
+    /// from the full width down to `nose_tip_w` of it at the nose, so the face is rounded or
+    /// pointed instead of flat, m. Range 0…0.5. Default 0 (flat face).
+    pub nose_plan_bow_m: f32,
+    /// Half width left at the very nose with `nose_plan_bow_m`, as a fraction. Range 0.1…1.0
+    /// (0.6 = rounded nose, 0.2 = pointed). Default 0.6.
+    pub nose_tip_w: f32,
+    /// Plan-view bow of the tail (as `nose_plan_bow_m`), m. Range 0…0.5. Default 0.
+    pub tail_plan_bow_m: f32,
+    /// Half width left at the very tail with `tail_plan_bow_m`. Range 0.1…1.0. Default 0.6.
+    pub tail_tip_w: f32,
+    /// Greenhouse plan taper: the roof (and side-glass top) narrows from the header to the rear
+    /// glass by this fraction of its half width, held behind it (roof narrower toward the
+    /// rear), separate from tumblehome and the A / C-pillar rakes. Range 0…0.3. Default 0.
+    pub roof_plan_taper: f32,
+    /// Lower-body lean-in below the character line (boat-tail / tucked section), m: side points
+    /// below the crease move in, most at the sill, 0 at the crease. Range 0…0.08. Default 0.
+    pub lower_lean_in_m: f32,
 }
 
 /// Allowed range of a [`BodyStyle::plan_width`] scale.
@@ -501,6 +535,16 @@ impl Default for BodyStyle {
             front_fender_rise_m: 0.0,
             rear_fender_rise_m: 0.0,
             fender_peak_w: 0.80,
+            nose_face_rake_deg: 0.0,
+            nose_chin_m: 0.0,
+            tail_face_rake_deg: 0.0,
+            tail_chin_m: 0.0,
+            nose_plan_bow_m: 0.0,
+            nose_tip_w: 0.6,
+            tail_plan_bow_m: 0.0,
+            tail_tip_w: 0.6,
+            roof_plan_taper: 0.0,
+            lower_lean_in_m: 0.0,
         }
     }
 }
