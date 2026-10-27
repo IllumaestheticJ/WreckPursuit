@@ -38,6 +38,9 @@ the vireo; a floating skirt plank; wheels small in big arch gaps.
   slats, the lindwurm's grille and intake bars) now use the shared prism (`face_bar`), which
   is far cheaper: lindwurm 21.9k → 21.1k of 22k after the generator's growth.
 - **Stoat:** tailgate lean 8° (the raked-tailgate mid-LOD fix landed).
+- **Mod coverage, final meshes (full run, 136 mods):** 1 of 136 shows nothing on each car,
+  `drivetrain_shifter_short` (interior, on the known list in `mod-visuals.md`; the script exits
+  1 whenever any pair is listed); every body / aero / protection / vinyl mod shows.
 - **Checked in the game renderer** (`e2e/smooth_shots.mjs`): smooth bodies, no artefacts
   after the chin change; low rear 3/4, low side and low front 3/4 views clean.
 
