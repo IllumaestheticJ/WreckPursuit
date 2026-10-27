@@ -1,7 +1,7 @@
 # car-shapes phase 2 + pass 3: hatch group
 
 - **Workstream:** car-shapes phase 2, group `hatch` (brief: `docs/integration/car-shapes-phase2-brief.md`),
-  then pass 3 on the phase-3 / 3b generator (`ws/car-shapes` d8e0a524 and b10e5e14, merged in).
+  then pass 3 on the phase-3 / 3b generator (`ws/car-shapes` d8e0a524, b10e5e14 and d64c04b7, merged in).
 - **Branch:** `ws/car-shapes-hatch` (from `origin/ws/car-shapes`)
 - **Cars:** `vireo_xs`, `stoat_16v`, `marten_20`, `lindwurm_4t`
 - **Files changed:** `tools/assets/src/styles/performance/hatch.rs` (style file, the only
@@ -34,6 +34,10 @@ the vireo; a floating skirt plank; wheels small in big arch gaps.
   (22°, 5 cm, bow 0.22 m to 0.70); leaning tailgates on those three (15° / 18° / 20°, capped by
   the short hatch tail); roof plan taper 0.10–0.12 (stoat 0.04). The stoat keeps upright faces:
   that is its identity (and a 6° tailgate lean left its coarse mid LOD without a tailgate panel).
+- **Addenda (d64c04b7):** `glass_base_lip_m` 0.03 (stoat 0.02) under the hatch glass;
+  `quarter_glass` set explicitly (stoat true, the others false); lindwurm `dlo_kink_m` 0.06 over
+  0.20 m (window line kicking up at the rear). The local projected `face_poly` stays (the shared
+  `Kit::face_poly` is a flat prism on the face plane, which a raked / bowed face needs projected).
 - **Face-mounted parts follow the faces:** every part on the nose / tail (grille inserts and
   slats, mouths, ducts, bumper bands, badges, plates, reflectors, valances, fogs) is now a flat
   patch projected onto the body (local `face_poly` / `face_box` / `slot_grille` / `round_fogs` /
@@ -65,7 +69,7 @@ the vireo; a floating skirt plank; wheels small in big arch gaps.
   red accent line and lip. Rear: tall red-over-amber clusters with a clear reverse lens under
   them, cast round onto the quarters (yaw 25°), black hatch garnish with badge, high brake lamp,
   plate, reflectors, single tip.
-- **Triangles:** 20,003 full (phase 1: 17,065), 5,690 mid. Hero budget 22k.
+- **Triangles:** 20,005 full (phase 1: 17,065), 5,681 mid. Hero budget 22k.
 
 ### stoat_16v
 - **Reference:** early-90s European front-drive 16-valve hot hatch, about 4.05 m long, 1.7 m
@@ -125,7 +129,7 @@ the vireo; a floating skirt plank; wheels small in big arch gaps.
 
 ## Checks run (pass 3)
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p
-car-assets` (37 passed), `validate-car-asset` (39 cars ok), `gen-car-mesh --check`; `git status`
+car-assets` (39 passed), `validate-car-asset` (39 cars ok), `gen-car-mesh --check`; `git status`
 after a full `gen-car-mesh` shows only the four cars' meshes changed.
 - `phase3_knobs_keep_panels_on_their_regions` (extreme knobs on top of each car's style) first
   failed on lindwurm_4t: mesh width 2.432 m against the +35 % limit of 2.430 m, from the door
@@ -138,7 +142,10 @@ after a full `gen-car-mesh` shows only the four cars' meshes changed.
   where the lamp top reached the leaning tailgate glass, so its tail lamps sit 4 cm lower.
 - Mod coverage, phase 2 (full run, 136 mods): 1 of 136 shows nothing on each car,
   `drivetrain_shifter_short` (interior, on the known list in `mod-visuals.md`). Pass 3 spot
-  check: see below.
+  check on the final bodies (wing, splitter, diffuser, front lip, side skirts, rear bumper, front
+  and rear protection bumpers, bull bar, stripes; `MODS=… SHOTS_ALL=1`): every mod shows on all
+  four, and the shots show them seated on the raked / bowed faces (the bolt-on front bumper
+  stands a little proud of the vireo's raked nose, as an add-on bumper does).
 
 ## Notes for the lead
 - **Door count:** `stoat_16v`'s spec sheet (and the old style comment for `vireo_xs`) says
@@ -157,8 +164,8 @@ blank shapes; lamp graphics are generic.
 ## Generator requests
 Sent to the lead 2026-10-27. Done in phase 3 / 3b: plan-width curve, section curvature, projected
 lamps that wrap the corners, face rake / chin / plan bow, tailgate lean, roof plan taper. Still
-open (announced): a lip at the hatch-glass base, the quarter-glass knob (stoat: size its small
-window explicitly), nose height, smooth shading.
+open: smooth shading (announced). Lip, quarter glass, heights and DLO shape landed in d64c04b7
+and are used above.
 
 ## Contract change requests
 None.

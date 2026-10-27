@@ -376,6 +376,9 @@ pub fn vireo(def: &VehicleDef) -> CarStyle {
     b.nose_tip_w = 0.65;
     b.tail_face_rake_deg = 15.0;
     b.roof_plan_taper = 0.10;
+    // Tailgate lip under the hatch glass; blind C-pillar.
+    b.glass_base_lip_m = 0.03;
+    b.quarter_glass = false;
     s.details.push(kit_detail(vireo_kit));
     wheels(
         &mut s,
@@ -644,7 +647,10 @@ pub fn stoat(def: &VehicleDef) -> CarStyle {
     b.tumblehome_m = Some(0.10);
     b.front_fender_rise_m = 0.02;
     b.fender_peak_w = 0.86;
-    // Upright faces (the boxy identity) and a near-square roof.
+    // Upright faces (the boxy identity) and a near-square roof; it keeps its small quarter
+    // window; a small lip under the hatch glass.
+    b.quarter_glass = true;
+    b.glass_base_lip_m = 0.02;
     b.roof_plan_taper = 0.04;
     s.details.push(kit_detail(stoat_kit));
     wheels(
@@ -935,6 +941,8 @@ pub fn marten(def: &VehicleDef) -> CarStyle {
     b.nose_tip_w = 0.50;
     b.tail_face_rake_deg = 18.0;
     b.roof_plan_taper = 0.12;
+    b.glass_base_lip_m = 0.03;
+    b.quarter_glass = false;
     b.side_bulge_m = 0.022;
     b.side_bulge_z = 0.42;
     b.rocker_in_m = 0.035;
@@ -1193,6 +1201,11 @@ pub fn lindwurm(def: &VehicleDef) -> CarStyle {
     b.nose_tip_w = 0.70;
     b.tail_face_rake_deg = 20.0;
     b.roof_plan_taper = 0.12;
+    b.glass_base_lip_m = 0.03;
+    b.quarter_glass = false;
+    // Window line kicking up at the rear of the rear-door glass.
+    b.dlo_kink_m = 0.06;
+    b.dlo_kink_len_m = 0.20;
     b.side_sculpt = vec![
         // Shoulder line along the whole side, 8 cm under the belt.
         SideSculpt {

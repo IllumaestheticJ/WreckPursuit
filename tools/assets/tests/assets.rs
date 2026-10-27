@@ -956,7 +956,7 @@ const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
     ("talus_20t", 17376),
     ("tansy_13", 8214),
     ("tumbril_20", 9418),
-    ("vireo_xs", 20003),
+    ("vireo_xs", 20005),
 ];
 
 /// Bounding box (lo, hi) of a part, m.
