@@ -79,6 +79,59 @@ fn main() {
         }
     }
     let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
+    if let Ok(from) = std::env::var("PIECE_FROM") {
+        // One piece of road: from the chain point nearest `x,y`, PIECE_LEN m along it.
+        let xy: Vec<f32> = from.split(',').map(|v| v.parse().unwrap()).collect();
+        let plen: f32 = std::env::var("PIECE_LEN")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(400.0);
+        let mut best: Option<(f32, usize, f32)> = None;
+        for (k, (_, pts)) in paths.iter().enumerate() {
+            let cum = geom::cumulative(pts);
+            let pr = geom::project(pts, &cum, [xy[0], xy[1]]);
+            if best.is_none_or(|b| pr.dist < b.0) {
+                best = Some((pr.dist, k, pr.s));
+            }
+        }
+        let (_, k, s0) = best.unwrap();
+        let pts = paths[k].1.clone();
+        let cum = geom::cumulative(&pts);
+        let piece: Vec<[f32; 3]> = (0..=(plen / 2.0) as usize)
+            .map(|i| geom::point_at(&pts, &cum, s0 + i as f32 * 2.0).0)
+            .collect();
+        eprintln!("piece on chain {} from {:?}", paths[k].0, piece[0]);
+        paths = vec![(paths[k].0, piece)];
+    }
+    if std::env::var("SAGS").is_ok() {
+        // 250 m pieces of each chain through every sag (grade rising by > 2.5 % over 30 m).
+        let mut cut = Vec::new();
+        for (k, (_, pts)) in paths.iter().enumerate() {
+            let cum = geom::cumulative(pts);
+            let len = *cum.last().unwrap();
+            let z = |s: f32| geom::point_at(pts, &cum, s).0[2];
+            let mut s = 130.0;
+            let mut last = -1000.0;
+            while s < len - 130.0 {
+                let g0 = (z(s) - z(s - 15.0)) / 15.0;
+                let g1 = (z(s + 15.0) - z(s)) / 15.0;
+                if (g1 - g0).abs() > 0.02 && s - last > 200.0 {
+                    last = s;
+                    let piece: Vec<[f32; 3]> = (0..=50)
+                        .map(|i| geom::point_at(pts, &cum, s - 120.0 + i as f32 * 5.0).0)
+                        .collect();
+                    eprintln!(
+                        "sag {} on chain {k} at {:?} grade {g0:.3}->{g1:.3}",
+                        cut.len(),
+                        geom::point_at(pts, &cum, s).0
+                    );
+                    cut.push((cut.len(), piece));
+                }
+                s += 2.0;
+            }
+        }
+        paths = cut;
+    }
     if std::env::var("CONES").is_ok() {
         // Straight through every crossover cone along the median line.
         paths.clear();
@@ -126,7 +179,11 @@ fn main() {
         &std::env::var("CAR").unwrap_or_else(|_| "cars/debug_sedan.json".into()),
     ))
     .unwrap();
+    let only: Option<usize> = std::env::var("CHAIN").ok().and_then(|v| v.parse().ok());
     for (start, path) in &paths {
+        if only.is_some_and(|o| o != *start) {
+            continue;
+        }
         let mut s = Sim::new(SimConfig {
             seed: 4,
             mode: mode.clone(),
@@ -153,7 +210,39 @@ fn main() {
                 .unwrap()
                 .1;
             let out = f.follow(&st, &dp, speed, 0.0, 1.0 / 240.0);
-            s.set_input(id, out.input).unwrap();
+            let mut input = out.input;
+            if let Some(cap) = std::env::var("FLAT_OUT")
+                .ok()
+                .and_then(|v| v.parse::<f32>().ok())
+            {
+                // The player's way: no braking for bends, throttle up to `cap` m/s.
+                let v = (st.lin_vel[0].powi(2) + st.lin_vel[1].powi(2)).sqrt();
+                input.brake = 0.0;
+                input.throttle = if v < cap { 1.0 } else { 0.0 };
+            }
+            s.set_input(id, input).unwrap();
+            if std::env::var("TRACE").is_ok()
+                && t % std::env::var("TRACE")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(30)
+                    .max(1)
+                    == 0
+            {
+                let cw = st.wheel_states.iter().filter(|w| w.contact).count();
+                println!(
+                    "trace {start} t={:.2} v={:.1} thr={:.2} brk={:.2} x={:.1} y={:.1} z={:.2} vz={:.1} wheels {cw} comp {:?}",
+                    t as f32 / 240.0,
+                    (st.lin_vel[0].powi(2) + st.lin_vel[1].powi(2)).sqrt(),
+                    input.throttle,
+                    input.brake,
+                    st.pos[0],
+                    st.pos[1],
+                    st.pos[2],
+                    st.lin_vel[2],
+                    st.wheel_states.iter().map(|w| (w.compression_m * 100.0).round() / 100.0).collect::<Vec<_>>()
+                );
+            }
             s.step_fixed();
             let v = (st.lin_vel[0].powi(2) + st.lin_vel[1].powi(2)).sqrt();
             for e in s.drain_events() {
