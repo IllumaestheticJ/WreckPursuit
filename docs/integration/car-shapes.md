@@ -453,6 +453,20 @@ Item 9 (the faceted fans on the black A-pillar sail and on sharp-plan tail corne
 with (f) in the all-cars regeneration commit ("Twisted loft strips" above). Arch lips and liners now add the side sculpt / bulge offset, so they
 stay on a sculpted side (0 when those knobs are off).
 
+### Chin depth-fight fix (`nose_chin_m` / `tail_chin_m`, hatch group report)
+A chin clamps the lowest ring points of the end rings onto the face band's lower edge, so they
+nearly coincide; `round_ends` then moved them apart along ill-defined normals (the underside
+point up by the full `end_round_m`, the collapsed corner points sideways), folding the end ring:
+the cap and the last loft faces overlapped in one plane with opposite normals (455 cm² under
+marten's nose at chin 0.06) and depth-fought as black / body-colour patches in the smooth
+renderer. Now that run of clamped points keeps one height (the lowest) and never steps back
+inboard, only on rings a chin reaches (defaults byte-identical, `gen-car-mesh --check` passes).
+- Test `chins_leave_no_overlapping_end_faces`: marten, kestrel, hauler, cruiser, tansy at chin
+  0.03 / 0.06 / 0.12 on both ends: coplanar overlapping body / panel area near each end no more
+  than the same car without a chin (+2 cm²). It fails without the fix.
+- Sheet `docs/media/car-shapes/phase3/chin_overlap.jpg` (game renderer, marten, low views).
+  `e2e/smooth_shots.mjs` takes `SHOT_VIEW="name|eye: [..], at: [..]"` for an extra view.
+
 ### Painted van rear doors (`rear_door_windows`, traffic group request)
 `BodyStyle::rear_door_windows: Option<RearDoorWindows>` (default `None`, meshes unchanged). On a
 car with rear glass, `Some` turns the whole rear glass area into body-colour door skin (`trunk`,

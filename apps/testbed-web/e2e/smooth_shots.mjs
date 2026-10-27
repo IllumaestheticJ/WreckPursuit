@@ -2,7 +2,7 @@
 // real renderer. Usage (after `npm run wasm`): node e2e/smooth_shots.mjs <outDir> [car ...]
 // Writes <outDir>/{before,after,lowpoly}/<car>_<view>.png: `before` = ?flatcars=1 (the old flat
 // body), `after` = greybox with crease-split normals, `lowpoly` = the low-poly dark style (still
-// faceted). Env: CHROMIUM. Exits 1 on page errors.
+// faceted). Env: CHROMIUM, SHOT_VIEW (an extra view, see below). Exits 1 on page errors.
 import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -33,6 +33,11 @@ const VIEWS = {
   rear: "eye: [0.62 * k, -0.78 * k, 0.30 * k + 0.4], at: [0, -0.05 * k, 0.6]",
   side: "eye: [-1.05 * k, 0.05 * k, 0.15 * k + 0.4], at: [0, 0, 0.6]",
 };
+// SHOT_VIEW="name|eye: [x, y, z], at: [x, y, z]" adds a view (car space, k = 0.95 × length).
+if (process.env.SHOT_VIEW) {
+  const [name, src] = process.env.SHOT_VIEW.split("|");
+  VIEWS[name] = src;
+}
 const errors = [];
 for (const [variant, query] of [
   ["before", "?gfx=high&style=greybox&flatcars=1"],

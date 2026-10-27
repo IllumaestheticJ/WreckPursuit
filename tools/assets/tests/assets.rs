@@ -1265,6 +1265,156 @@ fn fender_rise_keeps_kit_lamps_visible() {
     }
 }
 
+/// Area (cm²) where two body / panel triangles near an end (`front`: within 0.6 m of the nose,
+/// else of the tail; below 0.6 m) lie in the same plane (within 1.5 mm, parallel or opposite)
+/// and overlap: such faces depth-fight in the renderer.
+fn end_coplanar_overlap_cm2(m: &car_assets::mesh::CarMesh, front: bool) -> f32 {
+    type V = [f32; 3];
+    let sub = |a: V, b: V| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: V, b: V| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = |a: V, b: V| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let ys: Vec<f32> = m
+        .parts
+        .iter()
+        .flat_map(|p| p.positions_mm.chunks_exact(3).map(|q| q[1] as f32))
+        .collect();
+    let (ymin, ymax) = ys
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(a, b), &y| (a.min(y), b.max(y)));
+    let mut tris: Vec<([V; 3], V, f32)> = Vec::new();
+    for p in &m.parts {
+        if !matches!(p.kind, PartKind::Panel | PartKind::Body) || p.wheel.is_some() {
+            continue;
+        }
+        let v = |i: u32| -> V {
+            let q = &p.positions_mm[i as usize * 3..i as usize * 3 + 3];
+            [q[0] as f32, q[1] as f32, q[2] as f32]
+        };
+        for t in p.indices.chunks_exact(3) {
+            let q = [v(t[0]), v(t[1]), v(t[2])];
+            let near = if front {
+                q.iter().all(|c| c[1] > ymax - 600.0)
+            } else {
+                q.iter().all(|c| c[1] < ymin + 600.0)
+            };
+            if !near || q.iter().any(|c| c[2] > 600.0) {
+                continue;
+            }
+            let n = cross(sub(q[1], q[0]), sub(q[2], q[0]));
+            let l = dot(n, n).sqrt();
+            if l < 20.0 {
+                continue;
+            }
+            let n = [n[0] / l, n[1] / l, n[2] / l];
+            tris.push((q, n, dot(n, q[0])));
+        }
+    }
+    // Area of the overlap of two triangles in the plane (axes k1, k2).
+    let area = |p: &[[f32; 2]]| -> f32 {
+        (0..p.len())
+            .map(|i| {
+                let (a, b) = (p[i], p[(i + 1) % p.len()]);
+                a[0] * b[1] - b[0] * a[1]
+            })
+            .sum::<f32>()
+            * 0.5
+    };
+    let mut total = 0.0;
+    for i in 0..tris.len() {
+        for j in i + 1..tris.len() {
+            let (a, b) = (&tris[i], &tris[j]);
+            let d = dot(a.1, b.1);
+            if d.abs() < 0.995 || (a.2 - d * b.2).abs() > 1.5 {
+                continue;
+            }
+            let ax = (0..3)
+                .max_by(|&x, &y| a.1[x].abs().total_cmp(&a.1[y].abs()))
+                .unwrap();
+            let (k1, k2) = ((ax + 1) % 3, (ax + 2) % 3);
+            let flat = |t: &[V; 3]| -> Vec<[f32; 2]> {
+                let mut p: Vec<[f32; 2]> = t.iter().map(|c| [c[k1], c[k2]]).collect();
+                if area(&p) < 0.0 {
+                    p.reverse();
+                }
+                p
+            };
+            let mut poly = flat(&a.0);
+            let clip = flat(&b.0);
+            for e in 0..3 {
+                let (c0, c1) = (clip[e], clip[(e + 1) % 3]);
+                let side = |q: [f32; 2]| {
+                    (c1[0] - c0[0]) * (q[1] - c0[1]) - (c1[1] - c0[1]) * (q[0] - c0[0])
+                };
+                let mut out = Vec::new();
+                for k in 0..poly.len() {
+                    let (p0, p1) = (poly[k], poly[(k + 1) % poly.len()]);
+                    let (s0, s1) = (side(p0), side(p1));
+                    if s0 >= 0.0 {
+                        out.push(p0);
+                    }
+                    if (s0 >= 0.0) != (s1 >= 0.0) {
+                        let t = s0 / (s0 - s1);
+                        out.push([p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t]);
+                    }
+                }
+                poly = out;
+                if poly.len() < 3 {
+                    break;
+                }
+            }
+            if poly.len() >= 3 {
+                total += area(&poly).max(0.0) / 100.0;
+            }
+        }
+    }
+    total
+}
+
+/// Chins (`nose_chin_m` / `tail_chin_m`) leave no coplanar, overlapping faces at the ends (the
+/// rounded end ring used to fold where the chin collapses the lowest ring points, so the cap
+/// and the last faces depth-fought in the smooth renderer): no more overlap than the same car
+/// without a chin.
+#[test]
+fn chins_leave_no_overlapping_end_faces() {
+    let root = repo_root();
+    for id in [
+        "marten_20",
+        "kestrel_ts",
+        "hauler_1500",
+        "sentinel_cruiser",
+        "tansy_13",
+    ] {
+        let car = load_car(&root, id).unwrap();
+        let base = style_for(&car.def);
+        let m0 = car_assets::mesh::generate_styled(&car.def, &car.lattice, &base);
+        let before = [
+            end_coplanar_overlap_cm2(&m0, true),
+            end_coplanar_overlap_cm2(&m0, false),
+        ];
+        for chin in [0.03f32, 0.06, 0.12] {
+            let mut st = base.clone();
+            st.body.nose_chin_m = chin;
+            st.body.tail_chin_m = chin;
+            let m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+            for (k, front) in [(0, true), (1, false)] {
+                let a = end_coplanar_overlap_cm2(&m, front);
+                assert!(
+                    a <= before[k] + 2.0,
+                    "{id} chin {chin} {}: {a:.0} cm² of overlapping faces (no chin: {:.0})",
+                    if front { "nose" } else { "tail" },
+                    before[k]
+                );
+            }
+        }
+    }
+}
+
 /// Painted van rear doors (`rear_door_windows`): the rear glass area becomes body-colour door
 /// skin, glass only in the two drawn windows (a seal round each), on both LODs; the car still
 /// validates, inside its budget, with its lamps visible.

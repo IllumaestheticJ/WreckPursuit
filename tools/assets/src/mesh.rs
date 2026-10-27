@@ -1561,6 +1561,30 @@ fn round_ends(p: &BodyProfile, rings: &mut [Vec<RingPt>]) {
             let dz = (r * n[2]).abs().min((z_hi - z_lo) / 6.0);
             pt.p = [q[0] + dx, q[1], q[2] - dz * n[2].signum()];
         }
+        // A chin clamps the lowest ring points onto the face band's lower edge, so they nearly
+        // coincide and their normals are ill-defined: rounding moved them apart in height and
+        // folded the ring (the cap and the last faces then overlapped and depth-fought). That
+        // run (from the underside up) keeps one height, the lowest, and never steps back
+        // inboard. Only rings a chin reaches: default cars are unchanged.
+        let chin = if s == 0 {
+            p.style.tail_chin_m
+        } else {
+            p.style.nose_chin_m
+        };
+        if chin > 0.0 {
+            if let Some((lo, _)) = p.face_band(ring[0].p[1]) {
+                let run = ring.iter().take_while(|q| q.p[2] <= lo + 1e-4).count();
+                if run >= 2 {
+                    let z = (0..run).map(|j| rings[s][j].p[2]).fold(f32::MAX, f32::min);
+                    for j in 0..run {
+                        rings[s][j].p[2] = z;
+                        if j > 0 {
+                            rings[s][j].p[0] = rings[s][j].p[0].min(rings[s][j - 1].p[0]);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
