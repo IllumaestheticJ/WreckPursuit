@@ -251,7 +251,10 @@ pub struct BodyStyle {
     /// How far the tail top falls inside `tail_round`, m. Range 0…0.25. Default 0.10.
     pub tail_drop: f32,
     /// Visual (front, rear) overhang trim, m (+ lengthens, − shortens the mesh past the
-    /// bumper nodes). Range −0.15…+0.10 each.
+    /// bumper nodes). Range [`OVERHANG_RANGE`] (−0.35…+0.25) each (−0.15…+0.10 before phase
+    /// 3). The nose never comes closer than 0.10 m to the hood's front edge or 0.06 m to the
+    /// front tire (tail: the quarter's end, the rear tire), so the bumper panels keep a strip
+    /// on their lattice region.
     pub overhang_trim: (f32, f32),
     /// Pickup bed depth below the rail, m (Pickup only). Range 0.2…0.6. Default 0.45.
     pub bed_depth: f32,
@@ -322,6 +325,99 @@ pub struct BodyStyle {
     /// by this much all round, so bumpers read rounded instead of slab-cut. 0 = sharp.
     /// Range 0…0.05. Default 0.03.
     pub end_round_m: f32,
+
+    // --- Phase 3 shape knobs (car-shapes phase 3; every default leaves the body unchanged) ---
+    /// Plan-view width curve: control points `[y_m, scale]` (chassis y in metres, + forward;
+    /// any order) scaling the body half width at that station. Between points the scale eases
+    /// with a smoothstep (no overshoot); before the first / after the last point it holds.
+    /// Scale range [`PLAN_SCALE_RANGE`] (0.80…1.05). Empty (default) = 1 everywhere. Narrow
+    /// nose: `[[y_front_arch, 1.0], [y_nose, 0.88]]`; Coke-bottle waist: a 0.95 point at the
+    /// doors between 1.0 points at the arches. Over a wheel the body never narrows inside the
+    /// tire's outer face (+1 cm). The hood, deck and lamps follow (they read
+    /// [`crate::profile::BodyProfile::half_width`]); the greenhouse keeps its own width (it
+    /// only narrows when the glass base would cross it).
+    pub plan_width: Vec<[f32; 2]>,
+    /// Side sculpts: local side-wall offsets (side pods, scallops, coves, pontoon fenders,
+    /// shoulder lines). See [`SideSculpt`]. Empty by default. Offsets add up; the side point
+    /// never moves more than [`SCULPT_DX_RANGE`] in total.
+    pub side_sculpt: Vec<SideSculpt>,
+    /// Convex side section: outward bow of the body side between sill and belt, m (peak at
+    /// `side_bulge_z`, fading to 0 at the sill corner and the shoulder). Range 0…0.06.
+    /// Default 0 (flat slab).
+    pub side_bulge_m: f32,
+    /// Height of the side bulge peak as a fraction of sill → belt (0 = sill, 1 = belt).
+    /// Range 0.2…0.8. Default 0.55.
+    pub side_bulge_z: f32,
+    /// Sill tuck-in: how far the rocker and sill corner step in under the side, m (the lower
+    /// body tucks under, a "tucking hard into the sill" section). Range 0…0.08. Default 0.
+    pub rocker_in_m: f32,
+    /// Tumblehome with a wider range than [`BodyStyle::tumblehome`]: per-side inset of the roof
+    /// edge vs the body side, m. Range [`TUMBLEHOME_M_RANGE`] (0.03…0.36: near-vertical van or
+    /// SUV glass up to a narrow prototype canopy). `Some` overrides `tumblehome`. Default
+    /// `None`. Pair small values with a small `glass_inset` for upright glass.
+    pub tumblehome_m: Option<f32>,
+    /// Front fender tops raised above the hood centre, m: the outer band of the hood (|x| ≥
+    /// `fender_peak_w` of the half width) and the shoulder rise by this much from the front
+    /// wheel forward to the nose (fading in over 0.3 m behind the wheel arch; the nose fall still
+    /// applies, so nothing stands in front of lamps). Unlike `hood_valley` the hood centre and
+    /// the nose stay where they are, so kit head lamps stay visible. Range 0…0.12. Default 0.
+    pub front_fender_rise_m: f32,
+    /// Rear fender (haunch) tops raised above the deck centre, m: from the rear wheel back to
+    /// the tail (fading in over 0.3 m ahead of the arch). Range 0…0.12. Default 0.
+    pub rear_fender_rise_m: f32,
+    /// Where the fender peak starts, as a fraction of the half width from the centre line (the
+    /// rise fades in over 0.3 of the half width inboard of it). Range 0.5…0.95. Default 0.80.
+    pub fender_peak_w: f32,
+}
+
+/// Allowed range of a [`BodyStyle::plan_width`] scale.
+pub const PLAN_SCALE_RANGE: (f32, f32) = (0.80, 1.05);
+/// Allowed range of a [`SideSculpt::dx_m`] and of the summed sculpt offset, m.
+pub const SCULPT_DX_RANGE: (f32, f32) = (-0.08, 0.06);
+/// Allowed range of [`BodyStyle::tumblehome_m`], m.
+pub const TUMBLEHOME_M_RANGE: (f32, f32) = (0.03, 0.36);
+/// Allowed range of [`BodyStyle::overhang_trim`] (each end), m.
+pub const OVERHANG_RANGE: (f32, f32) = (-0.35, 0.25);
+
+/// A local side-wall offset ([`BodyStyle::side_sculpt`]): every side ring point (underside edge
+/// to shoulder) inside the box `y0_m..y1_m` × `z0_m..z1_m` moves out (+) or in (−) by `dx_m`,
+/// easing to 0 over `falloff_m` outside the box (smoothstep in y and in z). Chassis metres.
+///
+/// Recipes: side pod stepping in behind the front wheel: `y` from the arch's rear edge back
+/// 0.8 m, `z` from the sill to just under the belt, `dx −0.04`, falloff 0.15. Door scallop /
+/// cove: a short `y` span, a mid-height `z` band, `dx −0.025`, falloff 0.10. Pontoon fender:
+/// `y` over the arch ± 0.3, `z` from the arch top to the belt, `dx +0.04`, falloff 0.2 (pair
+/// with `front_fender_rise_m`). Shoulder line: a thin `z` band just under the belt, the whole
+/// length, `dx +0.015`, falloff 0.03.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SideSculpt {
+    /// Rear edge of the full-strength box, chassis y (m).
+    pub y0_m: f32,
+    /// Front edge of the full-strength box, chassis y (m).
+    pub y1_m: f32,
+    /// Lower edge, m above ground.
+    pub z0_m: f32,
+    /// Upper edge, m above ground.
+    pub z1_m: f32,
+    /// Offset, m (+ outward, − inward). Range [`SCULPT_DX_RANGE`].
+    pub dx_m: f32,
+    /// Soft edge outside the box (y and z), m. Range 0.02…0.5.
+    pub falloff_m: f32,
+}
+
+impl SideSculpt {
+    /// Offset (m, + outward) this sculpt gives a side point at (y, z).
+    pub fn dx_at(&self, y: f32, z: f32) -> f32 {
+        let f = self.falloff_m.clamp(0.02, 0.5);
+        let edge = |v: f32, a: f32, b: f32| {
+            let (lo, hi) = (a.min(b), a.max(b));
+            let d = (lo - v).max(v - hi).max(0.0);
+            crate::profile::smoothstep(1.0 - d / f)
+        };
+        self.dx_m.clamp(SCULPT_DX_RANGE.0, SCULPT_DX_RANGE.1)
+            * edge(y, self.y0_m, self.y1_m)
+            * edge(z, self.z0_m, self.z1_m)
+    }
 }
 
 impl Default for BodyStyle {
@@ -396,6 +492,15 @@ impl Default for BodyStyle {
             arch_lip_m: 0.016,
             arch_liners: true,
             end_round_m: 0.03,
+            plan_width: Vec::new(),
+            side_sculpt: Vec::new(),
+            side_bulge_m: 0.0,
+            side_bulge_z: 0.55,
+            rocker_in_m: 0.0,
+            tumblehome_m: None,
+            front_fender_rise_m: 0.0,
+            rear_fender_rise_m: 0.0,
+            fender_peak_w: 0.80,
         }
     }
 }
