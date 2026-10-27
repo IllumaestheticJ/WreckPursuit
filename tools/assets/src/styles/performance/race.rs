@@ -170,7 +170,8 @@ fn number_panel(k: &mut Kit, sx: f32, y0: f32, y1: f32, z0: f32, z1: f32) {
 
 /// Front-engine GT endurance racer built from a coupe: long louvred hood, vented box flares,
 /// huge carbon splitter with dive planes, swan-neck wing on big end plates, deep diffuser.
-/// Yellow with black (carbon) accents and white number panels.
+/// Slate teal with lime accents and number panels, carbon aero (a fictional team's colours;
+/// rule 9: no real team's livery).
 pub fn morrigan(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         cabin_shift_m: -0.22,
@@ -233,8 +234,8 @@ pub fn morrigan(def: &VehicleDef) -> CarStyle {
     m.show_engine_detail = true;
     m.caliper_rgb = Some(rgb(0xD21E1E));
     m.spring_rgb = Some(rgb(0x1C1C1C));
-    s.tints.push((M::Paint, rgb(0xFFD100)));
-    s.accent_rgb = Some(rgb(0xF4F4F0));
+    s.tints.push((M::Paint, rgb(0x2F4F57)));
+    s.accent_rgb = Some(rgb(0xB8E62A));
     s
 }
 

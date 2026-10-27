@@ -289,7 +289,7 @@ fn mesquite_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let ff = BodyRegion::FrameFront;
     let fr = BodyRegion::FrameRear;
 
-    // --- Nose: tall lamp clusters with C-shaped running lights, wide grille between them with
+    // --- Nose: tall lamp clusters with twin-blade running lights, wide grille between them with
     // a heavy body-colour crossbar and a blank badge, black lower fascia.
     let (lz0, lz1) = (nz1 - 0.24, nz1 - 0.04);
     for sx in SIDES {
@@ -327,15 +327,15 @@ fn mesquite_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.020,
             0.0,
         );
-        // "C" running light: top bar, inboard upright, bottom bar.
+        // Running lights: twin horizontal blades above and below the lens (the house graphic;
+        // rule 9 keeps it clear of any maker's signature lamp shape).
         let kd = sided(
             &lkey("drl_l", BodyRegion::FrontLeftFender, M::Headlight),
             sx,
         );
         for (x0, x1, z0, z1) in [
-            (0.63, wn - 0.05, lz1 - 0.035, lz1 - 0.015),
-            (0.63, 0.655, lz0 + 0.015, lz1 - 0.015),
-            (0.63, wn - 0.05, lz0 + 0.015, lz0 + 0.035),
+            (0.63, wn - 0.05, lz1 - 0.035, lz1 - 0.018),
+            (0.66, wn - 0.08, lz0 + 0.018, lz0 + 0.030),
         ] {
             k.front_box(&kd, sx * x0, sx * x1, z0, z1, 0.024, 0.0);
         }

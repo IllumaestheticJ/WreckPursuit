@@ -3,7 +3,7 @@
   "lattice_id": "morrigan_55",
   "format": 4,
   "tri_count": 20682,
-  "tints": {"paint":[255,209,0],"caliper":[210,30,30],"spring":[28,28,28],"accent":[244,244,240]},
+  "tints": {"paint":[47,79,87],"caliper":[210,30,30],"spring":[28,28,28],"accent":[184,230,42]},
   "atlas": {"y":[-2.355,2.5549998],"z":[0.0,1.38],"x_half":1.145},
   "wheel_camber_deg": [-1.5,-1.5,-1.0,-1.0],
   "parts": [

@@ -35,16 +35,16 @@ Triangles: full mesh (hero budget 22k) / mid LOD (7k).
 ### `mesquite_pr` (pre-runner pickup)
 - **Reference:** 2010s American full-size off-road performance pickup: tall slab sides and a high,
   flat hood, near-upright nose with a wide grille between the lamps, heavy crossbar and badge,
-  wrap-round lamp clusters with C-shaped running lights, fibreglass box flares over 35-inch
+  tall lamp clusters with LED running-light graphics, fibreglass box flares over 35-inch
   all-terrains, raked windshield, sliding cab-back window.
 - **Before:** read as a small 80s pickup (low belt, small square lamps, small grille, 46°
   upright windshield).
 - **Changed:** belt +8 cm (taller slab sides), nose raised to the lattice hood-front height
   (1.20 m, the physical limit) and stood upright, flatter hood with a centre bulge, 57°
   windshield, side character line; new front: tall lamp clusters (projector lens + outboard
-  amber signal + C running light), wide mesh grille with frame, body-colour crossbar and blank
+  amber signal + twin running-light blades), wide mesh grille with frame, body-colour crossbar and blank
   badge; sliding rear window on the cab-back wall; black mirrors and handles, fuel door left.
-- **Tris:** 20 223 → 20 835 / mid 6 530 → 6 980.
+- **Tris:** 20 223 → 20 811 / mid 6 530 → 6 964.
 
 ### `morrigan_55` (front-engine GT endurance racer)
 - **Reference:** 2010s front-mid-engine GT endurance car on a production coupe: long hood with
@@ -100,6 +100,10 @@ because the coarse one cut under the crowned windshield and flickered.
   (the cladding takes over as the dark accent; also needed to keep the mid LOD under 7k).
 - **Erg:** body-colour pontoon fenders (boxed, navy lips) 14 cm out; taller stance.
 - **Morrigan:** carbon sill pods between the wheels.
+- **Rule 9 (brand cues, lead note):** Morrigan's yellow-with-black livery was dropped (a yellow
+  front-engine V8 GT racer points at one real factory team): now slate teal with lime accents.
+  Mesquite's C-shaped running lights (one maker's signature) are now twin horizontal blades.
+  Grilles are generic mesh with blank badges.
 - Not done on purpose: a cab-forward canopy on Morrigan (front-engine GT, long hood per its
   spec) and Merlo (four-door touring sedan). Only Nyx has the canopy.
 
@@ -149,5 +153,5 @@ patches here) for two-door bodies on four-door lattices and closed engine covers
   lattice doors).
 - The loft's flat shading shows a stipple on the big curved haunches (pre-existing, every car).
 - Mesquite's hood front cannot rise above the lattice hood-front height, so the nose is a little
-  lower than a real full-size truck's; its mid LOD sits at 6 980 of 7 000.
+  lower than a real full-size truck's; its mid LOD sits at 6 964 of 7 000.
 - Body sides are still slab-sided between the arches (generator requests 1–2).
