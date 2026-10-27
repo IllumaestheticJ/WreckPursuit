@@ -813,7 +813,8 @@ fn rampart_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         0.045,
     );
     k.diffuser(M::Carbon, 0.66, 0.15, 4, 0.05);
-    k.lip_spoiler(M::Paint, yt + 0.22, 0.035, 0.08, 0.15);
+    // Inset so the lip stays on the flat deck centre, clear of the raised haunch tops.
+    k.lip_spoiler(M::Paint, yt + 0.22, 0.035, 0.08, 0.30);
     let kr = dkey("rear_valance", BodyRegion::RearBumper, M::Grille);
     k.rear_box(
         &kr,
