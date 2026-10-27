@@ -209,7 +209,11 @@ fn a_tyre_the_car_already_runs_does_nothing() {
         .iter()
         .find(|m| m.tire_ids().eq([stock.as_str()]))
         .unwrap_or_else(|| panic!("no tyre mod sets {stock}"));
-    assert!(same.does_nothing_on(&coupe.def), "{} on {stock} tyres", same.id);
+    assert!(
+        same.does_nothing_on(&coupe.def),
+        "{} on {stock} tyres",
+        same.id
+    );
     let other = e
         .catalog
         .iter()
