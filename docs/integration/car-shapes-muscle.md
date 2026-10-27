@@ -10,6 +10,18 @@
 - No shared generator code, car defs, lattices or sim code changed. A full `gen-car-mesh` run
   changes only these four cars' meshes.
 
+## Final touch-up (merged ws/car-shapes 86693a0d: smooth shading, raked-face kit fix, all-car regen)
+- **rampart_50:** full shark nose (`nose_face_rake_deg` −12°, `nose_chin_m` 0.07) and a tail
+  undercut over the diffuser (`tail_chin_m` 0.06), now that grille / mouth / fogs / splitter /
+  tail panel follow raked faces. To stay inside 22k after the regen (+tris), wheels 22 segments
+  and the over-the-top stripes on an 8 cm × 3 grid (local `stripe`) instead of the 6 cm auto grid.
+- **ironside_440:** +6 cm rear overhang back (the cladding test bound is now relative).
+- Checked with smooth shading in the real renderer (`e2e/smooth_shots.mjs`, greybox and
+  low-poly dark) and from low front / rear 3/4: no spikes, gaps or floating parts. The one
+  defect found and fixed: the coarse stripe grid dipped under the hood crown near the nose.
+- Final sheet (before = original `main` meshes, after = this branch):
+  `docs/media/car-shapes/muscle/final.jpg`.
+
 ## Pass 3 (phase-3 generator knobs, merged from ws/car-shapes d8e0a524)
 - **ironside_440:** coke-bottle plan (1.0 over both wheels, 0.935 at the doors, 0.95–0.96 at
   the ends); front fender tops 5 cm above the hood (replaces `hood_valley`), rear haunch tops
@@ -132,10 +144,10 @@ ribbed reflector panel, landau roof with chrome band, rubber side strip, chrome 
 ## Triangle counts (hero budget 22k, mid 7k)
 | car | full before | full now | mid before | mid now |
 |---|---|---|---|---|
-| ironside_440 | 19809 | 20055 | 5451 | 5891 |
-| rampart_50 | 19954 | 21317 | 5380 | 5902 |
-| bulwark_400 | 20579 | 20825 | 5621 | 6151 |
-| brigand_400 | 20986 | 21639 | 6042 | 6340 |
+| ironside_440 | 19809 | 21146 | 5451 | 6000 |
+| rampart_50 | 19954 | 21912 | 5380 | 6410 |
+| bulwark_400 | 20579 | 21377 | 5621 | 6299 |
+| brigand_400 | 20986 | 21935 | 6042 | 6364 |
 
 ## Checks
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p
@@ -149,9 +161,9 @@ and brigand). The rampart's sport tyres show (arch gap 6 cm; at 4.5 cm they were
 
 ## Shots
 `docs/media/car-shapes/muscle/{before,after}/<car>_{front,rear,side,top,cabin,cabin_rear}.jpg`;
-per-car before (left) / after (right) sheets `docs/media/car-shapes/muscle/<car>_before_after.jpg`
+before = the original `main` meshes; per-car before (left) / after (right) sheets `docs/media/car-shapes/muscle/<car>_before_after.jpg`
 (rows: front 3/4, rear 3/4, side, top) and all four side by side in
-`docs/media/car-shapes/muscle/before_after.jpg`.
+`docs/media/car-shapes/muscle/final.jpg` (same as `before_after.jpg`).
 
 ## Known gaps
 - The rampart's nose cannot lean forward (shark nose): `nose_rake_deg` only leans back. It is
@@ -166,7 +178,7 @@ per-car before (left) / after (right) sheets `docs/media/car-shapes/muscle/<car>
 3. ~~Shaped lamp lens primitive~~ (done in phase 3: `lamp`, `Kit::proj_cluster`).
 4. ~~Side patch that follows the greenhouse surface~~ (done: `PatchBand::Greenhouse`) (opera windows, C-pillar badges).
 5. ~~Lower-body tumblehome~~ (done in phase 3b: `lower_lean_in_m`).
-6. New: a face-following variant of `Kit::front_box` / `rear_box` (or a y offset taking the
+6. ~~Face-following `Kit::front_box` / `rear_box`~~ (done: 27cde677). Was: a face-following variant of `Kit::front_box` / `rear_box` (or a y offset taking the
    face rake and chin at z), so grilles, mouths and diffusers can sit on a raked face.
 
 ## Contract change requests
