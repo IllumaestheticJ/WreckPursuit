@@ -10,7 +10,7 @@
 use wp_contracts::{SurfaceType, WorldQuery};
 use wp_world::geom::{self, V2, V3};
 use wp_world::map::{CityMap, SegKind};
-use wp_world::Route;
+use wp_world::{routes, Route};
 
 /// Resampling step, m.
 pub const CORRIDOR_STEP_M: f32 = 2.0;
@@ -170,6 +170,9 @@ struct Piece {
     seg: u32,
     a: f32,
     b: f32,
+    /// The lane the route changes to at the end of this one: the samples move across to it
+    /// over the last `routes::LANE_CHANGE_M`.
+    change_to: Option<u32>,
 }
 
 impl Corridor {
@@ -198,18 +201,19 @@ impl Corridor {
             .project(geom::xy(*route.polyline.last().unwrap()))
             .s
             .clamp(0.0, last.length);
-        let pieces: Vec<Piece> = route
-            .segs
+        // Whole segments, except lanes left by a lane change (`wp_world::routes::route_spans`).
+        let spans = routes::route_spans(map, &route.segs, s_start, s_end);
+        let pieces: Vec<Piece> = spans
             .iter()
             .enumerate()
-            .map(|(k, &seg)| Piece {
+            .map(|(k, &(seg, a, b))| Piece {
                 seg,
-                a: if k == 0 { s_start } else { 0.0 },
-                b: if k == n - 1 {
-                    s_end
-                } else {
-                    map.seg(seg).length
-                },
+                a,
+                b,
+                change_to: spans
+                    .get(k + 1)
+                    .map(|nx| nx.0)
+                    .filter(|&nx| routes::is_lane_change(map, seg, nx)),
             })
             .filter(|p| p.b - p.a > 1e-3)
             .collect();
@@ -256,10 +260,42 @@ impl Corridor {
                     prev_was_lane = freeway;
                 }
             }
+            // Lane change: blend position and extents toward the next lane (the road's edges
+            // stay put, since the extents shift with the centre).
+            let change = p.change_to.and_then(|to| {
+                let to_lane = map.seg(to).lane()?;
+                Some((
+                    to,
+                    lane_extents(map, to_lane, opts),
+                    (p.b - routes::LANE_CHANGE_M).max(p.a),
+                ))
+            });
             let mut s = p.a + carry;
             while s < p.b {
-                let (pos, t) = seg.point_at(s);
-                let (l, lp, r) = ext.unwrap_or((f32::NAN, f32::NAN, f32::NAN));
+                let (mut pos, mut t) = seg.point_at(s);
+                let (mut l, mut lp, mut r) = ext.unwrap_or((f32::NAN, f32::NAN, f32::NAN));
+                if let Some((to, (l2, lp2, r2), from_s)) = change {
+                    if s > from_s {
+                        let u = (s - from_s) / (p.b - from_s).max(1e-3);
+                        let w = routes::lane_change_ease(u);
+                        let q = routes::lane_change_point(map, p.seg, to, s, u);
+                        let ahead = routes::lane_change_point(
+                            map,
+                            p.seg,
+                            to,
+                            (s + 1.0).min(p.b),
+                            ((s + 1.0 - from_s) / (p.b - from_s).max(1e-3)).min(1.0),
+                        );
+                        let d = geom::sub(geom::xy(ahead), geom::xy(q));
+                        if geom::len(d) > 1e-3 {
+                            t = geom::normalize(d);
+                        }
+                        pos = q;
+                        l += (l2 - l) * w;
+                        lp += (lp2 - lp) * w;
+                        r += (r2 - r) * w;
+                    }
+                }
                 pts.push((pos, t, l, lp, r, ext.is_none() && !freeway));
                 s += CORRIDOR_STEP_M;
             }
@@ -655,6 +691,58 @@ mod tests {
             ..route
         };
         assert!(Corridor::try_from_route(map, &fwd, &opts).is_some_and(|c| c.len() > 1));
+    }
+
+    /// A route that changes lanes builds a corridor that eases across: centre points stay a
+    /// step apart and the road's edges (centre ± extents) do not move.
+    #[test]
+    fn a_lane_change_eases_across_and_keeps_the_road_edges() {
+        let world = wp_world::World::procedural(
+            &wp_world::procgen::ProcGenConfig::small(),
+            wp_world::WorldConfig::default(),
+        );
+        let map = world.map();
+        // A long lane with a neighbour on the right: plan from its left lane to a point far
+        // along the right one (the planner changes lanes to get there).
+        let (left, right) = (0..map.n_lanes() as u32)
+            .filter_map(|i| {
+                let l = &map.net.lanes[i as usize];
+                let r = l.right?;
+                (map.seg(i).length > 150.0 && map.seg(r).drivable).then_some((i, r))
+            })
+            .next()
+            .expect("a two-lane road");
+        let a = map.seg(left).point_at(5.0).0;
+        let b = map.seg(right).point_at(map.seg(right).length - 5.0).0;
+        let route = Route {
+            segs: vec![left, right],
+            lanes: vec![left, right],
+            polyline: vec![a, b],
+            checkpoints: Vec::new(),
+            length_m: 0.0,
+            closed_loop: false,
+        };
+        let c = Corridor::from_route(map, &route, &CorridorOptions::default());
+        let edges = |s: &CorridorSample| {
+            let n = s.normal();
+            let p = geom::xy(s.pos);
+            (
+                [p[0] - n[0] * s.left_m, p[1] - n[1] * s.left_m],
+                [p[0] + n[0] * s.right_m, p[1] + n[1] * s.right_m],
+            )
+        };
+        for w in c.samples.windows(2) {
+            let d = geom::dist(geom::xy(w[0].pos), geom::xy(w[1].pos));
+            assert!(d < CORRIDOR_STEP_M * 1.2, "centre step {d} m");
+            let (l0, r0) = edges(&w[0]);
+            let (l1, r1) = edges(&w[1]);
+            assert!(geom::dist(l0, l1) < CORRIDOR_STEP_M * 1.2 + 0.05);
+            assert!(geom::dist(r0, r1) < CORRIDOR_STEP_M * 1.2 + 0.05);
+        }
+        // It starts on the left lane and ends on the right one.
+        let off = |p: V3, lane: u32| map.seg(lane).project(geom::xy(p)).dist;
+        assert!(off(c.samples[0].pos, left) < 0.1);
+        assert!(off(c.samples[c.samples.len() - 1].pos, right) < 0.1);
     }
 
     #[test]
