@@ -11,7 +11,8 @@
   lattices, car defs. `gen-car-mesh --check` passes for every car.
 
 ## New local helpers (in `traffic.rs`, used by my cars only)
-- `van_box(b, p, windows)`: the generator keeps the deck start ≥ 0.25 m ahead of the tail, so
+- `van_box(b, p, windows)` (passes 1–3; replaced by the shared `rear_door_windows` in the final
+  touch-up): the generator keeps the deck start ≥ 0.25 m ahead of the tail, so
   every van had a stepped upper rear (and floating hinges / roof markers: the known gap from
   phase 1). The greenhouse section at the roof's rear edge is now extruded back to the tail:
   `rear_corner_l/_r` (quarters), `roof_extension` (roof), `rear_door_skin` (trunk = barn doors,
@@ -215,13 +216,26 @@ over after row) and `overview_front.jpg` (all seven, before / after).
 - Final sheet: `docs/media/car-shapes/traffic/final.jpg` (before = `main` meshes, after = this
   branch; front / rear / side each).
 
+- Painted van rear doors (merged `759e9b2f`): the three vans use the shared
+  `rear_door_windows` (recipe 0.10 / 0.05 / 0.10 / 0.45 / 0.04; two windows that stay
+  `rear_glass`, so glass break works) with `deck_min_m` 0.02; my local `van_box` is gone. A
+  small `barn_door_trim` keeps the centre seam, hinges, handle and high brake lamp on the door
+  face. The tail lamps moved fully below the belt (red / amber / red on the European vans, red
+  over amber on the drayman): lenses cast across the belt step were stretched. The step itself
+  (a few cm of deck ledge at the belt) is how the shared doors look (same as the lead's
+  `van_doors.jpg`). Drayman budget: its rub strip is a single sheet and its front signals are
+  box lenses again (it was 11,212 with the doors).
+- Test change outside my style file: `painted_rear_doors_keep_glass_only_in_the_windows` now
+  builds its "fully glazed" baseline with `rear_door_windows: None` (the vans' own styles use
+  the knob now, so the old baseline was already painted).
+
 ## Final counts
 | car | full | mid |
 |---|---|---|
-| drayman_cargo | 10941 | 5709 |
+| drayman_cargo | 10766 | 5670 |
 | furrow_24 | 10134 | 5014 |
 | hauler_1500 | 10995 | 5901 |
 | junkyard_beater | 9244 | 4499 |
-| satchel_20 | 10689 | 5223 |
+| satchel_20 | 10868 | 5439 |
 | tansy_13 | 10248 | 4221 |
-| tumbril_20 | 10704 | 5143 |
+| tumbril_20 | 10845 | 5326 |
