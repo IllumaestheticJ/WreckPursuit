@@ -880,9 +880,9 @@ const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
     ("ironside_440", 19809),
     ("junkyard_beater", 8836),
     ("kestrel_ts", 18914),
-    ("lindwurm_4t", 17474),
+    ("lindwurm_4t", 18152),
     ("lucciola_350", 18170),
-    ("marten_20", 17056),
+    ("marten_20", 17520),
     ("rampart_50", 19954),
     ("satchel_20", 9221),
     ("sentinel_bastion", 18932),
@@ -892,11 +892,11 @@ const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
     ("sentinel_wolfhound", 18626),
     ("shiro_turbo", 18992),
     ("sperber_32", 19112),
-    ("stoat_16v", 16894),
+    ("stoat_16v", 17326),
     ("talus_20t", 17376),
     ("tansy_13", 8214),
     ("tumbril_20", 9418),
-    ("vireo_xs", 17065),
+    ("vireo_xs", 17147),
 ];
 
 /// Bounding box (lo, hi) of a part, m.
