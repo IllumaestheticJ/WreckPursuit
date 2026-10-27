@@ -1,7 +1,8 @@
 # car-shapes phase 2 + pass 3: hatch group
 
 - **Workstream:** car-shapes phase 2, group `hatch` (brief: `docs/integration/car-shapes-phase2-brief.md`),
-  then pass 3 on the phase-3 / 3b generator (`ws/car-shapes` d8e0a524, b10e5e14 and d64c04b7, merged in).
+  then pass 3 on the phase-3 / 3b generator (`ws/car-shapes` d8e0a524, b10e5e14, d64c04b7 and the final touch-up round 2e265d6c / 27cde677 /
+  86693a0d, merged in).
 - **Branch:** `ws/car-shapes-hatch` (from `origin/ws/car-shapes`)
 - **Cars:** `vireo_xs`, `stoat_16v`, `marten_20`, `lindwurm_4t`
 - **Files changed:** `tools/assets/src/styles/performance/hatch.rs` (style file, the only
@@ -9,7 +10,10 @@
   `data/panels/meshes/mid/`, their rows in `TRIS_BEFORE_INTEGRATED_SIGNALS`
   (`tools/assets/tests/assets.rs`), shots in `docs/media/car-shapes/hatch/`.
 - **Not changed:** shared generator code, `data/cars`, `data/lattices`, panel specs, sim crates.
-- **Before / after:** `docs/media/car-shapes/hatch/hatch_before_after.jpg` (all four), and
+- **Final sheet:** `docs/media/car-shapes/hatch/final.jpg` (per car: the original `main` meshes
+  on top, the final meshes below, front / rear / side / top in the greybox shot renderer, plus
+  the final car in the game renderer with smooth shading).
+- **Earlier before / after:** `docs/media/car-shapes/hatch/hatch_before_after.jpg` (all four), and
   `<car>_before_after.jpg` per car (front 3/4, rear 3/4, side, top; "before" = the phase-1
   meshes, "after" = pass 3).
 
@@ -18,6 +22,24 @@ All four used one body recipe and (three of them) one kit: a long flat roof runn
 almost vertical hatch with a third side window, so they read as small estates; slab sides and a
 rectangular plan view; a tall slab nose with box lamps; the stoat and marten were recolours of
 the vireo; a floating skirt plank; wheels small in big arch gaps.
+
+## Final touch-up (smooth shading, raked-face follow, all-cars regeneration)
+- Merged; mesh and triangle-table conflicts taken from `ws/car-shapes`, then the four cars
+  regenerated and their rows rebased.
+- **Nose chins off** (vireo, marten, lindwurm): in the game renderer with smooth shading the
+  chin undercut's faces depth-fight with the underside (black / body-colour patches under the
+  nose); with `nose_chin_m` 0 it is clean. Face rakes kept. Reported to the lead.
+- **Chin splitter:** a local plate whose top sits 6 mm under the underside (no coplanar faces),
+  placed at the face bottom and marked placed (`Builder::mark_placed`) so the end-face follow
+  pass (`lamp::follow_end_faces`) does not set it back a second time.
+- **Local `face_poly` kept:** it projects onto the body (`lamp::lens`, marked placed), so the
+  follow pass leaves it alone and it follows the plan bow exactly; the shared `Kit::face_poly`
+  is a flat prism the follow pass moves. Thin bars across the middle of the nose (slot-grille
+  slats, the lindwurm's grille and intake bars) now use the shared prism (`face_bar`), which
+  is far cheaper: lindwurm 21.9k → 21.1k of 22k after the generator's growth.
+- **Stoat:** tailgate lean 8° (the raked-tailgate mid-LOD fix landed).
+- **Checked in the game renderer** (`e2e/smooth_shots.mjs`): smooth bodies, no artefacts
+  after the chin change; low rear 3/4, low side and low front 3/4 views clean.
 
 ## Shared changes (all four, render only)
 - **Greenhouse:** short roof (`roof_len_trim` −0.10…−0.18) with a slight fall (`roof_arc`
@@ -29,11 +51,12 @@ the vireo; a floating skirt plank; wheels small in big arch gaps.
   sculpts. Values per car below.
 - **Stance:** `arch_gap` 0.07 → 0.05 (wheels fill the arches), `overhang_trim` (−0.05, −0.02):
   the visual nose ends at the bumper node row (front overhang 0.82–0.90 m, was 0.87–0.95 m).
-- **End faces (phase 3b):** raked nose faces with an undercut chin and a plan bow on the
-  vireo (20°, 5 cm, bow 0.25 m to 0.65), marten (28°, 6 cm, bow 0.30 m to 0.50) and lindwurm
-  (22°, 5 cm, bow 0.22 m to 0.70); leaning tailgates on those three (15° / 18° / 20°, capped by
-  the short hatch tail); roof plan taper 0.10–0.12 (stoat 0.04). The stoat keeps upright faces:
-  that is its identity (and a 6° tailgate lean left its coarse mid LOD without a tailgate panel).
+- **End faces (phase 3b):** raked nose faces with a plan bow on the vireo (20°, bow 0.25 m to
+  0.65), marten (28°, bow 0.30 m to 0.50) and lindwurm (22°, bow 0.22 m to 0.70); chin
+  undercuts were used in pass 3 and switched off in the final touch-up (see above); leaning
+  tailgates (vireo 15°, marten 18°, lindwurm 20°, stoat 8° since the final touch-up; capped by
+  the short hatch tail); roof plan taper 0.10–0.12 (stoat 0.04). The stoat keeps an upright nose:
+  that is its identity.
 - **Addenda (d64c04b7):** `glass_base_lip_m` 0.03 (stoat 0.02) under the hatch glass;
   `quarter_glass` set explicitly (stoat true, the others false); lindwurm `dlo_kink_m` 0.06 over
   0.20 m (window line kicking up at the rear). The local projected `face_poly` stays (the shared
@@ -69,7 +92,7 @@ the vireo; a floating skirt plank; wheels small in big arch gaps.
   red accent line and lip. Rear: tall red-over-amber clusters with a clear reverse lens under
   them, cast round onto the quarters (yaw 25°), black hatch garnish with badge, high brake lamp,
   plate, reflectors, single tip.
-- **Triangles:** 20,005 full (phase 1: 17,065), 5,681 mid. Hero budget 22k.
+- **Triangles:** 20,576 full (phase 1: 17,065), 5,669 mid. Hero budget 22k.
 
 ### stoat_16v
 - **Reference:** early-90s European front-drive 16-valve hot hatch, about 4.05 m long, 1.7 m
@@ -87,7 +110,7 @@ the vireo; a floating skirt plank; wheels small in big arch gaps.
   doors; tail: wide lenses cast round the corners (yaw 20°) with amber outer ends, black ribs and
   clear inner strips, either side of a black plate panel on the tailgate; black roof spoiler with
   high brake lamp; black mirror caps.
-- **Triangles:** 19,784 full (phase 1: 16,894), 6,683 mid.
+- **Triangles:** 19,594 full (phase 1: 16,894), 6,004 mid.
 
 ### marten_20
 - **Reference:** early-90s European front-drive 2.0 hot hatch, about 4.05 m long, 1.7 m wide,
@@ -104,7 +127,7 @@ the vireo; a floating skirt plank; wheels small in big arch gaps.
   and skirts; tail: one red band of lamps (amber inboard sections, small reverse lenses) cast
   round the corners (yaw 30°) and a red reflector panel with badge across the tailgate; black
   lower valance, twin tips, body-colour roof spoiler with high brake lamp; filler on the left.
-- **Triangles:** 19,198 full (phase 1: 17,056), 5,181 mid.
+- **Triangles:** 19,876 full (phase 1: 17,056), 5,163 mid.
 
 ### lindwurm_4t
 - **Reference:** 2010s European all-wheel-drive hot hatch, 5-door, about 4.28 m long, 1.80 m
@@ -125,11 +148,11 @@ the vireo; a floating skirt plank; wheels small in big arch gaps.
   the top, black hatch garnish with badge, diffuser, quad tips, end-plated roof spoiler with high
   brake lamp, plate, reflectors; silver mirror caps with repeaters (mirrors 10 cm further back on
   the door than in phase 2, see checks); split-spoke wheels.
-- **Triangles:** 20,816 full (phase 1: 17,474), 6,216 mid.
+- **Triangles:** 21,157 full (phase 1: 17,474), 5,785 mid.
 
 ## Checks run (pass 3)
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p
-car-assets` (39 passed), `validate-car-asset` (39 cars ok), `gen-car-mesh --check`; `git status`
+car-assets` (41 passed), `validate-car-asset` (39 cars ok), `gen-car-mesh --check`; `git status`
 after a full `gen-car-mesh` shows only the four cars' meshes changed.
 - `phase3_knobs_keep_panels_on_their_regions` (extreme knobs on top of each car's style) first
   failed on lindwurm_4t: mesh width 2.432 m against the +35 % limit of 2.430 m, from the door
