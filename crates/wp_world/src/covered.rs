@@ -24,8 +24,19 @@ pub const WALL_M: f32 = 0.6;
 /// Roof slab thickness, m.
 pub const ROOF_M: f32 = 0.8;
 /// How far the roof deck reaches past the outer wall face on each side (over the carved
-/// shoulder of the cut, out to the backfilled ground), m.
-pub const DECK_OVERHANG_M: f32 = 8.5;
+/// shoulder of the cut, out over the backfilled ground), m: [`BACKFILL_START_M`] plus one
+/// terrain cell diagonal (8 m cells), so the ground is level with the deck top all along its
+/// edge instead of leaving a slot or a drop beside it.
+pub const DECK_OVERHANG_M: f32 = 24.0;
+/// How far past the outer wall face the ground is backfilled up to the deck, m: more than one
+/// terrain cell diagonal (8 m cells: 11.3 m), so no backfilled terrain triangle reaches into
+/// the tube. Between the wall and here the ground stays carved, hidden under the deck.
+pub const BACKFILL_START_M: f32 = 12.0;
+/// Slope of the backfill embankment beyond the deck edge (and past the portals, beside the
+/// approaches) down to the natural ground, rise per metre: 1 in 3, drivable. A tunnel whose
+/// natural ground is lower than its roof (the Hollins Tunnel's north side) is buried instead
+/// of standing out as a box with a sheer drop off its deck edge.
+pub const BACKFILL_SLOPE: f32 = 1.0 / 3.0;
 /// How far below the road surface a point still counts as inside, m (eye heights are
 /// approximate on slopes; nothing else is down there).
 pub const BELOW_ROAD_M: f32 = 3.0;
@@ -171,6 +182,22 @@ impl CoverShape {
     /// Half width of the roof deck (centreline to deck edge), m.
     pub fn deck_half_width(&self) -> f32 {
         self.span.half_width_m + WALL_M + DECK_OVERHANG_M
+    }
+
+    /// Whether plan point `p` lies over the span's deck or within `margin` m past its side
+    /// edges (between the portals): the ground there is the tunnel's carve and backfill, drawn
+    /// and collided at the terrain's own resolution ([`crate::surface::collision_terrain`]).
+    pub fn over_deck(&self, p: V2, margin: f32) -> bool {
+        let r = self.deck_half_width() + margin;
+        if p[0] < self.bounds[0][0] - r
+            || p[1] < self.bounds[0][1] - r
+            || p[0] > self.bounds[1][0] + r
+            || p[1] > self.bounds[1][1] + r
+        {
+            return false;
+        }
+        let q = self.locate(p);
+        q.s >= 0.0 && q.s <= self.length() && q.lateral.abs() <= r
     }
 
     /// Wall-face lines at road level `[left, right]` along the span (inner faces).

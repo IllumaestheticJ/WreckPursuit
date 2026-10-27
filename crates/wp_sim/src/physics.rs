@@ -459,13 +459,21 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     }
 
     // Covered roads: a wall box along each side (inner face at the span's half width, from
-    // below the banked road edge up to the ceiling) and the roof deck, per centreline segment.
+    // below the banked road edge up to the ceiling) and a ceiling slab per centreline segment,
+    // under one smooth roof-deck mesh over the deck's full width (per-segment boxes leave
+    // wedge gaps at the outside of bends and steps between segments on a grade).
     for span in &net.covered {
         let shape = wp_world::covered::CoverShape::new(span);
         let c = &span.centre;
-        let deck_half = shape.deck_half_width();
         let wall = wp_world::covered::WALL_M;
         let roof = wp_world::covered::ROOF_M;
+        // The slab spans the carved ground under the deck; the backfill carries the deck's
+        // outer part.
+        let slab_half = span.half_width_m + wall + wp_world::covered::BACKFILL_START_M;
+        if let Some(col) = deck_top_collider(&shape) {
+            added.push(col);
+            out.tunnel_boxes += 1;
+        }
         for k in 0..c.len().saturating_sub(1) {
             let (a, b) = (c[k], c[k + 1]);
             let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
@@ -500,8 +508,14 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
                 added.push(col);
                 out.tunnel_boxes += 1;
             }
-            let roof_mid = Vector::new(mid[0], mid[1], mid[2] + span.clearance_m + roof * 0.5);
-            let col = ColliderBuilder::cuboid(deck_half, len * 0.5 + 0.05, roof * 0.5 + slope)
+            // Ceiling slab: from the ceiling (less the grade) to half way up the deck, under
+            // the deck mesh.
+            let (r0, r1) = (
+                mid[2] + span.clearance_m - slope,
+                mid[2] + span.clearance_m + roof * 0.5,
+            );
+            let roof_mid = Vector::new(mid[0], mid[1], (r0 + r1) * 0.5);
+            let col = ColliderBuilder::cuboid(slab_half, len * 0.5 + 0.05, (r1 - r0) * 0.5)
                 .position(Pose::from_parts(roof_mid, rot))
                 .friction(0.6)
                 .build();
@@ -521,6 +535,35 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     }
 
     Some((added, out))
+}
+
+/// The top of a covered span's roof deck as one smooth triangle mesh (terrain group): a ribbon
+/// over the deck's full width ([`wp_world::covered::CoverShape::deck_half_width`]) at the deck
+/// top, the surface the greybox draws. `None` for a degenerate span.
+fn deck_top_collider(shape: &wp_world::covered::CoverShape) -> Option<Collider> {
+    let span = &shape.span;
+    let deck = shape.deck_half_width();
+    let top = span.clearance_m + wp_world::covered::ROOF_M;
+    let lift = |line: Vec<[f32; 3]>| -> Vec<Vector> {
+        line.iter()
+            .map(|p| Vector::new(p[0], p[1], p[2] + top))
+            .collect()
+    };
+    let left = lift(wp_world::geom::offset_polyline(&span.centre, -deck));
+    let right = lift(wp_world::geom::offset_polyline(&span.centre, deck));
+    let n = left.len().min(right.len()) as u32;
+    if n < 2 {
+        return None;
+    }
+    let mut verts = left[..n as usize].to_vec();
+    verts.extend_from_slice(&right[..n as usize]);
+    let idx: Vec<[u32; 3]> = (0..n - 1)
+        // Wound counter-clockwise seen from above (the oriented mesh faces up).
+        .flat_map(|k| [[k, n + k + 1, k + 1], [k, n + k, n + k + 1]])
+        .collect();
+    ColliderBuilder::trimesh_with_flags(verts, idx, TriMeshFlags::FIX_INTERNAL_EDGES)
+        .ok()
+        .map(|b| b.friction(0.6).collision_groups(terrain_groups()).build())
 }
 
 /// Static collider of one piece of street / yard furniture (the same footprint as

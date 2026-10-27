@@ -1806,8 +1806,12 @@ fn road_band(map: &CityMap, t: &Heightfield) -> Vec<bool> {
             }
         }
     };
-    // Within 1.5 m of the fine ground: not a deck above it, not a tunnel under it.
-    let at_grade = |p: V3| (p[2] - t.height_at(geom::xy(p))).abs() <= 1.5;
+    // Within 1.5 m of the fine ground: not a deck above it, not a tunnel under it (inside a
+    // covered span the ground under the deck is carved to the road, but it is the tunnel's
+    // ground: [`cover_band`]).
+    let at_grade = |p: V3| {
+        (p[2] - t.height_at(geom::xy(p))).abs() <= 1.5 && map.covers.covered_at(p).is_none()
+    };
     for s in &net.surfaces {
         let side = if s.highway { 0.3 } else { beside };
         let r = s.left_m.max(s.right_m) + side + margin;
@@ -1836,6 +1840,31 @@ fn road_band(map: &CityMap, t: &Heightfield) -> Vec<bool> {
         }
     }
     keep
+}
+
+/// The fine-grid vertices of `t` over a covered span's deck or within one drawn cell past its
+/// side edges ([`crate::covered::CoverShape::over_deck`]): the tube's carve and the backfill
+/// up to the deck. Drawn and collided at the fine resolution: on the coarse grid the
+/// backfill's rise from the carve to the deck top (one fine cell diagonal) would either poke
+/// into the tube or leave the ground metres below the deck edge (playtest: "massive drop on
+/// the side of the Loop 9 tunnel").
+fn cover_band(map: &CityMap, t: &Heightfield) -> Vec<bool> {
+    let mut band = vec![false; t.z.len()];
+    let margin = drawn_spacing(map, t);
+    for sh in &map.covers.shapes {
+        let r = sh.deck_half_width() + margin;
+        let (lo, hi) = (sh.bounds[0], sh.bounds[1]);
+        let cell = |x: f32, o: f32, n: u32| (((x - o) / t.cell_m).max(0.0) as u32).min(n - 1);
+        for j in cell(lo[1] - r, t.origin[1], t.ny)..=cell(hi[1] + r, t.origin[1], t.ny) {
+            for i in cell(lo[0] - r, t.origin[0], t.nx)..=cell(hi[0] + r, t.origin[0], t.nx) {
+                let n = (j * t.nx + i) as usize;
+                if !band[n] && sh.over_deck(t.vertex_pos(i, j), margin) {
+                    band[n] = true;
+                }
+            }
+        }
+    }
+    band
 }
 
 /// Drawn ground vertex spacing for `t`: the smallest whole multiple of its cell that is at
@@ -1872,7 +1901,8 @@ pub const DRAWN_BAND_TOLERANCE_M: f32 = 0.25;
 /// The terrain mesh the greybox draws: the coarse [`drawn_terrain`] grid, with every coarse cell
 /// where the solid road-band ground stands more than [`DRAWN_BAND_TOLERANCE_M`] above it drawn
 /// from the fine grid instead (playtest row 172: solid shelves up to 15 m above the drawn ground
-/// beside roads on steep slopes). See [`drawn_terrain_mesh`].
+/// beside roads on steep slopes), and every cell over a tunnel deck ([`cover_band`]). See
+/// [`drawn_terrain_mesh`].
 #[derive(Debug, Clone)]
 pub struct DrawnTerrain {
     /// The coarse grid ([`drawn_terrain`]).
@@ -1924,6 +1954,7 @@ pub fn drawn_terrain_mesh(map: &CityMap) -> Option<DrawnTerrain> {
     // Solid ground above the coarse surface at every fine vertex.
     let rise =
         |fi: u32, fj: u32| solid.at(fi, fj) - coarse.height_on_triangles(t.vertex_pos(fi, fj));
+    let cover = cover_band(map, t);
     let mut refined = vec![false; (cw * ch) as usize];
     if !flat {
         for j in 0..ch {
@@ -1933,7 +1964,9 @@ pub fn drawn_terrain_mesh(map: &CityMap) -> Option<DrawnTerrain> {
                     continue;
                 }
                 let high = (j * k..=(j + 1) * k).any(|fj| {
-                    (i * k..=(i + 1) * k).any(|fi| rise(fi, fj) > DRAWN_BAND_TOLERANCE_M)
+                    (i * k..=(i + 1) * k).any(|fi| {
+                        cover[(fj * t.nx + fi) as usize] || rise(fi, fj) > DRAWN_BAND_TOLERANCE_M
+                    })
                 });
                 refined[(j * cw + i) as usize] = high;
             }
@@ -1961,7 +1994,8 @@ pub fn drawn_terrain_mesh(map: &CityMap) -> Option<DrawnTerrain> {
                 .collect();
             let all_refined = !cells.is_empty() && cells.iter().all(|(ci, cj)| is_ref(*ci, *cj));
             let c = coarse.height_on_triangles(p);
-            fine.z[(fj * t.nx + fi) as usize] = if all_refined && rise(fi, fj) > 0.0 {
+            let n = (fj * t.nx + fi) as usize;
+            fine.z[n] = if all_refined && (rise(fi, fj) > 0.0 || cover[n]) {
                 solid.at(fi, fj) - 0.05
             } else {
                 c
@@ -1979,8 +2013,9 @@ pub fn drawn_terrain_mesh(map: &CityMap) -> Option<DrawnTerrain> {
 /// The terrain physics collides with, on the fine grid of `net.terrain` (`None` without
 /// terrain): the surface the greybox draws ([`drawn_terrain`]), except in the road band
 /// (at-grade roads, junctions and bends: paved width + sidewalk + lot + skirt + half a cell),
-/// which keeps the fine heights the sidewalks, lots and skirts are laid on. Drawn and solid
-/// ground agree everywhere else, so there is no hillside the player can hit but not see; the
+/// which keeps the fine heights the sidewalks, lots and skirts are laid on, and over tunnel decks
+/// ([`cover_band`], also drawn at the fine resolution). Drawn and solid ground agree everywhere
+/// else, so there is no hillside the player can hit but not see; the
 /// fine grid samples the coarse triangles exactly (same diagonal), so the two surfaces are
 /// identical off the roads. A flat field (e.g. a grid city's ground under a viaduct) is
 /// returned as it is: there is no hidden ground to remove, only the drawn mesh's 5 cm offset,
@@ -1992,11 +2027,12 @@ pub fn collision_terrain(map: &CityMap) -> Option<Heightfield> {
     }
     let keep = road_band(map, t);
     let drawn = t.coarse_under(drawn_spacing(map, t), &keep);
+    let cover = cover_band(map, t);
     let mut out = t.clone();
     for j in 0..t.ny {
         for i in 0..t.nx {
             let n = (j * t.nx + i) as usize;
-            if !keep[n] {
+            if !keep[n] && !cover[n] {
                 out.z[n] = drawn.height_on_triangles(t.vertex_pos(i, j));
             }
         }
