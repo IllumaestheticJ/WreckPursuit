@@ -191,7 +191,7 @@ All full meshes are inside the hero budget (≤ 22k), all mid meshes inside 7k.
 ## Checks
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p
 car-assets`, `validate-car-asset` (all cars ok), `gen-car-mesh --check`.
-Mod coverage (`e2e/mod_coverage.mjs` on the six cars at `e2098d0c`; re-run on the final meshes below, 136 mods each, 6 not for
+Mod coverage (`e2e/mod_coverage.mjs` on the six cars, last run on the final meshes at `f5cad282`, 136 mods each, 6 not for
 Exotic): 12 car/mod pairs show nothing, all on the known list in `mod-visuals.md`: the short
 shifter (all six), the fuel rail under the mid-engine covers (lucciola, fulmine) and sport tyres
 on the low-profile exotics (lucciola, fulmine, ombra, ostwind). Body kits, lips, wings, vinyls,
