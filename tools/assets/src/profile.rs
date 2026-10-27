@@ -506,6 +506,34 @@ impl BodyProfile {
         (rake, chin * k, zb, zt)
     }
 
+    /// Share of an end face's height its chin sweeps ([`BodyStyle::nose_chin_h`] /
+    /// `tail_chin_h`), clamped.
+    fn chin_h(&self, front: bool) -> f32 {
+        if front {
+            self.style.nose_chin_h.clamp(0.05, 0.6)
+        } else {
+            self.style.tail_chin_h.clamp(0.05, 0.6)
+        }
+    }
+
+    /// How far the nose (`front`) or tail face is set back from the end at height `z`, m (rake
+    /// plus chin, as [`BodyProfile::face_band`] uses it; 0 without a face profile). The top of
+    /// the body meets a raked face at `y_nose − face_setback(true, top height)`.
+    pub fn face_setback(&self, front: bool, z: f32) -> f32 {
+        if self.face_depth(front) <= 1e-4 {
+            return 0.0;
+        }
+        let (rake, chin, zb, zt) = self.face_params(front);
+        let r = tan_deg(rake);
+        let zc = zb + self.chin_h(front) * (zt - zb).max(0.05);
+        let rk = if r >= 0.0 {
+            r * (z - zb).max(0.0)
+        } else {
+            -r * (zt - z).max(0.0)
+        };
+        rk + chin * smoothstep((zc - z) / (zc - zb).max(0.02))
+    }
+
     /// Allowed height band (lo, hi) of the loft at `y` from the end face profiles, or `None`
     /// where no face knob reaches. A point at height z is behind the face when its set-back
     /// (rake: from the face bottom up, or from the top down when leaning forward; chin: the
@@ -524,7 +552,7 @@ impl BodyProfile {
             }
             let (rake, chin, zb, zt) = self.face_params(front);
             let r = tan_deg(rake);
-            let zc = zb + 0.4 * (zt - zb).max(0.05);
+            let zc = zb + self.chin_h(front) * (zt - zb).max(0.05);
             let setback = |z: f32| -> f32 {
                 let rk = if r >= 0.0 {
                     r * (z - zb).max(0.0)

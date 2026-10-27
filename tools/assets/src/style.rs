@@ -389,6 +389,14 @@ pub struct BodyStyle {
     pub tail_face_rake_deg: f32,
     /// Undercut of the lower 40 % of the tail face (diffuser tuck), m. Range 0…0.25. Default 0.
     pub tail_chin_m: f32,
+    /// Share of the nose face's height (from its bottom) the chin sweeps: lower keeps the
+    /// undercut under kit parts on the lower face (a mouth grille, brake ducts and intakes on an
+    /// undercut sit in the upper face's shadow from every normal camera height). Range
+    /// 0.05…0.6. Default 0.4.
+    pub nose_chin_h: f32,
+    /// Share of the tail face's height the tail chin sweeps (as [`BodyStyle::nose_chin_h`]).
+    /// Range 0.05…0.6. Default 0.4.
+    pub tail_chin_h: f32,
     /// Plan-view bow of the nose: over this length the half width follows an elliptical arc
     /// from the full width down to `nose_tip_w` of it at the nose, so the face is rounded or
     /// pointed instead of flat, m. Range 0…0.5. Default 0 (flat face).
@@ -610,6 +618,8 @@ impl Default for BodyStyle {
             nose_chin_m: 0.0,
             tail_face_rake_deg: 0.0,
             tail_chin_m: 0.0,
+            nose_chin_h: 0.4,
+            tail_chin_h: 0.4,
             nose_plan_bow_m: 0.0,
             nose_tip_w: 0.6,
             tail_plan_bow_m: 0.0,

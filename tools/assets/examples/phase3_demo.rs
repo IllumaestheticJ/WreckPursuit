@@ -55,6 +55,7 @@ fn relamp<'a>(p: &'a BodyProfile, b: &'a mut Builder, front: bool, rear: bool) -
         b,
         yn: p.y_nose,
         yt: p.y_tail,
+        lens_step_m: 0.04,
     }
 }
 
