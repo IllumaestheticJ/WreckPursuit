@@ -468,6 +468,25 @@ inboard, only on rings a chin reaches (defaults byte-identical, `gen-car-mesh --
 - Sheet `docs/media/car-shapes/phase3/chin_overlap.jpg` (game renderer, marten, low views).
   `e2e/smooth_shots.mjs` takes `SHOT_VIEW="name|eye: [..], at: [..]"` for an extra view.
 
+### Raked-face folds found on the integrated branch (hatch marten, tuner kestrel)
+`chins_leave_no_overlapping_end_faces` failed on lead/car-shapes-int (marten 176 cm² with a chin
+against 104 without). The overlap was real, not kit parts: all of it was body / panel loft and
+cap faces. Four causes, all only where a face profile (rake / chin) reaches, so default meshes
+stay byte-identical:
+- the band of a raked face over a chin closed before the tip, so two whole rings collapsed
+  flat onto the underside (a zero-thickness fin on the underbody): `face_band` now keeps at
+  least `FACE_BAND_MIN_M` (12 mm) of height, a small step at the tip;
+- with the tip ring collapsed, the chin run of `round_ends` spanned the whole ring and pushed
+  the top points outboard (they must turn back inboard): the run stops at the shoulder;
+- rounding moved the points clamped onto the band's upper edge apart (top down, sides not), so
+  the tip ring went up and back down and its cap folded: they keep the highest height;
+- points clamped onto one edge kept their own x or took the side outline's, so their |x|
+  zigzagged at one height (folds in the face plane, also without a chin): every clamped run
+  in `ring()` and the upper run of `round_ends` now rise to one |x| peak and fall after it
+  (`profile::unimodal_x`).
+On lead/car-shapes-int + this commit, with every mesh regenerated (the raked-face cars of
+the groups change; parity copies too): the whole car-assets suite, validate and `--check` pass.
+
 ### Race-offroad findings: chin over lower-face kit parts, top lamps on a raked nose, lens step
 - **Chin hides the mouth / ducts.** `follow_end_faces` does put them on the chinned surface, but
   a chin is an undercut: with the default chin height (the lower 40 % of the face) the mouth

@@ -1564,8 +1564,35 @@ fn round_ends(p: &BodyProfile, rings: &mut [Vec<RingPt>]) {
         // A chin clamps the lowest ring points onto the face band's lower edge, so they nearly
         // coincide and their normals are ill-defined: rounding moved them apart in height and
         // folded the ring (the cap and the last faces then overlapped and depth-fought). That
-        // run (from the underside up) keeps one height, the lowest, and never steps back
-        // inboard. Only rings a chin reaches: default cars are unchanged.
+        // run (from the underside up the side) keeps one height, the lowest, and never steps
+        // back inboard. Only rings a chin reaches: default cars are unchanged.
+        // Likewise the points a raked face clamped onto the band's upper edge: rounding moved
+        // the top ones down and the side ones not, so the tip ring went up and back down and
+        // its cap folded. They keep the highest height. Only rings a face profile reaches.
+        if let Some((_, hi)) = p.face_band(ring[0].p[1]) {
+            let on: Vec<usize> = (0..ring.len())
+                .filter(|&j| ring[j].p[2] >= hi - 1e-4)
+                .collect();
+            if on.len() >= 2 {
+                let z = on
+                    .iter()
+                    .map(|&j| rings[s][j].p[2])
+                    .fold(f32::MIN, f32::max);
+                for &j in &on {
+                    rings[s][j].p[2] = z;
+                }
+                // Rounding moved their x apart too: no zigzag along each run.
+                let mut a = 0;
+                while a < on.len() {
+                    let mut e = a + 1;
+                    while e < on.len() && on[e] == on[e - 1] + 1 {
+                        e += 1;
+                    }
+                    crate::profile::unimodal_x(&mut rings[s][on[a]..=on[e - 1]]);
+                    a = e;
+                }
+            }
+        }
         let chin = if s == 0 {
             p.style.tail_chin_m
         } else {
@@ -1573,7 +1600,13 @@ fn round_ends(p: &BodyProfile, rings: &mut [Vec<RingPt>]) {
         };
         if chin > 0.0 {
             if let Some((lo, _)) = p.face_band(ring[0].p[1]) {
-                let run = ring.iter().take_while(|q| q.p[2] <= lo + 1e-4).count();
+                // The side only (underside edge to shoulder): at a fully collapsed tip every
+                // point sits on the edge, and the top points must still turn back inboard.
+                let run = ring
+                    .iter()
+                    .take(RING_SHOULDER + 1)
+                    .take_while(|q| q.p[2] <= lo + 1e-4)
+                    .count();
                 if run >= 2 {
                     let z = (0..run).map(|j| rings[s][j].p[2]).fold(f32::MAX, f32::min);
                     for j in 0..run {
