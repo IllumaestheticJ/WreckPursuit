@@ -89,6 +89,27 @@
   behind the header. 21343 full, 6391 mid.
 - Other cars unchanged by the merge (their projected lamps regenerate identically).
 
+## Final touch-up (merged `ws/car-shapes` 86693a0d: smooth shading, raked-face fixes, all-cars regen)
+- Merge: police meshes taken from either side and **regenerated** (not hand-merged); the
+  `TRIS_BEFORE_INTEGRATED_SIGNALS` conflict resolved by keeping ws/car-shapes' rows and
+  regenerating the five police rows. Only the five police meshes differ from ws/car-shapes.
+- The shared regeneration added ~800 triangles per police car (body, glass, quarters), which put
+  cruiser / wolfhound / vigil 300–700 over 22k and the SUV's mid LOD 64 over 7k. Trims: 21-segment
+  wheels on cruiser / wolfhound / vigil (hero default 24; smooth shading hides it), one slat in
+  the cruiser's shield grille, and box front plates on upright faces (SUV, 80s sedan; plates only
+  project on raked / chinned faces). Final: 21.2k–21.9k full, 6.1k–6.9k mid.
+- **Smooth shading in the real renderer** (`e2e/smooth_shots.mjs`, greybox with crease-split
+  normals, liveries on): all five read cleanly; nothing to fix.
+- Low-angle views redone (`low_views.jpg`): clean bottom edges; no panel vertex below the floor
+  line on the raked cars. The SUV's tail stays upright (its rear bumper step, handle, plate and
+  hitch are boxes, and a full-size SUV tailgate is near-vertical anyway).
+- Liveries city / county / grid re-checked on the final meshes: correct, no page errors. One
+  renderer-side note for the lead: in the `?livery=grid` debug view the decal carriers now show as
+  black patches with a white bloom (the grid mode skips the unit-number textures); the normal
+  liveries are unaffected. Not a mesh issue.
+- Final before / after sheet: `final.jpg` (before = the original `main` meshes; front 3/4, rear
+  3/4, side).
+
 ## Per car
 References are body types only; no real model is reproduced.
 
@@ -104,7 +125,7 @@ References are body types only; no real model is reproduced.
   pods, chin lip. Rear: boomerang tail lamps (a long bar along the deck edge, the outer drop is
   the red-on-red signal) on a dark band, badge between them, reverse lamps, plate, valance,
   small body-colour lip; black rockers.
-- **Triangles:** 21893 full (was 18497), 6294 mid (was 4728).
+- **Triangles:** 21865 full (was 18497), 6166 mid (was 4728).
 
 ### `sentinel_wolfhound` (police "patrol")
 - **Reference:** 2010s American AWD police pursuit sedan on a large FWD-platform saloon, about
@@ -116,7 +137,7 @@ References are body types only; no real model is reproduced.
   swept pentagon lamps rising from the grille corner to the fender (amber outboard end); fog
   pods, lower intake, plate. Rear: corner-wrapping tail lamps, wider at the top, amber outboard
   ends, in dark housings; badge, reverse lamps, plate, reflectors, valance; black rockers.
-- **Triangles:** 21646 full (was 18626), 6563 mid (was 5183).
+- **Triangles:** 21666 full (was 18626), 6575 mid (was 5183).
 
 ### `sentinel_bastion` (police "SUV")
 - **Reference:** 2010s American full-size body-on-frame SUV, about 5.18 × 2.04 × 1.89 m on a
@@ -129,7 +150,7 @@ References are body types only; no real model is reproduced.
   DRL line above); dark valance with fogs and a skid plate, plate. Rear: vertical tail lamps
   (amber lower section, reverse inset), bumper step, tailgate handle, plate, hitch; running
   boards, rocker cladding, large black-capped mirrors.
-- **Triangles:** 21419 full (was 18932), 6956 mid (was 5346).
+- **Triangles:** 21603 full (was 18932), 6880 mid (was 5346).
 
 ### `sentinel_warden` (police "old sedan")
 - **Reference:** late-80s American full-size body-on-frame RWD sedan, about 5.4 × 1.98 × 1.43 m
@@ -143,7 +164,7 @@ References are body types only; no real model is reproduced.
   corner lamps (face and fender side, one lens part), chrome header, plate; wide tail lamps with
   chrome ribs and red-on-red outer signals, reverse lamps, chrome plate panel, side markers;
   chrome handles, chrome-capped mirrors.
-- **Triangles:** 21251 full (was 19111), 6157 mid (was 5575).
+- **Triangles:** 21239 full (was 19111), 6093 mid (was 5575).
 
 ### `sentinel_vigil` (police "sports patrol")
 - **Reference:** 2010s American muscle coupe, about 4.8 × 1.93 × 1.37 m on a 2.75 m wheelbase:
@@ -157,7 +178,7 @@ References are body types only; no real model is reproduced.
   hood extractor vents. Rear: dark band with one swept lamp per side (outer end sweeps up,
   inboard end is the red-on-red signal), centre reverse lamps and badge, plate, dark diffuser
   valance; skirts, faux quarter vents, mirrors; police low decklid wing.
-- **Triangles:** 21343 full (was 19100), 6391 mid (was 4994).
+- **Triangles:** 21747 full (was 19100), 6497 mid (was 4994).
 
 All five are inside the hero budget (22k) and the mid budget (7k).
 
@@ -180,7 +201,7 @@ sentinel_vigil` on the pass-2 meshes: 136 mods per car, 7 car/mod pairs show not
 known list from phase 1 (no outside view): `drivetrain_shifter_short` on all five,
 `elec_radar_1` on the warden and the vigil. Body kits, wings, lips, vinyls and bull bars show and
 sit on the new bodies (stock and mod shots checked).
-Final meshes (pass 3 / 3b / addenda, `38231a10`): 8 car/mod pairs show nothing.
+Pass 3 / 3b / addenda meshes (`38231a10`): 8 car/mod pairs show nothing.
 `drivetrain_shifter_short` on all five and `elec_radar_1` on the cruiser and warden are the known
 no-outside-view pairs. `brakes_hydro_handbrake` on the warden was missed once in the full run but
 shows when re-run alone (`MODS=brakes_hydro_handbrake node e2e/mod_coverage.mjs sentinel_warden`:
