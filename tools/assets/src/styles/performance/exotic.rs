@@ -15,7 +15,8 @@
 use wp_contracts::{BodyRegion, VehicleDef};
 
 use crate::builder::{Builder, PartKey};
-use crate::mesh::{MaterialSlot as M, PartKind, INDICATOR_SEAM_M};
+use crate::lamp::LampView;
+use crate::mesh::{MaterialSlot as M, PartKind};
 use crate::style::{
     ArchShape, BodyStyle, CaliperKind, CapKind, CarStyle, DetailCtx, EngineKind, EngineLayout,
     ExhaustKind, FuelDoor, Induction, RimKind, Silhouette, SuspensionKind, TrimFinish,
@@ -25,7 +26,9 @@ use super::kit::{
     dkey, headlight_key, indicator_front_key, indicator_rear_key, sided, taillight_key, top_band,
     Kit, Seg, SIDES,
 };
-use super::supercar::{end_poly, flip_x, rear_stroke, side_poly, stadium, top_poly, top_stroke};
+use super::supercar::{
+    end_poly, flip_x, rear_stroke, shape3, side_poly, stadium, top_poly, top_stroke, Shape3,
+};
 use super::{kit_detail, rgb, wheels};
 
 /// 90s mid-engine berlinetta: soft round nose, rounded roof, upright rear glass between
@@ -66,6 +69,20 @@ pub fn lucciola(def: &VehicleDef) -> CarStyle {
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.details.push(kit_detail(lucciola_kit));
+    shape3(
+        &mut s,
+        def,
+        Shape3 {
+            nose: 0.86,
+            tail: 0.92,
+            waist: 0.95,
+            scallop: -0.05,
+            shoulder: 0.0,
+            bulge: 0.03,
+            rocker: 0.04,
+            rise: (0.02, 0.03),
+        },
+    );
     wheels(
         &mut s,
         def,
@@ -223,44 +240,31 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     // --- Rear: black mesh panel between the pill lamps.
     let (pz0, pz1) = (tz1 - 0.22, tz1 - 0.025);
-    k.rear_panel(
-        "tail_panel",
-        BodyRegion::Trunk,
-        wt - 0.02,
-        pz0,
-        pz1,
-        M::Grille,
-    );
+    // Flatter than `Kit::rear_panel` (2 mm proud) so the cast lamps stand clear of it.
+    let ktp = dkey("tail_panel", BodyRegion::Trunk, M::Grille);
+    k.rear_box(&ktp, -(wt - 0.02), wt - 0.02, pz0, pz1, 0.002, 0.0);
     let km = dkey("tail_mesh", BodyRegion::Trunk, M::Trim);
     for i in 1..5 {
         let z = pz0 + (pz1 - pz0) * i as f32 / 5.0;
         k.rear_box(&km, -0.38, 0.38, z - 0.006, z + 0.006, 0.016, 0.0);
     }
-    // One wide pill-shaped lamp per side in a chrome surround (this car's night signature),
-    // its inner end the amber turn signal.
+    // One wide pill-shaped lamp per side (this car's night signature), cast onto the tail
+    // with a black bezel; its inner end is the amber turn signal.
     let zc = 0.5 * (pz0 + pz1);
     let hh = (0.5 * (pz1 - pz0) - 0.035).min(0.055);
     for sx in SIDES {
         let (xo, xi) = (wt - 0.07, wt - 0.46);
-        let kring = sided(
-            &dkey("taillight_ring_l", BodyRegion::RearLeftQuarter, M::Chrome),
+        let pill = stadium(-0.5 * (xo + xi), zc, 0.5 * (xo - xi), hh, 5);
+        k.proj_cluster(
             sx,
+            false,
+            LampView::Rear,
+            &pill,
+            Some(Seg::Inboard(0.11)),
+            M::EmissiveAmber,
+            0.016,
+            10.0,
         );
-        let ring = stadium(0.5 * (xo + xi), zc, 0.5 * (xo - xi) + 0.016, hh + 0.016, 5);
-        end_poly(&mut k, &kring, false, &flip_x(&ring, sx), 0.016, 0.03);
-        let xs = xi + 0.11;
-        let tk = taillight_key(sx);
-        let red = stadium(0.5 * (xo + xs), zc, 0.5 * (xo - xs), hh, 5);
-        end_poly(&mut k, &tk, false, &flip_x(&red, sx), 0.03, 0.03);
-        let ka = indicator_rear_key(sx, M::EmissiveAmber);
-        let amber = stadium(
-            0.5 * (xs - INDICATOR_SEAM_M + xi),
-            zc,
-            0.5 * (xs - INDICATOR_SEAM_M - xi),
-            hh,
-            5,
-        );
-        end_poly(&mut k, &ka, false, &flip_x(&amber, sx), 0.03, 0.03);
     }
     let kv = dkey("rear_valance", BodyRegion::RearBumper, M::Grille);
     k.rear_box(
@@ -328,6 +332,20 @@ pub fn fulmine(def: &VehicleDef) -> CarStyle {
         ..BodyStyle::preset(Silhouette::Wedge)
     });
     s.details.push(kit_detail(fulmine_kit));
+    shape3(
+        &mut s,
+        def,
+        Shape3 {
+            nose: 0.88,
+            tail: 0.95,
+            waist: 0.96,
+            scallop: -0.06,
+            shoulder: 0.0,
+            bulge: 0.015,
+            rocker: 0.04,
+            rise: (0.0, 0.03),
+        },
+    );
     wheels(
         &mut s,
         def,

@@ -27,7 +27,9 @@ use wp_contracts::{BodyRegion, VehicleDef};
 use crate::builder::{Builder, PartKey};
 use crate::mesh::{MaterialSlot as M, INDICATOR_SEAM_M};
 use crate::profile::RING_GLASS_TOP;
-use crate::style::{ArchShape, BodyStyle, CapKind, CarStyle, DetailCtx, RimKind, Silhouette};
+use crate::style::{
+    ArchShape, BodyStyle, CapKind, CarStyle, DetailCtx, RimKind, SideSculpt, Silhouette,
+};
 
 use super::kit::{
     dkey, headlight_key, indicator_front_key, indicator_rear_key, lkey, sided, taillight_key,
@@ -141,36 +143,59 @@ fn mean2(pts: &[[f32; 2]]) -> [f32; 2] {
     [s[0] / n, s[1] / n]
 }
 
-/// Thin shell from an outer outline `top` and inner outline `bot` (same length, same order)
-/// plus their centres: an outer fan, an inner fan and the rim, each face turned away from
-/// the shell's middle (`mid`) or along `up` for the two fans.
-fn shell(
+/// Places an outline point (2-D) at an offset from a surface (see [`drape`]).
+type Place<'a> = &'a dyn Fn(&Kit, [f32; 2], f32) -> [f32; 3];
+
+/// Draped thin shell: outline `o` (2-D, already subdivided) placed by `at(q, offset)` onto a
+/// surface. The face is built from concentric rings (`rings`: scale toward the outline's
+/// mean, outer first, starting at 1.0) and a centre fan, every
+/// ring point placed on the surface, so the panel follows curved and recessed surfaces inside
+/// its outline too; the back is one fan `thick` below, the rim joins the outer edges. Faces are
+/// turned along `up` (face), against it (back) or away from the middle (rim).
+fn drape(
     k: &mut Kit,
     key: &PartKey,
-    top: &[[f32; 3]],
-    bot: &[[f32; 3]],
-    ct: [f32; 3],
-    cb: [f32; 3],
+    o: &[[f32; 2]],
+    off: f32,
+    thick: f32,
     up: [f32; 3],
+    rings: &[f32],
+    at: Place,
 ) {
-    let n = top.len();
+    let n = o.len();
+    let c = mean2(o);
+    let toward = |q: [f32; 2], t: f32| [c[0] + (q[0] - c[0]) * t, c[1] + (q[1] - c[1]) * t];
+    let rings: Vec<Vec<[f32; 3]>> = rings
+        .iter()
+        .map(|&t| o.iter().map(|&q| at(k, toward(q, t), off)).collect())
+        .collect();
+    let ct = at(k, c, off);
+    let bot: Vec<[f32; 3]> = o.iter().map(|&q| at(k, q, off - thick)).collect();
+    let cb = at(k, c, off - thick);
+    let down = [-up[0], -up[1], -up[2]];
     let mid = [
         0.5 * (ct[0] + cb[0]),
         0.5 * (ct[1] + cb[1]),
         0.5 * (ct[2] + cb[2]),
     ];
-    let down = [-up[0], -up[1], -up[2]];
     for i in 0..n {
         let j = (i + 1) % n;
-        k.b.poly_facing(key, &[ct, top[i], top[j]], up);
+        for r in 0..rings.len() - 1 {
+            let (a, b) = (&rings[r], &rings[r + 1]);
+            k.b.poly_facing(key, &[a[i], a[j], b[j]], up);
+            k.b.poly_facing(key, &[a[i], b[j], b[i]], up);
+        }
+        let last = &rings[rings.len() - 1];
+        k.b.poly_facing(key, &[ct, last[i], last[j]], up);
         k.b.poly_facing(key, &[cb, bot[j], bot[i]], down);
+        let top = &rings[0];
         let q = [top[i], top[j], bot[j], bot[i]];
-        let c = [
+        let e = [
             0.25 * (q[0][0] + q[1][0] + q[2][0] + q[3][0]),
             0.25 * (q[0][1] + q[1][1] + q[2][1] + q[3][1]),
             0.25 * (q[0][2] + q[1][2] + q[2][2] + q[3][2]),
         ];
-        k.b.poly_facing(key, &q, [c[0] - mid[0], c[1] - mid[1], c[2] - mid[2]]);
+        k.b.poly_facing(key, &q, [e[0] - mid[0], e[1] - mid[1], e[2] - mid[2]]);
     }
 }
 
@@ -178,12 +203,8 @@ fn shell(
 /// its face `lift` m above the paint and `thick` m deep.
 pub(super) fn top_poly(k: &mut Kit, key: &PartKey, pts: &[[f32; 2]], lift: f32, thick: f32) {
     let o = subdivide(pts, 0.05);
-    let c = mean2(&o);
     let at = |k: &Kit, q: [f32; 2], d: f32| [q[0], q[1], k.top_z(q[1], q[0]) + d];
-    let top: Vec<[f32; 3]> = o.iter().map(|&q| at(k, q, lift)).collect();
-    let bot: Vec<[f32; 3]> = o.iter().map(|&q| at(k, q, lift - thick)).collect();
-    let (ct, cb) = (at(k, c, lift), at(k, c, lift - thick));
-    shell(k, key, &top, &bot, ct, cb, [0.0, 0.0, 1.0]);
+    drape(k, key, &o, lift, thick, [0.0, 0.0, 1.0], &[1.0], &at);
 }
 
 /// Point `off` m out from the side surface of side `sx` at (y, z), and the outward normal.
@@ -197,6 +218,9 @@ fn side_at(k: &Kit, sx: f32, y: f32, z: f32, off: f32) -> ([f32; 3], [f32; 3]) {
     ([pt[0] + n[0] * off, pt[1], pt[2] + n[2] * off], n)
 }
 
+/// Extra lift of every [`side_poly`] panel over the loft's facets, m.
+const SIDE_LIFT_M: f32 = 0.010;
+
 /// Panel on the body side of side `sx` (key given for the left side; the right one is
 /// derived): outline `pts` in (y, z), its face `off` m out of the paint, `thick` m deep.
 pub(super) fn side_poly(
@@ -208,19 +232,21 @@ pub(super) fn side_poly(
     thick: f32,
 ) {
     let key = sided(key_left, sx);
-    let o = subdivide(pts, 0.06);
-    let c = mean2(&o);
-    let top: Vec<[f32; 3]> = o
-        .iter()
-        .map(|q| side_at(k, sx, q[0], q[1], off).0)
-        .collect();
-    let bot: Vec<[f32; 3]> = o
-        .iter()
-        .map(|q| side_at(k, sx, q[0], q[1], off - thick).0)
-        .collect();
-    let (ct, n) = side_at(k, sx, c[0], c[1], off);
-    let cb = side_at(k, sx, c[0], c[1], off - thick).0;
-    shell(k, &key, &top, &bot, ct, cb, n);
+    let o = subdivide(pts, 0.05);
+    let n = side_at(k, sx, mean2(&o)[0], mean2(&o)[1], 0.0).1;
+    let at = move |k: &Kit, q: [f32; 2], d: f32| side_at(k, sx, q[0], q[1], d).0;
+    // The loft's flat facets sit up to ≈ 1 cm off the smooth surface on sculpted sides; lift
+    // every side panel by that much (stacking order between panels unchanged).
+    drape(
+        k,
+        &key,
+        &o,
+        off + SIDE_LIFT_M,
+        thick + SIDE_LIFT_M,
+        n,
+        &[1.0, 0.5],
+        &at,
+    );
 }
 
 /// y of the nose (`front`) or tail face at (x, z): the end face where the plan-rounded
@@ -263,12 +289,9 @@ pub(super) fn end_poly(
 ) {
     let d = if front { 1.0 } else { -1.0 };
     let o = subdivide(pts, 0.06);
-    let c = mean2(&o);
-    let at = |k: &Kit, q: [f32; 2], off: f32| [q[0], face_y(k, front, q[0], q[1]) + d * off, q[1]];
-    let top: Vec<[f32; 3]> = o.iter().map(|&q| at(k, q, proud)).collect();
-    let bot: Vec<[f32; 3]> = o.iter().map(|&q| at(k, q, proud - depth)).collect();
-    let (ct, cb) = (at(k, c, proud), at(k, c, proud - depth));
-    shell(k, key, &top, &bot, ct, cb, [0.0, d, 0.0]);
+    let at =
+        move |k: &Kit, q: [f32; 2], off: f32| [q[0], face_y(k, front, q[0], q[1]) + d * off, q[1]];
+    drape(k, key, &o, proud, depth, [0.0, d, 0.0], &[1.0], &at);
 }
 
 /// Mirror an outline given for the left side (x < 0) to side `sx` (x only; order kept, the
@@ -329,6 +352,75 @@ pub(super) fn stadium(cx: f32, cz: f32, hw: f32, hh: f32, n: usize) -> Vec<[f32;
         }
     }
     out
+}
+
+/// Phase-3 body shaping shared by the exotic / supercar styles, placed from the wheels.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Shape3 {
+    /// Plan-width scale at the nose (reached 0.6 m ahead of the front arch).
+    pub nose: f32,
+    /// Plan-width scale at the tail (reached 0.6 m behind the rear arch).
+    pub tail: f32,
+    /// Plan-width scale at the doors (waist between the arches).
+    pub waist: f32,
+    /// Depth of the recessed scallop ahead of the rear wheel (negative = in), m; 0 = none.
+    pub scallop: f32,
+    /// Shoulder line standing out under the belt, m; 0 = none.
+    pub shoulder: f32,
+    /// `side_bulge_m`.
+    pub bulge: f32,
+    /// `rocker_in_m`.
+    pub rocker: f32,
+    /// `front_fender_rise_m`, `rear_fender_rise_m`.
+    pub rise: (f32, f32),
+}
+
+/// Apply [`Shape3`] to `s`: plan taper and waist, the side scallop, shoulder line, section
+/// bulge, rocker tuck and fender rise.
+pub(super) fn shape3(s: &mut CarStyle, def: &VehicleDef, o: Shape3) {
+    let w = &def.wheels;
+    let fy = w.iter().map(|q| q.position_m[1]).fold(f32::MIN, f32::max);
+    let ry = w.iter().map(|q| q.position_m[1]).fold(f32::MAX, f32::min);
+    let r = w.iter().map(|q| q.radius_m).fold(0.0, f32::max) + 0.07;
+    let wz = w.iter().map(|q| q.position_m[2]).fold(0.0, f32::max);
+    let b = &mut s.body;
+    b.plan_width = vec![
+        [ry - r - 0.6, o.tail],
+        [ry - r + 0.05, 1.0],
+        [ry + r + 0.10, 1.0],
+        [0.5 * (fy + ry), o.waist],
+        [fy - r - 0.10, 1.0],
+        [fy + r - 0.05, 1.0],
+        [fy + r + 0.6, o.nose],
+    ];
+    // Belt height from the body height: the lattice belt plus this group's belt_dz.
+    let belt = 0.62 * def.body_size_m[2] + b.belt_dz.max(0.0);
+    let mut sculpt = Vec::new();
+    if o.scallop < 0.0 {
+        sculpt.push(SideSculpt {
+            y0_m: ry + r + 0.04,
+            y1_m: ry + r + 0.75,
+            z0_m: wz - 0.04,
+            z1_m: belt - 0.10,
+            dx_m: o.scallop,
+            falloff_m: 0.12,
+        });
+    }
+    if o.shoulder > 0.0 {
+        sculpt.push(SideSculpt {
+            y0_m: ry - r,
+            y1_m: fy + r,
+            z0_m: belt - 0.10,
+            z1_m: belt - 0.07,
+            dx_m: o.shoulder,
+            falloff_m: 0.035,
+        });
+    }
+    b.side_sculpt = sculpt;
+    b.side_bulge_m = o.bulge;
+    b.rocker_in_m = o.rocker;
+    b.front_fender_rise_m = o.rise.0;
+    b.rear_fender_rise_m = o.rise.1;
 }
 
 /// Air outlet on the front fender behind the front wheel: dark slot with `slats` blades.
@@ -417,6 +509,20 @@ pub fn halberd(def: &VehicleDef) -> CarStyle {
         ..BodyStyle::preset(Silhouette::Fastback)
     });
     s.details.push(kit_detail(halberd_kit));
+    shape3(
+        &mut s,
+        def,
+        Shape3 {
+            nose: 0.84,
+            tail: 0.9,
+            waist: 0.94,
+            scallop: -0.07,
+            shoulder: 0.0,
+            bulge: 0.035,
+            rocker: 0.05,
+            rise: (0.03, 0.04),
+        },
+    );
     wheels(
         &mut s,
         def,
@@ -769,6 +875,20 @@ pub fn ombra(def: &VehicleDef) -> CarStyle {
         ..BodyStyle::preset(Silhouette::Wedge)
     });
     s.details.push(kit_detail(ombra_kit));
+    shape3(
+        &mut s,
+        def,
+        Shape3 {
+            nose: 0.86,
+            tail: 0.97,
+            waist: 0.95,
+            scallop: -0.07,
+            shoulder: 0.02,
+            bulge: 0.01,
+            rocker: 0.04,
+            rise: (0.0, 0.02),
+        },
+    );
     wheels(
         &mut s,
         def,
@@ -783,7 +903,7 @@ pub fn ombra(def: &VehicleDef) -> CarStyle {
     let m = &mut s.mechanical;
     m.caliper_rgb = Some(rgb(0xE87A10));
     m.spring_rgb = Some(rgb(0xE87A10));
-    s.tints.push((M::Paint, rgb(0xF2B705)));
+    s.tints.push((M::Paint, rgb(0x2B2D42)));
     s
 }
 
@@ -1161,7 +1281,7 @@ pub fn ostwind(def: &VehicleDef) -> CarStyle {
         nose_plan_round: 0.32,
         tail_plan_round: 0.30,
         hood_crown: 0.020,
-        hood_valley: 0.060,
+        hood_valley: 0.020,
         windshield_rake_deg: Some(60.0),
         a_pillar_rake_deg: 10.0,
         c_pillar_rake_deg: 6.0,
@@ -1187,6 +1307,20 @@ pub fn ostwind(def: &VehicleDef) -> CarStyle {
         ..BodyStyle::preset(Silhouette::Fastback)
     });
     s.details.push(kit_detail(ostwind_kit));
+    shape3(
+        &mut s,
+        def,
+        Shape3 {
+            nose: 0.9,
+            tail: 0.94,
+            waist: 0.94,
+            scallop: 0.0,
+            shoulder: 0.0,
+            bulge: 0.035,
+            rocker: 0.04,
+            rise: (0.06, 0.05),
+        },
+    );
     wheels(
         &mut s,
         def,
@@ -1347,10 +1481,11 @@ fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         let km = sided(&lkey("side_marker_l", fb, M::EmissiveAmber), sx);
         k.front_box(
             &km,
-            sx * (wn - 0.05),
-            sx * (wn - 0.03),
-            zi1 + 0.08,
-            zi1 + 0.11,
+            // ≥ 4 cm each way so the mid LOD's 3.5 cm vertex clustering keeps it.
+            sx * (wn - 0.07),
+            sx * (wn - 0.025),
+            zi1 + 0.075,
+            zi1 + 0.12,
             0.010,
             0.0,
         );
@@ -1570,6 +1705,20 @@ pub fn kagero(def: &VehicleDef) -> CarStyle {
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.details.push(kit_detail(kagero_kit));
+    shape3(
+        &mut s,
+        def,
+        Shape3 {
+            nose: 0.87,
+            tail: 0.94,
+            waist: 0.95,
+            scallop: -0.06,
+            shoulder: 0.015,
+            bulge: 0.02,
+            rocker: 0.04,
+            rise: (0.02, 0.03),
+        },
+    );
     wheels(
         &mut s,
         def,
