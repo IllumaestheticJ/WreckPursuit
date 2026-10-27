@@ -125,7 +125,11 @@ All five are inside the hero budget (22k) and the mid budget (7k).
   gaps, floating parts, glass through pillars and wheels in arches.
 
 ## Mod coverage
-Pending: the final run on these meshes is in progress; the result will be added here.
+`node e2e/mod_coverage.mjs sentinel_cruiser sentinel_wolfhound sentinel_bastion sentinel_warden
+sentinel_vigil` on the final meshes: 136 mods per car, 7 car/mod pairs show nothing, all on the
+known list from phase 1 (no outside view): `drivetrain_shifter_short` on all five,
+`elec_radar_1` on the warden and the vigil. Body kits, wings, lips, vinyls and bull bars show and
+sit on the new bodies (stock and mod shots checked).
 
 ## Shots
 `docs/media/car-shapes/police/`:
