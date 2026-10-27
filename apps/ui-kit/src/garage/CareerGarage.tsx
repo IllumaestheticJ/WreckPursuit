@@ -42,6 +42,7 @@ const itemKey = (i: RepairItem) => JSON.stringify(i);
 const fmt = {
   pi: (v: number) => v.toFixed(0),
   kg: (v: number) => `${v.toFixed(0)} kg`,
+  hp: (v: number) => `${v.toFixed(0)} hp`,
   s: (v: number) => `${v.toFixed(2)} s`,
   kmh: (v: number) => `${v.toFixed(0)} km/h`,
   g: (v: number) => `${v.toFixed(2)} g`,
@@ -82,6 +83,8 @@ function StatGrid({ now, after }: { now: StatsView; after?: StatsView | null }) 
       <span>
         <Delta before={now.class_index} after={a.class_index} format={fmt.pi} /> <span class="wp-dim">({a.bracket})</span>
       </span>
+      <span class="wp-dim">Power</span>
+      <Delta before={now.power_hp} after={a.power_hp} format={fmt.hp} epsilon={0.5} />
       <span class="wp-dim">Mass</span>
       <Delta before={now.mass_kg} after={a.mass_kg} format={fmt.kg} higherIsBetter={false} epsilon={0.5} />
       <span class="wp-dim">0–100</span>
