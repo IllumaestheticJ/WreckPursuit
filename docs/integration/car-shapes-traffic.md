@@ -25,6 +25,9 @@
 - `cab_back_window`: pickup cab-back glass with seal (and a sliding centre pane).
 - `door_handles_at`, `door_cut`: crew-cab handles on recesses and the rear door's cut lines
   (the lattice has no hinged rear door on `hauler_1500`).
+- `conform_to_faces` (pass 3b): moves kit detail / light parts near an end back by the measured
+  set-back of a raked / chinned end face (projected lamps and body parts untouched).
+- `head_lamp_bowls` (pass 3b): projector bowls + chrome reflector rings via `lamp::element`.
 - `proj_lamps`, `proj_signals`, `rect` (pass 3): head / tail lamps and turn signals as lenses
   projected onto the body with the phase 3 `crate::lamp` module (any outline, wrapped round
   the corner by a yaw, optional bezel), mirrored per side. Used on every car except the hauler,
@@ -47,13 +50,22 @@ Merged `ws/car-shapes` (phase 3) and reworked all seven again:
   the bumper (0.92 satchel, 0.95 tumbril), the hauler's nose 0.96.
 - tansy: shorter overhangs (−8 cm each end), rounder section (bulge 0.03 at 60 %, rockers in).
 - hauler: crisp full-length shoulder line (`side_sculpt`, +2 cm band under the belt).
-- Still local (phase 3b covers them): `lift_front` (nose above the hood node) and `van_box`
-  (van deck flush with the tail).
+- Phase 3b part 1 (merged `b10e5e14`): tansy gets a raked bumper face (22°) with a chin, a
+  leaning tailgate (12°), a slightly bowed nose in plan, a roof narrowing to the rear
+  (`roof_plan_taper` 0.08) and a tucked lower body; the European vans get raked plastic
+  bumpers with a chin (satchel 16° / 6 cm, tumbril 8° / 4 cm). A local `conform_to_faces`
+  slides the kit's end-mounted parts (grilles, plates, intakes, fog lamps, lips) back onto the
+  raked face. Projector bowls with chrome reflector rings (`lamp::element`) in tansy's and
+  satchel's lamps (one / two) and a big round reflector in tumbril's square lamps.
+- Still local (phase 3b part 2 covers them): `lift_front` (nose above the hood node) and
+  `van_box` (van deck flush with the tail). The drayman and furrow keep upright faces (the
+  drayman for budget, the furrow because a 90s steel-bumper truck has none).
 
 ## Per car
-Headline counts are pass 2; pass 3 counts (full / mid): drayman 10869 / 5543, furrow 10010 /
-4956, hauler 10999 / 5909, beater 9106 / 4453, satchel 9746 / 5037, tansy 9650 / 4347,
-tumbril 10135 / 5010 (all within traffic 11k / mid 7k).
+Headline counts are pass 2; final pass 3 counts (full / mid): drayman 10931 / 5651, furrow
+10006 / 4954, hauler 10999 / 5909, beater 9136 / 4471, satchel 10627 / 5161, tansy 10076 /
+4164, tumbril 10668 / 5125 (all within traffic 11k / mid 7k; drayman now on 14 wheel
+segments, hauler on 12).
 
 Reference descriptions are generic (no real names). Triangle counts: full (phase 1) / mid
 (phase 1). Budgets: traffic 4k–11k, mid 2k–7k.
