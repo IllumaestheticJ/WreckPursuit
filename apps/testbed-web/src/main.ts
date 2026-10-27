@@ -55,15 +55,15 @@ import { UiOverlay } from "./ui/overlay";
 import { MapOverlay } from "./ui/map";
 import { HudLayout } from "./ui/layout";
 import { DRIFT_LAB_W, DRIFT_LAB_W_CAR, DriftLabWPanel, driftLabWScenario } from "./drift_lab_w";
-import { defaultGameSettings, hasStoredSettings, loadGameSettings, loadMenuMap, mountGameMenu, type ControlDevice, type GameSettings, type MenuConfirm, type PlayChoice } from "../../ui-kit/src/live";
+import { defaultGameSettings, hasStoredSettings, loadGameSettings, loadMenuMap, mountGameMenu, saveMenuMap, type ControlDevice, type GameSettings, type MenuConfirm } from "../../ui-kit/src/live";
 import { gfxMode } from "./render/quality";
 import { RunEndView } from "./ui/runEnd";
 import { ModShop } from "./ui/modShop";
 import { WorkshopMode } from "./workshop/mode";
 import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
 import { LotVisitView } from "../../ui-kit/src/garage/LotVisit";
-import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
-import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
+import { downloadText, keepUnreadable, loadCareerText, pickTextFile, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
+import type { CareerApi, CareerView, RoamChoice, RunKind } from "../../ui-kit/src/garage/types";
 import { RaceView, racesForMap, type BetPick, type BetStatus, type RaceFrame } from "./ui/race";
 import { GarageVisitView } from "./ui/garageVisit";
 import { PlaceVisitView } from "./ui/placeVisit";
@@ -378,12 +378,12 @@ async function main(): Promise<void> {
     newCareer: (mode) => act(() => newCareer(mode)),
     exportSave: () => downloadText(saveFileName(sim.careerView().day), sim.careerSave()),
     importSave: (text) => act(() => sim.careerLoad(text)),
-    startRun: (kind) => void startCareerRun(kind),
+    startRun: (kind, roam) => void startCareerRun(kind, false, undefined, roam),
     // Playtest row 167: the race and touge pickers straight from the garage, as career runs.
     races: () => openCareerPicker("races"),
     touge: () => openCareerPicker("touge"),
     workshop: (uid) => openWorkshop(uid),
-    // Repairs from the menu are priced at a shop in the city the main menu spawns in.
+    // Repairs from the menu are priced at a shop in the remembered spawn city.
     homeCity: () => loadMenuMap(menuSpawns),
     close: () => {
       garage.hide();
@@ -659,8 +659,9 @@ async function main(): Promise<void> {
   const spawnSel = $("spawn") as HTMLSelectElement;
   const spawnPoints = sim.spawnPoints();
   for (const p of spawnPoints) spawnSel.add(new Option(p.label, p.id));
-  /** The game menu's spawn picker: the cities of the world (the first is the default). The
-   * world's greybox is ~34 MB, so the picker says so. */
+  /** The cities of the world career runs can start in (the first is the default; remembered
+   * under the menu map key, set from the developer panel's spawn box). The main menu no longer
+   * picks it (owner 2026-10-27: spawn choice belongs to the career). */
   const menuSpawns = spawnPoints.map((p) => ({ ...p, note: `One connected world: drive on to the other cities from here. Large download (~34 MB): the first load takes a while` }));
   const spawnParam = params.get("spawn");
   if (spawnParam && spawnPoints.some((p) => p.id === spawnParam)) spawnSel.value = spawnParam;
@@ -903,7 +904,7 @@ async function main(): Promise<void> {
     return v.cars.find((c) => c.uid === v.active_car)?.def_id ?? DEFAULT_CAR;
   };
   /** The map career races and garage runs use: always the world (owner 2026-10-25); they
-   * start in the main menu's remembered spawn city (`loadMenuMap(menuSpawns)`). */
+   * start in the remembered spawn city (`loadMenuMap(menuSpawns)`). */
   const careerMap = (): string => {
     const spawn = loadMenuMap(menuSpawns);
     if (spawn) spawnSel.value = spawn;
@@ -1104,23 +1105,32 @@ async function main(): Promise<void> {
     applyAssistPreset(app.source);
   };
 
+  /** Weather selector choice per Free Roam weather: Rain is the old rainy night's downpour. */
+  const ROAM_WEATHER: Record<RoamChoice["weather"], string> = { clear: "clear", rain: "heavy_rain", fog: "fog" };
+  /** The garage's last Free Roam choice (Restart drives the same again). */
+  let careerRoam: RoamChoice | null = null;
   /** A career run: the night run or a free drive (city box) with the career car, its saved
-   * damage and mods. Opens the garage instead when the car cannot go out. */
-  const startCareerRun = (kind: RunKind, rain = false, city = ($("city") as HTMLInputElement).checked): boolean => {
-    // Garage runs take place in the world, from the main menu's spawn city (row 167).
+   * damage and mods. Opens the garage instead when the car cannot go out. `roam`: the garage's
+   * Free Roam (owner 2026-10-27): a free drive in the world at noon or 23:00 in clear, a
+   * downpour or fog (the pop-up's weather wins over the developer weather box). */
+  const startCareerRun = (kind: RunKind, rain = false, city = ($("city") as HTMLInputElement).checked, roam: RoamChoice | null = null): boolean => {
+    // Garage runs take place in the world, from the remembered spawn city (row 167).
     citySel.value = careerMap();
-    const json =
+    careerRoam = roam;
+    let json =
       kind === "chase"
         ? withSpawn(rain ? sim.nightRunRainJson(DEFAULT_CAR, "Arcade", citySel.value) : sim.nightRunCityJson(DEFAULT_CAR, "Arcade", citySel.value))
-        : city
+        : city || roam
           ? withSpawn(sim.freeDriveCityJson(DEFAULT_CAR, "Arcade", citySel.value))
           : sim.freeDriveJson(DEFAULT_CAR, "Arcade", false);
+    json = withWeather(json);
+    if (roam) json = sim.scenarioWithWeather(JSON.stringify({ ...JSON.parse(json), time_of_day_h: roam.time === "day" ? 12 : 23 }), ROAM_WEATHER[roam.weather]);
     app.scenarioFile = null;
     app.scenario = null;
     app.result = null;
     app.bench = null;
     try {
-      sim.careerStartRun(withWeather(json));
+      sim.careerStartRun(json);
     } catch (e) {
       openGarage(String(e).replace(/^(Error: )?wp_wasm: /, ""));
       return false;
@@ -1139,7 +1149,7 @@ async function main(): Promise<void> {
     const sc = sim.scenario();
     // A career race or touge battle: back to the garage (its pickers start the next one).
     if (sim.careerRunActive() && sc.name.startsWith("race_")) return void openGarage();
-    if (sim.careerRunActive()) return void startCareerRun(sc.name.startsWith("night_run") ? "chase" : "free", sc.name === "night_run_rainy_night");
+    if (sim.careerRunActive()) return void startCareerRun(sc.name.startsWith("night_run") ? "chase" : "free", sc.name === "night_run_rainy_night", undefined, careerRoam);
     const car = sc.entities[0]?.car;
     const mods = sc.entities[0]?.mods ?? [];
     if (sc.name === "night_run") startNightRun(car, sc.mode, false, mods);
@@ -1422,7 +1432,7 @@ async function main(): Promise<void> {
   // Another spawn city restarts the session there, like another map; the game menu (and the
   // career's garage runs) remember it.
   spawnSel.onchange = () => {
-    menu?.setMap(spawnSel.value);
+    saveMenuMap(spawnSel.value);
     if (citySel.value === WORLD_ID) citySel.onchange?.(new Event("change"));
   };
   const cstr = $("cstr") as HTMLInputElement;
@@ -1761,7 +1771,8 @@ async function main(): Promise<void> {
    * when nothing would (free drive, the test pad, a finished race, a replay).
    */
   const leaveText = (action: MenuConfirm): string | null | undefined => {
-    if (action === "resetSettings") return undefined;
+    // Loading a save always asks (the menu's line): it replaces the career.
+    if (action === "resetSettings" || action === "loadGame") return undefined;
     if (isReplay()) return null;
     const sc = sim.scenario();
     const career = sim.careerRunActive();
@@ -1789,29 +1800,26 @@ async function main(): Promise<void> {
     developerDefault: devDefault,
     countersteer: true,
     cameras: CAMERAS.filter((c) => c.mode !== "orbit").map((c) => ({ id: c.mode, label: c.label })),
-    maps: menuSpawns,
-    mapLabel: "Spawn in",
     host: {
-      play: (choice: PlayChoice, spawn: string) => {
-        // Everything but touge takes place in the world; the main screen's spawn picks the
-        // city night run, rainy night, free drive and the career garage's runs start in (the
-        // developer panel's city and spawn boxes follow).
-        if (choice !== "touge") {
-          citySel.value = WORLD_ID;
-          if (spawnPoints.some((p) => p.id === spawn)) spawnSel.value = spawn;
+      // Owner 2026-10-27: the main menu is Career, Settings, Load / Save game and Controls;
+      // Free Roam, street races and touge all start from the career garage.
+      play: () => openGarage(),
+      saveGame: () => {
+        const name = saveFileName(sim.careerView().day);
+        downloadText(name, sim.careerSave());
+        return `Saved ${name}`;
+      },
+      loadGame: async () => {
+        let text: string;
+        try {
+          text = await pickTextFile();
+        } catch {
+          return null;
         }
-        careerPicker = null;
-        // Row 169: with the career box ticked (the default) and a career car that can go out,
-        // night run / rainy night / free drive are career runs, so street-race bets and wins
-        // land in the career. Otherwise they are quick play (practice cash; the street UI says
-        // so). The garage's own race / touge entries always run as career runs (row 167).
-        const career = careerOn() && sim.careerExists() && sim.careerView().can_start;
-        if (choice === "chase") void (career ? startCareerRun("chase") : startNightRun());
-        else if (choice === "chaseRain") void (career ? startCareerRun("chase", true) : startNightRun(undefined, undefined, true));
-        else if (choice === "free") void (career ? startCareerRun("free", false, true) : startFreeDrive(undefined, undefined, true));
-        else if (choice === "races") raceView.openPicker();
-        else if (choice === "touge") tougeView.openPicker();
-        else openGarage();
+        if (sim.careerRunActive()) sim.careerEndRun();
+        const v = sim.careerLoad(text);
+        persistCareer();
+        return `Loaded: night ${v.day}, $${v.cash.toLocaleString("en-US")}`;
       },
       restart: () => restartRun(),
       garage: () => openGarage(),
