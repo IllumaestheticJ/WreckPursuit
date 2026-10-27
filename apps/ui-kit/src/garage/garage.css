@@ -49,34 +49,6 @@
   font-size: 0.9em;
   margin: 0.4em 0;
 }
-.wp-cg-mods {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(16em, 22em);
-  gap: 1em;
-  align-items: start;
-}
-/* The effect panel follows the mod list down as it scrolls (beside it on wide screens, pinned
-   to the bottom of the view on narrow ones). */
-.wp-cg-mods-effect {
-  position: sticky;
-  top: 0;
-  max-height: calc(100vh - 2em);
-  overflow-y: auto;
-  z-index: 1;
-}
-.wp-cg-mods tr.wp-cg-mod-focus td {
-  background: rgba(255, 255, 255, 0.05);
-}
-@media (max-width: 760px) {
-  .wp-cg-mods {
-    grid-template-columns: 1fr;
-  }
-  .wp-cg-mods-effect {
-    grid-row: 1;
-    top: 0;
-    max-height: 45vh;
-  }
-}
 .wp-cg-pound {
   border: 1px solid var(--edge);
   padding: 0.6em 0.75em;
@@ -295,9 +267,36 @@
 }
 .wp-ws-catrow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.5em;
   align-items: center;
+}
+/* One upgrade for sale (part card, catalog): the row, then what it needs and its trade-off. */
+.wp-ws-uprow {
+  display: grid;
+  gap: 0.15em;
+}
+.wp-ws-upbtns {
+  gap: 0.3em;
+  flex-wrap: wrap;
+}
+.wp-ws-upbtns:empty {
+  display: none;
+}
+.wp-ws-uprow + .wp-ws-uprow {
+  border-top: 1px dashed var(--edge);
+  padding-top: 0.4em;
+}
+.wp-ws-upnote {
+  font-size: 0.8em;
+}
+.wp-ws-upgrades {
+  display: grid;
+  gap: 0.45em;
+}
+.wp-ws-upsub {
+  font-size: 0.8em;
+  margin-top: 0.2em;
 }
 .wp-ws-standpanel {
   grid-area: mid;

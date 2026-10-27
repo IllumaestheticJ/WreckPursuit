@@ -137,6 +137,9 @@ export class WorkshopMode {
       strip: (assembly, slot) => this.after(sim.careerStripPart(uid, assembly, slot), false),
       build: (assembly, slot, part) => this.after(sim.careerBuildPart(uid, assembly, slot, part), false),
       clearWay: (slot) => this.after(sim.careerClearWay(uid, slot)),
+      mods: () => sim.careerMods(uid),
+      install: (id) => (sim.careerInstall(uid, id), this.after(sim.careerWorkshop(uid))),
+      uninstall: (id) => (sim.careerUninstall(uid, id), this.after(sim.careerWorkshop(uid))),
       mechanic: (slot, source, sellOld) => {
         const r = "part" in source
           ? sim.careerMechanicInstall(uid, slot, source.part, null, sellOld)
