@@ -1481,6 +1481,10 @@ impl Career {
         let mut out = Vec::new();
         for m in mods {
             let installed = c.mods.contains(&m.id);
+            // A mod that would change nothing on this car (its stock tyres) is not offered.
+            if !installed && m.does_nothing_on(&base.def) {
+                continue;
+            }
             let (next, replaces, check) = if installed {
                 let next: Vec<String> = c.mods.iter().filter(|x| **x != m.id).cloned().collect();
                 let check = self
@@ -1730,9 +1734,18 @@ impl Career {
     pub fn workshop(&self, uid: CarUid) -> Result<WorkshopScreen, String> {
         let a = &self.profile.account;
         let car = a.try_car(uid).map_err(e2s)?;
+        // Grades that would change nothing on this car (its stock tyres) are not offered.
+        let base = base_car(&car.def_id)?;
+        let mut catalog = self.econ.part_catalog(a, uid, self.mode()).map_err(e2s)?;
+        catalog.retain(|e| {
+            e.grade
+                .as_deref()
+                .and_then(|g| self.econ.catalog.get(g))
+                .is_none_or(|m| !m.does_nothing_on(&base.def))
+        });
         Ok(WorkshopScreen {
             view: self.econ.workshop(a, uid, self.mode()).map_err(e2s)?,
-            catalog: self.econ.part_catalog(a, uid, self.mode()).map_err(e2s)?,
+            catalog,
             cash: a.cash,
             def_id: car.def_id.clone(),
         })

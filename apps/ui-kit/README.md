@@ -205,8 +205,8 @@ menu.openPause();  // Resume, Restart, Garage, Settings, Controls, Quit to main 
   own line; `menu.confirming` is the open question's action.
 - Garage screens use the kit's inline `Confirm` row (`src/ui/kit.tsx`: Cancel focused, Y / N,
   Esc cancels without closing the screen behind) for selling or scrapping a car, importing a save,
-  buying a car on a lot, and any purchase `isBigSpend` flags ($5,000+, or half your cash): mods
-  (and removals that throw away that much), workshop catalog parts and mechanic jobs.
+  buying a car on a lot, and removing a mod when `isBigSpend` flags the loss ($5,000+, or half
+  your cash). Buying parts, mechanic jobs and installing mods never ask (owner, 2026-10-27).
 - `controlsOpen()` lets the host's rebinding panel sit on top: the menu hides and comes back when
   the panel closes.
 - **Controls** section (per-device input shaping, `src/menu/controls.ts`): a device cycle

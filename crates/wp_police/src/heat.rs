@@ -172,6 +172,10 @@ pub struct RacerRecord {
     pub safehouse_s: f32,
     /// Last time each violation kind counted.
     pub last_violation: [Option<SimTime>; 5],
+    /// Last time a speeding violation counted that a unit or camera saw (the radar's repeat
+    /// for a conspicuous racer: unseen `wp_world` reports don't hold it back).
+    #[serde(default)]
+    pub last_witnessed_speeding: Option<SimTime>,
     /// Bounty ledger.
     pub bounty: BountyRecord,
     /// When the current pursuit started.
@@ -197,6 +201,7 @@ impl RacerRecord {
             pinned_s: 0.0,
             safehouse_s: 0.0,
             last_violation: [None; 5],
+            last_witnessed_speeding: None,
             bounty: BountyRecord::default(),
             pursuit_started: None,
         }

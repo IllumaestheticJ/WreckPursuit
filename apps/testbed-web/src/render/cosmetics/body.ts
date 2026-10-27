@@ -207,11 +207,17 @@ const lights: Builder = (c, p) => {
   for (const sx of [-1, 1] as const) {
     const b = c.frame.headlight(sx);
     const centre = b.getCenter(new THREE.Vector3());
-    const r = Math.min(b.max.x - b.min.x, b.max.z - b.min.z) * 0.42;
+    const w = b.max.x - b.min.x;
+    const h = b.max.z - b.min.z;
+    // Two rings side by side, sized from the lamp's width; a slit lamp (much wider than tall)
+    // gets oval rings at least 4 cm tall, so the halo shows on every lamp shape.
+    const r = Math.max(w * 0.22, 0.035);
+    const squash = Math.min(1, Math.max(h * 0.45, 0.04) / r);
     for (const dx of [-0.25, 0.25]) {
-      const halo = new THREE.Mesh(new THREE.TorusGeometry(r, 0.008, 6, 24), ring);
+      const halo = new THREE.Mesh(new THREE.TorusGeometry(r, 0.01, 6, 24), ring);
       halo.rotation.x = Math.PI / 2;
-      halo.position.set(centre.x + dx * (b.max.x - b.min.x), b.max.y + 0.006, centre.z);
+      halo.scale.set(1, squash, 1);
+      halo.position.set(centre.x + dx * w, b.max.y + 0.006, centre.z);
       g.add(halo);
     }
   }
