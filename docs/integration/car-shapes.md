@@ -152,6 +152,12 @@ change.
 | `rear_fender_rise_m` | m | 0…0.12 | 0 | rear fender / haunch tops above the deck, wheel → tail |
 | `fender_peak_w` | fraction | 0.5…0.95 | 0.80 | where the fender peak starts (of the body half width) |
 | `overhang_trim` (range widened) | m | −0.35…+0.25 each (`OVERHANG_RANGE`) | (0, 0) | was −0.15…+0.10 |
+| `nose_face_rake_deg` / `tail_face_rake_deg` | ° | −15…60 | 0 | side-view lean of the end face (+ top back / tailgate lean, − shark nose) |
+| `nose_chin_m` / `tail_chin_m` | m | 0…0.25 | 0 | undercut of the lower 40 % of the face |
+| `nose_plan_bow_m` / `tail_plan_bow_m` | m | 0…0.5 | 0 | plan-view bow length of the end (elliptical) |
+| `nose_tip_w` / `tail_tip_w` | fraction | 0.1…1.0 | 0.6 | half width left at the very end with a bow |
+| `roof_plan_taper` | fraction | 0…0.3 | 0 | roof narrows header → rear glass (greenhouse plan taper) |
+| `lower_lean_in_m` | m | 0…0.08 | 0 | lower body leans in below the crease (boat-tail section) |
 
 New type `SideSculpt { y0_m, y1_m, z0_m, z1_m, dx_m, falloff_m }` (chassis metres;
 `SideSculpt::dx_at(y, z)` gives its offset). New module `car_assets::lamp` (projected lamps) and
@@ -201,6 +207,24 @@ Station `y` values are chassis metres (+ forward). Take wheel stations from your
   bend cuts under it. The band is measured on the body's full half width, so it never grows
   toward the nose at a fixed x (no lip in front of lamps). `hood_valley` / `deck_valley` are
   unchanged (engine-cover valleys).
+- **End faces (`nose_face_rake_deg`, `nose_chin_m`, `tail_face_rake_deg`, `tail_chin_m`).**
+  The face runs from the underside to the nose leading edge (`nose_h` / `z_nose`) or the tail
+  top; loft points ahead of it are clamped onto it, so the face becomes sloped loft faces at the
+  fine station step (the end cap shrinks to a line). Raked modern bumper: 20–35°; tailgate lean:
+  15–30°; shark nose: −10…−15°; chin / diffuser undercut 0.05–0.12. The face depth (rake + chin)
+  is capped at 0.10 m ahead of the windshield base and 0.03 m behind the deck / rear-glass start
+  (a hatch's short tail section limits its tailgate lean), and with < 4 cm of room the face stays
+  vertical. On tailgate cars (no trunk lid) the rear-facing loft faces of a raked tail above the
+  bumper are the tailgate panel. Kit parts placed on the old vertical face (`Kit::front_box`,
+  generic lamps at `y_nose`) float in front of a raked face: re-place them, or use projected
+  lamps, which follow it.
+- **Plan bow (`nose_plan_bow_m` + `nose_tip_w`, tail likewise).** Over the bow length the half
+  width follows an elliptical arc down to the tip fraction: 0.2–0.35 m with tip 0.5–0.7 =
+  rounded 90s nose, tip 0.2–0.3 = pointed. Multiplies with `plan_width` and `nose_plan_round`.
+- **Greenhouse plan taper (`roof_plan_taper`)** 0.1–0.2 narrows the roof toward the rear glass
+  (separate from `tumblehome` and the A / C-pillar plan rakes). **Lower lean-in
+  (`lower_lean_in_m`)** 0.03–0.06 tucks the body in below the crease (boat-tail section); put
+  `crease_z` where the lean should start.
 - **Overhangs (`overhang_trim`).** Now −0.35…+0.25 m per end. The nose / tail stop 6 cm short of
   the tires; past the lattice hood front (quarter end) the visual hood front (quarter end) moves
   back with them, so the bumper panels always keep a 10 cm strip on their region (their lattice
@@ -221,9 +245,15 @@ Station `y` values are chassis metres (+ forward). Take wheel stations from your
     top view `Lower` is the leading strip). `bezel_w > 0` adds a flush black bezel
     (`headlamp_bezel_*` / `taillamp_bezel_*`, `FrameFront` / `FrameRear`, trim).
   - Lower level: `lamp::lens(b, p, key, &Lamp)`, `lamp::bezel(...)`, `split_outline` /
-    `clip_outline`, `ellipse` for round / oval lamps. Outlines must be star-shaped round their
-    centroid (convex, ovals, teardrops, strips); make C / boomerang shapes from two lenses.
-    Points past the silhouette are pulled in until they hit.
+    `clip_outline`, `ellipse` for round / oval lamps. Outlines are any simple polygon, convex or
+    concave (L, C, boomerang, trapezoid; ear-clipped). Points past the silhouette are pulled in
+    until they hit.
+  - Inner elements: `lamp::element(b, p, key, &lamp, at, &Element)` with `Element::Bowl { r_m,
+    h_m }` (projector bowl), `Ring { r_m, w_m }` (reflector / chrome ring), `Strip { pts, w_m }`
+    (LED strip along a polyline, following the surface); they sit on the lens face. Put emissive
+    elements in the lamp's own part (an extra light part in `FrameFront` / `FrameRear` would
+    count as a fifth end lamp in `lights_sit_outside_the_shell`), rings in a chrome / trim
+    detail. See the doc example at the top of `lamp.rs`.
   - Rules that keep lenses visible from ahead (`lights_sit_outside_the_shell`): keep a
     front-view outline inside the nose half width (`Kit::wn()`; let `yaw_deg` do the wrap) and
     under the top edge of the nose face (an outline across a sharp edge lands on two surfaces and
@@ -240,8 +270,8 @@ Station `y` values are chassis metres (+ forward). Take wheel stations from your
 the cars' styles) of kestrel_ts, vireo_xs, hauler_1500, nyx_proto and ironside_440;
 `MESH_DIR=<dir> node tools/assets/mesh_shots.mjs <out> <car>__<variant> …` renders them
 (`mesh_shots.mjs` now takes `MESH_DIR`; an id `<car>__<variant>` uses `<car>`'s def). Sheets:
-`docs/media/car-shapes/phase3/{plan_width,sculpt_section,fender_rise,overhang,lamps_front,
-lamps_rear}.jpg` (base on the left, knob on the right).
+`docs/media/car-shapes/phase3/{plan_width,sculpt_section,fender_rise,overhang,face_shape,
+lamps_front,lamps_rear}.jpg` (base on the left, knob on the right).
 
 ### Tests added
 `style_knob_extremes_never_panic` sweeps every phase-3 knob far past both ends (NaN control
@@ -280,10 +310,11 @@ phase 1 show nothing (short / sequential shifter, radar, sport tyres on the exot
 halo, front sway bar on the truck). `wasm-pack` was not installed in the container (installed
 with `cargo install wasm-pack`).
 
-### Not covered here (phase-2 requests outside this brief)
-Nose / tail face rake in side view and a plan bow of the face, tailgate lean, a quarter-glass
-knob (hatch group); a forward-leaning shark nose (muscle); a C-pillar window kink (tuner); nose
-height above the lattice hood line (traffic, police SUV); a shared `face_poly` / `top_poly`
-(several groups; `lamp.rs` covers lamp shapes, not general panels).
+### Lead addenda (merged phase-2 generator requests)
+Items 1–4 of the lead's merged list: lamp primitive (concave outlines, depth, bezel, inner
+elements) — `lamp.rs`; face rake / chin / plan bow per end; plan taper (nose: `plan_width` or
+the plan bow; waist: `plan_width`; greenhouse: `roof_plan_taper`); section shape (`side_bulge_m`,
+`lower_lean_in_m`, `tumblehome_m` down to 0.03, recesses via `side_sculpt`). The remaining
+items follow in a later pass (see below).
 
 ## Lead feedback
