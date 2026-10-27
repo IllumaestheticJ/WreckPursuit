@@ -873,7 +873,7 @@ const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
     ("debug_coupe", 17927),
     ("debug_sedan", 9605),
     ("drayman_cargo", 10488),
-    ("fulmine_v10", 19884),
+    ("fulmine_v10", 21056),
     ("furrow_24", 9414),
     ("hakone_gt", 18873),
     ("hauler_1500", 10625),
