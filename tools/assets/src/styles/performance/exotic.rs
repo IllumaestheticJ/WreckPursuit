@@ -27,7 +27,8 @@ use super::kit::{
     Kit, Seg, SIDES,
 };
 use super::supercar::{
-    end_poly, flip_x, rear_stroke, shape3, side_poly, stadium, top_poly, top_stroke, Shape3,
+    built_parts, end_poly, flip_x, rear_stroke, shape3, shear_to_faces, side_poly, stadium,
+    top_poly, top_stroke, Shape3,
 };
 use super::{kit_detail, rgb, wheels};
 
@@ -73,7 +74,7 @@ pub fn lucciola(def: &VehicleDef) -> CarStyle {
         &mut s,
         def,
         Shape3 {
-            nose: 0.86,
+            nose: 0.92,
             tail: 0.92,
             waist: 0.95,
             scallop: -0.05,
@@ -81,6 +82,9 @@ pub fn lucciola(def: &VehicleDef) -> CarStyle {
             bulge: 0.03,
             rocker: 0.04,
             rise: (0.02, 0.03),
+            face: (35.0, 0.06, 10.0, 0.06),
+            bow: (0.30, 0.60, 0.25, 0.70),
+            lean: 0.03,
         },
     );
     wheels(
@@ -114,6 +118,7 @@ pub fn lucciola(def: &VehicleDef) -> CarStyle {
 
 fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
+    let pre = built_parts(&k);
     let p = ctx.profile;
     let yn = k.yn;
     let wn = k.wn();
@@ -125,8 +130,10 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     // --- Pop-up lamp pods (closed): raised paint lids with a dark seam, on the hood top.
     for sx in SIDES {
-        let (y0, y1) = (yn - 0.56, yn - 0.26);
-        let (x0, x1) = (sx * 0.38, sx * (wn - 0.12));
+        // Behind the raked nose face, on the hood top.
+        let yl = yn - p.face_depth(true);
+        let (y0, y1) = (yl - 0.34, yl - 0.04);
+        let (x0, x1) = (sx * 0.38, sx * (p.half_width(yl) - 0.12));
         let ks = sided(&dkey("popup_seam_l", hood, M::Grille), sx);
         k.patch(
             &ks,
@@ -139,28 +146,24 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
         let kl = sided(&dkey("popup_lid_l", hood, M::Paint), sx);
         k.patch(&kl, y0, y1, top_band(x0, x1), 0.004, 0.012, (3, 2));
-        // Flush parking / flash lamp strip in the nose face below the pods, its outer corner
-        // the amber turn signal, which wraps round onto the fender side.
-        k.front_cluster(
+        // Parking / flash lamp strip cast onto the raked nose face below the pods, wrapping
+        // round the corner; its outer end is the amber turn signal.
+        let xi = (wn - 0.36).max(0.16);
+        let strip = [
+            [-xi, nz1 - 0.075],
+            [-(wn - 0.04), nz1 - 0.075],
+            [-(wn - 0.04), nz1 - 0.035],
+            [-xi, nz1 - 0.035],
+        ];
+        k.proj_cluster(
             sx,
-            0.40,
-            wn - 0.02,
-            nz1 - 0.06,
-            nz1 - 0.02,
-            0.012,
-            0.006,
-            Seg::Outboard(0.11),
-        );
-        k.side_patch(
-            &indicator_front_key(-1.0),
-            sx,
-            yn - 0.10,
-            yn - 0.025,
-            nz1 - 0.06,
-            nz1 - 0.02,
-            0.002,
+            true,
+            LampView::Front,
+            &strip,
+            Some(Seg::Outboard(0.10)),
+            M::EmissiveAmber,
             0.008,
-            (2, 1),
+            25.0,
         );
     }
     // --- Oval centre intake with four slats, small corner ducts, black lip.
@@ -280,6 +283,18 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.mirrors(0.18, 0.10, None);
     k.fender_repeaters();
     k.fuel_filler(1.0, 0.09, M::Trim);
+    shear_to_faces(
+        &mut k,
+        &pre,
+        &[
+            "taillight_",
+            "indicator_rear_",
+            "taillamp_bezel_",
+            "headlight_",
+            "indicator_front_",
+            "headlamp_bezel_",
+        ],
+    );
 }
 
 /// 2010s mid-engine V10 AWD supercar: low sharp-cornered wedge with the hood running in one
@@ -336,7 +351,7 @@ pub fn fulmine(def: &VehicleDef) -> CarStyle {
         &mut s,
         def,
         Shape3 {
-            nose: 0.88,
+            nose: 0.94,
             tail: 0.95,
             waist: 0.96,
             scallop: -0.06,
@@ -344,6 +359,9 @@ pub fn fulmine(def: &VehicleDef) -> CarStyle {
             bulge: 0.015,
             rocker: 0.04,
             rise: (0.0, 0.03),
+            face: (30.0, 0.05, 8.0, 0.08),
+            bow: (0.12, 0.90, 0.08, 0.92),
+            lean: 0.02,
         },
     );
     wheels(
@@ -381,34 +399,38 @@ pub fn fulmine(def: &VehicleDef) -> CarStyle {
 
 fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
+    let pre = built_parts(&k);
     let p = ctx.profile;
-    let yn = k.yn;
     let wn = k.wn();
     let wt = k.wt();
     let (nz0, nz1) = k.nose_z();
     let (tz0, tz1) = k.tail_z();
     let fb = BodyRegion::FrontBumper;
 
+    // Lamp anchors: where the nose top starts behind the raked face, so the lamps lie on the
+    // top surface instead of across the face edge.
+    let yl = k.yn - p.face_depth(true);
+    let wl = p.half_width(yl);
     // --- Slim angular head lamps on the nose top: a dark lens that tapers back along the
     //     fender, a lightning-bolt DRL (the car's own signature) inside it, a small
     //     projector, the amber signal at its nose.
     for sx in SIDES {
-        let wf = p.half_width(yn - 0.30);
+        let wf = p.half_width(yl - 0.30);
         let lens = [
-            [0.44, yn - 0.13],
-            [wn - 0.05, yn - 0.035],
-            [wf - 0.06, yn - 0.32],
-            [0.56, yn - 0.25],
+            [0.44, yl - 0.13],
+            [wl - 0.05, yl - 0.035],
+            [wf - 0.06, yl - 0.32],
+            [0.56, yl - 0.25],
         ];
         let kh = sided(
             &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
             sx,
         );
         let hous = [
-            [0.42, yn - 0.145],
-            [wn - 0.03, yn - 0.02],
-            [wf - 0.04, yn - 0.34],
-            [0.55, yn - 0.27],
+            [0.42, yl - 0.145],
+            [wl - 0.03, yl - 0.02],
+            [wf - 0.04, yl - 0.34],
+            [0.55, yl - 0.27],
         ];
         top_poly(&mut k, &kh, &flip_x(&hous, sx), 0.004, 0.012);
         let kl = sided(
@@ -418,26 +440,26 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         top_poly(&mut k, &kl, &flip_x(&lens, sx), 0.009, 0.012);
         let hk = headlight_key(sx);
         // Bolt: out along the front edge, a sharp kink back inward, then out to the rear tip.
-        let b0 = [sx * 0.48, yn - 0.135];
-        let b1 = [sx * (wn - 0.20), yn - 0.08];
-        let b2 = [sx * (wn - 0.27), yn - 0.17];
-        let b3 = [sx * (wf - 0.09), yn - 0.27];
+        let b0 = [sx * 0.48, yl - 0.135];
+        let b1 = [sx * (wl - 0.20), yl - 0.08];
+        let b2 = [sx * (wl - 0.27), yl - 0.17];
+        let b3 = [sx * (wf - 0.09), yl - 0.27];
         for (a, c) in [(b0, b1), (b1, b2), (b2, b3)] {
             top_stroke(&mut k, &hk, a, c, 0.016, 0.012);
         }
         let proj = [
-            [0.64, yn - 0.17],
-            [0.74, yn - 0.15],
-            [0.74, yn - 0.21],
-            [0.64, yn - 0.22],
+            [0.64, yl - 0.17],
+            [0.74, yl - 0.15],
+            [0.74, yl - 0.21],
+            [0.64, yl - 0.22],
         ];
         top_poly(&mut k, &hk, &flip_x(&proj, sx), 0.012, 0.01);
         let ik = indicator_front_key(sx);
         let sig = [
-            [wn - 0.13, yn - 0.06],
-            [wn - 0.06, yn - 0.045],
-            [wn - 0.08, yn - 0.09],
-            [wn - 0.14, yn - 0.10],
+            [wl - 0.13, yl - 0.06],
+            [wl - 0.06, yl - 0.045],
+            [wl - 0.08, yl - 0.09],
+            [wl - 0.14, yl - 0.10],
         ];
         top_poly(&mut k, &ik, &flip_x(&sig, sx), 0.022, 0.02);
     }
@@ -615,4 +637,9 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     k.mirrors(0.20, 0.10, Some(M::Carbon));
     k.mirror_repeaters(0.20, 0.10, true);
+    shear_to_faces(
+        &mut k,
+        &pre,
+        &["headlamp_", "headlight_", "indicator_front_"],
+    );
 }

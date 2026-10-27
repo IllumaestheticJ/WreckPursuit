@@ -22,10 +22,12 @@
 // Kit code takes explicit coordinates (x0, x1, z0, z1, …), as in `kit.rs`.
 #![allow(clippy::too_many_arguments)]
 
+use std::collections::BTreeSet;
+
 use wp_contracts::{BodyRegion, VehicleDef};
 
 use crate::builder::{Builder, PartKey};
-use crate::mesh::{MaterialSlot as M, INDICATOR_SEAM_M};
+use crate::mesh::{MaterialSlot as M, PartKind, INDICATOR_SEAM_M};
 use crate::profile::RING_GLASS_TOP;
 use crate::style::{
     ArchShape, BodyStyle, CapKind, CarStyle, DetailCtx, RimKind, SideSculpt, Silhouette,
@@ -254,8 +256,11 @@ pub(super) fn side_poly(
 pub(super) fn face_y(k: &Kit, front: bool, x: f32, z: f32) -> f32 {
     let p = k.p;
     let inside = |y: f32| {
-        let zs = z.min(p.belt(y) - 0.01).max(p.sill(y) + 0.01);
-        x.abs() <= k.side_x(y, zs) && z <= k.top_z(y, x) + 0.005
+        let ring = p.ring(y);
+        let lo = ring.iter().map(|q| q.p[2]).fold(f32::MAX, f32::min);
+        let hi = ring.iter().map(|q| q.p[2]).fold(f32::MIN, f32::max);
+        let zs = z.clamp(lo + 0.005, (hi - 0.005).max(lo + 0.005));
+        z >= lo - 0.002 && z <= hi + 0.002 && x.abs() <= k.side_x(y, zs) + 0.002
     };
     let (mut a, mut b) = if front {
         (k.yn, k.yn - 0.6)
@@ -266,7 +271,7 @@ pub(super) fn face_y(k: &Kit, front: bool, x: f32, z: f32) -> f32 {
     if inside(a) {
         return a;
     }
-    for _ in 0..18 {
+    for _ in 0..16 {
         let m = 0.5 * (a + b);
         if inside(m) {
             b = m;
@@ -289,9 +294,75 @@ pub(super) fn end_poly(
 ) {
     let d = if front { 1.0 } else { -1.0 };
     let o = subdivide(pts, 0.06);
-    let at =
-        move |k: &Kit, q: [f32; 2], off: f32| [q[0], face_y(k, front, q[0], q[1]) + d * off, q[1]];
+    // On the vertical end plane; [`shear_to_faces`] then moves it onto the real face (plan
+    // corners, rake, chin), like every other kit part built on the face.
+    let y0 = if front { k.yn } else { k.yt };
+    let at = move |_: &Kit, q: [f32; 2], off: f32| [q[0], y0 + d * off, q[1]];
     drape(k, key, &o, proud, depth, [0.0, d, 0.0], &[1.0], &at);
+}
+
+/// Names of the parts that already have geometry (call right after [`Kit::new`]), so
+/// [`shear_to_faces`] only moves what the kit itself builds.
+pub(super) fn built_parts(k: &Kit) -> BTreeSet<String> {
+    k.b.keys()
+        .into_iter()
+        .filter(|key| k.b.geometry(&key.name).is_some_and(|g| !g.0.is_empty()))
+        .map(|key| key.name)
+        .collect()
+}
+
+/// Move every detail / light part the kit built on the vertical nose or tail plane (vertices
+/// within 3 cm of it) back onto the real end face: the plan-rounded corners, the face rake and
+/// the chin undercut. Parts in `pre` (built before the kit) and names starting with any of
+/// `skip` (lamps already cast onto the face) stay.
+pub(super) fn shear_to_faces(k: &mut Kit, pre: &BTreeSet<String>, skip: &[&str]) {
+    // Set-back tables over (x, z), 4 cm × 2 cm cells, bilinear.
+    const NX: usize = 56;
+    const NZ: usize = 60;
+    let (x0, dx, z0, dz) = (-1.12, 0.04, 0.0, 0.02);
+    let table = |front: bool| -> Vec<f32> {
+        let end = if front { k.yn } else { k.yt };
+        let mut t = Vec::with_capacity(NX * NZ);
+        for iz in 0..NZ {
+            for ix in 0..NX {
+                let (x, z) = (x0 + dx * ix as f32, z0 + dz * iz as f32);
+                t.push((end - face_y(k, front, x, z)).abs());
+            }
+        }
+        t
+    };
+    let (tf, tr) = (table(true), table(false));
+    let look = move |t: &[f32], x: f32, z: f32| -> f32 {
+        let fx = ((x - x0) / dx).clamp(0.0, (NX - 1) as f32 - 1e-3);
+        let fz = ((z - z0) / dz).clamp(0.0, (NZ - 1) as f32 - 1e-3);
+        let (ix, iz) = (fx as usize, fz as usize);
+        let (u, v) = (fx - ix as f32, fz - iz as f32);
+        let g = |i: usize, j: usize| t[j * NX + i];
+        let a = g(ix, iz) * (1.0 - u) + g(ix + 1, iz) * u;
+        let c = g(ix, iz + 1) * (1.0 - u) + g(ix + 1, iz + 1) * u;
+        a * (1.0 - v) + c * v
+    };
+    let (yn, yt) = (k.yn, k.yt);
+    let skip: Vec<String> = skip.iter().map(|s| s.to_string()).collect();
+    k.b.transform(
+        |key| {
+            matches!(key.kind, PartKind::Detail | PartKind::Light)
+                && !pre.contains(&key.name)
+                && !skip.iter().any(|s| key.name.starts_with(s.as_str()))
+        },
+        |q| {
+            let wf = smoothstep01((q[1] - (yn - 0.03)) / 0.01);
+            let wr = smoothstep01(((yt + 0.03) - q[1]) / 0.01);
+            let y = q[1] - wf * look(&tf, q[0], q[2]) + wr * look(&tr, q[0], q[2]);
+            [q[0], y, q[2]]
+        },
+    );
+}
+
+/// Smoothstep on 0..1 (clamped).
+fn smoothstep01(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 /// Mirror an outline given for the left side (x < 0) to side `sx` (x only; order kept, the
@@ -373,6 +444,12 @@ pub(super) struct Shape3 {
     pub rocker: f32,
     /// `front_fender_rise_m`, `rear_fender_rise_m`.
     pub rise: (f32, f32),
+    /// End faces: (nose rake °, nose chin m, tail rake °, tail chin m).
+    pub face: (f32, f32, f32, f32),
+    /// Plan bows: (nose bow m, nose tip fraction, tail bow m, tail tip fraction).
+    pub bow: (f32, f32, f32, f32),
+    /// `lower_lean_in_m`.
+    pub lean: f32,
 }
 
 /// Apply [`Shape3`] to `s`: plan taper and waist, the side scallop, shoulder line, section
@@ -421,6 +498,15 @@ pub(super) fn shape3(s: &mut CarStyle, def: &VehicleDef, o: Shape3) {
     b.rocker_in_m = o.rocker;
     b.front_fender_rise_m = o.rise.0;
     b.rear_fender_rise_m = o.rise.1;
+    b.nose_face_rake_deg = o.face.0;
+    b.nose_chin_m = o.face.1;
+    b.tail_face_rake_deg = o.face.2;
+    b.tail_chin_m = o.face.3;
+    b.nose_plan_bow_m = o.bow.0;
+    b.nose_tip_w = o.bow.1;
+    b.tail_plan_bow_m = o.bow.2;
+    b.tail_tip_w = o.bow.3;
+    b.lower_lean_in_m = o.lean;
 }
 
 /// Air outlet on the front fender behind the front wheel: dark slot with `slats` blades.
@@ -513,7 +599,7 @@ pub fn halberd(def: &VehicleDef) -> CarStyle {
         &mut s,
         def,
         Shape3 {
-            nose: 0.84,
+            nose: 0.90,
             tail: 0.9,
             waist: 0.94,
             scallop: -0.07,
@@ -521,6 +607,9 @@ pub fn halberd(def: &VehicleDef) -> CarStyle {
             bulge: 0.035,
             rocker: 0.05,
             rise: (0.03, 0.04),
+            face: (30.0, 0.06, 12.0, 0.08),
+            bow: (0.25, 0.60, 0.12, 0.85),
+            lean: 0.04,
         },
     );
     wheels(
@@ -543,54 +632,58 @@ pub fn halberd(def: &VehicleDef) -> CarStyle {
 
 fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
+    let pre = built_parts(&k);
     let p = ctx.profile;
     let yn = k.yn;
-    let wn = k.wn();
     let wt = k.wt();
     let (nz0, nz1) = k.nose_z();
     let (tz0, tz1) = k.tail_z();
     let fb = BodyRegion::FrontBumper;
 
+    // Lamp anchors: where the nose top starts behind the raked face, so the lamps lie on the
+    // top surface instead of across the face edge.
+    let yl = k.yn - p.face_depth(true);
+    let wl = p.half_width(yl);
     // --- Blade lamps (this maker's signature): a slim black blade along each nose-top
     //     corner whose outer end hooks back inward, an LED stroke tracing the blade and its
     //     hook, a small lens in the hook; a separate vertical intake slot on the face below.
     for sx in SIDES {
-        let wf = p.half_width(yn - 0.30);
+        let wf = p.half_width(yl - 0.30);
         let kh = sided(
             &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
             sx,
         );
         let blade = [
-            [0.40, yn - 0.05],
-            [wn - 0.03, yn - 0.01],
-            [wf - 0.04, yn - 0.20],
-            [wf - 0.16, yn - 0.22],
-            [wn - 0.14, yn - 0.10],
-            [0.42, yn - 0.10],
+            [0.40, yl - 0.05],
+            [wl - 0.03, yl - 0.01],
+            [wf - 0.04, yl - 0.20],
+            [wf - 0.16, yl - 0.22],
+            [wl - 0.14, yl - 0.10],
+            [0.42, yl - 0.10],
         ];
         top_poly(&mut k, &kh, &flip_x(&blade, sx), 0.004, 0.012);
         let hk = headlight_key(sx);
-        let h0 = [sx * 0.57, yn - 0.06];
-        let h1 = [sx * (wn - 0.05), yn - 0.028];
-        let h2 = [sx * (wf - 0.06), yn - 0.19];
-        let h3 = [sx * (wf - 0.15), yn - 0.20];
+        let h0 = [sx * 0.57, yl - 0.06];
+        let h1 = [sx * (wl - 0.05), yl - 0.028];
+        let h2 = [sx * (wf - 0.06), yl - 0.19];
+        let h3 = [sx * (wf - 0.15), yl - 0.20];
         for (a, c) in [(h0, h1), (h1, h2), (h2, h3)] {
             top_stroke(&mut k, &hk, a, c, 0.018, 0.016);
         }
         let lens = [
-            [wn - 0.16, yn - 0.08],
-            [wn - 0.08, yn - 0.06],
-            [wf - 0.08, yn - 0.16],
-            [wf - 0.15, yn - 0.17],
+            [wl - 0.16, yl - 0.08],
+            [wl - 0.08, yl - 0.06],
+            [wf - 0.08, yl - 0.16],
+            [wf - 0.15, yl - 0.17],
         ];
         top_poly(&mut k, &hk, &flip_x(&lens, sx), 0.020, 0.018);
         // Amber signal: the inner end of the blade.
         let ik = indicator_front_key(sx);
         let sig = [
-            [0.44, yn - 0.065],
-            [0.53, yn - 0.06],
-            [0.55, yn - 0.095],
-            [0.46, yn - 0.095],
+            [0.44, yl - 0.065],
+            [0.53, yl - 0.06],
+            [0.55, yl - 0.095],
+            [0.46, yl - 0.095],
         ];
         top_poly(&mut k, &ik, &flip_x(&sig, sx), 0.022, 0.02);
         let kv = sided(
@@ -831,6 +924,11 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     // Turn signals as segments beside the lamps (playtest row 136).
     k.signals_beside_lamps(0.06, M::EmissiveAmber);
+    shear_to_faces(
+        &mut k,
+        &pre,
+        &["headlamp_", "headlight_", "indicator_front_"],
+    );
 }
 
 // ======================================================================================= Ombra
@@ -879,7 +977,7 @@ pub fn ombra(def: &VehicleDef) -> CarStyle {
         &mut s,
         def,
         Shape3 {
-            nose: 0.86,
+            nose: 0.92,
             tail: 0.97,
             waist: 0.95,
             scallop: -0.07,
@@ -887,6 +985,9 @@ pub fn ombra(def: &VehicleDef) -> CarStyle {
             bulge: 0.01,
             rocker: 0.04,
             rise: (0.0, 0.02),
+            face: (35.0, 0.04, 5.0, 0.08),
+            bow: (0.12, 0.90, 0.08, 0.92),
+            lean: 0.02,
         },
     );
     wheels(
@@ -909,6 +1010,7 @@ pub fn ombra(def: &VehicleDef) -> CarStyle {
 
 fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
+    let pre = built_parts(&k);
     let p = ctx.profile;
     let yn = k.yn;
     let wn = k.wn();
@@ -918,22 +1020,26 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let fb = BodyRegion::FrontBumper;
     let hood = BodyRegion::Hood;
 
+    // Lamp anchors: where the nose top starts behind the raked face, so the lamps lie on the
+    // top surface instead of across the face edge.
+    let yl = k.yn - p.face_depth(true);
+    let wl = p.half_width(yl);
     // --- Long angular lamps on the nose-top corners, running back along the fender edge:
     //     dark lens on a black housing, a double-chevron DRL inside, the amber signal at the
     //     tip.
     for sx in SIDES {
-        let wf = p.half_width(yn - 0.40);
+        let wf = p.half_width(yl - 0.40);
         let hous = [
-            [0.40, yn - 0.11],
-            [wn - 0.02, yn - 0.02],
-            [wf - 0.03, yn - 0.42],
-            [wf - 0.16, yn - 0.40],
+            [0.40, yl - 0.11],
+            [wl - 0.02, yl - 0.02],
+            [wf - 0.03, yl - 0.42],
+            [wf - 0.16, yl - 0.40],
         ];
         let lens = [
-            [0.43, yn - 0.115],
-            [wn - 0.045, yn - 0.04],
-            [wf - 0.055, yn - 0.39],
-            [wf - 0.15, yn - 0.375],
+            [0.43, yl - 0.115],
+            [wl - 0.045, yl - 0.04],
+            [wf - 0.055, yl - 0.39],
+            [wf - 0.15, yl - 0.375],
         ];
         let kh = sided(
             &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
@@ -948,25 +1054,25 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         let hk = headlight_key(sx);
         // Double chevron pointing outward (this maker's signature).
         for d in [0.0, 0.09] {
-            let a = [sx * (0.48 + d), yn - 0.11 - 0.02 * d];
-            let apex = [sx * (wn - 0.12 - d), yn - 0.20 - 0.3 * d];
-            let c = [sx * (wf - 0.20 - d), yn - 0.35];
+            let a = [sx * (0.48 + d), yl - 0.11 - 0.02 * d];
+            let apex = [sx * (wl - 0.12 - d), yl - 0.20 - 0.3 * d];
+            let c = [sx * (wf - 0.20 - d), yl - 0.35];
             top_stroke(&mut k, &hk, a, apex, 0.015, 0.012);
             top_stroke(&mut k, &hk, apex, c, 0.015, 0.012);
         }
         let proj = [
-            [wf - 0.14, yn - 0.22],
-            [wf - 0.07, yn - 0.21],
-            [wf - 0.075, yn - 0.30],
-            [wf - 0.13, yn - 0.30],
+            [wf - 0.14, yl - 0.22],
+            [wf - 0.07, yl - 0.21],
+            [wf - 0.075, yl - 0.30],
+            [wf - 0.13, yl - 0.30],
         ];
         top_poly(&mut k, &hk, &flip_x(&proj, sx), 0.012, 0.01);
         let ik = indicator_front_key(sx);
         let sig = [
-            [wn - 0.12, yn - 0.05],
-            [wn - 0.055, yn - 0.045],
-            [wn - 0.07, yn - 0.09],
-            [wn - 0.13, yn - 0.095],
+            [wl - 0.12, yl - 0.05],
+            [wl - 0.055, yl - 0.045],
+            [wl - 0.07, yl - 0.09],
+            [wl - 0.13, yl - 0.095],
         ];
         top_poly(&mut k, &ik, &flip_x(&sig, sx), 0.022, 0.02);
     }
@@ -1265,6 +1371,11 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     // Turn signals as segments beside the lamps (playtest row 136).
     k.signals_beside_lamps(0.06, M::EmissiveAmber);
+    shear_to_faces(
+        &mut k,
+        &pre,
+        &["headlamp_", "headlight_", "indicator_front_"],
+    );
 }
 
 // ===================================================================================== Ostwind
@@ -1311,7 +1422,7 @@ pub fn ostwind(def: &VehicleDef) -> CarStyle {
         &mut s,
         def,
         Shape3 {
-            nose: 0.9,
+            nose: 0.94,
             tail: 0.94,
             waist: 0.94,
             scallop: 0.0,
@@ -1319,6 +1430,9 @@ pub fn ostwind(def: &VehicleDef) -> CarStyle {
             bulge: 0.035,
             rocker: 0.04,
             rise: (0.06, 0.05),
+            face: (25.0, 0.05, 15.0, 0.06),
+            bow: (0.30, 0.55, 0.30, 0.65),
+            lean: 0.03,
         },
     );
     wheels(
@@ -1346,6 +1460,7 @@ fn tilt_fwd(n: [f32; 3]) -> [f32; 3] {
 
 fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
+    let pre = built_parts(&k);
     let p = ctx.profile;
     let yn = k.yn;
     let wn = k.wn();
@@ -1662,6 +1777,7 @@ fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     // Turn signals as segments beside the lamps (playtest row 136).
     k.signals_beside_lamps(0.06, M::EmissiveAmber);
+    shear_to_faces(&mut k, &pre, &[]);
 }
 
 // ====================================================================================== Kagero
@@ -1709,7 +1825,7 @@ pub fn kagero(def: &VehicleDef) -> CarStyle {
         &mut s,
         def,
         Shape3 {
-            nose: 0.87,
+            nose: 0.92,
             tail: 0.94,
             waist: 0.95,
             scallop: -0.06,
@@ -1717,6 +1833,9 @@ pub fn kagero(def: &VehicleDef) -> CarStyle {
             bulge: 0.02,
             rocker: 0.04,
             rise: (0.02, 0.03),
+            face: (28.0, 0.05, 10.0, 0.07),
+            bow: (0.20, 0.70, 0.10, 0.88),
+            lean: 0.03,
         },
     );
     wheels(
@@ -1739,51 +1858,55 @@ pub fn kagero(def: &VehicleDef) -> CarStyle {
 
 fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
+    let pre = built_parts(&k);
     let p = ctx.profile;
-    let yn = k.yn;
     let wn = k.wn();
     let wt = k.wt();
     let (nz0, nz1) = k.nose_z();
     let (tz0, tz1) = k.tail_z();
     let fb = BodyRegion::FrontBumper;
 
+    // Lamp anchors: where the nose top starts behind the raked face, so the lamps lie on the
+    // top surface instead of across the face edge.
+    let yl = k.yn - p.face_depth(true);
+    let wl = p.half_width(yl);
     // --- Slim angular lamps tapering back along each fender, with twin parallel light bars
     //     and a small projector in them, the amber signal at the inner end.
     for sx in SIDES {
-        let wf = p.half_width(yn - 0.36);
+        let wf = p.half_width(yl - 0.36);
         let kh = sided(
             &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
             sx,
         );
         let hous = [
-            [0.40, yn - 0.07],
-            [wn - 0.025, yn - 0.02],
-            [wf - 0.04, yn - 0.38],
-            [wf - 0.12, yn - 0.36],
-            [0.52, yn - 0.14],
+            [0.40, yl - 0.07],
+            [wl - 0.025, yl - 0.02],
+            [wf - 0.04, yl - 0.38],
+            [wf - 0.12, yl - 0.36],
+            [0.52, yl - 0.14],
         ];
         top_poly(&mut k, &kh, &flip_x(&hous, sx), 0.004, 0.012);
         let hk = headlight_key(sx);
         // Twin bars (this maker's signature): two parallel light bars running from the inner
         // front corner back along the lens to the outer rear, the upper one longer.
         for (d, back) in [(0.0, 0.0), (0.05, 0.06)] {
-            let a = [sx * (0.58 + d), yn - 0.07 - 0.6 * d];
-            let c = [sx * (wf - 0.07 - d), yn - 0.34 + back];
-            top_stroke(&mut k, &hk, a, c, 0.016, 0.012);
+            let a = [sx * (0.58 + d), yl - 0.07 - 0.6 * d];
+            let c = [sx * (wf - 0.09 - d), yl - 0.30 + back];
+            top_stroke(&mut k, &hk, a, c, 0.016, 0.018);
         }
         let proj = [
-            [wn - 0.20, yn - 0.12],
-            [wn - 0.12, yn - 0.10],
-            [wn - 0.13, yn - 0.17],
-            [wn - 0.21, yn - 0.18],
+            [wl - 0.20, yl - 0.12],
+            [wl - 0.12, yl - 0.10],
+            [wl - 0.13, yl - 0.17],
+            [wl - 0.21, yl - 0.18],
         ];
         top_poly(&mut k, &hk, &flip_x(&proj, sx), 0.012, 0.010);
         let ik = indicator_front_key(sx);
         let sig = [
-            [0.43, yn - 0.085],
-            [0.54, yn - 0.085],
-            [0.56, yn - 0.12],
-            [0.50, yn - 0.13],
+            [0.43, yl - 0.085],
+            [0.54, yl - 0.085],
+            [0.56, yl - 0.12],
+            [0.50, yl - 0.13],
         ];
         top_poly(&mut k, &ik, &flip_x(&sig, sx), 0.022, 0.02);
     }
@@ -2041,4 +2164,9 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     // Turn signals as segments beside the lamps (playtest row 136).
     k.signals_beside_lamps(0.06, M::EmissiveAmber);
+    shear_to_faces(
+        &mut k,
+        &pre,
+        &["headlamp_", "headlight_", "indicator_front_"],
+    );
 }
