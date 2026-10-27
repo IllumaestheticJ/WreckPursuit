@@ -54,6 +54,9 @@ pub enum ArchShape {
     Round,
     /// Squared arch: flat top with chamfered corners (trucks, box flares, 80s cars).
     Box,
+    /// Flat-top trapezoid: a short flat top and long slanted sides (off-road flares, 70s
+    /// trucks, modern crossover cladding arches).
+    Trapezoid,
 }
 
 /// Hood scoop / vent variant emitted on the hood (region `Hood`, so it swings with it).
@@ -402,6 +405,50 @@ pub struct BodyStyle {
     /// Lower-body lean-in below the character line (boat-tail / tucked section), m: side points
     /// below the crease move in, most at the sill, 0 at the crease. Range 0…0.08. Default 0.
     pub lower_lean_in_m: f32,
+    /// Hood height offsets against the lattice, m: (at the cowl, at the hood's front edge).
+    /// Raising the front also lets the nose leading edge (`nose_h`) rise above the lattice hood
+    /// line (tall flat truck / SUV hoods); lowering both gives a thin, low nose block. Range
+    /// −0.10…+0.12 each. Default (0, 0).
+    pub hood_dz: (f32, f32),
+    /// Deck (trunk lid / tail top) height offset against the lattice, m. Range −0.10…+0.10.
+    /// Default 0.
+    pub deck_dz: f32,
+    /// Exponent of the front half of the `roof_arc` curve (windshield base → roof middle):
+    /// 2 = the parabola; lower = fuller near the base, higher = flatter roof, steeper fall.
+    /// Range 1.0…4.0. Default 2.
+    pub roof_arc_front_exp: f32,
+    /// Exponent of the rear half of the `roof_arc` curve (roof middle → rear glass base or the
+    /// fastback / hatch line's end): lower (1.2–1.6) makes a fastback fall in one even curve from
+    /// just behind the header. Range 1.0…4.0. Default 2.
+    pub roof_arc_rear_exp: f32,
+    /// Quarter (rearmost side) window. `false` paints the opening (body colour). Default true.
+    pub quarter_glass: bool,
+    /// Shortest deck (trunk lid / tailgate top) behind the rear glass base, m: vans and some
+    /// hatches want the glass (and roof) nearly flush with the tail. Range 0.02…0.25. Default
+    /// 0.25.
+    pub deck_min_m: f32,
+    /// Lip at the base of the rear glass (a kick where hatch glass meets the tailgate), m.
+    /// Range 0…0.05. Default 0.
+    pub glass_base_lip_m: f32,
+    /// Arch lip finish ([`TrimFinish::Black`] for black flare lips, `Chrome`, else body
+    /// colour). Default [`TrimFinish::Body`].
+    pub arch_lip_finish: TrimFinish,
+    /// Lower-body cladding: loft faces of the side, bumpers and sills below this height (m
+    /// above ground) become black `<panel>_cladding` parts on the same region. The band edge
+    /// falls on ring points (put `crease_z` near it for a crisp line); it never rises past 6 cm
+    /// under the lower bumper top, and on the bumpers past half their height, so every bumper
+    /// keeps paint. 0 = none. Range 0…0.7. Default 0.
+    pub cladding_z_m: f32,
+    /// Side-window (DLO) kick-up at its rear end, m: the glass base rises by this much over the
+    /// last `dlo_kink_len_m` of the rearmost side window (a C-pillar upturn). Range 0…0.12.
+    /// Default 0.
+    pub dlo_kink_m: f32,
+    /// Length of the DLO kick-up, m. Range 0.05…0.40. Default 0.15.
+    pub dlo_kink_len_m: f32,
+    /// Side-window top line drop from the front door window's front to the rearmost window's
+    /// rear end, m (+ the top line falls toward the rear, independent of the roof edge; the roof
+    /// rail band widens). Range −0.03…+0.10. Default 0.
+    pub dlo_top_drop_m: f32,
 }
 
 /// Allowed range of a [`BodyStyle::plan_width`] scale.
@@ -545,6 +592,18 @@ impl Default for BodyStyle {
             tail_tip_w: 0.6,
             roof_plan_taper: 0.0,
             lower_lean_in_m: 0.0,
+            hood_dz: (0.0, 0.0),
+            deck_dz: 0.0,
+            roof_arc_front_exp: 2.0,
+            roof_arc_rear_exp: 2.0,
+            quarter_glass: true,
+            deck_min_m: 0.25,
+            glass_base_lip_m: 0.0,
+            arch_lip_finish: TrimFinish::Body,
+            cladding_z_m: 0.0,
+            dlo_kink_m: 0.0,
+            dlo_kink_len_m: 0.15,
+            dlo_top_drop_m: 0.0,
         }
     }
 }
