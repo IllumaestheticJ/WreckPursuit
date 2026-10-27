@@ -70,6 +70,22 @@ fn face_box(
     );
 }
 
+/// Thin bar `x0..x1` × `z0..z1` across the middle of the nose / tail: a cheap flat prism
+/// ([`Kit::face_poly`]) that the end-face follow pass moves onto a raked face (keep it clear of
+/// the plan-bowed corners, where [`face_box`] follows the curve).
+fn face_bar(
+    k: &mut Kit,
+    key: &PartKey,
+    front: bool,
+    x0: f32,
+    x1: f32,
+    z0: f32,
+    z1: f32,
+    proud: f32,
+) {
+    k.face_poly(key, front, &[[x0, z0], [x1, z0], [x1, z1], [x0, z1]], proud);
+}
+
 /// Slot grille on the nose surface: dark insert `±half` × `z0..z1` with `slats` bars.
 fn slot_grille(
     k: &mut Kit,
@@ -87,7 +103,7 @@ fn slot_grille(
     let h = (z1 - z0) / (slats as f32 + 1.0);
     for i in 1..=slats {
         let z = z0 + h * i as f32;
-        face_box(
+        face_bar(
             k,
             &sk,
             true,
@@ -132,18 +148,6 @@ fn rear_diffuser(k: &mut Kit, mat: M, half: f32, h: f32, fins: usize, fin_out: f
         ];
         k.prism_x(&f, &prof, x - 0.006, x + 0.006);
     }
-}
-
-/// Chin splitter under the nose: a plate `t` thick reaching `fwd` past the bottom of the
-/// face (which a chin undercut sets back), `inset` in from the face width.
-fn chin_splitter(k: &mut Kit, mat: M, fwd: f32, inset: f32, t: f32) {
-    let key = dkey("splitter", BodyRegion::FrontBumper, mat);
-    let p = k.p;
-    let z = p.sill(k.yn);
-    let y = k.yn - p.style.nose_chin_m.clamp(0.0, 0.25).min(p.face_depth(true));
-    let w = p.half_width(y) - inset;
-    let prof = [[-w, z - t], [w, z - t], [w + 0.01, z], [-w - 0.01, z]];
-    k.prism_y(&key, &prof, y - 0.30, y + fwd);
 }
 
 /// Left-side outline `pts` ((|x|, z)) moved to side `sx`.
@@ -507,7 +511,7 @@ fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         zm1 + 0.026,
         0.016,
     );
-    chin_splitter(&mut k, M::Trim, 0.035, 0.12, 0.022);
+    k.splitter(M::Trim, 0.035, 0.12, 0.022, false);
     face_box(
         &mut k,
         &accent,
@@ -647,8 +651,9 @@ pub fn stoat(def: &VehicleDef) -> CarStyle {
     b.tumblehome_m = Some(0.10);
     b.front_fender_rise_m = 0.02;
     b.fender_peak_w = 0.86;
-    // Upright faces (the boxy identity) and a near-square roof; it keeps its small quarter
-    // window; a small lip under the hatch glass.
+    // Upright nose (the boxy identity), a slightly leaning tailgate with a small lip under
+    // the hatch glass, a near-square roof; it keeps its small quarter window.
+    b.tail_face_rake_deg = 8.0;
     b.quarter_glass = true;
     b.glass_base_lip_m = 0.02;
     b.roof_plan_taper = 0.04;
@@ -1055,7 +1060,7 @@ fn marten_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.016,
         );
     }
-    chin_splitter(&mut k, M::Trim, 0.04, 0.10, 0.02);
+    k.splitter(M::Trim, 0.04, 0.10, 0.02, false);
 
     // --- Sides: black body-side mouldings, body-colour mirrors, black handles.
     side_strip(&mut k, "side_moulding", 0.38, 0.44, M::Trim, 0.014);
@@ -1290,7 +1295,7 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let kbar = dkey("grille_bars", BodyRegion::Hood, M::Trim);
     for f in [0.33, 0.66] {
         let z = gz0 + f * (gz1 - gz0);
-        face_box(
+        face_bar(
             &mut k,
             &kbar,
             true,
@@ -1354,11 +1359,11 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let km = dkey("lower_mouth_mesh", fb, M::Trim);
     for i in 1..3 {
         let z = zi0 + (zi1 - zi0) * i as f32 / 3.0;
-        face_box(&mut k, &km, true, -0.38, 0.38, z - 0.005, z + 0.005, 0.012);
+        face_bar(&mut k, &km, true, -0.38, 0.38, z - 0.005, z + 0.005, 0.012);
     }
     for i in 1..8 {
         let x = -0.36 + 0.72 * i as f32 / 8.0;
-        face_box(
+        face_bar(
             &mut k,
             &km,
             true,
@@ -1392,7 +1397,7 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             );
         }
     }
-    chin_splitter(&mut k, M::Trim, 0.05, 0.10, 0.02);
+    k.splitter(M::Trim, 0.05, 0.10, 0.02, false);
 
     // --- Rear: two-piece wrap-around LED lamps with a light-bar signature, black garnish
     // with badge between them, diffuser, big roof spoiler with plates and a brake lamp.
