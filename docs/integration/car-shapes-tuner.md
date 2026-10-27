@@ -18,9 +18,8 @@
   tail pattern.
 - **Shaped lamps and grilles (local helpers in `tuner.rs`, no shared change):**
   `face_poly` (convex outline lens / grille / intake on the nose or tail face, instead of boxes),
-  `top_quad` (thin shell following the top surface over any plan quad) and `swept_top_lamp`
-  (a head lamp on the nose top whose outboard edge runs back into the fender, its rear edge a
-  diagonal, with the amber turn-signal segment at the inboard end and a dark housing round it),
+  `swept_top_lamp` (a head lamp on the nose top whose outboard edge runs back into the fender,
+  its rear edge a diagonal; since pass 3 drawn with the shared `Kit::proj_cluster`),
   `blank_badge` (octagonal chrome badge with no lettering), `rear_reflectors`.
 - **Sedan proportions.** The four-door cars had a ~0.7 m roof that read as a coupe. Roofs are now
   0.84–0.92 m long (`roof_len_trim` +0.15, steeper rear glass) and the cowl sits a little higher
@@ -128,18 +127,45 @@ rings, L-shaped tails and bonnet roundel; hakone's quad round tails; kestrel's h
 with a bright wing bar. What remains are generic era / body-type cues (swept lamps, square
 lamps with amber corners, intercooler mesh, pedestal wings, hoop wing, horizontal tails).
 
+## Pass 3 (phase 3 generator, merged from `ws/car-shapes` @ d8e0a524)
+Side profiles, sections and plan views, using the phase 3 knobs (values in `tuner.rs`; wheel
+stations from the car def via `axle()`, belt ≈ 0.59 × body height):
+
+| car | plan view (`plan_width`) | section | sculpts / fender rises | overhang trim (front, rear) |
+|---|---|---|---|---|
+| kestrel_ts | nose 0.93, tail 0.95 | bulge 0.025, rocker in 0.04 | shoulder line +2 cm, arch flares +2.5 / +3 cm, rear rise 2 cm | −0.10, −0.12 |
+| arashi_t4 | nose 0.96, tail 0.97 (square) | bulge 0.012, rocker in 0.03 | shoulder +1.2 cm, box flares +2.2 cm, front rise 1.5 cm | −0.08, −0.10 |
+| talus_20t | nose 0.95, waist 0.95, tail 0.96 | bulge 0.02, rocker in 0.045 | round blisters +4 / +4.5 cm, shoulder, rises 3 / 2.5 cm | −0.08, −0.12 |
+| shiro_turbo | nose 0.89, waist 0.96, tail 0.92 | bulge 0.03 high, rocker in 0.045 | shoulder +1.5 cm, rear haunch +3 cm, rear rise 3.5 cm | +0.02, −0.16 |
+| hakone_gt | pointed nose 0.86, waist 0.95, tail 0.90 | bulge 0.04, rocker in 0.05, tumblehome 0.26 | fat rear haunch +4 cm, front +2 cm, rear rise 5 cm | +0.05, −0.12 |
+| sperber_32 | nose 0.94, tail 0.95 | bulge 0.02, rocker in 0.035 | sharp shoulder +2.2 cm, lower door line −2 cm, rear +2 cm, front rise 2 cm | −0.14, −0.06 |
+
+Lamps moved to the shared projected clusters (`Kit::proj_cluster`): the swept top lamps
+(kestrel, shiro, hakone; `swept_top_lamp` now draws a top-view outline, amber at the outer
+end, flush bezel), arashi's and talus's head lamps (front view, 22° / 15° yaw so the amber
+corner wraps onto the fender), arashi's and talus's tails (rear view, 30° wrap). The local
+`top_quad` helper is gone. Kestrel's swept lamps sit outboard (|x| ≥ 0.56 m) and its
+`fender_peak_w` is 0.95, so they stay on one side of the fender-peak band
+(`fender_rise_keeps_kit_lamps_visible`). The swept lamp keeps a 15 cm minimum lens width when
+a narrow nose pulls its outer edge in (`phase3_knobs_keep_panels_on_their_regions` sweeps
+`plan_width` 0.80 at the nose). Sheets: `group_side_before_after.jpg`,
+`group_top_before_after.jpg` and the per-car sheets (regenerated).
+
+Still waiting on phase 3b (hood / deck dz, DLO top line and kink, face rake, nose height,
+roof-arc exponent, smooth shading) for the touch-up pass.
+
 ## Triangle counts
 
 Hero budget 22k (mid LOD 7k); all six within it.
 
 | car | full before → after | mid before → after |
 |---|---|---|
-| kestrel_ts | 18914 → 19030 | 5051 → 5451 |
-| arashi_t4 | 18292 → 18022 | 4962 → 4624 |
-| talus_20t | 17376 → 17680 | 4464 → 4646 |
-| shiro_turbo | 18992 → 18956 | 5040 → 5006 |
-| hakone_gt | 18873 → 18887 | 4826 → 4890 |
-| sperber_32 | 19112 → 18752 | 4942 → 5110 |
+| kestrel_ts | 18914 → 19558 | 5051 → 5645 |
+| arashi_t4 | 18292 → 18302 | 4962 → 4622 |
+| talus_20t | 17376 → 19018 | 4464 → 5034 |
+| shiro_turbo | 18992 → 19361 | 5040 → 5211 |
+| hakone_gt | 18873 → 19707 | 4826 → 4721 |
+| sperber_32 | 19112 → 18976 | 4942 → 5116 |
 
 The rows of `every_car_has_turn_signals_integrated_into_its_lamps`'s table for these six cars
 were rebased to the new counts (the phase-1 doc asks per-car passes above +2 % to do this).
@@ -178,12 +204,12 @@ ones; these are what limit the "obvious from a thumbnail" bar for this group:
 4. **Plan-view taper over a length** (`nose_taper_m` / `tail_taper_m` + length), not only corner
    rounding.
 5. **Side-window (DLO) shape**: rear side window kink, window top line independent of the roof.
-6. **Shaped lens helpers in `kit.rs`**: `top_quad` (surface-following shell over any plan quad),
-   `swept_top_lamp` and `face_poly` from `tuner.rs` can move to the shared kit as they are.
+6. **Shaped lens helpers in `kit.rs`**: done in phase 3 as `car_assets::lamp` /
+   `Kit::proj_cluster` (items 2–4 also landed in phase 3; 1 and 5 are in phase 3b).
 
 ## Known gaps
-- The side views still show tall flat flanks on the saloons: the belt / sill heights and the
-  overhangs come from the lattice and the shared loft; only knobs were used.
+- Hood and deck heights still come from the lattice (thick nose / tail blocks in side view on
+  the saloons) until phase 3b's hood / deck dz.
 - `sperber_32` has no C-pillar window kink (see generator requests).
 - Headlamp projector bowls / rings are on the nose face; on the steep hakone nose they read as
   separate round lamps under the cover rather than inside it.
