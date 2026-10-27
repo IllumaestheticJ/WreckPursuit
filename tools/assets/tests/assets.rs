@@ -940,19 +940,19 @@ const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
     ("bulwark_400", 21377),
     ("debug_coupe", 18723),
     ("debug_sedan", 9785),
-    ("drayman_cargo", 10572),
+    ("drayman_cargo", 10766),
     ("fulmine_v10", 21938),
-    ("furrow_24", 9618),
+    ("furrow_24", 10134),
     ("hakone_gt", 20990),
-    ("hauler_1500", 10893),
+    ("hauler_1500", 10995),
     ("ironside_440", 21146),
-    ("junkyard_beater", 8896),
+    ("junkyard_beater", 9244),
     ("kestrel_ts", 20690),
     ("lindwurm_4t", 21157),
     ("lucciola_350", 19966),
     ("marten_20", 19876),
     ("rampart_50", 21912),
-    ("satchel_20", 9289),
+    ("satchel_20", 10868),
     ("sentinel_bastion", 19524),
     ("sentinel_cruiser", 19201),
     ("sentinel_vigil", 19964),
@@ -962,8 +962,8 @@ const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
     ("sperber_32", 19954),
     ("stoat_16v", 19594),
     ("talus_20t", 20152),
-    ("tansy_13", 8330),
-    ("tumbril_20", 9466),
+    ("tansy_13", 10248),
+    ("tumbril_20", 10845),
     ("vireo_xs", 20576),
 ];
 
@@ -1456,7 +1456,11 @@ fn painted_rear_doors_keep_glass_only_in_the_windows() {
                 })
                 .sum()
         };
-        let full = car_assets::mesh::generate_styled(&car.def, &car.lattice, &base);
+        // Fully glazed baseline: the car's style without painted doors (the vans' own styles
+        // may already use them).
+        let mut glazed = base.clone();
+        glazed.body.rear_door_windows = None;
+        let full = car_assets::mesh::generate_styled(&car.def, &car.lattice, &glazed);
         let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
         car_assets::skin::bind_skin(&car.lattice, &mut m);
         let errors = validate(&car, &m, None);
