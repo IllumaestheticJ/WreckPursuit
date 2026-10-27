@@ -10,6 +10,26 @@
 - No shared generator code, car defs, lattices or sim code changed. A full `gen-car-mesh` run
   changes only these four cars' meshes.
 
+## Pass 3 (phase-3 generator knobs, merged from ws/car-shapes d8e0a524)
+- **ironside_440:** coke-bottle plan (1.0 over both wheels, 0.935 at the doors, 0.95–0.96 at
+  the ends); front fender tops 5 cm above the hood (replaces `hood_valley`), rear haunch tops
+  3.5 cm above the deck; pontoon hips (+3.5 cm over the rear wheel), a shoulder line 8 cm under
+  the belt, 2 cm side bulge, 3 cm rocker tuck.
+- **rampart_50:** narrow shark-nose plan (0.90 at the nose), waist 0.95, tail 0.94; fender
+  peaks 3.5 / 5 cm; pontoon hips, a shoulder line and a 3.5 cm cove low on the doors; rounded
+  section (bulge 3 cm high on the side), 4.5 cm rocker tuck, 26 cm tumblehome. Projected
+  lamps replace the local prism stop-gaps: angular head lamps wrapping onto the fenders (yaw
+  25°, black bezel, amber outer segment, running-light lens), wedge tail lamps wrapping onto
+  the quarters (bezel, red-on-red outer segment); the black tail panel now only fills the centre.
+- **bulwark_400:** gentle waist (0.955) and tapered ends, fender tops 3 cm / haunches 2.5 cm,
+  pontoon hips, shoulder line, 1.5 cm bulge.
+- **brigand_400:** slab-straight sides with barely tapered ends, squared front fender tops 4 cm
+  above the hood, one crisp mid-side character line; the corner tail lamps are now projected
+  lenses swung 35° round onto the quarters (bottom strip = signal).
+- The 70s cars use 18 wheel segments (was 20) to pay for the extra loft stations.
+- Waiting on phase 3b (nose / tail rake and chin, hood / deck dz, roof-arc exponent, DLO
+  kink, arch shapes, smooth shading) for a touch-up pass.
+
 ## Second pass (after the lead's "be bold" and "no brand cues" notes)
 - **Proportions:** ironside hood +7 cm longer (cabin −0.42 m), roof −3 cm, coke-bottle hips
   (haunch 7 cm) with fender peaks either side of a sunken hood (front haunch 3.5 cm, hood valley
@@ -100,10 +120,10 @@ ribbed reflector panel, landau roof with chrome band, rubber side strip, chrome 
 ## Triangle counts (hero budget 22k, mid 7k)
 | car | full before | full now | mid before | mid now |
 |---|---|---|---|---|
-| ironside_440 | 19809 | 21008 | 5451 | 5702 |
-| rampart_50 | 19954 | 19568 | 5380 | 5188 |
-| bulwark_400 | 20579 | 21539 | 5621 | 6027 |
-| brigand_400 | 20986 | 21793 | 6042 | 5922 |
+| ironside_440 | 19809 | 20318 | 5451 | 5822 |
+| rampart_50 | 19954 | 20910 | 5380 | 5910 |
+| bulwark_400 | 20579 | 20825 | 5621 | 6171 |
+| brigand_400 | 20986 | 21363 | 6042 | 6375 |
 
 ## Checks
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p
