@@ -358,6 +358,16 @@ fn style_knob_extremes_never_panic() {
             b.rear_fender_rise_m = k;
             b.fender_peak_w = 3.0 * k;
             b.overhang_trim = (3.0 * k, 3.0 * k);
+            b.nose_face_rake_deg = 90.0 * k;
+            b.tail_face_rake_deg = -90.0 * k;
+            b.nose_chin_m = k;
+            b.tail_chin_m = k;
+            b.nose_plan_bow_m = 2.0 * k;
+            b.tail_plan_bow_m = 2.0 * k;
+            b.nose_tip_w = 3.0 * k;
+            b.tail_tip_w = -3.0 * k;
+            b.roof_plan_taper = k;
+            b.lower_lean_in_m = k;
             let m = generate_styled(&car.def, &car.lattice, &st);
             assert!(m.tri_count > 0, "{id}");
         }
@@ -1148,6 +1158,16 @@ fn phase3_knobs_keep_panels_on_their_regions() {
             b.front_fender_rise_m = 0.12;
             b.rear_fender_rise_m = 0.12;
             b.overhang_trim = oh;
+            b.nose_face_rake_deg = if k == 0 { 50.0 } else { -15.0 };
+            b.tail_face_rake_deg = if k == 0 { -15.0 } else { 50.0 };
+            b.nose_chin_m = 0.20;
+            b.tail_chin_m = 0.20;
+            b.nose_plan_bow_m = 0.45;
+            b.nose_tip_w = 0.2;
+            b.tail_plan_bow_m = 0.45;
+            b.tail_tip_w = 0.3;
+            b.roof_plan_taper = 0.3;
+            b.lower_lean_in_m = 0.08;
             let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
             car_assets::skin::bind_skin(&car.lattice, &mut m);
             // Budgets are the style author's call (these settings add loft stations).
@@ -1295,6 +1315,72 @@ fn projected_lamps_sit_outside_the_shell_and_keep_the_signal_contract() {
             );
         }
     }
+    // A concave (L-shaped) head lamp with a projector bowl, a chrome ring and an LED strip.
+    fn concave(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
+        use car_assets::lamp::{element, Element, Lamp};
+        use car_assets::styles::performance::kit::{dkey, headlight_key, sided};
+        let mut kit = Kit::new(ctx.profile, b);
+        let (wn, (_, zt)) = (kit.wn(), kit.nose_z());
+        let (wt, (_, tt)) = (kit.wt(), kit.tail_z());
+        for sx in SIDES {
+            let l = [
+                [-(wn - 0.40), zt - 0.14],
+                [-(wn - 0.02), zt - 0.14],
+                [-(wn - 0.02), zt - 0.05],
+                [-(wn - 0.14), zt - 0.05],
+                [-(wn - 0.14), zt - 0.10],
+                [-(wn - 0.40), zt - 0.10],
+            ];
+            let i = Seg::Inboard(0.06);
+            kit.proj_cluster(
+                sx,
+                true,
+                LampView::Front,
+                &l,
+                Some(i),
+                M::EmissiveAmber,
+                0.01,
+                15.0,
+            );
+            let pts = l.iter().map(|q| [sx * q[0].abs(), q[1]]).collect();
+            let lamp = Lamp::new(LampView::Front, pts);
+            let hk = headlight_key(sx);
+            let c = [sx * (wn - 0.08), zt - 0.10];
+            let bowl = Element::Bowl {
+                r_m: 0.03,
+                h_m: 0.01,
+            };
+            element(kit.b, ctx.profile, &hk, &lamp, c, &bowl);
+            let ring = sided(&dkey("lamp_ring_l", BodyRegion::FrameFront, M::Chrome), sx);
+            let rg = Element::Ring {
+                r_m: 0.036,
+                w_m: 0.006,
+            };
+            element(kit.b, ctx.profile, &ring, &lamp, c, &rg);
+            let strip = Element::Strip {
+                pts: vec![[sx * (wn - 0.38), zt - 0.12], [sx * (wn - 0.17), zt - 0.12]],
+                w_m: 0.012,
+            };
+            element(kit.b, ctx.profile, &hk, &lamp, c, &strip);
+            let tail = [
+                [-(wt - 0.30), tt - 0.12],
+                [-(wt - 0.02), tt - 0.12],
+                [-(wt - 0.02), tt - 0.03],
+                [-(wt - 0.30), tt - 0.03],
+            ];
+            let o = Seg::Outboard(0.08);
+            kit.proj_cluster(
+                sx,
+                false,
+                LampView::Rear,
+                &tail,
+                Some(o),
+                M::EmissiveAmber,
+                0.0,
+                0.0,
+            );
+        }
+    }
     let root = repo_root();
     for id in [
         "kestrel_ts",
@@ -1304,7 +1390,7 @@ fn projected_lamps_sit_outside_the_shell_and_keep_the_signal_contract() {
         "sentinel_cruiser",
     ] {
         let car = load_car(&root, id).unwrap();
-        for f in [front_view as car_assets::style::DetailFn, top_view] {
+        for f in [front_view as car_assets::style::DetailFn, top_view, concave] {
             let mut st = style_for(&car.def);
             st.details = vec![Detail::new(
                 "lamps",
@@ -1324,7 +1410,10 @@ fn projected_lamps_sit_outside_the_shell_and_keep_the_signal_contract() {
                 .iter()
                 .filter(|p| p.name.contains("lamp_bezel"))
                 .count();
-            assert_eq!(bezels, 4, "{id}: head and tail bezels");
+            assert!(
+                bezels == 4 || bezels == 2,
+                "{id}: head (and tail) bezels: {bezels}"
+            );
         }
     }
 }

@@ -184,6 +184,72 @@ fn led_strips(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
     }
 }
 
+/// Sedan: concave L-shaped head lamps with a projector bowl, a chrome ring and an LED strip.
+fn concave_lamps(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
+    use car_assets::lamp::{element, Element, Lamp};
+    use car_assets::styles::performance::kit::{dkey, sided};
+    let p = ctx.profile;
+    let mut kit = relamp(p, b, true, false);
+    let (wn, (_, zt)) = (kit.wn(), kit.nose_z());
+    for sx in SIDES {
+        let l = [
+            [-(wn - 0.40), zt - 0.14],
+            [-(wn - 0.02), zt - 0.14],
+            [-(wn - 0.02), zt - 0.05],
+            [-(wn - 0.14), zt - 0.05],
+            [-(wn - 0.14), zt - 0.10],
+            [-(wn - 0.40), zt - 0.10],
+        ];
+        kit.proj_cluster(
+            sx,
+            true,
+            LampView::Front,
+            &l,
+            Some(Seg::Inboard(0.06)),
+            MaterialSlot::EmissiveAmber,
+            0.01,
+            15.0,
+        );
+        let lamp = Lamp::new(
+            LampView::Front,
+            l.iter().map(|q| [sx * q[0].abs(), q[1]]).collect(),
+        );
+        let hk = headlight_key(sx);
+        let c = [sx * (wn - 0.08), zt - 0.095];
+        element(
+            kit.b,
+            p,
+            &hk,
+            &lamp,
+            c,
+            &Element::Bowl {
+                r_m: 0.03,
+                h_m: 0.012,
+            },
+        );
+        let ring = sided(
+            &dkey("lamp_ring_l", BodyRegion::FrameFront, MaterialSlot::Chrome),
+            sx,
+        );
+        element(
+            kit.b,
+            p,
+            &ring,
+            &lamp,
+            c,
+            &Element::Ring {
+                r_m: 0.037,
+                w_m: 0.006,
+            },
+        );
+        let strip = Element::Strip {
+            pts: vec![[sx * (wn - 0.38), zt - 0.12], [sx * (wn - 0.17), zt - 0.12]],
+            w_m: 0.012,
+        };
+        element(kit.b, p, &hk, &lamp, c, &strip);
+    }
+}
+
 fn custom(f: car_assets::style::DetailFn) -> Detail {
     Detail::new(
         "demo_lamps",
@@ -244,8 +310,20 @@ fn variants(
                 s.body.rocker_in_m = 0.04;
             });
             v("lamps", &|s| s.details.push(custom(wrap_lamps)));
+            v("lamps_concave", &|s| s.details.push(custom(concave_lamps)));
             // Long nose and short tail (the new range: −0.35…+0.25 m).
             v("overhang", &|s| s.body.overhang_trim = (0.25, -0.30));
+            // Raked, undercut, bowed nose; roof narrowing to the rear.
+            v("face", &|s| {
+                s.body.nose_face_rake_deg = 35.0;
+                s.body.nose_chin_m = 0.08;
+                s.body.nose_plan_bow_m = 0.30;
+                s.body.nose_tip_w = 0.55;
+                s.body.tail_face_rake_deg = 20.0;
+                s.body.tail_plan_bow_m = 0.20;
+                s.body.tail_tip_w = 0.7;
+                s.body.roof_plan_taper = 0.15;
+            });
         }
         "vireo_xs" => {
             // Rounded-wedge nose and tapered tail.
@@ -265,6 +343,13 @@ fn variants(
             });
             v("lamps", &|s| s.details.push(custom(swept_lamps)));
             v("overhang", &|s| s.body.overhang_trim = (-0.30, 0.20));
+            // Hatch tailgate lean, pointed plan nose, boat-tail lower body.
+            v("face", &|s| {
+                s.body.tail_face_rake_deg = 30.0;
+                s.body.nose_plan_bow_m = 0.35;
+                s.body.nose_tip_w = 0.3;
+                s.body.lower_lean_in_m = 0.05;
+            });
         }
         "hauler_1500" => {
             // Fenders wider than the cab and bed sides.
@@ -305,6 +390,12 @@ fn variants(
             v("lamps", &|s| s.details.push(custom(led_strips)));
         }
         "ironside_440" => {
+            // Shark nose: the face leans forward.
+            v("shark", &|s| {
+                s.body.nose_face_rake_deg = -15.0;
+                s.body.nose_plan_bow_m = 0.15;
+                s.body.nose_tip_w = 0.85;
+            });
             // Long-hood fender tops standing above the hood centre; pontoon rear haunch.
             v("fender_rise", &|s| {
                 s.body.front_fender_rise_m = 0.05;

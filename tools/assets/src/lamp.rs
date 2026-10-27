@@ -13,12 +13,21 @@
 //!   (`kit::headlight_key`, `mesh::indicator_front_key`, …) so the renderer's lamp slots and
 //!   the turn-signal contract keep working.
 //! - [`bezel`]: a trim ring of a given width round the outline, a little less proud.
+//! - [`element`]: inner elements on the lens face: projector bowls, reflector rings, LED strips.
 //! - [`split_outline`] / [`clip_outline`]: cut an outline in two along a view axis with the
 //!   [`INDICATOR_SEAM_M`] gap, for the amber turn-signal segment of a lamp cluster.
 //!
-//! Outlines must be star-shaped around their centroid (every convex shape, ovals, teardrops,
-//! swept or slim strips; not a C or a boomerang: build those from two lenses). Points whose
-//! ray misses the body (past the silhouette) are pulled toward the centroid until they hit.
+//! Outlines may be any simple polygon, convex or concave (teardrops, L, C, boomerang, trapezoid,
+//! slim strips); they are ear-clipped in the view plane. Points whose ray misses the body (past
+//! the silhouette) are pulled toward the centroid until they hit.
+//!
+//! ```ignore
+//! // A swept L-shaped head lamp on the left of the nose that wraps onto the fender, with its
+//! // amber outer end, a bezel and a projector bowl (inside a performance kit):
+//! use car_assets::lamp::{element, Element, LampView};
+//! let l = [[-0.35, 0.58], [-0.80, 0.60], [-0.80, 0.66], [-0.55, 0.66], [-0.52, 0.62], [-0.35, 0.62]];
+//! kit.proj_cluster(-1.0, true, LampView::Front, &l, Some(Seg::Outboard(0.08)), M::EmissiveAmber, 0.012, 20.0);
+//! ```
 //! Chassis metres; deterministic.
 
 use crate::builder::{Builder, PartKey};
@@ -136,10 +145,12 @@ pub fn lens(b: &mut Builder, p: &BodyProfile, key: &PartKey, lamp: &Lamp) {
     let Some(caster) = Caster::new(b, p, lamp) else {
         return;
     };
-    let grid = caster.grid(lamp);
+    let Some(mesh) = triangulate(&lamp.outline, lamp.step_m.clamp(0.01, 0.08)) else {
+        return;
+    };
     let proud = lamp.proud_m.clamp(0.002, 0.03);
     let depth = lamp.depth_m.clamp(0.0, 0.01);
-    shell(b, &caster, key, &grid, proud, -depth);
+    shell(b, &caster, key, &mesh, proud, -depth);
 }
 
 /// How far a [`bezel`] band stands off the surface, m (flush: it never shadows the lens rim).
@@ -173,6 +184,116 @@ pub fn bezel(b: &mut Builder, p: &BodyProfile, key: &PartKey, lamp: &Lamp, width
         let ed = add(e.0, scale(e.1, -depth.max(0.004)));
         let mid = scale(add(add(dout, eout), add(dd, ed)), 0.25);
         b.poly_facing(key, &[dout, dd, ed, eout], sub(mid, centre));
+    }
+}
+
+/// An inner element of a lamp, placed on its lens face (see [`element`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Element {
+    /// Projector bowl: a dome of radius `r_m` standing `h_m` out of the lens face.
+    Bowl {
+        /// Radius, m.
+        r_m: f32,
+        /// Height over the lens face, m.
+        h_m: f32,
+    },
+    /// Reflector / bezel ring of radius `r_m` and tube width `w_m` lying on the lens face.
+    Ring {
+        /// Ring radius, m.
+        r_m: f32,
+        /// Tube width, m.
+        w_m: f32,
+    },
+    /// LED strip along a polyline in the lamp's view coordinates, `w_m` wide, 3 mm over the
+    /// lens face (it follows the surface like the lens).
+    Strip {
+        /// Polyline points, view coordinates.
+        pts: Vec<[f32; 2]>,
+        /// Width, m.
+        w_m: f32,
+    },
+}
+
+/// An inner element of `lamp` at view point `at` (ignored by `Strip`, which carries its own
+/// points) into part `key`: projector bowls, reflector rings and LED strips sit on the lens
+/// face (they follow the same cast as the lens). Use a light key (the lamp's own part, or a DRL
+/// part) for emissive elements, a trim / chrome detail key for rings.
+///
+/// ```ignore
+/// use car_assets::lamp::{element, ellipse, lens, Element, Lamp, LampView};
+/// let lamp = Lamp::new(LampView::Front, ellipse([-0.55, 0.62], [0.16, 0.05], 16));
+/// lens(b, p, &headlight_key(-1.0), &lamp);
+/// element(b, p, &headlight_key(-1.0), &lamp, [-0.62, 0.62], &Element::Bowl { r_m: 0.03, h_m: 0.01 });
+/// element(b, p, &chrome_ring_key, &lamp, [-0.62, 0.62], &Element::Ring { r_m: 0.036, w_m: 0.006 });
+/// element(b, p, &drl_key, &lamp, [0.0, 0.0], &Element::Strip {
+///     pts: vec![[-0.42, 0.59], [-0.66, 0.60], [-0.70, 0.64]], w_m: 0.008 });
+/// ```
+pub fn element(
+    b: &mut Builder,
+    p: &BodyProfile,
+    key: &PartKey,
+    lamp: &Lamp,
+    at: [f32; 2],
+    el: &Element,
+) {
+    let face = lamp.proud_m.clamp(0.002, 0.03);
+    match el {
+        Element::Strip { pts, w_m } => {
+            let w = 0.5 * w_m.clamp(0.002, 0.05);
+            if pts.len() < 2 {
+                return;
+            }
+            // Thicken the polyline into an outline (left side out, right side back).
+            let n = pts.len();
+            let side = |i: usize| -> [f32; 2] {
+                let (a, c) = (pts[i.saturating_sub(1)], pts[(i + 1).min(n - 1)]);
+                let d = [c[0] - a[0], c[1] - a[1]];
+                let l = (d[0] * d[0] + d[1] * d[1]).sqrt().max(1e-6);
+                [-d[1] / l * w, d[0] / l * w]
+            };
+            let mut outline: Vec<[f32; 2]> = (0..n)
+                .map(|i| [pts[i][0] + side(i)[0], pts[i][1] + side(i)[1]])
+                .collect();
+            outline.extend(
+                (0..n)
+                    .rev()
+                    .map(|i| [pts[i][0] - side(i)[0], pts[i][1] - side(i)[1]]),
+            );
+            let strip = Lamp {
+                outline,
+                proud_m: face + 0.003,
+                depth_m: 0.0,
+                step_m: lamp.step_m,
+                ..lamp.clone()
+            };
+            lens(b, p, key, &strip);
+        }
+        Element::Bowl { r_m, h_m } => {
+            let Some(caster) = Caster::new(b, p, lamp) else {
+                return;
+            };
+            let (h, n) = caster.cast_or_pull(at, caster.c2);
+            let (r, hh) = (r_m.clamp(0.005, 0.15), h_m.clamp(0.001, 0.06));
+            let base = add(h, scale(n, face - 0.001));
+            let prof = [[r, 0.0], [r, 0.3 * hh], [0.7 * r, 0.8 * hh], [0.0, hh]];
+            b.lathe(key, base, n, &prof, 12);
+        }
+        Element::Ring { r_m, w_m } => {
+            let Some(caster) = Caster::new(b, p, lamp) else {
+                return;
+            };
+            let (h, n) = caster.cast_or_pull(at, caster.c2);
+            let w = 0.5 * w_m.clamp(0.002, 0.03);
+            b.torus(
+                key,
+                add(h, scale(n, face)),
+                n,
+                r_m.clamp(0.005, 0.2),
+                w,
+                14,
+                4,
+            );
+        }
     }
 }
 
@@ -352,33 +473,12 @@ impl Caster {
         hit.unwrap_or_else(|| (self.start(q), scale(self.dir, -1.0)))
     }
 
-    /// Polar grid of the lens: centre, then `nr` rings of the resampled outline.
-    fn grid(&self, lamp: &Lamp) -> Vec<Vec<Hit>> {
-        let step = lamp.step_m.clamp(0.01, 0.08);
-        let ring2 = resample(&lamp.outline, step);
-        let rmax = ring2
+    /// Cast every vertex of a 2D lens mesh.
+    fn cast_mesh(&self, m: &LensMesh) -> Vec<Hit> {
+        m.pts
             .iter()
-            .map(|q| ((q[0] - self.c2[0]).powi(2) + (q[1] - self.c2[1]).powi(2)).sqrt())
-            .fold(0.0f32, f32::max);
-        let nr = ((rmax / (2.0 * step)).ceil() as usize).clamp(1, 3);
-        let centre = self.cast_or_pull(self.c2, self.c2);
-        let mut rows = vec![vec![centre]];
-        for k in 1..=nr {
-            let f = k as f32 / nr as f32;
-            rows.push(
-                ring2
-                    .iter()
-                    .map(|q| {
-                        let q = [
-                            self.c2[0] + (q[0] - self.c2[0]) * f,
-                            self.c2[1] + (q[1] - self.c2[1]) * f,
-                        ];
-                        self.cast_or_pull(q, self.c2)
-                    })
-                    .collect(),
-            );
-        }
-        rows
+            .map(|&q| self.cast_or_pull(q, self.c2))
+            .collect()
     }
 
     /// The outline (resampled at the lens step) offset outward by `off` m in the view, cast.
@@ -395,43 +495,189 @@ impl Caster {
     }
 }
 
-/// Lens over a polar grid: the face at `hi` along the normals and a rim wall down to `lo`
-/// (under the surface; the back is inside the body and left open). Faces whose middle would
+/// A lens outline triangulated in the view plane: points, triangles (counter-clockwise in the
+/// view) and the boundary loop (point indices in outline order).
+struct LensMesh {
+    pts: Vec<[f32; 2]>,
+    tris: Vec<[usize; 3]>,
+    rim: Vec<usize>,
+}
+
+/// Triangulate `outline` (any simple polygon, convex or concave): resample the boundary at
+/// `step`, ear-clip it, then split every triangle into `n × n` (n = 1…2, from the longest edge
+/// over 2 × `step`; the same `n` everywhere, so shared edges split alike and the lens has no
+/// cracks).
+fn triangulate(outline: &[[f32; 2]], step: f32) -> Option<LensMesh> {
+    let mut ring = resample(outline, step);
+    if ring.len() < 3 {
+        return None;
+    }
+    if signed_area(&ring) < 0.0 {
+        ring.reverse();
+    }
+    let ears = ear_clip(&ring);
+    if ears.is_empty() {
+        return None;
+    }
+    let len = |a: usize, b: usize| {
+        let (p, q) = (ring[a], ring[b]);
+        ((q[0] - p[0]).powi(2) + (q[1] - p[1]).powi(2)).sqrt()
+    };
+    let longest = ears
+        .iter()
+        .map(|t| len(t[0], t[1]).max(len(t[1], t[2])).max(len(t[2], t[0])))
+        .fold(0.0f32, f32::max);
+    let n = ((longest / (2.0 * step)).ceil() as usize).clamp(1, 2);
+    // Points: the ring first, then edge and interior points keyed canonically.
+    let mut pts = ring.clone();
+    let mut keyed: std::collections::BTreeMap<(usize, usize, usize, usize), usize> =
+        std::collections::BTreeMap::new();
+    let lerp2 =
+        |a: [f32; 2], b: [f32; 2], t: f32| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    let mut point = |pts: &mut Vec<[f32; 2]>, t: [usize; 3], w: [usize; 3]| -> usize {
+        // Barycentric (w0, w1, w2) / n over triangle t.
+        let nz: Vec<usize> = (0..3).filter(|&k| w[k] > 0).collect();
+        if nz.len() == 1 {
+            return t[nz[0]];
+        }
+        if nz.len() == 2 {
+            // On an edge: key by (low index, high index, steps from the low end).
+            let (i, j) = (nz[0], nz[1]);
+            let (lo, hi, wl) = if t[i] < t[j] {
+                (t[i], t[j], w[i])
+            } else {
+                (t[j], t[i], w[j])
+            };
+            let key = (lo, hi, wl, usize::MAX);
+            if let Some(&v) = keyed.get(&key) {
+                return v;
+            }
+            let q = lerp2(ring[lo], ring[hi], (n - wl) as f32 / n as f32);
+            pts.push(q);
+            keyed.insert(key, pts.len() - 1);
+            return pts.len() - 1;
+        }
+        let key = (t[0], t[1], t[2], w[0] * (n + 1) + w[1]);
+        if let Some(&v) = keyed.get(&key) {
+            return v;
+        }
+        let f = 1.0 / n as f32;
+        let q = [
+            (ring[t[0]][0] * w[0] as f32
+                + ring[t[1]][0] * w[1] as f32
+                + ring[t[2]][0] * w[2] as f32)
+                * f,
+            (ring[t[0]][1] * w[0] as f32
+                + ring[t[1]][1] * w[1] as f32
+                + ring[t[2]][1] * w[2] as f32)
+                * f,
+        ];
+        pts.push(q);
+        keyed.insert(key, pts.len() - 1);
+        pts.len() - 1
+    };
+    let mut tris = Vec::new();
+    for t in &ears {
+        // Sub-grid rows: w0 from n down to 0.
+        let mut id =
+            |pts: &mut Vec<[f32; 2]>, a: usize, b: usize| point(pts, *t, [a, b, n - a - b]);
+        for a in 0..n {
+            for b in 0..n - a {
+                let p0 = id(&mut pts, a + 1, b);
+                let p1 = id(&mut pts, a, b + 1);
+                let p2 = id(&mut pts, a, b);
+                tris.push([p0, p1, p2]);
+                if a + b + 1 < n {
+                    let p3 = id(&mut pts, a + 1, b + 1);
+                    tris.push([p0, p3, p1]);
+                }
+            }
+        }
+    }
+    // Boundary loop, including the points that split each boundary edge.
+    let mut rim = Vec::new();
+    let m = ring.len();
+    for i in 0..m {
+        let j = (i + 1) % m;
+        rim.push(i);
+        for s in 1..n {
+            let (lo, hi) = (i.min(j), i.max(j));
+            let wl = if i < j { n - s } else { s };
+            if let Some(&v) = keyed.get(&(lo, hi, wl, usize::MAX)) {
+                rim.push(v);
+            }
+        }
+    }
+    Some(LensMesh { pts, tris, rim })
+}
+
+/// Signed area of a polygon (+ = counter-clockwise).
+fn signed_area(q: &[[f32; 2]]) -> f32 {
+    let n = q.len();
+    0.5 * (0..n)
+        .map(|i| {
+            let (a, b) = (q[i], q[(i + 1) % n]);
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum::<f32>()
+}
+
+/// Ear clipping of a counter-clockwise simple polygon into index triangles (CCW).
+fn ear_clip(q: &[[f32; 2]]) -> Vec<[usize; 3]> {
+    let cross2 = |a: [f32; 2], b: [f32; 2], c: [f32; 2]| {
+        (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    };
+    let inside = |p: [f32; 2], a: [f32; 2], b: [f32; 2], c: [f32; 2]| {
+        cross2(a, b, p) >= 0.0 && cross2(b, c, p) >= 0.0 && cross2(c, a, p) >= 0.0
+    };
+    let mut idx: Vec<usize> = (0..q.len()).collect();
+    let mut out = Vec::new();
+    let mut guard = 0;
+    while idx.len() > 3 && guard < 4 * q.len() * q.len() {
+        guard += 1;
+        let n = idx.len();
+        let mut clipped = false;
+        for i in 0..n {
+            let (ia, ib, ic) = (idx[(i + n - 1) % n], idx[i], idx[(i + 1) % n]);
+            let (a, b, c) = (q[ia], q[ib], q[ic]);
+            if cross2(a, b, c) <= 1e-12 {
+                continue;
+            }
+            let blocked = idx
+                .iter()
+                .any(|&k| k != ia && k != ib && k != ic && inside(q[k], a, b, c));
+            if !blocked {
+                out.push([ia, ib, ic]);
+                idx.remove(i);
+                clipped = true;
+                break;
+            }
+        }
+        if !clipped {
+            // Degenerate rest (collinear points): fan it.
+            for i in 1..idx.len() - 1 {
+                out.push([idx[0], idx[i], idx[i + 1]]);
+            }
+            return out;
+        }
+    }
+    if idx.len() == 3 {
+        out.push([idx[0], idx[1], idx[2]]);
+    }
+    out
+}
+
+/// Lens over a triangulated outline: the face at `hi` along the normals and a rim wall down to
+/// `lo` (under the surface; the back is inside the body and left open). Faces whose middle would
 /// sit less than half of `hi` clear of the body (a chord across a rounded corner) are pushed
 /// toward the viewer until they clear it.
-fn shell(b: &mut Builder, caster: &Caster, key: &PartKey, grid: &[Vec<Hit>], hi: f32, lo: f32) {
-    let n = grid.get(1).map_or(0, |r| r.len());
-    if n < 3 {
-        return;
-    }
-    // Vertex (row, index) → slot; row 0 is the centre.
-    let slot = |r: usize, i: usize| if r == 0 { 0 } else { 1 + (r - 1) * n + i % n };
-    let mut top: Vec<[f32; 3]> = vec![add(grid[0][0].0, scale(grid[0][0].1, hi))];
-    for row in &grid[1..] {
-        for h in row {
-            top.push(add(h.0, scale(h.1, hi)));
-        }
-    }
-    let mut tris: Vec<[usize; 3]> = Vec::new();
-    for i in 0..n {
-        tris.push([slot(0, 0), slot(1, i), slot(1, i + 1)]);
-    }
-    for r in 1..grid.len() - 1 {
-        for i in 0..n {
-            let (a0, a1, e0, e1) = (
-                slot(r, i),
-                slot(r, i + 1),
-                slot(r + 1, i),
-                slot(r + 1, i + 1),
-            );
-            tris.push([a0, e0, e1]);
-            tris.push([a0, e1, a1]);
-        }
-    }
+fn shell(b: &mut Builder, caster: &Caster, key: &PartKey, m: &LensMesh, hi: f32, lo: f32) {
+    let hits = caster.cast_mesh(m);
+    let mut top: Vec<[f32; 3]> = hits.iter().map(|h| add(h.0, scale(h.1, hi))).collect();
     let depth = |q: [f32; 3]| dot(sub(q, caster.origin), caster.dir);
     for _ in 0..3 {
         let mut push = vec![0.0f32; top.len()];
-        for t in &tris {
+        for t in &m.tris {
             let c = scale(add(add(top[t[0]], top[t[1]]), top[t[2]]), 1.0 / 3.0);
             let d = sub(c, caster.origin);
             let Some((s, _)) = caster.cast_tri([dot(d, caster.u), dot(d, caster.v)]) else {
@@ -451,31 +697,26 @@ fn shell(b: &mut Builder, caster: &Caster, key: &PartKey, grid: &[Vec<Hit>], hi:
             *q = sub(*q, scale(caster.dir, d));
         }
     }
-    let hit = |v: usize| -> &Hit {
-        if v == 0 {
-            &grid[0][0]
-        } else {
-            &grid[1 + (v - 1) / n][(v - 1) % n]
-        }
-    };
-    for t in &tris {
-        let nrm = norm(add(add(hit(t[0]).1, hit(t[1]).1), hit(t[2]).1));
+    for t in &m.tris {
+        let nrm = norm(add(add(hits[t[0]].1, hits[t[1]].1), hits[t[2]].1));
         b.poly_facing(key, &[top[t[0]], top[t[1]], top[t[2]]], nrm);
     }
-    // Rim wall round the outer ring, from the (pushed) face down under the surface.
-    let r = grid.len() - 1;
-    let centre = grid[0][0].0;
+    // Rim wall round the boundary, from the (pushed) face down under the surface; outward is
+    // the boundary edge's outward normal in the view (the loop is counter-clockwise).
+    let n = m.rim.len();
     for i in 0..n {
-        let (s0, s1) = (slot(r, i), slot(r, i + 1));
-        let (h0, h1) = (hit(s0), hit(s1));
+        let (s0, s1) = (m.rim[i], m.rim[(i + 1) % n]);
+        let (h0, h1) = (&hits[s0], &hits[s1]);
         let q = [
             add(h0.0, scale(h0.1, lo)),
             add(h1.0, scale(h1.1, lo)),
             top[s1],
             top[s0],
         ];
-        let mid = scale(add(add(q[0], q[1]), add(q[2], q[3])), 0.25);
-        b.poly_facing(key, &q, sub(mid, centre));
+        let (a, c) = (m.pts[s0], m.pts[s1]);
+        let out2 = [c[1] - a[1], -(c[0] - a[0])];
+        let out = add(scale(caster.u, out2[0]), scale(caster.v, out2[1]));
+        b.poly_facing(key, &q, out);
     }
 }
 
@@ -580,6 +821,49 @@ mod tests {
         // A cut outside the outline keeps it whole on one side.
         assert_eq!(clip_outline(&sq, 1, 2.0, true).len(), 4);
         assert!(clip_outline(&sq, 1, 2.0, false).is_empty());
+    }
+
+    #[test]
+    fn concave_outlines_triangulate_without_losing_area() {
+        // An L, a C and a boomerang.
+        let shapes: Vec<Vec<[f32; 2]>> = vec![
+            vec![
+                [0.0, 0.0],
+                [0.4, 0.0],
+                [0.4, 0.06],
+                [0.08, 0.06],
+                [0.08, 0.2],
+                [0.0, 0.2],
+            ],
+            vec![
+                [0.0, 0.0],
+                [0.3, 0.0],
+                [0.3, 0.05],
+                [0.06, 0.05],
+                [0.06, 0.15],
+                [0.3, 0.15],
+                [0.3, 0.2],
+                [0.0, 0.2],
+            ],
+            vec![[0.0, 0.0], [0.2, 0.08], [0.4, 0.0], [0.2, 0.14]],
+        ];
+        for (k, q) in shapes.iter().enumerate() {
+            let m = triangulate(q, 0.04).unwrap();
+            let area: f32 = m
+                .tris
+                .iter()
+                .map(|t| {
+                    let (a, b, c) = (m.pts[t[0]], m.pts[t[1]], m.pts[t[2]]);
+                    0.5 * ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])).abs()
+                })
+                .sum();
+            let want = signed_area(q).abs();
+            assert!(
+                (area - want).abs() < 1e-3 * want.max(1e-3) + 1e-5,
+                "shape {k}: {area} vs {want}"
+            );
+            assert!(m.rim.len() >= q.len(), "shape {k}");
+        }
     }
 
     #[test]
