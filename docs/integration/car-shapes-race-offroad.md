@@ -107,6 +107,36 @@ because the coarse one cut under the crowned windshield and flickered.
 - Not done on purpose: a cab-forward canopy on Morrigan (front-engine GT, long hood per its
   spec) and Merlo (four-door touring sedan). Only Nyx has the canopy.
 
+## Final pass (phase 3 knobs, merged ws/car-shapes @ d8e0a524)
+- **Morrigan:** plan taper (nose 0.90, tail 0.93), front / rear fender rise 0.08 / 0.06 over a
+  flat hood (`hood_valley` dropped, `fender_peak_w` 0.65), a cove stepping in 4.5 cm behind the
+  front wheel (exit-vent area), rear haunches standing 3.5 cm proud, side bulge 0.025, rocker in
+  0.04. Lamps: projected top-view swept blades on the fender peaks (amber outer tip) and slim
+  projected tail blades wrapping round the corners (30° yaw, amber inboard). No bezels (budget).
+- **Nyx:** wheel pods via fender rise 0.11 / 0.09 (the old painted dome patches and sidepod
+  patch are gone; louvres sit on the pods), canopy tumblehome 0.34, sidepods stepping in 7 cm
+  between the wheels, nose and tail tapered (0.90 / 0.95). Lamps: projected angular units on
+  the pods with a wide (8 cm) amber outer tip (a narrow tip or a rear strip fails
+  `lights_sit_outside_the_shell` under the hood's shadow).
+- **Merlo:** arch extensions standing 3.5 cm proud over both axles (sedan doors read pinched
+  between them), nose taper 0.95, side bulge 0.02, rocker in 0.035, small fender rise. Lamps:
+  slim angular head lamps drawn in the front view and projected round onto the fenders (25° yaw,
+  10 cm amber outboard segment, black bezel); tails wrap round the corners, light bar kept.
+- **Mesquite:** plan width 0.93 between the arches (fender boxes wider than cab and bed), front
+  overhang −0.32 m (stubby pre-runner nose), upright glass (`tumblehome_m` 0.05, `glass_inset`
+  0.05), rocker in 0.05.
+- **Erg:** cabin pinched to 0.90 between pontoon fenders (sculpt +0.04 over each axle), fender
+  humps 0.08 / 0.06 above the hood and deck, canopy tumblehome 0.32, overhangs −0.22 / −0.08.
+- **Shared test fix (one line, `tools/assets/tests/assets.rs`):**
+  `plan_width_keeps_the_body_outside_the_tires` built its baseline from the car's own style, so
+  any car whose style pinches the waist at y = 0 (Erg, Mesquite) failed `≤ 0.81 × baseline`.
+  The baseline now clears the style's `plan_width` first; the test's intent is unchanged.
+- Triangles (full / mid): morrigan 21 704 / 6 428, nyx 19 892 / 6 128, merlo 20 652 / 5 404,
+  mesquite 21 017 / 6 964, erg 19 552 / 6 190 (budgets 22k / 7k).
+- Sheets (`<car>_before_after.jpg`) now show front 3/4, rear 3/4, side and top (the top view
+  shows the plan taper and waists). Mod spot-check (8 kit / wing / bull-bar / vinyl mods on all
+  five): nothing missing.
+
 ## Checks
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p car-assets`
 (incl. the turn-signal +2 % table and `lights_sit_outside_the_shell`), `validate-car-asset`
@@ -124,7 +154,8 @@ After the second pass, wings (2, swan neck), front lip, side skirts, rear bumper
 stripes and race-number vinyls show on all five cars (`MODS=...`, 0 missing).
 
 ## Generator requests
-Sent to the lead on 2026-10-27. Each item is a limit the per-car styles cannot get past:
+All six delivered by phase 3 (see "Final pass"); kept for the record. Sent to the lead on
+2026-10-27. Each item is a limit the per-car styles cannot get past:
 1. **Plan-view width curve:** the loft's half-width is the lattice width everywhere; only
    `nose_plan_round` / `tail_plan_round` round the corners. Wanted: a per-station width scale
    (e.g. `plan_width: Vec<(y, scale)>`) for a nose narrower than the body, a Coke-bottle waist,
@@ -154,4 +185,3 @@ patches here) for two-door bodies on four-door lattices and closed engine covers
 - The loft's flat shading shows a stipple on the big curved haunches (pre-existing, every car).
 - Mesquite's hood front cannot rise above the lattice hood-front height, so the nose is a little
   lower than a real full-size truck's; its mid LOD sits at 6 964 of 7 000.
-- Body sides are still slab-sided between the arches (generator requests 1–2).

@@ -17,8 +17,8 @@ use crate::builder::{Builder, PartKey};
 use crate::mesh::MaterialSlot as M;
 use crate::profile::{RingPt, RING_GLASS_BASE, RING_GLASS_TOP};
 use crate::style::{
-    ArchShape, BodyStyle, CapKind, CarStyle, DetailCtx, FuelDoor, HoodScoop, RimKind, Silhouette,
-    TrimFinish,
+    ArchShape, BodyStyle, CapKind, CarStyle, DetailCtx, FuelDoor, HoodScoop, RimKind, SideSculpt,
+    Silhouette, TrimFinish,
 };
 
 use super::kit::{
@@ -26,6 +26,22 @@ use super::kit::{
     top_band, Kit, SIDES,
 };
 use super::{kit_detail, rgb, wheels};
+
+/// (front axle y, front wheel radius, rear axle y, rear wheel radius) from the car def, m.
+fn axles(def: &VehicleDef) -> (f32, f32, f32, f32) {
+    let mut f = (f32::MIN, 0.45);
+    let mut r = (f32::MAX, 0.45);
+    for w in &def.wheels {
+        let y = w.position_m[1];
+        if y > f.0 {
+            f = (y, w.radius_m);
+        }
+        if y < r.0 {
+            r = (y, w.radius_m);
+        }
+    }
+    (f.0, f.1, r.0, r.1)
+}
 
 /// Radius of the kit's tube work (bumpers, rack, frames), m.
 const TUBE_R: f32 = 0.028;
@@ -220,7 +236,19 @@ fn box_flare(
 /// Pre-runner pickup: crew cab, short bed, bolt-on fibreglass fenders, tube bumpers. Sand paint
 /// with black accents and signal-orange hardware (tow hooks, reservoir caps, pinstripe).
 pub fn mesquite(def: &VehicleDef) -> CarStyle {
+    let (fy, fr, ry, rr) = axles(def);
     let mut s = CarStyle::with_body(BodyStyle {
+        // Phase 3: fender boxes wider than the cab and bed (body pinched between the arches),
+        // stubby pre-runner nose, upright truck glass, rocker tucked under.
+        plan_width: vec![
+            [fy - fr - 0.15, 1.0],
+            [fy - fr - 0.45, 0.93],
+            [ry + rr + 0.45, 0.93],
+            [ry + rr + 0.15, 1.0],
+        ],
+        tumblehome_m: Some(0.05),
+        glass_inset: 0.05,
+        rocker_in_m: 0.05,
         nose_h: Some(1.22),
         nose_rake_deg: 4.0,
         nose_plan_round: 0.16,
@@ -230,7 +258,6 @@ pub fn mesquite(def: &VehicleDef) -> CarStyle {
         hood_scoop_h: 0.07,
         windshield_rake_deg: Some(57.0),
         a_pillar_rake_deg: 4.0,
-        tumblehome: Some(0.12),
         roof_crown: 0.015,
         belt_dz: 0.08,
         crease_z: 0.60,
@@ -243,7 +270,7 @@ pub fn mesquite(def: &VehicleDef) -> CarStyle {
         arch_gap: 0.15,
         ride_dz: 0.08,
         stance_pitch_deg: -0.5,
-        overhang_trim: (-0.15, -0.12),
+        overhang_trim: (-0.32, -0.12),
         belt_rake: 0.04,
         a_sail_len_m: 0.18,
         b_pillar_w_m: 0.10,
@@ -951,21 +978,50 @@ fn mesquite_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 /// Rally-raid prototype: tube-frame buggy body, short nose, roof scoop, spare wheels in the tail.
 /// Signal orange-red with navy accents.
 pub fn erg(def: &VehicleDef) -> CarStyle {
+    let (fy, fr, ry, rr) = axles(def);
     let mut s = CarStyle::with_body(BodyStyle {
+        // Phase 3: pontoon fenders standing proud over both axles with humps above the hood
+        // and deck, the cabin pinched in between, narrow canopy, very short overhangs.
+        plan_width: vec![
+            [fy - fr - 0.10, 1.0],
+            [fy - fr - 0.40, 0.90],
+            [ry + rr + 0.40, 0.90],
+            [ry + rr + 0.10, 1.0],
+        ],
+        side_sculpt: vec![
+            SideSculpt {
+                y0_m: fy - 0.35,
+                y1_m: fy + 0.35,
+                z0_m: 0.75,
+                z1_m: 1.20,
+                dx_m: 0.04,
+                falloff_m: 0.20,
+            },
+            SideSculpt {
+                y0_m: ry - 0.35,
+                y1_m: ry + 0.35,
+                z0_m: 0.75,
+                z1_m: 1.20,
+                dx_m: 0.04,
+                falloff_m: 0.20,
+            },
+        ],
+        front_fender_rise_m: 0.08,
+        rear_fender_rise_m: 0.06,
+        fender_peak_w: 0.70,
+        tumblehome_m: Some(0.32),
         cabin_shift_m: 0.15,
         nose_h: Some(0.92),
         nose_rake_deg: 40.0,
         nose_plan_round: 0.26,
         tail_plan_round: 0.16,
         hood_crown: 0.040,
-        hood_valley: 0.05,
         windshield_rake_deg: Some(62.0),
         a_pillar_rake_deg: 10.0,
         c_pillar_rake_deg: 9.0,
         rear_glass_rake_deg: Some(62.0),
         roof_dz: -0.12,
         roof_arc: 0.35,
-        tumblehome: Some(0.28),
         glass_inset: 0.14,
         crease_z: 0.50,
         crease_depth: 0.02,
@@ -976,7 +1032,7 @@ pub fn erg(def: &VehicleDef) -> CarStyle {
         arch_gap: 0.13,
         ride_dz: 0.06,
         stance_pitch_deg: -0.3,
-        overhang_trim: (-0.10, -0.06),
+        overhang_trim: (-0.22, -0.08),
         deck_drop: 0.06,
         b_pillar: TrimFinish::Body,
         a_sail_len_m: 0.10,

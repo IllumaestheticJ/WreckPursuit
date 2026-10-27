@@ -1168,6 +1168,8 @@ fn plan_width_keeps_the_body_outside_the_tires() {
     for id in car_ids(&root) {
         let car = load_car(&root, &id).unwrap();
         let mut body = style_for(&car.def).body;
+        // Baseline without the car's own plan curve (a style may already pinch the waist).
+        body.plan_width.clear();
         let w0 = BodyProfile::styled(&car.def, &car.lattice, &body);
         body.plan_width = vec![[0.0, 0.80]];
         let p = BodyProfile::styled(&car.def, &car.lattice, &body);

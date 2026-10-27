@@ -20,17 +20,33 @@
 use wp_contracts::{BodyRegion, VehicleDef};
 
 use crate::builder::{Builder, PartKey};
+use crate::lamp::LampView;
 use crate::mesh::MaterialSlot as M;
 use crate::style::{
-    ArchShape, BodyStyle, CapKind, CarStyle, DetailCtx, FuelDoor, RimKind, Silhouette, TrimFinish,
+    ArchShape, BodyStyle, CapKind, CarStyle, DetailCtx, FuelDoor, RimKind, SideSculpt, Silhouette,
+    TrimFinish,
 };
 
-use super::kit::{
-    dkey, headlight_key, lkey, sided, taillight_key, top_band, Kit, Seg, Stand, Wing, SIDES,
-};
+use super::kit::{dkey, lkey, sided, taillight_key, top_band, Kit, Seg, Stand, Wing, SIDES};
 use super::{kit_detail, rgb, wheels};
 
 // ---------------------------------------------------------------------- shared helpers
+
+/// (front axle y, front wheel radius, rear axle y, rear wheel radius) from the car def, m.
+fn axles(def: &VehicleDef) -> (f32, f32, f32, f32) {
+    let mut f = (f32::MIN, 0.33);
+    let mut r = (f32::MAX, 0.33);
+    for w in &def.wheels {
+        let y = w.position_m[1];
+        if y > f.0 {
+            f = (y, w.radius_m);
+        }
+        if y < r.0 {
+            r = (y, w.radius_m);
+        }
+    }
+    (f.0, f.1, r.0, r.1)
+}
 
 /// `Kit::top_vent` on side `sx`, from the LEFT-side name / region (`…_l`): the right copy
 /// gets the mirrored name and region. `xin..xout` are unsigned |x| bounds.
@@ -51,58 +67,6 @@ fn sided_vent(
     let region = key.region.unwrap_or(region_l);
     let (a, c) = (sx * xin, sx * xout);
     k.top_vent(&key.name, region, y0, y1, a.min(c), a.max(c), slats, mat);
-}
-
-/// Slab lens lying on the top surface: `outline` = convex (|x|, y) points on side `sx`, the
-/// slab `thick` m deep standing `lift` m off the surface (each corner follows the surface).
-fn top_lens(k: &mut Kit, key: &PartKey, sx: f32, outline: &[[f32; 2]], lift: f32, thick: f32) {
-    let lo: Vec<[f32; 3]> = outline
-        .iter()
-        .map(|q| [sx * q[0], q[1], k.top_z(q[1], sx * q[0]) + lift])
-        .collect();
-    let hi: Vec<[f32; 3]> = lo.iter().map(|q| [q[0], q[1], q[2] + thick]).collect();
-    let n = lo.len() as f32;
-    let cx = lo.iter().map(|q| q[0]).sum::<f32>() / n;
-    let cy = lo.iter().map(|q| q[1]).sum::<f32>() / n;
-    k.b.poly_facing(key, &hi, [0.0, 0.0, 1.0]);
-    k.b.poly_facing(key, &lo, [0.0, 0.0, -1.0]);
-    for i in 0..lo.len() {
-        let j = (i + 1) % lo.len();
-        let out = [
-            0.5 * (lo[i][0] + lo[j][0]) - cx,
-            0.5 * (lo[i][1] + lo[j][1]) - cy,
-            0.0,
-        ];
-        k.b.poly_facing(key, &[lo[i], lo[j], hi[j], hi[i]], out);
-    }
-}
-
-/// Shaped head lamp on the nose top (side `sx`): a dark housing `border` m larger than the
-/// lens outline (|x|, y, convex) and the lens itself in the head-lamp part. Replaces the
-/// kit's rectangular `top_lamp` so each car gets its own lamp graphic.
-fn shaped_lamp(k: &mut Kit, sx: f32, outline: &[[f32; 2]], border: f32) {
-    let n = outline.len() as f32;
-    let c = [
-        outline.iter().map(|q| q[0]).sum::<f32>() / n,
-        outline.iter().map(|q| q[1]).sum::<f32>() / n,
-    ];
-    let grow: Vec<[f32; 2]> = outline
-        .iter()
-        .map(|q| {
-            let (dx, dy) = (q[0] - c[0], q[1] - c[1]);
-            let l = (dx * dx + dy * dy).sqrt().max(1e-4);
-            [
-                q[0] + dx / l * border,
-                (q[1] + dy / l * border).min(k.yn - 0.005),
-            ]
-        })
-        .collect();
-    let kh = sided(
-        &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
-        sx,
-    );
-    top_lens(k, &kh, sx, &grow, 0.001, 0.008);
-    top_lens(k, &headlight_key(sx), sx, outline, 0.004, 0.012);
 }
 
 /// Windscreen sun strip: a band `depth` m long (in plan) across the top of the windscreen.
@@ -173,7 +137,39 @@ fn number_panel(k: &mut Kit, sx: f32, y0: f32, y1: f32, z0: f32, z1: f32) {
 /// Slate teal with lime accents and number panels, carbon aero (a fictional team's colours;
 /// rule 9: no real team's livery).
 pub fn morrigan(def: &VehicleDef) -> CarStyle {
+    let (fy, fr, ry, rr) = axles(def);
     let mut s = CarStyle::with_body(BodyStyle {
+        // Phase 3: narrow nose and tail, fender peaks above a low hood, round haunches standing
+        // proud, a cove stepping in behind the front wheel (exit-vent area), curved section.
+        plan_width: vec![
+            [fy + fr + 0.05, 1.0],
+            [fy + fr + 0.75, 0.90],
+            [ry - rr - 0.05, 1.0],
+            [ry - rr - 0.70, 0.93],
+        ],
+        front_fender_rise_m: 0.08,
+        rear_fender_rise_m: 0.06,
+        fender_peak_w: 0.65,
+        side_sculpt: vec![
+            SideSculpt {
+                y0_m: fy - fr - 0.85,
+                y1_m: fy - fr - 0.05,
+                z0_m: 0.10,
+                z1_m: 0.42,
+                dx_m: -0.045,
+                falloff_m: 0.15,
+            },
+            SideSculpt {
+                y0_m: ry - 0.35,
+                y1_m: ry + 0.35,
+                z0_m: 0.36,
+                z1_m: 0.66,
+                dx_m: 0.035,
+                falloff_m: 0.20,
+            },
+        ],
+        side_bulge_m: 0.025,
+        rocker_in_m: 0.04,
         cabin_shift_m: -0.22,
         overhang_trim: (0.10, 0.06),
         roof_dz: -0.06,
@@ -183,7 +179,6 @@ pub fn morrigan(def: &VehicleDef) -> CarStyle {
         nose_plan_round: 0.30,
         tail_plan_round: 0.16,
         hood_crown: 0.010,
-        hood_valley: 0.055,
         power_bulge_h: 0.035,
         hood_bulge_w: 0.36,
         windshield_rake_deg: Some(64.0),
@@ -251,16 +246,25 @@ fn morrigan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let (yf, _, _) = k.arch(true);
     let (yr, _, rr) = k.arch(false);
 
-    // --- Nose: slim swept lamps on the corners, endurance lamp pod, big mesh mouth, ducts.
-    // Long, slim lamps swept back along the fender peaks (signals: `signals_beside_lamps`).
+    // --- Nose: long swept lamps lying on the fender peaks (projected onto the surface, amber
+    // signal as the outer tip), endurance lamp pod, big mesh mouth, ducts.
     for sx in SIDES {
         let lamp = [
-            [wn - 0.30, yn - 0.20],
-            [wn - 0.09, yn - 0.10],
-            [wn - 0.10, yn - 0.38],
-            [wn - 0.22, yn - 0.50],
+            [-(wn - 0.05), yn - 0.10],
+            [-(wn - 0.19), yn - 0.17],
+            [-(wn - 0.17), yn - 0.50],
+            [-(wn - 0.07), yn - 0.42],
         ];
-        shaped_lamp(&mut k, sx, &lamp, 0.022);
+        k.proj_cluster(
+            sx,
+            true,
+            LampView::Top,
+            &lamp,
+            Some(Seg::Outboard(0.045)),
+            M::EmissiveAmber,
+            0.0,
+            0.0,
+        );
     }
     let kp = dkey("endurance_pod", fb, M::Trim);
     let (pz0, pz1) = (nz1 - 0.12, nz1 - 0.025);
@@ -442,42 +446,23 @@ fn morrigan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         fz1,
         M::Grille,
     );
-    let zt = tz1 - 0.07;
+    // Slim wrap-round tail blades (projected round the rear corners), amber inboard segment.
     for sx in SIDES {
-        let tk = taillight_key(sx);
-        let kh = sided(
-            &dkey("taillight_housing_l", BodyRegion::RearLeftQuarter, M::Trim),
+        let tail = [
+            [-(wt - 0.42), tz1 - 0.075],
+            [-(wt + 0.02), tz1 - 0.085],
+            [-(wt + 0.02), tz1 - 0.040],
+            [-(wt - 0.44), tz1 - 0.045],
+        ];
+        k.proj_cluster(
             sx,
-        );
-        k.rear_box(
-            &kh,
-            sx * 0.42,
-            sx * (wt - 0.01),
-            zt - 0.065,
-            zt + 0.045,
-            0.010,
-            0.004,
-        );
-        // Two stacked bars and a vertical outer stroke.
-        for dz in [0.0, -0.045] {
-            k.rear_box(
-                &tk,
-                sx * 0.45,
-                sx * (wt - 0.05),
-                zt + dz,
-                zt + dz + 0.018,
-                0.022,
-                0.0,
-            );
-        }
-        k.rear_box(
-            &tk,
-            sx * (wt - 0.04),
-            sx * (wt - 0.02),
-            zt - 0.055,
-            zt + 0.035,
-            0.022,
+            false,
+            LampView::Rear,
+            &tail,
+            Some(Seg::Inboard(0.09)),
+            M::EmissiveAmber,
             0.0,
+            30.0,
         );
     }
     k.diffuser(M::Carbon, 0.80, 0.18, 7, 0.16);
@@ -494,21 +479,41 @@ fn morrigan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 /// raised centre nose, sidepods with radiator intakes, roof scoop + shark fin, full-width
 /// twin-element wing, huge diffuser. Dark navy with a bright orange accent.
 pub fn nyx(def: &VehicleDef) -> CarStyle {
+    let (fy, fr, ry, rr) = axles(def);
     let mut s = CarStyle::with_body(BodyStyle {
+        // Phase 3: wheel pods standing above a low nose and engine cover, narrow canopy,
+        // sidepods stepping in behind the front wheels, nose and tail tapered in plan.
+        front_fender_rise_m: 0.11,
+        rear_fender_rise_m: 0.09,
+        fender_peak_w: 0.68,
+        tumblehome_m: Some(0.34),
+        plan_width: vec![
+            [fy + fr + 0.05, 1.0],
+            [fy + fr + 0.80, 0.90],
+            [ry - rr - 0.05, 1.0],
+            [ry - rr - 0.60, 0.95],
+        ],
+        side_sculpt: vec![SideSculpt {
+            y0_m: ry + rr + 0.10,
+            y1_m: fy - fr - 0.15,
+            z0_m: 0.0,
+            z1_m: 0.42,
+            dx_m: -0.07,
+            falloff_m: 0.15,
+        }],
+        rocker_in_m: 0.03,
         cabin_shift_m: 0.30,
         nose_h: Some(0.40),
         nose_rake_deg: 30.0,
         nose_plan_round: 0.10,
         tail_plan_round: 0.04,
         hood_crown: 0.040,
-        hood_valley: 0.060,
         windshield_rake_deg: Some(64.0),
         a_pillar_rake_deg: 22.0,
         c_pillar_rake_deg: 18.0,
         rear_glass_rake_deg: Some(74.0),
         roof_arc: 0.70,
         roof_len_trim: 0.25,
-        tumblehome: Some(0.36),
         crease_z: 0.36,
         crease_depth: 0.030,
         haunch: 0.080,
@@ -599,21 +604,24 @@ fn nyx_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         (2, 0),
     );
     for sx in SIDES {
-        // Angular lamp units: a swept main lens and a short lower blade ahead of it.
-        let main = [
-            [wn - 0.30, yn - 0.30],
-            [wn - 0.06, yn - 0.22],
-            [wn - 0.06, yn - 0.34],
-            [wn - 0.20, yn - 0.42],
+        // Angular lamp unit lying on the fender pod (projected), a wide amber outer tip (a
+        // narrow one sits in the hood's shadow from ahead).
+        let lamp = [
+            [-(wn - 0.03), yn - 0.12],
+            [-(wn - 0.26), yn - 0.20],
+            [-(wn - 0.24), yn - 0.40],
+            [-(wn - 0.05), yn - 0.33],
         ];
-        shaped_lamp(&mut k, sx, &main, 0.02);
-        let blade = [
-            [wn - 0.24, yn - 0.18],
-            [wn - 0.07, yn - 0.13],
-            [wn - 0.07, yn - 0.18],
-            [wn - 0.22, yn - 0.22],
-        ];
-        shaped_lamp(&mut k, sx, &blade, 0.015);
+        k.proj_cluster(
+            sx,
+            true,
+            LampView::Top,
+            &lamp,
+            Some(Seg::Outboard(0.08)),
+            M::EmissiveAmber,
+            0.0,
+            0.0,
+        );
     }
     k.mesh_grille(
         "nose_intake",
@@ -640,23 +648,10 @@ fn nyx_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.splitter(M::Carbon, 0.18, 0.0, 0.024, true);
     k.canards(M::Carbon, nz0 + 0.16);
 
-    // --- Raised fender domes over the front wheels with louvred tops; rear arch louvres.
+    // --- Louvred tops on the fender pods (the pods are `front_fender_rise_m`); rear arch
+    // louvres.
     for sx in SIDES {
         let hw = p.half_width(yf);
-        let kd = sided(
-            &dkey("fender_dome_l", BodyRegion::FrontLeftFender, M::Paint),
-            sx,
-        );
-        let (xa, xb) = (sx * 0.52, sx * (hw - 0.03));
-        k.patch(
-            &kd,
-            yf - rf - 0.02,
-            yf + rf + 0.06,
-            top_band(xa, xb),
-            0.0,
-            0.06,
-            (4, 3),
-        );
         let kb = sided(
             &dkey("fender_dome_vent_l", BodyRegion::FrontLeftFender, M::Grille),
             sx,
@@ -668,7 +663,7 @@ fn nyx_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             yf - 0.14,
             yf + 0.20,
             top_band(va, vb),
-            0.062,
+            0.004,
             0.004,
             (2, 1),
         );
@@ -682,7 +677,7 @@ fn nyx_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
         for i in 0..5 {
             let y = yf - 0.14 + 0.34 * (i as f32 + 0.5) / 5.0;
-            let z = k.top_z(y, sx * xi).max(k.top_z(y, sx * xo)) + 0.064;
+            let z = k.top_z(y, sx * xi).max(k.top_z(y, sx * xo)) + 0.006;
             k.bx(&kl, [va, y - 0.012, z], [vb, y + 0.012, z + 0.016]);
         }
         let hr = p.half_width(yr);
@@ -704,8 +699,6 @@ fn nyx_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let (y0, y1) = (yr + rr + 0.06, yf - rf - 0.10);
     let zs = p.sill(0.5 * (y0 + y1));
     for sx in SIDES {
-        let kpod = dkey("sidepod_l", BodyRegion::FrameLeft, M::Paint);
-        k.side_patch(&kpod, sx, y0, y1, zs + 0.03, zs + 0.24, 0.0, 0.07, (4, 2));
         let xs = k.side_x(y1, zs + 0.14);
         let ki = sided(
             &dkey("sidepod_intake_l", BodyRegion::FrameLeft, M::Grille),
@@ -909,7 +902,32 @@ fn nyx_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 /// splitter, big open grille mesh + lower intake, bonnet vents, skirts, single-element wing
 /// on two pillars, diffuser, roof vent scoop. Cyan with white accents.
 pub fn merlo(def: &VehicleDef) -> CarStyle {
+    let (fy, fr, ry, _) = axles(def);
     let mut s = CarStyle::with_body(BodyStyle {
+        // Phase 3: bolt-on arch extensions standing proud over both axles (the sedan's doors
+        // read pinched between them), curved section, slightly tapered nose.
+        plan_width: vec![[fy + fr + 0.05, 1.0], [fy + fr + 0.60, 0.95]],
+        side_sculpt: vec![
+            SideSculpt {
+                y0_m: fy - 0.30,
+                y1_m: fy + 0.30,
+                z0_m: 0.30,
+                z1_m: 0.74,
+                dx_m: 0.035,
+                falloff_m: 0.15,
+            },
+            SideSculpt {
+                y0_m: ry - 0.30,
+                y1_m: ry + 0.30,
+                z0_m: 0.30,
+                z1_m: 0.74,
+                dx_m: 0.035,
+                falloff_m: 0.15,
+            },
+        ],
+        side_bulge_m: 0.02,
+        rocker_in_m: 0.035,
+        front_fender_rise_m: 0.02,
         nose_h: Some(0.60),
         nose_rake_deg: 30.0,
         nose_plan_round: 0.28,
@@ -970,7 +988,6 @@ pub fn merlo(def: &VehicleDef) -> CarStyle {
 fn merlo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
     let p = ctx.profile;
-    let yn = k.yn;
     let wn = k.wn();
     let wt = k.wt();
     let (nz0, nz1) = k.nose_z();
@@ -978,56 +995,25 @@ fn merlo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let fb = BodyRegion::FrontBumper;
     let (yr, _, rr) = k.arch(false);
 
-    // --- Front: slim angular lamps wrapping from the nose face onto the fender top (with the
-    // signal as the outboard end of the face lens and an LED brow), big trapezoid grille mesh,
-    // lower intake, deep splitter.
+    // --- Front: slim angular lamps drawn on the nose face and projected round the corner
+    // onto the fender (amber outboard segment, black bezel), big grille mesh, lower intake,
+    // deep splitter.
     for sx in SIDES {
-        let lamp = [
-            [wn - 0.36, yn - 0.13],
-            [wn - 0.07, yn - 0.04],
-            [wn - 0.07, yn - 0.12],
-            [wn - 0.28, yn - 0.19],
+        let head = [
+            [-(wn - 0.34), nz1 - 0.115],
+            [-(wn - 0.01), nz1 - 0.075],
+            [-(wn - 0.01), nz1 - 0.030],
+            [-(wn - 0.40), nz1 - 0.055],
         ];
-        shaped_lamp(&mut k, sx, &lamp, 0.018);
-        let kh = sided(
-            &dkey(
-                "headlamp_face_housing_l",
-                BodyRegion::FrontLeftFender,
-                M::Trim,
-            ),
+        k.proj_cluster(
             sx,
-        );
-        k.front_box(
-            &kh,
-            sx * 0.48,
-            sx * (wn - 0.03),
-            nz1 - 0.10,
-            nz1 - 0.01,
-            0.012,
-            0.006,
-        );
-        k.front_cluster(
-            sx,
-            0.52,
-            wn - 0.06,
-            nz1 - 0.08,
-            nz1 - 0.035,
-            0.02,
-            0.0,
-            Seg::Outboard(0.07),
-        );
-        let kd = sided(
-            &lkey("drl_l", BodyRegion::FrontLeftFender, M::Headlight),
-            sx,
-        );
-        k.front_box(
-            &kd,
-            sx * 0.50,
-            sx * (wn - 0.05),
-            nz1 - 0.095,
-            nz1 - 0.085,
-            0.026,
-            0.0,
+            true,
+            LampView::Front,
+            &head,
+            Some(Seg::Outboard(0.10)),
+            M::EmissiveAmber,
+            0.010,
+            25.0,
         );
     }
     let (gz0, gz1) = (nz0 + 0.22, nz1 - 0.03);
@@ -1172,54 +1158,25 @@ fn merlo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         stand_mat: M::Carbon,
         gurney: 0.010,
     });
-    // Slim two-piece tails (quarter + lid), joined by a full-width red light bar on the lid.
+    // Slim tails wrapping round the rear corners (projected, amber inboard segment), joined
+    // by a full-width red light bar on the lid.
     let zt = tz1 - 0.07;
     for sx in SIDES {
-        let tk = taillight_key(sx);
-        let kh = sided(
-            &dkey("taillight_housing_l", BodyRegion::RearLeftQuarter, M::Trim),
+        let tail = [
+            [-(wt - 0.40), zt - 0.035],
+            [-(wt + 0.02), zt - 0.050],
+            [-(wt + 0.02), zt + 0.020],
+            [-(wt - 0.42), zt + 0.015],
+        ];
+        k.proj_cluster(
             sx,
-        );
-        k.rear_box(
-            &kh,
-            sx * 0.40,
-            sx * (wt - 0.01),
-            zt - 0.050,
-            zt + 0.035,
-            0.010,
-            0.006,
-        );
-        // Outer lens with an inner hook (taller at the corner), signal beside it (kit call).
-        k.rear_box(
-            &tk,
-            sx * 0.56,
-            sx * (wt - 0.03),
-            zt - 0.010,
-            zt + 0.022,
-            0.022,
-            0.004,
-        );
-        k.rear_box(
-            &tk,
-            sx * (wt - 0.10),
-            sx * (wt - 0.03),
-            zt - 0.040,
-            zt - 0.010,
-            0.022,
+            false,
+            LampView::Rear,
+            &tail,
+            Some(Seg::Inboard(0.09)),
+            M::EmissiveAmber,
             0.0,
-        );
-        let ki = sided(
-            &lkey("taillight_inner_l", BodyRegion::Trunk, M::Taillight),
-            sx,
-        );
-        k.rear_box(
-            &ki,
-            sx * 0.42,
-            sx * 0.54,
-            zt - 0.010,
-            zt + 0.022,
-            0.020,
-            0.004,
+            30.0,
         );
     }
     let kbar = dkey("tail_light_bar", BodyRegion::Trunk, M::Taillight);
