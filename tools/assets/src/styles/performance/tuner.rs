@@ -365,7 +365,6 @@ pub fn kestrel(def: &VehicleDef) -> CarStyle {
     b.nose_chin_m = 0.06;
     b.nose_plan_bow_m = 0.25;
     b.nose_tip_w = 0.75;
-    b.tail_face_rake_deg = 10.0;
     b.roof_plan_taper = 0.08;
     b.hood_dz = (0.0, -0.05);
     b.deck_dz = -0.04;
@@ -1199,7 +1198,6 @@ pub fn shiro(def: &VehicleDef) -> CarStyle {
     b.nose_chin_m = 0.06;
     b.nose_plan_bow_m = 0.25;
     b.nose_tip_w = 0.7;
-    b.tail_face_rake_deg = 15.0;
     b.roof_plan_taper = 0.12;
     b.lower_lean_in_m = 0.03;
     // No hood drop: it makes the front fender float in the 50 km/h crumple test (fold
@@ -1492,9 +1490,9 @@ pub fn hakone(def: &VehicleDef) -> CarStyle {
     b.side_bulge_m = 0.04;
     b.side_bulge_z = 0.55;
     b.rocker_in_m = 0.05;
-    b.tumblehome_m = Some(0.26);
+    b.tumblehome_m = Some(0.22);
     b.side_sculpt = vec![
-        blister(ry, rr, 0.25, belt + 0.02, 0.04, 0.22),
+        blister(ry, rr, 0.25, belt - 0.04, 0.04, 0.18),
         blister(fy, fr, 0.25, belt, 0.02, 0.18),
     ];
     b.rear_fender_rise_m = 0.05;
@@ -1504,11 +1502,9 @@ pub fn hakone(def: &VehicleDef) -> CarStyle {
     b.nose_chin_m = 0.05;
     b.nose_plan_bow_m = 0.30;
     b.nose_tip_w = 0.7;
-    b.tail_face_rake_deg = 20.0;
-    b.roof_plan_taper = 0.15;
+    b.roof_plan_taper = 0.0;
     b.lower_lean_in_m = 0.04;
     b.hood_dz = (0.0, -0.06);
-    b.dlo_top_drop_m = 0.04;
     b.roof_arc_rear_exp = 1.4;
     s.details.push(kit_detail(hakone_kit));
     wheels(
@@ -1795,7 +1791,6 @@ pub fn sperber(def: &VehicleDef) -> CarStyle {
     b.nose_chin_m = 0.05;
     b.nose_plan_bow_m = 0.15;
     b.nose_tip_w = 0.8;
-    b.tail_face_rake_deg = 8.0;
     b.roof_plan_taper = 0.06;
     b.hood_dz = (0.0, -0.05);
     b.deck_dz = -0.04;

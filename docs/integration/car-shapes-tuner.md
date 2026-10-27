@@ -205,18 +205,29 @@ End faces and plan:
 Mod coverage after the addenda (all six): 9 car/mod pairs show nothing, all no-visual mods on
 the known list (`drivetrain_shifter_short`, `tires_sport`).
 
+### Lead review fix: tail bottom spikes (2026-10-27)
+Low rear 3/4 and low side renders of all six showed a spike at the tail's bottom corner on the
+four cars with a tail face rake (kestrel 10°, shiro 15°, hakone 20°, sperber 8°): the raked face
+leaves its bottom edge at the old tail end below the tucked, chamfered underside. Tail face
+rake is now 0 on every car (the nose rakes stay); arashi and talus were already clean. hakone
+also lost its `dlo_top_drop_m` (jagged top edge on the rear side glass) and its
+`roof_plan_taper` (white slivers along the glass top), its rear haunch blister stops 4 cm under
+the belt, and its tumblehome is 0.22 (was 0.26). Remaining on hakone: shading facets on the
+fastback C-pillar sail (thin loft triangles under the curved roof edge); faint on the original
+mesh too, a shared-loft item.
+
 ## Triangle counts
 
 Hero budget 22k (mid LOD 7k); all six within it.
 
 | car | full before → after | mid before → after |
 |---|---|---|
-| kestrel_ts | 18914 → 19654 | 5051 → 5463 |
+| kestrel_ts | 18914 → 19684 | 5051 → 5575 |
 | arashi_t4 | 18292 → 18820 | 4962 → 4854 |
 | talus_20t | 17376 → 19464 | 4464 → 5080 |
-| shiro_turbo | 18992 → 19454 | 5040 → 5282 |
-| hakone_gt | 18873 → 19844 | 4826 → 4614 |
-| sperber_32 | 19112 → 18880 | 4942 → 5062 |
+| shiro_turbo | 18992 → 19485 | 5040 → 5309 |
+| hakone_gt | 18873 → 19873 | 4826 → 4645 |
+| sperber_32 | 19112 → 18914 | 4942 → 5112 |
 
 The rows of `every_car_has_turn_signals_integrated_into_its_lamps`'s table for these six cars
 were rebased to the new counts (the phase-1 doc asks per-car passes above +2 % to do this).
