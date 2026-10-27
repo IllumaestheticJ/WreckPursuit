@@ -21,7 +21,8 @@
 - `cab_back_window`: pickup cab-back glass with seal (and a sliding centre pane).
 - `door_handles_at`, `door_cut`: crew-cab handles on recesses and the rear door's cut lines
   (the lattice has no hinged rear door on `hauler_1500`).
-- `conform_to_faces` (pass 3b): moves kit detail / light parts near an end back by the measured
+- `conform_to_faces` (pass 3b; deleted in the final touch-up, replaced by the shared
+  `lamp::follow_end_faces`): moved kit detail / light parts near an end back by the measured
   set-back of a raked / chinned end face (projected lamps and body parts untouched).
 - `head_lamp_bowls` (pass 3b): projector bowls + chrome reflector rings via `lamp::element`.
 - `proj_lamps`, `proj_signals`, `rect` (pass 3): head / tail lamps and turn signals as lenses
@@ -49,9 +50,8 @@ Merged `ws/car-shapes` (phase 3) and reworked all seven again:
 - Phase 3b part 1 (merged `b10e5e14`): tansy gets a raked bumper face (22°), a slightly bowed nose in plan, a roof narrowing to the rear
   (`roof_plan_taper` 0.08) and a tucked lower body; the European vans get raked plastic
   bumpers (satchel 16°, tumbril 8°). Chins (tansy 5 cm, satchel 6 cm, tumbril 4 cm) and tansy's
-  12° tailgate lean were tried and are off until the generator's face-bottom clipping fix (the
-  lead's spike warning); a low-angle check of all seven (front and rear 3/4 at 0.3 m) shows no
-  spikes with them off. A local `conform_to_faces`
+  12° tailgate lean were briefly off for the generator's face-bottom clipping bug and are back
+  on since the final touch-up. A local `conform_to_faces` (deleted in the final touch-up)
   slides the kit's end-mounted parts (grilles, plates, intakes, fog lamps, lips) back onto the
   raked face. Projector bowls with chrome reflector rings (`lamp::element`) in tansy's and
   satchel's lamps (one / two) and a big round reflector in tumbril's square lamps.
@@ -202,13 +202,26 @@ over after row) and `overview_front.jpg` (all seven, before / after).
   shapes and cladding.) Open: a painted rear-door panel mode for vans (glass only where a
   window is drawn), so `van_box`'s door skin could go.
 
-## Final counts (after the phase 3 addenda)
+## Final touch-up (merged ws/car-shapes `86693a0d`: all-cars regen, `follow_end_faces`, smooth shading)
+- Local `conform_to_faces` deleted: the shared `lamp::follow_end_faces` now moves end-face kit
+  parts onto raked faces (both together would shift parts twice).
+- Chins back on (tansy 5 cm, satchel 6 cm, tumbril 4 cm) and tansy's 12° tailgate lean back on
+  (the generator fixed the face-bottom clipping). Low front / rear / side views of all seven at
+  0.25–0.3 m show no spikes.
+- Budget trims for the all-cars twist rows (+0.5–7 %): drayman wheels 14 → 12 segments; hauler
+  draws no lug nuts and drops its fender badges, tailgate badge and air dam.
+- Smooth shading checked in the real renderer (`e2e/smooth_shots.mjs`, greybox with
+  crease-split normals): no seams, shading breaks or inverted faces on the seven.
+- Final sheet: `docs/media/car-shapes/traffic/final.jpg` (before = `main` meshes, after = this
+  branch; front / rear / side each).
+
+## Final counts
 | car | full | mid |
 |---|---|---|
-| drayman_cargo | 10929 | 5657 |
-| furrow_24 | 10006 | 4954 |
-| hauler_1500 | 10999 | 5909 |
-| junkyard_beater | 9136 | 4471 |
-| satchel_20 | 10627 | 5177 |
-| tansy_13 | 10106 | 4336 |
-| tumbril_20 | 10640 | 5125 |
+| drayman_cargo | 10941 | 5709 |
+| furrow_24 | 10134 | 5014 |
+| hauler_1500 | 10995 | 5901 |
+| junkyard_beater | 9244 | 4499 |
+| satchel_20 | 10689 | 5223 |
+| tansy_13 | 10248 | 4221 |
+| tumbril_20 | 10704 | 5143 |
