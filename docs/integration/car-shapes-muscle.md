@@ -33,6 +33,12 @@
   undercut and a stronger lean (−12°) were tried on the rampart but left the face-plane kit
   (lower mouth, fogs, splitter, tail panel, diffuser) floating, so they stay off until those
   parts are re-placed on the raked face.
+- **Phase 3 addenda (d64c04b7):** brigand: blind C-pillar (`quarter_glass: false`) carrying
+  a chrome-ringed opera window each side (`PatchBand::Greenhouse`, local mirrored helper
+  `greenhouse_patch`). Rampart: `roof_arc` 0.85 with rear exponent 1.4 (one even fastback
+  fall). Ironside: window top falls 3 cm toward the rear (`dlo_top_drop_m`); rear overhang
+  back to stock (+6 cm lifted the raked tail's cladding over the shared
+  `greenhouse_patches_and_cladding` test's 0.55 m bound).
 - Still waiting on phase 3b part 2 (smooth shading, nose height / hood dz, roof-arc exponent)
   for a touch-up pass.
 
@@ -126,10 +132,10 @@ ribbed reflector panel, landau roof with chrome band, rubber side strip, chrome 
 ## Triangle counts (hero budget 22k, mid 7k)
 | car | full before | full now | mid before | mid now |
 |---|---|---|---|---|
-| ironside_440 | 19809 | 20278 | 5451 | 5812 |
+| ironside_440 | 19809 | 20055 | 5451 | 5891 |
 | rampart_50 | 19954 | 21317 | 5380 | 5902 |
 | bulwark_400 | 20579 | 20825 | 5621 | 6151 |
-| brigand_400 | 20986 | 21463 | 6042 | 6340 |
+| brigand_400 | 20986 | 21639 | 6042 | 6340 |
 
 ## Checks
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p
@@ -153,14 +159,13 @@ per-car before (left) / after (right) sheets `docs/media/car-shapes/muscle/<car>
   upright with a rounder plan instead.
 - The rear-arch flare on the rampart still shows a few spiky facets where the haunch meets the
   arch lip (generator loft; reduced by a smaller haunch / flare).
-- No opera windows on the brigand's C-pillar: side patches can't follow the greenhouse surface.
 
 ## Generator requests (sent to the lead 2026-10-27)
 1. ~~Per-station side section~~ (done in phase 3: `plan_width`, `side_sculpt`): a waist pinch at the doors swelling over the arches in plan
    (coke-bottle line), e.g. `waist_pinch_m`.
 2. ~~Forward-leaning nose~~ (done in phase 3b: `nose_face_rake_deg`).
 3. ~~Shaped lamp lens primitive~~ (done in phase 3: `lamp`, `Kit::proj_cluster`).
-4. Side patch that follows the greenhouse surface (opera windows, C-pillar badges).
+4. ~~Side patch that follows the greenhouse surface~~ (done: `PatchBand::Greenhouse`) (opera windows, C-pillar badges).
 5. ~~Lower-body tumblehome~~ (done in phase 3b: `lower_lean_in_m`).
 6. New: a face-following variant of `Kit::front_box` / `rear_box` (or a y offset taking the
    face rake and chin at z), so grilles, mouths and diffusers can sit on a raked face.
