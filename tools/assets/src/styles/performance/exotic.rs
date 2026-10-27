@@ -15,7 +15,7 @@
 use wp_contracts::{BodyRegion, VehicleDef};
 
 use crate::builder::{Builder, PartKey};
-use crate::mesh::{MaterialSlot as M, PartKind};
+use crate::mesh::{MaterialSlot as M, PartKind, INDICATOR_SEAM_M};
 use crate::style::{
     ArchShape, BodyStyle, CaliperKind, CapKind, CarStyle, DetailCtx, EngineKind, EngineLayout,
     ExhaustKind, FuelDoor, Induction, RimKind, Silhouette, SuspensionKind, TrimFinish,
@@ -25,12 +25,13 @@ use super::kit::{
     dkey, headlight_key, indicator_front_key, indicator_rear_key, sided, taillight_key, top_band,
     Kit, Seg, SIDES,
 };
-use super::supercar::{end_poly, flip_x, rear_stroke, side_poly, top_poly, top_stroke};
+use super::supercar::{end_poly, flip_x, rear_stroke, side_poly, stadium, top_poly, top_stroke};
 use super::{kit_detail, rgb, wheels};
 
 /// 90s mid-engine berlinetta: soft round nose, rounded roof, upright rear glass between
-/// flying-buttress sails, closed pop-up lamp pods, slatted nose, side intake with strakes,
-/// louvred deck, quad round tails (outer amber-ringed) in a black rear mesh panel.
+/// flying-buttress sails, closed pop-up lamp pods, oval slatted nose intake, one teardrop
+/// side scoop, louvred deck, one wide pill-shaped tail lamp per side (amber inner end) in a
+/// chrome surround on a black rear mesh panel.
 pub fn lucciola(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         cabin_shift_m: 0.38,
@@ -38,21 +39,21 @@ pub fn lucciola(def: &VehicleDef) -> CarStyle {
         cowl_h: 0.05,
         belt_dz: 0.07,
         nose_rake_deg: 48.0,
-        nose_plan_round: 0.32,
+        nose_plan_round: 0.40,
         tail_plan_round: 0.26,
         hood_crown: 0.022,
         windshield_rake_deg: Some(62.0),
         a_pillar_rake_deg: 12.0,
         rear_glass_rake_deg: Some(38.0),
         roof_arc: 0.55,
-        tumblehome: Some(0.22),
+        tumblehome: Some(0.26),
         crease_z: 0.46,
         crease_depth: 0.012,
-        shoulder_round: 0.08,
-        haunch: 0.045,
-        front_haunch: 0.030,
+        shoulder_round: 0.10,
+        haunch: 0.07,
+        front_haunch: 0.05,
         flare: 0.008,
-        ride_dz: -0.01,
+        ride_dz: -0.025,
         stance_pitch_deg: 0.3,
         ducktail_h: 0.025,
         deck_valley: 0.02,
@@ -61,6 +62,7 @@ pub fn lucciola(def: &VehicleDef) -> CarStyle {
         belt_rake: 0.03,
         tail_round: 0.22,
         tail_drop: 0.06,
+        sill_tuck: 0.09,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.details.push(kit_detail(lucciola_kit));
@@ -219,7 +221,7 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         k.sail(&ks, sx, r0 + 0.02, k.yt + 0.30, xs, 0.07, 0.035);
     }
 
-    // --- Rear: black mesh panel between quad round lamps.
+    // --- Rear: black mesh panel between the pill lamps.
     let (pz0, pz1) = (tz1 - 0.22, tz1 - 0.025);
     k.rear_panel(
         "tail_panel",
@@ -234,28 +236,31 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         let z = pz0 + (pz1 - pz0) * i as f32 / 5.0;
         k.rear_box(&km, -0.38, 0.38, z - 0.006, z + 0.006, 0.016, 0.0);
     }
+    // One wide pill-shaped lamp per side in a chrome surround (this car's night signature),
+    // its inner end the amber turn signal.
     let zc = 0.5 * (pz0 + pz1);
-    let r = (0.5 * (pz1 - pz0) - 0.03).min(0.06);
+    let hh = (0.5 * (pz1 - pz0) - 0.035).min(0.055);
     for sx in SIDES {
-        let tk = taillight_key(sx);
+        let (xo, xi) = (wt - 0.07, wt - 0.46);
         let kring = sided(
             &dkey("taillight_ring_l", BodyRegion::RearLeftQuarter, M::Chrome),
             sx,
         );
-        let kc = sided(
-            &dkey(
-                "taillight_inner_ring_l",
-                BodyRegion::RearLeftQuarter,
-                M::Chrome,
-            ),
-            sx,
-        );
-        let xo = wt - 0.10;
-        let xi = xo - 2.6 * r;
-        k.round_lamp(&tk, false, sx * xo, zc, r, 0.03, Some(&kring));
-        // The inner round lamp is the amber turn signal.
+        let ring = stadium(0.5 * (xo + xi), zc, 0.5 * (xo - xi) + 0.016, hh + 0.016, 5);
+        end_poly(&mut k, &kring, false, &flip_x(&ring, sx), 0.016, 0.03);
+        let xs = xi + 0.11;
+        let tk = taillight_key(sx);
+        let red = stadium(0.5 * (xo + xs), zc, 0.5 * (xo - xs), hh, 5);
+        end_poly(&mut k, &tk, false, &flip_x(&red, sx), 0.03, 0.03);
         let ka = indicator_rear_key(sx, M::EmissiveAmber);
-        k.round_lamp(&ka, false, sx * xi, zc, r, 0.03, Some(&kc));
+        let amber = stadium(
+            0.5 * (xs - INDICATOR_SEAM_M + xi),
+            zc,
+            0.5 * (xs - INDICATOR_SEAM_M - xi),
+            hh,
+            5,
+        );
+        end_poly(&mut k, &ka, false, &flip_x(&amber, sx), 0.03, 0.03);
     }
     let kv = dkey("rear_valance", BodyRegion::RearBumper, M::Grille);
     k.rear_box(
@@ -274,11 +279,11 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 }
 
 /// 2010s mid-engine V10 AWD supercar: low sharp-cornered wedge with the hood running in one
-/// line from the nose lip to the windshield; slim angular head lamps with a Y-shaped DRL; a
-/// black hexagon-themed lower front with two big trapezoid intakes; a sharp diagonal side
+/// line from the nose lip to the windshield; slim angular head lamps with a lightning-bolt
+/// DRL (this fictional maker's signature); a black lower front with two big trapezoid intakes; a sharp diagonal side
 /// line rising from the front wheel into the big quarter intake behind the door; louvred
 /// engine cover over a glass strip; integrated lip spoiler (no wing on the stock car); thin
-/// Y-shaped tail strokes over a black honeycomb fascia, twin tips each side low in the
+/// lightning-bolt tail strokes over a slatted black fascia, twin tips each side low in the
 /// diffuser.
 pub fn fulmine(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
@@ -298,16 +303,16 @@ pub fn fulmine(def: &VehicleDef) -> CarStyle {
         b_pillar_w_m: 0.07,
         windshield_wrap_m: 0.09,
         roof_arc: 0.42,
-        tumblehome: Some(0.28),
+        tumblehome: Some(0.30),
         crease_z: 0.40,
         crease_depth: 0.026,
         shoulder_round: 0.03,
-        sill_tuck: 0.05,
-        haunch: 0.055,
-        front_haunch: 0.025,
+        sill_tuck: 0.08,
+        haunch: 0.075,
+        front_haunch: 0.045,
         flare: 0.012,
         flare_shape: ArchShape::Box,
-        ride_dz: -0.015,
+        ride_dz: -0.03,
         stance_pitch_deg: 0.3,
         belt_dz: 0.08,
         ducktail_h: 0.012,
@@ -367,7 +372,8 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let fb = BodyRegion::FrontBumper;
 
     // --- Slim angular head lamps on the nose top: a dark lens that tapers back along the
-    //     fender, a Y-shaped DRL inside it, a small projector, the amber signal at its nose.
+    //     fender, a lightning-bolt DRL (the car's own signature) inside it, a small
+    //     projector, the amber signal at its nose.
     for sx in SIDES {
         let wf = p.half_width(yn - 0.30);
         let lens = [
@@ -393,11 +399,14 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
         top_poly(&mut k, &kl, &flip_x(&lens, sx), 0.009, 0.012);
         let hk = headlight_key(sx);
-        // Y: stem along the lens' front edge, then a fork at the outer end.
-        let j = [sx * (wn - 0.17), yn - 0.085];
-        top_stroke(&mut k, &hk, [sx * 0.48, yn - 0.135], j, 0.016, 0.012);
-        top_stroke(&mut k, &hk, j, [sx * (wf - 0.10), yn - 0.27], 0.016, 0.012);
-        top_stroke(&mut k, &hk, j, [sx * (wn - 0.14), yn - 0.075], 0.016, 0.012);
+        // Bolt: out along the front edge, a sharp kink back inward, then out to the rear tip.
+        let b0 = [sx * 0.48, yn - 0.135];
+        let b1 = [sx * (wn - 0.20), yn - 0.08];
+        let b2 = [sx * (wn - 0.27), yn - 0.17];
+        let b3 = [sx * (wf - 0.09), yn - 0.27];
+        for (a, c) in [(b0, b1), (b1, b2), (b2, b3)] {
+            top_stroke(&mut k, &hk, a, c, 0.016, 0.012);
+        }
         let proj = [
             [0.64, yn - 0.17],
             [0.74, yn - 0.15],
@@ -441,7 +450,7 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
                 0.0,
             );
         }
-        // Slanted blade across each intake (the hexagon read of the black front).
+        // Slanted blade across each intake.
         let kb = sided(&dkey("front_duct_blade_l", fb, M::Paint), sx);
         let blade = [
             [0.58, zd1 - 0.005],
@@ -535,7 +544,7 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         top_poly(&mut k, &kv, &flip_x(&vent, sx), 0.004, 0.01);
     }
 
-    // --- Rear: integrated lip spoiler, black honeycomb fascia, Y-shaped tail strokes.
+    // --- Rear: integrated lip spoiler, slatted black fascia, lightning-bolt tail strokes.
     k.lip_spoiler(M::Paint, k.yt + 0.12, 0.035, 0.10, 0.10);
     let (fz0, fz1) = (tz0 + 0.10, tz0 + 0.55 * (tz1 - tz0));
     k.rear_panel(
@@ -547,24 +556,9 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         M::Grille,
     );
     let km = dkey("rear_fascia_mesh", BodyRegion::RearBumper, M::Trim);
-    for i in 0..9 {
-        let x = -wt + 0.16 + (2.0 * wt - 0.32) * i as f32 / 8.0;
-        rear_stroke(
-            &mut k,
-            &km,
-            [x - 0.04, fz0 + 0.01],
-            [x + 0.04, fz1 - 0.01],
-            0.008,
-            0.014,
-        );
-        rear_stroke(
-            &mut k,
-            &km,
-            [x + 0.04, fz0 + 0.01],
-            [x - 0.04, fz1 - 0.01],
-            0.008,
-            0.014,
-        );
+    for i in 1..5 {
+        let z = fz0 + (fz1 - fz0) * i as f32 / 5.0;
+        k.rear_box(&km, -wt + 0.10, wt - 0.10, z - 0.006, z + 0.006, 0.016, 0.0);
     }
     let zt = tz1 - 0.05;
     for sx in SIDES {
@@ -581,13 +575,15 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         ];
         end_poly(&mut k, &kh, false, &flip_x(&hous, sx), 0.010, 0.03);
         let tk = taillight_key(sx);
-        // Y on its side: a long stroke along the top, forking at the outer end into one
-        // stroke on to the corner and one down toward the bumper.
-        let j = [sx * (wt - 0.17), zt];
-        rear_stroke(&mut k, &tk, [sx * 0.44, zt - 0.005], j, 0.018, 0.022);
-        rear_stroke(&mut k, &tk, j, [sx * (wt - 0.07), zt + 0.02], 0.018, 0.022);
-        rear_stroke(&mut k, &tk, j, [sx * (wt - 0.11), zt - 0.065], 0.018, 0.022);
-        // Amber signal: the outer tip of the upper fork.
+        // Bolt: along the top, a kink down and back inward, then out to the corner.
+        let b0 = [sx * 0.44, zt + 0.005];
+        let b1 = [sx * (wt - 0.24), zt + 0.012];
+        let b2 = [sx * (wt - 0.30), zt - 0.055];
+        let b3 = [sx * (wt - 0.08), zt - 0.04];
+        for (a, c) in [(b0, b1), (b1, b2), (b2, b3)] {
+            rear_stroke(&mut k, &tk, a, c, 0.018, 0.022);
+        }
+        // Amber signal: a short bar at the outer top corner of the lamp.
         let ka = indicator_rear_key(sx, M::EmissiveAmber);
         let sig = [
             [wt - 0.06, zt + 0.03],
