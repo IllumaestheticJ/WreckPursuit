@@ -15,8 +15,8 @@
 //!
 //! Each car has its own body kit and its own night identifier (tail-lamp pattern):
 //! - Halberd: one hair-thin full-width LED line over an exposed black rear mesh.
-//! - Ombra: a sideways-Y lamp at each corner in an angular black housing.
-//! - Ostwind: a full-width red bar through a black band, four square brake dots per side.
+//! - Ombra: a double chevron at each corner in an angular black housing.
+//! - Ostwind: a full-width red bar through a black band, three stepped dashes per side.
 //! - Kagero: a thin full-width bar whose ends fold down into a Z at each corner.
 
 // Kit code takes explicit coordinates (x0, x1, z0, z1, …), as in `kit.rs`.
@@ -25,18 +25,21 @@
 use wp_contracts::{BodyRegion, VehicleDef};
 
 use crate::builder::{Builder, PartKey};
-use crate::mesh::MaterialSlot as M;
-use crate::style::{ArchShape, BodyStyle, CapKind, CarStyle, DetailCtx, RimKind, Silhouette};
+use crate::mesh::{MaterialSlot as M, INDICATOR_SEAM_M};
+use crate::profile::RING_GLASS_TOP;
+use crate::style::{
+    ArchShape, BodyStyle, CapKind, CarStyle, DetailCtx, RimKind, SideSculpt, Silhouette,
+};
 
 use super::kit::{
-    dkey, headlight_key, indicator_front_key, lkey, sided, taillight_key, top_band, Kit, Stand,
-    Wing, SIDES,
+    dkey, headlight_key, indicator_front_key, indicator_rear_key, lkey, on_side, sided,
+    taillight_key, top_band, Kit, Stand, Wing, SIDES,
 };
 use super::{kit_detail, rgb, wheels};
 
 /// A straight stroke from `a` to `c` lying on a surface with normal `n`: `width` is the
 /// visible width across the stroke, `depth` how far it stands along the normal.
-fn stroke(
+pub(super) fn stroke(
     k: &mut Kit,
     key: &PartKey,
     a: [f32; 3],
@@ -49,7 +52,14 @@ fn stroke(
 }
 
 /// A stroke on the nose face from (x, z) `a` to `c`, standing `proud` out of the face.
-fn front_stroke(k: &mut Kit, key: &PartKey, a: [f32; 2], c: [f32; 2], width: f32, proud: f32) {
+pub(super) fn front_stroke(
+    k: &mut Kit,
+    key: &PartKey,
+    a: [f32; 2],
+    c: [f32; 2],
+    width: f32,
+    proud: f32,
+) {
     let y = k.yn + 0.5 * (proud - 0.015);
     let depth = proud + 0.015;
     stroke(
@@ -64,7 +74,14 @@ fn front_stroke(k: &mut Kit, key: &PartKey, a: [f32; 2], c: [f32; 2], width: f32
 }
 
 /// A stroke on the tail face from (x, z) `a` to `c`, standing `proud` out of the face.
-fn rear_stroke(k: &mut Kit, key: &PartKey, a: [f32; 2], c: [f32; 2], width: f32, proud: f32) {
+pub(super) fn rear_stroke(
+    k: &mut Kit,
+    key: &PartKey,
+    a: [f32; 2],
+    c: [f32; 2],
+    width: f32,
+    proud: f32,
+) {
     let y = k.yt - 0.5 * (proud - 0.015);
     let depth = proud + 0.015;
     stroke(
@@ -79,15 +96,198 @@ fn rear_stroke(k: &mut Kit, key: &PartKey, a: [f32; 2], c: [f32; 2], width: f32,
 }
 
 /// A stroke on the top surface from (x, y) `a` to `c`, `lift` m above the surface.
-fn top_stroke(k: &mut Kit, key: &PartKey, a: [f32; 2], c: [f32; 2], width: f32, lift: f32) {
+pub(super) fn top_stroke(
+    k: &mut Kit,
+    key: &PartKey,
+    a: [f32; 2],
+    c: [f32; 2],
+    width: f32,
+    lift: f32,
+) {
     let pa = [a[0], a[1], k.top_z(a[1], a[0]) + lift];
     let pc = [c[0], c[1], k.top_z(c[1], c[0]) + lift];
     let n = k.p.top_point(0.5 * (a[1] + c[1]), 0.5 * (a[0] + c[0])).1;
     stroke(k, key, pa, pc, n, width, 0.012);
 }
 
+// ------------------------------------------------------------------ local shape helpers
+//
+// The draped panels moved to the shared `Kit::{top_poly, side_poly, end_poly, face_poly}`.
+// What stays here: the pill outline, the side groove, the quarter window and phase-3 body
+// shaping from the wheels. Kit parts built on the vertical end planes follow raked faces via
+// the generator's `lamp::follow_end_faces`.
+
+/// Mean of an outline.
+fn mean2(pts: &[[f32; 2]]) -> [f32; 2] {
+    let n = pts.len().max(1) as f32;
+    let s = pts
+        .iter()
+        .fold([0.0, 0.0], |s, q| [s[0] + q[0], s[1] + q[1]]);
+    [s[0] / n, s[1] / n]
+}
+
+/// Thin dark groove on the body side of side `sx` from (y, z) `a` to `c`: one plate `w` m wide
+/// standing 2 mm out of the surface (a cheap line where a draped panel would cost hundreds of
+/// triangles).
+pub(super) fn side_groove(
+    k: &mut Kit,
+    key_left: &PartKey,
+    sx: f32,
+    a: [f32; 2],
+    c: [f32; 2],
+    w: f32,
+) {
+    let key = sided(key_left, sx);
+    let at = |q: [f32; 2]| {
+        // `side_point` is the left side (x < 0); mirror for the right.
+        let (pt, n) = k.p.side_point(q[0], q[1]);
+        let x = pt[0] + n[0] * 0.002;
+        [if sx < 0.0 { x } else { -x }, q[0], pt[2] + n[2] * 0.002]
+    };
+    let (pa, pc) = (at(a), at(c));
+    k.plate(&key, pa, pc, [0.0, 0.0, 1.0], w, 0.008);
+}
+
+/// Rear quarter window behind the door glass on side `sx` (for bodies whose loft paints that
+/// greenhouse panel): a glass panel on a black seal, from `gap` m behind the door glass back
+/// to where the roof rail meets the belt (at most `max_len` m), its top edge `drop` m under
+/// the roof rail.
+pub(super) fn quarter_window(k: &mut Kit, sx: f32, gap: f32, max_len: f32, drop: f32) {
+    let p = k.p;
+    let ya = p.front_window().0 - gap;
+    let zb = |y: f32| p.belt(y) + 0.035;
+    let zt = |y: f32| p.ring(y)[RING_GLASS_TOP].p[2] - drop;
+    if !p.has_greenhouse(ya) || zt(ya) - zb(ya) < 0.10 {
+        return;
+    }
+    let mut top = Vec::new();
+    let mut y = ya;
+    let mut tip = ya;
+    while y > ya - max_len && p.has_greenhouse(y) && zt(y) - zb(y) > 0.05 {
+        top.push([y, zt(y)]);
+        tip = y;
+        y -= 0.04;
+    }
+    if top.len() < 3 {
+        return;
+    }
+    let mut glass = vec![[ya, zb(ya)]];
+    glass.extend(top.iter().copied());
+    glass.push([tip - 0.02, zb(tip) + 0.01]);
+    let seal: Vec<[f32; 2]> = {
+        let c = mean2(&glass);
+        glass
+            .iter()
+            .map(|q| [c[0] + (q[0] - c[0]) * 1.04, c[1] + (q[1] - c[1]) * 1.10])
+            .collect()
+    };
+    let ks = dkey("quarter_glass_seal_l", BodyRegion::RearLeftQuarter, M::Trim);
+    k.side_poly(&ks, sx, &seal, 0.002, 0.008);
+    let kg = dkey("quarter_glass_l", BodyRegion::RearLeftQuarter, M::Glass);
+    k.side_poly(&kg, sx, &glass, 0.005, 0.006);
+}
+
+/// Stadium (pill) outline centred at (`cx`, `cz`): `hw` half length along the first axis,
+/// `hh` half height (the end radius), `n` points per round end.
+pub(super) fn stadium(cx: f32, cz: f32, hw: f32, hh: f32, n: usize) -> Vec<[f32; 2]> {
+    let r = hh.min(hw);
+    let mut out = Vec::new();
+    for (end, sgn) in [(cx + hw - r, 1.0f32), (cx - hw + r, -1.0)] {
+        for i in 0..=n {
+            let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * i as f32 / n as f32;
+            let (sa, ca) = a.sin_cos();
+            out.push([end + sgn * r * ca, cz + sgn * r * sa]);
+        }
+    }
+    out
+}
+
+/// Phase-3 body shaping shared by the exotic / supercar styles, placed from the wheels.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Shape3 {
+    /// Plan-width scale at the nose (reached 0.6 m ahead of the front arch).
+    pub nose: f32,
+    /// Plan-width scale at the tail (reached 0.6 m behind the rear arch).
+    pub tail: f32,
+    /// Plan-width scale at the doors (waist between the arches).
+    pub waist: f32,
+    /// Depth of the recessed scallop ahead of the rear wheel (negative = in), m; 0 = none.
+    pub scallop: f32,
+    /// Shoulder line standing out under the belt, m; 0 = none.
+    pub shoulder: f32,
+    /// `side_bulge_m`.
+    pub bulge: f32,
+    /// `rocker_in_m`.
+    pub rocker: f32,
+    /// `front_fender_rise_m`, `rear_fender_rise_m`.
+    pub rise: (f32, f32),
+    /// End faces: (nose rake °, nose chin m, tail rake °, tail chin m).
+    pub face: (f32, f32, f32, f32),
+    /// Plan bows: (nose bow m, nose tip fraction, tail bow m, tail tip fraction).
+    pub bow: (f32, f32, f32, f32),
+    /// `lower_lean_in_m`.
+    pub lean: f32,
+}
+
+/// Apply [`Shape3`] to `s`: plan taper and waist, the side scallop, shoulder line, section
+/// bulge, rocker tuck and fender rise.
+pub(super) fn shape3(s: &mut CarStyle, def: &VehicleDef, o: Shape3) {
+    let w = &def.wheels;
+    let fy = w.iter().map(|q| q.position_m[1]).fold(f32::MIN, f32::max);
+    let ry = w.iter().map(|q| q.position_m[1]).fold(f32::MAX, f32::min);
+    let r = w.iter().map(|q| q.radius_m).fold(0.0, f32::max) + 0.07;
+    let wz = w.iter().map(|q| q.position_m[2]).fold(0.0, f32::max);
+    let b = &mut s.body;
+    b.plan_width = vec![
+        [ry - r - 0.6, o.tail],
+        [ry - r + 0.05, 1.0],
+        [ry + r + 0.10, 1.0],
+        [0.5 * (fy + ry), o.waist],
+        [fy - r - 0.10, 1.0],
+        [fy + r - 0.05, 1.0],
+        [fy + r + 0.6, o.nose],
+    ];
+    // Belt height from the body height: the lattice belt plus this group's belt_dz.
+    let belt = 0.62 * def.body_size_m[2] + b.belt_dz.max(0.0);
+    let mut sculpt = Vec::new();
+    if o.scallop < 0.0 {
+        sculpt.push(SideSculpt {
+            y0_m: ry + r + 0.04,
+            y1_m: ry + r + 0.75,
+            z0_m: wz - 0.04,
+            z1_m: belt - 0.10,
+            dx_m: o.scallop,
+            falloff_m: 0.12,
+        });
+    }
+    if o.shoulder > 0.0 {
+        sculpt.push(SideSculpt {
+            y0_m: ry - r,
+            y1_m: fy + r,
+            z0_m: belt - 0.10,
+            z1_m: belt - 0.07,
+            dx_m: o.shoulder,
+            falloff_m: 0.035,
+        });
+    }
+    b.side_sculpt = sculpt;
+    b.side_bulge_m = o.bulge;
+    b.rocker_in_m = o.rocker;
+    b.front_fender_rise_m = o.rise.0;
+    b.rear_fender_rise_m = o.rise.1;
+    b.nose_face_rake_deg = o.face.0;
+    b.nose_chin_m = o.face.1;
+    b.tail_face_rake_deg = o.face.2;
+    b.tail_chin_m = o.face.3;
+    b.nose_plan_bow_m = o.bow.0;
+    b.nose_tip_w = o.bow.1;
+    b.tail_plan_bow_m = o.bow.2;
+    b.tail_tip_w = o.bow.3;
+    b.lower_lean_in_m = o.lean;
+}
+
 /// Air outlet on the front fender behind the front wheel: dark slot with `slats` blades.
-fn fender_outlet(k: &mut Kit, slats: usize, slat_mat: M) {
+pub(super) fn fender_outlet(k: &mut Kit, slats: usize, slat_mat: M) {
     let p = k.p;
     let (yf, zf, rf) = k.arch(true);
     let (y0, y1) = (p.y_fd_hinge + 0.04, yf - rf - 0.02);
@@ -112,7 +312,7 @@ fn fender_outlet(k: &mut Kit, slats: usize, slat_mat: M) {
 
 /// Dark roof sheet (glass canopy / black floating roof) over the roof top, `inset` from the
 /// roof edges, `off` above the paint, `mat`.
-fn roof_sheet(k: &mut Kit, name: &str, inset: f32, off: f32, mat: M) {
+pub(super) fn roof_sheet(k: &mut Kit, name: &str, inset: f32, off: f32, mat: M) {
     let (r0, r1, _, _) = k.p.roof;
     // Narrowest roof width along the sheet, so a tapered (canopy) roof never overhangs it.
     let hw = [r0 + 0.02, 0.5 * (r0 + r1), r1 - 0.02]
@@ -128,21 +328,24 @@ fn roof_sheet(k: &mut Kit, name: &str, inset: f32, off: f32, mat: M) {
         top_band(-hw, hw),
         off,
         0.0,
-        (4, 3),
+        (8, 6),
     );
 }
 
 // ===================================================================================== Halberd
 
-/// 2020s British carbon-tub supercar: teardrop glass canopy, dihedral doors, deep "eye socket"
-/// lamps, door-to-haunch air channel, flat active wing on stands, hair-line tail over mesh.
+/// 2020s British carbon-tub supercar: teardrop glass canopy, dihedral doors, hooked blade
+/// lamps (this fictional maker's signature), door-to-haunch air channel, glass engine cover
+/// between flying buttresses, flush active airbrake, hair-line tail over mesh.
 pub fn halberd(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         cabin_shift_m: 0.42,
-        nose_h: Some(0.46),
+        nose_h: Some(0.45),
+        cowl_h: 0.12,
+        belt_dz: 0.08,
         nose_rake_deg: 40.0,
         nose_plan_round: 0.45,
-        tail_plan_round: 0.42,
+        tail_plan_round: 0.30,
         hood_crown: 0.022,
         hood_valley: 0.02,
         windshield_rake_deg: Some(64.0),
@@ -153,11 +356,11 @@ pub fn halberd(def: &VehicleDef) -> CarStyle {
         crease_z: 0.44,
         crease_depth: 0.0,
         shoulder_round: 0.10,
-        sill_tuck: 0.09,
-        haunch: 0.075,
-        front_haunch: 0.050,
+        sill_tuck: 0.11,
+        haunch: 0.08,
+        front_haunch: 0.06,
         flare: 0.0,
-        ride_dz: -0.01,
+        ride_dz: -0.03,
         stance_pitch_deg: 0.2,
         ducktail_h: 0.020,
         rear_glass_bow: 0.02,
@@ -169,6 +372,23 @@ pub fn halberd(def: &VehicleDef) -> CarStyle {
         ..BodyStyle::preset(Silhouette::Fastback)
     });
     s.details.push(kit_detail(halberd_kit));
+    shape3(
+        &mut s,
+        def,
+        Shape3 {
+            nose: 0.90,
+            tail: 0.9,
+            waist: 0.94,
+            scallop: -0.07,
+            shoulder: 0.0,
+            bulge: 0.035,
+            rocker: 0.05,
+            rise: (0.03, 0.04),
+            face: (30.0, 0.06, 6.0, 0.05),
+            bow: (0.25, 0.60, 0.0, 1.0),
+            lean: 0.04,
+        },
+    );
     wheels(
         &mut s,
         def,
@@ -191,86 +411,83 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
     let p = ctx.profile;
     let yn = k.yn;
-    let wn = k.wn();
     let wt = k.wt();
     let (nz0, nz1) = k.nose_z();
     let (tz0, tz1) = k.tail_z();
     let fb = BodyRegion::FrontBumper;
 
-    // --- Deep "eye sockets": a black socket on the nose corner, a slim LED eyebrow along its
-    //     top edge with a short outer drop, and a vertical intake slot inside the socket.
+    // Lamp anchors: where the nose top starts behind the raked face, so the lamps lie on the
+    // top surface instead of across the face edge.
+    let yl = k.yn - p.face_depth(true);
+    let wl = p.half_width(yl);
+    // --- Blade lamps (this maker's signature): a slim black blade along each nose-top
+    //     corner whose outer end hooks back inward, an LED stroke tracing the blade and its
+    //     hook, a small lens in the hook; a separate vertical intake slot on the face below.
     for sx in SIDES {
-        let (xi, xo) = (0.46, wn - 0.05);
-        let ks = sided(
-            &dkey("eye_socket_l", BodyRegion::FrontLeftFender, M::Trim),
+        let wf = p.half_width(yl - 0.30);
+        let kh = sided(
+            &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
             sx,
         );
-        k.front_box(&ks, sx * xi, sx * xo, nz1 - 0.19, nz1 - 0.004, 0.010, 0.004);
-        k.patch(
-            &ks,
-            yn - 0.16,
-            yn - 0.005,
-            top_band(sx * xi, sx * xo),
-            0.002,
-            0.006,
-            (2, 1),
-        );
+        let blade = [
+            [0.40, yl - 0.05],
+            [wl - 0.03, yl - 0.01],
+            [wf - 0.04, yl - 0.20],
+            [wf - 0.16, yl - 0.22],
+            [wl - 0.14, yl - 0.10],
+            [0.42, yl - 0.10],
+        ];
+        k.top_poly(&kh, &on_side(sx, &blade), 0.004, 0.012);
         let hk = headlight_key(sx);
-        front_stroke(
-            &mut k,
-            &hk,
-            [sx * (xi + 0.02), nz1 - 0.028],
-            [sx * (xo - 0.03), nz1 - 0.022],
-            0.020,
-            0.022,
-        );
-        front_stroke(
-            &mut k,
-            &hk,
-            [sx * (xo - 0.03), nz1 - 0.022],
-            [sx * (xo - 0.06), nz1 - 0.12],
-            0.018,
-            0.022,
-        );
-        // Lens behind the eyebrow on the nose top.
-        k.patch(
-            &hk,
-            yn - 0.12,
-            yn - 0.03,
-            top_band(sx * (xi + 0.10), sx * (xo - 0.06)),
-            0.004,
-            0.008,
-            (1, 1),
-        );
+        let h0 = [sx * 0.57, yl - 0.06];
+        let h1 = [sx * (wl - 0.05), yl - 0.028];
+        let h2 = [sx * (wf - 0.06), yl - 0.19];
+        let h3 = [sx * (wf - 0.15), yl - 0.20];
+        for (a, c) in [(h0, h1), (h1, h2), (h2, h3)] {
+            top_stroke(&mut k, &hk, a, c, 0.018, 0.016);
+        }
+        let lens = [
+            [wl - 0.16, yl - 0.08],
+            [wl - 0.08, yl - 0.06],
+            [wf - 0.08, yl - 0.16],
+            [wf - 0.15, yl - 0.17],
+        ];
+        k.top_poly(&hk, &on_side(sx, &lens), 0.020, 0.018);
+        // Amber signal: the inner end of the blade.
+        let ik = indicator_front_key(sx);
+        let sig = [
+            [0.44, yl - 0.065],
+            [0.53, yl - 0.06],
+            [0.55, yl - 0.095],
+            [0.46, yl - 0.095],
+        ];
+        k.top_poly(&ik, &on_side(sx, &sig), 0.022, 0.02);
         let kv = sided(
-            &dkey("socket_intake_l", BodyRegion::FrontLeftFender, M::Grille),
+            &dkey("corner_intake_l", BodyRegion::FrontLeftFender, M::Grille),
             sx,
         );
-        k.front_box(
-            &kv,
-            sx * (xi + 0.05),
-            sx * (xi + 0.17),
-            nz1 - 0.175,
-            nz1 - 0.05,
-            0.016,
-            0.0,
-        );
+        let slot = [
+            [0.46, nz1 - 0.03],
+            [0.60, nz1 - 0.03],
+            [0.64, nz1 - 0.15],
+            [0.52, nz1 - 0.12],
+        ];
+        k.face_poly(&kv, true, &on_side(sx, &slot), 0.016);
         let kb = sided(
             &dkey(
-                "socket_intake_vane_l",
+                "corner_intake_vane_l",
                 BodyRegion::FrontLeftFender,
                 M::Carbon,
             ),
             sx,
         );
-        k.front_box(
+        front_stroke(
+            &mut k,
             &kb,
-            sx * (xi + 0.105),
-            sx * (xi + 0.115),
-            nz1 - 0.175,
-            nz1 - 0.05,
+            [sx * 0.53, nz1 - 0.035],
+            [sx * 0.58, nz1 - 0.135],
+            0.012,
             0.022,
-            0.0,
         );
     }
     // --- Wide low centre intake, carbon splitter with fences, hood duct.
@@ -285,19 +502,20 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         M::Trim,
     );
     k.splitter(M::Carbon, 0.09, 0.05, 0.022, true);
+    // Hood duct just behind the raked nose face, two body-colour slats across it.
+    let yd = yn - p.face_depth(true);
     k.top_vent(
         "hood_duct",
         BodyRegion::Hood,
-        yn - 0.52,
-        yn - 0.30,
-        -0.20,
-        0.20,
+        yd - 0.22,
+        yd - 0.04,
+        -0.18,
+        0.18,
         2,
         M::Paint,
     );
 
     // --- Glass canopy: dark roof sheet, dihedral door cut lines in the roof, door seams.
-    roof_sheet(&mut k, "canopy_roof_base", 0.03, 0.004, M::Trim);
     roof_sheet(&mut k, "canopy_roof", 0.05, 0.010, M::Glass);
     let (r0, r1, _, _) = p.roof;
     let ws = dkey("door_roof_seam_l", BodyRegion::Roof, M::Grille);
@@ -382,40 +600,22 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     }
     k.skirts(M::Carbon, 0.035, 0.05);
     fender_outlet(&mut k, 2, M::Carbon);
+    // --- Glass engine cover between flying buttresses (the double-skin rear deck).
+    let (d0, d1) = (yr - rr + 0.12, p.y_deck - 0.04);
+    let kg = dkey("engine_cover_glass", BodyRegion::Trunk, M::Glass);
+    k.patch(&kg, d0, d1, top_band(-0.28, 0.28), 0.004, 0.006, (4, 2));
+    let r0 = p.roof.0;
     for sx in SIDES {
-        let name = if sx < 0.0 {
-            "engine_vent_l"
-        } else {
-            "engine_vent_r"
-        };
-        let (a, c) = (sx * 0.16, sx * 0.46);
-        let (d0, d1) = (yr - rr + 0.20, p.y_deck - 0.10);
-        k.top_vent(
-            name,
-            BodyRegion::Trunk,
-            d0,
-            d1,
-            a.min(c),
-            a.max(c),
-            5,
-            M::Carbon,
+        let xs = k.roof_edge(r0 + 0.02) - 0.02;
+        let ks = sided(
+            &dkey("buttress_l", BodyRegion::RearLeftQuarter, M::Paint),
+            sx,
         );
+        k.sail(&ks, sx, r0 + 0.02, k.yt + 0.40, xs, 0.10, 0.03);
     }
 
-    // --- Flat full-width active wing raised on carbon stands from the deck.
-    k.wing(Wing {
-        lead: 0.34,
-        chord: 0.24,
-        height: 0.17,
-        half_span: 0.90,
-        thick: 0.024,
-        aoa_deg: 2.0,
-        stand: Stand::Pedestal(0.30),
-        endplates: None,
-        mat: M::Paint,
-        stand_mat: M::Carbon,
-        gurney: 0.0,
-    });
+    // --- Full-width active airbrake lying flush on the tail of the deck.
+    k.lip_spoiler(M::Paint, k.yt + 0.32, 0.03, 0.30, 0.06);
 
     // --- Rear: hair-line LED tail over an exposed black mesh, high exhaust surrounds.
     let zt = tz1 - 0.035;
@@ -423,9 +623,29 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.rear_box(&kb, -0.30, 0.30, zt - 0.007, zt + 0.007, 0.022, 0.0);
     for sx in SIDES {
         let tk = taillight_key(sx);
+        let x_sig = wt - 0.08;
         k.rear_box(
             &tk,
             sx * 0.30,
+            sx * (x_sig - INDICATOR_SEAM_M),
+            zt - 0.007,
+            zt + 0.007,
+            0.022,
+            0.0,
+        );
+        // The hairline's outer end folds down round the corner of the mesh opening.
+        rear_stroke(
+            &mut k,
+            &tk,
+            [sx * (x_sig - 0.02), zt - 0.01],
+            [sx * (x_sig - 0.08), zt - 0.15],
+            0.014,
+            0.022,
+        );
+        let ka = indicator_rear_key(sx, M::EmissiveAmber);
+        k.rear_box(
+            &ka,
+            sx * x_sig,
             sx * (wt - 0.02),
             zt - 0.007,
             zt + 0.007,
@@ -447,8 +667,8 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         let z = mz0 + (mz1 - mz0) * i as f32 / 4.0;
         k.rear_box(&km, -wt + 0.07, wt - 0.07, z - 0.004, z + 0.004, 0.014, 0.0);
     }
-    for i in 0..10 {
-        let x = -wt + 0.12 + (2.0 * wt - 0.24) * i as f32 / 9.0;
+    for i in 0..6 {
+        let x = -wt + 0.12 + (2.0 * wt - 0.24) * i as f32 / 5.0;
         k.rear_box(&km, x - 0.004, x + 0.004, mz0, mz1, 0.014, 0.0);
     }
     let ze = (p.z_bumper_top.1 - 0.12).max(p.z_floor + 0.26);
@@ -464,7 +684,7 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.01,
         );
     }
-    k.diffuser(M::Carbon, 0.72, 0.17, 7, 0.10);
+    k.diffuser(M::Carbon, 0.72, 0.17, 5, 0.10);
 
     k.mirrors(0.16, 0.10, Some(M::Carbon));
 
@@ -474,18 +694,20 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
 // ======================================================================================= Ombra
 
-/// 2010s Italian V12 flagship: very low and wide, Y / hexagon motifs, trapezoid intakes,
-/// hood spine with ducts, giant angular side intakes + shoulder air ears, glass-louvred engine
-/// cover, Y-shaped tails, quad centre exhaust in a hexagonal surround.
+/// 2010s Italian V12 flagship: very low and wide, sharp-cornered wedge; double-chevron lamp
+/// graphics front and rear (this fictional maker's signature), trapezoid corner intakes split
+/// by two bars, V hood creases with flush ducts, giant angular side intakes + shoulder air
+/// ears, glass-louvred engine cover, centre exhaust in a wide pill surround.
 pub fn ombra(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         cabin_shift_m: 0.32,
-        nose_h: Some(0.42),
+        nose_h: Some(0.45),
+        belt_dz: 0.07,
         nose_rake_deg: 58.0,
         nose_plan_round: 0.08,
         tail_plan_round: 0.08,
         hood_crown: 0.008,
-        cowl_h: 0.10,
+        cowl_h: 0.16,
         windshield_rake_deg: Some(66.0),
         a_pillar_rake_deg: 20.0,
         c_pillar_rake_deg: 12.0,
@@ -495,12 +717,12 @@ pub fn ombra(def: &VehicleDef) -> CarStyle {
         crease_z: 0.42,
         crease_depth: 0.030,
         shoulder_round: 0.02,
-        sill_tuck: 0.03,
-        haunch: 0.070,
-        front_haunch: 0.030,
+        sill_tuck: 0.07,
+        haunch: 0.08,
+        front_haunch: 0.05,
         flare: 0.025,
         flare_shape: ArchShape::Box,
-        ride_dz: -0.02,
+        ride_dz: -0.035,
         stance_pitch_deg: 0.3,
         ducktail_h: 0.0,
         deck_valley: 0.03,
@@ -512,6 +734,23 @@ pub fn ombra(def: &VehicleDef) -> CarStyle {
         ..BodyStyle::preset(Silhouette::Wedge)
     });
     s.details.push(kit_detail(ombra_kit));
+    shape3(
+        &mut s,
+        def,
+        Shape3 {
+            nose: 0.92,
+            tail: 0.97,
+            waist: 0.95,
+            scallop: -0.07,
+            shoulder: 0.02,
+            bulge: 0.01,
+            rocker: 0.04,
+            rise: (0.0, 0.02),
+            face: (35.0, 0.04, 5.0, 0.08),
+            bow: (0.12, 0.90, 0.08, 0.92),
+            lean: 0.02,
+        },
+    );
     wheels(
         &mut s,
         def,
@@ -541,106 +780,92 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let fb = BodyRegion::FrontBumper;
     let hood = BodyRegion::Hood;
 
-    // --- Angular lamps on the nose top with a two-stroke chevron DRL.
+    // Lamp anchors: where the nose top starts behind the raked face, so the lamps lie on the
+    // top surface instead of across the face edge.
+    let yl = k.yn - p.face_depth(true);
+    let wl = p.half_width(yl);
+    // --- Long angular lamps on the nose-top corners, running back along the fender edge:
+    //     dark lens on a black housing, a double-chevron DRL inside, the amber signal at the
+    //     tip.
     for sx in SIDES {
-        let (y0, y1) = (yn - 0.30, yn - 0.05);
-        let (xi, xo) = (0.52, wn - 0.06);
+        let wf = p.half_width(yl - 0.40);
+        let hous = [
+            [0.40, yl - 0.11],
+            [wl - 0.02, yl - 0.02],
+            [wf - 0.03, yl - 0.42],
+            [wf - 0.16, yl - 0.40],
+        ];
         let kh = sided(
             &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
             sx,
         );
-        k.patch(
-            &kh,
-            y0,
-            y1,
-            top_band(sx * (xi - 0.02), sx * xo),
-            0.002,
-            0.007,
-            (3, 2),
-        );
+        k.top_poly(&kh, &on_side(sx, &hous), 0.004, 0.012);
         let hk = headlight_key(sx);
-        k.patch(
-            &hk,
-            y0 + 0.03,
-            y0 + 0.09,
-            top_band(sx * (xi + 0.24), sx * (xi + 0.34)),
-            0.004,
-            0.010,
-            (1, 1),
-        );
-        // Amber turn-signal segment of the same lens, outboard of the lamp.
+        // Double chevron pointing outward (this maker's signature).
+        for d in [0.0, 0.09] {
+            let a = [sx * (0.48 + d), yl - 0.11 - 0.02 * d];
+            let apex = [sx * (wl - 0.12 - d), yl - 0.20 - 0.3 * d];
+            let c = [sx * (wf - 0.20 - d), yl - 0.35];
+            top_stroke(&mut k, &hk, a, apex, 0.015, 0.012);
+            top_stroke(&mut k, &hk, apex, c, 0.015, 0.012);
+        }
+        let proj = [
+            [wf - 0.14, yl - 0.22],
+            [wf - 0.07, yl - 0.21],
+            [wf - 0.075, yl - 0.30],
+            [wf - 0.13, yl - 0.30],
+        ];
+        k.top_poly(&hk, &on_side(sx, &proj), 0.012, 0.01);
         let ik = indicator_front_key(sx);
-        k.patch(
-            &ik,
-            y0 + 0.03,
-            y0 + 0.09,
-            top_band(sx * (xi + 0.35), sx * (xi + 0.41)),
-            0.004,
-            0.010,
-            (1, 1),
-        );
-        let kd = sided(
-            &lkey("drl_l", BodyRegion::FrontLeftFender, M::Headlight),
-            sx,
-        );
-        let j = [sx * (xi + 0.20), 0.5 * (y0 + y1)];
-        top_stroke(&mut k, &kd, [sx * xi, j[1] - 0.02], j, 0.018, 0.016);
-        top_stroke(&mut k, &kd, j, [sx * (xo - 0.04), y0 + 0.01], 0.018, 0.016);
+        let sig = [
+            [wl - 0.12, yl - 0.05],
+            [wl - 0.055, yl - 0.045],
+            [wl - 0.07, yl - 0.09],
+            [wl - 0.13, yl - 0.095],
+        ];
+        k.top_poly(&ik, &on_side(sx, &sig), 0.022, 0.02);
     }
-    // --- Huge trapezoid intakes with a diamond ("hex") mesh, narrow centre slot, splitter.
-    let (zi0, zi1) = (nz0 + 0.03, nz1 - 0.07);
+    // --- Huge corner intakes (trapezoids leaning in at the top) split by two body-colour
+    //     bars, narrow centre slot under the pointed nose, carbon splitter.
+    let (zi0, zi1) = (nz0 + 0.03, nz1 - 0.04);
     for sx in SIDES {
-        let (xi, xo) = (0.36, wn - 0.04);
+        let (xi, xo) = (0.34, wn - 0.03);
         let kg = sided(&dkey("front_intake_l", fb, M::Grille), sx);
-        k.front_box(&kg, sx * xi, sx * xo, zi0, zi1, 0.006, 0.0);
-        // Trapezoid: slanted carbon inner edge, paint brow across the top.
-        let ke = sided(&dkey("front_intake_edge_l", fb, M::Carbon), sx);
-        front_stroke(
-            &mut k,
-            &ke,
-            [sx * (xi + 0.10), zi1],
-            [sx * xi, zi0],
-            0.03,
-            0.02,
-        );
-        let kw = sided(&dkey("front_intake_brow_l", fb, M::Paint), sx);
-        front_stroke(
-            &mut k,
-            &kw,
-            [sx * (xi + 0.10), zi1],
-            [sx * xo, zi1 - 0.04],
-            0.03,
-            0.02,
-        );
-        // Diamond mesh: crossing diagonals.
+        let intake = [[xi, zi0], [xo, zi0], [xo, zi1 - 0.03], [xi + 0.14, zi1]];
+        k.face_poly(&kg, true, &on_side(sx, &intake), 0.006);
+        // Two body-colour bars split the intake into three stacked slots.
+        let kb = sided(&dkey("front_intake_blade_l", fb, M::Paint), sx);
+        for f in [0.36, 0.68] {
+            let z = zi0 + f * (zi1 - zi0);
+            let xe = xi + 0.14 * (z - zi0) / (zi1 - zi0);
+            let bar = [
+                [xe - 0.01, z - 0.016],
+                [xo + 0.005, z - 0.016],
+                [xo + 0.005, z + 0.016],
+                [xe - 0.01, z + 0.016],
+            ];
+            k.face_poly(&kb, true, &on_side(sx, &bar), 0.02);
+        }
+        // Horizontal mesh bars behind the blade.
         let km = sided(&dkey("front_intake_mesh_l", fb, M::Trim), sx);
-        let n = 4;
-        let span = xo - xi - 0.14;
-        for i in 0..n {
-            let x = xi + 0.12 + span * i as f32 / (n - 1) as f32;
-            let d = 0.5 * (zi1 - zi0 - 0.06);
-            front_stroke(
-                &mut k,
+        for i in 1..4 {
+            let z = zi0 + (zi1 - zi0) * i as f32 / 4.0;
+            let xe = xi + 0.14 * (z - zi0) / (zi1 - zi0) + 0.02;
+            k.front_box(
                 &km,
-                [sx * (x - d), zi0 + 0.02],
-                [sx * x, zi1 - 0.05],
-                0.008,
+                sx * xe,
+                sx * (xo - 0.02),
+                z - 0.005,
+                z + 0.005,
                 0.012,
-            );
-            front_stroke(
-                &mut k,
-                &km,
-                [sx * x, zi0 + 0.02],
-                [sx * (x - d), zi1 - 0.05],
-                0.008,
-                0.012,
+                0.0,
             );
         }
     }
     k.mesh_grille(
         "centre_slot",
         fb,
-        0.26,
+        0.24,
         nz0 + 0.03,
         nz0 + 0.10,
         1,
@@ -649,11 +874,12 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     );
     k.splitter(M::Carbon, 0.10, 0.04, 0.022, true);
 
-    // --- Hood spine with a flush duct either side.
-    let ks = dkey("hood_spine", hood, M::Paint);
-    let ys = [yn - 0.08, yn - 0.40, p.y_fw + 0.35, p.y_fw + 0.04];
-    for w in ys.windows(2) {
-        top_stroke(&mut k, &ks, [0.0, w[0]], [0.0, w[1]], 0.05, 0.010);
+    // --- Hood: two creases converging into a V at the nose tip, a flush duct either side.
+    let kc = dkey("hood_crease", hood, M::Grille);
+    for sx in SIDES {
+        let a = [sx * 0.03, yn - 0.06];
+        let c = [sx * 0.30, p.y_fw + 0.06];
+        top_stroke(&mut k, &kc, a, c, 0.008, 0.004);
     }
     for sx in SIDES {
         let name = if sx < 0.0 {
@@ -661,36 +887,29 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         } else {
             "flush_duct_r"
         };
-        let ya = p.y_fw + 0.12;
-        let yb = p.y_fw + 0.40;
-        let (a0, a1) = (sx * 0.10, sx * 0.26);
-        k.top_vent(
-            name,
-            hood,
-            ya,
-            yb - 0.12,
-            a0.min(a1),
-            a0.max(a1),
-            0,
-            M::Trim,
-        );
-        let (c0, c1) = (sx * 0.15, sx * 0.21);
-        k.top_vent(
-            name,
-            hood,
-            yb - 0.12,
-            yb,
-            c0.min(c1),
-            c0.max(c1),
-            0,
-            M::Trim,
-        );
+        let kd = dkey(name, hood, M::Trim);
+        let ya = p.y_fw + 0.10;
+        let duct = [
+            [sx * 0.10, ya + 0.30],
+            [sx * 0.17, ya + 0.30],
+            [sx * 0.26, ya],
+            [sx * 0.12, ya],
+        ];
+        k.top_poly(&kd, &duct, 0.003, 0.008);
     }
 
     // --- Scissor-door seams, giant angular side intake, shoulder air "ears".
     let (yr, zr, rr) = k.arch(false);
     let (y0, y1) = (yr + rr + 0.03, p.y_fd_rear - 0.01);
     let (z0, z1) = (zr - 0.06, p.belt(y1) - 0.03);
+    let (yf, zf, rf) = k.arch(true);
+    for sx in SIDES {
+        // Sharp groove rising from behind the front wheel along the door to the intake.
+        let kc = dkey("side_line_l", BodyRegion::LeftDoorF, M::Grille);
+        let (ya, za) = (yf - rf + 0.02, zf + 0.12);
+        let (yb, zb) = (y1 + 0.10, z0 + 0.10);
+        side_groove(&mut k, &kc, sx, [ya, za - 0.006], [yb, zb], 0.012);
+    }
     for sx in SIDES {
         let ki = dkey("side_intake_l", BodyRegion::RearLeftQuarter, M::Grille);
         k.side_patch(&ki, sx, y0, y1, z0, z1, 0.002, 0.008, (3, 3));
@@ -836,7 +1055,8 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         gurney: 0.012,
     });
 
-    // --- Rear: Y-shaped tails in angular black housings, mesh fascia, hex exhaust surround.
+    // --- Rear: double-chevron tails in angular black housings, mesh fascia, a wide pill
+    //     exhaust surround.
     let zt = tz1 - 0.07;
     for sx in SIDES {
         let kh = sided(
@@ -853,10 +1073,15 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.004,
         );
         let tk = taillight_key(sx);
-        let j = [sx * 0.62, zt];
-        rear_stroke(&mut k, &tk, [sx * 0.40, zt], j, 0.022, 0.026);
-        rear_stroke(&mut k, &tk, j, [sx * (wt - 0.03), zt + 0.05], 0.022, 0.026);
-        rear_stroke(&mut k, &tk, j, [sx * (wt - 0.03), zt - 0.06], 0.022, 0.026);
+        // Double chevron pointing outward, as at the front, plus a bar linking it inboard.
+        rear_stroke(&mut k, &tk, [sx * 0.40, zt], [sx * 0.56, zt], 0.020, 0.026);
+        for d in [0.0, 0.10] {
+            let apex = [sx * (wt - 0.05 - d), zt];
+            let top = [sx * (wt - 0.15 - d), zt + 0.05];
+            let bot = [sx * (wt - 0.15 - d), zt - 0.06];
+            rear_stroke(&mut k, &tk, top, apex, 0.020, 0.026);
+            rear_stroke(&mut k, &tk, apex, bot, 0.020, 0.026);
+        }
     }
     let (fz0, fz1) = (tz0 + 0.12, zt - 0.10);
     k.rear_panel(
@@ -880,17 +1105,9 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
     }
     let ze = (p.z_floor + 0.14).max(0.24);
-    let kx = dkey("exhaust_hex", BodyRegion::RearBumper, M::Trim);
-    let (hw, hh) = (0.27, 0.085);
-    let hex = [
-        [-hw, ze],
-        [-hw + 0.06, ze - hh],
-        [hw - 0.06, ze - hh],
-        [hw, ze],
-        [hw - 0.06, ze + hh],
-        [-hw + 0.06, ze + hh],
-    ];
-    k.prism_y(&kx, &hex, k.yt + 0.03, k.yt - 0.022);
+    let kx = dkey("exhaust_surround", BodyRegion::RearBumper, M::Trim);
+    let surround = stadium(0.0, ze, 0.27, 0.075, 5);
+    k.face_poly(&kx, false, &surround, 0.03);
     k.diffuser(M::Carbon, 0.80, 0.15, 5, 0.12);
 
     k.mirrors(0.18, 0.09, Some(M::Trim));
@@ -901,35 +1118,38 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
 // ===================================================================================== Ostwind
 
-/// 2020s German rear-engine flagship: round quad-LED lamps on high front fenders, front trunk
+/// 2020s German rear-engine flagship: oval triple-bar lamps on high front fenders, front trunk
 /// lid, slatted low intakes, small haunch intakes, longitudinal engine grille in the deck lid,
 /// raised lip spoiler, full-width light bar, twin rectangular tips in the valance.
 pub fn ostwind(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         cabin_shift_m: 0.10,
-        nose_h: Some(0.58),
+        nose_h: Some(0.56),
+        belt_dz: 0.04,
         nose_rake_deg: 30.0,
         nose_plan_round: 0.32,
         tail_plan_round: 0.30,
         hood_crown: 0.020,
-        hood_valley: 0.060,
+        hood_valley: 0.020,
         windshield_rake_deg: Some(60.0),
         a_pillar_rake_deg: 10.0,
         c_pillar_rake_deg: 6.0,
-        roof_arc: 1.0,
+        roof_arc: 0.90,
+        roof_arc_rear_exp: 1.4,
         tumblehome: Some(0.22),
-        rear_glass_bow: 0.03,
+        rear_glass_bow: 0.05,
         crease_z: 0.50,
         crease_depth: 0.0,
-        shoulder_round: 0.08,
-        sill_tuck: 0.07,
+        shoulder_round: 0.10,
+        sill_tuck: 0.09,
         haunch: 0.080,
-        front_haunch: 0.060,
+        front_haunch: 0.07,
         flare: 0.0,
         ride_dz: -0.005,
         stance_pitch_deg: 0.1,
         ducktail_h: 0.030,
-        deck_drop: 0.06,
+        deck_drop: 0.0,
+        roof_len_trim: -0.18,
         belt_kick: 0.0,
         belt_rake: 0.0,
         tail_round: 0.35,
@@ -937,6 +1157,23 @@ pub fn ostwind(def: &VehicleDef) -> CarStyle {
         ..BodyStyle::preset(Silhouette::Fastback)
     });
     s.details.push(kit_detail(ostwind_kit));
+    shape3(
+        &mut s,
+        def,
+        Shape3 {
+            nose: 0.94,
+            tail: 0.94,
+            waist: 0.94,
+            scallop: 0.0,
+            shoulder: 0.0,
+            bulge: 0.035,
+            rocker: 0.04,
+            rise: (0.06, 0.05),
+            face: (25.0, 0.05, 15.0, 0.06),
+            bow: (0.30, 0.55, 0.30, 0.65),
+            lean: 0.03,
+        },
+    );
     wheels(
         &mut s,
         def,
@@ -954,6 +1191,12 @@ pub fn ostwind(def: &VehicleDef) -> CarStyle {
     s
 }
 
+/// Surface normal `n` turned 40° about x from +z toward +y, for lamps that face ahead.
+fn tilt_fwd(n: [f32; 3]) -> [f32; 3] {
+    let (s, c) = (0.643, 0.766);
+    [n[0], c * n[1] + s * n[2], c * n[2] - s * n[1]]
+}
+
 fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
     let p = ctx.profile;
@@ -965,9 +1208,9 @@ fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let fb = BodyRegion::FrontBumper;
     let hood = BodyRegion::Hood;
 
-    // --- Round lamps on the fender tops: chrome bezel, dark bowl, four LED dots.
-    // Two overlapping discs along y give the oval; the LED dots sit in the front one.
-    let yc = yn - 0.26;
+    // --- Oval lamps on the fender fronts: chrome bezel, dark bowl, three light bars.
+    // Two overlapping discs along y give the oval; the bars sit in the front one.
+    let yc = yn - 0.22;
     let xc = wn - 0.17;
     for sx in SIDES {
         let kb = sided(
@@ -980,33 +1223,42 @@ fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
         for dy in [0.0, -0.07] {
             let (q, n) = p.top_point(yc + dy, sx * xc);
+            // Face the lamp forward like an upright oval on the raked fender front.
+            let n = tilt_fwd(n);
             let along = |d: f32| [q[0] + n[0] * d, q[1] + n[1] * d, q[2] + n[2] * d];
             k.b.cylinder(&kb, along(-0.01), along(0.018), 0.125, 0.125, 20, true);
             k.b.cylinder(&kd, along(0.0), along(0.022), 0.108, 0.108, 20, true);
         }
         let (pt, n) = p.top_point(yc - 0.035, sx * xc);
+        let n = tilt_fwd(n);
         let hk = headlight_key(sx);
-        for (dx, dy) in [
-            (-0.045, -0.05),
-            (0.045, -0.05),
-            (-0.045, 0.05),
-            (0.045, 0.05),
-        ] {
-            // On the bowl's plane (tangent at `pt`), so the dots stay proud of the bowl where
-            // the fender top curves into the hood valley.
-            let dz = -(n[0] * dx + n[1] * dy) / n[2].max(0.2);
-            let c = [pt[0] + dx, pt[1] + dy, pt[2] + dz];
-            let c0 = [
-                c[0] + n[0] * 0.016,
-                c[1] + n[1] * 0.016,
-                c[2] + n[2] * 0.016,
+        // Three horizontal light bars across the oval (this maker's signature; the lower
+        // one is the turn signal), on the
+        // bowl's plane so they stay proud of it where the fender curves into the valley.
+        let u = {
+            let dz = -n[0] / n[2].max(0.2);
+            let l = (1.0 + dz * dz).sqrt();
+            [1.0 / l, 0.0, dz / l]
+        };
+        let v = [
+            n[1] * u[2] - n[2] * u[1],
+            n[2] * u[0] - n[0] * u[2],
+            n[0] * u[1] - n[1] * u[0],
+        ];
+        for (dv, half) in [(-0.045, 0.055), (0.0, 0.07), (0.045, 0.055)] {
+            let c = [
+                pt[0] + v[0] * dv + n[0] * 0.03,
+                pt[1] + v[1] * dv + n[1] * 0.03,
+                pt[2] + v[2] * dv + n[2] * 0.03,
             ];
-            let c1 = [
-                c[0] + n[0] * 0.045,
-                c[1] + n[1] * 0.045,
-                c[2] + n[2] * 0.045,
-            ];
-            k.b.cylinder(&hk, c0, c1, 0.03, 0.03, 10, true);
+            let a = [c[0] - u[0] * half, c[1] - u[1] * half, c[2] - u[2] * half];
+            let e = [c[0] + u[0] * half, c[1] + u[1] * half, c[2] + u[2] * half];
+            // The lower bar is the amber turn signal.
+            if dv < 0.0 {
+                k.plate(&indicator_front_key(sx), a, e, v, 0.02, 0.03);
+            } else {
+                k.plate(&hk, a, e, v, 0.02, 0.03);
+            }
         }
     }
     // --- Front trunk lid shut lines.
@@ -1082,10 +1334,11 @@ fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         let km = sided(&lkey("side_marker_l", fb, M::EmissiveAmber), sx);
         k.front_box(
             &km,
-            sx * (wn - 0.05),
-            sx * (wn - 0.03),
-            zi1 + 0.08,
-            zi1 + 0.11,
+            // ≥ 4 cm each way so the mid LOD's 3.5 cm vertex clustering keeps it.
+            sx * (wn - 0.07),
+            sx * (wn - 0.025),
+            zi1 + 0.075,
+            zi1 + 0.12,
             0.010,
             0.0,
         );
@@ -1116,6 +1369,9 @@ fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
     }
     k.skirts(M::Paint, 0.015, 0.05);
+    for sx in SIDES {
+        quarter_window(&mut k, sx, 0.05, 0.75, 0.025);
+    }
     // Chrome window line along the belt from the A-pillar to the quarter window.
     let kw = dkey("window_line_l", BodyRegion::LeftDoorF, M::Chrome);
     let (w0, w1) = (p.y_fd_rear - 0.30, p.y_fw - 0.10);
@@ -1176,7 +1432,7 @@ fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         gurney: 0.008,
     });
 
-    // --- Tail: black band with a full-width red bar, four brake dots per side.
+    // --- Tail: black band with a full-width red bar, three stepped dashes per side.
     let zt = tz1 - 0.06;
     let kh = dkey("tail_band", BodyRegion::Trunk, M::Trim);
     k.rear_box(
@@ -1200,14 +1456,16 @@ fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     );
     for sx in SIDES {
         let tk = taillight_key(sx);
-        for i in 0..4 {
-            let x = wt - 0.08 - 0.065 * i as f32;
+        // Three dashes stepping down toward the corner.
+        for i in 0..3 {
+            let x = wt - 0.10 - 0.105 * i as f32;
+            let dz = -0.008 * (2 - i) as f32;
             k.rear_box(
                 &tk,
-                sx * (x - 0.022),
-                sx * (x + 0.022),
-                zt - 0.038,
-                zt - 0.012,
+                sx * (x - 0.045),
+                sx * (x + 0.045),
+                zt - 0.038 + dz,
+                zt - 0.020 + dz,
                 0.024,
                 0.0,
             );
@@ -1261,13 +1519,17 @@ fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
 // ====================================================================================== Kagero
 
-/// 2010s Japanese hybrid supercar: boomerang LED lamps, black floating roof + A-pillars,
-/// flying buttresses with a C-pillar air channel, folded door intakes, Z-shaped full-width
-/// tails over a black mesh, quad exhaust in a carbon tray, blue hybrid accent strips.
+/// 2010s Japanese hybrid supercar: slim lamps with twin parallel light bars (this fictional
+/// maker's signature), narrow upper grille over a straight silver line, black floating roof +
+/// A-pillars, flying buttresses with a C-pillar air channel, one big door-to-quarter scoop,
+/// Z-shaped full-width tails over a black mesh, quad exhaust in a carbon tray, blue hybrid
+/// accent strips.
 pub fn kagero(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         cabin_shift_m: 0.30,
-        nose_h: Some(0.56),
+        nose_h: Some(0.50),
+        cowl_h: 0.08,
+        belt_dz: 0.07,
         nose_rake_deg: 38.0,
         nose_plan_round: 0.30,
         tail_plan_round: 0.12,
@@ -1278,13 +1540,13 @@ pub fn kagero(def: &VehicleDef) -> CarStyle {
         rear_glass_rake_deg: Some(30.0),
         roof_arc: 0.50,
         roof_len_trim: 0.05,
-        tumblehome: Some(0.24),
+        tumblehome: Some(0.28),
         crease_z: 0.48,
         crease_depth: 0.028,
-        haunch: 0.050,
-        front_haunch: 0.030,
+        haunch: 0.075,
+        front_haunch: 0.05,
         flare: 0.010,
-        ride_dz: -0.01,
+        ride_dz: -0.025,
         stance_pitch_deg: 0.2,
         ducktail_h: 0.030,
         belt_kick: 0.03,
@@ -1292,9 +1554,27 @@ pub fn kagero(def: &VehicleDef) -> CarStyle {
         tail_round: 0.22,
         tail_drop: 0.06,
         roof_dz: 0.03,
+        sill_tuck: 0.09,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.details.push(kit_detail(kagero_kit));
+    shape3(
+        &mut s,
+        def,
+        Shape3 {
+            nose: 0.92,
+            tail: 0.94,
+            waist: 0.95,
+            scallop: -0.06,
+            shoulder: 0.015,
+            bulge: 0.02,
+            rocker: 0.04,
+            rise: (0.02, 0.03),
+            face: (28.0, 0.05, 10.0, 0.07),
+            bow: (0.20, 0.70, 0.10, 0.88),
+            lean: 0.03,
+        },
+    );
     wheels(
         &mut s,
         def,
@@ -1316,87 +1596,120 @@ pub fn kagero(def: &VehicleDef) -> CarStyle {
 fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
     let p = ctx.profile;
-    let yn = k.yn;
     let wn = k.wn();
     let wt = k.wt();
     let (nz0, nz1) = k.nose_z();
     let (tz0, tz1) = k.tail_z();
     let fb = BodyRegion::FrontBumper;
-    let hood = BodyRegion::Hood;
 
-    // --- Slim lamps with a boomerang DRL: along the front edge, then back along the fender.
+    // Lamp anchors: where the nose top starts behind the raked face, so the lamps lie on the
+    // top surface instead of across the face edge.
+    let yl = k.yn - p.face_depth(true);
+    let wl = p.half_width(yl);
+    // --- Slim angular lamps tapering back along each fender, with twin parallel light bars
+    //     and a small projector in them, the amber signal at the inner end.
     for sx in SIDES {
-        let (xi, xo) = (0.46, wn - 0.05);
-        k.top_lamp(sx, yn - 0.13, yn - 0.06, xi + 0.04, xo - 0.04, 0.025);
-        // The boomerang belongs to the lens part: it runs in front of the slim lens, so from
-        // ahead it is what you see of the lamp.
-        let kd = headlight_key(sx);
-        let corner = [sx * (xo - 0.01), yn - 0.04];
-        top_stroke(&mut k, &kd, [sx * xi, yn - 0.05], corner, 0.016, 0.016);
-        top_stroke(
-            &mut k,
-            &kd,
-            corner,
-            [sx * (xo - 0.07), yn - 0.34],
-            0.016,
-            0.016,
+        let wf = p.half_width(yl - 0.36);
+        let kh = sided(
+            &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
+            sx,
         );
+        let hous = [
+            [0.40, yl - 0.07],
+            [wl - 0.025, yl - 0.02],
+            [wf - 0.04, yl - 0.38],
+            [wf - 0.12, yl - 0.36],
+            [0.52, yl - 0.14],
+        ];
+        k.top_poly(&kh, &on_side(sx, &hous), 0.004, 0.012);
+        let hk = headlight_key(sx);
+        // Twin bars (this maker's signature): two parallel light bars running from the inner
+        // front corner back along the lens to the outer rear, the upper one longer.
+        for (d, back) in [(0.0, 0.0), (0.05, 0.06)] {
+            let a = [sx * (0.58 + d), yl - 0.07 - 0.6 * d];
+            let c = [sx * (wf - 0.09 - d), yl - 0.30 + back];
+            top_stroke(&mut k, &hk, a, c, 0.016, 0.018);
+        }
+        let proj = [
+            [wl - 0.20, yl - 0.12],
+            [wl - 0.12, yl - 0.10],
+            [wl - 0.13, yl - 0.17],
+            [wl - 0.21, yl - 0.18],
+        ];
+        k.top_poly(&hk, &on_side(sx, &proj), 0.012, 0.010);
+        let ik = indicator_front_key(sx);
+        let sig = [
+            [0.43, yl - 0.085],
+            [0.54, yl - 0.085],
+            [0.56, yl - 0.12],
+            [0.50, yl - 0.13],
+        ];
+        k.top_poly(&ik, &on_side(sx, &sig), 0.022, 0.02);
     }
-    // --- Tall outer intakes with a folded blade, low centre mesh, blue accent, splitter.
-    let (zo0, zo1) = (nz0 + 0.04, nz1 - 0.07);
+    // --- Front: narrow black upper grille between the lamps over a straight silver line;
+    //     big low centre intake; tall corner intakes, each split by one
+    //     slanted body-colour blade; blue hybrid accent; carbon splitter.
+    let kg = dkey("upper_grille", fb, M::Grille);
+    let ug = [
+        [-0.42, nz1 - 0.10],
+        [0.42, nz1 - 0.10],
+        [0.36, nz1 - 0.03],
+        [-0.36, nz1 - 0.03],
+    ];
+    k.face_poly(&kg, true, &ug, 0.006);
+    let kbl = dkey("nose_blade", fb, M::Metal);
+    let blade = [
+        [-0.46, nz1 - 0.125],
+        [0.46, nz1 - 0.125],
+        [0.48, nz1 - 0.105],
+        [-0.48, nz1 - 0.105],
+    ];
+    k.face_poly(&kbl, true, &blade, 0.014);
+    let (zo0, zo1) = (nz0 + 0.04, nz1 - 0.15);
     for sx in SIDES {
-        let (xi, xo) = (0.44, wn - 0.04);
+        let (xi, xo) = (0.48, wn - 0.035);
         let kg = sided(&dkey("front_intake_l", fb, M::Grille), sx);
-        k.front_box(&kg, sx * xi, sx * xo, zo0, zo1, 0.006, 0.0);
+        let intake = [[xi, zo0], [xo, zo0], [xo, zo1 + 0.02], [xi + 0.06, zo1]];
+        k.face_poly(&kg, true, &on_side(sx, &intake), 0.006);
         let km = sided(&dkey("front_intake_bars_l", fb, M::Trim), sx);
         for i in 1..3 {
             let z = zo0 + (zo1 - zo0) * i as f32 / 3.0;
-            k.front_box(&km, sx * xi, sx * xo, z - 0.005, z + 0.005, 0.012, 0.0);
+            k.front_box(
+                &km,
+                sx * (xi + 0.06),
+                sx * (xo - 0.02),
+                z - 0.005,
+                z + 0.005,
+                0.012,
+                0.0,
+            );
         }
         let kb = sided(&dkey("front_intake_blade_l", fb, M::Paint), sx);
-        front_stroke(
-            &mut k,
-            &kb,
-            [sx * xi, zo1],
-            [sx * xo, zo0 + 0.03],
-            0.035,
-            0.022,
-        );
+        let xm = 0.5 * (xi + xo);
+        let bl = [
+            [xm - 0.02, zo0],
+            [xm + 0.02, zo0],
+            [xm + 0.07, zo1],
+            [xm + 0.03, zo1],
+        ];
+        k.face_poly(&kb, true, &on_side(sx, &bl), 0.02);
     }
     k.mesh_grille(
         "centre_intake",
         fb,
-        0.36,
+        0.40,
         nz0 + 0.03,
-        nz0 + 0.12,
+        nz0 + 0.13,
         1,
         8,
         M::Trim,
     );
     let ka = dkey("hybrid_accent_front", fb, M::Accent);
-    k.front_box(&ka, -0.36, 0.36, nz0 + 0.135, nz0 + 0.15, 0.012, 0.0);
+    k.front_box(&ka, -0.40, 0.40, nz0 + 0.135, nz0 + 0.148, 0.012, 0.0);
     k.splitter(M::Carbon, 0.07, 0.06, 0.02, false);
-    for sx in SIDES {
-        let name = if sx < 0.0 {
-            "hood_vent_l"
-        } else {
-            "hood_vent_r"
-        };
-        let (a, c) = (sx * 0.14, sx * 0.32);
-        k.top_vent(
-            name,
-            hood,
-            p.y_fw + 0.10,
-            p.y_fw + 0.28,
-            a.min(c),
-            a.max(c),
-            3,
-            M::Paint,
-        );
-    }
 
     // --- Black floating roof and A-pillars.
-    roof_sheet(&mut k, "roof_black", 0.0, 0.005, M::Trim);
+    roof_sheet(&mut k, "roof_black", 0.01, 0.010, M::Trim);
     let (r0, r1, _, _) = p.roof;
     let kp = dkey("a_pillar_black_l", BodyRegion::Roof, M::Trim);
     for sx in SIDES {
@@ -1435,83 +1748,58 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         stroke(&mut k, &kf, a, c, [sx * 0.5, 0.0, 0.85], 0.13, 0.04);
     }
 
-    // --- Deep folded intakes in the doors, running into a big quarter intake.
+    // --- One big scoop: it starts as a narrow groove in the door under the belt and opens
+    //     rearward and downward into the quarter intake ahead of the rear wheel; a folded
+    //     body-colour lip over its top edge and a blue hybrid line along its lower edge.
     let (yr, zr, rr) = k.arch(false);
     let zb = p.belt(p.y_fd_rear);
+    let ys = p.y_fd_hinge - 0.30;
+    let yq = yr + rr + 0.04;
     for sx in SIDES {
         let kd = dkey("door_intake_l", BodyRegion::LeftDoorF, M::Grille);
-        k.side_patch(
-            &kd,
-            sx,
-            p.y_fd_rear + 0.01,
-            p.y_fd_hinge - 0.40,
-            zb - 0.24,
-            zb - 0.07,
-            0.010,
-            0.006,
-            (4, 2),
-        );
+        let door = [
+            [ys, zb - 0.10],
+            [p.y_fd_rear + 0.01, zb - 0.07],
+            [p.y_fd_rear + 0.01, zr + 0.06],
+            [ys + 0.02, zb - 0.13],
+        ];
+        k.side_poly(&kd, sx, &door, 0.002, 0.01);
+        let kq = dkey("quarter_intake_l", BodyRegion::RearLeftQuarter, M::Grille);
+        let quarter = [
+            [p.y_fd_rear - 0.01, zb - 0.07],
+            [yq + 0.06, zb - 0.06],
+            [yq, zr + 0.02],
+            [p.y_fd_rear - 0.01, zr + 0.06],
+        ];
+        k.side_poly(&kq, sx, &quarter, 0.002, 0.01);
+        // Folded lips over the scoop's top edge and the blue hybrid line along its lower edge:
+        // single plates (draped panels would cost ≈ 250 triangles each).
         let kf = dkey("door_fold_l", BodyRegion::LeftDoorF, M::Paint);
-        k.side_patch(
+        side_groove(
+            &mut k,
             &kf,
             sx,
-            p.y_fd_rear + 0.01,
-            p.y_fd_hinge - 0.20,
-            zb - 0.07,
-            zb - 0.045,
-            0.008,
-            0.012,
-            (5, 1),
+            [ys - 0.02, zb - 0.09],
+            [p.y_fd_rear + 0.01, zb - 0.065],
+            0.02,
         );
-        // Folded front edge of the door intake.
-        let ke = sided(
-            &dkey("door_intake_edge_l", BodyRegion::LeftDoorF, M::Paint),
+        let kl = dkey("quarter_fold_l", BodyRegion::RearLeftQuarter, M::Paint);
+        side_groove(
+            &mut k,
+            &kl,
             sx,
-        );
-        let (ya0, ya1) = (p.y_fd_hinge - 0.40, p.y_fd_hinge - 0.56);
-        let (pa, _) = p.side_point(ya0, zb - 0.075);
-        let (pc, _) = p.side_point(ya1, zb - 0.235);
-        k.plate(
-            &ke,
-            [sx * (-pa[0] + 0.012), ya0, zb - 0.075],
-            [sx * (-pc[0] + 0.012), ya1, zb - 0.235],
-            [sx, 0.0, 0.0],
-            0.03,
-            0.05,
+            [p.y_fd_rear - 0.01, zb - 0.065],
+            [yq + 0.06, zb - 0.055],
+            0.02,
         );
         let ka = dkey("door_accent_l", BodyRegion::LeftDoorF, M::Accent);
-        k.side_patch(
+        side_groove(
+            &mut k,
             &ka,
             sx,
-            p.y_fd_rear + 0.01,
-            p.y_fd_hinge - 0.30,
-            zb - 0.255,
-            zb - 0.24,
-            0.006,
-            0.006,
-            (4, 1),
-        );
-        let kq = dkey("quarter_intake_l", BodyRegion::RearLeftQuarter, M::Grille);
-        let (q0, q1) = (yr + rr + 0.03, p.y_fd_rear - 0.01);
-        k.side_patch(&kq, sx, q0, q1, zr + 0.03, zb - 0.07, 0.002, 0.008, (3, 2));
-        // Folded blade across the quarter intake (top-front to bottom-rear).
-        let kb = sided(
-            &dkey(
-                "quarter_intake_fold_l",
-                BodyRegion::RearLeftQuarter,
-                M::Paint,
-            ),
-            sx,
-        );
-        let (pa, _) = p.side_point(q1, zb - 0.08);
-        let (pc, _) = p.side_point(q0 + 0.02, zr + 0.05);
-        k.plate(
-            &kb,
-            [sx * (-pa[0] + 0.015), q1, zb - 0.08],
-            [sx * (-pc[0] + 0.015), q0 + 0.02, zr + 0.05],
-            [sx, 0.0, 0.0],
-            0.03,
-            0.05,
+            [ys + 0.10, zb - 0.148],
+            [p.y_fd_rear + 0.01, zr + 0.068],
+            0.014,
         );
     }
     k.skirts(M::Trim, 0.03, 0.05);
