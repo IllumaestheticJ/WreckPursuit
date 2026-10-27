@@ -347,45 +347,78 @@ impl PoliceSystem {
     /// pursued anyway, and pursuit heat covers a pursued one. Held racers are never clocked.
     pub(crate) fn clock_speeders(&mut self, world: &dyn WorldQuery, tdt: f32) {
         let radar = self.cfg.heat.heat.radar.clone();
+        let cons = self.cfg.heat.heat.conspicuous.clone();
+        let blatant_over = self.cfg.heat.heat.blatant.over_mps;
         let speeding = crate::heat::violation_index(&ViolationKind::Speeding { over_mps: 0.0 });
-        let mut clocked: Vec<(EntityId, f32, [f32; 2])> = Vec::new();
+        let mut clocked: Vec<(EntityId, f32, [f32; 2], bool)> = Vec::new();
         let ids: Vec<EntityId> = self.racers.keys().copied().collect();
         for id in ids {
             let r = &self.racers[&id];
-            let watched = r.level == WantedLevel::None
-                && !self.held.contains(&id)
-                && self.obs.get(&id).is_some_and(|o| o.witness.is_some());
-            // The higher of the world's limit (lane under the car; at a junction that can be
-            // the slower cross street) and the police road graph's nearest road. Off the lanes
-            // (over the kerb, on parking) the world has none: the road's, within half a street.
-            let road = self
-                .graph
-                .nearest_on_road(xy(r.pos))
-                .filter(|rp| rp.dist_m <= RADAR_ROAD_M)
-                .map(|rp| self.graph.segment(rp.segment).speed_limit_mps);
-            let limit = match (world.speed_limit_at(r.pos), road) {
-                (Some(a), Some(b)) => Some(a.max(b)),
-                (a, b) => a.or(b),
-            };
+            let obs = self.obs.get(&id).copied().unwrap_or_default();
+            let watched =
+                r.level == WantedLevel::None && !self.held.contains(&id) && obs.witness.is_some();
+            let limit = self.speed_limit_for(world, r.pos);
             let speed = (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt();
             let over = limit.map(|l| (speed - l, l));
             let fast = over.is_some_and(|(o, l)| o > radar.margin_mps.max(radar.ratio * l));
+            // A conspicuous racer (far over the limit, owner 2026-10-27) is clocked sooner.
+            let c = obs.conspicuity;
+            let hold =
+                crate::config::ConspicuousConfig::scale(radar.hold_s, cons.radar_hold_s, c, false);
             let held = self.radar_over.entry(id).or_insert(0.0);
             *held = if watched && fast { *held + tdt } else { 0.0 };
             // At wp_world's cadence: only when no speeding counted for `repeat_s` (a clock a
             // second made a race field passing one patrol wanted at once, Hollins), and only
-            // after `hold_s` of speeding in sight (wp_world's hold).
-            let due =
-                r.last_violation[speeding].is_none_or(|t| self.now.since(t) >= radar.repeat_s);
-            if *held >= radar.hold_s && due {
+            // after the hold of speeding in sight (wp_world's hold). For a conspicuous racer
+            // only *witnessed* speeding counts toward the repeat: wp_world reports sustained
+            // speeding every 5 s whether anyone saw it or not, and an unseen report kept the
+            // radar from ever clocking a car that stayed far over the limit (Loop 9 night).
+            let last = if c > 0.0 {
+                r.last_witnessed_speeding
+            } else {
+                r.last_violation[speeding]
+            };
+            let due = last.is_none_or(|t| self.now.since(t) >= radar.repeat_s);
+            if *held >= hold {
                 if let Some((o, _)) = over {
-                    clocked.push((id, o, xy(r.pos)));
+                    if due || (c > 0.0 && o >= blatant_over) {
+                        clocked.push((id, o, xy(r.pos), due));
+                    }
                 }
             }
         }
-        for (racer, over_mps, at) in clocked {
-            self.stats.radar_clocks += 1;
-            self.on_violation(world, racer, &ViolationKind::Speeding { over_mps }, at);
+        for (racer, over_mps, at, due) in clocked {
+            if due {
+                self.stats.radar_clocks += 1;
+                self.on_violation(world, racer, &ViolationKind::Speeding { over_mps }, at);
+            }
+            // A conspicuous racer blowing past a unit is recognised at once even when the
+            // violation itself did not count (not due yet, or within the repeat cooldown of
+            // an unseen wp_world report): the blatant rule, if a unit is close enough.
+            let r = &self.racers[&racer];
+            if self.obs.get(&racer).is_some_and(|o| o.conspicuity > 0.0)
+                && over_mps >= blatant_over
+                && !r.pursued()
+            {
+                let before = r.level;
+                self.on_blatant_speeding(world, racer, over_mps, before);
+            }
+        }
+    }
+
+    /// The speed limit police hold a car at `pos` to: the higher of the world's limit (lane
+    /// under the car; at a junction that can be the slower cross street) and the police road
+    /// graph's nearest road. Off the lanes (over the kerb, on parking) the world has none: the
+    /// road's, within half a street.
+    pub(crate) fn speed_limit_for(&self, world: &dyn WorldQuery, pos: [f32; 3]) -> Option<f32> {
+        let road = self
+            .graph
+            .nearest_on_road(xy(pos))
+            .filter(|rp| rp.dist_m <= RADAR_ROAD_M)
+            .map(|rp| self.graph.segment(rp.segment).speed_limit_mps);
+        match (world.speed_limit_at(pos), road) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
         }
     }
 
@@ -416,6 +449,9 @@ impl PoliceSystem {
         let after = rec.level;
         if added <= 0.0 {
             return;
+        }
+        if witnessed && matches!(kind, ViolationKind::Speeding { .. }) {
+            rec.last_witnessed_speeding = Some(now);
         }
         if let ViolationKind::Speeding { over_mps } = kind {
             if *over_mps >= cfg.heat.blatant.over_mps
@@ -512,7 +548,15 @@ impl PoliceSystem {
         before: WantedLevel,
     ) -> bool {
         let b = self.cfg.heat.heat.blatant.clone();
-        let sight = self.cfg.heat.heat.sight.clone();
+        let cons = &self.cfg.heat.heat.conspicuous;
+        // Far over the limit (owner 2026-10-27): recognised further out, and seen coming in
+        // the mirror.
+        let c = self.obs.get(&racer).map_or(0.0, |o| o.conspicuity);
+        let range_m =
+            crate::config::ConspicuousConfig::scale(b.range_m, cons.blatant_range_m, c, true);
+        let mut sight = self.cfg.heat.heat.sight.clone();
+        sight.all_round_m =
+            crate::config::ConspicuousConfig::scale(sight.all_round_m, cons.all_round_m, c, true);
         let r = &self.racers[&racer];
         let (rp, rz) = (xy(r.pos), r.pos[2]);
         let mut best: Option<(f32, usize)> = None;
@@ -525,7 +569,7 @@ impl PoliceSystem {
                 continue;
             }
             let d = dist(u.body.pos, rp);
-            if d <= b.range_m
+            if d <= range_m
                 && best.is_none_or(|x| d < x.0)
                 && crate::pursuit::in_view(u.body.heading, u.body.pos, rp, d, &sight)
                 && self.sees_at(world, u.body.pos, u.body.alt_m, rp, rz)

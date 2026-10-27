@@ -16,6 +16,11 @@
 // runs (seeds 600-629) 19 escapes here vs 14 on main, no captures on either, so max 8. Night
 // racers break contact a little more often with units on the corrected graph: review with the
 // police balance.
+// Loop 9 night detection (2026-10-27, heat.conspicuous): this wanted racer at 2.6x the limit is
+// ~22 m/s over (slightly conspicuous), so units recognise it sooner and further out: first
+// pursuit 74.6 -> 63.9 s (mean, these 10 runs; 30 runs 118 -> 92 s), pursuits 24 -> 26 of 30,
+// share escaped about the same (21/24 -> 24/26), no captures either way. 9 escapes in these 10
+// (main 8), so max 9.
 (
     name: "police_escape_break_contact_night",
     seed: 600,
@@ -25,6 +30,6 @@
     stop_after_first_pursuit: true,
     racers: [(district: Core, speed_factor: 2.6, cornering_g: 0.95, initial_heat: 15.0, violations: false, stay_in_district: false)],
     expect: [
-        (metric: "escapes", min: 1.0, max: 8.0),
+        (metric: "escapes", min: 1.0, max: 9.0),
     ],
 )

@@ -81,6 +81,29 @@ repeat_s = 5.0
 # of the lane's and the police road graph's (at a junction the lane can be the cross street).
 hold_s = 2.0
 
+# Speed makes you obvious (owner report 2026-10-27, "cops on Loop 9 night take too long to
+# detect me if I'm going 185 mph"). A racer not in a pursuit is "conspicuous" from 0 at
+# from_over_mps over the limit to 1 at full_over_mps over (linear). Up to from_over_mps over
+# (54 km/h) nothing here applies: ordinary driving and mild speeding keep the rules above as
+# tuned (owner PR #64). Toward full conspicuity, for that racer only, every value moves from the
+# normal rule's toward these (never slower or shorter than the normal rule):
+#   range_m          sight / witness / recognition range, every phase (night doesn't hide a car
+#                    with its lights on at double the limit); fog and rain still cap it
+#   all_round_m      seen all round this close (headlights closing in the mirror, the engine)
+#   radar_hold_s     clocked after this long in sight (a 2 s hold is 165 m at 185 mph)
+#   recognition_s    a wanted car is recognised after this long
+#   blatant_range_m  the blatant rule (recognised at once, pursuit) reaches this far
+# Loop 9 (limit 24.6 m/s): 100 mph is 0.17, 150 mph 0.92, 185 mph 1. Measured:
+# docs/integration/police-loop9-night.md.
+[heat.conspicuous]
+from_over_mps = 15.0
+full_over_mps = 45.0
+range_m = 380.0
+all_round_m = 220.0
+radar_hold_s = 0.3
+recognition_s = 0.3
+blatant_range_m = 250.0
+
 # Recognising an already-wanted car the unit did not see offend (rows 80 / 89):
 # recognition_time_s within near_m, + far_extra_s at the edge of recognition_range_m (linear).
 # Out of sight the timer drains at decay_per_s instead of resetting.

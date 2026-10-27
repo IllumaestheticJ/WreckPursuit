@@ -69,6 +69,13 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   60 m of an in-service unit with line of sight is recognised at once (L1 at least, pursuit by
   that unit), day or night. Otherwise a night pursuit needs 40 m for 4 s, which a fast pass-by
   never gives.
+- **Speed makes you obvious** (`heat.conspicuous`, owner 2026-10-27, "Loop 9 night at 185
+  mph"): a racer not in a pursuit, 15–45 m/s over the limit, is conspicuous 0..=1. Toward 1 it
+  is seen all round to 220 m (mirror radius 60 m), within 380 m day or night, clocked after
+  0.3 s (radar 2 s), recognised after 0.3 s and caught by the blatant rule to 250 m; unseen
+  `wp_world` reports no longer hold its radar back. Up to 15 m/s over nothing changes. 185 mph
+  past a Loop 9 night patrol: 5.0 s → 0.8 s to a pursuit. Measured in
+  `tests/loop9_night_detection.rs`, numbers in `docs/integration/police-loop9-night.md`.
 
 ### Presence & dispatch (`dispatch.rs`)
 - Pool units per district per phase from `presence.toml [patrols.*]`. Shortfalls are spawned
