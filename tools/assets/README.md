@@ -72,7 +72,10 @@ built in another worktree with a shared `CARGO_TARGET_DIR` writes into *that* wo
   (`BodyProfile::greenhouse_weight`), so the windshield base and the deck joins have no fans of
   thin faces. Each quad is split along the diagonal that folds less; a long thin quad that is
   twisted by more than 3° (C-pillar sail, A-pillar glass, tail corners) is cut into up to 3 rows
-  across (`twist_rows`), so flat shading shows no sawtooth. Side points under a wheel arch are lifted onto the arch (round or box) with the
+  across (`twist_rows`), so flat shading shows no sawtooth. The A-pillar (ring points 10…13 ahead
+  of the roof) runs to the windshield's lower corner, where the front door glass ends in a corner
+  on its foot (`SailLayout::ToCorner`, default); it is a solid section (`a_pillar` outer face,
+  `a_pillar_inner` cabin side and returns). Side points under a wheel arch are lifted onto the arch (round or box) with the
   flare lip; haunches swell the sides around the arches; the first and last rings are set in by
   `end_round_m` (rounded nose / tail face edges, no extra triangles).
 - **Greenhouse** (car-shapes, 2026-10-27; knobs in `BodyStyle` "Greenhouse framing"): body-colour
