@@ -98,7 +98,11 @@ small in big arch gaps.
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p
 car-assets` (29 passed), `validate-car-asset` (39 cars ok), `gen-car-mesh --check`; `git status`
 after a full `gen-car-mesh` shows only the four cars' meshes changed.
-Mod coverage: see below.
+`npm run wasm && node e2e/mod_coverage.mjs vireo_xs stoat_16v marten_20 lindwurm_4t`: 1 of 136
+mods shows nothing on each car, `drivetrain_shifter_short` (interior part, already on the known
+list in `mod-visuals.md`). With `SHOTS_ALL` I looked at the wing, front lip, side skirts,
+splitter, bull bar and stripes vinyl on stoat_16v and lindwurm_4t: all sit on the new bodies,
+none float or hide inside the shell.
 
 ## Notes for the lead
 - **Door count:** `stoat_16v`'s spec sheet (and the old style comment for `vireo_xs`) says
