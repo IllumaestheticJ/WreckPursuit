@@ -466,7 +466,7 @@ fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
 /// Early-90s European FF 16-valve hot hatch (`stoat_16v`): upright and boxy, crisp edges,
 /// a full-width black front band (square twin-lamp housings either side of a slatted grille
-/// with a yellow pinstripe), black bumpers wrapping to the arches and black rubbing strips,
+/// between them), black bumpers wrapping to the arches and black rubbing strips with a yellow insert,
 /// a very thick C-pillar, wide ribbed tail lamps either side of a black plate panel. Dark
 /// green with silver multi-spokes and a yellow accent.
 pub fn stoat(def: &VehicleDef) -> CarStyle {
@@ -540,7 +540,7 @@ fn stoat_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let rb = BodyRegion::RearBumper;
 
     // --- Full-width black front band: square housings with twin round lamps, signal wrapping
-    // the corner, slatted grille between them with a yellow pinstripe under it.
+    // the corner, slatted grille between them.
     let (zt, zb) = (nz1 - 0.025, nz1 - 0.175);
     let xi = 0.19;
     let xo = wn - 0.04;
@@ -592,16 +592,6 @@ fn stoat_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         0.08,
         0.05,
     );
-    let accent = dkey("accent_stripe", BodyRegion::Hood, M::Accent);
-    k.front_box(
-        &accent,
-        -xo + 0.02,
-        xo - 0.02,
-        zb - 0.026,
-        zb - 0.016,
-        0.014,
-        0.0,
-    );
 
     // --- Black front bumper with a lower slot, fogs, and side wraps to the arches.
     let (bz0, bz1) = (nz0 + 0.02, nz0 + 0.24);
@@ -647,6 +637,15 @@ fn stoat_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     // --- Sides: black rubbing strips continuing the bumper line, black mirror caps.
     side_strip(&mut k, "rub_strip", bz1 - 0.07, bz1 - 0.01, M::Trim, 0.016);
+    // Yellow insert line along the strips (the car's accent).
+    side_strip(
+        &mut k,
+        "rub_insert",
+        bz1 - 0.045,
+        bz1 - 0.035,
+        M::Accent,
+        0.022,
+    );
     k.mirrors(0.10, 0.11, Some(M::Trim));
     k.fender_repeaters();
     k.door_handles(M::Trim);
@@ -943,7 +942,7 @@ fn marten_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 /// line, slim LED head lamps with a DRL brow and grille bars that run into them, a big
 /// honeycomb lower intake with bladed side ducts, thick C-pillar, big roof spoiler with end
 /// plates, two-piece LED tail lamps with a light-bar signature, diffuser and quad tips,
-/// silver mirror caps. Blue with a red pinstripe and dark turbines.
+/// silver mirror caps. Blue with red side-duct blades and dark turbines.
 pub fn lindwurm(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         nose_h: Some(0.68),
@@ -1019,8 +1018,7 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let (tz0, tz1) = k.tail_z();
     let fb = BodyRegion::FrontBumper;
 
-    // --- Front: slim grille with horizontal bars running out into the lamps, a red pinstripe
-    // along its lower edge, slim LED lamps on the nose top with an L-shaped DRL brow.
+    // --- Front: slim grille with horizontal bars running out into the lamps, slim LED lamps on the nose top with an L-shaped DRL brow.
     let (gz0, gz1) = (nz1 - 0.10, nz1 - 0.02);
     k.grille("grille", BodyRegion::Hood, 0.44, gz0, gz1, 0, M::Trim, None);
     let kbar = dkey("grille_bars", BodyRegion::Hood, M::Trim);
@@ -1036,8 +1034,6 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.0,
         );
     }
-    let pin = dkey("accent_bar", BodyRegion::Hood, M::Accent);
-    k.front_box(&pin, -0.44, 0.44, gz0 - 0.002, gz0 + 0.008, 0.018, 0.0);
     badge(
         &mut k,
         BodyRegion::Hood,
@@ -1151,7 +1147,7 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [0.46, zi0 + 0.02],
         ];
         face_poly(&mut k, &kd, true, &on_side(sx, &duct), 0.006);
-        let kb = sided(&dkey("side_duct_blade_l", fb, M::Trim), sx);
+        let kb = sided(&dkey("side_duct_blade_l", fb, M::Accent), sx);
         for x in [0.56, 0.66] {
             k.front_box(
                 &kb,

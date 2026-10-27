@@ -51,18 +51,18 @@ small in big arch gaps.
 - **Reference:** early-90s European front-drive 16-valve hot hatch, about 4.05 m long, 1.7 m
   wide, 1.40 m tall, 2.48 m wheelbase, 15-inch wheels. Upright and boxy with crisp edges: a
   near-vertical nose with a full-width black band of square twin-lamp housings and a slatted
-  grille (a coloured pinstripe), black bumpers wrapping round to the arches, black rubbing
+  grille, black bumpers wrapping round to the arches, black rubbing
   strips, an upright greenhouse with a very thick C-pillar, wide ribbed horizontal tail lamps,
   small black roof spoiler.
 - **Changes:** own body (was a vireo recolour): nose rake 10°, square plan corners, flat hood,
   56° windshield, crisper shoulders and sill, 0.28 m C-pillar. Own kit: black front band, square
   lamp lenses each with twin round reflectors, amber signals at the corners, three-slat grille
-  with badge, yellow pinstripe; black front and rear bumper bands with side wraps to the arches;
-  rectangular fogs; black rubbing strips continuing the bumper line along the doors; ribbed tail
+  with badge; black front and rear bumper bands with side wraps to the arches;
+  rectangular fogs; black rubbing strips with a yellow insert line continuing the bumper line along the doors; ribbed tail
   lamps with clear inner strips either side of a black plate panel on the tailgate; black
   roof spoiler with high brake lamp; black mirror caps. It keeps a small rear quarter window
   (typical for the type, and it sets it apart from the other two 90s cars).
-- **Triangles:** 17,326 full (was 16,894), 4,446 mid.
+- **Triangles:** 17,594 full (was 16,894).
 
 ### marten_20
 - **Reference:** early-90s European front-drive 2.0 hot hatch, about 4.05 m long, 1.7 m wide,
@@ -82,17 +82,17 @@ small in big arch gaps.
 ### lindwurm_4t
 - **Reference:** 2010s European all-wheel-drive hot hatch, 5-door, about 4.28 m long, 1.80 m
   wide, 1.44 m tall, 2.63 m wheelbase, 18-inch wheels. Wide and planted, a sharp shoulder
-  ("tornado") line, a high belt and lower greenhouse, slim LED head lamps with a DRL signature and
+  line, a high belt and lower greenhouse, slim LED head lamps with a DRL signature and
   horizontal grille bars running into them, a big honeycomb lower intake with side ducts, a large
   roof spoiler with end plates, horizontal two-piece LED tail lamps, diffuser and quad tips.
 - **Changes:** belt +6 cm, shoulder line at 0.66 H, 62° windshield with 10 cm wrap, short roof,
   0.26 m C-pillar, box arches. Kit: slim grille with two bars running across into the lamps and a
-  red pinstripe (accent changed from blue-on-blue to red), badge; nose-top LED lenses plus a face
+  badge; red accent on the side-duct blades (accent changed from blue-on-blue to red); nose-top LED lenses plus a face
   lens with an L-shaped DRL brow and a projector; trapezoid honeycomb intake with angled bladed
   side ducts; tail lamps moved in from the corners with an L light-bar signature, black hatch
   garnish with badge, high brake lamp under the end-plated spoiler, plate, reflectors;
   split-spoke wheels.
-- **Triangles:** 18,152 full (was 17,474), 4,670 mid.
+- **Triangles:** 18,140 full (was 17,474).
 
 ## Checks run
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p
@@ -128,6 +128,12 @@ What limited this group (sent to the lead 2026-10-27 for a shared generator phas
    Wanted a tailgate lean (lower tailgate panel raked) and a kick / lip at the glass base.
 5. **Quarter glass:** an explicit knob to suppress or size the quarter window (now only reachable
    by shortening the roof).
+## Brand cues (rule 9)
+Per the lead (2026-10-27), rule 9 covers maker-identifying cues too. Removed the coloured grille
+pinstripes on stoat_16v and lindwurm_4t (a well-known single-maker hot-hatch cue); the accent
+moved to the stoat's rubbing strips and the lindwurm's side-duct blades. Badges are blank
+shapes; lamp graphics are generic. Pass 2 keeps each car a fictional brand of its own.
+
 ## Pass 2 plan (after the phase-3 generator lands on ws/car-shapes)
 Merge `ws/car-shapes` into this branch, then per car, using the new plan-width curve, side
 sculpting (tumblehome / bulge), independent fender tops, overhangs and projected lamp outlines:
