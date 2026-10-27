@@ -71,7 +71,7 @@ use wp_economy::{BetTicket, BetVenue};
 use wp_math::Rng;
 use wp_opponent::{
     CarCapability, CorridorOptions, DriverProfile, Field, OpposingLanes, RaceConfig, RacerSpec,
-    RacerStatus, SimPolice, VehicleObs,
+    RacerStatus, RiskLevel, SimPolice, VehicleObs,
 };
 use wp_sim::{Sim, VehicleKind};
 use wp_world::{geom, World};
@@ -333,6 +333,38 @@ const NAMES: [&str; 16] = [
     "Tamsin", "Cruz", "Pike", "Wren", "Halo",
 ];
 
+/// Each street name's temperament: added to its level's [`Level::risk`] (clamped to 0..1), so
+/// the same racer always takes the same risks with oncoming traffic, gaps and red lights
+/// (owner, 2026-10-27: a risk level per opponent). Names not listed are 0.
+const TEMPERAMENT: [(&str, f32); 16] = [
+    ("Dex", 0.2),
+    ("Mara", -0.15),
+    ("Kito", 0.1),
+    ("Juno", -0.2),
+    ("Rook", 0.25),
+    ("Vega", 0.05),
+    ("Sable", -0.1),
+    ("Ozzy", 0.3),
+    ("Nyx", 0.15),
+    ("Brand", 0.2),
+    ("Lark", -0.25),
+    ("Tamsin", -0.05),
+    ("Cruz", 0.1),
+    ("Pike", -0.1),
+    ("Wren", -0.3),
+    ("Halo", 0.0),
+];
+
+/// Racer `name`'s risk at level `l` when racing: the level's risk plus their
+/// [`TEMPERAMENT`].
+pub fn racer_risk(l: &Level, name: &str) -> f32 {
+    let t = TEMPERAMENT
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map_or(0.0, |(_, t)| *t);
+    (l.risk + t).clamp(0.0, 1.0)
+}
+
 /// The level table entry of `level` (clamped to the table's range, 2..=5).
 pub fn level(level: u8) -> &'static Level {
     let lo = LEVELS[0].level;
@@ -451,13 +483,13 @@ pub fn mark_racers(sim: &mut Sim, sc: &Scenario, ids: &[EntityId]) {
     }
 }
 
-/// The racer's driving profile in a race.
-fn race_profile(l: &Level) -> DriverProfile {
+/// Racer `name`'s driving profile in a race (their own risk: [`racer_risk`]).
+fn race_profile(l: &Level, name: &str) -> DriverProfile {
     DriverProfile {
         skill: l.skill,
         aggression: l.aggression,
         consistency: l.consistency,
-        risk: l.risk,
+        risk: racer_risk(l, name),
         awareness: 0.5 + 0.5 * l.skill,
     }
 }
@@ -601,6 +633,8 @@ pub struct Offer {
     pub wins: u32,
     /// Racer's losses against the player.
     pub losses: u32,
+    /// How much risk they take racing (`wp_opponent::RiskLevel` name).
+    pub risk_level: &'static str,
     /// Smallest stake, $.
     pub bet_min: i64,
     /// Largest stake the player can place now (level maximum capped by cash), $.
@@ -1129,6 +1163,8 @@ impl StreetRacers {
                     shift: r.shift,
                     wins: r.wins,
                     losses: r.losses,
+                    risk: racer_risk(l, &r.name),
+                    risk_level: RiskLevel::of(racer_risk(l, &r.name)).label(),
                 }
             })
             .collect()
@@ -1165,6 +1201,7 @@ impl StreetRacers {
             car: r.car_id.clone(),
             wins: r.wins,
             losses: r.losses,
+            risk_level: RiskLevel::of(racer_risk(l, &r.name)).label(),
             bet_min: l.bet_min,
             bet_max: l.bet_max.min(cash),
             cash,
@@ -1406,7 +1443,7 @@ impl StreetRacers {
         };
         let spec = RacerSpec {
             entity,
-            profile: race_profile(&l),
+            profile: race_profile(&l, &self.racers[k].name),
             capability: cap,
         };
         let field = field_on(sim.world(), &ai_route, &[spec], config)
@@ -1944,9 +1981,12 @@ impl StreetRacers {
             self.racers[k].replan_at = tick + 3 * 240;
             return;
         };
+        // The destination stands for its road, either way along it (`plan_route_via`): a
+        // destination lane pointing back the way the racer came sent it round the block or a
+        // freeway interchange to arrive the "right" way.
         let Some(route) = sim
             .world()
-            .plan_route(st.pos, Some(fwd), dest)
+            .plan_route_via(st.pos, Some(fwd), &[], dest)
             .filter(|r| r.length_m >= 150.0)
         else {
             self.racers[k].replan_at = tick + 60;
@@ -2188,6 +2228,10 @@ pub struct RosterEntry {
     pub wins: u32,
     /// Races lost against the player.
     pub losses: u32,
+    /// Risk they take racing (0..1, [`racer_risk`]).
+    pub risk: f32,
+    /// Its name (`wp_opponent::RiskLevel`: Cautious, Measured, Bold, Reckless).
+    pub risk_level: &'static str,
 }
 
 /// The red-light guard holds a car this close to the stop line, m.

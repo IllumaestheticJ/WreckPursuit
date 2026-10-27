@@ -440,7 +440,7 @@ export class StreetUi {
       `<div class="wp-panel-title"><span>Challenge</span><b>Lv ${o.level}</b></div>` +
       `<h3>${esc(o.name)} <span class="st-lv" style="background:${o.colour}">Lv ${o.level} ${esc(o.level_name)}</span></h3>` +
       // One row for car, class and record (the card must fit a 430 px tall phone-landscape view).
-      `<div class="wp-dim st-row" data-testid="st-odds">${esc(o.car)} <b>${esc(o.odds.racer_bracket)} ${o.odds.racer_class}</b> vs your <b>${esc(o.odds.player_bracket)} ${o.odds.player_class}</b> · record ${o.losses}–${o.wins}</div>` +
+      `<div class="wp-dim st-row" data-testid="st-odds">${esc(o.car)} <b>${esc(o.odds.racer_bracket)} ${o.odds.racer_class}</b> vs your <b>${esc(o.odds.player_bracket)} ${o.odds.player_class}</b> · record ${o.losses}–${o.wins} · <b>${esc(o.risk_level)}</b></div>` +
       (o.rest_stop
         ? `<div class="st-row">Night meet at <b>${esc(o.rest_stop)}</b>: start side by side on the parking road.</div>` +
           (o.loop_lap ? `<div class="st-buttons"><button class="wp-btn wp-btn--ghost" id="st-lap">Loop 9 lap back here</button></div>` : "")
@@ -521,7 +521,7 @@ export class StreetUi {
       const m = bound("map");
       html = `<b>${esc(o.name)}</b> is waiting: open the map (${[m.key && `<span class="wp-kbd">${esc(m.key)}</span>`, m.pad && `pad ${esc(m.pad)}`].filter(Boolean).join(" / ")}) to pick the finish, or honk (${this.hornLabel()}) to call it off`;
     } else if (h && !o && !st.race) {
-      html = `Honk (${this.hornLabel()}) to challenge <b>${esc(h.name)}</b> <span class="st-lv" style="background:${h.colour}">Lv ${h.level} ${esc(h.level_name)}</span>`;
+      html = `Honk (${this.hornLabel()}) to challenge <b>${esc(h.name)}</b> <span class="st-lv" style="background:${h.colour}">Lv ${h.level} ${esc(h.level_name)}</span> <span class="wp-dim">${esc(h.risk_level)}</span>`;
     } else if (st.blocked && !o && !st.race) {
       html = `Lose the police first to challenge <b>${esc(st.blocked.name)}</b>`;
     }
