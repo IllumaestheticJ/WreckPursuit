@@ -1215,6 +1215,27 @@ fn loft(
         let t = d.min(0.4 * l) / l;
         [a[0] + v[0] * t, a[1] + v[1] * t, a[2] + v[2] * t]
     };
+    // Rows per face (`twist_rows`) and points per station line: line s of strip j
+    // takes the larger count of its two faces, so both share its points (no T-junctions).
+    let want: Vec<Vec<usize>> = (0..ns - 1)
+        .map(|s| {
+            (0..k - 1)
+                .map(|j| {
+                    twist_rows([
+                        rings[s][j].p,
+                        rings[s + 1][j].p,
+                        rings[s][j + 1].p,
+                        rings[s + 1][j + 1].p,
+                    ])
+                })
+                .collect()
+        })
+        .collect();
+    let line_rows = |s: usize, j: usize| -> usize {
+        let a = if s > 0 { want[s - 1][j] } else { 1 };
+        let b = if s < ns - 1 { want[s][j] } else { 1 };
+        a.max(b)
+    };
     for s in 0..ns - 1 {
         for j in 0..k - 1 {
             let left = keys[s][j].clone();
@@ -1291,13 +1312,79 @@ fn loft(
                         b.vert(part, id, m(cs[i].1), [0.0, 0.0])
                     })
                     .collect();
+                // A twisted face is cut into rows across its strip (bilinear points on the
+                // station lines, shared with the next face by id): one long twisted quad shades
+                // as two facets of different brightness, which repeat along the strip as a
+                // sawtooth (C-pillar sail, A-pillar sail, plan-rounded tail corners). Where the
+                // two station lines have different counts the face is zipped between them.
+                let (nl, nr) = (line_rows(s, j), line_rows(s + 1, j));
+                let lerp = |a: [f32; 3], b: [f32; 3], t: f32| {
+                    [
+                        a[0] + (b[0] - a[0]) * t,
+                        a[1] + (b[1] - a[1]) * t,
+                        a[2] + (b[2] - a[2]) * t,
+                    ]
+                };
+                // Points of a station line (`at` = 0: line s, 1: line s + 1), bottom to top.
+                let line = |b: &mut Builder, at: usize, n: usize| -> Vec<([f32; 3], u32)> {
+                    let (q0, q1) = (cs[at].1, cs[at + 2].1);
+                    (0..=n)
+                        .map(|r| {
+                            if r == 0 {
+                                (q0, v[at])
+                            } else if r == n {
+                                (q1, v[at + 2])
+                            } else {
+                                let q = lerp(q0, q1, r as f32 / n as f32);
+                                // Keyed by the end corners' glass pull flags too: faces
+                                // whose corners are pulled differently do not share points.
+                                let pull = cs[at].2 * 16 + cs[at + 2].2;
+                                let id = Some((
+                                    (s + at) as i64 * 2 + side,
+                                    100_000 + pull * 1_000 + j as i64 * 16 + r as i64,
+                                ));
+                                (q, b.vert(part, id, m(q), [0.0, 0.0]))
+                            }
+                        })
+                        .collect()
+                };
+                let lp = line(b, 0, nl);
+                let rp = line(b, 1, nr);
                 // Left side: outward normal is −X/up; CCW seen from outside.
-                if right {
-                    b.tri(part, v[0], v[1], v[2]);
-                    b.tri(part, v[1], v[3], v[2]);
+                let tri = |b: &mut Builder, x: u32, y: u32, z: u32| {
+                    if right {
+                        b.tri(part, x, z, y);
+                    } else {
+                        b.tri(part, x, y, z);
+                    }
+                };
+                if nl == nr {
+                    // Row quads, each split along the diagonal with the flatter fold.
+                    for r in 0..nl {
+                        let q = [lp[r].0, rp[r].0, lp[r + 1].0, rp[r + 1].0];
+                        let v = [lp[r].1, rp[r].1, lp[r + 1].1, rp[r + 1].1];
+                        if flatter_split(q) {
+                            tri(b, v[0], v[3], v[1]);
+                            tri(b, v[0], v[2], v[3]);
+                        } else {
+                            tri(b, v[0], v[2], v[1]);
+                            tri(b, v[1], v[2], v[3]);
+                        }
+                    }
                 } else {
-                    b.tri(part, v[0], v[2], v[1]);
-                    b.tri(part, v[1], v[2], v[3]);
+                    // Zip: advance along whichever line's next point is lower.
+                    let (mut i, mut r) = (0, 0);
+                    while i < nl || r < nr {
+                        let ti = (i + 1) as f32 / nl as f32;
+                        let tr = (r + 1) as f32 / nr as f32;
+                        if i < nl && (r == nr || ti <= tr) {
+                            tri(b, lp[i].1, lp[i + 1].1, rp[r].1);
+                            i += 1;
+                        } else {
+                            tri(b, rp[r].1, lp[i].1, rp[r + 1].1);
+                            r += 1;
+                        }
+                    }
                 }
                 if !edges.is_empty() {
                     let seal = seal_key(&key);
@@ -1322,6 +1409,66 @@ pub fn loft_rings(p: &BodyProfile, base: f32, fine: f32) -> (Vec<f32>, Vec<Vec<R
     let mut rings: Vec<Vec<RingPt>> = ys.iter().map(|&y| p.ring(y)).collect();
     round_ends(p, &mut rings);
     (ys, rings)
+}
+
+/// Whether to split a loft quad along its 0–3 diagonal instead of the original 1–2 one: corners
+/// `q` = (station s, point j), (s + 1, j), (s, j + 1), (s + 1, j + 1). Picked only when its two
+/// triangles fold clearly less (near-planar quads keep the original split).
+fn flatter_split(q: [[f32; 3]; 4]) -> bool {
+    let (fa, fb) = quad_folds(q);
+    fb > fa + 0.02
+}
+
+/// Twist (degrees of fold between a quad's two triangles) per row of [`twist_rows`].
+const TWIST_ROW_DEG: f32 = 3.0;
+
+/// Rows to cut a loft quad into across its strip (1 = none, at most 3): only long thin quads
+/// (across the strip > 2 × along it) that fold more than [`TWIST_ROW_DEG`] whichever way they
+/// are split. Corners as in [`flatter_split`].
+fn twist_rows(q: [[f32; 3]; 4]) -> usize {
+    let len = |a: [f32; 3], b: [f32; 3]| {
+        ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt()
+    };
+    let across = 0.5 * (len(q[0], q[2]) + len(q[1], q[3]));
+    let along = 0.5 * (len(q[0], q[1]) + len(q[2], q[3]));
+    if across <= 2.0 * along {
+        return 1;
+    }
+    let (fa, fb) = quad_folds(q);
+    let deg = fa.max(fb).clamp(-1.0, 1.0).acos().to_degrees();
+    ((deg / TWIST_ROW_DEG).ceil() as usize).clamp(1, 3)
+}
+
+/// Folds (normal dot products) of the original and the alternative split of a quad.
+fn quad_folds(q: [[f32; 3]; 4]) -> (f32, f32) {
+    let n = |a: [f32; 3], b: [f32; 3], c: [f32; 3]| -> [f32; 3] {
+        let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        let x = [
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+        ];
+        let l = (x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt();
+        if l < 1e-12 {
+            [0.0; 3]
+        } else {
+            [x[0] / l, x[1] / l, x[2] / l]
+        }
+    };
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    // Same winding for both splits (left side): (0, 2, 1) + (1, 2, 3) vs (0, 3, 1) + (0, 2, 3).
+    // A degenerate triangle (zero normal) counts as flat: nothing to fold.
+    let fold = |a: [f32; 3], b: [f32; 3]| {
+        if a == [0.0; 3] || b == [0.0; 3] {
+            1.0
+        } else {
+            dot(a, b)
+        }
+    };
+    let fold_a = fold(n(q[0], q[2], q[1]), n(q[1], q[2], q[3]));
+    let fold_b = fold(n(q[0], q[3], q[1]), n(q[0], q[2], q[3]));
+    (fold_a, fold_b)
 }
 
 /// Set the first and last rings in by [`crate::style::BodyStyle::end_round_m`] (along each

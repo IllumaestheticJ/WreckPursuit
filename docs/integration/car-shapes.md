@@ -360,13 +360,38 @@ tests (split / clip, resample, a lens proud of a box).
   ring's own side outline at their new height (the face edge follows the sill chamfer). On an open
   pickup bed the tail face stops at the bed start, so the tailgate keeps its height.
 - (e) **Jagged rear side glass with `roof_plan_taper` + `dlo_top_drop_m`:** the jagged band is
-  the painted sail behind the glass (triangle sawtooth, faint on the base car too); it is item (f)
-  and goes with item 9 into the all-cars regeneration commit.
+  the painted sail behind the glass (triangle sawtooth, faint on the base car too); fixed with
+  item 9 in the all-cars regeneration commit (see "Twisted loft strips" below).
 - Tests: `end_face_kit_parts_follow_a_raked_face` (5 cars, back-lean + chin and forward lean: no
   kit part's gap to the shell grows past its upright gap + 3 cm; lights visible),
   `raked_tailgate_keeps_its_trunk_in_both_lods` (4 tailgate cars, 4 rakes, full + mid),
   `projected_lamps_…` now also runs on raked / undercut faces; `greenhouse_patches_and_cladding`'s
   bound is relative to the car's belt.
+
+### Twisted loft strips: sail sawtooth, A-sail fans, tail corners (item (f) + 9, all cars)
+**This commit regenerates every mesh** (full + mid, parity copies refreshed): phase-2 branches
+must re-run `gen-car-mesh` after merging it.
+- Cause: where a strip of the loft is long across and short along the car (the C-pillar sail
+  under a fastback roof edge, the side glass under a raked A-pillar, plan-rounded tail corners),
+  its top and bottom ring points move at different rates from station to station, so each quad is
+  twisted by a few degrees. Either diagonal then gives two triangles of different brightness, and
+  that pair repeats at every station as a sawtooth. It shows in flat-shaded shots (`mesh_shots`,
+  the low-poly style, the mid LOD); smooth shading mostly hid it. The ring points themselves
+  progress smoothly (no zigzag between stations).
+- Fix (`mesh.rs`, `twist_rows`): a quad more than 2× longer across than along that folds more than
+  3° whichever way it is split is cut into up to 3 rows across (bilinear points on its station
+  lines). Each station line takes the larger count of its two faces, so neighbours share the
+  points (no T-junctions inside a panel); a face whose two lines differ is zipped between them.
+  Every quad (rowed or not) is split along the diagonal that folds less (`flatter_split`).
+  Glass rows too (inset corners keep their pull flags in the shared-point ids).
+- Cost: +0.5 to +7 % triangles per car (heaviest: morrigan 21 842, sentinel_vigil 19 964 of the
+  20 000 police test cap; all inside `TRI_BUDGET`). `TRIS_BEFORE_INTEGRATED_SIGNALS` was rebased by
+  each car's growth. A lower threshold (1.5°, 4 rows) is smoother still but costs +9–14 % and
+  breaks the hero budget.
+- Sheets: `docs/media/car-shapes/phase3/twist/` (`c_sail.jpg`: hakone, vireo, marten, lindwurm;
+  `a_sail.jpg`: ombra, fulmine, kestrel; `tail_corner.jpg`: ombra, fulmine; top row before,
+  bottom row after; `wire_hakone.jpg`: wireframe). `mesh_shots.mjs` takes `SHOT_WIRE=1` for the
+  wireframe overlay.
 
 ### Smoother bodies (item 6): smooth shading in the renderer (phase 3b)
 No mesh changes (more loft rings would cost ≈ 70 triangles per station against hero cars at up to

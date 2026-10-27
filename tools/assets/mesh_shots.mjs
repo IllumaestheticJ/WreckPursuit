@@ -70,6 +70,12 @@ window.shoot = async (mesh, car) => {
     const m = new THREE.Mesh(g, mat(p.material));
     if (p.wheel != null && car) m.position.fromArray(car.wheels[p.wheel].position_m);
     root.add(m);
+    // SHOT_WIRE=1: overlay the triangle edges (for facet / sliver checks).
+    if (window.shotWire) {
+      const w = new THREE.LineSegments(new THREE.WireframeGeometry(g), new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 }));
+      w.position.copy(m.position);
+      root.add(w);
+    }
   }
   // Chassis space: +X right, +Y forward, +Z up.
   const cam = new THREE.PerspectiveCamera(30, 1100 / 620, 0.1, 200);
@@ -123,6 +129,7 @@ if (process.env.SHOT_CAM && process.env.SHOT_AT) {
   const v = (e) => e.split(",").map(Number);
   await page.evaluate((c) => (window.customCam = c), [v(process.env.SHOT_CAM), v(process.env.SHOT_AT)]);
 }
+if (process.env.SHOT_WIRE === "1") await page.evaluate(() => (window.shotWire = true));
 for (const id of cars) {
   // MESH_DIR=<dir> reads <dir>/<id>.json instead (e.g. `phase3_demo` output); an id
   // `<car>__<variant>` takes the car def of <car>.
