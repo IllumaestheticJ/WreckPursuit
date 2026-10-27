@@ -1499,3 +1499,135 @@ fn greenhouse_patches_and_cladding() {
         assert!(top < 0.55, "{}: {top}", q.name);
     }
 }
+
+/// The shared panel helpers promoted into `Kit` (`face_poly`, `top_poly`, `side_poly`,
+/// `end_poly`, `swept_top_lamp`) build on a raked, sculpted body, stay on their surfaces and
+/// keep the mesh valid.
+#[test]
+fn shared_kit_panels_follow_the_body() {
+    use car_assets::builder::{Builder, PartKey};
+    use car_assets::mesh::MaterialSlot as M;
+    use car_assets::style::{Detail, DetailCtx, Shape};
+    use car_assets::styles::performance::kit::{dkey, on_side, Kit, SIDES};
+    fn panels(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
+        let p = ctx.profile;
+        let mut k = Kit::new(p, b);
+        let (wn, yn) = (k.wn(), k.yn);
+        let (_, zt) = k.nose_z();
+        let intake = [
+            [-0.25, zt - 0.30],
+            [0.25, zt - 0.30],
+            [0.20, zt - 0.20],
+            [-0.20, zt - 0.20],
+        ];
+        k.end_poly(
+            &dkey("t_intake", BodyRegion::FrontBumper, M::Grille),
+            true,
+            &intake,
+            0.004,
+            0.02,
+        );
+        k.face_poly(
+            &dkey("t_badge", BodyRegion::Trunk, M::Chrome),
+            false,
+            &[[-0.05, 0.6], [0.05, 0.6], [0.05, 0.64], [-0.05, 0.64]],
+            0.006,
+        );
+        let (fy, _, fr) = k.arch(true);
+        for sx in SIDES {
+            let vent = on_side(
+                sx,
+                &[
+                    [wn - 0.35, fy + 0.1],
+                    [wn - 0.15, fy + 0.1],
+                    [wn - 0.17, fy - 0.15],
+                    [wn - 0.33, fy - 0.15],
+                ],
+            );
+            let key = car_assets::styles::performance::kit::sided(
+                &dkey("t_vent_l", BodyRegion::FrontLeftFender, M::Grille),
+                sx,
+            );
+            k.top_poly(&key, &vent, 0.003, 0.01);
+            let gill = [
+                [fy - fr - 0.30, 0.40],
+                [fy - fr - 0.08, 0.42],
+                [fy - fr - 0.08, 0.55],
+                [fy - fr - 0.30, 0.52],
+            ];
+            k.side_poly(
+                &dkey("t_gill_l", BodyRegion::LeftDoorF, M::Trim),
+                sx,
+                &gill,
+                0.004,
+                0.01,
+            );
+            k.swept_top_lamp(
+                sx,
+                yn - 0.30,
+                yn - 0.05,
+                wn - 0.40,
+                wn - 0.06,
+                0.12,
+                0.01,
+                0.06,
+            );
+            let (wt, (_, tt)) = (k.wt(), k.tail_z());
+            let tail = [
+                [-(wt - 0.30), tt - 0.12],
+                [-(wt - 0.03), tt - 0.12],
+                [-(wt - 0.03), tt - 0.04],
+                [-(wt - 0.30), tt - 0.04],
+            ];
+            let rear = car_assets::lamp::LampView::Rear;
+            k.proj_cluster(sx, false, rear, &tail, None, M::Taillight, 0.0, 0.0);
+        }
+        k.signals_beside_lamps(0.06, M::EmissiveAmber);
+    }
+    let root = repo_root();
+    for id in ["kestrel_ts", "vireo_xs"] {
+        let car = load_car(&root, id).unwrap();
+        let spec = PanelSpec::load(&panel_path(&root, id)).unwrap();
+        let mut st = style_for(&car.def);
+        st.body.nose_face_rake_deg = 25.0;
+        st.body.nose_plan_bow_m = 0.25;
+        st.body.side_bulge_m = 0.03;
+        st.details = vec![Detail::new(
+            "panels",
+            BodyRegion::Cabin,
+            M::Trim,
+            Shape::Custom(panels),
+        )];
+        let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+        car_assets::skin::bind_skin(&car.lattice, &mut m);
+        for n in [
+            "t_intake",
+            "t_badge",
+            "t_vent_l",
+            "t_vent_r",
+            "t_gill_l",
+            "t_gill_r",
+            "headlight_l",
+            "headlight_r",
+        ] {
+            let q = m
+                .parts
+                .iter()
+                .find(|q| q.name == n)
+                .unwrap_or_else(|| panic!("{id}: no {n}"));
+            assert!(q.tri_count() > 0, "{id}/{n}");
+        }
+        let gill = m.parts.iter().find(|q| q.name == "t_gill_l").unwrap();
+        let (lo, hi) = part_box(gill);
+        assert!(
+            hi[0] < -0.5 && lo[2] > 0.3 && hi[2] < 0.65,
+            "{id}: gill {lo:?}..{hi:?}"
+        );
+        let errs: Vec<String> = validate(&car, &m, Some(&spec))
+            .into_iter()
+            .filter(|e| !e.contains("budget"))
+            .collect();
+        assert!(errs.is_empty(), "{id}: {errs:#?}");
+        check_lights(id, &m);
+    }
+}

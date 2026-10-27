@@ -301,6 +301,26 @@ Station `y` values are chassis metres (+ forward). Take wheel stations from your
     a bezel 4 × points. Replacing all four kit lamps with projected lenses and bezels cost
     +470…+560 triangles in the demo (kestrel, vireo, nyx).
 
+### Shared kit helpers (promoted from the phase-2 groups)
+In `styles/performance/kit.rs`, with a doc example above them; same names and argument orders
+as the groups' local versions, so switching is a rename of the call site (`face_poly(k, …)` →
+`k.face_poly(…)`):
+- `Kit::face_poly(key, front, outline, proud)` — flat prism on the nose / tail face plane
+  (tuner, hatch).
+- `Kit::top_poly(key, pts, lift, thick)`, `Kit::side_poly(key_left, sx, pts, off, thick)`,
+  `Kit::end_poly(key, front, pts, proud, depth)` — panels draped on the top / side / end surface
+  (supercar). They now cast onto the built body triangles (`lamp::panel`), so they follow
+  sculpts, bulges, raked and bowed faces exactly (no `SIDE_LIFT_M` fudge needed) and take
+  concave outlines.
+- `Kit::swept_top_lamp(sx, y0, y1, xin, xout, sweep, border, sig_w)` — swept top-view head lamp
+  with its amber outer end (tuner).
+- `kit::on_side(sx, pts)` — a left-side outline moved to side `sx` (tuner / hatch `on_side`,
+  supercar `flip_x`).
+- `lamp::panel(b, p, key, view, outline, face_m, back_m)` — the general draped panel under them.
+- `Kit::prism_y` (muscle) was already shared.
+Tested by `shared_kit_panels_follow_the_body` (a raked, bowed, bulged body: every helper builds,
+the mesh validates, lights stay visible).
+
 ### Demo and sheet
 `cargo run --release -p car-assets --example phase3_demo -- <dir>` writes demo variants (not
 the cars' styles) of kestrel_ts, vireo_xs, hauler_1500, nyx_proto and ironside_440;
