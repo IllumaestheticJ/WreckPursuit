@@ -90,7 +90,12 @@ because the coarse one cut under the crowned windshield and flickered.
 below). `wasm-pack` was not installed in this container; installed with `cargo install wasm-pack`.
 
 ## Mod coverage
-Run in progress at the time of this commit; results follow in the next commit.
+`node e2e/mod_coverage.mjs morrigan_55 nyx_proto merlo_20t mesquite_pr erg_hamada` (136 mods):
+7 car/mod pairs show nothing, all on the known list in `mod-visuals.md`: short shifter (nyx
+excepted: merlo, mesquite, erg), sequential shifter + radar + turbo 1 on the Mesquite (truck
+cabin / known), front sway bar on the Nyx (under the car). Look check (`SHOTS_ALL=1`, wing 2,
+side skirts, tube bull bar, stripes vinyl on Erg and Mesquite): the wing sits on the roof edge,
+the bull bar in front of the new noses, skirts and vinyls follow the new panels.
 
 ## Generator requests
 None needed. Possible later: a shared "cover glass with paint" helper (the local `glass_cover` /
