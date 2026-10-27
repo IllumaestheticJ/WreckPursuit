@@ -564,6 +564,21 @@ impl ModDef {
         })
     }
 
+    /// True when installing the mod on `def` would change nothing: every effect fits a tyre
+    /// compound the car already runs on all four wheels (sport tyres on a car sold on sport
+    /// tyres). The shop does not offer such a mod (owner, 2026-10-27).
+    pub fn does_nothing_on(&self, def: &VehicleDef) -> bool {
+        !self.effects.is_empty()
+            && self.effects.iter().all(|e| match e {
+                ModEffect::Vehicle {
+                    param: VehicleParam::WheelsTireId,
+                    value: ParamValue::Text(t),
+                    ..
+                } => !def.wheels.is_empty() && def.wheels.iter().all(|w| w.tire_id == *t),
+                _ => false,
+            })
+    }
+
     /// Tire ids set by this mod.
     pub fn tire_ids(&self) -> impl Iterator<Item = &str> {
         self.effects.iter().filter_map(|e| match e {

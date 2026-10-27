@@ -198,3 +198,25 @@ fn reference_line_repairs_below_and_replaces_above_threshold() {
     assert_eq!(arcade.parts_cost, replace.parts_cost);
     assert!((arcade.total - 0.5 * replace.total).abs() < 1e-3);
 }
+
+#[test]
+fn a_tyre_the_car_already_runs_does_nothing() {
+    let e = econ();
+    let coupe = coupe(); // sold on sport tyres
+    let stock = coupe.def.wheels[0].tire_id.clone();
+    let same = e
+        .catalog
+        .iter()
+        .find(|m| m.tire_ids().eq([stock.as_str()]))
+        .unwrap_or_else(|| panic!("no tyre mod sets {stock}"));
+    assert!(same.does_nothing_on(&coupe.def), "{} on {stock} tyres", same.id);
+    let other = e
+        .catalog
+        .iter()
+        .find(|m| m.tire_ids().next().is_some_and(|t| t != stock))
+        .expect("a tyre mod with another compound");
+    assert!(!other.does_nothing_on(&coupe.def), "{}", other.id);
+    // Mods with any other effect always do something.
+    let wing = e.catalog.get("aero_wing_1").unwrap();
+    assert!(!wing.does_nothing_on(&coupe.def));
+}
