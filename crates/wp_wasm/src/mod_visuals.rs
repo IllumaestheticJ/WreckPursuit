@@ -7,7 +7,7 @@
 //!
 //! | function | returns |
 //! |---|---|
-//! | `mod_catalog_json(car_id)` | `[{...ModDef, parts: [[PartKind, style]]}]`: every mod the car's class may fit, catalog order |
+//! | `mod_catalog_json(car_id)` | `[{...ModDef, parts: [[PartKind, style]]}]`: every mod the car's class may fit that changes something on it, catalog order |
 //! | `build_visuals_json(car_id, mods_json)` | [`wp_economy::BuildVisuals`] for a legal set (error text for an illegal one) |
 //! | `entity_visuals_json(entity)` | [`wp_economy::BuildVisuals`] of a live entity's installed mods |
 
@@ -34,7 +34,8 @@ pub fn mod_catalog(car_id: &str) -> Result<String, String> {
         let entries: Vec<CatalogEntry> = e
             .catalog
             .iter()
-            .filter(|m| m.allows_class(car.def.class))
+            // A mod that would change nothing (the car's stock tyres) is not listed.
+            .filter(|m| m.allows_class(car.def.class) && !m.does_nothing_on(&car.def))
             .map(|m| CatalogEntry {
                 def: m,
                 parts: wp_economy::visuals::mod_parts(m),
