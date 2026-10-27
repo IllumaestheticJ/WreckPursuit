@@ -10,6 +10,23 @@
 - No shared generator code, car defs, lattices or sim code changed. A full `gen-car-mesh` run
   changes only these four cars' meshes.
 
+## Second pass (after the lead's "be bold" and "no brand cues" notes)
+- **Proportions:** ironside hood +7 cm longer (cabin −0.42 m), roof −3 cm, coke-bottle hips
+  (haunch 7 cm) with fender peaks either side of a sunken hood (front haunch 3.5 cm, hood valley
+  2.5 cm), full nose-down rake (0.8°), longer overhangs (+5 / +6 cm). Rampart roof chopped
+  (−7 cm), belt at the top of its range, rounder shoulders and deeper sill tuck, lower nose,
+  shorter overhangs (−6 / −8 cm), fender peaks. Bulwark +9 / +8 cm overhangs, lower roof,
+  square shoulders. Brigand +10 / +10 cm overhangs, taller formal roof, near-vertical sides
+  (tumblehome 12 cm), square shoulders, taller nose.
+- **Shaped lamps:** a local `face_poly` helper (convex outline extruded off the nose / tail
+  face) gives the rampart an angular headlamp (black housing whose inner end drops toward the
+  grille, projector, lens strip, running-light blade along the sloped lower edge, amber outer
+  segment) and one split wedge tail lamp per side.
+- **No maker cues (rule 9):** removed the vertical tri-bar tail lamps and tri-bar running
+  lights (rampart), the body-colour split-grille divider and the hockey-stick stripe
+  (ironside, now a straight body-side stripe). Badges are blank discs.
+- Generator requests sent to the lead (see below).
+
 ## Common to the group
 - **Higher belt** (`belt_dz` +0.05…+0.07): tall slab body sides under a short greenhouse, which
   is the muscle-car look. Before, the belt sat at ~0.78 m on 1.33 m roofs and the greenhouse was
@@ -31,27 +48,27 @@ about 5.2 × 1.95 × 1.33 m, 2.95 m wheelbase; long hood (~37 % of length), set-
 semi-fastback roof with wide sail panels into a short deck; no B-pillar (pillarless hardtop);
 windshield ~57°; tall slab sides with a hip kick over the rear wheel; full-width grille with
 quad round lamps behind a chrome blade; twin hood scoops; full-width tail lamps in a black
-panel; chrome drip rails, vinyl roof, stripe; 14–15" slotted mags on tall tyres.
+panel; chrome drip rails, vinyl roof, body-side stripe; 14–15" slotted mags on tall tyres.
 
 **Changed:** belt +6 cm; windshield 59°→57°, rear glass 63°→61°, roof +5 cm longer (now ~1.07 m
 vs 0.62 m); hardtop B-pillar (5 cm seal only); wider C-pillar sail (16 cm); stronger hips
 (haunch 3.5→5 cm, small front haunch); arch gap 7→6 cm; the flat "brick" cowl scoop replaced by
-twin forward-facing hood scoops on a power bulge; body-colour grille divider with a blank
-badge; chrome drip rail, chrome bullet mirrors; chrome-bezelled side markers; reverse lamps and
+twin forward-facing hood scoops on a power bulge; blank grille badge; chrome drip rail, chrome bullet mirrors; chrome-bezelled side markers; reverse lamps and
 a plate recess moved into the rear blade (the centre lamps no longer read as a letter).
 
 ## rampart_50 — 2010s muscle coupe
 **Reference (generic):** a 2010s American V8 muscle coupe: about 4.8 × 1.92 × 1.38 m, 2.72 m
 wheelbase; long hood with a power dome and heat extractors, chopped-looking greenhouse on a high
 belt, fastback roof into a short ducktail deck; wide rear hips; large trapezoid mesh grille with a
-centre emblem; slim headlamps with tri-bar running lights; splitter; fake scoop ahead of the rear
-wheel; tri-bar vertical tail lamps in a black panel, diffuser and quad tips; 19–20" wheels on
+centre emblem; slim angular headlamps with LED running lights; splitter; fake scoop ahead of the rear
+wheel; slim tail lamps in a black panel, diffuser and quad tips; 19–20" wheels on
 low-profile tyres; over-the-top stripes.
 
 **Changed:** belt +4 cm net (high belt, small side glass), roof arc 0.5 (smooth fastback),
 windshield 63°→62°, roof −3 cm; sharper shoulder crease; rounder nose and tail plan, softer tail
 (tail_round 0.18→0.24); tighter arch gap; black mirrors; grille frame now a trapezoid with a blank
-badge; tri-bar running lights on a black lamp face; quarter scoops; blank tail badge.
+badge; angular shaped headlamps and split wedge tail lamps (second pass); quarter scoops; blank tail
+badge.
 
 ## bulwark_400 — early-70s full-size four-door muscle sedan
 **Reference (generic):** an early-70s American full-size four-door with a high-output V8:
@@ -83,10 +100,10 @@ ribbed reflector panel, landau roof with chrome band, rubber side strip, chrome 
 ## Triangle counts (hero budget 22k, mid 7k)
 | car | full before | full now | mid before | mid now |
 |---|---|---|---|---|
-| ironside_440 | 19809 | 20667 | 5451 | 5687 |
-| rampart_50 | 19954 | 20390 | 5380 | 5230 |
-| bulwark_400 | 20579 | 21770 | 5621 | 5896 |
-| brigand_400 | 20986 | 21519 | 6042 | 5821 |
+| ironside_440 | 19809 | 21008 | 5451 | 5702 |
+| rampart_50 | 19954 | 19830 | 5380 | 5322 |
+| bulwark_400 | 20579 | 21539 | 5621 | 6027 |
+| brigand_400 | 20986 | 21793 | 6042 | 5922 |
 
 ## Checks
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p
@@ -100,7 +117,7 @@ cars ok), `gen-car-mesh --check`. Mod coverage: see below.
 ## Shots
 `docs/media/car-shapes/muscle/{before,after}/<car>_{front,rear,side,top,cabin,cabin_rear}.jpg`;
 per-car before (left) / after (right) sheets `docs/media/car-shapes/muscle/<car>_before_after.jpg`
-(rows: front 3/4, rear 3/4, side, cabin close-up) and all four side by side in
+(rows: front 3/4, rear 3/4, side, top) and all four side by side in
 `docs/media/car-shapes/muscle/before_after.jpg`.
 
 ## Known gaps
@@ -110,10 +127,14 @@ per-car before (left) / after (right) sheets `docs/media/car-shapes/muscle/<car>
   arch lip (generator loft; reduced by a smaller haunch / flare).
 - No opera windows on the brigand's C-pillar: side patches can't follow the greenhouse surface.
 
-## Generator requests
-None needed for this pass. Nice to have: a forward-leaning nose (negative `nose_rake_deg`) for
-modern shark-nose cars; a side patch that follows the greenhouse surface (opera windows,
-C-pillar badges).
+## Generator requests (sent to the lead 2026-10-27)
+1. Per-station side section: a waist pinch at the doors swelling over the arches in plan
+   (coke-bottle line), e.g. `waist_pinch_m`.
+2. Forward-leaning nose: negative `nose_rake_deg` (to about −15°) for modern shark noses.
+3. Shaped lamp lens primitive: polygon outline extruded off the face that follows the
+   plan-round corners, with an inner bezel inset.
+4. Side patch that follows the greenhouse surface (opera windows, C-pillar badges).
+5. Lower-body tumblehome (boat-tail section) as its own knob.
 
 ## Contract change requests
 None.
