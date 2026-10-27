@@ -433,3 +433,26 @@ fn the_pound_blocks_the_workshop() {
         Err(EconomyError::CarUnavailable { .. })
     ));
 }
+
+#[test]
+fn the_catalog_says_when_a_part_needs_another_first() {
+    let (e, mut a, car) = rich();
+    let swan = |e: &Economy, a: &PlayerAccount| {
+        e.part_catalog(a, car, MODE)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.grade.as_deref() == Some("aero_swan_wing"))
+            .expect("the swan-neck wing is in the catalog")
+    };
+    let before = swan(&e, &a);
+    assert!(
+        before
+            .reason
+            .as_deref()
+            .is_some_and(|r| r.contains("first")),
+        "{:?}",
+        before.reason
+    );
+    e.install_mod(&mut a, car, "aero_splitter", MODE).unwrap();
+    assert_eq!(swan(&e, &a).reason, None);
+}

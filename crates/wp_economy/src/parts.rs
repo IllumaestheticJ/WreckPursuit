@@ -684,6 +684,57 @@ fn round(v: f32) -> Money {
 }
 
 impl Economy {
+    /// Replace every mod `car` carries that its class may not (an old save, or a lot variant
+    /// sold before its data was fixed) with the allowed mod of the same line nearest in tier
+    /// (the higher one on a tie), or drop it when the line has none; in the mod list and in
+    /// the fitted parts alike. Returns `(old, new)` for each change, empty when the car was
+    /// already legal.
+    pub fn legalize_mods(&self, car: &mut crate::OwnedCar) -> Vec<(String, Option<String>)> {
+        let class = car.class;
+        let swap = |id: &str| -> Option<Option<String>> {
+            let m = self.catalog.get(id)?;
+            if m.allows_class(class) {
+                return None;
+            }
+            let best = self
+                .catalog
+                .iter()
+                .filter(|o| o.line == m.line && o.allows_class(class))
+                .min_by_key(|o| ((o.tier as i32 - m.tier as i32).abs(), u8::MAX - o.tier))
+                .map(|o| o.id.clone());
+            Some(best)
+        };
+        let mut changes = Vec::new();
+        let mut mods = Vec::new();
+        for id in &car.mods {
+            match swap(id) {
+                None => mods.push(id.clone()),
+                Some(new) => {
+                    if let Some(n) = &new {
+                        if !mods.contains(n) {
+                            mods.push(n.clone());
+                        }
+                    }
+                    changes.push((id.clone(), new));
+                }
+            }
+        }
+        car.mods = mods;
+        if let Some(parts) = car.parts.as_mut() {
+            for fitted in parts.slots.values_mut().flatten() {
+                if let Some(g) = fitted.grade.clone() {
+                    if let Some(new) = swap(&g) {
+                        if !changes.iter().any(|(o, _)| *o == g) {
+                            changes.push((g.clone(), new.clone()));
+                        }
+                        fitted.grade = new;
+                    }
+                }
+            }
+        }
+        changes
+    }
+
     /// What is in each slot of `car`: its stored parts state, with any slot it does not
     /// mention derived from the mod list (a grade if a mod of the slot's lines is installed,
     /// else the stock part, or nothing for an optional slot).
@@ -1770,7 +1821,10 @@ impl Economy {
                 } else if !m.allows_mode(mode) {
                     Some(format!("not available in {mode:?} mode"))
                 } else {
-                    None
+                    // It could be bought but not fitted (the swan-neck wing before a splitter).
+                    self.catalog
+                        .missing_requirement(&c.mods, &m.id)
+                        .map(|r| format!("needs {} fitted first", r.name))
                 };
                 out.push(CatalogEntry {
                     kind: s.kind().to_string(),

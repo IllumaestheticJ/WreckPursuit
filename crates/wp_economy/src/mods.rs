@@ -861,6 +861,17 @@ impl ModCatalog {
             .sum()
     }
 
+    /// The first mod `id` requires that `installed` does not satisfy (by line and tier), if
+    /// any: the shop says "needs it first" instead of selling a part that cannot go on.
+    pub fn missing_requirement<'a>(&'a self, installed: &[String], id: &str) -> Option<&'a ModDef> {
+        let m = self.get(id)?;
+        let have: Vec<&ModDef> = installed.iter().filter_map(|i| self.get(i)).collect();
+        m.requires
+            .iter()
+            .find(|r| !self.requirement_met(&have, r))
+            .and_then(|r| self.get(r))
+    }
+
     fn requirement_met(&self, installed: &[&ModDef], req_id: &str) -> bool {
         let Some(req) = self.get(req_id) else {
             return false;
