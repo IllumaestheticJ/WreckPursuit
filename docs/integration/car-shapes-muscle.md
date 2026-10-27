@@ -154,7 +154,7 @@ ribbed reflector panel, landau roof with chrome band, rubber side strip, chrome 
 car-assets` (incl. the turn-signal contract on full and mid meshes), `validate-car-asset` (all
 cars ok), `gen-car-mesh --check`. Mod coverage: see below.
 
-`node e2e/mod_coverage.mjs <car>` on the final (pass 3 + addenda) meshes: each car shows
+`node e2e/mod_coverage.mjs <car>` on the final touch-up meshes (re-run after the merge): each car shows
 134–135 of 136 mods (4 not for Muscle); the misses are only the known non-visual ones from
 `mod-visuals.md` (`drivetrain_shifter_short` on all four, `elec_radar_1` on ironside, bulwark
 and brigand). The rampart's sport tyres show (arch gap 6 cm; at 4.5 cm they were hidden).
