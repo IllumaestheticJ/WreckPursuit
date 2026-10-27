@@ -311,6 +311,27 @@ fn style_knob_extremes_never_panic() {
                 let _ = p.ring(y);
             }
         }
+        // Greenhouse framing and trim knobs (car-shapes) at both extremes: full generation.
+        for k in [1.0f32, -1.0] {
+            let mut st = base.clone();
+            let b = &mut st.body;
+            b.a_pillar_w_m = k;
+            b.c_pillar_w_m = k;
+            b.b_pillar_w_m = k;
+            b.a_sail_len_m = k;
+            b.roof_rail_drop_m = k;
+            b.glass_recess_m = k;
+            b.glass_frame_m = k;
+            b.windshield_wrap_m = 5.0 * k;
+            b.rear_glass_wrap_m = 5.0 * k;
+            b.cowl_len_m = k;
+            b.wipers = if k > 0.0 { 9 } else { 0 };
+            b.seam_w_m = k;
+            b.arch_lip_m = k;
+            b.end_round_m = k;
+            let m = generate_styled(&car.def, &car.lattice, &st);
+            assert!(m.tri_count > 0, "{id}");
+        }
         // Full generation at the two cabin-shift ends (the slow part: once per car).
         for shift in [-0.6f32, 0.6] {
             let mut st = base.clone();
@@ -841,39 +862,41 @@ fn lights_move_with_the_front_and_rear_structure() {
     }
 }
 
-/// Full-mesh triangle counts before the turn signals were rebuilt into the lamp clusters
-/// (round 12, playtest row 136); the rebuild may add at most 2 % per car.
+/// Full-mesh triangle counts the turn-signal lamps may add at most 2 % to (round 12, playtest
+/// row 136: the signals were rebuilt into the lamp clusters). Rebased on 2026-10-27 to the
+/// counts after the car-shapes generator pass (framed glass, pillars, common trim), so it keeps
+/// guarding foundation growth; a deliberate per-car detail pass updates its row.
 const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
-    ("arashi_t4", 16916),
-    ("brigand_400", 19772),
-    ("bulwark_400", 19186),
-    ("debug_coupe", 16617),
-    ("debug_sedan", 8422),
-    ("drayman_cargo", 9435),
-    ("fulmine_v10", 18738),
-    ("furrow_24", 8490),
-    ("hakone_gt", 17829),
-    ("hauler_1500", 9781),
-    ("ironside_440", 18699),
-    ("junkyard_beater", 7960),
-    ("kestrel_ts", 17548),
-    ("lindwurm_4t", 16246),
-    ("lucciola_350", 17242),
-    ("marten_20", 15796),
-    ("rampart_50", 18826),
-    ("satchel_20", 8330),
-    ("sentinel_bastion", 17191),
-    ("sentinel_cruiser", 16963),
-    ("sentinel_vigil", 17715),
-    ("sentinel_warden", 17770),
-    ("sentinel_wolfhound", 17137),
-    ("shiro_turbo", 17918),
-    ("sperber_32", 17772),
-    ("stoat_16v", 15610),
-    ("talus_20t", 17062),
-    ("tansy_13", 7192),
-    ("tumbril_20", 8503),
-    ("vireo_xs", 15731),
+    ("arashi_t4", 18292),
+    ("brigand_400", 20986),
+    ("bulwark_400", 20579),
+    ("debug_coupe", 17927),
+    ("debug_sedan", 9605),
+    ("drayman_cargo", 10488),
+    ("fulmine_v10", 19884),
+    ("furrow_24", 9414),
+    ("hakone_gt", 18873),
+    ("hauler_1500", 10625),
+    ("ironside_440", 19809),
+    ("junkyard_beater", 8836),
+    ("kestrel_ts", 18914),
+    ("lindwurm_4t", 17474),
+    ("lucciola_350", 18170),
+    ("marten_20", 17056),
+    ("rampart_50", 19954),
+    ("satchel_20", 9221),
+    ("sentinel_bastion", 18932),
+    ("sentinel_cruiser", 18497),
+    ("sentinel_vigil", 19100),
+    ("sentinel_warden", 19111),
+    ("sentinel_wolfhound", 18626),
+    ("shiro_turbo", 18992),
+    ("sperber_32", 19112),
+    ("stoat_16v", 16894),
+    ("talus_20t", 17376),
+    ("tansy_13", 8214),
+    ("tumbril_20", 9418),
+    ("vireo_xs", 17065),
 ];
 
 /// Bounding box (lo, hi) of a part, m.

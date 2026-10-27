@@ -312,7 +312,6 @@ fn ironside_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.mirrors(0.12, 0.13, None);
     k.door_handles(M::Chrome);
     k.fuel_filler(1.0, 0.12, M::Chrome);
-    k.wipers();
     // Chrome window surround on the deck edge (rear glass base).
     let kt = dkey("deck_trim", BodyRegion::Trunk, M::Chrome);
     let yd = p.y_deck - 0.01;
@@ -562,5 +561,4 @@ fn rampart_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.mirrors(0.10, 0.12, None);
     k.door_handles(M::Trim);
     k.fuel_filler(-1.0, 0.11, M::Paint);
-    k.wipers();
 }

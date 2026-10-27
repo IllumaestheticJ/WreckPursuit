@@ -324,7 +324,6 @@ fn morrigan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
     }
     k.mirrors(0.16, 0.10, Some(M::Carbon));
-    k.wipers();
 
     // --- Rear: swan-neck wing on big end plates, black fascia, twin-bar tails, diffuser.
     k.wing(Wing {
@@ -686,7 +685,6 @@ fn nyx_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
     }
     k.mirrors(0.06, 0.09, Some(M::Accent));
-    k.wipers();
 
     // --- Rear: full-width twin-element wing, open mesh tail, inverted-L lamps, diffuser.
     let main = Wing {
@@ -997,7 +995,6 @@ fn merlo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     }
     k.mirrors(0.10, 0.11, Some(M::Accent));
     k.door_handles(M::Trim);
-    k.wipers();
 
     // --- Rear: single-element wing on two pillars, two-piece lamps, diffuser, rain light.
     k.wing(Wing {

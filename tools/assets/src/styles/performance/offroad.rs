@@ -709,7 +709,6 @@ fn mesquite_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     k.mirrors(0.16, 0.13, Some(M::Trim));
     k.door_handles(M::Trim);
-    k.wipers();
 
     // Turn signals as segments beside the lamps (playtest row 136).
     k.signals_beside_lamps(0.06, M::EmissiveAmber);
@@ -1094,7 +1093,6 @@ fn erg_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     );
 
     k.mirrors(0.14, 0.12, Some(M::Accent));
-    k.wipers();
 
     // Turn signals as segments beside the lamps (playtest row 136).
     k.signals_beside_lamps(0.06, M::EmissiveAmber);

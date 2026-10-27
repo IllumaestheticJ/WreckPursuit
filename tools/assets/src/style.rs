@@ -74,6 +74,44 @@ pub enum HoodScoop {
     Vents,
 }
 
+/// Finish of a small body part (handles, mirror housings, drip rails, B-pillars).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum TrimFinish {
+    /// Not drawn.
+    None,
+    /// Body colour (paint).
+    #[default]
+    Body,
+    /// Black plastic / rubber trim.
+    Black,
+    /// Chrome.
+    Chrome,
+}
+
+impl TrimFinish {
+    /// Material slot of the finish (`None` for [`TrimFinish::None`]).
+    pub fn material(self) -> Option<MaterialSlot> {
+        match self {
+            TrimFinish::None => None,
+            TrimFinish::Body => Some(MaterialSlot::Paint),
+            TrimFinish::Black => Some(MaterialSlot::Trim),
+            TrimFinish::Chrome => Some(MaterialSlot::Chrome),
+        }
+    }
+}
+
+/// Which side the fuel filler door is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum FuelDoor {
+    /// No fuel door drawn.
+    None,
+    /// Left rear quarter (x < 0).
+    Left,
+    /// Right rear quarter (x > 0).
+    #[default]
+    Right,
+}
+
 /// Every shape knob of the lofted body. Distances in metres, angles in degrees.
 /// `Option` knobs default to the value measured from the lattice.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -217,6 +255,73 @@ pub struct BodyStyle {
     pub overhang_trim: (f32, f32),
     /// Pickup bed depth below the rail, m (Pickup only). Range 0.2…0.6. Default 0.45.
     pub bed_depth: f32,
+
+    // --- Greenhouse framing (see `profile::BodyProfile::ring` and `mesh::loft`) ---
+    /// A-pillar width seen from the front, m: the body-colour band from the side-glass top edge
+    /// over the roof-rail corner to the windshield edge, following the windshield rake up to the
+    /// roof. Range 0.04…0.14. Default 0.075.
+    pub a_pillar_w_m: f32,
+    /// C-pillar (D-pillar on wagons / SUVs / vans) width seen from behind, at the rear glass, m.
+    /// Blends into [`BodyStyle::a_pillar_w_m`] along the roof. Range 0.04…0.30. Default 0.10.
+    pub c_pillar_w_m: f32,
+    /// B-pillar width in side view (between the front and rear side windows), m. Range
+    /// 0.05…0.25. Default 0.12.
+    pub b_pillar_w_m: f32,
+    /// B-pillar finish: [`TrimFinish::Black`] (default) or [`TrimFinish::Body`] (`None` and
+    /// `Chrome` draw body colour).
+    pub b_pillar: TrimFinish,
+    /// Length (along y) of the sail at the A-pillar foot, ahead of the front door glass (the
+    /// mirror patch), m. The front door glass runs forward under the A-pillar to it. Range
+    /// 0.04…0.40. Default 0.14.
+    pub a_sail_len_m: f32,
+    /// Sail finish: [`TrimFinish::Black`] (default) or body colour.
+    pub a_sail: TrimFinish,
+    /// Roof rail: drop from the roof top to the side-glass top edge, m. Range 0.02…0.10.
+    /// Default 0.05.
+    pub roof_rail_drop_m: f32,
+    /// How far every glass panel sits in behind the body surface (inset), m. Range 0…0.03.
+    /// Default 0.012.
+    pub glass_recess_m: f32,
+    /// Width of the black seal / frame round every glass panel, m (seen face-on). Range
+    /// 0…0.04. Default 0.018.
+    pub glass_frame_m: f32,
+    /// Plan-view wrap of the windshield: how far its corners sit behind its centre, m (the
+    /// glass curves back at the sides). Range 0…0.20. Default 0.06.
+    pub windshield_wrap_m: f32,
+    /// Plan-view wrap of the rear glass (corners ahead of its centre), m. Range 0…0.20.
+    /// Default 0.04.
+    pub rear_glass_wrap_m: f32,
+    /// Length of the black cowl / wiper panel at the windshield base (plan, along y), m.
+    /// 0 = none. Range 0…0.20. Default 0.07.
+    pub cowl_len_m: f32,
+    /// Wiper blades parked on the windshield above the cowl. Range 0…2. Default 2.
+    pub wipers: u8,
+    /// Drip rail / roof rail line along the roof edge and down the A- and C-pillars.
+    /// Default [`TrimFinish::Black`].
+    pub drip_rail: TrimFinish,
+
+    // --- Body details common to every car (see `trim.rs`) ---
+    /// Door handles (one per door). Default [`TrimFinish::Body`] on a black recess.
+    pub door_handles: TrimFinish,
+    /// Door-mirror housing finish (the base and glass are always black / mirror).
+    /// `None` = no generic mirrors. Default [`TrimFinish::Body`].
+    pub mirrors: TrimFinish,
+    /// Panel seams as thin dark lines: door cut lines, hood / trunk shut lines, bumper splits.
+    /// Default true.
+    pub panel_seams: bool,
+    /// Width of a panel seam line, m. Range 0.003…0.012. Default 0.006.
+    pub seam_w_m: f32,
+    /// Fuel filler door side. Default [`FuelDoor::Right`].
+    pub fuel_door: FuelDoor,
+    /// Wheel-arch lip: radial width of the body-colour lip round each wheel opening, m.
+    /// 0 = none. Range 0…0.04. Default 0.016.
+    pub arch_lip_m: f32,
+    /// Black liners inside the wheel arches (closes the open wheel wells). Default true.
+    pub arch_liners: bool,
+    /// Edge rounding of the nose and tail faces, m: the last loft ring at each end is set in
+    /// by this much all round, so bumpers read rounded instead of slab-cut. 0 = sharp.
+    /// Range 0…0.05. Default 0.03.
+    pub end_round_m: f32,
 }
 
 impl Default for BodyStyle {
@@ -269,6 +374,28 @@ impl Default for BodyStyle {
             tail_drop: 0.10,
             overhang_trim: (0.0, 0.0),
             bed_depth: 0.45,
+            a_pillar_w_m: 0.075,
+            c_pillar_w_m: 0.10,
+            b_pillar_w_m: 0.12,
+            b_pillar: TrimFinish::Black,
+            a_sail_len_m: 0.14,
+            a_sail: TrimFinish::Black,
+            roof_rail_drop_m: 0.05,
+            glass_recess_m: 0.012,
+            glass_frame_m: 0.018,
+            windshield_wrap_m: 0.06,
+            rear_glass_wrap_m: 0.04,
+            cowl_len_m: 0.07,
+            wipers: 2,
+            drip_rail: TrimFinish::Black,
+            door_handles: TrimFinish::Body,
+            mirrors: TrimFinish::Body,
+            panel_seams: true,
+            seam_w_m: 0.006,
+            fuel_door: FuelDoor::Right,
+            arch_lip_m: 0.016,
+            arch_liners: true,
+            end_round_m: 0.03,
         }
     }
 }
@@ -811,10 +938,10 @@ pub struct LiveryHint {
 /// Detail / triangle-budget tier of a car.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Tier {
-    /// Hero / performance / police: 8k–20k triangles, finer loft.
+    /// Hero / performance / police: 8k–22k triangles, finer loft.
     #[default]
     Hero,
-    /// Traffic: 4k–10k triangles, coarser loft.
+    /// Traffic: 4k–11k triangles, coarser loft.
     Traffic,
 }
 
@@ -822,8 +949,8 @@ impl Tier {
     /// Triangle budget (min, max) of the whole mesh.
     pub fn tri_budget(self) -> (u32, u32) {
         match self {
-            Tier::Hero => (8000, 20000),
-            Tier::Traffic => (4000, 10000),
+            Tier::Hero => (8000, 22000),
+            Tier::Traffic => (4000, 11000),
         }
     }
 }

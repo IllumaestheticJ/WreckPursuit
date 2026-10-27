@@ -86,18 +86,6 @@ fn top_stroke(k: &mut Kit, key: &PartKey, a: [f32; 2], c: [f32; 2], width: f32, 
     stroke(k, key, pa, pc, n, width, 0.012);
 }
 
-/// Thin vertical door-shut seams (dark) at the front and rear edges of the front doors.
-fn door_seams(k: &mut Kit) {
-    let p = k.p;
-    let key = dkey("door_seam_l", BodyRegion::LeftDoorF, M::Grille);
-    for y in [p.y_fd_hinge - 0.004, p.y_fd_rear + 0.004] {
-        let (z0, z1) = (p.sill(y) + 0.06, p.belt(y) - 0.012);
-        for sx in SIDES {
-            k.side_patch(&key, sx, y - 0.006, y + 0.006, z0, z1, 0.002, 0.0, (1, 3));
-        }
-    }
-}
-
 /// Air outlet on the front fender behind the front wheel: dark slot with `slats` blades.
 fn fender_outlet(k: &mut Kit, slats: usize, slat_mat: M) {
     let p = k.p;
@@ -326,7 +314,6 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             (3, 1),
         );
     }
-    door_seams(&mut k);
 
     // --- Air channel scooped into the door, feeding a big intake on the rear haunch whose
     //     front edge steps back toward the sill (teardrop read), carbon lip under it.
@@ -480,7 +467,6 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.diffuser(M::Carbon, 0.72, 0.17, 7, 0.10);
 
     k.mirrors(0.16, 0.10, Some(M::Carbon));
-    k.wipers();
 
     // Turn signals as segments beside the lamps (playtest row 136).
     k.signals_beside_lamps(0.06, M::EmissiveAmber);
@@ -702,7 +688,6 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     }
 
     // --- Scissor-door seams, giant angular side intake, shoulder air "ears".
-    door_seams(&mut k);
     let (yr, zr, rr) = k.arch(false);
     let (y0, y1) = (yr + rr + 0.03, p.y_fd_rear - 0.01);
     let (z0, z1) = (zr - 0.06, p.belt(y1) - 0.03);
@@ -909,7 +894,6 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.diffuser(M::Carbon, 0.80, 0.15, 5, 0.12);
 
     k.mirrors(0.18, 0.09, Some(M::Trim));
-    k.wipers();
 
     // Turn signals as segments beside the lamps (playtest row 136).
     k.signals_beside_lamps(0.06, M::EmissiveAmber);
@@ -1131,7 +1115,6 @@ fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             (2, 1),
         );
     }
-    door_seams(&mut k);
     k.skirts(M::Paint, 0.015, 0.05);
     // Chrome window line along the belt from the A-pillar to the quarter window.
     let kw = dkey("window_line_l", BodyRegion::LeftDoorF, M::Chrome);
@@ -1271,7 +1254,6 @@ fn ostwind_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.mirrors(0.10, 0.11, None);
     k.door_handles(M::Paint);
     k.fuel_filler(1.0, 0.10, M::Paint);
-    k.wipers();
 
     // Turn signals as segments beside the lamps (playtest row 136).
     k.signals_beside_lamps(0.06, M::EmissiveAmber);
@@ -1532,7 +1514,6 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.05,
         );
     }
-    door_seams(&mut k);
     k.skirts(M::Trim, 0.03, 0.05);
     fender_outlet(&mut k, 2, M::Paint);
     // Blue accent line along the outer face of each skirt (skirt: 0.03 out of the side).
@@ -1633,7 +1614,6 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.diffuser(M::Carbon, 0.66, 0.12, 4, 0.06);
 
     k.mirrors(0.16, 0.10, Some(M::Trim));
-    k.wipers();
 
     // Turn signals as segments beside the lamps (playtest row 136).
     k.signals_beside_lamps(0.06, M::EmissiveAmber);

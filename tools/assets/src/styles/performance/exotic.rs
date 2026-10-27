@@ -263,7 +263,6 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     k.mirrors(0.18, 0.10, None);
     k.fender_repeaters();
-    k.wipers();
     k.fuel_filler(1.0, 0.09, M::Trim);
 }
 
@@ -600,5 +599,4 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     k.mirrors(0.20, 0.10, Some(M::Carbon));
     k.mirror_repeaters(0.20, 0.10, true);
-    k.wipers();
 }

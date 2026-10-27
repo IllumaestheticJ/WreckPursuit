@@ -255,7 +255,6 @@ fn talus_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.fender_repeaters();
     k.door_handles(M::Trim);
     k.fuel_filler(-1.0, 0.10, M::Paint);
-    k.wipers();
 }
 
 fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
@@ -397,7 +396,6 @@ fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.fender_repeaters();
     k.door_handles(M::Trim);
     k.fuel_filler(1.0, 0.10, M::Paint);
-    k.wipers();
 }
 
 /// 2000s FR drift coupe: carbon vented hood, bolt-on box flares, wide lip with canards, carbon
@@ -627,7 +625,6 @@ fn shiro_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.fender_repeaters();
     k.door_handles(M::Trim);
     k.fuel_filler(1.0, 0.10, M::Carbon);
-    k.wipers();
     let _ = tz0;
 }
 
@@ -811,7 +808,6 @@ fn hakone_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.fender_repeaters();
     k.door_handles(M::Trim);
     k.fuel_filler(-1.0, 0.11, M::Paint);
-    k.wipers();
     let _ = (p, PatchBand::Top { x0: 0.0, x1: 0.0 });
 }
 
@@ -1077,7 +1073,6 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.mirror_repeaters(0.10, 0.11, true);
     k.door_handles(M::Chrome);
     k.fuel_filler(1.0, 0.10, M::Paint);
-    k.wipers();
 }
 
 /// Sport coupe (the old worked example): fastback with splitter, slim LED lamps with DRL,
@@ -1256,6 +1251,5 @@ fn debug_coupe_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.mirror_repeaters(0.10, 0.11, true);
     k.door_handles(M::Trim);
     k.fuel_filler(1.0, 0.10, M::Paint);
-    k.wipers();
     let _ = tz0;
 }

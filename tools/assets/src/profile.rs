@@ -23,6 +23,21 @@ pub const RING_POINTS: usize = 18;
 pub const RING_SHOULDER: usize = 7;
 /// Station offset of the paired stations that make vertical pickup-bed walls, m.
 pub const BED_WALL_EPS: f32 = 0.004;
+/// Greenhouse height over the flat top above which a ring takes the greenhouse layout, m.
+pub const GH_MIN_M: f32 = 0.002;
+/// Greenhouse height over which a ring blends from the flat-top to the greenhouse layout, m.
+pub const GH_BLEND_M: f32 = 0.05;
+/// Largest corner drop of the windshield / rear-glass plan wrap, m (see
+/// [`BodyProfile::greenhouse_crown`]).
+pub const WRAP_DROP_MAX_M: f32 = 0.035;
+/// Ring index of the side-glass base (greenhouse layout).
+pub const RING_GLASS_BASE: usize = 8;
+/// Ring index of the side-glass top edge (greenhouse layout): the A-pillar's lower edge at the
+/// windshield, the roof rail at the roof.
+pub const RING_GLASS_TOP: usize = 10;
+/// Ring index of the windshield / rear-glass edge: points 10…13 are the pillar (or roof rail),
+/// 13…17 the glass (or roof).
+pub const RING_PILLAR_IN: usize = 13;
 
 /// What the face from ring point `j` to `j + 1` is (the loft classifies parts from it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -499,9 +514,133 @@ impl BodyProfile {
         }
     }
 
-    /// True where the greenhouse (cabin top) rises above the belt.
+    /// How far the greenhouse rises over the flat top (belt + 1.5 cm) at `y`, m: 0 on the
+    /// hood, the deck and a ducktail lip, the cabin height over the belt elsewhere.
+    pub fn greenhouse_excess(&self, y: f32) -> f32 {
+        if y >= self.y_fw {
+            return 0.0;
+        }
+        let duck = if y < self.y_deck {
+            self.ducktail(y)
+        } else {
+            0.0
+        };
+        (self.top(y) - duck - (self.belt(y) + 0.015)).max(0.0)
+    }
+
+    /// Greenhouse weight of the ring at `y`, 0…1: 0 = flat top (hood / deck), 1 = full
+    /// greenhouse (side glass, roof rail, pillars). Ramps over the first [`GH_BLEND_M`] of
+    /// greenhouse height, so the cross-section changes smoothly at the windshield base and
+    /// where a rear glass or fastback line meets the deck (no fans of thin faces there).
+    pub fn greenhouse_weight(&self, y: f32) -> f32 {
+        smoothstep(self.greenhouse_excess(y) / GH_BLEND_M)
+    }
+
+    /// True where the ring at `y` has the greenhouse layout (side glass, rail, pillars).
     pub fn has_greenhouse(&self, y: f32) -> bool {
-        self.top(y) > self.belt(y) + 0.06
+        self.greenhouse_excess(y) > GH_MIN_M
+    }
+
+    /// Front door window y span (rear edge, front edge): half the B-pillar width
+    /// ([`BodyStyle::b_pillar_w_m`]) ahead of the front door's rear edge, forward under the
+    /// A-pillar to the sail at its foot ([`BodyStyle::a_sail_len_m`]); at most 0.45 m past the
+    /// door hinge line.
+    pub fn front_window(&self) -> (f32, f32) {
+        let mb = 0.5 * self.style.b_pillar_w_m.clamp(0.05, 0.25);
+        let rear = match self.rear_door {
+            Some((rh, _)) => rh + mb,
+            None => self.y_fd_rear + mb,
+        };
+        let sail = self.style.a_sail_len_m.clamp(0.04, 0.40);
+        (
+            rear,
+            clamp_soft(self.y_fw - sail, rear + 0.2, self.y_fd_hinge + 0.45),
+        )
+    }
+
+    /// The sail (mirror patch) at the A-pillar foot, ahead of the front door glass: (rear y,
+    /// front y). Door mirrors sit on it.
+    pub fn sail(&self) -> (f32, f32) {
+        let (_, f) = self.front_window();
+        let sail = self.style.a_sail_len_m.clamp(0.04, 0.40);
+        (f, self.y_fw.min(f + sail).max(f + 0.02))
+    }
+
+    /// Pillar width seen from ahead / behind at `y`, m: [`BodyStyle::a_pillar_w_m`] ahead of
+    /// the roof front, [`BodyStyle::c_pillar_w_m`] behind the roof rear, blended along the roof.
+    pub fn pillar_w(&self, y: f32) -> f32 {
+        let a = self.style.a_pillar_w_m.clamp(0.04, 0.14);
+        let c = self.style.c_pillar_w_m.clamp(0.04, 0.30);
+        let (r0, r1, _, _) = self.roof;
+        lerp(c, a, (y - r0) / (r1 - r0).max(0.05))
+    }
+
+    /// Windshield slope over the ground, dz/dy (≥ 0), and rear-glass slope.
+    fn glass_slopes(&self) -> (f32, f32) {
+        let (r0, r1, rz, _) = self.roof;
+        let zf = self.belt(self.y_fw) + 0.015;
+        let front = ((rz - zf) / (self.y_fw - r1).max(0.05)).clamp(0.0, 3.0);
+        let zd = self.top(self.y_deck);
+        let rear = ((rz - zd) / (r0 - self.y_deck).max(0.05)).clamp(0.0, 3.0);
+        (front, rear)
+    }
+
+    /// Cross-section crown of the greenhouse top at `y` for `u` = |x| / roof half width: the
+    /// roof crown (the hood crown near the windshield base and the deck), plus the plan-view wrap
+    /// of the windshield and rear glass ([`BodyStyle::windshield_wrap_m`] /
+    /// [`BodyStyle::rear_glass_wrap_m`]): on a raked glass, corners set back in plan are corners
+    /// lower in the cross-section. The wrap fades out over the roof.
+    pub fn greenhouse_crown(&self, y: f32, u: f32) -> f32 {
+        let s = &self.style;
+        let u = u.clamp(0.0, 1.0);
+        let (r0, r1, _, _) = self.roof;
+        let flat = s.hood_crown.clamp(0.0, 0.05) * (1.0 - u * u);
+        let roof = s.roof_crown.clamp(0.0, 0.05) * (1.0 - u * u);
+        let tf = smoothstep((self.y_fw - y) / 0.25);
+        let tr = smoothstep((y - self.y_deck) / 0.25);
+        let crown = lerp(flat, roof, tf.min(tr));
+        let fade = (0.45 * (r1 - r0)).clamp(0.05, 0.30);
+        let gf = if y >= r1 {
+            1.0
+        } else {
+            smoothstep(1.0 - (r1 - y) / fade)
+        };
+        let gr = if y <= r0 {
+            smoothstep(1.0 - (self.y_deck - y).max(0.0) / 0.3)
+        } else {
+            smoothstep(1.0 - (y - r0) / fade)
+        };
+        // The corner drop is capped: on near-vertical glass (vans, SUV tailgates) a plan wrap
+        // is a set-back, not a drop.
+        let (kf, kr) = self.glass_slopes();
+        let wrap = (s.windshield_wrap_m.clamp(0.0, 0.20) * kf).min(WRAP_DROP_MAX_M) * gf
+            + (s.rear_glass_wrap_m.clamp(0.0, 0.20) * kr).min(WRAP_DROP_MAX_M) * gr;
+        crown - wrap * u * u
+    }
+
+    /// x (positive half widths) of ring points 8…17 at `y`, shared by the greenhouse and the
+    /// flat-top layouts so neighbouring rings of either kind always line up. `xs` is the
+    /// shoulder point's |x|, `gb` the side-glass base.
+    fn top_xs(&self, y: f32, xs: f32, gb: f32) -> [f32; 10] {
+        let rd = self.style.roof_rail_drop_m.clamp(0.02, 0.10);
+        let gb = gb.min(xs - 0.01).max(0.05);
+        let rw = self.roof_half_w(y.min(self.y_fw)).min(gb - 0.02).max(0.04);
+        let aw = self.pillar_w(y);
+        let x11 = rw - 0.25 * rd;
+        let x12 = rw - (0.6 * rd).min(0.5 * aw);
+        let x13 = (rw - aw).max(0.25 * rw).min(x12 - 0.005);
+        [
+            gb,
+            0.5 * (gb + rw) + 0.008,
+            rw,
+            x11,
+            x12,
+            x13,
+            0.66 * x13,
+            0.40 * x13,
+            0.18 * x13,
+            0.0,
+        ]
     }
 
     /// Greenhouse half width at roof height at `y` (A-pillar plan taper applied).
@@ -615,7 +754,7 @@ impl BodyProfile {
         let sill = self.sill(y);
         let belt = self.belt(y).max(sill + 0.12);
         let top = self.top(y).max(belt + 0.015);
-        let gh = top > belt + 0.06;
+        let gh = !self.bed_open(y) && self.has_greenhouse(y);
         let h = belt - sill;
         let tuck = s.sill_tuck.clamp(0.01, 0.12).min(0.3 * h);
         let ch = s.shoulder_round.clamp(0.01, 0.12).min(0.3 * h);
@@ -656,37 +795,40 @@ impl BodyProfile {
             }
         }
         let xs = w + hn - 0.5 * ch;
+        let gb = (w + 0.5 * hn - s.glass_inset.clamp(0.04, 0.20)).max(0.3);
+        let tx = self.top_xs(y, xs, gb);
         if gh {
-            let gb = (w + 0.5 * hn - s.glass_inset.clamp(0.04, 0.20)).max(0.3);
-            let rw = self.roof_half_w(y).min(gb - 0.02);
-            let rch = ch.min(0.5 * (top - belt));
-            let gmid = 0.5 * (gb + rw) + 0.008;
-            pts.push(RingPt {
-                p: [-gb, y, belt + 0.01],
-                seg: Seg::Glass,
-            });
-            pts.push(RingPt {
-                p: [-gmid, y, 0.5 * (belt + 0.01 + top - rch)],
-                seg: Seg::Glass,
-            });
-            pts.push(RingPt {
-                p: [-rw, y, top - rch],
-                seg: Seg::Top,
-            });
-            pts.push(RingPt {
-                p: [-(rw - rch), y, top + self.top_crown(y, 0.9, true)],
-                seg: Seg::Top,
-            });
-            for f in [0.80, 0.62, 0.45, 0.28, 0.12] {
+            // Greenhouse: side glass 8→10, roof rail / pillar 10→13, roof / glass 13→17.
+            // Blended toward the flat top while the greenhouse is low (windshield base, deck).
+            let k = self.greenhouse_weight(y);
+            let hg = (top - belt).max(0.0);
+            let rw = tx[2].max(0.04);
+            let rd = s.roof_rail_drop_m.clamp(0.02, 0.10).min(0.45 * hg);
+            let gc = |x: f32| self.greenhouse_crown(y, x / rw);
+            let fc = |x: f32| top + self.top_crown(y, (x / xs).min(1.0), false);
+            let z8 = belt + 0.01f32.min(0.25 * hg);
+            let z10 = (top - rd + gc(tx[2])).max(z8);
+            let mut z = [
+                z8,
+                0.5 * (z8 + z10),
+                z10,
+                top - 0.35 * rd + gc(tx[3]),
+                top - 0.08 * rd + gc(tx[4]),
+                top + gc(tx[5]),
+                top + gc(tx[6]),
+                top + gc(tx[7]),
+                top + gc(tx[8]),
+                top + gc(0.0),
+            ];
+            for i in 1..6 {
+                z[i] = z[i].max(z[i - 1]);
+            }
+            for (i, (&x, &zg)) in tx.iter().zip(z.iter()).enumerate() {
                 pts.push(RingPt {
-                    p: [-f * rw, y, top + self.top_crown(y, f, true)],
-                    seg: Seg::Top,
+                    p: [-x, y, lerp(fc(x), zg, k)],
+                    seg: if i < 2 { Seg::Glass } else { Seg::Top },
                 });
             }
-            pts.push(RingPt {
-                p: [0.0, y, top + self.top_crown(y, 0.0, true)],
-                seg: Seg::Top,
-            });
         } else if self.bed_open(y) {
             let (_, _, floor0) = self.bed.unwrap_or((0.0, 0.0, belt - 0.4));
             let floor = floor0.min(top - 0.1);
@@ -715,16 +857,13 @@ impl BodyProfile {
                 seg: Seg::BedFloor,
             });
         } else {
-            for f in [0.93, 0.85, 0.76, 0.66, 0.54, 0.42, 0.30, 0.18, 0.08] {
+            // Flat top (hood / deck) at the greenhouse's x positions.
+            for &x in &tx {
                 pts.push(RingPt {
-                    p: [-f * xs, y, top + self.top_crown(y, f, false)],
+                    p: [-x, y, top + self.top_crown(y, (x / xs).min(1.0), false)],
                     seg: Seg::Top,
                 });
             }
-            pts.push(RingPt {
-                p: [0.0, y, top + self.top_crown(y, 0.0, false)],
-                seg: Seg::Top,
-            });
         }
         debug_assert_eq!(pts.len(), RING_POINTS);
         pts

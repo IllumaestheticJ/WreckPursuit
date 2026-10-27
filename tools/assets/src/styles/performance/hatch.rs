@@ -235,7 +235,6 @@ fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.fender_repeaters();
     k.door_handles(M::Trim);
     k.fuel_filler(1.0, 0.10, M::Paint);
-    k.wipers();
     let _ = top_band;
 }
 
@@ -467,5 +466,4 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.mirror_repeaters(0.10, 0.12, true);
     k.door_handles(M::Trim);
     k.fuel_filler(1.0, 0.11, M::Paint);
-    k.wipers();
 }

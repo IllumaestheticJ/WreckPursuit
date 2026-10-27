@@ -3,7 +3,7 @@
 //!
 //! Every car is a [`BodyStyle`] built from a silhouette preset plus one custom detail function
 //! that emits that car's trim kit through the small helpers below: grilles, bumpers with rub
-//! strips, door handles, mirrors, wipers, plates, side markers, era-appropriate lamps (the
+//! strips, door handles, mirrors, plates, side markers, era-appropriate lamps (wipers: `trim`; the
 //! generic head / tail light boxes are reshaped in place), bed rails, step bumpers, mud flaps,
 //! van door tracks and hinges.
 //!
@@ -383,7 +383,6 @@ fn sedan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     belt_chrome(b, p);
     handles(b, p, M::Paint, false);
     side_markers(b, p, p.z_bumper_top.0 + 0.0);
-    wipers(b, p, 0.25);
     shark_fin(b, p);
 }
 
@@ -456,7 +455,6 @@ fn beater_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     drip_rails(b, p);
     handles(b, p, M::Chrome, false);
     black_mirrors(b, p, (0.12, 0.07, 0.09), 0.05);
-    wipers(b, p, 0.22);
     let ant = key("antenna", R::FrontRightFender, M::Chrome);
     let ya = p.y_fw + 0.25;
     let xa = p.half_width(ya) - 0.10;
@@ -561,7 +559,6 @@ fn supermini_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     rocker_cladding(b, p, 0.09, M::Trim);
     handles(b, p, M::Trim, false);
     side_markers(b, p, p.z_bumper_top.0 + 0.04);
-    wipers(b, p, 0.22);
 }
 
 /// furrow_24: framed bar grille, square lamps + amber corners, chrome bumper, bed rail caps,
@@ -601,7 +598,6 @@ fn compact_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     mud_flaps(b, p);
     handles(b, p, M::Trim, false);
     side_markers(b, p, p.z_bumper_top.0 + 0.05);
-    wipers(b, p, 0.22);
 }
 
 /// hauler_1500: big two-bar chrome grille, tall lamps, chrome bumper + red tow hooks, running
@@ -665,7 +661,6 @@ fn fullsize_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     }
     handles(b, p, M::Chrome, true);
     side_markers(b, p, p.z_bumper_top.0 + 0.06);
-    wipers(b, p, 0.30);
 }
 
 /// drayman_cargo: wide bar grille, black bumpers + rub strip, sliding-door track (right),
@@ -742,7 +737,6 @@ fn van_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     tall_mirrors(b, p, (0.12, 0.08, 0.30), 0.16);
     handles(b, p, M::Trim, false);
     side_markers(b, p, p.z_bumper_top.0 + 0.08);
-    wipers(b, p, 0.30);
 }
 
 // =======================================================================================
@@ -1231,6 +1225,7 @@ fn plate_rear(b: &mut Builder, p: &BodyProfile, z: f32) {
 
 /// Door handles: one per door, just ahead of the door's rear edge, below the belt.
 fn handles(b: &mut Builder, p: &BodyProfile, mat: MaterialSlot, crew_cab: bool) {
+    crate::trim::remove_generic(b, &crate::trim::GENERIC_HANDLES);
     let mut doors = vec![(
         R::LeftDoorF,
         match p.rear_door {
@@ -1295,21 +1290,6 @@ fn side_markers(b: &mut Builder, p: &BodyProfile, z: f32) {
     mirror(b, &kr);
 }
 
-/// Two parked wipers along the windshield base, `len` long each.
-fn wipers(b: &mut Builder, p: &BodyProfile, len: f32) {
-    let k = key("wipers", R::Cabin, M::Trim);
-    let y = p.y_fw - 0.07;
-    for cx in [-0.32f32, 0.12] {
-        let z = p.top_point(y, cx).0[2] + 0.012;
-        b.oriented_box(
-            &k,
-            [cx, y, z],
-            unit3([1.0, 0.12, 0.06], [0.0, 1.0, 0.0]),
-            [len, 0.008, 0.007],
-        );
-    }
-}
-
 /// Chrome belt trim along the door glass bases.
 fn belt_chrome(b: &mut Builder, p: &BodyProfile) {
     let z = p.z_belt;
@@ -1359,6 +1339,7 @@ fn shark_fin(b: &mut Builder, p: &BodyProfile) {
 
 /// Chrome drip rails along both roof edges.
 fn drip_rails(b: &mut Builder, p: &BodyProfile) {
+    crate::trim::remove_generic(b, &crate::trim::GENERIC_DRIP_RAIL);
     let k = key("drip_rail_l", R::Roof, M::Chrome);
     let (r0, r1, _, _) = p.roof;
     let n = 4;
@@ -1387,15 +1368,14 @@ fn drip_rails(b: &mut Builder, p: &BodyProfile) {
 
 /// Hide the generic paint mirrors.
 fn hide_generic_mirrors(b: &mut Builder) {
-    for n in ["mirror_l", "mirror_r"] {
-        b.set_geometry(n, Vec::new(), Vec::new(), Vec::new());
-    }
+    crate::trim::remove_generic(b, &crate::trim::GENERIC_MIRRORS);
 }
 
 /// Small black door mirrors (`size` = out × along × up) on a stub `arm` long.
 fn black_mirrors(b: &mut Builder, p: &BodyProfile, size: (f32, f32, f32), arm: f32) {
     hide_generic_mirrors(b);
-    let y = p.y_fd_hinge - 0.14;
+    // On the sail at the A-pillar foot.
+    let y = 0.5 * (p.sail().0 + p.sail().1);
     let zb = p.belt(y);
     let (s, _) = p.side_point(y, zb - 0.02);
     let x0 = s[0];
@@ -1417,7 +1397,8 @@ fn black_mirrors(b: &mut Builder, p: &BodyProfile, size: (f32, f32, f32), arm: f
 /// Tall truck / van mirrors: two arms, a black head with a glass face toward the rear.
 fn tall_mirrors(b: &mut Builder, p: &BodyProfile, size: (f32, f32, f32), arm: f32) {
     hide_generic_mirrors(b);
-    let y = p.y_fd_hinge - 0.12;
+    // On the sail at the A-pillar foot.
+    let y = 0.5 * (p.sail().0 + p.sail().1);
     let zb = p.belt(y);
     let (s, _) = p.side_point(y, zb - 0.03);
     let x0 = s[0];

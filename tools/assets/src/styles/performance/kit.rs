@@ -1,5 +1,5 @@
 //! Body-kit geometry shared by the performance styles: lamps, grilles, splitters, skirts,
-//! wings, diffusers, vents, louvres, side intakes, mirrors, handles, fillers, wipers.
+//! wings, diffusers, vents, louvres, side intakes, mirrors, handles, fillers (wipers: `trim`).
 //!
 //! Everything is built from the foundation's [`Builder`] primitives and positioned from the
 //! styled [`BodyProfile`], so it follows each car's real loft. [`Kit`] wraps the builder and
@@ -221,6 +221,8 @@ impl<'a> Kit<'a> {
     /// Wrap a builder; removes the foundation's default head / tail lamps, turn signals and
     /// mirrors (the kit re-emits them into the same parts in the car's own shapes).
     pub fn new(p: &'a BodyProfile, b: &'a mut Builder) -> Kit<'a> {
+        // The kit's mirrors (`Kit::mirrors`) replace the generic ones (`trim::mirrors`).
+        crate::trim::remove_generic(b, &crate::trim::GENERIC_MIRRORS);
         for sx in SIDES {
             for k in [headlight_key(sx), taillight_key(sx), mirror_key(sx)] {
                 b.set_geometry(&k.name, Vec::new(), Vec::new(), Vec::new());
@@ -267,7 +269,7 @@ impl<'a> Kit<'a> {
     pub fn roof_edge(&self, y: f32) -> f32 {
         let ring = self.p.ring(y);
         if self.p.has_greenhouse(y) {
-            -ring[12].p[0]
+            -ring[crate::profile::RING_PILLAR_IN].p[0]
         } else {
             self.p.half_width(y) - 0.1
         }
@@ -1286,7 +1288,8 @@ impl<'a> Kit<'a> {
     // ------------------------------------------------------------------ sides
 
     /// Wing-mirror on the front door (replaces the foundation's box): a tapered housing on a
-    /// stalk, optional contrast cap (`cap`), `y_off` from the door hinge.
+    /// stalk, optional contrast cap (`cap`), `y_off` back from 5 cm ahead of the sail front
+    /// (`BodyProfile::sail`, the A-pillar foot).
     pub fn mirrors(&mut self, y_off: f32, size: f32, cap: Option<MaterialSlot>) {
         for sx in SIDES {
             let MirrorFrame {
@@ -1339,7 +1342,8 @@ impl<'a> Kit<'a> {
 
     /// Placement of the door mirror of side `sx` (see [`Kit::mirrors`]).
     fn mirror_frame(&self, sx: f32, y_off: f32, size: f32) -> MirrorFrame {
-        let yh = self.p.y_fd_hinge - y_off;
+        // `y_off` back from the front of the sail at the A-pillar foot (+5 cm).
+        let yh = self.p.sail().1 + 0.05 - y_off;
         let zb = self.p.belt(yh) + 0.02;
         let w = self.side_x(yh, zb - 0.06).max(self.p.half_width(yh) - 0.05);
         let zl = zb + 0.03;
@@ -1356,6 +1360,7 @@ impl<'a> Kit<'a> {
 
     /// Door handles (front doors; rear doors too on 4-door cars), `mat`.
     pub fn door_handles(&mut self, mat: MaterialSlot) {
+        crate::trim::remove_generic(self.b, &crate::trim::GENERIC_HANDLES);
         let p = self.p;
         let mut doors: Vec<(BodyRegion, f32)> = Vec::new();
         match p.rear_door {
@@ -1379,6 +1384,7 @@ impl<'a> Kit<'a> {
 
     /// Fuel filler flap on the rear quarter (side `sx`), Ø `d`.
     pub fn fuel_filler(&mut self, sx: f32, d: f32, mat: MaterialSlot) {
+        crate::trim::remove_generic(self.b, &crate::trim::GENERIC_FUEL_DOOR);
         let p = self.p;
         let (yr, zr, rr) = self.arch(false);
         let y = yr + rr + 0.20;
@@ -1400,28 +1406,6 @@ impl<'a> Kit<'a> {
             12,
             true,
         );
-    }
-
-    /// Wipers lying on the windshield base (region `Windshield`).
-    pub fn wipers(&mut self) {
-        let p = self.p;
-        let k = dkey("wipers", BodyRegion::Windshield, M::Trim);
-        let y = p.y_fw - 0.06;
-        let hw = p.roof_half_w(y).min(p.half_width(y) - 0.2);
-        for (xa, xb) in [(-0.9 * hw, -0.08), (0.05, 0.8 * hw)] {
-            let ya = y - 0.03;
-            let yb = y - 0.11;
-            let za = self.top_z(ya, xa) + 0.012;
-            let zb = self.top_z(yb, xb) + 0.012;
-            self.plate(
-                &k,
-                [xa, ya, za],
-                [xb, yb, zb],
-                [0.0, 0.0, 1.0],
-                0.014,
-                0.012,
-            );
-        }
     }
 
     /// Fog / driving lamps on the nose face at ±x, z, radius r (lens `Headlight`, ring `Trim`).

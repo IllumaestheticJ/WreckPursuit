@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use wp_contracts::{BodyRegion, LatticeDef, VehicleDef};
 
 use crate::builder::{mirror_region, Builder, PartKey, Patch, PatchBand};
-use crate::profile::{BodyProfile, RingPt, Seg, BED_WALL_EPS, RING_POINTS, RING_SHOULDER};
+use crate::profile::{
+    BodyProfile, RingPt, Seg, BED_WALL_EPS, RING_PILLAR_IN, RING_POINTS, RING_SHOULDER,
+};
 use crate::style::{style_for, CarStyle, Detail, DetailCtx, HoodScoop, LiveryHint, Shape, Tier};
 use crate::wheels::WheelGeom;
 
@@ -84,7 +86,7 @@ pub fn indicator_side_key(right: bool, left_region: BodyRegion) -> PartKey {
 }
 
 /// Hard overall triangle range of any car (per-tier budgets: [`Tier::tri_budget`]).
-pub const TRI_BUDGET: (u32, u32) = (4000, 20000);
+pub const TRI_BUDGET: (u32, u32) = (4000, 22000);
 /// Window margin (pillar half width) around door edges, m.
 const WINDOW_MARGIN: f32 = 0.06;
 
@@ -502,27 +504,49 @@ struct Windows {
     front: (f32, f32),
     rear: Option<(f32, f32)>,
     quarter: Option<(f32, f32)>,
+    /// B-pillar y span (black when [`crate::style::BodyStyle::b_pillar`] is `Black`).
+    b_pillar: Option<(f32, f32)>,
 }
 
 fn windows(p: &BodyProfile) -> Windows {
     let m = WINDOW_MARGIN;
-    let (front, rear, last) = match p.rear_door {
-        Some((rh, re)) => ((rh + m, p.y_fd_hinge - m), Some((re + m, rh - m)), re),
-        None => ((p.y_fd_rear + m, p.y_fd_hinge - m), None, p.y_fd_rear),
+    // B-pillar: half its width either side of the front door's rear edge; the front door
+    // glass runs forward under the A-pillar to the sail (`BodyProfile::front_window`).
+    let mb = 0.5 * p.style.b_pillar_w_m.clamp(0.05, 0.25);
+    let front = p.front_window();
+    let (rear, last) = match p.rear_door {
+        Some((rh, re)) => (Some((re + m, rh - mb)), re),
+        None => (None, p.y_fd_rear),
     };
     let q0 = p.roof.0 + 0.08;
     let q1 = last - 0.04;
     let van = p.style.silhouette == crate::style::Silhouette::Van;
     let quarter = (!van && q1 - q0 > 0.2).then_some((q0, q1));
+    let rear = if van { None } else { rear };
+    // B-pillar: between the front window and the rear door window or quarter glass.
+    let b_pillar = match (rear, quarter) {
+        (Some(r), _) => Some((r.1, front.0)),
+        (None, Some(q)) if p.rear_door.is_none() => Some((q.1, front.0)),
+        _ => None,
+    };
     Windows {
         front,
-        rear: if van { None } else { rear },
+        rear,
         quarter,
+        b_pillar,
     }
 }
 
-/// Classify a lofted face of the LEFT side at mid `y`, mid height `z`, segment kind `seg`.
-fn classify_left(p: &BodyProfile, win: &Windows, y: f32, z: f32, seg: Seg) -> PartKey {
+/// Start of the windshield glass above the cowl panel (y), when there is a cowl.
+fn cowl_edge(p: &BodyProfile) -> Option<f32> {
+    let len = p.style.cowl_len_m.clamp(0.0, 0.20);
+    let y = p.y_fw - len;
+    (len > 0.01 && y > p.roof.1 + 0.08).then_some(y)
+}
+
+/// Classify a lofted face of the LEFT side at mid `y`, mid height `z`, segment kind `seg`,
+/// from ring point `j` to `j + 1`.
+fn classify_left(p: &BodyProfile, win: &Windows, y: f32, z: f32, seg: Seg, j: usize) -> PartKey {
     use BodyRegion::*;
     let lower = |y: f32, z: f32| -> BodyRegion {
         if y > p.y_bf {
@@ -596,18 +620,40 @@ fn classify_left(p: &BodyProfile, win: &Windows, y: f32, z: f32, seg: Seg) -> Pa
                     );
                 }
             }
+            if y > win.front.1 && y < p.y_fw {
+                // Sail at the A-pillar foot, ahead of the front door glass (mirror patch).
+                return match p.style.a_sail {
+                    crate::style::TrimFinish::Black => {
+                        PartKey::body("a_sail", Cabin, PartKind::Body, MaterialSlot::Trim)
+                    }
+                    _ => key_for(Cabin, PartKind::Body),
+                };
+            }
+            if let Some(b) = win.b_pillar {
+                if inside(b) && p.style.b_pillar == crate::style::TrimFinish::Black {
+                    return PartKey::body("b_pillar", Cabin, PartKind::Body, MaterialSlot::Trim);
+                }
+            }
             key_for(Cabin, PartKind::Body)
         }
         Seg::Top => {
             let (ry0, ry1, _, _) = p.roof;
+            // Ring points 10…13 of a greenhouse ring: A-pillar / roof rail / C-pillar band.
+            let pillar = p.has_greenhouse(y) && j < RING_PILLAR_IN;
             if y >= p.y_fw {
                 key_for(Hood, PartKind::Panel)
             } else if y > ry1 {
-                key_for(Windshield, PartKind::Glass)
+                if pillar {
+                    key_for(Cabin, PartKind::Body)
+                } else if cowl_edge(p).is_some_and(|c| y > c) {
+                    PartKey::body("cowl", Cabin, PartKind::Body, MaterialSlot::Trim)
+                } else {
+                    key_for(Windshield, PartKind::Glass)
+                }
             } else if y >= ry0 {
                 key_for(Roof, PartKind::Panel)
             } else if y > p.y_deck {
-                if p.rear_glass {
+                if p.rear_glass && !pillar {
                     key_for(RearGlass, PartKind::Glass)
                 } else {
                     key_for(Cabin, PartKind::Body)
@@ -674,7 +720,10 @@ pub fn stations(p: &BodyProfile, base: f32, fine: f32) -> Vec<f32> {
         keys.push(h);
         keys.push(e);
     }
-    for r in [win.rear, win.quarter].into_iter().flatten() {
+    if let Some(c) = cowl_edge(p) {
+        keys.push(c);
+    }
+    for r in [win.rear, win.quarter, win.b_pillar].into_iter().flatten() {
         keys.push(r.0);
         keys.push(r.1);
     }
@@ -737,7 +786,7 @@ pub const MID_PATCH_STEP_M: f32 = 0.16;
 /// Segments around a mid-LOD wheel (tire and rim lathes).
 pub const MID_WHEEL_SEGMENTS: u8 = 12;
 /// Triangle range of every mid-LOD mesh.
-pub const MID_TRI_BUDGET: (u32, u32) = (2000, 6500);
+pub const MID_TRI_BUDGET: (u32, u32) = (2000, 7000);
 /// Detail parts smaller than this (largest bounding-box edge, m) are dropped from the mid LOD
 /// (door handles, fuel fillers, plate screws, mirror glass, stripe kicks).
 pub const MID_MIN_DETAIL_M: f32 = 0.2;
@@ -882,14 +931,15 @@ pub fn generate_lod(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle, lo
         loft_steps(style.tier)
     };
     let ys = stations(&p, base, fine);
-    let rings: Vec<Vec<RingPt>> = ys.iter().map(|&y| p.ring(y)).collect();
+    let mut rings: Vec<Vec<RingPt>> = ys.iter().map(|&y| p.ring(y)).collect();
+    round_ends(&p, &mut rings);
     let win = windows(&p);
     let mut b = Builder::new();
     if mid {
         b.patch_step_m = Some(MID_PATCH_STEP_M);
     }
 
-    loft(&p, &win, &ys, &rings, &mut b);
+    loft(&p, &win, &ys, &rings, mid, &mut b);
     end_caps(&p, &ys, &rings, &mut b);
     underbody(&p, def, &ys, &rings, &mut b);
     if style.underglow_rgb.is_some() {
@@ -898,6 +948,7 @@ pub fn generate_lod(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle, lo
     lights_and_mirrors(&p, &mut b);
     interior(&p, &mut b);
     hood_scoop(&p, &mut b);
+    crate::trim::body_trim(&p, cowl_edge(&p), mid, &mut b);
     let ctx = DetailCtx { def, profile: &p };
     for d in &style.details {
         emit_detail(&ctx, d, &mut b);
@@ -982,17 +1033,56 @@ pub fn generate_lod(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle, lo
     }
 }
 
+/// Key of the black seal round a glass part (same region, so it swings / detaches with it).
+fn seal_key(glass: &PartKey) -> PartKey {
+    PartKey::body(
+        &format!("{}_seal", glass.name),
+        glass.region.unwrap_or(BodyRegion::Cabin),
+        PartKind::Body,
+        MaterialSlot::Trim,
+    )
+}
+
+/// Outward normal (x–z plane) of the LEFT-side ring at point `j`.
+fn ring_normal(ring: &[RingPt], j: usize) -> [f32; 3] {
+    let n = ring.len();
+    if j + 1 >= n {
+        return [0.0, 0.0, 1.0];
+    }
+    let a = ring[j.saturating_sub(1)].p;
+    let b = ring[j + 1].p;
+    let (dx, dz) = (b[0] - a[0], b[2] - a[2]);
+    let l = (dx * dx + dz * dz).sqrt();
+    if l < 1e-6 {
+        return [-1.0, 0.0, 0.0];
+    }
+    [-dz / l, 0.0, dx / l]
+}
+
 /// Loft quads, both sides. Faces between a closed and an open-bed ring are bed end walls.
-fn loft(p: &BodyProfile, win: &Windows, ys: &[f32], rings: &[Vec<RingPt>], b: &mut Builder) {
+/// Glass faces sit [`crate::style::BodyStyle::glass_recess_m`] behind the surface and
+/// [`crate::style::BodyStyle::glass_frame_m`] inside their opening; a black seal part closes
+/// the step round every glass panel (`<glass>_seal`, same region as the glass).
+fn loft(
+    p: &BodyProfile,
+    win: &Windows,
+    ys: &[f32],
+    rings: &[Vec<RingPt>],
+    mid: bool,
+    b: &mut Builder,
+) {
     let k = RING_POINTS;
-    for s in 0..ys.len() - 1 {
+    let ns = ys.len();
+    // Pass 1: the LEFT-side key of every face.
+    let mut keys: Vec<Vec<PartKey>> = Vec::with_capacity(ns.saturating_sub(1));
+    for s in 0..ns - 1 {
         let ym = 0.5 * (ys[s] + ys[s + 1]);
         let bed_end = p.bed_open(ys[s]) != p.bed_open(ys[s + 1]);
+        let mut row = Vec::with_capacity(k - 1);
         for j in 0..k - 1 {
             let (a0, a1) = (rings[s][j].p, rings[s][j + 1].p);
             let (b0, b1) = (rings[s + 1][j].p, rings[s + 1][j + 1].p);
             let zm = 0.25 * (a0[2] + b0[2] + a1[2] + b1[2]);
-            // The segment kind of the (finer) station that has the feature.
             // Adjacent rings with different layouts (greenhouse / flat top / bed): take the
             // segment kind of the ring whose layout matches the face's middle.
             let seg = {
@@ -1021,7 +1111,96 @@ fn loft(p: &BodyProfile, win: &Windows, ys: &[f32], rings: &[Vec<RingPt>], b: &m
                     )
                 }
             } else {
-                classify_left(p, win, ym, zm, seg)
+                classify_left(p, win, ym, zm, seg, j)
+            };
+            row.push(left);
+        }
+        keys.push(row);
+    }
+    // The mid LOD (30–150 m) keeps its glass flush: no inset, frame or seal.
+    let (recess, frame) = if mid {
+        (0.0, 0.0)
+    } else {
+        (
+            p.style.glass_recess_m.clamp(0.0, 0.03),
+            p.style.glass_frame_m.clamp(0.0, 0.04),
+        )
+    };
+    // Same glass part on face (s, j)? The faces past the centre line (j ≥ k − 1) are the
+    // mirror image of the last one: always the same part.
+    let same = |s: isize, j: isize, key: &PartKey| -> bool {
+        if j >= k as isize - 1 {
+            return true;
+        }
+        s >= 0 && j >= 0 && (s as usize) < ns - 1 && keys[s as usize][j as usize] == *key
+    };
+    let toward = |a: [f32; 3], b: [f32; 3], d: f32| -> [f32; 3] {
+        let v = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        if l < 1e-6 {
+            return a;
+        }
+        let t = d.min(0.4 * l) / l;
+        [a[0] + v[0] * t, a[1] + v[1] * t, a[2] + v[2] * t]
+    };
+    for s in 0..ns - 1 {
+        for j in 0..k - 1 {
+            let left = keys[s][j].clone();
+            let glass = left.kind == PartKind::Glass;
+            let (si, ji) = (s as isize, j as isize);
+            // Corner (sv, jv) of this face: surface point and (glass) inset point + pull flags.
+            let corner = |sv: usize, jv: usize| -> ([f32; 3], [f32; 3], i64) {
+                let q = rings[sv][jv].p;
+                if !glass {
+                    return (q, q, 0);
+                }
+                let mut c = q;
+                let mut flags = 0i64;
+                if sv == s && !same(si - 1, ji, &left) {
+                    c = toward(c, rings[s + 1][jv].p, frame);
+                    flags |= 1;
+                }
+                if sv == s + 1 && !same(si + 1, ji, &left) {
+                    c = toward(c, rings[s][jv].p, frame);
+                    flags |= 2;
+                }
+                if jv == j && !same(si, ji - 1, &left) {
+                    c = toward(c, rings[sv][j + 1].p, frame);
+                    flags |= 4;
+                }
+                if jv == j + 1 && jv < k - 1 && !same(si, ji + 1, &left) {
+                    c = toward(c, rings[sv][j].p, frame);
+                    flags |= 8;
+                }
+                let n = ring_normal(&rings[sv], jv);
+                let c = [c[0] - n[0] * recess, c[1], c[2] - n[2] * recess];
+                (q, c, flags)
+            };
+            let cs = [
+                corner(s, j),
+                corner(s + 1, j),
+                corner(s, j + 1),
+                corner(s + 1, j + 1),
+            ];
+            let vid = [(s, j), (s + 1, j), (s, j + 1), (s + 1, j + 1)];
+            // Glass boundary edges (as corner index pairs) and the face across each.
+            let edges: Vec<(usize, usize)> = if glass && !mid {
+                let mut e = Vec::new();
+                if !same(si - 1, ji, &left) {
+                    e.push((0, 2));
+                }
+                if !same(si + 1, ji, &left) {
+                    e.push((1, 3));
+                }
+                if !same(si, ji - 1, &left) {
+                    e.push((0, 1));
+                }
+                if !same(si, ji + 1, &left) {
+                    e.push((2, 3));
+                }
+                e
+            } else {
+                Vec::new()
             };
             for right in [false, true] {
                 let key = if right {
@@ -1033,20 +1212,56 @@ fn loft(p: &BodyProfile, win: &Windows, ys: &[f32], rings: &[Vec<RingPt>], b: &m
                 let mx = if right { -1.0 } else { 1.0 };
                 let m = |q: [f32; 3]| [q[0] * mx, q[1], q[2]];
                 let side = if right { 1 } else { 0 };
-                let id = |st: usize, jj: usize| Some((st as i64 * 2 + side, jj as i64));
-                let va = b.vert(part, id(s, j), m(a0), [0.0, 0.0]);
-                let vb = b.vert(part, id(s + 1, j), m(b0), [0.0, 0.0]);
-                let va1 = b.vert(part, id(s, j + 1), m(a1), [0.0, 0.0]);
-                let vb1 = b.vert(part, id(s + 1, j + 1), m(b1), [0.0, 0.0]);
+                let v: Vec<u32> = (0..4)
+                    .map(|i| {
+                        let (st, jj) = vid[i];
+                        let id = Some((st as i64 * 2 + side, jj as i64 + 100 * cs[i].2));
+                        b.vert(part, id, m(cs[i].1), [0.0, 0.0])
+                    })
+                    .collect();
                 // Left side: outward normal is −X/up; CCW seen from outside.
                 if right {
-                    b.tri(part, va, vb, va1);
-                    b.tri(part, vb, vb1, va1);
+                    b.tri(part, v[0], v[1], v[2]);
+                    b.tri(part, v[1], v[3], v[2]);
                 } else {
-                    b.tri(part, va, va1, vb);
-                    b.tri(part, vb, va1, vb1);
+                    b.tri(part, v[0], v[2], v[1]);
+                    b.tri(part, v[1], v[2], v[3]);
+                }
+                if !edges.is_empty() {
+                    let seal = seal_key(&key);
+                    for &(e0, e1) in &edges {
+                        let (o0, i0) = (cs[e0].0, cs[e0].1);
+                        let (o1, i1) = (cs[e1].0, cs[e1].1);
+                        let (st, jj) = vid[e0];
+                        let n = ring_normal(&rings[st], jj);
+                        let out = [n[0] * mx, 0.0, n[2]];
+                        b.poly_facing(&seal, &[m(o0), m(o1), m(i1), m(i0)], out);
+                    }
                 }
             }
+        }
+    }
+}
+
+/// Set the first and last rings in by [`crate::style::BodyStyle::end_round_m`] (along each
+/// point's inward normal in the ring plane, at most a third of the distance to the centre line
+/// / underside), so the nose and tail faces get a rounded edge over the last loft step.
+fn round_ends(p: &BodyProfile, rings: &mut [Vec<RingPt>]) {
+    let r = p.style.end_round_m.clamp(0.0, 0.05);
+    if r <= 1e-4 || rings.len() < 3 {
+        return;
+    }
+    let last = rings.len() - 1;
+    for s in [0, last] {
+        let ring = rings[s].clone();
+        let z_lo = ring[0].p[2];
+        let z_hi = ring[ring.len() - 1].p[2];
+        for (j, pt) in rings[s].iter_mut().enumerate() {
+            let n = ring_normal(&ring, j);
+            let q = pt.p;
+            let dx = (r * n[0]).abs().min(-q[0] / 3.0).max(0.0);
+            let dz = (r * n[2]).abs().min((z_hi - z_lo) / 6.0);
+            pt.p = [q[0] + dx, q[1], q[2] - dz * n[2].signum()];
         }
     }
 }
@@ -1173,8 +1388,7 @@ fn underglow(p: &BodyProfile, b: &mut Builder) {
 /// so they crush with the end of the car. Each cluster carries its turn signal as a segment of
 /// the same lens (same depth, proud face and bevel, split by [`INDICATOR_SEAM_M`]): an amber
 /// strip along the bottom of the head lamp, an amber inboard section of the tail lamp. Style
-/// kits reshape both (this default is the police cars' layout). Door mirrors on the front
-/// doors.
+/// kits reshape both (this default is the police cars' layout). Door mirrors: [`crate::trim`].
 fn lights_and_mirrors(p: &BodyProfile, b: &mut Builder) {
     let top_n = p.belt(p.y_nose);
     let top_t = p.belt(p.y_tail);
@@ -1229,26 +1443,6 @@ fn lights_and_mirrors(p: &BodyProfile, b: &mut Builder) {
             [t1.min(ts), p.y_tail - LIGHT_PROUD_M, tl_z - 0.05],
             [t1.max(ts), p.y_tail + LIGHT_DEPTH_M, tl_z + 0.05],
             0.008,
-        );
-        // Mirror on the front door, just behind its hinge at the belt.
-        let door = if right {
-            BodyRegion::RightDoorF
-        } else {
-            BodyRegion::LeftDoorF
-        };
-        let w = p.half_width(p.y_fd_hinge) + p.haunch(p.y_fd_hinge);
-        let (m0, m1) = (sx * (w + 0.02), sx * (w + 0.17));
-        let zb = p.belt(p.y_fd_hinge - 0.15);
-        b.beveled_box(
-            &PartKey::body(
-                &format!("mirror_{side}"),
-                door,
-                PartKind::Mirror,
-                MaterialSlot::Paint,
-            ),
-            [m0.min(m1), p.y_fd_hinge - 0.20, zb + 0.03],
-            [m0.max(m1), p.y_fd_hinge - 0.10, zb + 0.13],
-            0.02,
         );
     }
 }
