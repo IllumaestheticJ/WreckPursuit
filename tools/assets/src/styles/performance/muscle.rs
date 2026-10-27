@@ -123,6 +123,18 @@ fn side_moulding(
     }
 }
 
+/// Convex lens / housing outline on the nose (`front`) or tail face: `pts` are (|x|, z)
+/// corners for the left side, mirrored to side `sx`, extruded from 2 cm inside the face to
+/// `proud` out of it.
+fn face_poly(k: &mut Kit, key: &PartKey, front: bool, sx: f32, pts: &[[f32; 2]], proud: f32) {
+    let prof: Vec<[f32; 2]> = pts.iter().map(|q| [sx * q[0], q[1]]).collect();
+    if front {
+        k.prism_y(key, &prof, k.yn - 0.02, k.yn + proud);
+    } else {
+        k.prism_y(key, &prof, k.yt + 0.02, k.yt - proud);
+    }
+}
+
 /// Small blank badge (chrome disc standing out of the nose or tail face) at (x, z).
 fn face_badge(k: &mut Kit, name: &str, region: BodyRegion, front: bool, x: f32, z: f32, r: f32) {
     let key = dkey(name, region, M::Chrome);
@@ -135,10 +147,10 @@ fn face_badge(k: &mut Kit, name: &str, region: BodyRegion, front: bool, x: f32, 
 /// Early-70s big-block hardtop coupe (`ironside_440`): long flat hood with twin forward
 /// scoops, set-back semi-fastback cabin with no B-pillar (hardtop), coke-bottle hips, full-width
 /// grille with quad round lamps behind a chrome blade, full-width tail lamps, chrome drip rail
-/// and window trim, vinyl roof, hockey-stick stripe, slot mags.
+/// and window trim, vinyl roof, straight body-side stripe, slot mags.
 pub fn ironside(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        cabin_shift_m: -0.35,
+        cabin_shift_m: -0.42,
         nose_h: Some(0.72),
         nose_rake_deg: 3.0,
         nose_plan_round: 0.10,
@@ -152,18 +164,18 @@ pub fn ironside(def: &VehicleDef) -> CarStyle {
         a_pillar_rake_deg: 6.0,
         rear_glass_rake_deg: Some(61.0),
         roof_len_trim: 0.15,
-        roof_dz: -0.02,
+        roof_dz: -0.05,
         roof_crown: 0.015,
         tumblehome: Some(0.17),
         belt_dz: 0.06,
         crease_z: 0.56,
         crease_depth: 0.012,
         shoulder_round: 0.03,
-        haunch: 0.050,
-        front_haunch: 0.015,
+        haunch: 0.070,
+        front_haunch: 0.035,
         flare: 0.010,
-        arch_gap: 0.06,
-        stance_pitch_deg: 0.6,
+        arch_gap: 0.065,
+        stance_pitch_deg: 0.8,
         ducktail_h: 0.035,
         tail_round: 0.14,
         tail_drop: 0.03,
@@ -174,6 +186,11 @@ pub fn ironside(def: &VehicleDef) -> CarStyle {
         c_pillar_w_m: 0.16,
         drip_rail: TrimFinish::Chrome,
         windshield_wrap_m: 0.05,
+        hood_valley: 0.025,
+        ride_dz: 0.01,
+        overhang_trim: (0.05, 0.06),
+        sill_tuck: 0.05,
+        deck_drop: 0.02,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.details.push(kit_detail(ironside_kit));
@@ -214,8 +231,8 @@ fn ironside_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let fb = BodyRegion::FrontBumper;
     let rb = BodyRegion::RearBumper;
 
-    // --- Front: chrome blade, full-width recessed grille split by a body-colour centre
-    // divider, quad round lamps in chrome bezels, black valance.
+    // --- Front: chrome blade, full-width recessed grille with fine bright bars and a blank
+    // badge, quad round lamps in chrome bezels, black valance.
     let zb = nz0 + 0.40 * (nz1 - nz0);
     let blade = dkey("bumper_blade_front", fb, M::Chrome);
     k.front_box(
@@ -248,8 +265,6 @@ fn ironside_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         M::Chrome,
         Some(M::Chrome),
     );
-    let div = dkey("grille_divider", BodyRegion::Hood, M::Paint);
-    k.front_box(&div, -0.045, 0.045, gz0 - 0.005, gz1 + 0.01, 0.03, 0.01);
     face_badge(
         &mut k,
         "grille_badge",
@@ -373,7 +388,7 @@ fn ironside_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let plate = dkey("plate_rear", rb, M::Grille);
     k.rear_box(&plate, -0.16, 0.16, zbr - 0.045, zbr + 0.025, 0.069, 0.0);
 
-    // --- Sides: chrome rocker strip, black hockey-stick stripe, side markers, vinyl roof.
+    // --- Sides: chrome rocker strip, black body-side stripe, side markers, vinyl roof.
     let (yf, _, rf) = k.arch(true);
     let (yr, _, rr) = k.arch(false);
     let zr = p.z_door_bottom + 0.03;
@@ -402,18 +417,6 @@ fn ironside_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.004,
             0.0,
             (14, 1),
-        );
-        let kh = dkey("side_stripe_kick_l", BodyRegion::RearLeftQuarter, M::Trim);
-        k.side_patch(
-            &kh,
-            sx,
-            yr + 0.05,
-            yr + 0.15,
-            zc + 0.03,
-            p.belt(yr + 0.1) - 0.04,
-            0.004,
-            0.0,
-            (2, 2),
         );
     }
     side_markers(&mut k, 0.07, 0.10, Some(M::Chrome));
@@ -452,14 +455,14 @@ fn ironside_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
 /// 2010s muscle coupe (`rampart_50`): long hood with a power dome and heat extractors,
 /// short chopped greenhouse on a high belt, fastback roof into a short ducktail deck, wide
-/// rear hips, trapezoid mesh grille with a blank badge, slim headlamps with tri-bar running
-/// lights, splitter, fake quarter scoops, tri-bar vertical tail lamps in a black panel,
+/// rear hips, trapezoid mesh grille with a blank badge, angular headlamps with projector and
+/// running-light blade, splitter, fake quarter scoops, split wedge tail lamps in a black panel,
 /// diffuser, quad tips, twin over-the-top stripes, big split-spoke wheels.
 pub fn rampart(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         silhouette: Silhouette::Fastback,
         cabin_shift_m: -0.25,
-        nose_h: Some(0.70),
+        nose_h: Some(0.66),
         nose_rake_deg: 8.0,
         nose_plan_round: 0.28,
         tail_plan_round: 0.22,
@@ -469,22 +472,22 @@ pub fn rampart(def: &VehicleDef) -> CarStyle {
         windshield_rake_deg: Some(62.0),
         a_pillar_rake_deg: 10.0,
         roof_len_trim: 0.0,
-        roof_dz: -0.03,
+        roof_dz: -0.07,
         roof_arc: 0.5,
-        belt_dz: 0.07,
-        tumblehome: Some(0.21),
+        belt_dz: 0.08,
+        tumblehome: Some(0.24),
         crease_z: 0.62,
         crease_depth: 0.018,
-        sill_tuck: 0.07,
+        sill_tuck: 0.09,
         haunch: 0.045,
-        front_haunch: 0.015,
+        front_haunch: 0.030,
         flare: 0.012,
         flare_shape: ArchShape::Round,
         arch_gap: 0.045,
         ride_dz: -0.01,
         stance_pitch_deg: 0.2,
         ducktail_h: 0.035,
-        overhang_trim: (0.0, -0.03),
+        overhang_trim: (-0.06, -0.08),
         belt_kick: 0.05,
         rear_glass_bow: 0.03,
         tail_round: 0.24,
@@ -493,6 +496,9 @@ pub fn rampart(def: &VehicleDef) -> CarStyle {
         c_pillar_w_m: 0.14,
         b_pillar_w_m: 0.08,
         mirrors: TrimFinish::Black,
+        shoulder_round: 0.07,
+        hood_valley: 0.015,
+        deck_valley: 0.010,
         ..BodyStyle::preset(Silhouette::Fastback)
     });
     s.details.push(kit_detail(rampart_kit));
@@ -533,7 +539,7 @@ fn rampart_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let fb = BodyRegion::FrontBumper;
 
     // --- Front: wide upper grille (trapezoid read: frame narrower at the bottom), lower
-    // mouth, splitter, slim lamps with tri-bar running lights, blank badge.
+    // mouth, splitter, angular lamps with running-light blades, blank badge.
     let gz0 = nz1 - 0.20;
     let gz1 = nz1 - 0.03;
     k.mesh_grille("grille", fb, 0.50, gz0, gz1, 3, 8, M::Trim);
@@ -571,15 +577,11 @@ fn rampart_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     );
     k.splitter(M::Carbon, 0.06, 0.12, 0.022, false);
     for sx in SIDES {
-        k.top_lamp_split(
-            sx,
-            yn - 0.20,
-            yn - 0.03,
-            0.58,
-            wn - 0.07,
-            0.025,
-            Seg::Outboard(0.08),
-        );
+        // Angular lamp: black housing whose inner end drops toward the grille, a round
+        // projector lens and a slim lens strip along the top, a running-light blade below,
+        // amber signal at the outer end.
+        let (xi, xo) = (0.50, wn - 0.03);
+        let (zt, zb) = (nz1 - 0.015, nz1 - 0.17);
         let ki = sided(
             &dkey(
                 "headlamp_housing_face_l",
@@ -588,32 +590,43 @@ fn rampart_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             ),
             sx,
         );
-        k.front_box(
-            &ki,
-            sx * 0.56,
-            sx * (wn - 0.04),
-            nz1 - 0.13,
-            nz1 - 0.02,
-            0.008,
-            0.0,
-        );
-        // Tri-bar running lights: three short vertical bars on the lamp face.
+        let housing = [
+            [xi, zt - 0.035],
+            [xo, zt],
+            [xo, zt - 0.075],
+            [xi + 0.07, zb],
+        ];
+        face_poly(&mut k, &ki, true, sx, &housing, 0.010);
+        let hk = headlight_key(sx);
+        let strip = [
+            [xi + 0.03, zt - 0.040],
+            [xo - 0.10, zt - 0.012],
+            [xo - 0.10, zt - 0.030],
+            [xi + 0.03, zt - 0.058],
+        ];
+        face_poly(&mut k, &hk, true, sx, &strip, 0.018);
+        let zp = zt - 0.075;
+        k.cyl_y(&hk, sx * (xo - 0.17), zp, yn - 0.02, yn + 0.022, 0.035, 12);
+        let ka = indicator_front_key(sx);
+        let sig = [
+            [xo - 0.085, zt - 0.010],
+            [xo - 0.012, zt - 0.004],
+            [xo - 0.012, zt - 0.065],
+            [xo - 0.085, zt - 0.065],
+        ];
+        face_poly(&mut k, &ka, true, sx, &sig, 0.018);
         let drl = sided(
             &lkey("drl_l", BodyRegion::FrontLeftFender, M::Headlight),
             sx,
         );
-        for i in 0..3 {
-            let x = 0.62 + 0.05 * i as f32;
-            k.front_box(
-                &drl,
-                sx * x,
-                sx * (x + 0.018),
-                nz1 - 0.115,
-                nz1 - 0.04,
-                0.016,
-                0.0,
-            );
-        }
+        // Running-light blade along the housing's sloping lower edge.
+        let blade = [
+            [xi + 0.08, zb + 0.012],
+            [xo - 0.02, zt - 0.088],
+            [xo - 0.02, zt - 0.070],
+            [xi + 0.08, zb + 0.030],
+        ];
+        face_poly(&mut k, &drl, true, sx, &blade, 0.016);
         let fog = sided(&lkey("fog_l", fb, M::Headlight), sx);
         k.front_box(
             &fog,
@@ -645,7 +658,7 @@ fn rampart_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
     }
 
-    // --- Rear: black lamp panel, three vertical bars per side, centre badge, diffuser,
+    // --- Rear: black lamp panel, one split wedge lamp per side, centre badge, diffuser,
     // ducktail lip.
     let pz0 = tz1 - 0.19;
     let pz1 = tz1 - 0.025;
@@ -660,18 +673,35 @@ fn rampart_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     for sx in SIDES {
         let tk = taillight_key(sx);
         let ka = indicator_rear_key(sx, M::Taillight);
-        for i in 0..3 {
-            let xc = 0.40 + 0.13 * i as f32;
-            k.rear_box(
-                if i == 2 { &ka } else { &tk },
-                sx * (xc - 0.04),
-                sx * (xc + 0.04),
-                pz0 + 0.02,
-                pz1 - 0.02,
-                0.026,
-                0.006,
-            );
-        }
+        // One wedge lens a side, taller outboard, split by a black bar; its outer end is the
+        // red-on-red turn signal.
+        let (xi, xo) = (0.34, wt - 0.06);
+        let xs = xo - 0.10;
+        let lamp = [
+            [xi, pz0 + 0.06],
+            [xs - 0.012, pz0 + 0.03],
+            [xs - 0.012, pz1 - 0.022],
+            [xi, pz1 - 0.035],
+        ];
+        face_poly(&mut k, &tk, false, sx, &lamp, 0.026);
+        let sig = [
+            [xs, pz0 + 0.028],
+            [xo, pz0 + 0.02],
+            [xo, pz1 - 0.02],
+            [xs, pz1 - 0.021],
+        ];
+        face_poly(&mut k, &ka, false, sx, &sig, 0.026);
+        let kb = sided(&dkey("taillight_bar_l", BodyRegion::Trunk, M::Grille), sx);
+        let zm = 0.5 * (pz0 + pz1) + 0.005;
+        k.rear_box(
+            &kb,
+            sx * xi,
+            sx * (xs - 0.012),
+            zm - 0.006,
+            zm + 0.006,
+            0.03,
+            0.0,
+        );
     }
     face_badge(
         &mut k,
@@ -790,14 +820,14 @@ pub fn bulwark(def: &VehicleDef) -> CarStyle {
         a_pillar_rake_deg: 5.0,
         rear_glass_rake_deg: Some(57.0),
         roof_len_trim: 0.12,
-        roof_dz: -0.02,
+        roof_dz: -0.04,
         roof_crown: 0.015,
         tumblehome: Some(0.17),
         belt_dz: 0.05,
         crease_z: 0.52,
         crease_depth: 0.010,
-        shoulder_round: 0.03,
-        haunch: 0.030,
+        shoulder_round: 0.02,
+        haunch: 0.040,
         flare: 0.008,
         arch_gap: 0.07,
         stance_pitch_deg: 0.3,
@@ -811,6 +841,10 @@ pub fn bulwark(def: &VehicleDef) -> CarStyle {
         drip_rail: TrimFinish::Chrome,
         fuel_door: FuelDoor::None,
         windshield_wrap_m: 0.05,
+        overhang_trim: (0.09, 0.08),
+        front_haunch: 0.025,
+        hood_valley: 0.015,
+        sill_tuck: 0.045,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.details.push(kit_detail(bulwark_kit));
@@ -838,7 +872,7 @@ pub fn bulwark(def: &VehicleDef) -> CarStyle {
 pub fn brigand(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         cabin_shift_m: -0.06,
-        nose_h: Some(0.74),
+        nose_h: Some(0.78),
         nose_rake_deg: 0.0,
         nose_plan_round: 0.08,
         tail_plan_round: 0.08,
@@ -848,13 +882,13 @@ pub fn brigand(def: &VehicleDef) -> CarStyle {
         a_pillar_rake_deg: 4.0,
         rear_glass_rake_deg: Some(48.0),
         roof_len_trim: 0.15,
-        roof_dz: 0.0,
+        roof_dz: 0.03,
         roof_crown: 0.010,
-        tumblehome: Some(0.15),
+        tumblehome: Some(0.12),
         belt_dz: 0.05,
         crease_z: 0.50,
         crease_depth: 0.008,
-        shoulder_round: 0.025,
+        shoulder_round: 0.015,
         haunch: 0.020,
         flare: 0.006,
         arch_gap: 0.08,
@@ -871,6 +905,8 @@ pub fn brigand(def: &VehicleDef) -> CarStyle {
         fuel_door: FuelDoor::None,
         windshield_wrap_m: 0.04,
         rear_glass_wrap_m: 0.02,
+        overhang_trim: (0.10, 0.10),
+        sill_tuck: 0.035,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.details.push(kit_detail(brigand_kit));
