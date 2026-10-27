@@ -156,6 +156,40 @@ pub fn lens(b: &mut Builder, p: &BodyProfile, key: &PartKey, lamp: &Lamp) {
 /// How far a [`bezel`] band stands off the surface, m (flush: it never shadows the lens rim).
 pub const BEZEL_LIFT_M: f32 = 0.001;
 
+/// A thin panel (grille, vent, intake surround, badge, applique …) of any part `key` draped on
+/// the body like a lens: the outline (any simple polygon, in `view`'s coordinates) cast onto the
+/// built body triangles, its face `face_m` over the surface (0.0005…0.10) and its edge wall down
+/// to `back_m` (−0.05…face; above 0 the panel floats as a plate and gets a back face too).
+/// `Kit::top_poly`, `Kit::side_poly` and `Kit::end_poly` wrap it.
+pub fn panel(
+    b: &mut Builder,
+    p: &BodyProfile,
+    key: &PartKey,
+    view: LampView,
+    outline: &[[f32; 2]],
+    face_m: f32,
+    back_m: f32,
+) {
+    let lamp = Lamp::new(view, outline.to_vec());
+    let Some(caster) = Caster::new(b, p, &lamp) else {
+        return;
+    };
+    let Some(mesh) = triangulate(outline, lamp.step_m) else {
+        return;
+    };
+    let face = face_m.clamp(0.0005, 0.10);
+    let back = back_m.clamp(-0.05, face - 0.0005);
+    shell(b, &caster, key, &mesh, face, back);
+    if back > 0.0 {
+        let hits = caster.cast_mesh(&mesh);
+        for t in &mesh.tris {
+            let q = [0, 1, 2].map(|i| add(hits[t[i]].0, scale(hits[t[i]].1, back)));
+            let n = norm(add(add(hits[t[0]].1, hits[t[1]].1), hits[t[2]].1));
+            b.poly_facing(key, &q, scale(n, -1.0));
+        }
+    }
+}
+
 /// A trim bezel `width_m` wide (0.003…0.05) round `lamp`'s outline into part `key`: a band
 /// [`BEZEL_LIFT_M`] over the surface from the lens edge outward, with a skirt into the body.
 /// Draw the lens with [`lens`] (same `lamp`) on top of it.
