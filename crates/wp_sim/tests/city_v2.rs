@@ -587,3 +587,72 @@ fn ramp_merges_are_driven_at_speed_without_contact() {
         );
     }
 }
+
+/// Owner playtest (2026-10-27): "massive drop on the side of the Loop 9 tunnel". Every tunnel
+/// deck is buried: the solid ground just past each side edge is level with the deck top (or
+/// higher, a hillside), never a drop, and the deck itself has no holes (per-segment roof boxes
+/// left wedge gaps on the outside of the Hollins Tunnel's bend). The last 8 m at each portal
+/// are left out: beside a junction there the backfill steps down to stay under its road.
+#[test]
+fn tunnel_decks_are_flush_with_the_ground_beside_them() {
+    let map = wp_world::CityMap::new(net().clone());
+    let mut phys = wp_sim::PhysicsWorld::new();
+    phys.set_city_ground(&map);
+    assert!(!net().covered.is_empty());
+    for span in &net().covered {
+        let sh = wp_world::covered::CoverShape::new(span);
+        let deck = sh.deck_half_width();
+        let top_of = |s: f32| {
+            wp_world::geom::point_at(&span.centre, &sh.cum, s).0[2]
+                + span.clearance_m
+                + wp_world::covered::ROOF_M
+        };
+        let (mut worst_drop, mut worst_hole) = ((0.0f32, 0.0f32, 0.0f32), (0.0f32, 0.0f32, 0.0f32));
+        let mut s = 8.0;
+        while s < sh.length() - 8.0 {
+            let (c, d) = wp_world::geom::point_at(&span.centre, &sh.cum, s);
+            let right = [d[1], -d[0]];
+            let at = |lat: f32| [c[0] + right[0] * lat, c[1] + right[1] * lat];
+            let top = top_of(s);
+            let ground = |lat: f32| {
+                phys.static_ground_z(at(lat), top + 300.0, 600.0)
+                    .expect("ground everywhere")
+            };
+            // On the deck: nothing lower than its top.
+            let mut lat = -deck + 0.5;
+            while lat < deck - 0.5 {
+                let hole = top - ground(lat);
+                if hole > worst_hole.0 {
+                    worst_hole = (hole, s, lat);
+                }
+                lat += 1.0;
+            }
+            // Just past each side edge (1-3 m): at most a kerb's step down.
+            for side in [-1.0f32, 1.0] {
+                for off in [1.0f32, 2.0, 3.0] {
+                    let drop = top - ground(side * (deck + off));
+                    if drop > worst_drop.0 {
+                        worst_drop = (drop, s, side * (deck + off));
+                    }
+                }
+            }
+            s += 2.0;
+        }
+        assert!(
+            worst_hole.0 < 0.3,
+            "{}: hole {:.2} m deep in the deck at s {:.0} lat {:.1}",
+            span.name,
+            worst_hole.0,
+            worst_hole.1,
+            worst_hole.2
+        );
+        assert!(
+            worst_drop.0 < 1.5,
+            "{}: ground {:.2} m below the deck edge at s {:.0} lat {:.1}",
+            span.name,
+            worst_drop.0,
+            worst_drop.1,
+            worst_drop.2
+        );
+    }
+}
