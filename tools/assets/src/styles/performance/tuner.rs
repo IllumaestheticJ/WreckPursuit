@@ -6,7 +6,7 @@
 //! Each car has its own body knobs and kit (car-shapes phase 2, 2026-10-27; references in
 //! `docs/integration/car-shapes-tuner.md`). Genre cues: wings that belong to the stock car
 //! (pedestal wings on the rally saloons, a hoop wing on the GT, a boot lip on the sedan),
-//! shaped lamps (swept, angular, quad round, twin round with rings), real grille and intake
+//! shaped lamps (swept, angular, twin round, wide two-tier tails), real grille and intake
 //! shapes, a dropped stance on aftermarket-looking wheels.
 //!
 //! Local helpers ([`face_poly`], [`swept_top_lamp`]) give lamps and grilles non-box outlines
@@ -203,7 +203,7 @@ fn blank_badge(k: &mut Kit, region: BodyRegion, front: bool, z: f32, w: f32, h: 
 // ---------------------------------------------------------------------- kestrel_ts
 
 /// Mid-2000s Japanese sport sedan with the rally-bred look (`kestrel_ts`): high belt, swept
-/// lamps running back into the fenders, hexagonal upper grille with a chrome bar, wide
+/// lamps running back into the fenders, a slatted trapezoid upper slot, wide
 /// trapezoid lower mouth with fog pods, top-mount intercooler scoop, box flares, tall
 /// pedestal wing, round-element tails, roof vent, mud flaps, gold wheels.
 pub fn kestrel(def: &VehicleDef) -> CarStyle {
@@ -296,27 +296,23 @@ fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.07,
         );
     }
-    // Hexagonal upper grille with a chrome bar and a blank badge.
+    // Trapezoid upper slot grille (wider at the top) with two dark slats and a blank badge.
     let (gz0, gz1) = (nz1 - 0.11, nz1 - 0.03);
     let g = dkey("grille", BodyRegion::Hood, M::Grille);
     face_poly(
         &mut k,
         &g,
         true,
-        &[
-            [-0.30, gz1],
-            [0.30, gz1],
-            [0.33, 0.5 * (gz0 + gz1)],
-            [0.24, gz0],
-            [-0.24, gz0],
-            [-0.33, 0.5 * (gz0 + gz1)],
-        ],
+        &[[-0.31, gz1], [0.31, gz1], [0.26, gz0], [-0.26, gz0]],
         0.006,
     );
-    let gb = dkey("grille_bar", BodyRegion::Hood, M::Chrome);
+    let gb = dkey("grille_slats", BodyRegion::Hood, M::Trim);
+    for t in [0.35, 0.68] {
+        let z = gz0 + t * (gz1 - gz0);
+        k.front_box(&gb, -0.27, 0.27, z - 0.006, z + 0.006, 0.012, 0.0);
+    }
     let zg = 0.5 * (gz0 + gz1);
-    k.front_box(&gb, -0.31, 0.31, zg - 0.008, zg + 0.008, 0.016, 0.003);
-    blank_badge(&mut k, BodyRegion::Hood, true, zg, 0.11, 0.05);
+    blank_badge(&mut k, BodyRegion::Hood, true, zg, 0.09, 0.04);
     // Wide trapezoid lower mouth with a mesh, fog pods in the corners.
     let (zm0, zm1) = (nz0 + 0.06, nz0 + 0.26);
     let lm = dkey("lower_mouth", fb, M::Grille);
@@ -1276,7 +1272,7 @@ fn shiro_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 /// well back under a bubble roof that narrows into a teardrop canopy, a big glass hatch
 /// running down to a high tail, soft rounded flanks and fat rear haunches. Triple projector
 /// lamps under long clear covers, a big rounded central mouth with a body-colour bar, fender
-/// vents, a hoop wing over the hatch, quad round tails in a body-wide smoked panel.
+/// vents, a hoop wing over the hatch, wide two-tier tails in a body-wide smoked panel.
 pub fn hakone(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         cabin_shift_m: -0.14,
@@ -1466,7 +1462,7 @@ fn hakone_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         }
     }
 
-    // --- Rear: hoop wing, quad round tails in a body-wide smoked panel, centre garnish.
+    // --- Rear: hoop wing, wide two-tier tails in a body-wide smoked panel, centre garnish.
     k.hoop_wing(0.42, 0.20, 0.12, M::Paint);
     let (pz0, pz1) = (tz1 - 0.20, tz1 - 0.025);
     k.rear_panel(
@@ -1478,18 +1474,46 @@ fn hakone_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         M::Grille,
     );
     let zc = 0.5 * (pz0 + pz1);
-    let r = (0.5 * (pz1 - pz0) - 0.02).min(0.068);
     for sx in SIDES {
-        let tk = taillight_key(sx);
+        // One wide lens per side with rounded outer corners: red outboard, amber inboard.
+        let (za, zb) = (pz0 + 0.025, pz1 - 0.02);
+        let (xi, xo) = (wt - 0.44, wt - 0.05);
+        let xs = xi + 0.11;
+        let c = 0.04;
+        let o = on_side(
+            sx,
+            &[
+                [xs + 0.008, za],
+                [xo - c, za],
+                [xo, za + c],
+                [xo, zb - c],
+                [xo - c, zb],
+                [xs + 0.008, zb],
+            ],
+        );
+        face_poly(&mut k, &taillight_key(sx), false, &o, 0.024);
+        let o = on_side(sx, &[[xi, za + 0.01], [xs, za], [xs, zb], [xi, zb - 0.01]]);
+        face_poly(
+            &mut k,
+            &indicator_rear_key(sx, M::EmissiveAmber),
+            false,
+            &o,
+            0.024,
+        );
+        // A dark horizontal bar across the red lens (two-tier tail).
         let kr = sided(
-            &dkey("taillight_ring_l", BodyRegion::RearLeftQuarter, M::Chrome),
+            &dkey("taillight_bar_l", BodyRegion::RearLeftQuarter, M::Trim),
             sx,
         );
-        k.round_lamp(&tk, false, sx * (wt - 0.12), zc, r, 0.03, Some(&kr));
-        // The inner round lamp of each pair is the amber turn signal.
-        let ka = indicator_rear_key(sx, M::EmissiveAmber);
-        let xi = wt - 0.12 - 2.45 * r;
-        k.round_lamp(&ka, false, sx * xi, zc, r, 0.03, Some(&kr));
+        k.rear_box(
+            &kr,
+            sx * (xs + 0.02),
+            sx * (xo - 0.02),
+            zc - 0.005,
+            zc + 0.005,
+            0.030,
+            0.0,
+        );
     }
     let kg = dkey("tail_garnish", BodyRegion::Trunk, M::Chrome);
     k.rear_box(&kg, -0.22, 0.22, zc - 0.012, zc + 0.012, 0.016, 0.004);
@@ -1508,8 +1532,9 @@ fn hakone_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 /// 2000s German FR sport sedan with a high-revving six (`sperber_32`): long bonnet with a
 /// power dome and the cabin set well back (long dash-to-axle), a crisp notchback with a
 /// short boot and an integrated boot-lid lip, a sharp shoulder line, wide C-pillars. Split
-/// twin grille, twin round lamps with light rings under one cover, three-part front intake,
-/// fender gills, L-shaped tails wrapping onto the quarters, carbon roof, diffuser, quad tips.
+/// full-width grille with a body-colour bar, twin round lamps under one cover, three-part
+/// front intake, fender gills, horizontal tails wrapping onto the quarters, carbon roof,
+/// diffuser, quad tips.
 pub fn sperber(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         cabin_shift_m: -0.16,
@@ -1574,7 +1599,6 @@ pub fn sperber(def: &VehicleDef) -> CarStyle {
 fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
     let p = ctx.profile;
-    let yn = k.yn;
     let yt = k.yt;
     let wn = k.wn();
     let wt = k.wt();
@@ -1582,51 +1606,46 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let (_, tz1) = k.tail_z();
     let fb = BodyRegion::FrontBumper;
 
-    // --- Front: split twin grille (two rounded chrome-framed halves with vertical slats).
-    let (gz0, gz1) = (nz1 - 0.14, nz1 - 0.015);
+    // --- Front: one full-width grille between the lamps (rounded corners, dark mesh) split
+    // by a body-colour horizontal bar.
+    let (gz0, gz1) = (nz1 - 0.13, nz1 - 0.025);
+    let rounded = |x: f32, z0: f32, z1: f32, c: f32| {
+        [
+            [-x, z0 + c],
+            [-x + c, z0],
+            [x - c, z0],
+            [x, z0 + c],
+            [x, z1 - c],
+            [x - c, z1],
+            [-x + c, z1],
+            [-x, z1 - c],
+        ]
+    };
+    let gf = dkey("grille_frame", BodyRegion::Hood, M::Trim);
+    face_poly(&mut k, &gf, true, &rounded(0.25, gz0, gz1, 0.03), 0.010);
+    let g = dkey("grille", BodyRegion::Hood, M::Grille);
+    face_poly(
+        &mut k,
+        &g,
+        true,
+        &rounded(0.235, gz0 + 0.012, gz1 - 0.012, 0.024),
+        0.014,
+    );
+    k.mesh_grille(
+        "grille_mesh",
+        BodyRegion::Hood,
+        0.22,
+        gz0 + 0.02,
+        gz1 - 0.02,
+        2,
+        8,
+        M::Trim,
+    );
+    let gb = dkey("grille_bar", BodyRegion::Hood, M::Paint);
+    let zg = 0.5 * (gz0 + gz1);
+    k.front_box(&gb, -0.245, 0.245, zg - 0.012, zg + 0.012, 0.022, 0.006);
     for sx in SIDES {
-        let (x0, x1) = (0.03, 0.22);
-        let rounded = |x0: f32, x1: f32, z0: f32, z1: f32, c: f32| {
-            on_side(
-                sx,
-                &[
-                    [x0, z0 + c],
-                    [x0 + 0.4 * c, z0],
-                    [x1 - c, z0],
-                    [x1, z0 + c],
-                    [x1, z1 - c],
-                    [x1 - c, z1],
-                    [x0 + 0.4 * c, z1],
-                    [x0, z1 - c],
-                ],
-            )
-        };
-        let f = sided(&dkey("grille_frame_l", BodyRegion::Hood, M::Chrome), sx);
-        face_poly(&mut k, &f, true, &rounded(x0, x1, gz0, gz1, 0.03), 0.012);
-        let name = if sx < 0.0 { "grille_l" } else { "grille_r" };
-        let g = dkey(name, BodyRegion::Hood, M::Grille);
-        let e = 0.012;
-        face_poly(
-            &mut k,
-            &g,
-            true,
-            &rounded(x0 + e, x1 - e, gz0 + e, gz1 - e, 0.024),
-            0.016,
-        );
-        let s2 = sided(&dkey("grille_slats_l", BodyRegion::Hood, M::Chrome), sx);
-        for i in 1..6 {
-            let x = sx * (x0 + (x1 - x0) * i as f32 / 6.0);
-            k.front_box(
-                &s2,
-                x - 0.004,
-                x + 0.004,
-                gz0 + 0.02,
-                gz1 - 0.02,
-                0.020,
-                0.0,
-            );
-        }
-        // Twin round lamps with light rings under one clear cover.
+        // Twin round lamps under one clear cover.
         let kh = sided(
             &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
             sx,
@@ -1649,15 +1668,6 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         let xs = [0.38, (wn - 0.12).max(0.49)];
         for &x in &xs {
             k.round_lamp(&hk, true, sx * x, zl, r, 0.024, None);
-            k.b.torus(
-                &hk,
-                [sx * x, yn + 0.026, zl],
-                [0.0, 1.0, 0.0],
-                r + 0.010,
-                0.0045,
-                14,
-                4,
-            );
         }
         // Amber turn-signal strip in the inboard end of the housing.
         let ka = indicator_front_key(sx);
@@ -1683,18 +1693,6 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
         face_poly(&mut k, &kd, true, &o, 0.006);
     }
-    // Round blank badge on the bonnet's leading edge, standing on the surface.
-    let (pt, n) = p.top_point(yn - 0.05, 0.0);
-    let kb = dkey("badge_front", BodyRegion::Hood, M::Chrome);
-    k.b.cylinder(
-        &kb,
-        [pt[0] - 0.004 * n[0], pt[1], pt[2] - 0.004 * n[2]],
-        [pt[0] + 0.008 * n[0], pt[1], pt[2] + 0.008 * n[2]],
-        0.028,
-        0.028,
-        12,
-        true,
-    );
     let lm = dkey("lower_intake", fb, M::Grille);
     let (zm0, zm1) = (nz0 + 0.06, nz0 + 0.22);
     face_poly(
@@ -1723,11 +1721,7 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         let z0 = zf + 0.14;
         let kv = dkey("fender_gill_l", BodyRegion::FrontLeftFender, M::Grille);
         k.side_patch(&kv, sx, y0, y1, z0, z0 + 0.07, 0.002, 0.008, (2, 1));
-        let ks = dkey(
-            "fender_gill_slats_l",
-            BodyRegion::FrontLeftFender,
-            M::Chrome,
-        );
+        let ks = dkey("fender_gill_slats_l", BodyRegion::FrontLeftFender, M::Paint);
         for dz in [0.023, 0.047] {
             k.side_patch(
                 &ks,
@@ -1743,7 +1737,7 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         }
     }
 
-    // --- Rear: L-shaped tails wrapping onto the quarters, diffuser, carbon roof.
+    // --- Rear: horizontal tails wrapping onto the quarters, diffuser, carbon roof.
     for sx in SIDES {
         let tk = taillight_key(sx);
         let kh = sided(
@@ -1752,28 +1746,30 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
         let (z0, z1) = (tz1 - 0.15, tz1 - 0.03);
         k.rear_box(&kh, sx * 0.34, sx * (wt + 0.005), z0, z1, 0.012, 0.006);
-        // L: a bar along the top (its inboard end the amber turn signal) plus a leg down the
-        // outer end.
-        k.rear_cluster(
+        // One horizontal lens over the housing (amber strip along its bottom), tapering down
+        // toward the plate.
+        let (lz0, lz1) = (z0 + 0.012, z1 - 0.012);
+        let o = on_side(
             sx,
-            0.36,
-            wt - 0.01,
-            z1 - 0.05,
-            z1 - 0.012,
-            0.026,
-            0.006,
-            Seg::Inboard(0.10),
-            M::EmissiveAmber,
+            &[
+                [0.36, lz0 + 0.03],
+                [wt - 0.01, lz0 + 0.025],
+                [wt - 0.01, lz1],
+                [0.36, lz1],
+            ],
         );
-        k.rear_box(
-            &tk,
-            sx * (wt - 0.13),
-            sx * (wt - 0.01),
-            z0 + 0.012,
-            z1 - 0.05,
-            0.026,
-            0.006,
+        face_poly(&mut k, &tk, false, &o, 0.026);
+        let ka = indicator_rear_key(sx, M::EmissiveAmber);
+        let o = on_side(
+            sx,
+            &[
+                [0.53, lz0],
+                [wt - 0.03, lz0],
+                [wt - 0.03, lz0 + 0.018],
+                [0.53, lz0 + 0.022],
+            ],
         );
+        face_poly(&mut k, &ka, false, &o, 0.030);
         let kw = PartKey {
             kind: PartKind::Light,
             ..dkey(
@@ -1787,7 +1783,7 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             sx,
             yt + 0.01,
             yt + 0.14,
-            z1 - 0.05,
+            z0 + 0.04,
             z1 - 0.014,
             0.002,
             0.012,

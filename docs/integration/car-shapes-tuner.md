@@ -46,11 +46,11 @@ class).
 - **Reference:** a mid-2000s Japanese compact four-door sport sedan with a turbo four (a rally
   homologation family): 4.60 × 1.77 × 1.45 m, wheelbase 2.64 m, overhangs ~1.0 m each end, high
   belt line (glass ≈ a third of the height), ~60° windshield. Cues: swept lamps that run back
-  into the front fenders, hexagonal upper grille with a bright bar, wide trapezoid lower mouth
+  into the front fenders, a slatted upper slot, wide trapezoid lower mouth
   with fog pods in the corners, top-mount intercooler scoop, tall pedestal boot wing, round
   tail elements, roof vent, mud flaps, gold multi-spoke wheels.
 - **Changes:** swept surface-following head lamps (amber inboard segment) on dark housings
-  replace the rectangle + projector boxes; hexagonal grille with chrome bar and blank badge;
+  replace the rectangle + projector boxes; trapezoid slot grille with two slats and blank badge;
   trapezoid lower mouth with mesh; fog pods; bigger tail clusters with chrome-ringed round
   elements; rear reflectors; boot badge. Body: belt +3 cm, 60° windshield, slight roof arc,
   longer roof, wider C-pillar, higher cowl, rounder nose corners.
@@ -98,9 +98,11 @@ class).
   wheelbase 2.55 m; long low nose, cabin set well back under a bubble roof that narrows into a
   teardrop canopy, a big glass hatch to a high tail, soft rounded flanks, fat rear haunches.
   Cues: triple projector lamps under long clear covers, a big rounded central mouth with a
-  body-colour bar, a hoop wing over the hatch, quad round tails in a body-wide smoked panel.
+  body-colour bar, a hoop wing over the hatch, wide tails in a body-wide smoked panel.
 - **Changes:** long swept lamp covers over the triple projectors; octagonal central mouth with
-  mesh, body-colour bar and badge; shaped brake ducts; rear reflectors; plate recess. Body:
+  mesh, body-colour bar and badge; shaped brake ducts; the quad round tails (a well-known
+  brand signature) became one wide two-tier lens per side with rounded outer corners and an
+  amber inboard section; rear reflectors; plate recess. Body:
   bubble roof (`roof_arc` 0.55), C-pillar plan lean (teardrop canopy), belt +3.5 cm, more glass
   wrap, rounder ends.
 
@@ -108,15 +110,23 @@ class).
 - **Reference:** a 2000s German compact executive sport sedan with a naturally aspirated straight
   six: 4.49 × 1.78 × 1.37 m, wheelbase 2.73 m; long bonnet with the cabin set back (long
   dash-to-axle), crisp notchback, short boot with an integrated lip, sharp shoulder line, wide
-  C-pillars. Cues: a split twin grille, twin round lamps with light rings under one cover,
-  three-part front intake, fender gills, L-shaped tails wrapping onto the quarters, power dome,
-  quad tips.
-- **Changes:** rounded chrome-framed twin grille halves with vertical slats; one shaped lamp
-  cover with twin round lamps and light rings (torus, in the headlight part); shaped outer
-  intakes; trapezoid centre intake; round badge on the bonnet; boot badge; chrome door handles
-  (generic trim). Body: power dome instead of a flat bulge, cabin set further back, longer
+  C-pillars. Cues: a low full-width grille between the lamps, twin round lamps under one
+  cover, three-part front intake, fender gills, horizontal tails wrapping onto the quarters,
+  power dome, quad tips.
+- **Changes:** one full-width rounded grille with a dark mesh and a body-colour split bar
+  (replaces the twin split grille, a carmaker's protected trade dress; the lamp light rings,
+  the L-shaped tails and the bonnet roundel went for the same reason); one shaped lamp cover
+  with twin round lamps; horizontal tails tapering toward the plate with an amber lower strip,
+  wrapping onto the quarters; shaped outer intakes; trapezoid centre intake; boot badge;
+  dark fender gills with body-colour slats; chrome door handles (generic trim). Body: power dome instead of a flat bulge, cabin set further back, longer
   roof (0.92 m), wider C-pillar, belt +3.5 cm, higher cowl; the separate boot-lip part is
   replaced by the integrated ducktail.
+
+## Brand cues removed (CLAUDE.md rule 9, lead review 2026-10-27)
+Rule 9 covers trade dress as well as names. Removed: sperber's twin split grille, lamp light
+rings, L-shaped tails and bonnet roundel; hakone's quad round tails; kestrel's hexagon grille
+with a bright wing bar. What remains are generic era / body-type cues (swept lamps, square
+lamps with amber corners, intercooler mesh, pedestal wings, hoop wing, horizontal tails).
 
 ## Triangle counts
 
@@ -124,12 +134,12 @@ Hero budget 22k (mid LOD 7k); all six within it.
 
 | car | full before → after | mid before → after |
 |---|---|---|
-| kestrel_ts | 18914 → 19074 | 5051 → 5459 |
+| kestrel_ts | 18914 → 19030 | 5051 → 5451 |
 | arashi_t4 | 18292 → 18022 | 4962 → 4624 |
 | talus_20t | 17376 → 17680 | 4464 → 4646 |
 | shiro_turbo | 18992 → 18956 | 5040 → 5006 |
-| hakone_gt | 18873 → 19215 | 4826 → 5154 |
-| sperber_32 | 19112 → 19572 | 4942 → 5130 |
+| hakone_gt | 18873 → 18887 | 4826 → 4890 |
+| sperber_32 | 19112 → 18752 | 4942 → 5110 |
 
 The rows of `every_car_has_turn_signals_integrated_into_its_lamps`'s table for these six cars
 were rebased to the new counts (the phase-1 doc asks per-car passes above +2 % to do this).
