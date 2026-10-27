@@ -20,6 +20,7 @@
 
 pub mod builder;
 pub mod crumple;
+pub mod lamp;
 pub mod mechanical;
 pub mod mesh;
 pub mod profile;
