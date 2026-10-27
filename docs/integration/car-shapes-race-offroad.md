@@ -148,14 +148,18 @@ because the coarse one cut under the crowned windshield and flickered.
     detail cannot be turned off from the style (the mechanical table forces it).
   - **Merlo:** coarse hood / trunk stripe grids, no head-lamp bezel.
   - **Mesquite:** grille 2 × 4, two bypass shocks per side instead of three.
-- New knobs: nose face rake + chin and a tail chin on the race cars (Morrigan 20° / 0.08 /
-  0.06, Nyx 25° / 0.10 / 0.08, Merlo 12° / 0.06 / 0.05); Mesquite `hood_dz` (0.06, 0.12) with
-  `nose_h` 1.30 for the tall flat truck hood. `tail_face_rake_deg` stays 0.
+- New knobs: nose face rake on the race cars (Morrigan 12°, Nyx 15°, Merlo 12°); Mesquite
+  `hood_dz` (0.06, 0.12) with `nose_h` 1.30 for the tall flat truck hood. Chins are 0 (lead
+  check, 2026-10-27): in low smooth-shaded views of the real renderer the nose chin swept the
+  face back over the mouth grille, brake ducts and intakes (they vanished); with the chins at 0
+  the steeper rakes (20° / 25°) put a sliver of the head lamps under the hood
+  (`lights_sit_outside_the_shell`), hence 12° / 15°. `tail_face_rake_deg` and the tail chins
+  stay 0.
 - Smooth shading in the real renderer (`e2e/smooth_shots.mjs`): no seams or flipped faces on the
   five cars. One fix it and the low views exposed: door number panels cut under the bulged door
   side (now 3 rows, 8 mm off).
 - Low rear 3/4 and low side views: no spikes under the faces.
-- Triangles (full / mid): morrigan 21 906 / 6 294, nyx 21 714 / 6 425, merlo 21 915 / 5 607,
+- Triangles (full / mid): morrigan 21 860 / 6 274, nyx 21 423 / 6 424, merlo 21 899 / 5 569,
   mesquite 21 457 / 6 996, erg 21 126 / 6 398 (budgets 22k / 7k).
 - Final sheet: `docs/media/car-shapes/race-offroad/final.jpg` (each row one car: original `main`
   mesh and final mesh, front / rear / side / top). Per-car `<car>_before_after.jpg` refreshed

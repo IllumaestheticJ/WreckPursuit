@@ -214,10 +214,11 @@ pub fn morrigan(def: &VehicleDef) -> CarStyle {
         front_fender_rise_m: 0.08,
         rear_fender_rise_m: 0.06,
         fender_peak_w: 0.65,
-        // Raked nose face over a chin undercut (splitter lip), tucked diffuser tail.
-        nose_face_rake_deg: 20.0,
-        nose_chin_m: 0.08,
-        tail_chin_m: 0.06,
+        // Raked nose face. Chins stay 0: in the smooth-shaded renderer a chin swept the face
+        // back over the mouth grille and brake ducts (they vanished from low views).
+        nose_face_rake_deg: 12.0,
+        nose_chin_m: 0.0,
+        tail_chin_m: 0.0,
         side_sculpt: vec![
             SideSculpt {
                 y0_m: fy - fr - 0.85,
@@ -547,9 +548,9 @@ pub fn nyx(def: &VehicleDef) -> CarStyle {
         front_fender_rise_m: 0.11,
         rear_fender_rise_m: 0.09,
         fender_peak_w: 0.68,
-        nose_face_rake_deg: 25.0,
-        nose_chin_m: 0.10,
-        tail_chin_m: 0.08,
+        nose_face_rake_deg: 15.0,
+        nose_chin_m: 0.0,
+        tail_chin_m: 0.0,
         tumblehome_m: Some(0.34),
         plan_width: vec![
             [fy + fr + 0.05, 1.0],
@@ -993,8 +994,8 @@ pub fn merlo(def: &VehicleDef) -> CarStyle {
         rocker_in_m: 0.035,
         front_fender_rise_m: 0.02,
         nose_face_rake_deg: 12.0,
-        nose_chin_m: 0.06,
-        tail_chin_m: 0.05,
+        nose_chin_m: 0.0,
+        tail_chin_m: 0.0,
         nose_h: Some(0.60),
         nose_rake_deg: 30.0,
         nose_plan_round: 0.28,
