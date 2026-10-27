@@ -119,6 +119,9 @@ fn cruiser() -> CarStyle {
         &["POLICE", "PORT VESPER", "DIAL 911"],
     );
     steel_wheels(&mut s, 5, CapKind::Small);
+    // 21 segments (hero default 24): keeps the car inside the 22k budget after the shared
+    // car-shapes regeneration; smooth shading hides the difference.
+    s.wheel.segments = 21;
     s.mechanical.engine = EngineKind::V8;
     s.mechanical.exhaust = ExhaustKind::Dual;
     s.mechanical.caliper_rgb = Some(BLACK_CALIPER);
@@ -231,6 +234,9 @@ fn wolfhound() -> CarStyle {
         &["HIGHWAY PATROL", "PORT VESPER"],
     );
     steel_wheels(&mut s, 5, CapKind::Small);
+    // 21 segments (hero default 24): keeps the car inside the 22k budget after the shared
+    // car-shapes regeneration; smooth shading hides the difference.
+    s.wheel.segments = 21;
     s.mechanical.engine = EngineKind::V6;
     s.mechanical.induction = Induction::Turbo;
     s.mechanical.exhaust = ExhaustKind::Dual;
@@ -359,6 +365,9 @@ fn vigil() -> CarStyle {
     s.wheel.cap = CapKind::Small;
     s.wheel.face_depth_m = 0.035;
     s.wheel.rim_radius_m = None;
+    // 21 segments (hero default 24): keeps the car inside the 22k budget after the shared
+    // car-shapes regeneration; smooth shading hides the difference.
+    s.wheel.segments = 21;
     s.mechanical.engine = EngineKind::V8;
     s.mechanical.induction = Induction::Blower;
     s.mechanical.exhaust = ExhaustKind::Quad;

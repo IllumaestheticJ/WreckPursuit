@@ -79,7 +79,20 @@ fn plate(k: &mut Kit, front: bool, z: f32) {
     let kp = dkey(name, region, M::Metal);
     let kr = dkey(&format!("{name}_recess"), region, M::Grille);
     let (hw, hh) = (0.26, 0.075);
-    if front {
+    let raked = k.p.style.nose_face_rake_deg.abs() > 0.5 || k.p.style.nose_chin_m > 0.0;
+    if front && !raked {
+        // Upright face: plain boxes are cheaper.
+        k.front_box(
+            &kr,
+            -hw - 0.02,
+            hw + 0.02,
+            z - hh - 0.02,
+            z + hh + 0.02,
+            0.006,
+            0.0,
+        );
+        k.front_box(&kp, -hw, hw, z - hh, z + hh, 0.012, 0.004);
+    } else if front {
         // Projected: follows a raked nose face.
         let (x, zr) = ((-hw - 0.02, hw + 0.02), (z - hh - 0.02, z + hh + 0.02));
         proj_rect(k, &kr, true, x, zr, 0.004);
@@ -371,7 +384,7 @@ pub fn cruiser(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         gz0,
         gz0 + 0.10,
         gz1,
-        2,
+        1,
         0,
         M::Trim,
         M::Chrome,

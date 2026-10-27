@@ -25,6 +25,7 @@ import { LENS_ON } from "./lights";
 import { sim, type CarModelInfo } from "../wasm/sim";
 import { PALETTE, type Hex } from "./palette";
 import { artStyle } from "./style";
+import { buildCrease, updateCrease } from "./crease";
 
 /** Cars nearer than this (to the camera) get the mid-LOD instanced mesh, m (default; the
  * graphics profiles set `Fleet.fullLodM`, render/quality.ts). */
@@ -230,7 +231,7 @@ interface Chunk {
 
 /** Merge parts into one non-indexed geometry with a flat vertex colour per part (and UVs when
  * `withUv`: 0..1 from the mesh file's 0..65535). */
-function merge(chunks: Chunk[], withUv = false): THREE.BufferGeometry {
+function merge(chunks: Chunk[], withUv = false, smooth = false): THREE.BufferGeometry {
   let n = 0;
   for (const c of chunks) n += c.idx.length;
   const pos = new Float32Array(n * 3);
@@ -259,8 +260,42 @@ function merge(chunks: Chunk[], withUv = false): THREE.BufferGeometry {
   g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
   g.setAttribute("color", new THREE.BufferAttribute(col, 3));
   if (uv) g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-  g.computeVertexNormals();
+  if (smooth) g.setAttribute("normal", new THREE.BufferAttribute(creaseNormals(chunks, n), 3));
+  else g.computeVertexNormals();
   return g;
+}
+
+/**
+ * Per-corner crease-split normals of merged chunks (the order `merge` writes corners in), as
+ * the near cars' paint batches have (render/crease.ts), so a car promoted or demoted between the
+ * panel mesh and the fleet keeps its shading.
+ */
+function creaseNormals(chunks: Chunk[], corners: number): Float32Array {
+  let nv = 0;
+  for (const c of chunks) nv += c.pos.length / 3;
+  const src = new Float32Array(nv * 3);
+  const index = new Uint32Array(corners);
+  let v0 = 0;
+  let i0 = 0;
+  for (const c of chunks) {
+    src.set(c.pos, v0 * 3);
+    for (let i = 0; i < c.idx.length; i++) index[i0 + i] = c.idx[i] + v0;
+    v0 += c.pos.length / 3;
+    i0 += c.idx.length;
+  }
+  const crease = buildCrease(src, index);
+  const nr = crease.map.length;
+  const rpos = new Float32Array(nr * 3);
+  const rnrm = new Float32Array(nr * 3);
+  updateCrease(crease, src, crease.index, rpos, rnrm);
+  const out = new Float32Array(corners * 3);
+  for (let i = 0; i < corners; i++) {
+    const r = crease.index[i] * 3;
+    out[i * 3] = rnrm[r];
+    out[i * 3 + 1] = rnrm[r + 1];
+    out[i * 3 + 2] = rnrm[r + 2];
+  }
+  return out;
 }
 
 /** A box as non-indexed triangles with a flat vertex colour. */
@@ -430,8 +465,9 @@ export function fullGeoms(mesh: CarMeshJson, info: CarModelInfo, police = false,
   const hasLens = lens.L.length + lens.R.length > 0;
   // The mesh's own tail-light parts sit inside the shell; the markers are what shows.
   return {
-    paint: merge(paint),
-    liv: liv.length ? merge(liv, true) : null,
+    // The painted body smooth-shaded like the near cars' (render/crease.ts).
+    paint: merge(paint, false, true),
+    liv: liv.length ? merge(liv, true, true) : null,
     detail: merge(detail),
     tail: join([merge(tail), lamps.tail]),
     head: lamps.head,
@@ -794,7 +830,7 @@ export class FleetModel {
     const g = fullGeoms(mesh, this.info, this.police, !this.police);
     if (g.liv) {
       const tex = liveryTexture(mesh, 8, this.county);
-      this.livMat = new THREE.MeshStandardMaterial({ map: tex, flatShading: true, metalness: 0.25, roughness: 0.55 });
+      this.livMat = new THREE.MeshStandardMaterial({ map: tex, flatShading: artStyle.lowpoly, metalness: 0.25, roughness: 0.55 });
       applyCarEnv(this.livMat, !artStyle.lowpoly);
       this.liveryBase = liveryBaseColour(mesh, this.county)?.getHex() ?? null;
     }
@@ -880,6 +916,11 @@ export class Fleet {
     const paint = this.mats.paint as THREE.MeshStandardMaterial;
     const detail = this.mats.detail as THREE.MeshStandardMaterial;
     paint.roughness = lowpoly ? 0.85 : 0.55;
+    // Smooth-shaded paint in greybox (crease normals baked into the geometry), faceted in low-poly.
+    if (paint.flatShading !== lowpoly) {
+      paint.flatShading = lowpoly;
+      paint.needsUpdate = true;
+    }
     paint.metalness = lowpoly ? 0.15 : 0.25;
     detail.roughness = lowpoly ? 0.85 : 0.6;
     // Image-based lighting in greybox, as the panel meshes (render/panels.ts applyCarEnv).
