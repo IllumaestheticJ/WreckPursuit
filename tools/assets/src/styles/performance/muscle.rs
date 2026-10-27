@@ -160,6 +160,31 @@ fn side_moulding(
     }
 }
 
+/// Patch on the greenhouse side above the belt (`PatchBand::Greenhouse`), both sides: built on
+/// the left into `key_left`, mirrored into its right key.
+#[allow(clippy::too_many_arguments)]
+fn greenhouse_patch(
+    k: &mut Kit,
+    key_left: &PartKey,
+    y0: f32,
+    y1: f32,
+    z0: f32,
+    z1: f32,
+    off: f32,
+    thick: f32,
+) {
+    k.patch(
+        key_left,
+        y0,
+        y1,
+        PatchBand::Greenhouse { z0, z1 },
+        off,
+        thick,
+        (3, 2),
+    );
+    k.b.mirror_part(&key_left.name, &sided(key_left, 1.0));
+}
+
 /// Small blank badge (chrome disc standing out of the nose or tail face) at (x, z).
 fn face_badge(k: &mut Kit, name: &str, region: BodyRegion, front: bool, x: f32, z: f32, r: f32) {
     let key = dkey(name, region, M::Chrome);
@@ -213,7 +238,7 @@ pub fn ironside(def: &VehicleDef) -> CarStyle {
         windshield_wrap_m: 0.05,
         hood_valley: 0.0,
         ride_dz: 0.01,
-        overhang_trim: (0.05, 0.06),
+        overhang_trim: (0.05, 0.0),
         sill_tuck: 0.05,
         deck_drop: 0.02,
         ..BodyStyle::preset(Silhouette::Notchback)
@@ -244,6 +269,7 @@ pub fn ironside(def: &VehicleDef) -> CarStyle {
     b.rocker_in_m = 0.03;
     b.roof_plan_taper = 0.08;
     b.lower_lean_in_m = 0.03;
+    b.dlo_top_drop_m = 0.03;
     wheels(
         &mut s,
         def,
@@ -590,6 +616,9 @@ pub fn rampart(def: &VehicleDef) -> CarStyle {
     b.nose_face_rake_deg = -6.0;
     b.roof_plan_taper = 0.12;
     b.lower_lean_in_m = 0.03;
+    // One even fastback fall from just behind the header.
+    b.roof_arc = 0.85;
+    b.roof_arc_rear_exp = 1.4;
     wheels(
         &mut s,
         def,
@@ -1017,6 +1046,8 @@ pub fn brigand(def: &VehicleDef) -> CarStyle {
     b.fender_peak_w = 0.88;
     b.side_sculpt = vec![char_line(def, 0.60, 0.63, 0.018)];
     b.rocker_in_m = 0.02;
+    // Formal roof: blind C-pillar (quarter opening painted) carrying an opera window (kit).
+    b.quarter_glass = false;
     wheels(
         &mut s,
         def,
@@ -1512,6 +1543,26 @@ fn sedan70_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder, v: Sedan70) {
             hw,
             M::Trim,
         );
+        // Opera windows in the blind C-pillars: glass in a chrome ring.
+        let (ow0, ow1) = (r0 - 0.20, r0 - 0.05);
+        let zo = p.belt(r0) + 0.09;
+        let ring = dkey(
+            "opera_window_ring_l",
+            BodyRegion::RearLeftQuarter,
+            M::Chrome,
+        );
+        greenhouse_patch(
+            &mut k,
+            &ring,
+            ow0 - 0.015,
+            ow1 + 0.015,
+            zo - 0.015,
+            zo + 0.135,
+            0.002,
+            0.004,
+        );
+        let glass = dkey("opera_window_l", BodyRegion::RearLeftQuarter, M::Glass);
+        greenhouse_patch(&mut k, &glass, ow0, ow1, zo, zo + 0.12, 0.005, 0.004);
         let kb = dkey("landau_band", BodyRegion::Roof, M::Chrome);
         k.patch(
             &kb,

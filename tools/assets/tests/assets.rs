@@ -928,7 +928,7 @@ fn lights_move_with_the_front_and_rear_structure() {
 /// guarding foundation growth; a deliberate per-car detail pass updates its row.
 const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
     ("arashi_t4", 18292),
-    ("brigand_400", 21463),
+    ("brigand_400", 21639),
     ("bulwark_400", 20825),
     ("debug_coupe", 17927),
     ("debug_sedan", 9605),
@@ -937,7 +937,7 @@ const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
     ("furrow_24", 9414),
     ("hakone_gt", 18873),
     ("hauler_1500", 10625),
-    ("ironside_440", 20278),
+    ("ironside_440", 20055),
     ("junkyard_beater", 8836),
     ("kestrel_ts", 18914),
     ("lindwurm_4t", 17474),
