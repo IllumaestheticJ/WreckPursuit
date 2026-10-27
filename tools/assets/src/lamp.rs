@@ -142,6 +142,13 @@ pub fn split_outline(outline: &[[f32; 2]], axis: usize, at: f32) -> (Vec<[f32; 2
 
 /// The lens of `lamp` into part `key` (a face following the surface, with a rim wall).
 pub fn lens(b: &mut Builder, p: &BodyProfile, key: &PartKey, lamp: &Lamp) {
+    let before = b.vertex_count(&key.name);
+    lens_inner(b, p, key, lamp);
+    let after = b.vertex_count(&key.name);
+    b.mark_placed(&key.name, before, after);
+}
+
+fn lens_inner(b: &mut Builder, p: &BodyProfile, key: &PartKey, lamp: &Lamp) {
     let Some(caster) = Caster::new(b, p, lamp) else {
         return;
     };
@@ -156,10 +163,66 @@ pub fn lens(b: &mut Builder, p: &BodyProfile, key: &PartKey, lamp: &Lamp) {
 /// How far a [`bezel`] band stands off the surface, m (flush: it never shadows the lens rim).
 pub const BEZEL_LIFT_M: f32 = 0.001;
 
+/// A thin panel (grille, vent, intake surround, badge, applique …) of any part `key` draped on
+/// the body like a lens: the outline (any simple polygon, in `view`'s coordinates) cast onto the
+/// built body triangles, its face `face_m` over the surface (0.0005…0.10) and its edge wall down
+/// to `back_m` (−0.05…face; above 0 the panel floats as a plate and gets a back face too).
+/// `Kit::top_poly`, `Kit::side_poly` and `Kit::end_poly` wrap it.
+pub fn panel(
+    b: &mut Builder,
+    p: &BodyProfile,
+    key: &PartKey,
+    view: LampView,
+    outline: &[[f32; 2]],
+    face_m: f32,
+    back_m: f32,
+) {
+    let before = b.vertex_count(&key.name);
+    panel_inner(b, p, key, view, outline, face_m, back_m);
+    let after = b.vertex_count(&key.name);
+    b.mark_placed(&key.name, before, after);
+}
+
+fn panel_inner(
+    b: &mut Builder,
+    p: &BodyProfile,
+    key: &PartKey,
+    view: LampView,
+    outline: &[[f32; 2]],
+    face_m: f32,
+    back_m: f32,
+) {
+    let lamp = Lamp::new(view, outline.to_vec());
+    let Some(caster) = Caster::new(b, p, &lamp) else {
+        return;
+    };
+    let Some(mesh) = triangulate(outline, lamp.step_m) else {
+        return;
+    };
+    let face = face_m.clamp(0.0005, 0.10);
+    let back = back_m.clamp(-0.05, face - 0.0005);
+    shell(b, &caster, key, &mesh, face, back);
+    if back > 0.0 {
+        let hits = caster.cast_mesh(&mesh);
+        for t in &mesh.tris {
+            let q = [0, 1, 2].map(|i| add(hits[t[i]].0, scale(hits[t[i]].1, back)));
+            let n = norm(add(add(hits[t[0]].1, hits[t[1]].1), hits[t[2]].1));
+            b.poly_facing(key, &q, scale(n, -1.0));
+        }
+    }
+}
+
 /// A trim bezel `width_m` wide (0.003…0.05) round `lamp`'s outline into part `key`: a band
 /// [`BEZEL_LIFT_M`] over the surface from the lens edge outward, with a skirt into the body.
 /// Draw the lens with [`lens`] (same `lamp`) on top of it.
 pub fn bezel(b: &mut Builder, p: &BodyProfile, key: &PartKey, lamp: &Lamp, width_m: f32) {
+    let before = b.vertex_count(&key.name);
+    bezel_inner(b, p, key, lamp, width_m);
+    let after = b.vertex_count(&key.name);
+    b.mark_placed(&key.name, before, after);
+}
+
+fn bezel_inner(b: &mut Builder, p: &BodyProfile, key: &PartKey, lamp: &Lamp, width_m: f32) {
     let Some(caster) = Caster::new(b, p, lamp) else {
         return;
     };
@@ -236,6 +299,20 @@ pub fn element(
     at: [f32; 2],
     el: &Element,
 ) {
+    let before = b.vertex_count(&key.name);
+    element_inner(b, p, key, lamp, at, el);
+    let after = b.vertex_count(&key.name);
+    b.mark_placed(&key.name, before, after);
+}
+
+fn element_inner(
+    b: &mut Builder,
+    p: &BodyProfile,
+    key: &PartKey,
+    lamp: &Lamp,
+    at: [f32; 2],
+    el: &Element,
+) {
     let face = lamp.proud_m.clamp(0.002, 0.03);
     match el {
         Element::Strip { pts, w_m } => {
@@ -297,6 +374,96 @@ pub fn element(
     }
 }
 
+/// Kit parts on a raked / undercut end face (`nose_face_rake_deg`, `nose_chin_m`, tail likewise):
+/// every detail / light vertex from 8 cm behind to 30 cm ahead of the old vertical end plane
+/// moves along y by the face's set-back at its own x / z (the body triangles cast from ahead /
+/// behind), so boxes, grilles, generic lamps, push bars, splitters and badges that kits place on
+/// the old face sit on the raked one. Vertices already placed on the surface (projected lamps and panels, surface patches; see
+/// `Builder::mark_placed`) are left alone. No-op when the end has no face profile. Run once,
+/// after the style details (`mesh::generate_lod` does).
+pub fn follow_end_faces(b: &mut Builder, p: &BodyProfile) {
+    for front in [true, false] {
+        let depth = p.face_depth(front);
+        if depth <= 1e-4 {
+            continue;
+        }
+        let plane = if front { p.y_nose } else { p.y_tail };
+        // On the face: 8 cm behind the old plane to 30 cm ahead of it (push bars, splitters and
+        // bumpers bolted on in front follow too).
+        let (behind, ahead) = (0.08, 0.30);
+        // Candidate vertices: (part, vertex, position).
+        let mut cand: Vec<(String, usize, [f32; 3])> = Vec::new();
+        for key in b.keys() {
+            if key.wheel.is_some() || !matches!(key.kind, PartKind::Detail | PartKind::Light) {
+                continue;
+            }
+            let Some((pos, _, _)) = b.geometry(&key.name) else {
+                continue;
+            };
+            let pos = pos.to_vec();
+            for (v, q) in pos.iter().enumerate() {
+                let out = if front { q[1] - plane } else { plane - q[1] };
+                if out >= -behind && out <= ahead && !b.is_placed(&key.name, v) {
+                    cand.push((key.name.clone(), v, *q));
+                }
+            }
+        }
+        if cand.is_empty() {
+            continue;
+        }
+        let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+        for (_, _, q) in &cand {
+            lo = [lo[0].min(q[0]), lo[1].min(q[2])];
+            hi = [hi[0].max(q[0]), hi[1].max(q[2])];
+        }
+        let view = if front {
+            LampView::Front
+        } else {
+            LampView::Rear
+        };
+        let bbox = vec![
+            [lo[0], lo[1]],
+            [hi[0], lo[1]],
+            [hi[0], hi[1]],
+            [lo[0], hi[1]],
+        ];
+        let Some(caster) = Caster::new(b, p, &Lamp::new(view, bbox)) else {
+            continue;
+        };
+        // Face span for misses (above the face top, past the silhouette): retry inside it.
+        let zb = p.sill(plane) + 0.01;
+        let zt = (if front { p.z_nose } else { p.belt(plane) } - 0.01).max(zb);
+        let half = p.half_width(plane) - 0.02;
+        let mut memo: std::collections::BTreeMap<(i32, i32), f32> =
+            std::collections::BTreeMap::new();
+        for (name, v, q) in cand {
+            let key = ((q[0] * 500.0).round() as i32, (q[2] * 500.0).round() as i32);
+            let shift = *memo.entry(key).or_insert_with(|| {
+                // View coordinates of chassis (x, z) for an un-yawed front / rear cast.
+                let at = |x: f32, z: f32| {
+                    let d = sub([x, plane, z], caster.origin);
+                    caster
+                        .cast_tri([dot(d, caster.u), dot(d, caster.v)])
+                        .map(|h| h.0)
+                };
+                let hit =
+                    at(q[0], q[2]).or_else(|| at(q[0].clamp(-half, half), q[2].clamp(zb, zt)));
+                hit.map_or(0.0, |h| {
+                    let s = h[1] - plane;
+                    if front {
+                        s.clamp(-(depth + 0.03), 0.0)
+                    } else {
+                        s.clamp(0.0, depth + 0.03)
+                    }
+                })
+            });
+            if shift != 0.0 {
+                b.set_vertex(&name, v, [q[0], q[1] + shift, q[2]]);
+            }
+        }
+    }
+}
+
 /// One projected grid point: (surface point, outward normal).
 type Hit = ([f32; 3], [f32; 3]);
 
@@ -318,6 +485,13 @@ struct Caster {
     c2: [f32; 2],
     /// Surface point of the centroid.
     centre: [f32; 3],
+    /// Front / rear views: the furthest a cast may land from its start, m (the face zone: a
+    /// point over a lowered tailgate is a miss, not a hit on the cab wall behind the bed).
+    max_d: f32,
+    /// Front / rear views: view height of the face's middle (a second pull target when an
+    /// outline point and its centroid both miss, e.g. above a raked tailgate) and the face's
+    /// half width in the view.
+    face_mid: Option<(f32, f32)>,
 }
 
 impl Caster {
@@ -369,15 +543,32 @@ impl Caster {
             ),
         };
         // Body triangles whose view footprint overlaps the outline (+ bezel and normal margin).
+        let face_mid = match lamp.view {
+            LampView::Front | LampView::Rear => {
+                let front = lamp.view == LampView::Front;
+                let y = if front { p.y_nose } else { p.y_tail };
+                let top = if front { p.z_nose } else { p.belt(y) };
+                let zm = 0.5 * (p.sill(y) + top);
+                Some((dot(sub([0.0, y, zm], origin), v), p.half_width(y) - 0.05))
+            }
+            _ => None,
+        };
         let m = 0.08;
-        let lo = [
+        let mut lo = [
             lamp.outline.iter().map(|q| q[0]).fold(f32::MAX, f32::min) - m,
             lamp.outline.iter().map(|q| q[1]).fold(f32::MAX, f32::min) - m,
         ];
-        let hi = [
+        let mut hi = [
             lamp.outline.iter().map(|q| q[0]).fold(f32::MIN, f32::max) + m,
             lamp.outline.iter().map(|q| q[1]).fold(f32::MIN, f32::max) + m,
         ];
+        // Keep the triangles the face-middle fallback pull may reach.
+        if let Some((vm, half)) = face_mid {
+            lo[1] = lo[1].min(vm - m);
+            hi[1] = hi[1].max(vm + m);
+            lo[0] = lo[0].max(-half - m).min(hi[0]);
+            hi[0] = hi[0].min(half + m).max(lo[0]);
+        }
         let mut tris = Vec::new();
         for key in b.keys() {
             if key.wheel.is_some() || !matches!(key.kind, PartKind::Panel | PartKind::Body) {
@@ -401,6 +592,13 @@ impl Caster {
         if tris.is_empty() {
             return None;
         }
+        let max_d = match lamp.view {
+            LampView::Front | LampView::Rear => {
+                let depth = p.face_depth(lamp.view == LampView::Front);
+                1.5 + 1.2 * sy + depth + 0.35
+            }
+            _ => f32::MAX,
+        };
         let mut caster = Caster {
             tris,
             dir,
@@ -409,6 +607,8 @@ impl Caster {
             origin,
             c2,
             centre: [0.0; 3],
+            max_d,
+            face_mid,
         };
         caster.centre = caster.cast_or_pull(c2, c2).0;
         Some(caster)
@@ -436,7 +636,7 @@ impl Caster {
                 continue;
             }
             let d = a[2] + (b[2] - a[2]) * l1 + (c[2] - a[2]) * l2;
-            if d > 0.0 && best.is_none_or(|x| d < x.0) {
+            if d > 0.0 && d <= self.max_d && best.is_none_or(|x| d < x.0) {
                 best = Some((d, i));
             }
         }
@@ -461,14 +661,20 @@ impl Caster {
     /// Surface point and normal of view point `q`, pulled toward `toward` (a point known to
     /// hit) until the cast hits.
     fn cast_or_pull(&self, q: [f32; 2], toward: [f32; 2]) -> Hit {
-        let mut f = 1.0f32;
-        let mut hit = self.cast_tri(q);
-        while hit.is_none() && f > 0.02 {
-            f -= 0.08;
-            hit = self.cast_tri([
-                toward[0] + (q[0] - toward[0]) * f,
-                toward[1] + (q[1] - toward[1]) * f,
-            ]);
+        let pull = |to: [f32; 2]| {
+            let mut f = 1.0f32;
+            let mut hit = self.cast_tri(q);
+            while hit.is_none() && f > 0.02 {
+                f -= 0.08;
+                hit = self.cast_tri([to[0] + (q[0] - to[0]) * f, to[1] + (q[1] - to[1]) * f]);
+            }
+            hit
+        };
+        let mut hit = pull(toward);
+        if hit.is_none() {
+            if let Some((vm, half)) = self.face_mid {
+                hit = pull([q[0].clamp(-half, half), vm]);
+            }
         }
         hit.unwrap_or_else(|| (self.start(q), scale(self.dir, -1.0)))
     }

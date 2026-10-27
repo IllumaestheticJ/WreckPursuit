@@ -422,6 +422,7 @@ fn arch_path(p: &BodyProfile, arch: (f32, f32, f32), n: usize) -> Vec<[f32; 3]> 
             continue;
         }
         let x = p.half_width(y) + p.haunch(y) + s.flare.clamp(0.0, 0.08) * p.arch_t(y);
+        let x = x + p.side_dx(y, z);
         out.push([-x, y, z]);
     }
     out
@@ -448,12 +449,12 @@ pub fn arch_lips(p: &BodyProfile, w: f32, b: &mut Builder) {
             continue;
         }
         let (region, tag) = arch_region(a.0);
-        let k = key(
-            &format!("arch_lip_{tag}_l"),
-            region,
-            PartKind::Detail,
-            MaterialSlot::Paint,
-        );
+        let mat = match p.style.arch_lip_finish {
+            crate::style::TrimFinish::Black => MaterialSlot::Trim,
+            crate::style::TrimFinish::Chrome => MaterialSlot::Chrome,
+            _ => MaterialSlot::Paint,
+        };
+        let k = key(&format!("arch_lip_{tag}_l"), region, PartKind::Detail, mat);
         // Wedge profile (radial out, outward), CCW: the edge at the opening stands out most.
         let prof = [[-0.003, -0.006], [w, -0.006], [-0.003, 0.010]];
         b.extrude(&k, &prof, &path, [-1.0, 0.0, 0.0], true);

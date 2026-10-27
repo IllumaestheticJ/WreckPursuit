@@ -111,6 +111,9 @@ exotic), ironside_440 (muscle), hauler_1500 (pickup), drayman_cargo (van), senti
 custom view (`SHOT_CAM`, `SHOT_AT`).
 
 ## Changes outside my crates
+- Phase 3b (smooth shading, asked by the lead): `apps/testbed-web/src/render/{crease.ts (new),
+  panels.ts, fleet.ts}`, `apps/testbed-web/e2e/{crease_check,smooth_shots,smooth_perf}.mjs` (new),
+  `e2e/chase_perf.mjs` (`QUERY` env for A/B runs).
 - `data/panels/meshes/**` regenerated; the six `parity_*` copies refreshed with
   `tools/parity/build_parity_cars.py`'s `copy_panels` only (parity car physics files untouched).
 - `data/panels/README.md`: new section "Greenhouse and common trim".
@@ -135,7 +138,7 @@ fender tops above the hood, short overhangs and lamps that follow the surface. *
 default changes nothing**: with all of them at their defaults the generated meshes were
 byte-identical to the phase-1 meshes (`gen-car-mesh --check`), and they still are: item 6 was not
 done as a mesh change (see "Smoother bodies" below), so the phase-2 branches have no meshes to
-regenerate for this merge. Render meshes only: no `data/cars`, `data/lattices` or sim
+regenerate for this merge. (Phase 3b's smooth shading is a renderer change, no mesh either.) Render meshes only: no `data/cars`, `data/lattices` or sim
 change.
 
 ### Knob list (`car_assets::style::BodyStyle`, all soft-clamped)
@@ -158,6 +161,18 @@ change.
 | `nose_tip_w` / `tail_tip_w` | fraction | 0.1…1.0 | 0.6 | half width left at the very end with a bow |
 | `roof_plan_taper` | fraction | 0…0.3 | 0 | roof narrows header → rear glass (greenhouse plan taper) |
 | `lower_lean_in_m` | m | 0…0.08 | 0 | lower body leans in below the crease (boat-tail section) |
+| `hood_dz` | (m, m) | −0.10…+0.12 each | (0, 0) | hood height vs the lattice at the cowl / at its front (nose may rise above the lattice hood line) |
+| `deck_dz` | m | −0.10…+0.10 | 0 | deck / tail top height vs the lattice |
+| `roof_arc_front_exp` / `roof_arc_rear_exp` | — | 1…4 | 2 | exponent of the `roof_arc` halves (rear 1.2–1.6: one even fastback fall) |
+| `quarter_glass` | bool | | true | `false` paints the quarter window opening |
+| `deck_min_m` | m | 0.02…0.25 | 0.25 | shortest deck behind the rear glass base (vans: glass near the tail) |
+| `glass_base_lip_m` | m | 0…0.05 | 0 | kick at the rear-glass base (hatch tailgate lip) |
+| `flare_shape: ArchShape::Trapezoid` | | | | new arch outline: short flat top, long slanted sides |
+| `arch_lip_finish` | `TrimFinish` | | `Body` | `Black` / `Chrome` arch lips |
+| `cladding_z_m` | m | 0…0.7 | 0 | black `<panel>_cladding` parts below this height (bumpers keep their upper half) |
+| `dlo_kink_m`, `dlo_kink_len_m` | m | 0…0.12, 0.05…0.40 | 0, 0.15 | side-window base kicks up at the rear of the last window |
+| `dlo_top_drop_m` | m | −0.03…+0.10 | 0 | side-window top line falls toward the rear, independent of the roof edge |
+| `PatchBand::Greenhouse { z0, z1 }` | | | | patches on the side above the belt (`BodyProfile::greenhouse_point`) |
 
 New type `SideSculpt { y0_m, y1_m, z0_m, z1_m, dx_m, falloff_m }` (chassis metres;
 `SideSculpt::dx_at(y, z)` gives its offset). New module `car_assets::lamp` (projected lamps) and
@@ -225,6 +240,30 @@ Station `y` values are chassis metres (+ forward). Take wheel stations from your
   (separate from `tumblehome` and the A / C-pillar plan rakes). **Lower lean-in
   (`lower_lean_in_m`)** 0.03–0.06 tucks the body in below the crease (boat-tail section); put
   `crease_z` where the lean should start.
+- **Hood and deck heights (`hood_dz`, `deck_dz`).** Thick flat nose / tail blocks on saloons:
+  lower the hood front (`hood_dz.1` −0.04…−0.08) and the deck (`deck_dz` −0.03…−0.06). Tall flat
+  truck / SUV hoods: raise the front (+0.06…+0.10), which also raises the nose leading edge's
+  upper clamp (`nose_h` can now sit above the lattice hood-front node). The lattice and the hood
+  hinge are unchanged (visual only).
+- **Roof arc exponents.** With `roof_arc` 0.8–1.0, `roof_arc_rear_exp` 1.2–1.6 makes a fastback
+  fall in one even curve from just behind the header; 2.5–3 keeps the roof flat longer and drops
+  late. `roof_arc_front_exp` does the same for the windshield side.
+- **Quarter glass / deck / glass lip.** `quarter_glass: false` paints the quarter opening
+  (blind C-pillar, opera-window cars, panel vans). `deck_min_m` 0.05–0.10 lets a van's or hatch's
+  rear glass come close to the tail. `glass_base_lip_m` 0.02–0.04 adds the kick where hatch glass
+  meets the tailgate.
+- **Arches and cladding.** `ArchShape::Trapezoid` (flat top, slanted sides) for off-road flares and
+  crossover arches; `arch_lip_finish: Black` for black flare lips; `cladding_z_m` 0.35–0.50 puts a
+  black band on the lower doors, fenders, quarters, sills and the lower half of the bumpers
+  (parts `door_fl_cladding` … on the panel's own region, so they dent and detach with it).
+- **Side-window shape.** `dlo_kink_m` 0.06–0.10 over `dlo_kink_len_m` 0.15–0.25 gives the
+  upturned window line at the C-pillar (a 70s–2000s German-sedan-style kink, described
+  generically); `dlo_top_drop_m` 0.03–0.06 drops the window top toward the rear (the roof rail
+  band widens), so the DLO top no longer follows the roof edge.
+- **Greenhouse patches.** `PatchBand::Greenhouse { z0, z1 }` in a `Patch` (`Kit::patch`,
+  `Shape::Patch`) follows the side above the belt — belt ledge, side glass, roof rail and the
+  C-pillar sail over a rear-glass slope: opera windows, C-pillar badges, louvres, a pillar
+  applique. Put it behind the roof's rear edge (`p.roof.0`) for the sail.
 - **Overhangs (`overhang_trim`).** Now −0.35…+0.25 m per end. The nose / tail stop 6 cm short of
   the tires; past the lattice hood front (quarter end) the visual hood front (quarter end) moves
   back with them, so the bumper panels always keep a 10 cm strip on their region (their lattice
@@ -265,13 +304,33 @@ Station `y` values are chassis metres (+ forward). Take wheel stations from your
     a bezel 4 × points. Replacing all four kit lamps with projected lenses and bezels cost
     +470…+560 triangles in the demo (kestrel, vireo, nyx).
 
+### Shared kit helpers (promoted from the phase-2 groups)
+In `styles/performance/kit.rs`, with a doc example above them; same names and argument orders
+as the groups' local versions, so switching is a rename of the call site (`face_poly(k, …)` →
+`k.face_poly(…)`):
+- `Kit::face_poly(key, front, outline, proud)` — flat prism on the nose / tail face plane
+  (tuner, hatch).
+- `Kit::top_poly(key, pts, lift, thick)`, `Kit::side_poly(key_left, sx, pts, off, thick)`,
+  `Kit::end_poly(key, front, pts, proud, depth)` — panels draped on the top / side / end surface
+  (supercar). They now cast onto the built body triangles (`lamp::panel`), so they follow
+  sculpts, bulges, raked and bowed faces exactly (no `SIDE_LIFT_M` fudge needed) and take
+  concave outlines.
+- `Kit::swept_top_lamp(sx, y0, y1, xin, xout, sweep, border, sig_w)` — swept top-view head lamp
+  with its amber outer end (tuner).
+- `kit::on_side(sx, pts)` — a left-side outline moved to side `sx` (tuner / hatch `on_side`,
+  supercar `flip_x`).
+- `lamp::panel(b, p, key, view, outline, face_m, back_m)` — the general draped panel under them.
+- `Kit::prism_y` (muscle) was already shared.
+Tested by `shared_kit_panels_follow_the_body` (a raked, bowed, bulged body: every helper builds,
+the mesh validates, lights stay visible).
+
 ### Demo and sheet
 `cargo run --release -p car-assets --example phase3_demo -- <dir>` writes demo variants (not
 the cars' styles) of kestrel_ts, vireo_xs, hauler_1500, nyx_proto and ironside_440;
 `MESH_DIR=<dir> node tools/assets/mesh_shots.mjs <out> <car>__<variant> …` renders them
 (`mesh_shots.mjs` now takes `MESH_DIR`; an id `<car>__<variant>` uses `<car>`'s def). Sheets:
 `docs/media/car-shapes/phase3/{plan_width,sculpt_section,fender_rise,overhang,face_shape,
-lamps_front,lamps_rear}.jpg` (base on the left, knob on the right).
+heights_greenhouse,lamps_front,lamps_rear}.jpg` (base on the left, knob on the right).
 
 ### Tests added
 `style_knob_extremes_never_panic` sweeps every phase-3 knob far past both ends (NaN control
@@ -283,38 +342,111 @@ top-view swept lamps, wraparound tails, on a sedan, a hatch, the prototype, the 
 police sedan: lights check, turn-signal contract, end-lamp binding, bezels); `lamp.rs` unit
 tests (split / clip, resample, a lens proud of a box).
 
-### Smoother bodies (item 6): not done as a mesh change
-Every mesh on `ws/car-shapes` is unchanged by phase 3 (no regeneration to merge). Reasons:
-- The loft already uses the fine step (hero 3.6 cm, traffic 6.5 cm) over ≈ 65 % of a car's
-  length (nose fall + 1 m, tail rounding, both arches ± 0.15 m); the base step covers only the
-  flat doors and roof. More rings there cost ≈ 70 triangles per station with little to show,
-  and the hero cars sit at up to 21.0k of 22k while the phase-2 groups spend the rest on detail.
-- Most of the faceting seen in game is shading, not geometry: `render/panels.ts` makes every car
-  material with `flatShading: true` (`std()`), and mesh format 4 carries no normals. Smooth paint
-  needs a renderer change: drop `flatShading` on the paint / livery batch material and compute
-  vertex normals on the batch geometry (re-skinned parts would recompute them, as lenses already
-  do), with the loft's per-part vertex sharing (`Builder::vert` ids) giving smooth normals inside a
-  panel and hard edges at panel / atlas seams. The low-poly-dark style (`render/style.ts`) forces
-  flat shading anyway. `mesh_shots.mjs` already renders smooth (`computeVertexNormals`), which is
-  why the shot sheets look smoother than the game.
-- Changing the ring point count (18 per side) would break every style that indexes ring points.
-Request to the lead (renderer owner): smooth-shaded paint in the greybox style, see above.
+### Raked-face fixes (phase 3b queue a–d)
+- (a) **Kit parts follow a raked / undercut face:** `lamp::follow_end_faces` (run by
+  `mesh::generate_lod` after the style details) moves every detail / light vertex from 8 cm behind
+  to 30 cm ahead of the old vertical end plane along y by the face's set-back at its x / z (cast
+  onto the built body): `front_box` / `rear_box` / `round_lamp` / `face_poly` parts, grilles,
+  generic lamps, bumpers, push bars, splitters, badges. Vertices already on the surface (projected
+  lenses, bezels, panels, elements, surface patches: `Builder::mark_placed`) are left alone, so the
+  groups' local `follow_faces` helpers can go (keeping them would shift parts twice).
+- (b) **Projected lenses on raked faces:** they always landed on the drawn face; the 5 cm "lens
+  inside the face" case was a second shift by a local follow pass. Also: front / rear casts can't
+  land further than the face zone (a point above a lowered tailgate no longer lands on the cab
+  wall), and a point whose cast and centroid both miss is pulled toward the face's mid height.
+- (c) **Mid LOD trunk on a raked tailgate:** tailgate faces are judged by their top corner and
+  their tail-side edge (a coarse mid-LOD step can be longer than the face is deep).
+- (d) **Spikes at a raked face's bottom:** points clamped onto the face line also move inside the
+  ring's own side outline at their new height (the face edge follows the sill chamfer). On an open
+  pickup bed the tail face stops at the bed start, so the tailgate keeps its height.
+- (e) **Jagged rear side glass with `roof_plan_taper` + `dlo_top_drop_m`:** the jagged band is
+  the painted sail behind the glass (triangle sawtooth, faint on the base car too); fixed with
+  item 9 in the all-cars regeneration commit (see "Twisted loft strips" below).
+- Tests: `end_face_kit_parts_follow_a_raked_face` (5 cars, back-lean + chin and forward lean: no
+  kit part's gap to the shell grows past its upright gap + 3 cm; lights visible),
+  `raked_tailgate_keeps_its_trunk_in_both_lods` (4 tailgate cars, 4 rakes, full + mid),
+  `projected_lamps_…` now also runs on raked / undercut faces; `greenhouse_patches_and_cladding`'s
+  bound is relative to the car's belt.
 
-### Checks run (phase 3)
-`cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test -p car-assets`
-(36 tests incl. the extended soft-clamp sweep), `validate-car-asset` (all cars ok),
-`gen-car-mesh --check` (no stale mesh: phase 3 changes no mesh), `cargo build --target
-wasm32-unknown-unknown -p wp_wasm`, `npm ci && npm run wasm && npx tsc --noEmit -p .`,
-`node e2e/mod_coverage.mjs kestrel_ts ombra_v12 hauler_1500`: the same 8 known car/mod pairs as
-phase 1 show nothing (short / sequential shifter, radar, sport tyres on the exotic, the Ombra
-halo, front sway bar on the truck). `wasm-pack` was not installed in the container (installed
-with `cargo install wasm-pack`).
+### Twisted loft strips: sail sawtooth, A-sail fans, tail corners (item (f) + 9, all cars)
+**This commit regenerates every mesh** (full + mid, parity copies refreshed): phase-2 branches
+must re-run `gen-car-mesh` after merging it.
+- Cause: where a strip of the loft is long across and short along the car (the C-pillar sail
+  under a fastback roof edge, the side glass under a raked A-pillar, plan-rounded tail corners),
+  its top and bottom ring points move at different rates from station to station, so each quad is
+  twisted by a few degrees. Either diagonal then gives two triangles of different brightness, and
+  that pair repeats at every station as a sawtooth. It shows in flat-shaded shots (`mesh_shots`,
+  the low-poly style, the mid LOD); smooth shading mostly hid it. The ring points themselves
+  progress smoothly (no zigzag between stations).
+- Fix (`mesh.rs`, `twist_rows`): a quad more than 2× longer across than along that folds more than
+  3° whichever way it is split is cut into up to 3 rows across (bilinear points on its station
+  lines). Each station line takes the larger count of its two faces, so neighbours share the
+  points (no T-junctions inside a panel); a face whose two lines differ is zipped between them.
+  Every quad (rowed or not) is split along the diagonal that folds less (`flatter_split`).
+  Glass rows too (inset corners keep their pull flags in the shared-point ids).
+- Cost: +0.5 to +7 % triangles per car (heaviest: morrigan 21 842, sentinel_vigil 19 964 of the
+  20 000 police test cap; all inside `TRI_BUDGET`). `TRIS_BEFORE_INTEGRATED_SIGNALS` was rebased by
+  each car's growth. A lower threshold (1.5°, 4 rows) is smoother still but costs +9–14 % and
+  breaks the hero budget.
+- Sheets: `docs/media/car-shapes/phase3/twist/` (`c_sail.jpg`: hakone, vireo, marten, lindwurm;
+  `a_sail.jpg`: ombra, fulmine, kestrel; `tail_corner.jpg`: ombra, fulmine; top row before,
+  bottom row after; `wire_hakone.jpg`: wireframe). `mesh_shots.mjs` takes `SHOT_WIRE=1` for the
+  wireframe overlay.
+
+### Smoother bodies (item 6): smooth shading in the renderer (phase 3b)
+No mesh changes (more loft rings would cost ≈ 70 triangles per station against hero cars at up to
+21.0k of 22k, and the fine step already covers ≈ 65 % of each car). Most of the faceting was
+shading: every car material was flat-shaded and format 4 carries no normals. Phase 3b (asked by
+the lead) smooth-shades the painted body in the renderer:
+- `apps/testbed-web/src/render/crease.ts` (new): crease-angle split vertex normals
+  (`CREASE_DEG` = 38°). `buildCrease` welds the batch's vertices by rest position (UV-band seams
+  and separately built faces join), gives each face corner the faces round its welded vertex
+  within 38° of its own, and makes one render vertex per (source vertex, smoothing set), so
+  surfaces meeting at less than 38° shade smoothly and sharper edges (panel edges, nose and tail
+  faces, sills, scoops, lamp recesses) stay hard. `updateCrease` copies the skinned positions
+  through the map and recomputes the normals (area weighted, from the current index, so hidden
+  parts drop out).
+- `render/panels.ts`: the `paint` / `livery` batches (`SMOOTH_BATCHES`) skin into their own
+  source array and draw the crease layout (positions, normals, UVs); the crease map and UVs are
+  built once per model (cached with the merged index). Normals are recomputed only when a batch
+  was re-skinned, i.e. only while the car's lattice moves (an undamaged or settled car costs
+  nothing). The paint / livery materials are made with `flatShading: false`. Part hiding, picking
+  (`faceIndex`), rebatching and the vinyl overlay work unchanged (same index order).
+  `?flatcars=1` restores the old flat body for A/B shots and perf runs.
+- `render/fleet.ts`: the far cars' (mid LOD) paint / livery geometry gets the same crease
+  normals, baked once when the model is built, so a car keeps its shading when it switches LOD.
+- Art styles (`render/style.ts`): greybox is smooth; low-poly dark forces `flatShading` back on
+  every car material (its existing `applyOne`), so that style stays faceted (fleet: `applyStyle`
+  sets the paint material flat in low-poly). Lenses, glass, trim and mod parts are unchanged
+  (lenses already had vertex normals).
+- Cost (`e2e/smooth_perf.mjs`, `PanelBody.update` per car, headless SwiftShader; compare, don't
+  read as frame times): settled car 0.004–0.013 → 0.010–0.019 ms; every node moving 0.76–1.35 →
+  1.51–1.78 ms; hood nodes moving 0.48–1.07 → 1.30–1.96 ms (kestrel, ombra, hauler, cruiser; the
+  whole paint batch's normals are recomputed when any of its parts re-skins). Chase run
+  (`e2e/chase_perf.mjs`, 31 cars with panels, 20 s, `QUERY=flatcars=1` for the A/B): flat / smooth
+  views 13.6 / 12.5 ms, render 11.4 / 10.9 ms, real-time factor 0.74 / 0.76: no difference beyond
+  noise (driving re-skins nothing; the extra cost is only paid while a car deforms).
+- Checks: `e2e/crease_check.mjs` (cube splits every corner, a cylinder is smooth round its side
+  with hard caps, normals follow a moved vertex), `npx tsc --noEmit`. Shots:
+  `docs/media/car-shapes/phase3/smooth/{before,after,lowpoly}/<car>_{front,rear,side}.jpg` for 8
+  cars, sheets `sheet_{front,rear,side}.jpg`, `closeup.jpg` (`e2e/smooth_shots.mjs`).
+- `tools/assets/mesh_shots.mjs` already rendered smooth (`computeVertexNormals`, no crease);
+  the in-game look now matches it more closely, with hard edges kept.
+- Ring point count (18 per side) unchanged: changing it would break every style that indexes
+  ring points.
 
 ### Lead addenda (merged phase-2 generator requests)
 Items 1–4 of the lead's merged list: lamp primitive (concave outlines, depth, bezel, inner
 elements) — `lamp.rs`; face rake / chin / plan bow per end; plan taper (nose: `plan_width` or
 the plan bow; waist: `plan_width`; greenhouse: `roof_plan_taper`); section shape (`side_bulge_m`,
-`lower_lean_in_m`, `tumblehome_m` down to 0.03, recesses via `side_sculpt`). The remaining
-items follow in a later pass (see below).
+`lower_lean_in_m`, `tumblehome_m` down to 0.03, recesses via `side_sculpt`).
+Items 5–8 and the tuner group's (a)/(b): nose height and hood / deck heights (`hood_dz`,
+`deck_dz`), roof arc exponents, `quarter_glass`, `glass_base_lip_m` (hatch lip; the tailgate lean
+is `tail_face_rake_deg`), `deck_min_m` (van deck near the tail), `ArchShape::Trapezoid`,
+`arch_lip_finish`, `cladding_z_m`, `PatchBand::Greenhouse`, `dlo_kink_m` / `dlo_top_drop_m`.
+Item 9 (the faceted fans on the black A-pillar sail and on sharp-plan tail corners) is not done:
+any fix changes every car's mesh, which this pass must not do; it is a candidate for the lead's
+next all-cars regeneration. Arch lips and liners now add the side sculpt / bulge offset, so they
+stay on a sculpted side (0 when those knobs are off).
 
 ## Lead feedback
