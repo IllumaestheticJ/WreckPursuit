@@ -70,6 +70,37 @@ fn face_box(
     );
 }
 
+/// Set-back of the nose face at its bottom edge (the chin undercut, scaled down with the face
+/// as the generator does when the face would reach too far back), m.
+fn chin_setback(p: &crate::profile::BodyProfile) -> f32 {
+    let st = &p.style;
+    let chin = st.nose_chin_m.clamp(0.0, 0.25);
+    if chin <= 0.0 {
+        return 0.0;
+    }
+    let (s, c) = wp_math::sin_cos(st.nose_face_rake_deg.clamp(-15.0, 60.0).abs().to_radians());
+    let nominal = s / c.max(1e-3) * (p.z_nose - p.sill(p.y_nose)).max(0.0) + chin;
+    chin * (p.face_depth(true) / nominal.max(1e-4)).min(1.0)
+}
+
+/// Chin splitter under the nose: a plate `t` thick whose top sits 6 mm under the underside
+/// (no faces coplanar with the chin), reaching `fwd` past the set-back bottom of the face,
+/// `inset` in from the body width there. Its vertices are marked placed, so the end-face follow
+/// pass does not set it back a second time.
+fn chin_splitter(k: &mut Kit, mat: M, fwd: f32, inset: f32, t: f32) {
+    let key = dkey("splitter", BodyRegion::FrontBumper, mat);
+    let p = k.p;
+    let z = p.sill(k.yn) - 0.006;
+    let y = k.yn - chin_setback(p);
+    let w = p.half_width(y) - inset;
+    let count = |b: &Builder| b.geometry(&key.name).map_or(0, |g| g.0.len());
+    let before = count(k.b);
+    let prof = [[-w, z - t], [w, z - t], [w + 0.01, z], [-w - 0.01, z]];
+    k.prism_y(&key, &prof, y - 0.30, y + fwd);
+    let after = count(k.b);
+    k.b.mark_placed(&key.name, before, after);
+}
+
 /// Thin bar `x0..x1` × `z0..z1` across the middle of the nose / tail: a cheap flat prism
 /// ([`Kit::face_poly`]) that the end-face follow pass moves onto a raked face (keep it clear of
 /// the plan-bowed corners, where [`face_box`] follows the curve).
@@ -375,7 +406,9 @@ pub fn vireo(def: &VehicleDef) -> CarStyle {
     // Rounded nose in side view and plan (raked face, undercut chin, bowed corners), tailgate
     // leaning in (capped by the short tail section), roof narrowing toward the hatch.
     b.nose_face_rake_deg = 20.0;
-    b.nose_chin_m = 0.05;
+    // No chin undercut: its faces depth-fight with the underside in the smooth-shaded
+    // renderer (reported to the generator owner); the face rake carries the shape.
+    b.nose_chin_m = 0.0;
     b.nose_plan_bow_m = 0.25;
     b.nose_tip_w = 0.65;
     b.tail_face_rake_deg = 15.0;
@@ -511,7 +544,7 @@ fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         zm1 + 0.026,
         0.016,
     );
-    k.splitter(M::Trim, 0.035, 0.12, 0.022, false);
+    chin_splitter(&mut k, M::Trim, 0.035, 0.12, 0.022);
     face_box(
         &mut k,
         &accent,
@@ -941,7 +974,9 @@ pub fn marten(def: &VehicleDef) -> CarStyle {
     b.plan_width = plan_taper(def, 0.90, 0.92, 1.0);
     // Pointed wedge nose: strongly raked face with a chin, plan bow to a narrow tip.
     b.nose_face_rake_deg = 28.0;
-    b.nose_chin_m = 0.06;
+    // No chin undercut: its faces depth-fight with the underside in the smooth-shaded
+    // renderer (reported to the generator owner); the face rake carries the shape.
+    b.nose_chin_m = 0.0;
     b.nose_plan_bow_m = 0.30;
     b.nose_tip_w = 0.50;
     b.tail_face_rake_deg = 18.0;
@@ -1060,7 +1095,7 @@ fn marten_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.016,
         );
     }
-    k.splitter(M::Trim, 0.04, 0.10, 0.02, false);
+    chin_splitter(&mut k, M::Trim, 0.04, 0.10, 0.02);
 
     // --- Sides: black body-side mouldings, body-colour mirrors, black handles.
     side_strip(&mut k, "side_moulding", 0.38, 0.44, M::Trim, 0.014);
@@ -1201,7 +1236,9 @@ pub fn lindwurm(def: &VehicleDef) -> CarStyle {
     b.fender_peak_w = 0.80;
     // Modern raked bumper with an undercut, slight bow; leaning tailgate; roof tapering back.
     b.nose_face_rake_deg = 22.0;
-    b.nose_chin_m = 0.05;
+    // No chin undercut: its faces depth-fight with the underside in the smooth-shaded
+    // renderer (reported to the generator owner); the face rake carries the shape.
+    b.nose_chin_m = 0.0;
     b.nose_plan_bow_m = 0.22;
     b.nose_tip_w = 0.70;
     b.tail_face_rake_deg = 20.0;
@@ -1397,7 +1434,7 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             );
         }
     }
-    k.splitter(M::Trim, 0.05, 0.10, 0.02, false);
+    chin_splitter(&mut k, M::Trim, 0.05, 0.10, 0.02);
 
     // --- Rear: two-piece wrap-around LED lamps with a light-bar signature, black garnish
     // with badge between them, diffuser, big roof spoiler with plates and a brake lamp.
