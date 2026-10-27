@@ -11,7 +11,8 @@ use wp_contracts::{BodyRegion, LatticeDef, VehicleDef};
 
 use crate::builder::{mirror_region, Builder, PartKey, Patch, PatchBand};
 use crate::profile::{
-    BodyProfile, RingPt, Seg, BED_WALL_EPS, RING_PILLAR_IN, RING_POINTS, RING_SHOULDER,
+    BodyProfile, RingPt, Seg, BED_WALL_EPS, RING_GLASS_BASE, RING_GLASS_TOP, RING_PILLAR_IN,
+    RING_POINTS, RING_SHOULDER,
 };
 use crate::style::{style_for, CarStyle, Detail, DetailCtx, HoodScoop, LiveryHint, Shape, Tier};
 use crate::wheels::WheelGeom;
@@ -671,7 +672,8 @@ fn classify_left(p: &BodyProfile, win: &Windows, y: f32, z: f32, seg: Seg, j: us
                 key_for(Hood, PartKind::Panel)
             } else if y > ry1 {
                 if pillar {
-                    key_for(Cabin, PartKind::Body)
+                    // The A-pillar's outer face ([`a_pillar_inner`] closes its section).
+                    PartKey::body("a_pillar", Cabin, PartKind::Body, MaterialSlot::Livery)
                 } else if cowl_edge(p).is_some_and(|c| y > c) {
                     PartKey::body("cowl", Cabin, PartKind::Body, MaterialSlot::Trim)
                 } else {
@@ -1011,6 +1013,9 @@ pub fn generate_lod(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle, lo
     }
 
     loft(&p, &win, &ys, &rings, mid, &mut b);
+    if !mid {
+        a_pillar_inner(&p, &ys, &rings, &mut b);
+    }
     end_caps(&p, &ys, &rings, &mut b);
     underbody(&p, def, &ys, &rings, &mut b);
     if style.underglow_rgb.is_some() {
@@ -1291,12 +1296,26 @@ fn loft(
         .map(|s| {
             (0..k - 1)
                 .map(|j| {
-                    twist_rows([
-                        rings[s][j].p,
-                        rings[s + 1][j].p,
-                        rings[s][j + 1].p,
-                        rings[s + 1][j + 1].p,
-                    ])
+                    // The pillar band at the A-pillar foot also cuts slivers (it widens there).
+                    // The side glass is row-cut only along the A-pillar (its fans there), not at
+                    // the foot's small wedge nor behind the roof front (triangle budget).
+                    let ym = 0.5 * (ys[s] + ys[s + 1]);
+                    let t_foot = p.a_foot_t(ym);
+                    let foot = (RING_GLASS_TOP..RING_PILLAR_IN).contains(&j) && t_foot > 0.0;
+                    if (RING_GLASS_BASE..RING_GLASS_TOP).contains(&j)
+                        && (t_foot > 0.0 || ym < p.roof.1)
+                    {
+                        return 1;
+                    }
+                    twist_rows(
+                        [
+                            rings[s][j].p,
+                            rings[s + 1][j].p,
+                            rings[s][j + 1].p,
+                            rings[s + 1][j + 1].p,
+                        ],
+                        foot,
+                    )
                 })
                 .collect()
         })
@@ -1317,6 +1336,16 @@ fn loft(
                 if !glass {
                     return (q, q, 0);
                 }
+                // Side glass where the opening gets small (its tip at the A-pillar foot): the
+                // frame shrinks with the opening's height at that station, so the inset corners
+                // never cross (twisted seals). Same for every face at the station.
+                let frame = if (RING_GLASS_BASE..RING_GLASS_TOP).contains(&j) {
+                    let (g0, g1) = (rings[sv][RING_GLASS_BASE].p, rings[sv][RING_GLASS_TOP].p);
+                    let h = ((g1[0] - g0[0]).powi(2) + (g1[2] - g0[2]).powi(2)).sqrt();
+                    frame * (h / 0.08).clamp(0.0, 1.0)
+                } else {
+                    frame
+                };
                 let mut c = q;
                 let mut flags = 0i64;
                 if sv == s && !same(si - 1, ji, &left) {
@@ -1420,19 +1449,31 @@ fn loft(
                 };
                 let lp = line(b, 0, nl);
                 let rp = line(b, 1, nr);
-                // Left side: outward normal is −X/up; CCW seen from outside.
-                let tri = |b: &mut Builder, x: u32, y: u32, z: u32| {
+                // Left side: outward normal is −X/up; CCW seen from outside. Zero-area triangles
+                // (where a strip collapses, e.g. the side glass at the A-pillar foot) are skipped.
+                let tri = |b: &mut Builder,
+                           x: (u32, [f32; 3]),
+                           y: (u32, [f32; 3]),
+                           z: (u32, [f32; 3])| {
+                    if tri_area2(x.1, y.1, z.1) < 1e-9 {
+                        return;
+                    }
                     if right {
-                        b.tri(part, x, z, y);
+                        b.tri(part, x.0, z.0, y.0);
                     } else {
-                        b.tri(part, x, y, z);
+                        b.tri(part, x.0, y.0, z.0);
                     }
                 };
                 if nl == nr {
                     // Row quads, each split along the diagonal with the flatter fold.
                     for r in 0..nl {
                         let q = [lp[r].0, rp[r].0, lp[r + 1].0, rp[r + 1].0];
-                        let v = [lp[r].1, rp[r].1, lp[r + 1].1, rp[r + 1].1];
+                        let v = [
+                            (lp[r].1, q[0]),
+                            (rp[r].1, q[1]),
+                            (lp[r + 1].1, q[2]),
+                            (rp[r + 1].1, q[3]),
+                        ];
                         if flatter_split(q) {
                             tri(b, v[0], v[3], v[1]);
                             tri(b, v[0], v[2], v[3]);
@@ -1447,11 +1488,12 @@ fn loft(
                     while i < nl || r < nr {
                         let ti = (i + 1) as f32 / nl as f32;
                         let tr = (r + 1) as f32 / nr as f32;
+                        let pt = |q: &([f32; 3], u32)| (q.1, q.0);
                         if i < nl && (r == nr || ti <= tr) {
-                            tri(b, lp[i].1, lp[i + 1].1, rp[r].1);
+                            tri(b, pt(&lp[i]), pt(&lp[i + 1]), pt(&rp[r]));
                             i += 1;
                         } else {
-                            tri(b, rp[r].1, lp[i].1, rp[r + 1].1);
+                            tri(b, pt(&rp[r]), pt(&lp[i]), pt(&rp[r + 1]));
                             r += 1;
                         }
                     }
@@ -1464,7 +1506,59 @@ fn loft(
                         let (st, jj) = vid[e0];
                         let n = ring_normal(&rings[st], jj);
                         let out = [n[0] * mx, 0.0, n[2]];
-                        b.poly_facing(&seal, &[m(o0), m(o1), m(i1), m(i0)], out);
+                        // Long seals at the A-pillar (the windshield's cowl edge) in pieces at most
+                        // 13 × their width (every angle ≥ ~4°, no sliver triangles); each piece
+                        // split along its flatter diagonal.
+                        let d = |a: [f32; 3], b: [f32; 3]| {
+                            ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2))
+                                .sqrt()
+                        };
+                        let len = 0.5 * (d(o0, o1) + d(i0, i1));
+                        // Width across the strip: the inner edge's distance from the outer line
+                        // (at the window corners the inner points are also pulled along it).
+                        let perp = |q: [f32; 3]| {
+                            let e = [o1[0] - o0[0], o1[1] - o0[1], o1[2] - o0[2]];
+                            let v = [q[0] - o0[0], q[1] - o0[1], q[2] - o0[2]];
+                            let l = (e[0] * e[0] + e[1] * e[1] + e[2] * e[2]).max(1e-12);
+                            let t = (v[0] * e[0] + v[1] * e[1] + v[2] * e[2]) / l;
+                            d(q, [o0[0] + e[0] * t, o0[1] + e[1] * t, o0[2] + e[2] * t])
+                        };
+                        let wid = perp(i0).min(perp(i1)).max(0.002);
+                        // Only the A-pillar's seals (windshield, front door glass): the others
+                        // stay single quads (triangle budget).
+                        let a_seal = seal.name == "windshield_seal"
+                            || seal.name.starts_with("door_f")
+                                && seal.name.ends_with("_glass_seal");
+                        let pieces = if a_seal {
+                            ((len / (13.0 * wid)).ceil() as usize).clamp(1, 8)
+                        } else {
+                            1
+                        };
+                        let lerp3 = |a: [f32; 3], b: [f32; 3], t: f32| {
+                            [
+                                a[0] + (b[0] - a[0]) * t,
+                                a[1] + (b[1] - a[1]) * t,
+                                a[2] + (b[2] - a[2]) * t,
+                            ]
+                        };
+                        for k in 0..pieces {
+                            let (t0, t1) =
+                                (k as f32 / pieces as f32, (k + 1) as f32 / pieces as f32);
+                            let (a0, a1) = (lerp3(o0, o1, t0), lerp3(o0, o1, t1));
+                            let (c0, c1) = (lerp3(i0, i1, t0), lerp3(i0, i1, t1));
+                            // Quad (a0, a1, c0, c1) in loft-corner order for `flatter_split`.
+                            let tris = if flatter_split([a0, a1, c0, c1]) {
+                                [[a0, c1, a1], [a0, c0, c1]]
+                            } else {
+                                [[a0, c0, a1], [a1, c0, c1]]
+                            };
+                            for t in tris {
+                                if tri_area2(t[0], t[1], t[2]) < 1e-9 {
+                                    continue;
+                                }
+                                b.poly_facing(&seal, &[m(t[0]), m(t[1]), m(t[2])], out);
+                            }
+                        }
                     }
                 }
             }
@@ -1481,6 +1575,86 @@ pub fn loft_rings(p: &BodyProfile, base: f32, fine: f32) -> (Vec<f32>, Vec<Vec<R
     (ys, rings)
 }
 
+/// Twice the area of triangle (a, b, c), m².
+fn tri_area2(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> f32 {
+    let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    let n = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
+    (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt()
+}
+
+/// The cabin side of the A-pillar (`a_pillar_inner`, dark trim, both sides): a face straight
+/// across from the side glass's inner edge (ring point 10) to the windshield's (13), just behind
+/// the glass, along the stations from the roof front to the start of the pillar foot (in steps
+/// of up to 12 cm), closed at its lower end. With the outer face (`a_pillar`) and the glass
+/// seals as its side returns it closes the pillar's section, so through the glass it reads as
+/// one solid pillar, not a ribbon over a gap. Each quad is split along its flatter diagonal;
+/// collapsed (zero-area) triangles are skipped.
+fn a_pillar_inner(p: &BodyProfile, ys: &[f32], rings: &[Vec<RingPt>], b: &mut Builder) {
+    let key = PartKey::body(
+        "a_pillar_inner",
+        BodyRegion::Cabin,
+        PartKind::Body,
+        MaterialSlot::Trim,
+    );
+    // Just behind the glass (its inset), so the seals meet it.
+    let depth = p.style.glass_recess_m.clamp(0.0, 0.03) + 0.004;
+    let (_, ry1, _, _) = p.roof;
+    // Per station: the inner corners at 10 and 13 (LEFT side).
+    let section = |s: usize| -> Option<[[f32; 3]; 2]> {
+        let y = ys[s];
+        // Up to the start of the pillar foot (it widens onto the cowl there, inside the body).
+        if y < ry1 - 0.02 || y >= p.y_fw || !p.has_greenhouse(y) || p.a_foot_t(y) > 0.5 {
+            return None;
+        }
+        let r = &rings[s];
+        let at = |j: usize| {
+            let (o, n) = (r[j].p, ring_normal(r, j));
+            [o[0] - n[0] * depth, o[1], o[2] - n[2] * depth]
+        };
+        Some([at(RING_GLASS_TOP), at(RING_PILLAR_IN)])
+    };
+    // Fewer stations than the loft (it sits behind the glass): steps of up to 12 cm, never
+    // dropping the first or last station of the run.
+    let run: Vec<usize> = (0..ys.len()).filter(|&s| section(s).is_some()).collect();
+    let mut keep: Vec<usize> = Vec::new();
+    for (i, &st) in run.iter().enumerate() {
+        let skip = match (keep.last(), run.get(i + 1)) {
+            (Some(&k), Some(&next)) => ys[next] - ys[k] <= 0.12,
+            _ => false,
+        };
+        if !skip {
+            keep.push(st);
+        }
+    }
+    for w in keep.windows(2) {
+        let (Some(a), Some(c)) = (section(w[0]), section(w[1])) else {
+            continue;
+        };
+        let q = [a[0], c[0], a[1], c[1]];
+        // Facing the cabin: inward from the outer band.
+        let n = ring_normal(&rings[w[0]], RING_GLASS_TOP + 1);
+        let tris = if flatter_split(q) {
+            [[q[0], q[3], q[1]], [q[0], q[2], q[3]]]
+        } else {
+            [[q[0], q[2], q[1]], [q[1], q[2], q[3]]]
+        };
+        for mx in [1.0f32, -1.0] {
+            let m = |v: [f32; 3]| [v[0] * mx, v[1], v[2]];
+            for t in tris {
+                if tri_area2(t[0], t[1], t[2]) < 1e-9 {
+                    continue;
+                }
+                b.poly_facing(&key, &[m(t[0]), m(t[1]), m(t[2])], [-n[0] * mx, 0.0, -n[2]]);
+            }
+        }
+    }
+}
+
 /// Whether to split a loft quad along its 0–3 diagonal instead of the original 1–2 one: corners
 /// `q` = (station s, point j), (s + 1, j), (s, j + 1), (s + 1, j + 1). Picked only when its two
 /// triangles fold clearly less (near-planar quads keep the original split).
@@ -1494,8 +1668,9 @@ const TWIST_ROW_DEG: f32 = 3.0;
 
 /// Rows to cut a loft quad into across its strip (1 = none, at most 3): only long thin quads
 /// (across the strip > 2 × along it) that fold more than [`TWIST_ROW_DEG`] whichever way they
-/// are split. Corners as in [`flatter_split`].
-fn twist_rows(q: [[f32; 3]; 4]) -> usize {
+/// are split, or (`cut_slivers`) that are more than 8 × longer across than along. Corners as in
+/// [`flatter_split`].
+fn twist_rows(q: [[f32; 3]; 4], cut_slivers: bool) -> usize {
     let len = |a: [f32; 3], b: [f32; 3]| {
         ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt()
     };
@@ -1506,7 +1681,16 @@ fn twist_rows(q: [[f32; 3]; 4]) -> usize {
     }
     let (fa, fb) = quad_folds(q);
     let deg = fa.max(fb).clamp(-1.0, 1.0).acos().to_degrees();
-    ((deg / TWIST_ROW_DEG).ceil() as usize).clamp(1, 3)
+    // With `cut_slivers` (the widened A-pillar foot, where the cowl edge can put two stations
+    // close together) very long thin quads are cut too: at most 8 × along per row.
+    let thin = if cut_slivers {
+        (across / (8.0 * along.max(1e-4))).ceil() as usize
+    } else {
+        1
+    };
+    ((deg / TWIST_ROW_DEG).ceil() as usize)
+        .max(thin)
+        .clamp(1, 3)
 }
 
 /// Folds (normal dot products) of the original and the alternative split of a quad.

@@ -219,8 +219,8 @@ const DOOR_F: BodyRegion = BodyRegion::LeftDoorF;
 
 // ------------------------------------------------------------------ mirrors
 
-/// Door mirrors on the sail at the A-pillar foot: a black base on the sail and belt, a black
-/// arm, a housing in `finish` (`mirror_l`, kind `Mirror`) and the mirror glass on its rear face.
+/// Door mirrors at the A-pillar foot (on the door skin; on the sail with the old layout): a
+/// black base on the belt, a black arm, a housing in `finish` (`mirror_l`, kind `Mirror`) and the mirror glass on its rear face.
 /// Region: the front doors.
 pub fn mirrors(p: &BodyProfile, finish: TrimFinish, b: &mut Builder) {
     let Some(mat) = finish.material() else {
@@ -236,13 +236,19 @@ pub fn mirrors(p: &BodyProfile, finish: TrimFinish, b: &mut Builder) {
         PartKind::Detail,
         MaterialSlot::Trim,
     );
-    // Base: a black block on the belt ledge / sail, and the arm out to the housing.
+    // Base: a black block on the belt ledge / sail (default layout: a low flag on the door
+    // skin, under the door glass), and the arm out to the housing.
     let yb0 = yc - 0.06;
     let yb1 = (yc + 0.05).min(p.y_fw);
+    let top = if p.style.a_sail_layout == crate::style::SailLayout::ToCorner {
+        zb + 0.012
+    } else {
+        zb + 0.06
+    };
     b.cuboid(
         &base,
         [-(w + 0.02), yb0, zb - 0.035],
-        [-(w - 0.07), yb1, zb + 0.06],
+        [-(w - 0.07), yb1, top],
     );
     b.cuboid(
         &base,
