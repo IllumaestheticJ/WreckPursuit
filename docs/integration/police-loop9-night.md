@@ -184,7 +184,13 @@ blatant speed the same way (detection does not depend on the car model).
 
 ## Goldens
 
-See the commit message (`[bless]` list with reasons).
+`simcli goldens`: 130 pass, one moved and re-blessed (separate `[bless]` commit):
+
+- `golden_night_pursuit_escape`: a racer at 35 m/s on a ~14 m/s street at 23:00 passes a parked
+  patrol (21 m/s over: conspicuity 0.2). The patrol now notices it sooner: the pursuit starts at
+  6.0 s instead of 9.1 s (first divergence 4.2 s, when the racer comes into the patrol's grown
+  sight). Its expectations still pass; the pending `pursuit_started_before(6.0)` is now 6.017 s
+  (was 9.117 s).
 
 ## Changes outside my crates
 
