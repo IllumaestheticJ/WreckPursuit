@@ -80,6 +80,15 @@
   (`sentinel_bastion`, a tailgate car) makes the mid LOD lose its `trunk` part
   (`every_car_has_an_up_to_date_mid_lod`: "mid LOD lost trunk"). The SUV's tail stays upright.
 
+## Phase 3 addenda (merged from `ws/car-shapes` d64c04b7)
+- **SUV (`sentinel_bastion`):** `hood_dz` (0, +0.10) with `nose_h` 1.17 m: the tall, flat truck
+  hood (generator request 1, now done); black lower cladding (`cladding_z_m` 0.45) and black
+  arch lips. Triangles unchanged (the cladding is split out of the panels): 21419 full,
+  6956 mid.
+- **Vigil:** `roof_arc` 0.9 with `roof_arc_rear_exp` 1.4: one even fastback fall from just
+  behind the header. 21343 full, 6391 mid.
+- Other cars unchanged by the merge (their projected lamps regenerate identically).
+
 ## Per car
 References are body types only; no real model is reproduced.
 
@@ -120,7 +129,7 @@ References are body types only; no real model is reproduced.
   DRL line above); dark valance with fogs and a skid plate, plate. Rear: vertical tail lamps
   (amber lower section, reverse inset), bumper step, tailgate handle, plate, hitch; running
   boards, rocker cladding, large black-capped mirrors.
-- **Triangles:** 21419 full (was 18932), 6992 mid (was 5346).
+- **Triangles:** 21419 full (was 18932), 6956 mid (was 5346).
 
 ### `sentinel_warden` (police "old sedan")
 - **Reference:** late-80s American full-size body-on-frame RWD sedan, about 5.4 × 1.98 × 1.43 m
@@ -148,7 +157,7 @@ References are body types only; no real model is reproduced.
   hood extractor vents. Rear: dark band with one swept lamp per side (outer end sweeps up,
   inboard end is the red-on-red signal), centre reverse lamps and badge, plate, dark diffuser
   valance; skirts, faux quarter vents, mirrors; police low decklid wing.
-- **Triangles:** 21343 full (was 19100), 6423 mid (was 4994).
+- **Triangles:** 21343 full (was 19100), 6391 mid (was 4994).
 
 All five are inside the hero budget (22k) and the mid budget (7k).
 
@@ -171,7 +180,7 @@ sentinel_vigil` on the pass-2 meshes: 136 mods per car, 7 car/mod pairs show not
 known list from phase 1 (no outside view): `drivetrain_shifter_short` on all five,
 `elec_radar_1` on the warden and the vigil. Body kits, wings, lips, vinyls and bull bars show and
 sit on the new bodies (stock and mod shots checked).
-Pass 3: re-run in progress.
+Pass 3 / 3b / addenda: re-run on the final meshes in progress; result below when done.
 
 ## Shots
 `docs/media/car-shapes/police/`:
@@ -190,7 +199,7 @@ Pass 3: re-run in progress.
 ## Generator requests
 Sent to the lead (none blocking; this pass works inside the current generator):
 Phase 3 / 3b delivered 2 (projected lamps and any-outline face parts, now used) and 3 (plan
-width and roof plan taper, used); 1 (SUV nose height) is still to come.
+width and roof plan taper, used); 1 (SUV nose height) came with the addenda (`hood_dz`), used.
 1. Nose height above the lattice hood-front node: `profile.rs` clamps `z_nose` to `z_hood.1`, so
    the SUV's nose still falls ~9 cm (a knob allowing up to +0.10 m would give the flat, tall
    truck hood).
@@ -199,7 +208,6 @@ width and roof plan taper, used); 1 (SUV nose height) is still to come.
 3. Greenhouse plan taper toward the rear, independent of tumblehome.
 
 ## Known gaps
-- The SUV's hood still falls ~9 cm from the cowl to the nose (request 1).
 - Grilles and badges are still flat prisms on the nose / tail face (lamps are projected).
 - The push bars' positions are unchanged (they sit where the research table put them) and hide
   part of each grille, as on the real cars.

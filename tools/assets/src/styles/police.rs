@@ -241,7 +241,7 @@ fn wolfhound() -> CarStyle {
 /// §1.4 "SUV": full-size body-on-frame SUV.
 fn bastion() -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        nose_h: Some(1.10),
+        nose_h: Some(1.17),
         nose_rake_deg: 3.0,
         nose_plan_round: 0.08,
         tail_plan_round: 0.10,
@@ -271,6 +271,11 @@ fn bastion() -> CarStyle {
         glass_inset: 0.04,
         front_fender_rise_m: 0.04,
         plan_width: vec![[-1.0, 1.0], [-0.55, 0.965], [0.55, 0.965], [1.0, 1.0]],
+        // Phase 3 addenda: the tall, flat truck hood (nose above the lattice hood line), black
+        // lower cladding and black arch lips.
+        hood_dz: (0.0, 0.10),
+        cladding_z_m: 0.45,
+        arch_lip_finish: TrimFinish::Black,
         ..BodyStyle::preset(Silhouette::Suv)
     });
     s.livery = livery(
@@ -338,6 +343,9 @@ fn vigil() -> CarStyle {
         nose_chin_m: 0.10,
         roof_plan_taper: 0.15,
         lower_lean_in_m: 0.03,
+        // Phase 3 addenda: one even fastback curve from just behind the header.
+        roof_arc: 0.9,
+        roof_arc_rear_exp: 1.4,
         ..BodyStyle::preset(Silhouette::Fastback)
     });
     s.livery = livery(
