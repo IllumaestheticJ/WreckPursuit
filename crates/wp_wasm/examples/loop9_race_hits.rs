@@ -43,7 +43,22 @@ fn main() {
                     if a == player || b == player {
                         let other = if a == player { b } else { a };
                         let what = if other == WORLD_ENTITY {
-                            "world".to_string()
+                            let d3 = |q: [f32; 3]| {
+                                ((q[0] - point[0]).powi(2)
+                                    + (q[1] - point[1]).powi(2)
+                                    + (q[2] - point[2]).powi(2))
+                                .sqrt()
+                            };
+                            let bar = s
+                                .sim()
+                                .roadblock_barriers()
+                                .iter()
+                                .map(|b| (d3(b.pos), b.half_extents_m))
+                                .min_by(|a, b| a.0.total_cmp(&b.0));
+                            format!(
+                                "world (nearest roadblock barrier {:?})",
+                                bar.map(|(d, h)| (format!("{d:.1} m"), h))
+                            )
                         } else {
                             s.vehicle(other)
                                 .map(|v| format!("{:?} {}", v.kind, v.car_id))

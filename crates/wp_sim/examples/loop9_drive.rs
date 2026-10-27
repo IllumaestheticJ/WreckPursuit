@@ -99,7 +99,11 @@ fn main() {
             let along = geom::normalize(geom::sub(geom::xy(*x), geom::xy(c.pos)));
             let right = geom::right_of(along);
             let side: f32 = if k % 2 == 0 { 1.0 } else { -1.0 };
-            let (ca, sa) = (20f32.to_radians().cos(), 20f32.to_radians().sin());
+            let ang: f32 = std::env::var("ANG")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(30.0);
+            let (ca, sa) = (ang.to_radians().cos(), ang.to_radians().sin());
             let dir = [
                 along[0] * ca + right[0] * sa * side,
                 along[1] * ca + right[1] * sa * side,
@@ -111,7 +115,10 @@ fn main() {
                     c.pos[2] - 0.35,
                 ]
             };
-            let pts: Vec<[f32; 3]> = (-5..=4).map(|i| at(i as f32 * 5.0)).collect();
+            if k % 3 != 2 {
+                continue;
+            }
+            let pts: Vec<[f32; 3]> = (-8..=5).rev().map(|i| at(i as f32 * 5.0)).collect();
             paths.push((k, pts));
         }
     }
