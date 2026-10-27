@@ -25,7 +25,7 @@ use wp_contracts::{BodyRegion, VehicleDef};
 use crate::mesh::{MaterialSlot, PartKind};
 use crate::style::{
     ArchShape, BodyStyle, CapKind, CarStyle, Detail, EngineKind, ExhaustKind, Induction,
-    LiveryHint, RimKind, Shape, Silhouette, SuspensionKind, TrimFinish,
+    LiveryHint, RimKind, Shape, SideSculpt, Silhouette, SuspensionKind, TrimFinish,
 };
 
 /// Style for a police car id, or `None` if this module does not own it.
@@ -95,6 +95,18 @@ fn cruiser() -> CarStyle {
         c_pillar_w_m: 0.20,
         a_sail_len_m: 0.12,
         roof_len_trim: -0.05,
+        // Phase 3: rounded section, tucked sill, rear hips, a crisp shoulder line.
+        side_bulge_m: 0.02,
+        rocker_in_m: 0.03,
+        rear_fender_rise_m: 0.03,
+        side_sculpt: vec![SideSculpt {
+            y0_m: -2.4,
+            y1_m: 2.4,
+            z0_m: 0.87,
+            z1_m: 0.9,
+            dx_m: 0.02,
+            falloff_m: 0.035,
+        }],
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.livery = livery(
@@ -139,6 +151,16 @@ fn warden() -> CarStyle {
         end_round_m: 0.012,
         arch_lip_m: 0.010,
         glass_frame_m: 0.022,
+        // Phase 3: slab sides with a sharp shoulder crease and a slightly tucked sill.
+        rocker_in_m: 0.02,
+        side_sculpt: vec![SideSculpt {
+            y0_m: -2.9,
+            y1_m: 2.5,
+            z0_m: 0.79,
+            z1_m: 0.82,
+            dx_m: 0.015,
+            falloff_m: 0.03,
+        }],
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.livery = livery(
@@ -186,6 +208,11 @@ fn wolfhound() -> CarStyle {
         overhang_trim: (0.0, -0.03),
         c_pillar_w_m: 0.22,
         cabin_shift_m: 0.10,
+        // Phase 3: tall rounded 2010s section, tucked sill, nose and tail taper in plan.
+        side_bulge_m: 0.03,
+        side_bulge_z: 0.6,
+        rocker_in_m: 0.04,
+        plan_width: vec![[-2.635, 0.94], [-1.86, 1.0], [1.86, 1.0], [2.485, 0.93]],
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.livery = livery(
@@ -228,6 +255,12 @@ fn bastion() -> CarStyle {
         end_round_m: 0.02,
         c_pillar_w_m: 0.14,
         a_sail_len_m: 0.16,
+        // Phase 3: near-vertical side glass, fender shoulders over the hood, doors set in a
+        // little between the flared fenders.
+        tumblehome_m: Some(0.05),
+        glass_inset: 0.04,
+        front_fender_rise_m: 0.04,
+        plan_width: vec![[-1.0, 1.0], [-0.55, 0.965], [0.55, 0.965], [1.0, 1.0]],
         ..BodyStyle::preset(Silhouette::Suv)
     });
     s.livery = livery(
@@ -275,6 +308,20 @@ fn vigil() -> CarStyle {
         tail_drop: 0.03,
         overhang_trim: (-0.02, -0.04),
         c_pillar_w_m: 0.22,
+        // Phase 3: coke-bottle waist, raised front fenders and rear haunches, a cove behind the
+        // front wheel.
+        plan_width: vec![[-1.0, 1.0], [-0.6, 0.95], [0.5, 0.95], [0.95, 1.0]],
+        front_fender_rise_m: 0.03,
+        rear_fender_rise_m: 0.05,
+        side_bulge_m: 0.02,
+        side_sculpt: vec![SideSculpt {
+            y0_m: 0.35,
+            y1_m: 0.9,
+            z0_m: 0.3,
+            z1_m: 0.55,
+            dx_m: -0.035,
+            falloff_m: 0.12,
+        }],
         ..BodyStyle::preset(Silhouette::Fastback)
     });
     s.livery = livery(

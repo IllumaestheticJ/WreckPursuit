@@ -39,6 +39,28 @@
   guards, spotlights, antennas, partitions, decal carriers (`decal_unit_l/_r`, `decal_roof`,
   `decal_trunk`), city and county liveries (see "Checks").
 
+## Pass 3 (phase-3 generator, merged from `ws/car-shapes` d8e0a524)
+- **Projected lamps:** every shaped lens is now cast onto the body with `Kit::proj_cluster`
+  (`shaped_cluster` / `shaped_cluster_yaw` in `body.rs` turn an |x|-outline and a signal cut into
+  the call), so lenses follow the curved nose / tail faces instead of floating flat prisms. Black
+  bezels come from the projection too. Wraps: the cruiser's blade tail lamps 20°, the SUV's
+  vertical tail lamps 25° onto the quarters. The dark tail bands sit 2 mm proud so the 8 mm
+  lenses stand clear of them (no z-fight). The old prism helpers for lamps are gone.
+- **Section / plan / fenders:**
+  - cruiser: side bulge 2 cm, sill tucked 3 cm, 3 cm rear-fender hips, a 2 cm shoulder line
+    9–11 cm under the belt along the whole car.
+  - wolfhound: rounded high section (bulge 3 cm, peak at 60 %), sill tucked 4 cm, nose taper to
+    93 % and tail to 94 % in plan.
+  - bastion: near-vertical side glass (tumblehome 5 cm, glass inset 4 cm), 4 cm front fender
+    shoulders over the hood, doors set in to 96.5 % between the flared fenders.
+  - warden: sharp 1.5 cm shoulder crease 7–10 cm under the belt, sill tucked 2 cm.
+  - vigil: coke-bottle waist (95 % at the doors), 3 cm front fender rise, 5 cm rear haunch rise,
+    2 cm side bulge, a 3.5 cm cove behind the front wheel.
+- **SUV mirrors** 0.14 m (were 0.19 m): 2.66 m across the mirrors was too wide for the type and
+  broke `phase3_knobs_keep_panels_on_their_regions`' size check under its strong settings.
+- Checks re-run on pass 3: fmt, clippy, all car-assets tests (incl. the phase-3 tests),
+  `validate-car-asset`, `gen-car-mesh --check`, liveries (city / county / grid), mod coverage.
+
 ## Per car
 References are body types only; no real model is reproduced.
 
@@ -54,7 +76,7 @@ References are body types only; no real model is reproduced.
   pods, chin lip. Rear: boomerang tail lamps (a long bar along the deck edge, the outer drop is
   the red-on-red signal) on a dark band, badge between them, reverse lamps, plate, valance,
   small body-colour lip; black rockers.
-- **Triangles:** 19783 full (was 18497), 5220 mid (was 4728).
+- **Triangles:** 21107 full (was 18497), 5790 mid (was 4728).
 
 ### `sentinel_wolfhound` (police "patrol")
 - **Reference:** 2010s American AWD police pursuit sedan on a large FWD-platform saloon, about
@@ -66,7 +88,7 @@ References are body types only; no real model is reproduced.
   swept pentagon lamps rising from the grille corner to the fender (amber outboard end); fog
   pods, lower intake, plate. Rear: corner-wrapping tail lamps, wider at the top, amber outboard
   ends, in dark housings; badge, reverse lamps, plate, reflectors, valance; black rockers.
-- **Triangles:** 19410 full (was 18626), 5535 mid (was 5183).
+- **Triangles:** 20524 full (was 18626), 6139 mid (was 5183).
 
 ### `sentinel_bastion` (police "SUV")
 - **Reference:** 2010s American full-size body-on-frame SUV, about 5.18 × 2.04 × 1.89 m on a
@@ -79,7 +101,7 @@ References are body types only; no real model is reproduced.
   DRL line above); dark valance with fogs and a skid plate, plate. Rear: vertical tail lamps
   (amber lower section, reverse inset), bumper step, tailgate handle, plate, hitch; running
   boards, rocker cladding, large black-capped mirrors.
-- **Triangles:** 20221 full (was 18932), 6186 mid (was 5346).
+- **Triangles:** 20661 full (was 18932), 6490 mid (was 5346).
 
 ### `sentinel_warden` (police "old sedan")
 - **Reference:** late-80s American full-size body-on-frame RWD sedan, about 5.4 × 1.98 × 1.43 m
@@ -93,7 +115,7 @@ References are body types only; no real model is reproduced.
   corner lamps (face and fender side, one lens part), chrome header, plate; wide tail lamps with
   chrome ribs and red-on-red outer signals, reverse lamps, chrome plate panel, side markers;
   chrome handles, chrome-capped mirrors.
-- **Triangles:** 20707 full (was 19111), 5965 mid (was 5575).
+- **Triangles:** 21051 full (was 19111), 6061 mid (was 5575).
 
 ### `sentinel_vigil` (police "sports patrol")
 - **Reference:** 2010s American muscle coupe, about 4.8 × 1.93 × 1.37 m on a 2.75 m wheelbase:
@@ -107,7 +129,7 @@ References are body types only; no real model is reproduced.
   hood extractor vents. Rear: dark band with one swept lamp per side (outer end sweeps up,
   inboard end is the red-on-red signal), centre reverse lamps and badge, plate, dark diffuser
   valance; skirts, faux quarter vents, mirrors; police low decklid wing.
-- **Triangles:** 19184 full (was 19100), 5389 mid (was 4994).
+- **Triangles:** 20042 full (was 19100), 5889 mid (was 4994).
 
 All five are inside the hero budget (22k) and the mid budget (7k).
 
@@ -126,10 +148,11 @@ All five are inside the hero budget (22k) and the mid budget (7k).
 
 ## Mod coverage
 `node e2e/mod_coverage.mjs sentinel_cruiser sentinel_wolfhound sentinel_bastion sentinel_warden
-sentinel_vigil` on the final meshes: 136 mods per car, 7 car/mod pairs show nothing, all on the
+sentinel_vigil` on the pass-2 meshes: 136 mods per car, 7 car/mod pairs show nothing, all on the
 known list from phase 1 (no outside view): `drivetrain_shifter_short` on all five,
 `elec_radar_1` on the warden and the vigil. Body kits, wings, lips, vinyls and bull bars show and
 sit on the new bodies (stock and mod shots checked).
+Pass 3: re-run in progress.
 
 ## Shots
 `docs/media/car-shapes/police/`:
@@ -147,6 +170,7 @@ sit on the new bodies (stock and mod shots checked).
 
 ## Generator requests
 Sent to the lead (none blocking; this pass works inside the current generator):
+Phase 3 delivered 2 (projected lamps, now used) and 3 (plan width, used); 1 is due in 3b.
 1. Nose height above the lattice hood-front node: `profile.rs` clamps `z_nose` to `z_hood.1`, so
    the SUV's nose still falls ~9 cm (a knob allowing up to +0.10 m would give the flat, tall
    truck hood).
@@ -156,6 +180,6 @@ Sent to the lead (none blocking; this pass works inside the current generator):
 
 ## Known gaps
 - The SUV's hood still falls ~9 cm from the cowl to the nose (request 1).
-- Lenses and grilles are flat prisms on the nose / tail face; they do not follow its curve.
+- Grilles and badges are still flat prisms on the nose / tail face (lamps are projected).
 - The push bars' positions are unchanged (they sit where the research table put them) and hide
   part of each grille, as on the real cars.

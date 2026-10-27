@@ -29,11 +29,10 @@
 use wp_contracts::BodyRegion;
 
 use crate::builder::{Builder, PartKey};
-use crate::mesh::{MaterialSlot as M, INDICATOR_SEAM_M};
+use crate::mesh::MaterialSlot as M;
 use crate::style::DetailCtx;
 use crate::styles::performance::kit::{
-    dkey, headlight_key, indicator_front_key, indicator_rear_key, lkey, sided, taillight_key,
-    top_band, Kit, Seg, SIDES,
+    dkey, headlight_key, indicator_front_key, lkey, sided, top_band, Kit, Seg, SIDES,
 };
 
 const FB: BodyRegion = BodyRegion::FrontBumper;
@@ -119,34 +118,6 @@ fn rocker_strip(k: &mut Kit, mat: M, h: f32, out: f32) {
     }
 }
 
-/// Clip a convex (|x|, z) outline to `x0 <= |x| <= x1` (both vertical cuts); stays convex.
-fn clip_x(pts: &[[f32; 2]], x0: f32, x1: f32) -> Vec<[f32; 2]> {
-    let mut out: Vec<[f32; 2]> = pts.to_vec();
-    for (edge, keep_above) in [(x0, true), (x1, false)] {
-        let inside = |q: [f32; 2]| {
-            if keep_above {
-                q[0] >= edge
-            } else {
-                q[0] <= edge
-            }
-        };
-        let src = std::mem::take(&mut out);
-        let n = src.len();
-        for i in 0..n {
-            let a = src[i];
-            let c = src[(i + 1) % n];
-            if inside(a) {
-                out.push(a);
-            }
-            if inside(a) != inside(c) {
-                let t = (edge - a[0]) / (c[0] - a[0]);
-                out.push([edge, a[1] + t * (c[1] - a[1])]);
-            }
-        }
-    }
-    out
-}
-
 /// Shaped lens / panel on the nose (`front`) or tail face: a convex (|x|, z) outline on side
 /// `sx`, standing `proud` out of the face (2 cm buried behind it).
 fn face_poly(k: &mut Kit, key: &PartKey, front: bool, sx: f32, pts: &[[f32; 2]], proud: f32) {
@@ -163,9 +134,11 @@ fn face_poly(k: &mut Kit, key: &PartKey, front: bool, sx: f32, pts: &[[f32; 2]],
     }
 }
 
-/// A shaped lamp cluster: the convex outline `pts` (|x|, z) on side `sx`, cut at |x| = `cut`
-/// into the lamp (`lamp`) and the turn signal (`sig`), outboard of the cut when `sig_out`, with
-/// the seam between them; a dark housing `border` larger behind it.
+/// A shaped lamp cluster projected onto the nose (`front`) or tail face
+/// ([`Kit::proj_cluster`], so the lens follows the surface): the convex outline `pts` (|x|, z)
+/// on side `sx`, cut at |x| = `cut` into the lamp and its turn signal (outboard of the cut when
+/// `sig_out`), with a black bezel `border` wide. `yaw_deg` wraps a corner lamp round onto the
+/// fender / quarter. `proud` is kept for call-site symmetry (the projected lens is 8 mm proud).
 fn shaped_cluster(
     k: &mut Kit,
     front: bool,
@@ -177,48 +150,38 @@ fn shaped_cluster(
     proud: f32,
     border: f32,
 ) {
-    let (lamp, sig) = if front {
-        (headlight_key(sx), indicator_front_key(sx))
+    shaped_cluster_yaw(k, front, sx, pts, cut, sig_out, sig_mat, proud, border, 0.0);
+}
+
+/// [`shaped_cluster`] with a wrap angle.
+fn shaped_cluster_yaw(
+    k: &mut Kit,
+    front: bool,
+    sx: f32,
+    pts: &[[f32; 2]],
+    cut: f32,
+    sig_out: bool,
+    sig_mat: M,
+    _proud: f32,
+    border: f32,
+    yaw_deg: f32,
+) {
+    use crate::lamp::LampView;
+    let xmax = pts.iter().map(|q| q[0]).fold(f32::MIN, f32::max);
+    let xmin = pts.iter().map(|q| q[0]).fold(f32::MAX, f32::min);
+    let seg = if sig_out {
+        Seg::Outboard(xmax - cut)
     } else {
-        (taillight_key(sx), indicator_rear_key(sx, sig_mat))
+        Seg::Inboard(cut - xmin)
     };
-    let g = INDICATOR_SEAM_M;
-    let (lp, sp) = if sig_out {
-        (clip_x(pts, 0.0, cut - g), clip_x(pts, cut, 9.0))
+    // Outline for the LEFT side (x < 0); proj_cluster mirrors it for sx > 0.
+    let left: Vec<[f32; 2]> = pts.iter().map(|q| [-q[0], q[1]]).collect();
+    let view = if front {
+        LampView::Front
     } else {
-        (clip_x(pts, cut + g, 9.0), clip_x(pts, 0.0, cut))
+        LampView::Rear
     };
-    face_poly(k, &lamp, front, sx, &lp, proud);
-    face_poly(k, &sig, front, sx, &sp, proud);
-    if border > 0.0 {
-        let (cx, cz) = {
-            let n = pts.len() as f32;
-            (
-                pts.iter().map(|q| q[0]).sum::<f32>() / n,
-                pts.iter().map(|q| q[1]).sum::<f32>() / n,
-            )
-        };
-        let grow: Vec<[f32; 2]> = pts
-            .iter()
-            .map(|q| {
-                let (dx, dz) = (q[0] - cx, q[1] - cz);
-                let l = (dx * dx + dz * dz).sqrt().max(1e-4);
-                [q[0] + border * dx / l, q[1] + border * dz / l]
-            })
-            .collect();
-        let region = if front {
-            BodyRegion::FrontLeftFender
-        } else {
-            BodyRegion::Trunk
-        };
-        let name = if front {
-            "headlamp_housing_l"
-        } else {
-            "taillamp_housing_l"
-        };
-        let hk = sided(&dkey(name, region, M::Trim), sx);
-        face_poly(k, &hk, front, sx, &grow, proud - 0.012);
-    }
+    k.proj_cluster(sx, front, view, &left, Some(seg), sig_mat, border, yaw_deg);
 }
 
 /// The fleet's fictional maker identity (no real brand's grille or badge): a hexagonal
@@ -422,47 +385,38 @@ pub fn cruiser(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     // outer corner, the drop being the red-on-red signal) on a dark band, blank badge between
     // them, reverse lamps, diffuser valance.
     let (lz0, lz1) = (tz1 - 0.15, tz1 - 0.035);
-    k.rear_panel(
-        "tail_panel",
-        BodyRegion::Trunk,
+    // Dark band 2 mm proud, so the projected lenses (8 mm) stand clear of it.
+    let band = dkey("tail_panel", BodyRegion::Trunk, M::Grille);
+    k.rear_box(
+        &band,
+        -wt + 0.02,
         wt - 0.02,
         lz1 - 0.06,
         lz1 + 0.02,
-        M::Grille,
+        0.002,
+        0.0,
     );
     badge(&mut k, false, lz1 - 0.03, 0.06);
     for sx in SIDES {
-        let bar = [
-            [0.20, lz1 - 0.045],
-            [wt - 0.13, lz1 - 0.045],
-            [wt - 0.13, lz1 - 0.005],
-            [0.24, lz1 - 0.005],
+        // Blade lamp: thin along the deck edge, growing taller toward the corner, wrapping
+        // round onto the quarter; the outer end is the red-on-red signal.
+        let blade_lamp = [
+            [0.20, lz1 - 0.040],
+            [wt - 0.05, lz0 + 0.015],
+            [wt - 0.05, lz1 - 0.005],
+            [0.22, lz1 - 0.005],
         ];
-        face_poly(&mut k, &taillight_key(sx), false, sx, &bar, 0.024);
-        let drop = [
-            [wt - 0.125, lz0 + 0.01],
-            [wt - 0.04, lz0 + 0.03],
-            [wt - 0.04, lz1 - 0.005],
-            [wt - 0.125, lz1 - 0.005],
-        ];
-        face_poly(
+        shaped_cluster_yaw(
             &mut k,
-            &indicator_rear_key(sx, M::Taillight),
             false,
             sx,
-            &drop,
+            &blade_lamp,
+            wt - 0.15,
+            true,
+            M::Taillight,
             0.024,
-        );
-        let hk = sided(&dkey("taillamp_housing_l", BodyRegion::Trunk, M::Trim), sx);
-        let (h0, h1) = (sx * (wt - 0.14), sx * (wt - 0.025));
-        k.rear_box(
-            &hk,
-            h0.min(h1),
-            h0.max(h1),
-            lz0 - 0.005,
-            lz1 + 0.01,
             0.012,
-            0.004,
+            20.0,
         );
         let rev = sided(&lkey("reverse_lamp_l", BodyRegion::Trunk, M::Headlight), sx);
         let (r0, r1) = (sx * 0.30, sx * 0.40);
@@ -757,16 +711,22 @@ pub fn bastion(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     // --- Rear: vertical lamps on the corners, black bumper step, plate, hitch.
     let (rz0, rz1) = (tz1 - 0.42, tz1 - 0.02);
     for sx in SIDES {
-        k.rear_cluster(
+        // Tall vertical lamp projected onto the corner and wrapped round onto the quarter.
+        let tall = [
+            [-(wt - 0.17), rz0],
+            [-(wt - 0.025), rz0],
+            [-(wt - 0.025), rz1],
+            [-(wt - 0.17), rz1],
+        ];
+        k.proj_cluster(
             sx,
-            wt - 0.17,
-            wt - 0.025,
-            rz0,
-            rz1,
-            0.026,
-            0.008,
-            Seg::Lower(0.09),
+            false,
+            crate::lamp::LampView::Rear,
+            &tall,
+            Some(Seg::Lower(0.09)),
             M::EmissiveAmber,
+            0.012,
+            25.0,
         );
         let rev = sided(&lkey("reverse_lamp_l", BodyRegion::Trunk, M::Headlight), sx);
         let (r0, r1) = (sx * (wt - 0.165), sx * (wt - 0.03));
@@ -805,7 +765,7 @@ pub fn bastion(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     // --- Sides: running boards, rocker cladding, big mirrors.
     k.skirts(M::Grille, 0.09, 0.05);
     rocker_strip(&mut k, M::Grille, 0.09, 0.004);
-    k.mirrors(0.08, 0.19, Some(M::Grille));
+    k.mirrors(0.08, 0.14, Some(M::Grille));
     k.door_handles(M::Paint);
     k.fuel_filler(-1.0, 0.14, M::Paint);
 }
@@ -1072,13 +1032,16 @@ pub fn vigil(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     // --- Rear: dark band, one swept lamp per side, reverse lamps and badge in the centre.
     let (lz0, lz1) = (tz1 - 0.15, tz1 - 0.03);
-    k.rear_panel(
-        "tail_panel",
-        BodyRegion::Trunk,
+    // Dark band 2 mm proud, so the projected lenses (8 mm) stand clear of it.
+    let band = dkey("tail_panel", BodyRegion::Trunk, M::Grille);
+    k.rear_box(
+        &band,
+        -wt + 0.02,
         wt - 0.02,
         lz0 - 0.02,
         lz1 + 0.02,
-        M::Grille,
+        0.002,
+        0.0,
     );
     for sx in SIDES {
         // One lamp per side whose outer end sweeps up into the corner; the inboard end is the
