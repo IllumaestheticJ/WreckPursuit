@@ -159,7 +159,9 @@ mods = ["susp_springs_1", "drivetrain_lsd_1", "prot_skid_plate"]
 id = "rampart_50_police_auction"
 def_id = "rampart_50"
 name = "Rampart 5.0 Ex-Pursuit"
-mods = ["prot_push_bar", "susp_arb_front", "engine_ecu_1"]
+# The police push bar is police-class only (data/mods/protection.json), so the ex-pursuit car
+# keeps the tube bull bar of the same line (what Economy::legalize_mods gives old saves).
+mods = ["prot_bull_bar_tube", "susp_arb_front", "engine_ecu_1"]
 
 [[rare_variants]]
 id = "fulmine_v10_flood_car"

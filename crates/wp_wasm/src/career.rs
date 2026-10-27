@@ -711,6 +711,11 @@ impl Career {
                 progress,
             }
         });
+        // Mods the car's class may not carry (the ex-pursuit lot variant used to come with the
+        // police-only push bar) are swapped for the nearest legal one, so old saves keep working.
+        for car in &mut p.account.garage {
+            econ.legalize_mods(car);
+        }
         let mut career = Self::from_profile(econ, p);
         career.abandoned = settled;
         Ok(career)

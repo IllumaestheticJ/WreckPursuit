@@ -224,3 +224,36 @@ fn a_tyre_the_car_already_runs_does_nothing() {
     let wing = e.catalog.get("aero_wing_1").unwrap();
     assert!(!wing.does_nothing_on(&coupe.def));
 }
+
+#[test]
+fn every_rare_variant_comes_with_mods_its_car_may_carry() {
+    let e = econ();
+    for r in &e.lots.rare_variants {
+        let car = wp_contracts::load_car(repo().join(format!("data/cars/{}.json", r.def_id)))
+            .unwrap_or_else(|err| panic!("{}: {err}", r.id));
+        if let Err(err) = e.catalog.validate_set(car.def.class, &r.mods) {
+            panic!("{} ({:?}): {err}", r.id, car.def.class);
+        }
+    }
+}
+
+#[test]
+fn a_mod_the_class_may_not_carry_is_swapped_for_the_nearest_legal_one() {
+    let e = econ();
+    let (mut a, uid) = account_with_sedan(&e, 100_000);
+    let car = a.garage.iter_mut().find(|c| c.uid == uid).unwrap();
+    // An old save: the police-only push bar on a civilian car.
+    car.mods = vec!["prot_push_bar".into(), "susp_arb_front".into()];
+    let changes = e.legalize_mods(car);
+    assert_eq!(
+        changes,
+        vec![(
+            "prot_push_bar".to_string(),
+            Some("prot_bull_bar_tube".to_string())
+        )]
+    );
+    assert!(car.mods.contains(&"prot_bull_bar_tube".to_string()));
+    assert!(e.catalog.validate_set(car.class, &car.mods).is_ok());
+    // Already legal: nothing changes.
+    assert!(e.legalize_mods(car).is_empty());
+}
