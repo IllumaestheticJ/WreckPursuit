@@ -468,6 +468,50 @@ inboard, only on rings a chin reaches (defaults byte-identical, `gen-car-mesh --
 - Sheet `docs/media/car-shapes/phase3/chin_overlap.jpg` (game renderer, marten, low views).
   `e2e/smooth_shots.mjs` takes `SHOT_VIEW="name|eye: [..], at: [..]"` for an extra view.
 
+### A-pillar to the window corners, solid section (owner feedback on v0.13.0, all cars)
+**This commit regenerates every mesh** (full + mid, parity copies): merge it and re-run
+`gen-car-mesh`. Owner: "the A-pillars are triangulated wrong" and "A-pillars are supposed to go to
+the corner of the windows".
+- **Layout** (`BodyStyle::a_sail_layout: SailLayout`, default `ToCorner`): the A-pillar runs the
+  full windshield side edge, from the roof corner to the windshield's lower corner, and the front
+  door glass runs forward to it (no sail). Ahead of the roof the side glass's top edge sits a fixed
+  share of the way from the glass base up to the windshield edge, so both reach the belt together
+  at the windshield base; over the last ≤ 30 cm (`BodyProfile::a_foot_t`) the pillar's outer lower
+  edge moves out to the glass base, so the door glass ends in a corner on the pillar foot and the
+  foot widens onto the cowl / fender shoulder; the glass and pillar points are no longer blended
+  toward the flat top there (that made the bump, the star-shaped sliver and the twisted last
+  strip). `SailLayout::Sail` keeps the old layout for a style that asks for it; with `ToCorner`,
+  `a_sail_len_m` / `a_sail` only size the mirror mount (`BodyProfile::sail()` = the door skin's
+  front top corner), so the groups' existing `a_sail_len_m` values no longer change the glass.
+  Generic mirrors' base is a low flag on the door skin under the glass.
+- **Solid section**: outer face `a_pillar` (body colour, its own part now; region Cabin) and
+  `a_pillar_inner` (dark trim, both sides): a face straight across from the side glass's inner
+  edge to the windshield's, just behind the glass, from the roof front to the start of the foot
+  (steps of up to 12 cm); with the glass seals as its side returns it closes the section.
+- **Clean triangles**: zero-area loft triangles are skipped; each quad takes the flatter diagonal;
+  the side glass's frame shrinks with the opening at its tip (the inset corners crossed and
+  twisted the seal there); the windshield / front door glass seals are cut into pieces at most
+  13 × their width across (the cowl-edge seal was two 2.5° slivers); in the pillar band at the
+  foot, quads more than 8 × longer across than along are cut into rows too (`twist_rows`; two
+  close stations across the widened foot made slivers), while the side glass is row-cut only
+  along the A-pillar (not its small wedge at the foot nor behind the roof front: triangle
+  budget; the painted C-pillar sail keeps its rows).
+- **Test** `a_pillars_are_solid_clean_and_meet_the_window_corners` (every car on disk): both pillar
+  parts present, no `a_sail`; every angle ≥ 3.5° in `a_pillar` / `a_pillar_inner` and ≥ 2.5° in
+  the windshield and front door glass seals (their last piece at the glass tip can be a
+  millimetre or two wide), every area ≥ 2 mm² and every fold across a quad diagonal ≤ 30°; the door glass's front corner meets the pillar foot's outer corner,
+  the windshield's lower corner lies on the pillar's inner edge (a cowl strip may run below it)
+  and the pillar's top end meets both roof corners, within 5 mm. `sail_layout_on_request` keeps
+  the old layout working.
+- Cost: about neutral or lower (the sail's triangles go to the longer door glass and the pillar;
+  side glass is row-cut only along the A-pillar now). On lead/car-shapes-int + this commit, all
+  meshes regenerated: halberd 21 952 → 21 244, fulmine 21 928 → 21 538, morrigan 21 864 →
+  21 122, sentinel_vigil 21 747 → 21 347, brigand 21 935 → 21 943, satchel 10 866 → 10 970; the
+  whole car-assets suite (32 asset tests, 15 lib tests), validate, `--check` and fmt pass there.
+- Sheets: `docs/media/car-shapes/phase3/apillar/` — `smooth.jpg` and `lowpoly.jpg` (game renderer,
+  the lead's A-pillar view, kestrel, marten, cruiser, ombra, hakone, tansy, hauler; before |
+  after) and `foot_wire.jpg` (pillar foot, faceted with wireframe, marten, kestrel, cruiser).
+
 ### Raked-face folds found on the integrated branch (hatch marten, tuner kestrel)
 `chins_leave_no_overlapping_end_faces` failed on lead/car-shapes-int (marten 176 cm² with a chin
 against 104 without). The overlap was real, not kit parts: all of it was body / panel loft and

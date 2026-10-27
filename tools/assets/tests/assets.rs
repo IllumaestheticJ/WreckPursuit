@@ -1580,6 +1580,208 @@ fn top_view_lamps_stay_on_top_of_a_raked_nose() {
     }
 }
 
+/// Triangle quality of the parts at the A-pillar of `mesh` (`a_pillar`, `a_pillar_inner` and a
+/// sail if a style asks for one; or, with `seals`, the windshield's and front door glass's
+/// seals):
+/// (smallest angle °, smallest area mm², largest fold ° across a quad diagonal — an edge that
+/// is the longest of both triangles sharing it).
+fn a_pillar_quality(mesh: &car_assets::mesh::CarMesh, seals: bool) -> (f32, f32, f32) {
+    let wanted = |n: &str| {
+        if seals {
+            n == "windshield_seal" || n.starts_with("door_f") && n.ends_with("_glass_seal")
+        } else {
+            n == "a_pillar" || n == "a_pillar_inner" || n == "a_sail"
+        }
+    };
+    let (mut min_ang, mut min_area, mut max_fold) = (180.0f32, f32::MAX, 0.0f32);
+    for p in mesh.parts.iter().filter(|p| wanted(&p.name)) {
+        let v = |i: u32| p.vertex(i as usize);
+        let tris: Vec<[u32; 3]> = p.indices.chunks(3).map(|t| [t[0], t[1], t[2]]).collect();
+        let mut normals = Vec::new();
+        let mut longest = Vec::new();
+        for t in &tris {
+            let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+            let n = cross3(sub3(b, a), sub3(c, a));
+            let len = |u: [f32; 3]| (u[0] * u[0] + u[1] * u[1] + u[2] * u[2]).sqrt();
+            let area = 0.5 * len(n) * 1e6;
+            min_area = min_area.min(area);
+            let e = [len(sub3(b, a)), len(sub3(c, b)), len(sub3(a, c))];
+            for k in 0..3 {
+                // Angle opposite edge k (law of cosines).
+                let (x, y, z) = (e[k], e[(k + 1) % 3], e[(k + 2) % 3]);
+                let c = ((y * y + z * z - x * x) / (2.0 * y * z).max(1e-12)).clamp(-1.0, 1.0);
+                min_ang = min_ang.min(c.acos().to_degrees());
+            }
+            let ln = len(n).max(1e-12);
+            normals.push([n[0] / ln, n[1] / ln, n[2] / ln]);
+            let k = (0..3).max_by(|&i, &j| e[i].total_cmp(&e[j])).unwrap();
+            let (i0, i1) = (t[k], t[(k + 1) % 3]);
+            longest.push((i0.min(i1), i0.max(i1)));
+        }
+        let mut by_edge: std::collections::BTreeMap<(u32, u32), Vec<usize>> = Default::default();
+        for (i, e) in longest.iter().enumerate() {
+            by_edge.entry(*e).or_default().push(i);
+        }
+        for ts in by_edge.values() {
+            if let [a, b] = ts[..] {
+                let (na, nb) = (normals[a], normals[b]);
+                let d = (na[0] * nb[0] + na[1] * nb[1] + na[2] * nb[2]).clamp(-1.0, 1.0);
+                max_fold = max_fold.max(d.acos().to_degrees());
+            }
+        }
+    }
+    (min_ang, min_area, max_fold)
+}
+
+/// The A-pillar of every car (owner feedback on v0.13.0: "the A-pillars are triangulated wrong";
+/// "A-pillars are supposed to go to the corner of the windows"): a solid section (outer face
+/// `a_pillar`, cabin side `a_pillar_inner`), no sail by default, no degenerate or sliver
+/// triangles (angles ≥ 3.5° in the pillar, ≥ 2.5° in its seals; areas ≥ 2 mm²) and no twisted
+/// quads (fold across a quad diagonal ≤ 30°); the front door glass's front corner meets the pillar
+/// foot's outer corner and the windshield's lower corner lies on the pillar's inner edge (a
+/// cowl strip may run below it), and the pillar's top end meets the roof corners of both
+/// (seal outer edges), within 5 mm.
+#[test]
+fn a_pillars_are_solid_clean_and_meet_the_window_corners() {
+    let root = repo_root();
+    for id in car_ids(&root) {
+        let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
+        let has = |n: &str| {
+            mesh.parts
+                .iter()
+                .any(|p| p.name == n && !p.indices.is_empty())
+        };
+        assert!(
+            has("a_pillar") && has("a_pillar_inner"),
+            "{id}: no solid A-pillar"
+        );
+        assert!(
+            !has("a_sail"),
+            "{id}: sail at the A-pillar foot (old layout)"
+        );
+        // The pillar parts; then its seals (their last piece at the door glass's tip can be a
+        // millimetre or two wide: angles ≥ 2.5° there).
+        for (seals, min_ang) in [(false, 3.5f32), (true, 2.5)] {
+            let what = if seals { "A-pillar seal" } else { "A-pillar" };
+            let (ang, area, fold) = a_pillar_quality(&mesh, seals);
+            assert!(ang >= min_ang, "{id}: sliver in the {what} ({ang:.2}°)");
+            assert!(
+                area >= 2.0,
+                "{id}: degenerate triangle in the {what} ({area:.2} mm²)"
+            );
+            assert!(
+                fold <= 30.0,
+                "{id}: twisted quad in the {what} ({fold:.1}°)"
+            );
+        }
+        // LEFT-side vertices of a part.
+        let verts = |n: &str| -> Vec<[f32; 3]> {
+            mesh.parts
+                .iter()
+                .filter(|p| p.name == n)
+                .flat_map(|p| (0..p.vertex_count()).map(move |v| p.vertex(v)))
+                .filter(|q| q[0] < 0.0)
+                .collect()
+        };
+        let pillar = verts("a_pillar");
+        let near_in = |q: [f32; 3], vs: &[[f32; 3]]| -> f32 {
+            vs.iter()
+                .map(|w| {
+                    let d = sub3(*w, q);
+                    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+                })
+                .fold(f32::MAX, f32::min)
+        };
+        let near = |q: [f32; 3], n: &str| -> f32 {
+            verts(n)
+                .iter()
+                .map(|w| {
+                    let d = sub3(*w, q);
+                    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+                })
+                .fold(f32::MAX, f32::min)
+        };
+        let door = if has("door_fl_glass_seal") {
+            "door_fl_glass_seal"
+        } else {
+            continue;
+        };
+        for front in [true, false] {
+            // The pillar's end: its foremost (foot) / rearmost (roof) station.
+            let y_end = pillar.iter().map(|q| q[1]).fold(
+                if front { f32::MIN } else { f32::MAX },
+                |a, y| {
+                    if front {
+                        a.max(y)
+                    } else {
+                        a.min(y)
+                    }
+                },
+            );
+            let end: Vec<[f32; 3]> = pillar
+                .iter()
+                .copied()
+                // Within 6 mm: a zone boundary can put two stations 1 mm apart.
+                .filter(|q| (q[1] - y_end).abs() < 0.006)
+                .collect();
+            let outer = end
+                .iter()
+                .copied()
+                .min_by(|a, b| a[0].total_cmp(&b[0]))
+                .unwrap();
+            let inner = end
+                .iter()
+                .copied()
+                .max_by(|a, b| a[0].total_cmp(&b[0]))
+                .unwrap();
+            let what = if front { "foot" } else { "top" };
+            let dd = near(outer, door);
+            // Foot: the windshield's lower corner sits on the pillar's inner edge (a cowl strip
+            // can run between the windshield's bottom edge and the pillar foot).
+            let dw = if front {
+                let ws = verts("windshield_seal");
+                let y_ws = ws.iter().map(|q| q[1]).fold(f32::MIN, f32::max);
+                let corner = ws
+                    .iter()
+                    .copied()
+                    .filter(|q| (q[1] - y_ws).abs() < 0.001)
+                    .min_by(|a, b| a[0].total_cmp(&b[0]))
+                    .unwrap();
+                near_in(corner, &pillar)
+            } else {
+                near(inner, "windshield_seal")
+            };
+            assert!(
+                dd <= 0.005,
+                "{id}: A-pillar {what} {:.0} mm from the door glass corner",
+                dd * 1000.0
+            );
+            assert!(
+                dw <= 0.005,
+                "{id}: A-pillar {what} {:.0} mm from the windshield corner",
+                dw * 1000.0
+            );
+        }
+    }
+}
+
+/// The old A-pillar foot layout stays available on request (`SailLayout::Sail`): the door glass
+/// stops `a_sail_len_m` short of the windshield base and a black sail fills the corner.
+#[test]
+fn sail_layout_on_request() {
+    let root = repo_root();
+    let car = load_car(&root, "kestrel_ts").unwrap();
+    let mut st = style_for(&car.def);
+    st.body.a_sail_layout = car_assets::style::SailLayout::Sail;
+    let m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+    assert!(m
+        .parts
+        .iter()
+        .any(|p| p.name == "a_sail" && !p.indices.is_empty()));
+    let p = BodyProfile::styled(&car.def, &car.lattice, &st.body);
+    assert!(p.front_window().1 < p.y_fw - 0.03);
+}
+
 /// Painted van rear doors (`rear_door_windows`): the rear glass area becomes body-colour door
 /// skin, glass only in the two drawn windows (a seal round each), on both LODs; the car still
 /// validates, inside its budget, with its lamps visible.

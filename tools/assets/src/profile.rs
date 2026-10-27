@@ -13,8 +13,8 @@
 use wp_contracts::{BodyRegion, LatticeDef, VehicleDef};
 
 use crate::style::{
-    ArchShape, BodyStyle, Silhouette, OVERHANG_RANGE, PLAN_SCALE_RANGE, SCULPT_DX_RANGE,
-    TUMBLEHOME_M_RANGE,
+    ArchShape, BodyStyle, SailLayout, Silhouette, OVERHANG_RANGE, PLAN_SCALE_RANGE,
+    SCULPT_DX_RANGE, TUMBLEHOME_M_RANGE,
 };
 
 /// Allowed range of [`BodyStyle::cabin_shift_m`], m (− rearward, + forward / cab-forward).
@@ -964,6 +964,10 @@ impl BodyProfile {
             Some((rh, _)) => rh + mb,
             None => self.y_fd_rear + mb,
         };
+        if self.style.a_sail_layout == SailLayout::ToCorner {
+            // To the windshield's lower corner, where the A-pillar lands.
+            return (rear, self.y_fw.max(rear + 0.2));
+        }
         let sail = self.style.a_sail_len_m.clamp(0.04, 0.40);
         (
             rear,
@@ -971,11 +975,16 @@ impl BodyProfile {
         )
     }
 
-    /// The sail (mirror patch) at the A-pillar foot, ahead of the front door glass: (rear y,
-    /// front y). Door mirrors sit on it.
+    /// The mirror mount at the A-pillar foot: (rear y, front y). With the default layout
+    /// ([`SailLayout::ToCorner`]) the door skin's front top corner, [`BodyStyle::a_sail_len_m`]
+    /// long; with [`SailLayout::Sail`] the sail ahead of the front door glass. Door mirrors sit
+    /// on it.
     pub fn sail(&self) -> (f32, f32) {
-        let (_, f) = self.front_window();
         let sail = self.style.a_sail_len_m.clamp(0.04, 0.40);
+        if self.style.a_sail_layout == SailLayout::ToCorner {
+            return (self.y_fw - sail, self.y_fw);
+        }
+        let (_, f) = self.front_window();
         (f, self.y_fw.min(f + sail).max(f + 0.02))
     }
 
@@ -1042,10 +1051,22 @@ impl BodyProfile {
         let x11 = rw - 0.25 * rd;
         let x12 = rw - (0.6 * rd).min(0.5 * aw);
         let x13 = (rw - aw).max(0.25 * rw).min(x12 - 0.005);
+        // Default layout: toward the windshield's lower corner the pillar's outer lower edge
+        // (point 10) moves out to the side-glass base, so the door glass ends in a corner on the
+        // pillar foot (not a flat sliver along the belt) and the pillar foot widens onto the
+        // cowl; points 11 / 12 keep their place between 10 and 13.
+        let t = self.a_foot_t(y);
+        let (x10, x11, x12) = if t > 0.0 {
+            let x10 = lerp(rw, gb, t);
+            let k = (x10 - x13) / (rw - x13).max(1e-4);
+            (x10, x13 + (x11 - x13) * k, x13 + (x12 - x13) * k)
+        } else {
+            (rw, x11, x12)
+        };
         [
             gb,
-            0.5 * (gb + rw) + 0.008,
-            rw,
+            0.5 * (gb + x10) + 0.008 * (1.0 - t),
+            x10,
             x11,
             x12,
             x13,
@@ -1054,6 +1075,44 @@ impl BodyProfile {
             0.18 * x13,
             0.0,
         ]
+    }
+
+    /// How far `y` is into the A-pillar foot zone, 0…1 (default layout only): 0 up the pillar,
+    /// rising to 1 at the windshield's lower corner (`y_fw`) over the last
+    /// min(0.30, 0.4 × windshield length) m, then back to 0 over 0.06 m of hood ahead of it.
+    pub fn a_foot_t(&self, y: f32) -> f32 {
+        if self.style.a_sail_layout != SailLayout::ToCorner {
+            return 0.0;
+        }
+        // Longer where the pillar's lower edge moves far out (a narrow canopy over a wide body),
+        // so each strip widens by little.
+        let flare = self.a_foot_flare();
+        let len = (0.4 * (self.y_fw - self.roof.1))
+            .max(1.2 * flare)
+            .clamp(0.05, 0.30);
+        if y <= self.y_fw {
+            smoothstep((y - (self.y_fw - len)) / len)
+        } else {
+            smoothstep(1.0 - (y - self.y_fw) / 0.06)
+        }
+    }
+
+    /// How far the A-pillar's lower edge moves out at its foot (side-glass base − roof-rail half
+    /// width at the windshield base), m.
+    fn a_foot_flare(&self) -> f32 {
+        // As `ring` / `top_xs` place them (without the section-shape knobs).
+        let s = &self.style;
+        let y = self.y_fw - 0.01;
+        let (w, hn) = (self.half_width(y), self.haunch(y));
+        let h = (self.belt(y).max(self.sill(y) + 0.12) - self.sill(y)).max(0.0);
+        let ch = s.shoulder_round.clamp(0.01, 0.12).min(0.3 * h);
+        let xs = w + hn - 0.5 * ch;
+        let gb = (w + 0.5 * hn - s.glass_inset.clamp(0.04, 0.20))
+            .max(0.3)
+            .min(xs - 0.01)
+            .max(0.05);
+        let rw = self.roof_half_w(y).min(gb - 0.02).max(0.04);
+        (gb - rw).max(0.0)
     }
 
     /// Greenhouse half width at roof height at `y` (A-pillar plan taper applied).
@@ -1258,11 +1317,24 @@ impl BodyProfile {
             let hg = (top - belt).max(0.0);
             let rw = tx[2].max(0.04);
             let rd = s.roof_rail_drop_m.clamp(0.02, 0.10).min(0.45 * hg);
+            // Ahead of the roof (default layout) the A-pillar runs the full windshield side
+            // edge: the side glass's top edge sits a fixed share of the way from the glass base
+            // up to the windshield edge, so both reach the belt together at the windshield's
+            // lower corner (the pillar lands there with the door glass's front corner).
+            let a_corner = y > self.roof.1 && s.a_sail_layout == SailLayout::ToCorner;
             let gc = |x: f32| self.greenhouse_crown(y, x / rw);
             let fc =
                 |x: f32| top + self.top_crown(y, (x / xs).min(1.0), false) + self.fender_top(y, x);
             let mut z8 = belt + 0.01f32.min(0.25 * hg);
             let mut z10 = (top - rd + gc(tx[2])).max(z8);
+            if a_corner {
+                let h_full = (self.roof.2 - belt).max(0.2);
+                let share = (1.0 - s.roof_rail_drop_m.clamp(0.02, 0.10) / h_full).clamp(0.3, 0.95);
+                let z13 = top + gc(tx[5]);
+                let along = z8 + (z13 - z8).max(0.0) * share;
+                let t = smoothstep((y - self.roof.1) / 0.15);
+                z10 = lerp(z10, along, t).max(z8);
+            }
             if s.dlo_kink_m > 0.0 || s.dlo_top_drop_m != 0.0 {
                 let (rear, front) = self.dlo_span();
                 let drop = s.dlo_top_drop_m.clamp(-0.03, 0.10)
@@ -1290,8 +1362,21 @@ impl BodyProfile {
                 z[i] = z[i].max(z[i - 1]);
             }
             for (i, (&x, &zg)) in tx.iter().zip(z.iter()).enumerate() {
+                // The side glass and the whole pillar band (8…13) blend toward the flat top
+                // they land on at the windshield base (`y_fw`: the cowl / fender shoulder), not
+                // the flat-top height here (roof level in the windshield zone: that lifted them
+                // into a bump at the pillar foot); the windshield / roof points blend as before.
+                let z = if a_corner && i < 6 {
+                    let fw = self.y_fw;
+                    let land = self.top(fw)
+                        + self.top_crown(fw, (x / xs).min(1.0), false)
+                        + self.fender_top(fw, x);
+                    lerp(land, zg, k)
+                } else {
+                    lerp(fc(x), zg, k)
+                };
                 pts.push(RingPt {
-                    p: [-x, y, lerp(fc(x), zg, k)],
+                    p: [-x, y, z],
                     seg: if i < 2 { Seg::Glass } else { Seg::Top },
                 });
             }

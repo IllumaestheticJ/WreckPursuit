@@ -280,8 +280,13 @@ pub struct BodyStyle {
     /// mirror patch), m. The front door glass runs forward under the A-pillar to it. Range
     /// 0.04…0.40. Default 0.14.
     pub a_sail_len_m: f32,
-    /// Sail finish: [`TrimFinish::Black`] (default) or body colour.
+    /// Sail finish: [`TrimFinish::Black`] (default) or body colour (only with
+    /// [`SailLayout::Sail`]).
     pub a_sail: TrimFinish,
+    /// Layout of the A-pillar foot ([`SailLayout`]): by default the A-pillar runs the full
+    /// windshield side edge and the front door glass meets it to the windshield's lower corner
+    /// (no sail; `a_sail_len_m` / `a_sail` only size the door-skin mirror mount there).
+    pub a_sail_layout: SailLayout,
     /// Roof rail: drop from the roof top to the side-glass top edge, m. Range 0.02…0.10.
     /// Default 0.05.
     pub roof_rail_drop_m: f32,
@@ -474,6 +479,19 @@ pub const TUMBLEHOME_M_RANGE: (f32, f32) = (0.03, 0.36);
 /// Allowed range of [`BodyStyle::overhang_trim`] (each end), m.
 pub const OVERHANG_RANGE: (f32, f32) = (-0.35, 0.25);
 
+/// Layout of the A-pillar foot ([`BodyStyle::a_sail_layout`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SailLayout {
+    /// The A-pillar runs from the roof corner to the windshield's lower corner at the cowl; the
+    /// front door glass runs forward to it, so the windshield corners, the door glass's front
+    /// corners and the pillar ends coincide. Mirrors sit on the door skin at the pillar base.
+    #[default]
+    ToCorner,
+    /// The old layout: the door glass stops [`BodyStyle::a_sail_len_m`] short of the windshield
+    /// base and a sail ([`BodyStyle::a_sail`]) fills the corner under the pillar.
+    Sail,
+}
+
 /// Drawn windows in a painted van rear door ([`BodyStyle::rear_door_windows`]): one rounded
 /// rectangle each side of the centre seam, seen from behind, cast onto the door skin as glass
 /// with a black seal. Chassis metres; every field soft-clamped.
@@ -589,6 +607,7 @@ impl Default for BodyStyle {
             b_pillar: TrimFinish::Black,
             a_sail_len_m: 0.14,
             a_sail: TrimFinish::Black,
+            a_sail_layout: SailLayout::ToCorner,
             roof_rail_drop_m: 0.05,
             glass_recess_m: 0.012,
             glass_frame_m: 0.018,
