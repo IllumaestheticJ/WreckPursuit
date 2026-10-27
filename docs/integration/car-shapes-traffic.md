@@ -164,7 +164,8 @@ car-assets` (all pass; seven `TRIS_BEFORE_INTEGRATED_SIGNALS` rows rebased), `va
 Mod coverage: see "Mod coverage" below.
 
 ## Mod coverage
-`node e2e/mod_coverage.mjs <my 7 cars>` on the final meshes: 19 car/mod pairs show nothing, all
+`node e2e/mod_coverage.mjs <my 7 cars>` on the final meshes (rerun after pass 3 and the phase 3
+addenda, same result): 19 car/mod pairs show nothing, all
 of kinds already on the known list in `mod-visuals.md` (and the same as phase 1's hauler run):
 short / sequential shifter and bucket seats behind van / truck cabins (drayman, satchel, tumbril,
 and the short shifter on every car), the radar (drayman, hauler), sway bars under the car
