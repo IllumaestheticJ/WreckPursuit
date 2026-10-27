@@ -242,6 +242,8 @@ pub fn ironside(def: &VehicleDef) -> CarStyle {
     ];
     b.side_bulge_m = 0.02;
     b.rocker_in_m = 0.03;
+    b.roof_plan_taper = 0.08;
+    b.lower_lean_in_m = 0.03;
     wheels(
         &mut s,
         def,
@@ -582,6 +584,12 @@ pub fn rampart(def: &VehicleDef) -> CarStyle {
     b.side_bulge_z = 0.6;
     b.rocker_in_m = 0.045;
     b.tumblehome_m = Some(0.26);
+    // Shark nose leaning a little forward (kept small: the grille, mouth, fogs and splitter sit
+    // on the face plane, and a chin or a stronger lean would leave them floating); roof
+    // narrowing toward the fastback; lower body tucked in under the crease.
+    b.nose_face_rake_deg = -6.0;
+    b.roof_plan_taper = 0.12;
+    b.lower_lean_in_m = 0.03;
     wheels(
         &mut s,
         def,
@@ -682,6 +690,23 @@ fn rampart_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [sx * (xo - 0.04), zt - 0.095],
             [sx * (xi + 0.10), zb - 0.015],
         ];
+        // Projector bowl inside the lamp (on the lens, same cast).
+        let mut lh = Lamp::new(
+            LampView::Front,
+            outline.iter().map(|q| [sx * q[0], q[1]]).collect(),
+        );
+        lh.yaw_deg = 25.0;
+        lamp::element(
+            k.b,
+            p,
+            &headlight_key(sx),
+            &lh,
+            [sx * (xi + 0.20), zt - 0.075],
+            &lamp::Element::Bowl {
+                r_m: 0.035,
+                h_m: 0.015,
+            },
+        );
         let mut lb = Lamp::new(LampView::Front, blade);
         lb.yaw_deg = 20.0;
         lamp::lens(k.b, p, &drl, &lb);
@@ -915,6 +940,7 @@ pub fn bulwark(def: &VehicleDef) -> CarStyle {
     ];
     b.side_bulge_m = 0.015;
     b.rocker_in_m = 0.025;
+    b.lower_lean_in_m = 0.02;
     wheels(
         &mut s,
         def,
