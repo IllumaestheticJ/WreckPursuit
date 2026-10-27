@@ -188,12 +188,11 @@ fn tansy_13() -> CarStyle {
         // Short supermini overhangs.
         overhang_trim: (-0.08, -0.08),
         end_round_m: 0.04,
-        // Phase 3b: raked bumper face with a chin, leaning tailgate, rounded nose in plan, roof
+        // Phase 3b: raked bumper face, rounded nose in plan, roof
         // narrowing to the rear, lower body tucked in.
         nose_face_rake_deg: 22.0,
-        nose_chin_m: 0.05,
-        tail_face_rake_deg: 12.0,
-        tail_chin_m: 0.04,
+        // Chin and tailgate lean (0.05 m, 12°) are off until the generator's face-bottom
+        // clipping fix lands (spikes under the body from low angles).
         nose_plan_bow_m: 0.18,
         nose_tip_w: 0.88,
         roof_plan_taper: 0.08,
@@ -415,9 +414,9 @@ fn euro_panel_van(tumbril: bool) -> CarStyle {
         deck_min_m: 0.04,
         arch_lip_finish: TrimFinish::Black,
         cladding_z_m: if tumbril { 0.42 } else { 0.36 },
-        // Phase 3b: raked plastic bumper with a chin (more on the rounder satchel).
+        // Phase 3b: raked plastic bumper (more on the rounder satchel); the chin waits for the
+        // generator's face-bottom clipping fix.
         nose_face_rake_deg: if tumbril { 8.0 } else { 16.0 },
-        nose_chin_m: if tumbril { 0.04 } else { 0.06 },
         ..BodyStyle::preset(Silhouette::Van)
     };
     let mut s = with_kit(body, if tumbril { tumbril_kit } else { satchel_kit });

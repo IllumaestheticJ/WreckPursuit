@@ -954,8 +954,8 @@ const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
     ("sperber_32", 19112),
     ("stoat_16v", 16894),
     ("talus_20t", 17376),
-    ("tansy_13", 10076),
-    ("tumbril_20", 10668),
+    ("tansy_13", 10106),
+    ("tumbril_20", 10640),
     ("vireo_xs", 17065),
 ];
 
