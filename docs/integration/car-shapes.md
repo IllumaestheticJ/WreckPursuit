@@ -436,6 +436,10 @@ the lead) smooth-shades the painted body in the renderer:
 - Ring point count (18 per side) unchanged: changing it would break every style that indexes
   ring points.
 
+- Painted mod parts (`mod:paint` / `mod:livery` batches: body kits, wings, lips, flares) are
+  smooth-shaded too, so they match the body: the batch choice goes by material, and a mod
+  batch's crease map is built once with it (it is the car's own, like its index).
+
 ### Lead addenda (merged phase-2 generator requests)
 Items 1–4 of the lead's merged list: lamp primitive (concave outlines, depth, bezel, inner
 elements) — `lamp.rs`; face rake / chin / plan bow per end; plan taper (nose: `plan_width` or

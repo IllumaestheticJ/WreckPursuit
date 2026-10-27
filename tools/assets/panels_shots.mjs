@@ -47,14 +47,14 @@ const panelsReady = () =>
 // sim paused after a second P and covers the screenshot.
 const setPaused = (paused) => page.evaluate((p) => (window.__wp.app.paused = p), paused);
 // Triangles the browser draws for the player car's model (batched body parts, lenses, wheel and
-// wheel-pivot parts), against the mesh file. Round 12 batches body parts per material, so the
+// wheel-pivot `hubParts`), against the mesh file. Round 12 batches body parts per material, so the
 // number of scene children no longer says whether every part loaded.
 const drawnTris = () =>
   page.evaluate(() => {
     const v = [...window.__wp.app.views.values()][0];
     const meshes = new Set();
     v.panels.root.traverse((o) => o.isMesh && meshes.add(o));
-    for (const group of [...v.panels.wheelParts, ...v.panels.pivotParts]) for (const m of group) meshes.add(m);
+    for (const group of [...v.panels.wheelParts, ...v.panels.hubParts]) for (const m of group) meshes.add(m);
     let tris = 0;
     for (const m of meshes) {
       const g = m.geometry;
