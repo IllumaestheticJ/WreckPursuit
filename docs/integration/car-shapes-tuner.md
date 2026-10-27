@@ -202,6 +202,9 @@ End faces and plan:
   rake puts 69 of 84 head-lamp lens faces under the hood (`lights_sit_outside_the_shell`).
   Repro: add `b.nose_face_rake_deg = 8.0;` in `tuner::talus`, regenerate, run that test.
 
+Mod coverage after the addenda (all six): 9 car/mod pairs show nothing, all no-visual mods on
+the known list (`drivetrain_shifter_short`, `tires_sport`).
+
 ## Triangle counts
 
 Hero budget 22k (mid LOD 7k); all six within it.
