@@ -841,8 +841,9 @@ await shot("night_run_greybox_toggle.png");
   await page.click("#sc-garage");
   const opened = await page.waitForSelector(G, { timeout: 10000 }).then(() => true).catch(() => false);
   await page.click(`${G} button[role="tab"]:has-text("Car lots")`);
-  // Car lots: visit a junkyard (the lot itself loads, its stock parked in rows), then leave.
-  await page.click(`${G} tr[data-lot="dockside_salvage"] button:has-text("Visit")`);
+  // Car lots: with no car to drive there, take a taxi to a junkyard (the lot itself loads, its
+  // stock parked in rows), then leave. With a car, lots are drive-to (waypoint only).
+  await page.click(`${G} tr[data-lot="dockside_salvage"] button:has-text("Taxi")`);
   const lot = await page
     .waitForSelector('[data-testid="lot-visit"]', { timeout: 20000 })
     .then(() => page.evaluate(() => ({ visit: window.__wp.sim.lotVisit(), stock: window.__wp.sim.careerLot("dockside_salvage") })))
@@ -914,6 +915,9 @@ await shot("night_run_greybox_toggle.png");
   await page.click(`${G} button:has-text("Pay & release")`);
   await page.click(`${G} button[role="tab"]:has-text("Cars")`);
   const released = await page.evaluate(() => window.__wp.careerApi.view());
+  // Repairs are drive-to: the screen as it opens when the car pulls into a shop.
+  await page.evaluate(() => window.__wp.openGarage(null, "Meridian Motorworks", { kind: "Garage", id: "Meridian Motorworks", name: "Meridian Motorworks" }));
+  await page.click(`${G} button[role="tab"]:has-text("Cars")`).catch(() => {});
   await page.click(`${G} button:has-text("Repair all")`).catch(() => {});
   const repaired = await page.evaluate(() => window.__wp.careerApi.view());
   check(

@@ -63,10 +63,11 @@ import { WorkshopMode } from "./workshop/mode";
 import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
 import { LotVisitView } from "../../ui-kit/src/garage/LotVisit";
 import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
-import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
+import type { CareerApi, CareerPlace, CareerView, RunKind } from "../../ui-kit/src/garage/types";
 import { RaceView, racesForMap, type BetPick, type BetStatus, type RaceFrame } from "./ui/race";
 import { GarageVisitView } from "./ui/garageVisit";
-import { PlaceVisitView } from "./ui/placeVisit";
+import { PlaceVisitView, type PlaceVisit } from "./ui/placeVisit";
+import { CareerWaypoint } from "./ui/waypoint";
 import { TougeView, type TougeChoice, type Wager } from "./ui/touge";
 import { RaceMarker, parseCourse } from "./race_marker";
 import { RaceSpotsView } from "./race_spots";
@@ -198,6 +199,8 @@ async function main(): Promise<void> {
     if (!crash.playing) radioStrip.push(unit || null, text, performance.now(), tier);
   };
   const map = new MapOverlay(overlay);
+  // Career waypoint (owner 2026-10-27): the menu marks a dealer / garage on the map; drive there.
+  const waypoint = new CareerWaypoint(map.hud);
   // Street racers (wp_wasm::street; src/ui/street.ts): their dots, the route and the challenge
   // picker live in the city map above; the hint, race panel, countdown and result here.
   const street = new StreetUi(
@@ -349,6 +352,11 @@ async function main(): Promise<void> {
   garageEl.id = "ui-garage";
   garageEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
   overlay.appendChild(garageEl);
+  /** Where the player pulled in before the career screen opened (null: out on the road, e.g.
+   * the run ended or was quit). Garage work in the screen needs the right place. */
+  let careerPlace: CareerPlace | null = null;
+  /** Spawn city of the player's chosen garage (the career's only spawn choice). */
+  const careerHomeCity = (): string => sim.careerView().homes?.find((h) => h.selected)?.city ?? "port_vesper";
   const act = (f: () => CareerView): CareerView => {
     const v = f();
     persistCareer();
@@ -378,13 +386,19 @@ async function main(): Promise<void> {
     newCareer: (mode) => act(() => newCareer(mode)),
     exportSave: () => downloadText(saveFileName(sim.careerView().day), sim.careerSave()),
     importSave: (text) => act(() => sim.careerLoad(text)),
-    startRun: (kind) => void startCareerRun(kind),
+    // From the garage screen runs are in the world, starting in the player's chosen garage.
+    startRun: (kind) => void startCareerRun(kind, false, true),
     // Playtest row 167: the race and touge pickers straight from the garage, as career runs.
     races: () => openCareerPicker("races"),
     touge: () => openCareerPicker("touge"),
     workshop: (uid) => openWorkshop(uid),
-    // Repairs from the menu are priced at a shop in the city the main menu spawns in.
-    homeCity: () => loadMenuMap(menuSpawns),
+    // Repairs from the menu (a towed wreck) are priced at a shop in the player's garage's city.
+    homeCity: () => careerHomeCity(),
+    // Drive-to (owner 2026-10-27): garage work only where the player pulled in.
+    place: () => careerPlace,
+    setWaypoint: (t) => waypoint.set(t),
+    waypoint: () => waypoint.target,
+    setHome: (id) => act(() => sim.careerSetHome(id)),
     close: () => {
       garage.hide();
       app.paused = false;
@@ -435,7 +449,11 @@ async function main(): Promise<void> {
         rig.setMode("orbit", app.views.get(e)?.root, [-3.8, 6.2, 2.2]);
       },
       buy: (slot) => act(() => sim.careerBuyListing(lotId, slot)),
-      leave: () => openGarage(),
+      // Back from the rows: still at the lot (the dealer buys cars here).
+      leave: () => {
+        const lot = sim.careerView().lots.find((l) => l.id === lotId);
+        openGarage(null, null, { kind: "Lot", id: lotId, name: lot?.name ?? lotId });
+      },
     });
   };
   // Garage workshop: the career car on a lift in a 3D bay, parts on and off (src/workshop).
@@ -463,7 +481,7 @@ async function main(): Promise<void> {
       const uid = workshop.current()?.car;
       workshop.close();
       if (uid !== undefined) careerApi.setActive(uid);
-      startCareerRun("free");
+      startCareerRun("free", false, true);
     },
     carName: (defId) => sim.careerView().cars.find((c) => c.def_id === defId)?.name ?? defId,
   });
@@ -506,7 +524,9 @@ async function main(): Promise<void> {
   onAutoCrashReplayChange((on) => (autoBox.checked = on));
   /** Garage: ends a career run in progress (its result goes into the career), pauses. */
   /** `at`: the shop the car pulled into (the Repair panel starts on it). */
-  const openGarage = (message: string | null = null, at: string | null = null) => {
+  /** `place`: where the player is (garage work needs it; null = out on the road). */
+  const openGarage = (message: string | null = null, at: string | null = null, place: CareerPlace | null = null) => {
+    careerPlace = place;
     lotView.hide();
     careerPicker = null;
     workshop.close();
@@ -582,13 +602,23 @@ async function main(): Promise<void> {
   placeEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
   overlay.appendChild(placeEl);
   const activeCareerCar = () => sim.careerView().cars.find((c) => c.active)?.uid ?? null;
+  /** The place the player pulled into, as the career screen names it. */
+  const placeOf = (v: PlaceVisit): CareerPlace => ({ kind: v.kind, id: v.id ?? v.name, name: v.name });
   const placeView = new PlaceVisitView(placeEl, {
-    workshop: () => {
+    workshop: (v) => {
       const uid = activeCareerCar();
-      openGarage();
+      openGarage(null, null, placeOf(v));
       if (uid !== null) openWorkshop(uid);
     },
-    garage: (v) => (v.kind === "Safehouse" ? openGarage(`Safe at ${v.name} for the night. Your career is saved.`) : openGarage(`Pulled into ${v.name}.`, v.name)),
+    garage: (v) =>
+      v.kind === "Safehouse"
+        ? openGarage(`Safe at ${v.name} for the night. Your career is saved.`, null, placeOf(v))
+        : v.kind === "Home"
+          ? openGarage(`Back in your garage, ${v.name}. Your career is saved.`, null, placeOf(v))
+          : openGarage(`Pulled into ${v.name}.`, v.name, placeOf(v)),
+    lot: (v) => {
+      if (v.id) visitLot(v.id);
+    },
     leave: () => sim.placeLeave(),
   });
   // The city's regulars remember their results between visits (wp_race::roster records).
@@ -788,7 +818,9 @@ async function main(): Promise<void> {
     // Every session: the tune panel's saved debug overrides (none = the shipped handling) and
     // raw keys; the test pad (?drift=w) also gets its course and the reference assists.
     driftLabW.setActive(sc.name === DRIFT_LAB_W);
-    scene.setGarages(sim.garages(), sim.safehouses());
+    const places = sim.places();
+    scene.setGarages(sim.garages(), sim.safehouses(), places);
+    waypoint.reset(sim.careerRunActive() ? places : []);
     const city = sim.worldInfo()[W.city] > 0.5;
     const cityId = city ? sim.cityId() : "";
     void scene.setCity(cityId || null);
@@ -902,11 +934,11 @@ async function main(): Promise<void> {
     const v = sim.careerView();
     return v.cars.find((c) => c.uid === v.active_car)?.def_id ?? DEFAULT_CAR;
   };
-  /** The map career races and garage runs use: always the world (owner 2026-10-25); they
-   * start in the main menu's remembered spawn city (`loadMenuMap(menuSpawns)`). */
+  /** The map career races and garage runs use: always the world (owner 2026-10-25). Runs start
+   * in the player's chosen garage (wp_wasm `Career::start_run`; owner 2026-10-27: spawn points
+   * are a career choice), so the spawn city is that garage's. */
   const careerMap = (): string => {
-    const spawn = loadMenuMap(menuSpawns);
-    if (spawn) spawnSel.value = spawn;
+    spawnSel.value = careerHomeCity();
     return WORLD_ID;
   };
   /** Career betting limits for the picker (`CareerProgress`: city bets need the Street tier). */
@@ -2067,7 +2099,10 @@ async function main(): Promise<void> {
       if (!replay) {
         runEnd.update(sim.runResult(), now);
         garageView.update(sim.garageVisit(), now);
-        placeView.update(sim.careerRunActive() ? sim.place() : null, now);
+        const place = sim.careerRunActive() ? sim.place() : null;
+        placeView.update(place, now);
+        if (place?.visit) waypoint.arrived(place.visit.kind, place.visit.id ?? place.visit.name);
+        if (sim.careerRunActive()) waypoint.frame(now);
       }
       // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
       if (!replay && sim.careerRunActive()) {

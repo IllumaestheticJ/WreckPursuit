@@ -3,7 +3,12 @@
 // place is for, drawn with the UI kit's primitives:
 //  - garage: "Workshop" (work on the car part by part) or "Garage" (repairs, mods, tuning, cars);
 //  - safehouse: "End the night here" (the run ends safely and the career is saved) or "Workshop";
-//  - either: "Back on the road" gives control back (drive out of the ring before it reopens).
+//  - car lot: "Walk the lot" (the lot visit: browse and buy);
+//  - the player's own garage (career runs start in it): "Workshop", "Garage" (cars, mods, tuning)
+//    or "End the night here";
+//  - any: "Back on the road" gives control back (drive out of the ring before it reopens).
+// Dealers, garages and workshops are only reached this way (owner 2026-10-27): the career menu
+// only sets a waypoint to them.
 // During a pursuit a safehouse cannot be entered, but laying low inside its ring shakes the police
 // (the police safehouse rule); a strip shows how long is left.
 import { render } from "preact";
@@ -17,13 +22,29 @@ export interface SafehouseSite {
   radius_m: number;
 }
 
+/** `wp_wasm::garage_visit::PlaceKind`. */
+export type PlaceKind = "Garage" | "Safehouse" | "Lot" | "Home";
+
 /** `wp_wasm::garage_visit::PlaceVisit`. */
 export interface PlaceVisit {
   seq: number;
-  kind: "Garage" | "Safehouse";
+  kind: PlaceKind;
   name: string;
+  /** Lot / home garage id (null for shops and safehouses). */
+  id: string | null;
   shop: "Legit" | "Crooked" | null;
   wanted: string;
+}
+
+/** `wp_wasm::garage_visit::MapPlace` (`places_json()`): a drive-to place on the map. */
+export interface MapPlace {
+  kind: PlaceKind;
+  /** Lot / home id, else the name. */
+  id: string;
+  name: string;
+  pos: [number, number, number];
+  radius_m: number;
+  shop: "Legit" | "Crooked" | null;
 }
 
 /** `wp_wasm::garage_visit::PlaceStatus`. */
@@ -36,23 +57,32 @@ export interface PlaceStatus {
 export interface PlaceActions {
   /** End the run here and open the workshop with the car. */
   workshop: (v: PlaceVisit) => void;
-  /** End the run here and open the career garage. */
+  /** End the run here and open the career garage (a safehouse or home: end the night). */
   garage: (v: PlaceVisit) => void;
+  /** End the run here and walk the car lot `v.id`. */
+  lot: (v: PlaceVisit) => void;
   /** Give the car back. */
   leave: () => void;
 }
 
+const TAG: Record<PlaceKind, string> = { Garage: "GARAGE", Safehouse: "SAFEHOUSE", Lot: "CAR LOT", Home: "YOUR GARAGE" };
+
+const BLURB: Record<PlaceKind, string> = {
+  Garage: "Pull in to work on the car yourself, or have the shop repair, upgrade and tune it.",
+  Safehouse: "Your hideout. Park up for the night (the run ends and your career is saved), or work on the car.",
+  Lot: "Park up and walk the rows: today's stock, ready to buy.",
+  Home: "Your own garage. Work on the car, swap cars, or park up for the night.",
+};
+
 function PlacePanel(props: { visit: PlaceVisit; actions: PlaceActions }) {
   const v = props.visit;
   const a = props.actions;
-  const home = v.kind === "Safehouse";
+  const tag = v.kind === "Garage" && v.shop ? `${TAG.Garage} · ${v.shop.toUpperCase()}` : TAG[v.kind];
   return (
     <div style={{ position: "absolute", left: "1em", top: "4em", width: "min(320px, calc(100vw - 32px))", pointerEvents: "auto", zIndex: 70 }}>
-      <Panel title={v.name} tag={home ? "SAFEHOUSE" : `GARAGE${v.shop ? ` · ${v.shop.toUpperCase()}` : ""}`}>
+      <Panel title={v.name} tag={tag}>
         <p class="wp-dim" style={{ margin: "0 0 0.6em" }}>
-          {home
-            ? "Your hideout. Park up for the night (the run ends and your career is saved), or work on the car."
-            : "Pull in to work on the car yourself, or have the shop repair, upgrade and tune it."}
+          {BLURB[v.kind]}
         </p>
         {v.wanted !== "None" && (
           <p style={{ margin: "0 0 0.6em" }}>
@@ -60,22 +90,39 @@ function PlacePanel(props: { visit: PlaceVisit; actions: PlaceActions }) {
           </p>
         )}
         <div style={{ display: "grid", gap: "0.4em" }}>
-          {home ? (
-            <Button variant="primary" testid="place-end-night" onClick={() => a.garage(v)}>
-              End the night here
-            </Button>
-          ) : (
-            <Button variant="primary" testid="place-workshop" onClick={() => a.workshop(v)}>
-              Workshop
-            </Button>
+          {v.kind === "Safehouse" && (
+            <>
+              <Button variant="primary" testid="place-end-night" onClick={() => a.garage(v)}>
+                End the night here
+              </Button>
+              <Button testid="place-workshop" onClick={() => a.workshop(v)}>
+                Workshop
+              </Button>
+            </>
           )}
-          {home ? (
-            <Button testid="place-workshop" onClick={() => a.workshop(v)}>
-              Workshop
-            </Button>
-          ) : (
-            <Button testid="place-garage" onClick={() => a.garage(v)} title="repairs, mods, tuning, your cars">
-              Garage: repair, mods, tuning
+          {v.kind === "Garage" && (
+            <>
+              <Button variant="primary" testid="place-workshop" onClick={() => a.workshop(v)}>
+                Workshop
+              </Button>
+              <Button testid="place-garage" onClick={() => a.garage(v)} title="repairs, mods, tuning, your cars">
+                Garage: repair, mods, tuning
+              </Button>
+            </>
+          )}
+          {v.kind === "Home" && (
+            <>
+              <Button variant="primary" testid="place-workshop" onClick={() => a.workshop(v)}>
+                Workshop
+              </Button>
+              <Button testid="place-garage" onClick={() => a.garage(v)} title="your cars, mods, tuning; the run ends here">
+                Garage: cars, mods, tuning
+              </Button>
+            </>
+          )}
+          {v.kind === "Lot" && (
+            <Button variant="primary" testid="place-lot" onClick={() => a.lot(v)}>
+              Walk the lot
             </Button>
           )}
           <Button testid="place-leave" onClick={a.leave}>
@@ -139,6 +186,7 @@ export class PlaceVisitView {
     const wrap = (a: PlaceActions): PlaceActions => ({
       workshop: (x) => (this.reset(), a.workshop(x)),
       garage: (x) => (this.reset(), a.garage(x)),
+      lot: (x) => (this.reset(), a.lot(x)),
       leave: () => (this.reset(), a.leave()),
     });
     render(

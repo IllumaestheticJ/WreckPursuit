@@ -9,7 +9,12 @@
  * beater), Impound (release or let the auction countdown run), Career (rep tier, progress to
  * the next, what each tier unlocks), Ledger. The head has cash / debt / rep /
  * bounty / carried heat and
- * starts the next run (free drive or night run) with the active car.
+ * starts the next run (free drive or night run) with the active car, from the player's chosen
+ * garage (Garages tab: the three own garages, unlocked by rep, and the repair shops).
+ *
+ * Dealers, garages and workshops are drive-to (owner 2026-10-27): with a host that says where
+ * the player is (`CareerApi.place`), garage work is open only at the right place (see
+ * `access.ts`) and everything else offers "Waypoint", which marks the place on the map.
  */
 import { render, type ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -17,6 +22,7 @@ import { Badge, Button, Confirm as ConfirmRow, Delta, isBigSpend, Meter, Money, 
 import { pct, words } from "../ui/format";
 import type {
   CareerApi,
+  CareerPlace,
   CarTune,
   CareerView,
   CareerFeature,
@@ -33,10 +39,11 @@ import type {
   StatsView,
 } from "./types";
 import { pickTextFile } from "./store";
+import { type Access, canWalkLot, garageAccess, placeLine } from "./access";
 import { isStockTune, normalizeTune, STOCK_TUNE, TUNE_SLIDERS, TUNE_STEPS, tuneSummary } from "./tune";
 import "./garage.css";
 
-type Tab = "cars" | "lots" | "pound" | "police" | "career" | "ledger";
+type Tab = "cars" | "lots" | "garages" | "pound" | "police" | "career" | "ledger";
 
 const itemKey = (i: RepairItem) => JSON.stringify(i);
 const fmt = {
@@ -134,13 +141,14 @@ export function startShop(shops: ShopSite[], at: string | null, homeCity: string
   return shops.find((s) => s.name === at) ?? shops.find((s) => s.city === homeCity) ?? shops[0] ?? null;
 }
 
-function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; at: string | null; run: (f: () => CareerView) => void }) {
-  const { car, view, api } = props;
+function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; at: string | null; access: Access; run: (f: () => CareerView) => void }) {
+  const { car, view, api, access } = props;
   // The world's shops when the host lists them (one world since 2026-10-25: each shop has its
   // district's labour rate and is legit or crooked); else the bare district and shop kind.
   const shops = view.shops ?? [];
-  const [shopName, setShopName] = useState(() => startShop(shops, props.at, api.homeCity?.() ?? null)?.name ?? "");
-  const site = shops.find((s) => s.name === shopName) ?? null;
+  const [shopName, setShopName] = useState(() => startShop(shops, access.repairShop ?? props.at, api.homeCity?.() ?? null)?.name ?? "");
+  // At a shop the repairs are that shop's (drive-to); a tow or an old host picks freely.
+  const site = shops.find((s) => s.name === (access.repairShop ?? shopName)) ?? null;
   const [bareDistrict, setDistrict] = useState("Residential");
   const [bareShop, setShop] = useState<ShopKind>("Legit");
   const district = site?.district ?? bareDistrict;
@@ -148,6 +156,15 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; at
   const [picked, setPicked] = useState<string[]>([]);
   const [scrapAsk, setScrapAsk] = useState(false);
   if (car.location !== "Garage") return null;
+  if (!access.repair) {
+    return car.repair_lines.length === 0 ? null : (
+      <Panel title="Repair" tag="at a shop">
+        <p class="wp-dim" data-testid="repair-drive-to">
+          {car.repair_lines.length} repairs waiting. Repairs are done at a repair shop: set a waypoint in the Garages tab and drive there.
+        </p>
+      </Panel>
+    );
+  }
   const items = car.repair_lines.filter((l) => picked.includes(itemKey(l.item))).map((l) => l.item);
   const req = (option: ShopRequest["option"]): ShopRequest => ({ option, district, shop });
   const quote = (option: ShopRequest["option"]) => {
@@ -170,7 +187,7 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; at
             <div class="wp-row" style={{ gap: "0.6em", flexWrap: "wrap", marginBottom: "0.5em" }}>
               <label class="wp-mono wp-dim">
                 shop{" "}
-                <select class="wp-select" value={site.name} onChange={(e) => setShopName((e.target as HTMLSelectElement).value)} data-testid="repair-shop">
+                <select class="wp-select" value={site.name} disabled={access.repairShop !== null} onChange={(e) => setShopName((e.target as HTMLSelectElement).value)} data-testid="repair-shop">
                   {shops.map((s) => (
                     <option value={s.name} key={s.name}>
                       {s.name} · {s.city_label}
@@ -202,6 +219,7 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; at
               </Button>
             </div>
           )}
+          {access.tow && <p class="wp-dim" data-testid="repair-tow">The car can't be driven: the shop's tow truck brings it in.</p>}
           {wanted && shop === "Legit" && <p class="wp-warn">You are wanted ({view.carried_level}): a legit shop will report you.</p>}
           <table class="wp-table" data-testid="repair-lines">
             <thead>
@@ -271,11 +289,11 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; at
 const WHEELS = ["Front left", "Front right", "Rear left", "Rear right"];
 
 /** Tyres: tread per wheel and replacement. Repair All never fits tyres. */
-function TiresPanel(props: { car: CarView; view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
+function TiresPanel(props: { car: CarView; view: CareerView; api: CareerApi; access: Access; run: (f: () => CareerView) => void }) {
   const { car, view, api } = props;
   const t = car.tires;
   const [picked, setPicked] = useState<boolean[]>(t.worn_out.slice());
-  if (car.location !== "Garage") return null;
+  if (car.location !== "Garage" || !props.access.tires) return null;
   const n = picked.filter(Boolean).length;
   const cost = n * t.price_each;
   return (
@@ -531,6 +549,8 @@ function CarsTab(props: { view: CareerView; api: CareerApi; at: string | null; r
   const [tuning, setTuning] = useState(false);
   const [sellAsk, setSellAsk] = useState(false);
   const car = view.cars.find((c) => c.uid === sel) ?? view.cars.find((c) => c.active) ?? view.cars[0];
+  const place = api.place ? api.place() : undefined;
+  const access = garageAccess(place, car ?? { drivable: true });
   if (!car) {
     return (
       <Panel title="No cars">
@@ -543,8 +563,8 @@ function CarsTab(props: { view: CareerView; api: CareerApi; at: string | null; r
       </Panel>
     );
   }
-  if (mods && car.location === "Garage") return <ModTree car={car} cash={view.cash} api={api} run={props.run} onBack={() => setMods(false)} />;
-  if (tuning && car.location === "Garage") return <TunePage car={car} api={api} run={props.run} onBack={() => setTuning(false)} />;
+  if (mods && access.mods && car.location === "Garage") return <ModTree car={car} cash={view.cash} api={api} run={props.run} onBack={() => setMods(false)} />;
+  if (tuning && access.tune && car.location === "Garage") return <TunePage car={car} api={api} run={props.run} onBack={() => setTuning(false)} />;
   return (
     <div class="wp-cg-cars">
       <div class="wp-cg-list" role="listbox" aria-label="Your cars">
@@ -569,21 +589,21 @@ function CarsTab(props: { view: CareerView; api: CareerApi; at: string | null; r
               {car.active ? "Active car" : "Drive this car"}
             </Button>
             {api.workshop && (
-              <Button disabled={car.location !== "Garage"} onClick={() => api.workshop!(car.uid)} title="work on the car yourself: take parts off, fit new ones">
+              <Button disabled={car.location !== "Garage" || !access.workshop} onClick={() => api.workshop!(car.uid)} title={access.workshop ? "work on the car yourself: take parts off, fit new ones" : "drive to your garage or a repair shop"}>
                 Workshop
               </Button>
             )}
-            <Button disabled={car.location !== "Garage"} onClick={() => setMods(true)}>
+            <Button disabled={car.location !== "Garage" || !access.mods} onClick={() => setMods(true)} title={access.mods ? undefined : "drive to your garage or a repair shop"}>
               Mods
             </Button>
-            <Button disabled={car.location !== "Garage"} onClick={() => setTuning(true)} title="free: suspension, gearing, differential, brake balance">
+            <Button disabled={car.location !== "Garage" || !access.tune} onClick={() => setTuning(true)} title={access.tune ? "free: suspension, gearing, differential, brake balance" : "drive to your garage or a repair shop"}>
               Tune
             </Button>
-            <Button variant="danger" disabled={car.location !== "Garage"} pressed={sellAsk} onClick={() => setSellAsk(!sellAsk)}>
+            <Button variant="danger" disabled={car.location !== "Garage" || !access.sell} pressed={sellAsk} onClick={() => setSellAsk(!sellAsk)} title={access.sell ? undefined : "dealers buy cars at their lot: drive to one"}>
               Sell (+<Money value={car.sale_price} />)
             </Button>
           </div>
-          {sellAsk && car.location === "Garage" && (
+          {sellAsk && access.sell && car.location === "Garage" && (
             <Confirm
               text={
                 <>
@@ -603,8 +623,8 @@ function CarsTab(props: { view: CareerView; api: CareerApi; at: string | null; r
             </p>
           )}
         </Panel>
-        <RepairPanel key={`r${car.uid}`} car={car} view={view} api={api} at={props.at} run={props.run} />
-        <TiresPanel key={`t${car.uid}`} car={car} view={view} api={api} run={props.run} />
+        <RepairPanel key={`r${car.uid}`} car={car} view={view} api={api} at={props.at} access={access} run={props.run} />
+        <TiresPanel key={`t${car.uid}`} car={car} view={view} api={api} access={access} run={props.run} />
         <InsurancePanel car={car} view={view} api={api} run={props.run} />
       </div>
     </div>
@@ -626,6 +646,9 @@ const LOT_BLURB: Record<LotKind, string> = {
 /** The car lots (dealerships by tier, used lots, junkyards): pick one and drive there. */
 function LotsTab(props: { view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
   const { view, api } = props;
+  const place = api.place ? api.place() : undefined;
+  const drivable = view.cars.some((c) => c.location === "Garage" && c.drivable);
+  const [, redraw] = useState(0);
   const [peek, setPeek] = useState<string | null>(null);
   let stock: LotStockView | null = null;
   if (peek) {
@@ -662,6 +685,7 @@ function LotsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
                     <td>
                       <b>{l.name}</b> <span class="wp-dim wp-mono">{"★".repeat(l.tier)}</span>
                       <div class="wp-dim" style={{ fontSize: "0.8em" }}>
+                        {l.city_label ? `${l.city_label} · ` : ""}
                         {words(l.district)} · {l.classes.map(words).join(", ")}
                       </div>
                     </td>
@@ -672,9 +696,13 @@ function LotsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
                         <Button size="sm" pressed={peek === l.id} onClick={() => setPeek(peek === l.id ? null : l.id)}>
                           List
                         </Button>
-                        <Button size="sm" variant="primary" disabled={view.run_active} onClick={() => api.visitLot(l.id)} title="drive to the lot and walk the rows">
-                          Visit
-                        </Button>
+                        {canWalkLot(place, l.id, drivable) || !api.setWaypoint ? (
+                          <Button size="sm" variant="primary" disabled={view.run_active} onClick={() => api.visitLot(l.id)} title={place?.id === l.id || place === undefined ? "walk the rows" : "no car to drive there: take a taxi"}>
+                            {place?.id === l.id || place === undefined ? "Visit" : "Taxi"}
+                          </Button>
+                        ) : (
+                          <WaypointButton api={api} target={{ kind: "Lot", id: l.id, name: l.name }} onSet={() => redraw((n) => n + 1)} />
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -702,6 +730,84 @@ function LotsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
           )}
         </Panel>
       ))}
+    </div>
+  );
+}
+
+/** "Waypoint": marks the place on the map (the career's only way of sending the player there). */
+function WaypointButton(props: { api: CareerApi; target: CareerPlace; onSet: () => void }) {
+  const { api, target } = props;
+  const now = api.waypoint?.() ?? null;
+  const on = !!now && now.kind === target.kind && now.id === target.id;
+  return (
+    <Button size="sm" pressed={on} testid={`waypoint-${target.id}`} onClick={() => (api.setWaypoint?.(target), props.onSet())} title="mark it on the map; drive there and pull in">
+      {on ? "Waypoint set" : "Waypoint"}
+    </Button>
+  );
+}
+
+/** The player's own garages (spawn choice, unlocked by rep) and the city's repair shops. */
+function GaragesTab(props: { view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
+  const { view, api } = props;
+  const [, redraw] = useState(0);
+  const homes = view.homes ?? [];
+  const shops = view.shops ?? [];
+  return (
+    <div data-testid="garages">
+      <Panel title="Your garages" tag="runs start here">
+        <p class="wp-dim" style={{ fontSize: "0.85em", marginTop: 0 }}>
+          Night runs and free drives start in the garage you pick. More open up as your rep grows; once open, a garage stays yours.
+        </p>
+        <table class="wp-table" data-testid="home-garages">
+          <tbody>
+            {homes.map((h) => (
+              <tr key={h.id} data-home={h.id} style={{ opacity: h.unlocked ? 1 : 0.6 }}>
+                <td>
+                  <b>{h.name}</b> {h.selected && <Badge tone="ok">spawn</Badge>}
+                  <div class="wp-dim" style={{ fontSize: "0.8em" }}>
+                    {h.city_label}
+                  </div>
+                </td>
+                <td class="num">{h.unlocked ? <Badge tone="ok">open</Badge> : <Badge tone="dim">{`${h.needed_rep.toLocaleString("en-US")} rep`}</Badge>}</td>
+                <td>
+                  <div class="wp-row" style={{ gap: "0.3em" }}>
+                    {api.setHome && (
+                      <Button size="sm" variant="primary" pressed={h.selected} disabled={!h.unlocked || h.selected || view.run_active} testid={`home-${h.id}`} onClick={() => props.run(() => api.setHome!(h.id))}>
+                        {h.selected ? "Spawning here" : "Spawn here"}
+                      </Button>
+                    )}
+                    {api.setWaypoint && h.unlocked && <WaypointButton api={api} target={{ kind: "Home", id: h.id, name: h.name }} onSet={() => redraw((n) => n + 1)} />}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+      {api.setWaypoint && shops.length > 0 && (
+        <Panel title="Repair shops" tag="drive-to">
+          <p class="wp-dim" style={{ fontSize: "0.85em", marginTop: 0 }}>
+            Repairs, mods, tuning and the workshop. Legit shops report wanted cars; crooked ones never do, but charge more.
+          </p>
+          <table class="wp-table" data-testid="repair-shops">
+            <tbody>
+              {shops.map((s) => (
+                <tr key={s.name}>
+                  <td>
+                    <b>{s.name}</b>
+                    <div class="wp-dim" style={{ fontSize: "0.8em" }}>
+                      {s.city_label} · {words(s.district)} ×{s.labour.toFixed(2)} · {s.kind === "Crooked" ? "crooked" : "legit"}
+                    </div>
+                  </td>
+                  <td>
+                    <WaypointButton api={api} target={{ kind: "Garage", id: s.name, name: s.name }} onSet={() => redraw((n) => n + 1)} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Panel>
+      )}
     </div>
   );
 }
@@ -979,6 +1085,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   const pound = view.cars.filter((c) => c.impound).length;
+  const where = placeLine(api.place ? api.place() : undefined);
   return (
     <div class="wp-screen wp-cg" data-testid="career-garage">
       <header class="wp-head">
@@ -1033,6 +1140,11 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
           New career
         </Button>
       </div>
+      {where && (
+        <p class="wp-dim" data-testid="career-place">
+          {where}
+        </p>
+      )}
       {error && (
         <p class="wp-danger" data-testid="garage-error">
           {error}
@@ -1051,6 +1163,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
         tabs={[
           { id: "cars", label: `Cars (${view.cars.length})` },
           { id: "lots", label: "Car lots" },
+          ...((view.homes ?? []).length ? [{ id: "garages" as const, label: "Garages" }] : []),
           { id: "pound", label: pound ? `Impound (${pound})` : "Impound" },
           ...(api.payOffBounty ? [{ id: "police" as const, label: view.bounty > 0 ? "Police · bounty" : "Police" }] : []),
           { id: "career", label: "Career" },
@@ -1062,6 +1175,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
       <div style={{ marginTop: "0.8em" }}>
         {tab === "cars" && <CarsTab view={view} api={api} at={props.at} run={run} />}
         {tab === "lots" && <LotsTab view={view} api={api} run={run} />}
+        {tab === "garages" && <GaragesTab view={view} api={api} run={run} />}
         {tab === "pound" && <PoundTab view={view} api={api} run={run} />}
         {tab === "police" && <PoliceTab view={view} api={api} run={run} />}
         {tab === "career" && <CareerTab view={view} />}

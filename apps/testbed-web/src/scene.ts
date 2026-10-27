@@ -34,6 +34,9 @@ const MAX_CONTACT_MARKERS = 64;
 const GARAGE_COLOUR = { Legit: 0x3399ff, Crooked: 0xffaa22 } as const;
 /** Safehouse ring and beam colour (career runs). */
 const SAFEHOUSE_COLOUR = 0x33dd88;
+/** Car lots (pink) and the player's own garages (white) in career runs. */
+const LOT_COLOUR = 0xff7ac8;
+const HOME_COLOUR = 0xf2f2f2;
 /** Height of a garage's light beam, m (visible over the greybox blocks). */
 const GARAGE_BEAM_M = 40;
 const CONTACT_DOT = new THREE.SphereGeometry(0.08, 8, 6);
@@ -524,8 +527,9 @@ export class SceneView {
 
   /** Repair shop markers (`garages_json()`): a ring on the ground at the shop's radius and a
    * light beam, blue for legit shops, amber for crooked ones. Stop inside the ring to repair.
-   * Safehouses (`safehouses_json()`, career runs) get the same marker in green. */
-  setGarages(list: GarageSite[], safehouses: SafehouseSite[] = []): void {
+   * Safehouses (`safehouses_json()`, career runs) get the same marker in green; car lots and the
+   * player's own garages (`places_json()` kinds Lot / Home) in pink and white. */
+  setGarages(list: GarageSite[], safehouses: SafehouseSite[] = [], others: { kind: string; name: string; pos: [number, number, number]; radius_m: number }[] = []): void {
     for (const old of this.garages.children) {
       old.traverse((o) => {
         if (o instanceof THREE.Mesh) {
@@ -538,6 +542,9 @@ export class SceneView {
     const places = [
       ...list.map((g) => ({ name: `garage:${g.name}`, pos: g.pos, radius_m: g.radius_m, colour: GARAGE_COLOUR[g.kind] ?? GARAGE_COLOUR.Legit })),
       ...safehouses.map((h) => ({ name: `safehouse:${h.name}`, pos: h.pos, radius_m: h.radius_m, colour: SAFEHOUSE_COLOUR })),
+      ...others
+        .filter((p) => p.kind === "Lot" || p.kind === "Home")
+        .map((p) => ({ name: `${p.kind.toLowerCase()}:${p.name}`, pos: p.pos, radius_m: p.radius_m, colour: p.kind === "Lot" ? LOT_COLOUR : HOME_COLOUR })),
     ];
     for (const g of places) {
       const colour = g.colour;
