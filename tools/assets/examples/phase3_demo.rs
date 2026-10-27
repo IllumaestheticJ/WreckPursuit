@@ -250,6 +250,33 @@ fn concave_lamps(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
     }
 }
 
+/// Coupe: an opera window (dark glass patch) on the painted C-pillar via `PatchBand::Greenhouse`.
+fn opera_window(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
+    use car_assets::builder::{Patch, PatchBand};
+    let p = ctx.profile;
+    let key = PartKey::body(
+        "opera_window_l",
+        BodyRegion::Cabin,
+        car_assets::mesh::PartKind::Detail,
+        MaterialSlot::Glass,
+    );
+    // On the sail behind the roof's rear edge (the C-pillar over the rear glass slope).
+    let y = p.roof.0 - 0.42;
+    let patch = Patch {
+        y0: y,
+        y1: y + 0.24,
+        band: PatchBand::Greenhouse {
+            z0: p.z_belt + 0.07,
+            z1: p.z_belt + 0.20,
+        },
+        offset_m: 0.003,
+        thickness_m: 0.0,
+        steps: (3, 3),
+    };
+    b.surface_patch(&key, p, &patch);
+    b.mirror_part("opera_window_l", &key.mirrored());
+}
+
 fn custom(f: car_assets::style::DetailFn) -> Detail {
     Detail::new(
         "demo_lamps",
@@ -311,6 +338,18 @@ fn variants(
             });
             v("lamps", &|s| s.details.push(custom(wrap_lamps)));
             v("lamps_concave", &|s| s.details.push(custom(concave_lamps)));
+            // Side-window kick-up at the C-pillar, window top line falling to the rear.
+            v("dlo", &|s| {
+                s.body.dlo_kink_m = 0.09;
+                s.body.dlo_kink_len_m = 0.20;
+                s.body.dlo_top_drop_m = 0.04;
+            });
+            // One even fastback curve from behind the header, lower deck.
+            v("roof_arc", &|s| {
+                s.body.roof_arc = 0.9;
+                s.body.roof_arc_rear_exp = 1.3;
+                s.body.deck_dz = -0.04;
+            });
             // Long nose and short tail (the new range: −0.35…+0.25 m).
             v("overhang", &|s| s.body.overhang_trim = (0.25, -0.30));
             // Raked, undercut, bowed nose; roof narrowing to the rear.
@@ -343,6 +382,11 @@ fn variants(
             });
             v("lamps", &|s| s.details.push(custom(swept_lamps)));
             v("overhang", &|s| s.body.overhang_trim = (-0.30, 0.20));
+            // Lip at the hatch glass base, glass nearly flush with the tail.
+            v("glass_lip", &|s| {
+                s.body.glass_base_lip_m = 0.035;
+                s.body.deck_min_m = 0.08;
+            });
             // Hatch tailgate lean, pointed plan nose, boat-tail lower body.
             v("face", &|s| {
                 s.body.tail_face_rake_deg = 30.0;
@@ -363,6 +407,15 @@ fn variants(
             });
             // Short front overhang (pre-runner), longer bed overhang.
             v("overhang", &|s| s.body.overhang_trim = (-0.35, 0.15));
+            // Tall flat hood above the lattice hood line, trapezoid arches with black lips and
+            // a black lower-body cladding band.
+            v("tall_hood", &|s| {
+                s.body.hood_dz = (0.05, 0.10);
+                s.body.nose_h = None;
+                s.body.flare_shape = car_assets::style::ArchShape::Trapezoid;
+                s.body.arch_lip_finish = car_assets::style::TrimFinish::Black;
+                s.body.cladding_z_m = 0.42;
+            });
             v("upright_glass", &|s| {
                 s.body.tumblehome_m = Some(0.05);
                 s.body.glass_inset = 0.04;
@@ -390,6 +443,11 @@ fn variants(
             v("lamps", &|s| s.details.push(custom(led_strips)));
         }
         "ironside_440" => {
+            // Painted quarter, opera window on the C-pillar.
+            v("opera", &|s| {
+                s.body.quarter_glass = false;
+                s.details.push(custom(opera_window));
+            });
             // Shark nose: the face leans forward.
             v("shark", &|s| {
                 s.body.nose_face_rake_deg = -15.0;

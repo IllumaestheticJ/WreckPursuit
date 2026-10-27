@@ -132,6 +132,14 @@ pub enum PatchBand {
         /// Upper edge height.
         z1: f32,
     },
+    /// LEFT greenhouse side above the belt between heights `z0..z1` (belt ledge, side glass,
+    /// roof rail / pillar; see `BodyProfile::greenhouse_point`).
+    Greenhouse {
+        /// Lower edge height.
+        z0: f32,
+        /// Upper edge height.
+        z1: f32,
+    },
     /// Top surface between chassis `x0..x1` (signed; may span the centre line).
     Top {
         /// Left edge x.
@@ -585,7 +593,9 @@ impl Builder {
             (((y1 - y0) / step).ceil() as usize).max(1)
         };
         let (a0, a1) = match patch.band {
-            PatchBand::Side { z0, z1 } => (z0.min(z1), z0.max(z1)),
+            PatchBand::Side { z0, z1 } | PatchBand::Greenhouse { z0, z1 } => {
+                (z0.min(z1), z0.max(z1))
+            }
             PatchBand::Top { x0, x1 } => (x0.min(x1), x0.max(x1)),
         };
         let na = if patch.steps.1 > 0 {
@@ -602,6 +612,7 @@ impl Builder {
                         let a = a0 + (a1 - a0) * k as f32 / na as f32;
                         match patch.band {
                             PatchBand::Side { .. } => profile.side_point(y, a),
+                            PatchBand::Greenhouse { .. } => profile.greenhouse_point(y, a),
                             PatchBand::Top { .. } => profile.top_point(y, a),
                         }
                     })

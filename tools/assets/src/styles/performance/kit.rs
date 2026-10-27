@@ -120,6 +120,11 @@ impl Seg {
     }
 }
 
+/// An outline given for the LEFT side (x < 0, or |x|) moved to side `sx` (x only).
+pub fn on_side(sx: f32, pts: &[[f32; 2]]) -> Vec<[f32; 2]> {
+    pts.iter().map(|q| [sx * q[0].abs(), q[1]]).collect()
+}
+
 /// The foundation's default door-mirror key of side `sx`.
 pub fn mirror_key(sx: f32) -> PartKey {
     sided(
@@ -765,6 +770,119 @@ impl<'a> Kit<'a> {
                 lens(self.b, self.p, k, &l);
             }
         }
+    }
+
+    // ------------------------------------------------------------------ shared panels
+    // Promoted from the phase-2 groups' local helpers (tuner / hatch `face_poly`, supercar
+    // `top_poly` / `side_poly` / `end_poly`, tuner `swept_top_lamp`); the draped ones are cast
+    // onto the built body like the projected lamps (`crate::lamp::panel`), so they follow
+    // curved, sculpted and raked surfaces and take concave outlines.
+    //
+    // ```ignore
+    // // Inside a style kit (`k: Kit`, side `sx`):
+    // // a mesh intake on the nose face, a vent on each fender top, a side gill, a badge:
+    // k.end_poly(&dkey("intake", BodyRegion::FrontBumper, M::Grille), true,
+    //     &[[-0.30, 0.25], [0.30, 0.25], [0.24, 0.36], [-0.24, 0.36]], 0.004, 0.02);
+    // k.top_poly(&sided(&dkey("fender_vent_l", BodyRegion::FrontLeftFender, M::Grille), sx),
+    //     &on_side(sx, &[[0.55, 1.6], [0.75, 1.6], [0.72, 1.3], [0.58, 1.3]]), 0.003, 0.01);
+    // k.side_poly(&dkey("gill_l", BodyRegion::FrontLeftFender, M::Trim), sx,
+    //     &[[0.9, 0.45], [1.1, 0.48], [1.1, 0.62], [0.95, 0.60]], 0.004, 0.01);
+    // k.face_poly(&dkey("badge", BodyRegion::Hood, M::Chrome), true,
+    //     &[[-0.04, 0.55], [0.04, 0.55], [0.04, 0.59], [-0.04, 0.59]], 0.006);
+    // ```
+
+    /// Flat prism on the nose (`front`) or tail face plane: convex outline `(x, z)` swept from
+    /// 2 cm inside the face to `proud` out of it (lamp lenses, grilles, badges on a flat face;
+    /// for a curved or raked face use [`Kit::end_poly`]).
+    pub fn face_poly(&mut self, key: &PartKey, front: bool, outline: &[[f32; 2]], proud: f32) {
+        let (y0, y1) = if front {
+            (self.yn - 0.02, self.yn + proud)
+        } else {
+            (self.yt + 0.02, self.yt - proud)
+        };
+        self.prism_y(key, outline, y0, y1);
+    }
+
+    /// Panel lying on the top surface (hood, fender tops, deck, roof): outline `pts` in chassis
+    /// `(x, y)` (any simple polygon), its face `lift` m above the paint and `thick` m deep.
+    pub fn top_poly(&mut self, key: &PartKey, pts: &[[f32; 2]], lift: f32, thick: f32) {
+        crate::lamp::panel(
+            self.b,
+            self.p,
+            key,
+            crate::lamp::LampView::Top,
+            pts,
+            lift,
+            lift - thick,
+        );
+    }
+
+    /// Panel on the body side of side `sx` (`key_left` is the left-side key; the right one is
+    /// derived): outline `pts` in `(y, z)`, its face `off` m out of the paint, `thick` m deep.
+    /// Follows sculpts, bulges and arches (and the greenhouse above the belt).
+    pub fn side_poly(
+        &mut self,
+        key_left: &PartKey,
+        sx: f32,
+        pts: &[[f32; 2]],
+        off: f32,
+        thick: f32,
+    ) {
+        let key = sided(key_left, sx);
+        let view = crate::lamp::LampView::Side { right: sx > 0.0 };
+        crate::lamp::panel(self.b, self.p, &key, view, pts, off, off - thick);
+    }
+
+    /// Panel on the nose (`front`) or tail face: outline `pts` in `(x, z)` (signed x), its face
+    /// `proud` m out of the surface and `depth` m deep, following the plan-rounded corners and a
+    /// raked / bowed face.
+    pub fn end_poly(
+        &mut self,
+        key: &PartKey,
+        front: bool,
+        pts: &[[f32; 2]],
+        proud: f32,
+        depth: f32,
+    ) {
+        let view = if front {
+            crate::lamp::LampView::Front
+        } else {
+            crate::lamp::LampView::Rear
+        };
+        crate::lamp::panel(self.b, self.p, key, view, pts, proud, proud - depth);
+    }
+
+    /// Head lamp of side `sx` lying on the nose top and sweeping back into the fender, drawn in
+    /// the top view and projected ([`Kit::proj_cluster`]): the lens runs across |x| `xin..xout`
+    /// at its front edge `y1`; its inboard edge goes back to `y0`, its outboard edge `sweep` m
+    /// further (a swept, tapering lamp). The outboard `sig_w` is the amber turn signal; a flush
+    /// dark bezel `border` m wide rings it.
+    pub fn swept_top_lamp(
+        &mut self,
+        sx: f32,
+        y0: f32,
+        y1: f32,
+        xin: f32,
+        xout: f32,
+        sweep: f32,
+        border: f32,
+        sig_w: f32,
+    ) {
+        let y1 = y1.min(self.yn - 0.01);
+        // Keep a real lens when a narrow nose pulls the outer edge in.
+        let xin = xin.min(xout - 0.15);
+        let sig_w = sig_w.min(0.4 * (xout - xin));
+        let outline = [[xin, y1], [xout, y1], [xout - 0.03, y0 - sweep], [xin, y0]];
+        self.proj_cluster(
+            sx,
+            true,
+            crate::lamp::LampView::Top,
+            &outline,
+            Some(Seg::Outboard(sig_w)),
+            M::EmissiveAmber,
+            border,
+            0.0,
+        );
     }
 
     /// Bounding box (lo, hi) of part `name` as built so far, or `None` if it is empty.
