@@ -651,7 +651,7 @@ pub fn grille_leds(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
     let zt = p.z_nose - 0.05;
     for sx in [-1.0f32, 1.0] {
         let (x0, x1) = xs(sx, 0.06, 0.27);
-        b.cuboid(k0, [x0, yn - 0.03, zt - 0.085], [x1, yn + 0.016, zt - 0.03]);
+        b.cuboid(k0, [x0, yn - 0.03, zt - 0.085], [x1, yn + 0.032, zt - 0.03]);
     }
     for (side, sx) in [("l", -1.0f32), ("r", 1.0)] {
         let colour = if sx < 0.0 {
@@ -670,7 +670,7 @@ pub fn grille_leds(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
             b.cuboid(
                 &led,
                 [x0, yn - 0.02, zt - 0.075],
-                [x1, yn + 0.024, zt - 0.04],
+                [x1, yn + 0.040, zt - 0.04],
             );
         }
     }

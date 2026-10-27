@@ -8,21 +8,20 @@
 //! mirrors; each kit re-emits head / tail lamps with their turn signals cut out of the same
 //! lens, and its own mirrors.
 //!
-//! References (generic descriptions only, CLAUDE.md rule 9):
-//! - `sentinel_cruiser`: 2010s American full-size RWD police sedan with muscle-car styling:
-//!   wide crosshair grille, narrow swept lamps, one full-width "racetrack" tail lamp.
-//! - `sentinel_wolfhound`: 2010s American AWD police sedan on a large FWD-platform saloon: tall
-//!   body, high belt, big trapezoid three-bar grille, swept lamps, wide tail lamps joined by a
-//!   bright garnish.
-//! - `sentinel_bastion`: 2010s American full-size body-on-frame SUV: tall upright nose, two-tier
-//!   grille with a bright cross bar, stacked rectangular lamps, vertical tail lamps beside a
-//!   near-vertical tailgate, running boards, hitch.
-//! - `sentinel_warden`: late-80s American full-size body-on-frame sedan: flat slab sides,
-//!   upright chrome egg-crate grille, quad rectangular sealed-beam lamps, amber wraparound
-//!   corners, chrome bumpers with rubber strips, wide ribbed tail lamps.
-//! - `sentinel_vigil`: 2010s American muscle coupe: slim upper grille slot in line with the
-//!   lamps, big lower intake, power-dome hood with extractor vents, low "gun-slit" greenhouse,
-//!   twin horizontal tail lamps in a dark band, quad tips.
+//! References are body types only (CLAUDE.md rule 9, brand cues included): the fleet wears
+//! one invented maker identity, a hexagonal shield grille ([`shield_grille`]) and a blank
+//! shield badge ([`badge`]), in a different proportion and fill on each car.
+//! - `sentinel_cruiser`: 2010s full-size RWD police sedan: long hood, chopped greenhouse, wide
+//!   low shield grille, swept slit lamps, boomerang tail lamps.
+//! - `sentinel_wolfhound`: 2010s AWD police sedan on a large FWD-platform saloon: tall body,
+//!   high belt, tall shield grille with fine vertical bars, swept pentagon lamps, corner lamps.
+//! - `sentinel_bastion`: 2010s full-size body-on-frame SUV: upright nose, big egg-crate shield,
+//!   stacked lamps, vertical tail lamps, running boards, hitch.
+//! - `sentinel_warden`: late-80s full-size body-on-frame sedan: slab sides, period upright
+//!   chrome grille with quad rectangular sealed beams, amber wraparound corners, chrome bumpers
+//!   with rubber strips, wide ribbed tail lamps.
+//! - `sentinel_vigil`: 2010s muscle coupe: power-dome hood with extractor vents, low greenhouse,
+//!   slim lamps over one big shield-shaped mouth, swept tail lamps in a dark band.
 
 // Kit helpers take explicit coordinates, like the performance kits.
 #![allow(clippy::too_many_arguments)]
@@ -222,11 +221,97 @@ fn shaped_cluster(
     }
 }
 
+/// The fleet's fictional maker identity (no real brand's grille or badge): a hexagonal
+/// "shield" grille, widest at `zm`, with a frame in `frame` a little larger behind it.
+/// `half` = (top, widest, bottom) half widths; `rows` horizontal slats and `cols` vertical bars
+/// in `bar_mat`. Each car uses its own proportions and fill.
+fn shield_grille(
+    k: &mut Kit,
+    name: &str,
+    half: (f32, f32, f32),
+    z0: f32,
+    zm: f32,
+    z1: f32,
+    rows: usize,
+    cols: usize,
+    bar_mat: M,
+    frame: M,
+) {
+    let (ht, hm, hb) = half;
+    let outline = |grow: f32| {
+        vec![
+            [-ht - grow, z1 + grow],
+            [ht + grow, z1 + grow],
+            [hm + grow, zm],
+            [hb + grow, z0 - grow],
+            [-hb - grow, z0 - grow],
+            [-hm - grow, zm],
+        ]
+    };
+    let y = k.yn;
+    let kf = dkey(&format!("{name}_frame"), FB, frame);
+    k.prism_y(&kf, &outline(0.022), y - 0.02, y + 0.014);
+    let kg = dkey(name, FB, M::Grille);
+    k.prism_y(&kg, &outline(0.0), y - 0.02, y + 0.018);
+    // Half width of the opening at height z.
+    let hw = |z: f32| {
+        if z >= zm {
+            hm + (ht - hm) * (z - zm) / (z1 - zm).max(1e-3)
+        } else {
+            hb + (hm - hb) * (z - z0) / (zm - z0).max(1e-3)
+        }
+    };
+    let kb = dkey(&format!("{name}_bars"), FB, bar_mat);
+    for i in 1..=rows {
+        let z = z0 + (z1 - z0) * i as f32 / (rows + 1) as f32;
+        let w = hw(z) - 0.01;
+        k.front_box(&kb, -w, w, z - 0.006, z + 0.006, 0.026, 0.0);
+    }
+    for i in 1..=cols {
+        let x = -hm + 2.0 * hm * i as f32 / (cols + 1) as f32;
+        // Vertical bar over the height where the opening is wider than |x|.
+        let (mut za, mut zb) = (z0, z1);
+        if x.abs() > hb {
+            za = z0 + (zm - z0) * ((x.abs() - hb) / (hm - hb).max(1e-3)).clamp(0.0, 1.0);
+        }
+        if x.abs() > ht {
+            zb = zm + (z1 - zm) * (1.0 - ((x.abs() - ht) / (hm - ht).max(1e-3)).clamp(0.0, 1.0));
+        }
+        if zb - za > 0.03 {
+            k.front_box(
+                &kb,
+                x - 0.006,
+                x + 0.006,
+                za + 0.005,
+                zb - 0.005,
+                0.026,
+                0.0,
+            );
+        }
+    }
+}
+
+/// Blank maker's badge (a small shield, no lettering) at (0, z) on the nose or tail face.
+fn badge(k: &mut Kit, front: bool, z: f32, size: f32) {
+    let region = if front { FB } else { BodyRegion::Trunk };
+    let name = if front { "badge_front" } else { "badge_rear" };
+    let kb = dkey(name, region, M::Chrome);
+    let (w, h) = (0.5 * size, 0.6 * size);
+    let prof = [[-w, z + h], [w, z + h], [w, z], [0.0, z - h], [-w, z]];
+    if front {
+        let y = k.yn;
+        k.prism_y(&kb, &prof, y - 0.01, y + 0.034);
+    } else {
+        let y = k.yt;
+        k.prism_y(&kb, &prof, y + 0.01, y - 0.03);
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 // sentinel_cruiser
 // ---------------------------------------------------------------------------------------
 
-/// 2010s full-size RWD sedan: crosshair grille, swept lamps, racetrack tail lamp.
+/// 2010s full-size RWD sedan: wide low shield grille, swept slit lamps, boomerang tail lamps.
 pub fn cruiser(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
     let p = ctx.profile;
@@ -236,26 +321,23 @@ pub fn cruiser(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let (nz0, nz1) = k.nose_z();
     let (tz0, tz1) = k.tail_z();
 
-    // --- Front: wide grille with a crosshair, swept lamps over the corners, lower intake.
+    // --- Front: the fleet's wide, low shield grille with four slats and a blank badge, swept
+    // lamps over the corners, lower intake.
     let (gz0, gz1) = (nz1 - 0.19, nz1 - 0.035);
-    k.mesh_grille("grille", FB, 0.47, gz0, gz1, 3, 12, M::Trim);
-    let cross = dkey("grille_crosshair", FB, M::Metal);
-    let zc = 0.5 * (gz0 + gz1);
-    k.front_box(&cross, -0.47, 0.47, zc - 0.011, zc + 0.011, 0.022, 0.004);
-    k.front_box(&cross, -0.012, 0.012, gz0, gz1, 0.022, 0.004);
-    let surround = dkey("grille_surround", FB, M::Trim);
-    k.front_box(&surround, -0.50, 0.50, gz1, gz1 + 0.022, 0.016, 0.005);
-    k.front_box(&surround, -0.50, 0.50, gz0 - 0.022, gz0, 0.016, 0.005);
+    shield_grille(
+        &mut k,
+        "grille",
+        (0.44, 0.48, 0.36),
+        gz0,
+        gz0 + 0.10,
+        gz1,
+        4,
+        0,
+        M::Trim,
+        M::Chrome,
+    );
+    badge(&mut k, true, gz1 - 0.02, 0.07);
     for sx in SIDES {
-        k.front_box(
-            &surround,
-            sx * 0.47,
-            sx * 0.50,
-            gz0 - 0.022,
-            gz1 + 0.022,
-            0.016,
-            0.005,
-        );
         // Swept slit lamp: pointed inboard end toward the grille, taller outboard end with
         // the amber signal, in a black housing that also runs back over the nose top.
         let t = nz1;
@@ -336,41 +418,51 @@ pub fn cruiser(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         0.006,
     );
 
-    // --- Rear: full-width racetrack tail lamp on a dark band, reverse lamps, diffuser valance.
+    // --- Rear: per side a boomerang lamp (a long bar along the deck edge with a drop at the
+    // outer corner, the drop being the red-on-red signal) on a dark band, blank badge between
+    // them, reverse lamps, diffuser valance.
     let (lz0, lz1) = (tz1 - 0.15, tz1 - 0.035);
     k.rear_panel(
         "tail_panel",
         BodyRegion::Trunk,
         wt - 0.02,
-        lz0 - 0.02,
+        lz1 - 0.06,
         lz1 + 0.02,
         M::Grille,
     );
+    badge(&mut k, false, lz1 - 0.03, 0.06);
     for sx in SIDES {
-        // One continuous lens per side meeting at the centre (a hair apart); the outer end is
-        // the red-on-red turn signal.
-        k.rear_cluster(
+        let bar = [
+            [0.20, lz1 - 0.045],
+            [wt - 0.13, lz1 - 0.045],
+            [wt - 0.13, lz1 - 0.005],
+            [0.24, lz1 - 0.005],
+        ];
+        face_poly(&mut k, &taillight_key(sx), false, sx, &bar, 0.024);
+        let drop = [
+            [wt - 0.125, lz0 + 0.01],
+            [wt - 0.04, lz0 + 0.03],
+            [wt - 0.04, lz1 - 0.005],
+            [wt - 0.125, lz1 - 0.005],
+        ];
+        face_poly(
+            &mut k,
+            &indicator_rear_key(sx, M::Taillight),
+            false,
             sx,
-            0.004,
-            wt - 0.04,
-            lz0 + 0.02,
-            lz1 - 0.02,
-            0.022,
-            0.004,
-            Seg::Outboard(0.16),
-            M::Taillight,
+            &drop,
+            0.024,
         );
-        // Dark core inside the band: the lit lens reads as a ring ("racetrack").
-        let core = sided(&dkey("taillight_core_l", BodyRegion::Trunk, M::Grille), sx);
-        let (c0, c1) = (sx * 0.05, sx * (wt - 0.24));
+        let hk = sided(&dkey("taillamp_housing_l", BodyRegion::Trunk, M::Trim), sx);
+        let (h0, h1) = (sx * (wt - 0.14), sx * (wt - 0.025));
         k.rear_box(
-            &core,
-            c0.min(c1),
-            c0.max(c1),
-            lz0 + 0.045,
-            lz1 - 0.045,
-            0.026,
-            0.0,
+            &hk,
+            h0.min(h1),
+            h0.max(h1),
+            lz0 - 0.005,
+            lz1 + 0.01,
+            0.012,
+            0.004,
         );
         let rev = sided(&lkey("reverse_lamp_l", BodyRegion::Trunk, M::Headlight), sx);
         let (r0, r1) = (sx * 0.30, sx * 0.40);
@@ -409,7 +501,7 @@ pub fn cruiser(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 // sentinel_wolfhound
 // ---------------------------------------------------------------------------------------
 
-/// 2010s AWD police sedan: big trapezoid three-bar grille, swept lamps, tail garnish.
+/// 2010s AWD police sedan: tall shield grille with vertical bars, swept lamps, corner tail lamps.
 pub fn wolfhound(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
     let p = ctx.profile;
@@ -420,29 +512,21 @@ pub fn wolfhound(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let (nz0, nz1) = k.nose_z();
     let (tz0, tz1) = k.tail_z();
 
-    // --- Front: trapezoid grille, three wide bars, narrowing downward.
+    // --- Front: the fleet's shield grille, tall here, filled with fine vertical bars, badge.
     let (gz0, gz1) = (nz1 - 0.30, nz1 - 0.03);
-    let g = dkey("grille", FB, M::Grille);
-    let bars = dkey("grille_bars", FB, M::Chrome);
-    let frame = dkey("grille_frame", FB, M::Trim);
-    let rows = 5;
-    for i in 0..rows {
-        let t0 = i as f32 / rows as f32;
-        let t1 = (i + 1) as f32 / rows as f32;
-        let (z0, z1) = (gz0 + (gz1 - gz0) * t0, gz0 + (gz1 - gz0) * t1);
-        let hw = 0.36 + 0.14 * t1;
-        k.front_box(&g, -hw, hw, z0, z1, 0.006, 0.0);
-        k.front_box(&frame, -hw - 0.025, -hw, z0, z1 + 0.001, 0.016, 0.004);
-        k.front_box(&frame, hw, hw + 0.025, z0, z1 + 0.001, 0.016, 0.004);
-    }
-    k.front_box(&frame, -0.525, 0.525, gz1, gz1 + 0.022, 0.016, 0.004);
-    k.front_box(&frame, -0.385, 0.385, gz0 - 0.022, gz0, 0.016, 0.004);
-    for (i, t) in [0.25f32, 0.52, 0.78].iter().enumerate() {
-        let z = gz0 + (gz1 - gz0) * t;
-        let hw = 0.36 + 0.14 * t - 0.02;
-        let h = if i == 2 { 0.016 } else { 0.013 };
-        k.front_box(&bars, -hw, hw, z - h, z + h, 0.020, 0.005);
-    }
+    shield_grille(
+        &mut k,
+        "grille",
+        (0.40, 0.46, 0.30),
+        gz0,
+        gz0 + 0.17,
+        gz1,
+        0,
+        11,
+        M::Trim,
+        M::Chrome,
+    );
+    badge(&mut k, true, gz1 - 0.035, 0.08);
     for sx in SIDES {
         // Swept lamp: a long pentagon rising from the grille corner to the fender, amber
         // outboard end, black housing that also runs back over the nose top.
@@ -536,8 +620,7 @@ pub fn wolfhound(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.004,
         );
     }
-    let garnish = dkey("tail_garnish", BodyRegion::Trunk, M::Chrome);
-    k.rear_box(&garnish, -0.40, 0.40, lz1 - 0.05, lz1 - 0.02, 0.012, 0.004);
+    badge(&mut k, false, lz1 - 0.05, 0.07);
     plate(&mut k, false, lz0 - 0.12);
     let val = dkey("rear_valance", RB, M::Grille);
     k.rear_box(
@@ -575,7 +658,7 @@ pub fn wolfhound(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 // sentinel_bastion
 // ---------------------------------------------------------------------------------------
 
-/// Full-size body-on-frame SUV: tall two-tier grille, stacked lamps, vertical tail lamps,
+/// Full-size body-on-frame SUV: big egg-crate shield grille, stacked lamps, vertical tail lamps,
 /// running boards, hitch.
 pub fn bastion(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
@@ -586,33 +669,23 @@ pub fn bastion(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let (nz0, nz1) = k.nose_z();
     let (tz0, tz1) = k.tail_z();
 
-    // --- Front: two-tier grille split by a bright bar at lamp height, lamps beside it.
+    // --- Front: the fleet's shield grille at its biggest, a coarse egg-crate fill, the blank
+    // badge; lamps beside it.
     let (lz0, lz1) = (nz1 - 0.17, nz1 - 0.04);
-    let bar_z = 0.5 * (lz0 + lz1);
-    k.mesh_grille("grille", FB, 0.50, nz1 - 0.42, nz1 - 0.03, 4, 6, M::Trim);
-    let bar = dkey("grille_bar", FB, M::Chrome);
-    k.front_box(
-        &bar,
-        -0.56,
-        0.56,
-        bar_z - 0.035,
-        bar_z + 0.035,
-        0.030,
-        0.008,
+    shield_grille(
+        &mut k,
+        "grille",
+        (0.47, 0.50, 0.40),
+        nz1 - 0.42,
+        nz1 - 0.16,
+        nz1 - 0.03,
+        4,
+        7,
+        M::Trim,
+        M::Chrome,
     );
-    let frame = dkey("grille_frame", FB, M::Chrome);
-    k.front_box(&frame, -0.53, 0.53, nz1 - 0.035, nz1 - 0.012, 0.022, 0.006);
-    k.front_box(&frame, -0.53, 0.53, nz1 - 0.445, nz1 - 0.42, 0.022, 0.006);
+    badge(&mut k, true, nz1 - 0.10, 0.10);
     for sx in SIDES {
-        k.front_box(
-            &frame,
-            sx * 0.50,
-            sx * 0.53,
-            nz1 - 0.445,
-            nz1 - 0.012,
-            0.022,
-            0.006,
-        );
         let hk = sided(
             &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
             sx,
@@ -915,9 +988,9 @@ pub fn vigil(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let (nz0, nz1) = k.nose_z();
     let (_, tz1) = k.tail_z();
 
-    // --- Front: slim upper slot between slim lamps; big lower intake with a body bar.
+    // --- Front: slim lamps high on the corners over one big shield-shaped mouth (the fleet's
+    // grille, inverted proportions: narrow top, wide lower half) with a mesh fill.
     let (sz0, sz1) = (nz1 - 0.11, nz1 - 0.025);
-    k.mesh_grille("grille", FB, 0.42, sz0, sz1, 2, 10, M::Trim);
     for sx in SIDES {
         // Lamp lens in line with the slot, on the face (housing dark), amber inboard.
         // Slim, angry lamp: the top edge drops toward the slot, the outer end is taller;
@@ -966,11 +1039,20 @@ pub fn vigil(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.01,
         );
     }
-    let (iz0, iz1) = (nz0 + 0.05, sz0 - 0.06);
-    k.mesh_grille("lower_intake", FB, 0.50, iz0, iz1, 3, 12, M::Trim);
-    let bar = dkey("intake_bar", FB, M::Paint);
-    let zb = 0.5 * (iz0 + iz1);
-    k.front_box(&bar, -0.50, 0.50, zb - 0.022, zb + 0.022, 0.024, 0.008);
+    let (mz0, mz1) = (nz0 + 0.05, nz1 - 0.03);
+    shield_grille(
+        &mut k,
+        "grille",
+        (0.34, 0.50, 0.44),
+        mz0,
+        mz0 + 0.45 * (mz1 - mz0),
+        mz1,
+        5,
+        13,
+        M::Trim,
+        M::Grille,
+    );
+    badge(&mut k, true, mz1 - 0.03, 0.06);
 
     // Hood: two extractor vents either side of the power dome.
     let span = yn - p.y_fw;
@@ -988,7 +1070,7 @@ pub fn vigil(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
     }
 
-    // --- Rear: dark band with twin horizontal lamps per side, reverse in the centre.
+    // --- Rear: dark band, one swept lamp per side, reverse lamps and badge in the centre.
     let (lz0, lz1) = (tz1 - 0.15, tz1 - 0.03);
     k.rear_panel(
         "tail_panel",
@@ -999,22 +1081,23 @@ pub fn vigil(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         M::Grille,
     );
     for sx in SIDES {
-        let tk = taillight_key(sx);
-        let ik = indicator_rear_key(sx, M::Taillight);
-        // Inner lamp (indicator segment) and outer lamp, each a squared ring of red.
-        let (i0, i1) = (0.31, 0.53);
-        let (o0, o1) = (0.545, wt - 0.05);
-        for (a, c, key) in [(i0, i1, &ik), (o0, o1, &tk)] {
-            k.rear_box(key, sx * a, sx * c, lz0 + 0.01, lz1 - 0.01, 0.022, 0.006);
-        }
-        let core = sided(&dkey("taillight_core_l", BodyRegion::Trunk, M::Grille), sx);
-        k.rear_box(
-            &core,
-            sx * (o0 + 0.05),
-            sx * (o1 - 0.05),
-            lz0 + 0.04,
-            lz1 - 0.04,
-            0.026,
+        // One lamp per side whose outer end sweeps up into the corner; the inboard end is the
+        // red-on-red signal.
+        let outline = [
+            [0.24, lz0 + 0.035],
+            [wt - 0.06, lz0 + 0.01],
+            [wt - 0.04, lz1 - 0.005],
+            [0.28, lz1 - 0.015],
+        ];
+        shaped_cluster(
+            &mut k,
+            false,
+            sx,
+            &outline,
+            0.36,
+            false,
+            M::Taillight,
+            0.022,
             0.0,
         );
         let rev = sided(&lkey("reverse_lamp_l", BodyRegion::Trunk, M::Headlight), sx);
@@ -1029,6 +1112,7 @@ pub fn vigil(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.0,
         );
     }
+    badge(&mut k, false, 0.5 * (lz0 + lz1), 0.05);
     plate(&mut k, false, lz0 - 0.11);
     k.diffuser(M::Grille, 0.62, 0.12, 0, 0.0);
 
