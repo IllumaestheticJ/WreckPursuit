@@ -209,14 +209,36 @@ impl PoliceSystem {
             s.los = false;
         }
         let mut helo_los: Vec<UnitId> = Vec::new();
+        let cons = self.cfg.heat.heat.conspicuous.clone();
         for id in ids {
             let p = xy(self.racers[&id].pos);
             let pz = self.racers[&id].pos[2];
+            // Speed far over the limit makes a racer not yet chased obvious (owner
+            // 2026-10-27, Loop 9 night at 185 mph): seen further, in the mirror, day or night.
+            let conspicuity = {
+                let r = &self.racers[&id];
+                if r.pursued() || self.held.contains(&id) {
+                    0.0
+                } else {
+                    let speed = (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt();
+                    self.speed_limit_for(world, r.pos)
+                        .map_or(0.0, |l| cons.level(speed - l))
+                }
+            };
+            let grow = |base: f32, full: f32| {
+                crate::config::ConspicuousConfig::scale(base, full, conspicuity, true)
+            };
+            let los_range = grow(los_range, cons.range_m);
+            let witness = grow(witness, cons.range_m);
+            let recognise = grow(recognise, cons.range_m);
+            let mut sight = sight.clone();
+            sight.all_round_m = grow(sight.all_round_m, cons.all_round_m);
             let mut o = RacerObs {
                 nearest_unit_m: f32::INFINITY,
                 nearest_chaser_m: f32::INFINITY,
                 nearest_unit_free_m: f32::INFINITY,
                 nearest_chaser_free_m: f32::INFINITY,
+                conspicuity,
                 ..Default::default()
             };
             let mut best_spot = f32::INFINITY;
@@ -449,8 +471,13 @@ impl PoliceSystem {
             };
             let range = self.cfg.heat.heat.recognition_range_m.get(self.phase);
             let far = ((o.spotter_m - rc.near_m) / (range - rc.near_m).max(1.0)).clamp(0.0, 1.0);
-            let needed =
-                self.cfg.heat.heat.recognition_time_s.get(self.phase) + rc.far_extra_s * far;
+            // A conspicuous racer (far over the limit) is recognised sooner (owner 2026-10-27).
+            let needed = crate::config::ConspicuousConfig::scale(
+                self.cfg.heat.heat.recognition_time_s.get(self.phase) + rc.far_extra_s * far,
+                self.cfg.heat.heat.conspicuous.recognition_s,
+                o.conspicuity,
+                false,
+            );
             let recognised = o.spotter.is_some() && *acc >= needed;
             let rec = &self.racers[&id];
             if !rec.pursued() && rec.level > WantedLevel::None && recognised {

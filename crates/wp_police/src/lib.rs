@@ -475,6 +475,20 @@ pub(crate) struct RacerObs {
     pub(crate) nearest_unit_free_m: f32,
     /// See `nearest_unit_free_m`, m.
     pub(crate) nearest_chaser_free_m: f32,
+    /// How obvious the racer's speed makes it, 0..=1 ([`config::ConspicuousConfig`]); 0 while
+    /// pursued or held.
+    pub(crate) conspicuity: f32,
+}
+
+/// What the police saw of one racer on the last think step ([`PoliceSystem::sighting`]).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Sighting {
+    /// Any unit, helicopter or camera has line of sight.
+    pub seen: bool,
+    /// Closest ground unit in sight within witness range.
+    pub witness: Option<UnitId>,
+    /// Closest ground unit in sight within recognition range.
+    pub spotter: Option<UnitId>,
 }
 
 /// Police state for one instance.
@@ -974,6 +988,17 @@ impl PoliceSystem {
     // -----------------------------------------------------------------------------------------
     // Public queries
     // -----------------------------------------------------------------------------------------
+
+    /// What the police saw of `racer` on the last think step: whether any unit (or helicopter
+    /// or camera) has it in sight, and the closest ground unit that can see it. Read-only, for
+    /// tests and tools (the Loop 9 night detection measurement); `None` before the first think.
+    pub fn sighting(&self, racer: EntityId) -> Option<Sighting> {
+        self.obs.get(&racer).map(|o| Sighting {
+            seen: o.seen,
+            witness: o.witness,
+            spotter: o.spotter,
+        })
+    }
 
     /// Current wanted level of a racer.
     pub fn wanted_level(&self, racer: EntityId) -> WantedLevel {

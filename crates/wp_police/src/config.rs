@@ -161,6 +161,84 @@ pub struct HeatConfig {
     pub recognition: RecognitionConfig,
     /// Units clock speeders themselves (owner report 2026-10-21, "noticed but no pursuit").
     pub radar: RadarConfig,
+    /// Blatant speed makes a car obvious to a unit (owner report 2026-10-27, "cops on Loop 9
+    /// night take too long to detect me at 185 mph").
+    #[serde(default)]
+    pub conspicuous: ConspicuousConfig,
+}
+
+/// Speed far over the limit makes a car obvious (owner report 2026-10-27: "Cops on Loop 9 night
+/// take too long to detect me if I'm going 185 mph"). Engine noise, headlights closing in the
+/// mirror and sheer closing speed give a car doing double the limit away, day or night.
+///
+/// A racer that is not in a pursuit gets a *conspicuity* `c` in 0..=1 from how far it is over
+/// the limit where it drives: 0 up to `from_over_mps` over (ordinary driving and mild speeding
+/// keep every rule exactly as tuned, owner PR #64), rising linearly to 1 at `full_over_mps`
+/// over. Each value below is reached at `c = 1` from the normal rule's value at `c = 0`
+/// (linear), and only ever makes the unit quicker or see further:
+/// - sight range (witness, recognition and line-of-sight ranges) at least `range_m`, every
+///   phase: night does not hide it;
+/// - seen all round (mirrors, hearing) within `all_round_m` instead of `heat.sight.all_round_m`;
+/// - the radar clocks it after `radar_hold_s` in sight instead of `heat.radar.hold_s`;
+/// - an already wanted car is recognised after `recognition_s` instead of the phase's
+///   `recognition_time_s` (+ `far_extra_s`);
+/// - the blatant rule (recognised at once, pursuit) reaches `blatant_range_m` instead of
+///   `heat.blatant.range_m`.
+///
+/// Fog and rain still cap every sightline (the weather's `line_of_sight`), and buildings and
+/// terrain still block it. Chases and escapes are untouched: a racer already pursued (or
+/// searched for) gets `c = 0`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConspicuousConfig {
+    /// Over the limit by this much or less: no effect, m/s.
+    pub from_over_mps: f32,
+    /// Over the limit by this much or more: full effect, m/s.
+    pub full_over_mps: f32,
+    /// Sight range at full effect, every phase, m.
+    pub range_m: f32,
+    /// All-round sight radius at full effect, m.
+    pub all_round_m: f32,
+    /// Radar hold at full effect, s.
+    pub radar_hold_s: f32,
+    /// Recognition time of a wanted car at full effect, s.
+    pub recognition_s: f32,
+    /// Blatant-rule range at full effect, m.
+    pub blatant_range_m: f32,
+}
+
+impl Default for ConspicuousConfig {
+    /// The shipped values (`data/police/heat.toml`).
+    fn default() -> Self {
+        Self {
+            from_over_mps: 15.0,
+            full_over_mps: 45.0,
+            range_m: 380.0,
+            all_round_m: 220.0,
+            radar_hold_s: 0.3,
+            recognition_s: 0.3,
+            blatant_range_m: 250.0,
+        }
+    }
+}
+
+impl ConspicuousConfig {
+    /// Conspicuity 0..=1 of a car `over_mps` over the limit.
+    pub fn level(&self, over_mps: f32) -> f32 {
+        let span = (self.full_over_mps - self.from_over_mps).max(1e-3);
+        ((over_mps - self.from_over_mps) / span).clamp(0.0, 1.0)
+    }
+
+    /// `base` moved toward `full` by conspicuity `c`, never past what `base` already allows
+    /// (`longer`: larger is quicker / further, e.g. a range; else smaller is, e.g. a time).
+    pub fn scale(base: f32, full: f32, c: f32, longer: bool) -> f32 {
+        let v = base + (full - base) * c;
+        if longer {
+            v.max(base)
+        } else {
+            v.min(base)
+        }
+    }
 }
 
 /// A ground unit's field of view (owner playtest row 89, "if I can see them, they can see
@@ -1073,6 +1151,21 @@ impl PoliceConfig {
         }
         if self.heat.heat.call_min_heat < 0.0 {
             return bad("heat.call_min_heat must be >= 0");
+        }
+        let c = &self.heat.heat.conspicuous;
+        if !(c.full_over_mps > c.from_over_mps
+            && c.from_over_mps >= 0.0
+            && [
+                c.range_m,
+                c.all_round_m,
+                c.radar_hold_s,
+                c.recognition_s,
+                c.blatant_range_m,
+            ]
+            .iter()
+            .all(|v| v.is_finite() && *v >= 0.0))
+        {
+            return bad("heat.conspicuous: need 0 <= from_over_mps < full_over_mps, values >= 0");
         }
         if self.pursuit.think_hz <= 0.0 {
             return bad("pursuit.think_hz must be > 0");
