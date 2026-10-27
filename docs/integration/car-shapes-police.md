@@ -107,6 +107,9 @@
   renderer-side note for the lead: in the `?livery=grid` debug view the decal carriers now show as
   black patches with a white bloom (the grid mode skips the unit-number textures); the normal
   liveries are unaffected. Not a mesh issue.
+- Mod coverage on the final meshes: 6 car/mod pairs show nothing, all on the known
+  no-outside-view list: `drivetrain_shifter_short` on all five and `elec_radar_1` on the warden.
+  Body kits, wings, lips, vinyls and bull bars show on every police car.
 - Final before / after sheet: `final.jpg` (before = the original `main` meshes; front 3/4, rear
   3/4, side).
 
