@@ -133,8 +133,9 @@ Phase 3 (branch `ws/car-shapes`, brief in the lead's session prompt) adds the sh
 phase-2 per-car sessions could not make: non-rectangular plan views, sculpted and curved sides,
 fender tops above the hood, short overhangs and lamps that follow the surface. **Every knob's
 default changes nothing**: with all of them at their defaults the generated meshes were
-byte-identical to the phase-1 meshes (`gen-car-mesh --check`) before the separate item-6 commit
-(see "Smoother bodies" below). Render meshes only: no `data/cars`, `data/lattices` or sim
+byte-identical to the phase-1 meshes (`gen-car-mesh --check`), and they still are: item 6 was not
+done as a mesh change (see "Smoother bodies" below), so the phase-2 branches have no meshes to
+regenerate for this merge. Render meshes only: no `data/cars`, `data/lattices` or sim
 change.
 
 ### Knob list (`car_assets::style::BodyStyle`, all soft-clamped)
@@ -251,6 +252,23 @@ settings, both overhang extremes: bind-skin + `validate`, budgets aside);
 top-view swept lamps, wraparound tails, on a sedan, a hatch, the prototype, the pickup and the
 police sedan: lights check, turn-signal contract, end-lamp binding, bezels); `lamp.rs` unit
 tests (split / clip, resample, a lens proud of a box).
+
+### Smoother bodies (item 6): not done as a mesh change
+Every mesh on `ws/car-shapes` is unchanged by phase 3 (no regeneration to merge). Reasons:
+- The loft already uses the fine step (hero 3.6 cm, traffic 6.5 cm) over ≈ 65 % of a car's
+  length (nose fall + 1 m, tail rounding, both arches ± 0.15 m); the base step covers only the
+  flat doors and roof. More rings there cost ≈ 70 triangles per station with little to show,
+  and the hero cars sit at up to 21.0k of 22k while the phase-2 groups spend the rest on detail.
+- Most of the faceting seen in game is shading, not geometry: `render/panels.ts` makes every car
+  material with `flatShading: true` (`std()`), and mesh format 4 carries no normals. Smooth paint
+  needs a renderer change: drop `flatShading` on the paint / livery batch material and compute
+  vertex normals on the batch geometry (re-skinned parts would recompute them, as lenses already
+  do), with the loft's per-part vertex sharing (`Builder::vert` ids) giving smooth normals inside a
+  panel and hard edges at panel / atlas seams. The low-poly-dark style (`render/style.ts`) forces
+  flat shading anyway. `mesh_shots.mjs` already renders smooth (`computeVertexNormals`), which is
+  why the shot sheets look smoother than the game.
+- Changing the ring point count (18 per side) would break every style that indexes ring points.
+Request to the lead (renderer owner): smooth-shaded paint in the greybox style, see above.
 
 ### Not covered here (phase-2 requests outside this brief)
 Nose / tail face rake in side view and a plan bow of the face, tailgate lean, a quarter-glass
