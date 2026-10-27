@@ -120,7 +120,12 @@ All full meshes are inside the hero budget (≤ 22k), all mid meshes inside 7k.
 ## Checks
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p
 car-assets`, `validate-car-asset` (all cars ok), `gen-car-mesh --check`.
-Mod coverage (`e2e/mod_coverage.mjs` on the six cars): results below once the run finishes.
+Mod coverage (`e2e/mod_coverage.mjs` on the six cars, 136 mods each, 6 not for Exotic):
+12 car/mod pairs show nothing, all on the known list in `mod-visuals.md`: the short shifter
+(all six), the fuel rail under the mid-engine covers (lucciola, fulmine) and sport tyres on the
+low-profile exotics (lucciola, fulmine, ombra, ostwind). The Ombra lamp halo, a known miss
+before, now shows. Body kits, lips, wings, vinyls, bull bars and diffusers all show on the new
+bodies.
 
 ## Shots
 `docs/media/car-shapes/exotic/<car>.jpg`: before (left) / after (right), front 3/4, rear 3/4,
