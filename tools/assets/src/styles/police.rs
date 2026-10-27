@@ -17,6 +17,7 @@
 //! sides independently. Unit-number decal carriers (`decal_unit_l/_r`, `decal_roof`,
 //! `decal_trunk`) are thin `livery` patches the renderer re-maps onto a per-unit number texture.
 
+pub mod body;
 pub mod kit;
 
 use wp_contracts::{BodyRegion, VehicleDef};
@@ -24,19 +25,27 @@ use wp_contracts::{BodyRegion, VehicleDef};
 use crate::mesh::{MaterialSlot, PartKind};
 use crate::style::{
     ArchShape, BodyStyle, CapKind, CarStyle, Detail, EngineKind, ExhaustKind, Induction,
-    LiveryHint, RimKind, Shape, Silhouette, SuspensionKind,
+    LiveryHint, RimKind, Shape, Silhouette, SuspensionKind, TrimFinish,
 };
 
 /// Style for a police car id, or `None` if this module does not own it.
 pub fn style(def: &VehicleDef) -> Option<CarStyle> {
-    let mut s = match def.id.as_str() {
-        "sentinel_cruiser" => cruiser(),
-        "sentinel_warden" => warden(),
-        "sentinel_wolfhound" => wolfhound(),
-        "sentinel_bastion" => bastion(),
-        "sentinel_vigil" => vigil(),
+    let (mut s, body_kit): (CarStyle, crate::style::DetailFn) = match def.id.as_str() {
+        "sentinel_cruiser" => (cruiser(), body::cruiser),
+        "sentinel_warden" => (warden(), body::warden),
+        "sentinel_wolfhound" => (wolfhound(), body::wolfhound),
+        "sentinel_bastion" => (bastion(), body::bastion),
+        "sentinel_vigil" => (vigil(), body::vigil),
         _ => return None,
     };
+    // The car's own body kit (lamps, grille, bumpers, mirrors) goes first; the police
+    // equipment sits on top of it.
+    s.details.push(Detail::new(
+        "body_kit",
+        BodyRegion::Cabin,
+        MaterialSlot::Trim,
+        Shape::Custom(body_kit),
+    ));
     add_kit(&mut s, &kit::kit(&def.id));
     Some(s)
 }
@@ -59,21 +68,32 @@ const BLACK_CALIPER: [u8; 3] = [24, 24, 26];
 /// §1.1 "sedan": 2010s full-size RWD V8 sedan.
 fn cruiser() -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
+        cabin_shift_m: -0.08,
         nose_h: Some(0.74),
-        nose_rake_deg: 8.0,
-        nose_plan_round: 0.30,
-        hood_crown: 0.025,
-        windshield_rake_deg: Some(60.0),
+        nose_rake_deg: 6.0,
+        nose_plan_round: 0.20,
+        tail_plan_round: 0.22,
+        hood_crown: 0.02,
+        hood_bulge_h: 0.012,
+        hood_bulge_w: 0.50,
+        windshield_rake_deg: Some(62.0),
         a_pillar_rake_deg: 6.0,
-        rear_glass_rake_deg: Some(52.0),
-        crease_z: 0.58,
-        crease_depth: 0.012,
-        haunch: 0.02,
-        flare: 0.01,
+        rear_glass_rake_deg: Some(58.0),
+        roof_dz: -0.02,
+        belt_dz: 0.02,
+        tumblehome: Some(0.14),
+        crease_z: 0.60,
+        crease_depth: 0.015,
+        haunch: 0.03,
+        flare: 0.012,
         ride_dz: 0.01,
-        ducktail_h: 0.015,
-        belt_kick: 0.03,
+        ducktail_h: 0.02,
+        belt_kick: 0.05,
+        tail_round: 0.18,
+        tail_drop: 0.04,
         overhang_trim: (0.0, 0.03),
+        c_pillar_w_m: 0.16,
+        a_sail_len_m: 0.12,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.livery = livery(
@@ -92,26 +112,32 @@ fn cruiser() -> CarStyle {
 fn warden() -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         nose_h: Some(0.76),
-        nose_rake_deg: 2.0,
-        nose_plan_round: 0.08,
-        tail_plan_round: 0.08,
+        nose_rake_deg: 1.0,
+        nose_plan_round: 0.04,
+        tail_plan_round: 0.04,
         hood_crown: 0.005,
-        windshield_rake_deg: Some(52.0),
-        rear_glass_rake_deg: Some(30.0),
+        windshield_rake_deg: Some(54.0),
+        rear_glass_rake_deg: Some(32.0),
         roof_dz: -0.02,
-        roof_crown: 0.01,
-        tumblehome: Some(0.11),
+        roof_crown: 0.008,
+        tumblehome: Some(0.10),
         glass_inset: 0.07,
         crease_z: 0.56,
         crease_depth: 0.006,
-        sill_tuck: 0.03,
-        shoulder_round: 0.025,
+        sill_tuck: 0.025,
+        shoulder_round: 0.015,
         flare_shape: ArchShape::Box,
         ride_dz: 0.03,
         stance_pitch_deg: -0.3,
-        tail_round: 0.10,
-        tail_drop: 0.03,
+        tail_round: 0.05,
+        tail_drop: 0.02,
         overhang_trim: (0.05, 0.06),
+        a_pillar_w_m: 0.065,
+        c_pillar_w_m: 0.24,
+        drip_rail: TrimFinish::Chrome,
+        end_round_m: 0.012,
+        arch_lip_m: 0.010,
+        glass_frame_m: 0.022,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.livery = livery(
@@ -133,28 +159,31 @@ fn warden() -> CarStyle {
 /// §1.3 "patrol": AWD twin-turbo V6 pursuit sedan, highway-patrol livery.
 fn wolfhound() -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        nose_h: Some(0.78),
-        nose_rake_deg: 14.0,
-        nose_plan_round: 0.40,
+        nose_h: Some(0.82),
+        nose_rake_deg: 10.0,
+        nose_plan_round: 0.28,
         hood_crown: 0.03,
-        hood_bulge_h: 0.015,
+        hood_bulge_h: 0.012,
         hood_bulge_w: 0.60,
-        power_bulge_h: 0.01,
-        windshield_rake_deg: Some(58.0),
-        a_pillar_rake_deg: 8.0,
-        rear_glass_rake_deg: Some(48.0),
-        roof_len_trim: 0.10,
-        roof_dz: 0.0,
-        crease_z: 0.60,
-        crease_depth: 0.018,
-        haunch: 0.04,
-        flare: 0.02,
+        windshield_rake_deg: Some(60.0),
+        a_pillar_rake_deg: 7.0,
+        rear_glass_rake_deg: Some(56.0),
+        roof_len_trim: 0.05,
+        roof_dz: -0.03,
+        belt_dz: 0.03,
+        tumblehome: Some(0.15),
+        crease_z: 0.62,
+        crease_depth: 0.015,
+        haunch: 0.025,
+        flare: 0.015,
         ride_dz: 0.02,
-        belt_rake: 0.03,
-        belt_kick: 0.05,
+        belt_rake: 0.02,
+        belt_kick: 0.04,
         ducktail_h: 0.02,
-        tail_round: 0.28,
+        tail_round: 0.22,
+        tail_drop: 0.05,
         overhang_trim: (0.0, -0.03),
+        c_pillar_w_m: 0.20,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.livery = livery(
@@ -173,19 +202,30 @@ fn wolfhound() -> CarStyle {
 /// §1.4 "SUV": full-size body-on-frame SUV.
 fn bastion() -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        nose_rake_deg: 4.0,
-        nose_plan_round: 0.25,
-        hood_crown: 0.03,
-        hood_bulge_h: 0.02,
-        hood_bulge_w: 0.55,
-        windshield_rake_deg: Some(58.0),
-        a_pillar_rake_deg: 5.0,
-        crease_z: 0.59,
+        nose_h: Some(1.10),
+        nose_rake_deg: 3.0,
+        nose_plan_round: 0.12,
+        tail_plan_round: 0.10,
+        hood_crown: 0.012,
+        hood_bulge_h: 0.015,
+        hood_bulge_w: 0.70,
+        windshield_rake_deg: Some(57.0),
+        a_pillar_rake_deg: 3.0,
+        rear_glass_rake_deg: Some(12.0),
+        roof_crown: 0.015,
+        tumblehome: Some(0.07),
+        crease_z: 0.95,
         crease_depth: 0.012,
+        sill_tuck: 0.04,
+        shoulder_round: 0.04,
         haunch: 0.02,
-        flare: 0.03,
+        flare: 0.035,
         ride_dz: 0.04,
-        belt_kick: 0.02,
+        tail_round: 0.05,
+        tail_drop: 0.02,
+        end_round_m: 0.02,
+        c_pillar_w_m: 0.14,
+        a_sail_len_m: 0.16,
         ..BodyStyle::preset(Silhouette::Suv)
     });
     s.livery = livery(
@@ -206,28 +246,33 @@ fn bastion() -> CarStyle {
 /// §1.5 "sports patrol": modern muscle-coupe pursuit car, slicktop.
 fn vigil() -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        nose_h: Some(0.66),
-        nose_rake_deg: 12.0,
-        nose_plan_round: 0.38,
-        hood_crown: 0.03,
-        hood_bulge_h: 0.035,
-        hood_bulge_w: 0.45,
-        power_bulge_h: 0.04,
-        hood_scoop: crate::style::HoodScoop::Vents,
-        hood_scoop_h: 0.06,
+        cabin_shift_m: -0.28,
+        nose_h: Some(0.68),
+        nose_rake_deg: 4.0,
+        nose_plan_round: 0.18,
+        tail_plan_round: 0.18,
+        hood_crown: 0.02,
+        hood_bulge_h: 0.045,
+        hood_bulge_w: 0.40,
         windshield_rake_deg: Some(64.0),
-        a_pillar_rake_deg: 9.0,
-        roof_dz: -0.03,
-        tumblehome: Some(0.17),
-        crease_z: 0.57,
+        a_pillar_rake_deg: 10.0,
+        roof_len_trim: -0.05,
+        roof_dz: -0.06,
+        belt_dz: 0.04,
+        tumblehome: Some(0.20),
+        crease_z: 0.58,
         crease_depth: 0.02,
-        haunch: 0.06,
+        haunch: 0.07,
         front_haunch: 0.02,
-        flare: 0.03,
+        flare: 0.025,
         ride_dz: -0.02,
-        belt_kick: 0.04,
+        stance_pitch_deg: 0.2,
+        belt_kick: 0.06,
         ducktail_h: 0.03,
+        tail_round: 0.14,
+        tail_drop: 0.03,
         overhang_trim: (-0.02, -0.04),
+        c_pillar_w_m: 0.22,
         ..BodyStyle::preset(Silhouette::Fastback)
     });
     s.livery = livery(
@@ -457,7 +502,7 @@ mod tests {
                 assert!(has(n), "{id}: missing {n}");
             }
             assert!(
-                (8000..=20000).contains(&m.tri_count),
+                (8000..=22000).contains(&m.tri_count),
                 "{id}: {} tris",
                 m.tri_count
             );
