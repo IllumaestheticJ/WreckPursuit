@@ -26,9 +26,7 @@ use super::kit::{
     dkey, headlight_key, indicator_front_key, indicator_rear_key, on_side, sided, taillight_key,
     top_band, Kit, Seg, SIDES,
 };
-use super::supercar::{
-    built_parts, rear_stroke, shape3, shear_to_faces, side_groove, stadium, top_stroke, Shape3,
-};
+use super::supercar::{rear_stroke, shape3, side_groove, stadium, top_stroke, Shape3};
 use super::{kit_detail, rgb, wheels};
 
 /// 90s mid-engine berlinetta: soft round nose, rounded roof, upright rear glass between
@@ -117,7 +115,6 @@ pub fn lucciola(def: &VehicleDef) -> CarStyle {
 
 fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
-    let pre = built_parts(&k);
     let p = ctx.profile;
     let yn = k.yn;
     let wn = k.wn();
@@ -282,18 +279,6 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.mirrors(0.18, 0.10, None);
     k.fender_repeaters();
     k.fuel_filler(1.0, 0.09, M::Trim);
-    shear_to_faces(
-        &mut k,
-        &pre,
-        &[
-            "taillight_",
-            "indicator_rear_",
-            "taillamp_bezel_",
-            "headlight_",
-            "indicator_front_",
-            "headlamp_bezel_",
-        ],
-    );
 }
 
 /// 2010s mid-engine V10 AWD supercar: low sharp-cornered wedge with the hood running in one
@@ -398,7 +383,6 @@ pub fn fulmine(def: &VehicleDef) -> CarStyle {
 
 fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
-    let pre = built_parts(&k);
     let p = ctx.profile;
     let wn = k.wn();
     let wt = k.wt();
@@ -415,12 +399,6 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     //     projector, the amber signal at its nose.
     for sx in SIDES {
         let wf = p.half_width(yl - 0.30);
-        let lens = [
-            [0.44, yl - 0.13],
-            [wl - 0.05, yl - 0.035],
-            [wf - 0.06, yl - 0.32],
-            [0.56, yl - 0.25],
-        ];
         let kh = sided(
             &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
             sx,
@@ -432,11 +410,6 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [0.55, yl - 0.27],
         ];
         k.top_poly(&kh, &on_side(sx, &hous), 0.004, 0.012);
-        let kl = sided(
-            &dkey("headlamp_lens_l", BodyRegion::FrontLeftFender, M::Glass),
-            sx,
-        );
-        k.top_poly(&kl, &on_side(sx, &lens), 0.009, 0.012);
         let hk = headlight_key(sx);
         // Bolt: out along the front edge, a sharp kink back inward, then out to the rear tip.
         let b0 = [sx * 0.48, yl - 0.135];
@@ -551,22 +524,11 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         BodyRegion::Trunk,
         ld1,
         ld0,
-        6,
+        4,
         0.24,
         half.max(0.34),
         M::Trim,
     );
-    for sx in SIDES {
-        let kv = sided(&dkey("haunch_vent_l", BodyRegion::Trunk, M::Grille), sx);
-        let xo = p.half_width(yr) - 0.08;
-        let vent = [
-            [xo - 0.18, yr + 0.30],
-            [xo - 0.04, yr + 0.30],
-            [xo, yr + 0.06],
-            [xo - 0.14, yr + 0.02],
-        ];
-        k.top_poly(&kv, &on_side(sx, &vent), 0.004, 0.01);
-    }
 
     // --- Rear: integrated lip spoiler, slatted black fascia, lightning-bolt tail strokes.
     k.lip_spoiler(M::Paint, k.yt + 0.12, 0.035, 0.10, 0.10);
@@ -621,9 +583,4 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     k.mirrors(0.20, 0.10, Some(M::Carbon));
     k.mirror_repeaters(0.20, 0.10, true);
-    shear_to_faces(
-        &mut k,
-        &pre,
-        &["headlamp_", "headlight_", "indicator_front_"],
-    );
 }

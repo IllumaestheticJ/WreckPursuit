@@ -377,7 +377,9 @@ pub struct BodyStyle {
     /// of the face are clamped onto it. The face (rake + chin) never reaches further back than
     /// 0.10 m ahead of the windshield base; the tail face stops 0.03 m behind the deck / rear
     /// glass start (a hatch's tailgate lean is limited by its short tail section): deeper
-    /// settings are scaled down to fit. Default 0 (the vertical face).
+    /// settings are scaled down to fit. Kit parts placed on the old vertical face follow the
+    /// raked one (`lamp::follow_end_faces`). A steep face (> ~35°) on a very short nose
+    /// (`overhang_trim` −0.3…−0.35) eats the 10 cm bumper strip. Default 0 (the vertical face).
     pub nose_face_rake_deg: f32,
     /// Chin / undercut: how far the lower 40 % of the nose face sweeps back at the bottom, m.
     /// Range 0…0.25. Default 0.

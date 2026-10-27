@@ -29,7 +29,8 @@ const [vw, vh] = (process.env.VIEWPORT ?? "1280x720").split("x").map(Number);
 const page = await (await browser.newContext({ viewport: { width: vw, height: vh } })).newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
-await page.goto(URL);
+// QUERY="flatcars=1" etc. for A/B runs.
+await page.goto(process.env.QUERY ? `${URL}?${process.env.QUERY}` : URL);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 60000 });
 await page.evaluate(([c, m]) => window.__wp.startNightRun(c || undefined, m), [car, mode]);
 const panelsOff = process.env.PANELS === "0";

@@ -93,6 +93,20 @@ stand out as flaps.
   was dropped (it broke up on the sculpted surface). Halberd's buttress channels start at the
   deck (cast from the greenhouse they spiked).
 
+## Final touch-up (merged from `ws/car-shapes` at `86693a0d`: smooth shading, end-face fixes, all-cars regeneration)
+- The local end-plane shear is gone: the generator's `lamp::follow_end_faces` now moves kit parts
+  built on the old vertical faces onto the raked ones (both together would double-shift).
+- Budgets after the regeneration's +tris: trimmed with cheap equivalents — the glass covers over
+  the Fulmine / Ombra head lamps dropped (the black housing and the signature strokes carry
+  them), Fulmine haunch vents dropped and louvres 6 → 4 per side, Kagero scoop lips and blue line
+  as plates (`side_groove`), Halberd buttress channels and second roof layer dropped, its hood
+  duct a plain `top_vent` behind the raked nose, 6 rear-mesh bars and 5 diffuser fins.
+- Halberd tail corner (smooth-shaded it showed a boxy facet): `tail_plan_round` 0.42 → 0.30,
+  no tail plan bow, tail rake 12° → 6°, tail chin 0.08 → 0.05.
+- Smooth-shaded shots in the real renderer (`e2e/smooth_shots.mjs`): `smooth.jpg`. Final sheet
+  against the original `main` meshes: `final.jpg` (per-car sheets `<car>.jpg` are main vs final
+  too).
+
 ## Per car
 References are body types and eras only; no single real car is reproduced.
 
@@ -105,7 +119,7 @@ Changes: belt +0.07, cowl +0.05, nose 0.47 m, rounder plan corners, bigger haunc
 horizontal side strakes replaced by one teardrop scoop with a body-colour lip; full-width nose
 slats replaced by a squared-oval intake with four slats and corner ducts; hood vents removed;
 quad round tails replaced by one wide pill lamp per side in a chrome surround (amber inner end).
-Triangles: 18938 full (was 18170; table row updated), 4878 mid.
+Triangles: 19966 full (was 18170; table row updated), 5012 mid.
 
 ### fulmine_v10
 Reference: a 2010s Italian mid-engine V10 AWD supercar. 4.46 × 1.95 × 1.17 m, ≈ 2.62 m
@@ -119,7 +133,7 @@ centre slot; side diagonal groove + leaning quarter intake with a blade; the fix
 replaced by an integrated lip spoiler; slatted black fascia on the lower half of the tail;
 bolt-shaped tail strokes with an amber corner bar; `ExhaustKind::Quad`; no door handles or fuel
 door (flush on the type).
-Triangles: 21622 full (was 19884; table row updated), 6012 mid.
+Triangles: 21938 full (was 19884; table row updated), 5585 mid.
 
 ### halberd_40
 Reference: a 2020s British carbon-tub twin-turbo V8 supercar. 4.54 × 1.93 × 1.20 m, 2.67 m
@@ -132,7 +146,7 @@ separate vertical corner intake with a carbon vane; trapezoid hood duct; spiky c
 replaced by a glass engine cover between flying buttresses with dark channels; the wing on tall
 stands replaced by a flush full-width airbrake; the tail hair-line folds down at its outer ends,
 amber outer tip.
-Triangles: 21340 full (was 19804), 6225 mid.
+Triangles: 21952 full (was 19804), 6033 mid.
 
 ### ombra_v12
 Reference: a 2010s Italian V12 flagship with scissor doors. 4.78 × 2.03 × 1.14 m, 2.70 m
@@ -145,7 +159,7 @@ lens, double-chevron DRL, projector, amber tip); trapezoid corner intakes split 
 body-colour bars into three slots, mesh bars that follow the slanted edge; V hood creases and
 tapered flush ducts; side groove; double-chevron tails; centre exhaust in a wide pill surround.
 Paint: factory navy (kept, per the lead; it hides detail in the greybox shots).
-Triangles: 21180 full (was 19286), 5963 mid.
+Triangles: 21833 full (was 19286), 5835 mid.
 
 ### ostwind_6t
 Reference: a 2020s German rear-engine flat-six flagship coupe (2+2). 4.54 × 1.90 × 1.30 m,
@@ -158,7 +172,7 @@ Changes: belt +0.04; `roof_arc` 1.0 → 0.55, `rear_glass_bow` 0.05, `roof_len_t
 flat deck; a kit quarter window (glass on a black seal); the oval lamps now face forward (normal
 tilted 40°) with three horizontal light bars (the lower one the amber signal) instead of four
 dots; three stepped dashes per side in the tail bar instead of four brake dots.
-Triangles: 19920 full (was 18306), 5930 mid.
+Triangles: 21246 full (was 18306), 6114 mid.
 
 ### kagero_hx
 Reference: a 2010s Japanese mid-engine hybrid V6 supercar. 4.49 × 1.94 × 1.21 m, 2.63 m
@@ -170,14 +184,14 @@ parallel light bars, projector, amber inner end); upper grille over a straight s
 corner intakes with one slanted blade (the X-shaped blades are gone); hood vents removed; the
 stack of door / quarter rectangles replaced by one continuous scoop with folded lips and a blue
 hybrid line; the black roof sheet no longer z-fights (denser patch, 1 cm off the paint).
-Triangles: 21738 full (was 18949), 6582 mid.
+Triangles: 21738 full (was 18949), 6060 mid.
 
 All full meshes are inside the hero budget (≤ 22k), all mid meshes inside 7k.
 
 ## Checks
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p
 car-assets`, `validate-car-asset` (all cars ok), `gen-car-mesh --check`.
-Mod coverage (`e2e/mod_coverage.mjs` on the six cars at `e2098d0c`, 136 mods each, 6 not for
+Mod coverage (`e2e/mod_coverage.mjs` on the six cars at `e2098d0c`; re-run on the final meshes below, 136 mods each, 6 not for
 Exotic): 12 car/mod pairs show nothing, all on the known list in `mod-visuals.md`: the short
 shifter (all six), the fuel rail under the mid-engine covers (lucciola, fulmine) and sport tyres
 on the low-profile exotics (lucciola, fulmine, ombra, ostwind). Body kits, lips, wings, vinyls,

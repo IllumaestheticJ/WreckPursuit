@@ -27,6 +27,7 @@
 import * as THREE from "three";
 import { sim } from "../wasm/sim";
 import { PALETTE } from "./palette";
+import { buildCrease, updateCrease, type CreaseMap } from "./crease";
 
 /** Floats per panel in wasm `panel_states()` (mirrors crates/wp_wasm PANEL_STRIDE). */
 export const PANEL_STRIDE = 10;
@@ -619,7 +620,15 @@ function applyLook(m: THREE.MeshStandardMaterial, l: ModLook): void {
 
 /** Merged index and UVs of one material's batched parts, per car model (every car of the model
  * shares the UV array: it never changes). */
-const batchIndex = new WeakMap<CarMeshJson, Map<string, { index: Uint16Array | Uint32Array; uv: Float32Array }>>();
+/** Per-model batch templates: merged index and UVs, plus the crease map and its render-layout
+ * UVs for smooth batches. */
+interface BatchTemplate {
+  index: Uint16Array | Uint32Array;
+  uv: Float32Array;
+  crease?: CreaseMap;
+  uvR?: Float32Array;
+}
+const batchIndex = new WeakMap<CarMeshJson, Map<string, BatchTemplate>>();
 
 /** Largest-triangle node triples per region, per car model (from the rest lattice). */
 const spanCache = new Map<string, Map<number, [number, number, number]>>();
@@ -966,7 +975,22 @@ interface Batch {
   index: THREE.BufferAttribute;
   /** Re-skinned since the last upload. */
   dirty: boolean;
+  /**
+   * Smooth-shaded batches (paint / livery, see `SMOOTH_BATCHES`): parts skin into `src`; the
+   * drawn `position` / `normal` use the crease map's render layout and are refreshed from `src`
+   * when the batch was re-skinned (`render/crease.ts`).
+   */
+  smooth?: { crease: CreaseMap; src: Float32Array; normal: THREE.BufferAttribute };
 }
+
+/**
+ * Batches drawn smooth-shaded with crease-angle split normals (car-shapes phase 3b): the painted
+ * body. Their materials are made without `flatShading`; the low-poly art style forces flat
+ * shading back on (`render/style.ts`), so that style stays faceted.
+ */
+const SMOOTH_BATCHES = new Set(["paint", "livery"]);
+/** `?flatcars=1`: the flat-shaded body of before phase 3b (A/B shots and perf runs). */
+const FLAT_CARS = typeof location !== "undefined" && new URLSearchParams(location.search).has("flatcars");
 
 /** Element-wise equality of two float arrays. */
 function sameFloats(a: Float32Array, b: Float32Array): boolean {
@@ -1089,6 +1113,8 @@ export class PanelBody {
   /** Re-skins done since the page loaded, all cars (perf checks: should not grow while nothing
    * dents). */
   static reskins = 0;
+  /** Smooth batches whose normals were recomputed (perf counter, see `render/crease.ts`). */
+  static normalUpdates = 0;
   readonly root = new THREE.Group();
   ready = false;
   /** Parts per wheel index, hub space (VehicleView parents them under its spinning wheel groups). */
@@ -1180,9 +1206,11 @@ export class PanelBody {
     const headR = headlight instanceof THREE.Material ? headlight : headlight.right;
     this.mats = {
       ...sm,
-      paint: std({ color: paint, metalness: 0.25, roughness: 0.55 }),
+      // Smooth shaded (crease-split normals on their batches, SMOOTH_BATCHES); the low-poly style
+      // flattens them again.
+      paint: std({ color: paint, metalness: 0.25, roughness: 0.55, flatShading: FLAT_CARS }),
       // Body panels of format-4 meshes: the paint colour, or the livery texture (setLivery).
-      livery: std({ color: paint, metalness: 0.25, roughness: 0.55 }),
+      livery: std({ color: paint, metalness: 0.25, roughness: 0.55, flatShading: FLAT_CARS }),
       headlight: headL,
       "headlight@r": headR,
       taillight,
@@ -1665,7 +1693,6 @@ export class PanelBody {
         tmpl = { index, uv };
         if (!own) cached.set(key, tmpl);
       }
-      const index = tmpl.index.slice();
       let v0 = 0;
       let i0 = 0;
       for (const p of parts) {
@@ -1676,18 +1703,50 @@ export class PanelBody {
         i0 += p.def.indices.length;
       }
       const geom = new THREE.BufferGeometry();
-      const position = new THREE.BufferAttribute(pos, 3);
-      const indexAttr = new THREE.BufferAttribute(index, 1);
-      geom.setAttribute("position", position);
-      // UVs: livery atlas on `livery` parts (shared per model; the vinyl overlay reads position only).
-      geom.setAttribute("uv", new THREE.BufferAttribute(tmpl.uv, 2));
+      let smooth: Batch["smooth"];
+      let position: THREE.BufferAttribute;
+      let indexAttr: THREE.BufferAttribute;
+      if (!FLAT_CARS && SMOOTH_BATCHES.has(key)) {
+        // Crease map from the rest pose (per model, like the index template).
+        let c = own ? undefined : tmpl.crease;
+        if (!c) {
+          const rest = new Float32Array(nv * 3);
+          let r0 = 0;
+          for (const p of parts) {
+            rest.set(p.rest, r0);
+            r0 += p.rest.length;
+          }
+          c = buildCrease(rest, tmpl.index);
+          tmpl.uvR = new Float32Array(c.map.length * 2);
+          for (let r = 0; r < c.map.length; r++) {
+            tmpl.uvR[r * 2] = tmpl.uv[c.map[r] * 2];
+            tmpl.uvR[r * 2 + 1] = tmpl.uv[c.map[r] * 2 + 1];
+          }
+          if (!own) tmpl.crease = c;
+        }
+        const nr = c.map.length;
+        position = new THREE.BufferAttribute(new Float32Array(nr * 3), 3);
+        const normal = new THREE.BufferAttribute(new Float32Array(nr * 3), 3);
+        indexAttr = new THREE.BufferAttribute(c.index.slice(), 1);
+        geom.setAttribute("position", position);
+        geom.setAttribute("normal", normal);
+        geom.setAttribute("uv", new THREE.BufferAttribute(tmpl.uvR!, 2));
+        smooth = { crease: c, src: pos, normal };
+        updateCrease(c, pos, indexAttr.array as Uint16Array | Uint32Array, position.array as Float32Array, normal.array as Float32Array);
+      } else {
+        position = new THREE.BufferAttribute(pos, 3);
+        indexAttr = new THREE.BufferAttribute(tmpl.index.slice(), 1);
+        geom.setAttribute("position", position);
+        // UVs: livery atlas on `livery` parts (shared per model; the vinyl overlay reads position only).
+        geom.setAttribute("uv", new THREE.BufferAttribute(tmpl.uv, 2));
+      }
       geom.setIndex(indexAttr);
       const mesh = new THREE.Mesh(geom, this.mat(material));
       mesh.name = `${this.carId}:${key}`;
       mesh.frustumCulled = false;
       if (material === "glass" || material.startsWith("lightbar_")) mesh.renderOrder = 1;
       this.root.add(mesh);
-      const batch: Batch = { mesh, position, index: indexAttr, dirty: false };
+      const batch: Batch = { mesh, position, index: indexAttr, dirty: false, smooth };
       for (const p of parts) p.batch = batch;
       this.batches.push(batch);
       this.batchByKey.set(key, batch);
@@ -1800,6 +1859,12 @@ export class PanelBody {
     for (const b of this.batches) {
       if (!b.dirty) continue;
       b.dirty = false;
+      if (b.smooth) {
+        const s = b.smooth;
+        updateCrease(s.crease, s.src, b.index.array as Uint16Array | Uint32Array, b.position.array as Float32Array, s.normal.array as Float32Array);
+        s.normal.needsUpdate = true;
+        PanelBody.normalUpdates++;
+      }
       b.position.needsUpdate = true;
     }
   }
