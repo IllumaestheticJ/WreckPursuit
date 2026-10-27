@@ -185,6 +185,15 @@ fn greenhouse_patch(
     k.b.mirror_part(&key_left.name, &sided(key_left, 1.0));
 }
 
+/// Matte stripe decal on the top surface (`top_stripe` on an 8 cm grid along y and three steps
+/// across instead of the automatic 6 cm grid: fewer triangles, still follows the crown).
+#[allow(clippy::too_many_arguments)]
+fn stripe(k: &mut Kit, name: &str, region: BodyRegion, y0: f32, y1: f32, x0: f32, x1: f32) {
+    let key = dkey(name, region, M::Trim);
+    let ny = (((y1 - y0).abs() / 0.08).ceil() as usize).max(1);
+    k.patch(&key, y0, y1, PatchBand::Top { x0, x1 }, 0.005, 0.0, (ny, 3));
+}
+
 /// Small blank badge (chrome disc standing out of the nose or tail face) at (x, z).
 fn face_badge(k: &mut Kit, name: &str, region: BodyRegion, front: bool, x: f32, z: f32, r: f32) {
     let key = dkey(name, region, M::Chrome);
@@ -238,7 +247,7 @@ pub fn ironside(def: &VehicleDef) -> CarStyle {
         windshield_wrap_m: 0.05,
         hood_valley: 0.0,
         ride_dz: 0.01,
-        overhang_trim: (0.05, 0.0),
+        overhang_trim: (0.05, 0.06),
         sill_tuck: 0.05,
         deck_drop: 0.02,
         ..BodyStyle::preset(Silhouette::Notchback)
@@ -610,10 +619,11 @@ pub fn rampart(def: &VehicleDef) -> CarStyle {
     b.side_bulge_z = 0.6;
     b.rocker_in_m = 0.045;
     b.tumblehome_m = Some(0.26);
-    // Shark nose leaning a little forward (kept small: the grille, mouth, fogs and splitter sit
-    // on the face plane, and a chin or a stronger lean would leave them floating); roof
-    // narrowing toward the fastback; lower body tucked in under the crease.
-    b.nose_face_rake_deg = -6.0;
+    // Shark nose leaning forward over a chin (face kit follows the raked face), tail undercut
+    // over the diffuser; roof narrowing toward the fastback; lower body tucked in.
+    b.nose_face_rake_deg = -12.0;
+    b.nose_chin_m = 0.07;
+    b.tail_chin_m = 0.06;
     b.roof_plan_taper = 0.12;
     b.lower_lean_in_m = 0.03;
     // One even fastback fall from just behind the header.
@@ -630,6 +640,9 @@ pub fn rampart(def: &VehicleDef) -> CarStyle {
         (0.035, 0.015),
         (0.0, 0.0),
     );
+    // 22 wheel segments (20 is the tier-default marker) keep the sculpted body and projected
+    // lamps inside the hero budget; low-profile tyres hide the facets.
+    s.wheel.segments = 22;
     let m = &mut s.mechanical;
     m.engine = EngineKind::V8;
     m.show_engine_detail = true;
@@ -854,32 +867,32 @@ fn rampart_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         let (x0, x1) = (sx * 0.07, sx * 0.25);
         let (a, c) = (x0.min(x1), x0.max(x1));
         let n = if sx < 0.0 { "l" } else { "r" };
-        k.top_stripe(
+        stripe(
+            &mut k,
             &format!("stripe_hood_{n}"),
             BodyRegion::Hood,
             p.y_fw + 0.04,
             yn - 0.04,
             a,
             c,
-            M::Trim,
         );
-        k.top_stripe(
+        stripe(
+            &mut k,
             &format!("stripe_roof_{n}"),
             BodyRegion::Roof,
             r0 + 0.02,
             r1 - 0.02,
             a,
             c,
-            M::Trim,
         );
-        k.top_stripe(
+        stripe(
+            &mut k,
             &format!("stripe_deck_{n}"),
             BodyRegion::Trunk,
             yt + 0.10,
             p.y_deck - 0.02,
             a,
             c,
-            M::Trim,
         );
     }
     k.skirts(M::Carbon, 0.03, 0.06);

@@ -460,9 +460,10 @@ impl BodyProfile {
     }
 
     /// (rake °, chin m, face bottom z, face top z) of an end. The face never reaches past the
-    /// windshield base − 0.10 m (nose) or the deck / rear-glass start + 0.03 m (tail): a deeper
-    /// setting is scaled down to fit (those stations are lattice zone boundaries); with less than
-    /// 4 cm of room the face stays vertical.
+    /// windshield base − 0.10 m (nose) or the deck / rear-glass start + 0.03 m (tail; on an open
+    /// bed, the bed start: the tailgate keeps its height): a deeper setting is scaled down to fit
+    /// (those stations are lattice zone boundaries); with less than 4 cm of room the face stays
+    /// vertical.
     fn face_params(&self, front: bool) -> (f32, f32, f32, f32) {
         let s = &self.style;
         let (rake, chin, zb, zt, room) = if front {
@@ -479,7 +480,13 @@ impl BodyProfile {
                 s.tail_chin_m.clamp(0.0, 0.25),
                 self.sill(self.y_tail),
                 self.belt(self.y_tail),
-                self.y_deck - self.y_tail - 0.03,
+                // An open bed: the face stays inside the tailgate (it would cut it down).
+                match self.bed {
+                    Some((y0, _, _)) => {
+                        (y0 - self.y_tail - 0.005).min(self.y_deck - self.y_tail - 0.03)
+                    }
+                    None => self.y_deck - self.y_tail - 0.03,
+                },
             )
         };
         if rake == 0.0 && chin == 0.0 {
@@ -1274,10 +1281,37 @@ impl BodyProfile {
                 });
             }
         }
-        // End face profiles (phase 3): points ahead of a raked / undercut face move onto it.
+        // End face profiles (phase 3): points ahead of a raked / undercut face move onto it, and
+        // inside the ring's own side outline at their new height (so the face's edge follows the
+        // sill chamfer and shoulder instead of sticking out at full width).
         if let Some((lo, hi)) = self.face_band(y) {
+            let orig: Vec<[f32; 3]> = pts.iter().map(|q| q.p).collect();
+            let side_x = |z: f32| -> f32 {
+                // |x| of the side (ring points 0..=shoulder) at height z.
+                for j in 0..RING_SHOULDER {
+                    let (a, b) = (orig[j], orig[j + 1]);
+                    if (a[2] <= z && z <= b[2]) || (b[2] <= z && z <= a[2]) {
+                        let t = if (b[2] - a[2]).abs() < 1e-6 {
+                            0.0
+                        } else {
+                            (z - a[2]) / (b[2] - a[2])
+                        };
+                        return -(a[0] + (b[0] - a[0]) * t);
+                    }
+                }
+                if z < orig[0][2] {
+                    -orig[0][0]
+                } else {
+                    -orig[RING_SHOULDER][0]
+                }
+            };
             for pt in pts.iter_mut() {
-                pt.p[2] = pt.p[2].max(lo).min(hi);
+                let z = pt.p[2];
+                let zc = z.max(lo).min(hi);
+                if zc != z {
+                    pt.p[2] = zc;
+                    pt.p[0] = pt.p[0].max(-side_x(zc));
+                }
             }
         }
         debug_assert_eq!(pts.len(), RING_POINTS);
