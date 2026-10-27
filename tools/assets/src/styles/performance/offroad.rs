@@ -58,8 +58,9 @@ fn glass_pt(ring: &[RingPt], t: f32, off: f32) -> [f32; 3] {
     ]
 }
 
-/// Panel skinned over the left side glass between stations `y0..y1` (glass fractions
-/// `t0..t1`, `off` m proud), built into `key_l` and mirrored into its right key. Stations
+/// Panel skinned over the left side glass between stations `y0..y1`, one strip per glass
+/// fraction band `(t0, t1)` in `bands`, `off` m proud, built into `key_l` and mirrored once
+/// into its right key (`mirror_part` appends, so each key goes through here once). Stations
 /// without a greenhouse are skipped. Local to this file: covers the rear side glass of the
 /// two-door rally-raid body with paint (the lattice has rear doors; the mesh keeps them).
 #[allow(clippy::too_many_arguments)]
@@ -68,13 +69,31 @@ fn glass_cover(
     key_l: &PartKey,
     y0: f32,
     y1: f32,
+    bands: &[(f32, f32)],
+    off: f32,
+    steps: usize,
+) {
+    let rows = 3;
+    for &(t0, t1) in bands {
+        glass_strip(k, key_l, y0, y1, t0, t1, off, steps, rows);
+    }
+    k.b.mirror_part(&key_l.name, &sided(key_l, 1.0));
+}
+
+/// One strip of [`glass_cover`] (left side only), `rows` cells up the glass.
+#[allow(clippy::too_many_arguments)]
+fn glass_strip(
+    k: &mut Kit,
+    key_l: &PartKey,
+    y0: f32,
+    y1: f32,
     t0: f32,
     t1: f32,
     off: f32,
     steps: usize,
+    rows: usize,
 ) {
     let p = k.p;
-    let rows = 3;
     for i in 0..steps {
         let ya = y0 + (y1 - y0) * i as f32 / steps as f32;
         let yb = y0 + (y1 - y0) * (i + 1) as f32 / steps as f32;
@@ -94,7 +113,6 @@ fn glass_cover(
             k.b.poly_facing(key_l, &q, [-1.0, 0.0, 0.25]);
         }
     }
-    k.b.mirror_part(&key_l.name, &sided(key_l, 1.0));
 }
 
 /// Unit vector along (dy, dz), returned as [dy, dz].
@@ -1139,17 +1157,36 @@ fn erg_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     if let Some((hinge, rear)) = p.rear_door {
         let yg = hinge - 0.5 * p.style.b_pillar_w_m;
         let kd = dkey("rear_side_panel_l", BodyRegion::LeftDoorR, M::Paint);
-        glass_cover(&mut k, &kd, rear, yg, -0.02, 1.02, 0.004, 6);
+        glass_cover(&mut k, &kd, rear, yg, &[(-0.02, 1.02)], 0.004, 6);
         let kq = dkey(
             "rear_quarter_panel_l",
             BodyRegion::RearLeftQuarter,
             M::Paint,
         );
-        glass_cover(&mut k, &kq, p.y_deck, rear, -0.02, 1.02, 0.004, 6);
+        glass_cover(&mut k, &kq, p.y_deck, rear, &[(-0.02, 1.02)], 0.004, 6);
         let ki = dkey("side_intake_l", BodyRegion::LeftDoorR, M::Grille);
-        glass_cover(&mut k, &ki, rear + 0.12, yg - 0.10, 0.18, 0.80, 0.010, 4);
+        glass_cover(
+            &mut k,
+            &ki,
+            rear + 0.12,
+            yg - 0.10,
+            &[(0.18, 0.80)],
+            0.010,
+            4,
+        );
+        let ks = dkey("side_intake_slats_l", BodyRegion::LeftDoorR, M::Paint);
+        let slats = [(0.33, 0.38), (0.49, 0.54), (0.65, 0.70)];
+        glass_cover(&mut k, &ks, rear + 0.12, yg - 0.10, &slats, 0.014, 4);
         let kl = dkey("side_intake_lip_l", BodyRegion::LeftDoorR, M::Accent);
-        glass_cover(&mut k, &kl, rear + 0.08, yg - 0.06, 0.80, 0.90, 0.012, 4);
+        glass_cover(
+            &mut k,
+            &kl,
+            rear + 0.08,
+            yg - 0.06,
+            &[(0.80, 0.90)],
+            0.012,
+            4,
+        );
     }
     // Engine / spare-bay cover over the lower rear glass: paint with a louvred outlet, leaving
     // a short window under the roof.
