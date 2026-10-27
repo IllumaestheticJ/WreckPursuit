@@ -18,6 +18,8 @@ cargo run -p car-assets --example profile_dump -- [--ring <y>] <car>  # styled a
 cargo test -p car-assets                             # every car valid + meshes up to date + turn-signal contract
 cargo run --release -p car-assets --example crumple_matrix -- Arcade [frame ticks]  # hood/fender/bumper crumple, 30/50/70 km/h
 node tools/assets/panels_shots.mjs                   # browser checks + screenshots (docs/media/panels)
+node tools/assets/mesh_shots.mjs <dir> <car> ...      # rest-pose shots: front / rear / side / top / cabin / cabin_rear
+                                                     #   (+ SHOT_CAM=x,y,z SHOT_AT=x,y,z → <car>_custom.png)
 node tools/assets/crumple_shots.mjs after            # hood crumple shots at 8 m / 30 m
 ```
 
@@ -38,12 +40,13 @@ cargo test -p car-assets
 built in another worktree with a shared `CARGO_TARGET_DIR` writes into *that* worktree's
 `data/`. Use one target dir per checkout (or none).
 
-## Mesh generator (`src/{style,profile,mesh,builder,wheels,mechanical}.rs`, `src/styles/`)
+## Mesh generator (`src/{style,profile,mesh,trim,builder,wheels,mechanical}.rs`, `src/styles/`)
 - **Style** (`style.rs`): `style_for(def)` asks `styles::{performance, traffic, police}` (first
   `Some` wins) else `class_default` (Truck → Pickup / Van, PoliceSuv → Suv, others the default
   notchback; engine layout / exhaust by class). A `CarStyle` = `BodyStyle` (≈45 shape knobs,
   documented with units and ranges; `Default` = the original look) + `details` + `WheelStyle` +
   `MechStyle` + optional `LiveryHint` + `tints` + `accent_rgb` / `underglow_rgb` + budget `Tier`.
+  (≈70 knobs since the car-shapes pass; their defaults give every car framed glass and trim.)
   Styles live in `src/styles/{performance/,traffic.rs,police.rs + police/}`; every knob clamps
   softly (`profile::clamp_soft`), so extreme values never panic (`tests/assets.rs` sweeps them).
 - **Body profile** (`profile.rs`) from the `VehicleDef` (width, wheels → arches) anchored to the
@@ -58,10 +61,32 @@ built in another worktree with a shared `CARGO_TARGET_DIR` writes into *that* wo
   canopy), `hood_valley` / `deck_valley` (centre sunk between fender / haunch tops). `cabin_shift_m` spans −0.6…+0.6 m: the mid-engine cars use
   +0.40 / +0.45 for a cab-forward roof (centre ≈ 46 % of the length from the nose).
 - **Loft** (`mesh.rs`): cross-section rings of 18 points per side (sill tuck, rocker, character
-  crease, shoulder, belt ledge, 3-point greenhouse, 7-point crowned top / open bed) at adaptive
+  crease, shoulder, belt ledge, then either the greenhouse — side glass 8→10, roof rail /
+  A- / C-pillar band 10→13, roof or glass 13→17 — or a flat top / open bed) at adaptive
   stations: hero 7 cm (3.6 cm near the nose, tail and arches), traffic 11 cm (6.5 cm), plus every
-  zone boundary and window edge. Side points under a wheel arch are lifted onto the arch (round or
-  box) with the flare lip; haunches swell the sides around the arches.
+  zone boundary, window and pillar edge and the cowl edge. The flat top uses the greenhouse's x
+  positions and a ring blends from flat to greenhouse over its first 5 cm of cabin height
+  (`BodyProfile::greenhouse_weight`), so the windshield base and the deck joins have no fans of
+  thin faces. Side points under a wheel arch are lifted onto the arch (round or box) with the
+  flare lip; haunches swell the sides around the arches; the first and last rings are set in by
+  `end_round_m` (rounded nose / tail face edges, no extra triangles).
+- **Greenhouse** (car-shapes, 2026-10-27; knobs in `BodyStyle` "Greenhouse framing"): body-colour
+  A-pillars `a_pillar_w_m` wide seen from the front following the windshield rake, C/D-pillars
+  `c_pillar_w_m`; the windshield wraps back at the corners (`windshield_wrap_m`, as a corner drop
+  on the raked glass, capped at `profile::WRAP_DROP_MAX_M`) above a black cowl `cowl_len_m` long;
+  front door glass runs forward under the A-pillar to a black sail (`a_sail_len_m`, `a_sail`) that
+  carries the mirror; B-pillar `b_pillar_w_m` wide in black or body colour (`b_pillar`); roof rail
+  drop `roof_rail_drop_m`. Every glass panel sits `glass_recess_m` behind the surface and
+  `glass_frame_m` inside its opening, with a black `<glass>_seal` part closing the step.
+- **Common trim** (`trim.rs`; knobs in `BodyStyle` "Body details"): mirrors on the sail
+  (`mirrors`), door handles (`door_handles`), panel seams (`panel_seams`, `seam_w_m`: door cut
+  lines, hood / trunk shut lines, bumper splits), fuel door (`fuel_door`), arch lips
+  (`arch_lip_m`) and black arch liners (`arch_liners`), drip-rail line (`drip_rail`), wipers
+  (`wipers`). Style kits that draw their own pieces remove the generic ones first
+  (`trim::remove_generic` with `GENERIC_MIRRORS` / `GENERIC_HANDLES` / `GENERIC_FUEL_DOOR` /
+  `GENERIC_DRIP_RAIL` / `GENERIC_WIPERS`; `Kit::new`, `Kit::door_handles`, `Kit::fuel_filler`,
+  traffic `handles` / `drip_rails` / `black_mirrors` / `tall_mirrors` do). Kit and traffic mirrors
+  are placed from the sail (`BodyProfile::sail`) too.
 - **Parts**: each loft face is classified by station and segment (lower side / belt ledge /
   greenhouse / top / bed) into a body region: bumpers, hood, fenders, doors (door windows ride with
   their door), quarter glass, sills, roof, windshield, rear glass (or cab-back wall), trunk or
@@ -85,28 +110,34 @@ built in another worktree with a shared `CARGO_TARGET_DIR` writes into *that* wo
   origin.
 
 ### Triangle budgets (`Tier::tri_budget`, checked by `validate-car-asset`)
-Hero (performance + police, and classes Sport / Muscle / Exotic / Police*): 8k–20k. Traffic
-(traffic module; classes Beater / Compact / Truck): 4k–10k. Current output (2026-10-21, mesh
-format 4 after the round-12 × detailed-car-models merge and the integrated turn signals, which
-cost at most +1.6 % per car — `every_car_has_turn_signals_integrated_into_its_lamps` caps them at
-+2 % of the counts before; the fold bindings add no triangles):
+Hero (performance + police, and classes Sport / Muscle / Exotic / Police*): 8k–22k. Traffic
+(traffic module; classes Beater / Compact / Truck): 4k–11k. Raised from 20k / 10k on 2026-10-27
+by the car-shapes pass (framed inset glass with seals, pillars, cowl, common trim: +0.8k–1.5k per
+car; the heaviest hero cars were already at 19.8k of 20k). Measured render cost (desktop chase,
+1280×720, low-poly dark, headless SwiftShader, `e2e/frame_profile.mjs chase 12`): old meshes
+340k triangles / 409 draw calls / 227 ms per frame / RTF 0.91; new meshes 347k–350k / 413–417 /
+233–252 ms / RTF 0.87–0.90 (gate: triangles ≤ 400k, draw calls < 600). Seals, seams and trim
+are batched with the other `trim` / paint parts, so they add almost no draw calls.
+`every_car_has_turn_signals_integrated_into_its_lamps` keeps the +2 % cap on the counts below.
+Current output (2026-10-27, in brackets the change from the 2026-10-26 meshes):
 
-| car | tris | car | tris | car | tris |
+| car | tris (vs 10-26) | car | tris (vs 10-26) | car | tris (vs 10-26) |
 |---|---|---|---|---|---|
-| arashi_t4 | 17180 | ironside_440 | 18699 | sentinel_vigil | 17955 |
-| brigand_400 | 19772 | junkyard_beater | 7968 | sentinel_warden | 18010 |
-| bulwark_400 | 19186 | kestrel_ts | 17812 | sentinel_wolfhound | 17377 |
-| debug_coupe | 16801 | lindwurm_4t | 16430 | shiro_turbo | 17982 |
-| debug_sedan | 8454 | lucciola_350 | 17306 | sperber_32 | 18036 |
-| drayman_cargo | 9467 | marten_20 | 15916 | stoat_16v | 15730 |
-| fulmine_v10 | 18802 | rampart_50 | 18866 | talus_20t | 17326 |
-| furrow_24 | 8498 | satchel_20 | 8362 | tansy_13 | 7220 |
-| hakone_gt | 17773 | sentinel_bastion | 17431 | tumbril_20 | 8535 |
-| hauler_1500 | 9813 | sentinel_cruiser | 17203 | vireo_xs | 15851 |
+| arashi_t4 | 18292 (+1112) | junkyard_beater | 8836 (+868) | satchel_20 | 9221 (+859) |
+| brigand_400 | 20986 (+1214) | kagero_hx | 18949 (+950) | sentinel_bastion | 18932 (+1501) |
+| bulwark_400 | 20579 (+1393) | kestrel_ts | 18914 (+1102) | sentinel_cruiser | 18497 (+1294) |
+| debug_coupe | 17927 (+1126) | lindwurm_4t | 17474 (+1044) | sentinel_vigil | 19100 (+1145) |
+| debug_sedan | 9605 (+1151) | lucciola_350 | 18170 (+898) | sentinel_warden | 19111 (+1101) |
+| drayman_cargo | 10488 (+1021) | marten_20 | 17056 (+1140) | sentinel_wolfhound | 18626 (+1249) |
+| erg_hamada | 19872 (+1426) | merlo_20t | 19317 (+1065) | shiro_turbo | 18992 (+1010) |
+| fulmine_v10 | 19884 (+1098) | mesquite_pr | 20223 (+882) | sperber_32 | 19112 (+1076) |
+| furrow_24 | 9414 (+916) | morrigan_55 | 20454 (+1073) | stoat_16v | 16894 (+1164) |
+| hakone_gt | 18873 (+1100) | nyx_proto | 19674 (+1126) | talus_20t | 17376 (+1044) |
+| halberd_40 | 19804 (+1010) | ombra_v12 | 19286 (+926) | tansy_13 | 8214 (+994) |
+| hauler_1500 | 10625 (+812) | ostwind_6t | 18306 (+934) | tumbril_20 | 9418 (+883) |
+| ironside_440 | 19809 (+1110) | rampart_50 | 19954 (+1088) | vireo_xs | 17065 (+1214) |
 
-Headroom: hero cars sit at 15.7k–19.8k of 20k (`brigand_400` 19.8k with 22 wheel segments),
-`hauler_1500` at 9.8k of 10k (drop its tire lugs
-or wheel segments first if traffic details push it over; see `wave2_mechanical.md`).
+Headroom: hero cars sit at 16.9k–21.0k of 22k, traffic cars at 8.2k–10.6k of 11k.
 
 ### Mid LOD (`Lod::Mid`, `data/panels/meshes/mid/<car>.json`)
 `gen-car-mesh` writes a second, unskinned mesh per car for the browser's instanced far cars
@@ -117,26 +148,30 @@ same style at `MID_LOFT_STEPS` (0.20 m / 0.12 m), `MID_WHEEL_SEGMENTS` (12) whee
 details ≥ `MID_MIN_DETAIL_M` = 0.2 m); details, rims, lamps, light bars and mirrors are then
 decimated by vertex clustering (`cluster_part`, `MID_CLUSTER_M` = 3.5 cm grid, vertices snap
 to cell centres so touching parts stay closed; atlas seams kept apart by a UV bucket). Atlas,
-livery hint, tints and atlas UVs equal the full mesh's. Budget `MID_TRI_BUDGET` 2k–6.5k; checked
+livery hint, tints and atlas UVs equal the full mesh's. Budget `MID_TRI_BUDGET` 2k–7k (6.5k until
+2026-10-27); checked
 by `every_car_has_an_up_to_date_mid_lod` (also: up to date, a subset of the full mesh's parts
 with the same kinds / materials, every panel / glass / light / tire kept). Format: see
 `data/panels/README.md` "Mid LOD". Current output:
 
 | car | mid (full) tris | car | mid (full) tris | car | mid (full) tris |
 |---|---|---|---|---|---|
-| arashi_t4 | 4938 (17180) | ironside_440 | 5349 (18699) | sentinel_vigil | 4919 (17955) |
-| brigand_400 | 6008 (19772) | junkyard_beater | 4433 (7968) | sentinel_warden | 5460 (18010) |
-| bulwark_400 | 5502 (19186) | kestrel_ts | 5017 (17812) | sentinel_wolfhound | 5086 (17377) |
-| debug_coupe | 4765 (16801) | lindwurm_4t | 4728 (16430) | shiro_turbo | 5014 (17982) |
-| debug_sedan | 4562 (8454) | lucciola_350 | 4752 (17306) | sperber_32 | 4904 (18036) |
-| drayman_cargo | 5041 (9467) | marten_20 | 4072 (15916) | stoat_16v | 3978 (15730) |
-| fulmine_v10 | 5588 (18802) | rampart_50 | 5280 (18866) | talus_20t | 5213 (17326) |
-| furrow_24 | 4514 (8498) | satchel_20 | 4693 (8362) | tansy_13 | 4092 (7220) |
-| hakone_gt | 4790 (17773) | sentinel_bastion | 5309 (17431) | tumbril_20 | 4604 (8535) |
-| hauler_1500 | 5309 (9813) | sentinel_cruiser | 4824 (17203) | vireo_xs | 3967 (15851) |
+| arashi_t4 | 4962 (18292) | junkyard_beater | 4473 (8836) | satchel_20 | 4650 (9221) |
+| brigand_400 | 6042 (20986) | kagero_hx | 5131 (18949) | sentinel_bastion | 5346 (18932) |
+| bulwark_400 | 5621 (20579) | kestrel_ts | 5051 (18914) | sentinel_cruiser | 4728 (18497) |
+| debug_coupe | 4793 (17927) | lindwurm_4t | 4680 (17474) | sentinel_vigil | 4994 (19100) |
+| debug_sedan | 4407 (9605) | lucciola_350 | 4674 (18170) | sentinel_warden | 5575 (19111) |
+| drayman_cargo | 5248 (10488) | marten_20 | 4160 (17056) | sentinel_wolfhound | 5183 (18626) |
+| erg_hamada | 5912 (19872) | merlo_20t | 5151 (19317) | shiro_turbo | 5040 (18992) |
+| fulmine_v10 | 5530 (19884) | mesquite_pr | 6530 (20223) | sperber_32 | 4942 (19112) |
+| furrow_24 | 4496 (9414) | morrigan_55 | 5648 (20454) | stoat_16v | 3938 (16894) |
+| hakone_gt | 4826 (18873) | nyx_proto | 6025 (19674) | talus_20t | 4464 (17376) |
+| halberd_40 | 5111 (19804) | ombra_v12 | 5268 (19286) | tansy_13 | 4002 (8214) |
+| hauler_1500 | 5411 (10625) | ostwind_6t | 5506 (18306) | tumbril_20 | 4709 (9418) |
+| ironside_440 | 5451 (19809) | rampart_50 | 5380 (19954) | vireo_xs | 3921 (17065) |
 
-Mid LODs: 3967–6008 triangles (full meshes 7220–19772); files 130–190 KB each (full meshes
-0.5–1.4 MB). The four `parity_*` cars' mid files are copies of their template car's
+Mid LODs: 3921–6530 triangles (full meshes 8214–20986). The mid LOD's glass is flush (no seals) and it
+skips seams, handles, the fuel door, arch lips, the drip rail and wipers. The four `parity_*` cars' mid files are copies of their template car's
 (`tools/parity/build_parity_cars.py`; after a regeneration refresh the copies with its
 `copy_panels(spec)` for each `CARS` entry, or rerun the script).
 
@@ -219,4 +254,8 @@ vertex count. `panels_shots.mjs` reports 0.14 ms per car per frame during its cr
   Optional table-only fields (`lip_polished`, `missing_cap`, cover finish, `frame_rails`) are not
   `WheelStyle` / `MechStyle` knobs yet.
 - No per-region convex hulls for debris (the sim uses the lattice hull of the detached nodes).
-- Wheel wells are open (no inner arch liner); fine with the dark interior colour.
+- Wheel wells: black arch liners close the openings (`arch_liners`); there is no full inner well.
+- Per-car greenhouse styling is still to do: every car uses the default pillar widths, wrap and
+  trim finishes; some style kits' own overlays (black A-pillar strokes, roof sheets on
+  `kagero_hx` / `nyx_proto` / supercars) were tuned for the old frameless glass.
+- Where the cabin meets the deck (C-pillar foot) the side faces still show a few small facets.

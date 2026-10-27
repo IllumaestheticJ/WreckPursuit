@@ -1,6 +1,7 @@
 // Quick look at procedural car meshes without the testbed or the wasm build: renders
 // data/panels/meshes/<car>.json (rest pose, greybox materials + the mesh's tints) in headless
-// Chromium and writes front / rear 3/4 and side PNGs per car.
+// Chromium and writes front / rear 3/4, side, top and greenhouse close-up (cabin, cabin_rear) PNGs
+// per car; SHOT_CAM="x,y,z" SHOT_AT="x,y,z" (chassis space, m) adds <car>_custom.png.
 //   node tools/assets/mesh_shots.mjs <outDir> <car> [car ...]
 // Needs apps/testbed-web/node_modules (three, playwright-core).
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -81,6 +82,22 @@ window.shoot = async (mesh, car) => {
     r.render(scene, cam);
     shots[name] = r.domElement.toDataURL("image/png");
   }
+  // Close-ups of the greenhouse (pillars, glass frames, cowl, mirrors) and the rear quarter.
+  const zTop = car ? car.body_size_m[2] : 1.4;
+  for (const [name, dir, at] of [["cabin", [0.55, 0.62, 0.42], [0, 0.35 * len * 0.25, 0.7 * zTop]], ["cabin_rear", [-0.62, -0.5, 0.38], [0, -0.1 * len, 0.65 * zTop]]]) {
+    const dc = 0.95 * len;
+    cam.position.set(at[0] + dir[0] * dc, at[1] + dir[1] * dc, at[2] + dir[2] * dc);
+    cam.lookAt(at[0], at[1], at[2]);
+    r.render(scene, cam);
+    shots[name] = r.domElement.toDataURL("image/png");
+  }
+  // Optional extra view: SHOT_CAM="x,y,z" SHOT_AT="x,y,z" (chassis space, m) → <car>_custom.png.
+  if (window.customCam) {
+    cam.position.fromArray(window.customCam[0]);
+    cam.lookAt(...window.customCam[1]);
+    r.render(scene, cam);
+    shots.custom = r.domElement.toDataURL("image/png");
+  }
   return shots;
 };
 window.ready = true;
@@ -101,6 +118,10 @@ await page.route("**/*", (route) => {
 });
 await page.goto("http://shots.local/");
 await page.waitForFunction(() => window.ready === true);
+if (process.env.SHOT_CAM && process.env.SHOT_AT) {
+  const v = (e) => e.split(",").map(Number);
+  await page.evaluate((c) => (window.customCam = c), [v(process.env.SHOT_CAM), v(process.env.SHOT_AT)]);
+}
 for (const id of cars) {
   const mesh = JSON.parse(readFileSync(join(repo, "data/panels/meshes", `${id}.json`), "utf8"));
   let car = null;
