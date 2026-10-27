@@ -11,10 +11,6 @@
   lattices, car defs. `gen-car-mesh --check` passes for every car.
 
 ## New local helpers (in `traffic.rs`, used by my cars only)
-- `lift_front(b, p, h, z0, z1)`: raises the front of the already-built body by up to `h`
-  (zero at the windshield base, full ahead of the hood's front edge, faded in between heights
-  `z0..z1`). The lattice keeps truck / van hoods low and `nose_h` cannot go above the
-  lattice hood line, so the tall flat noses are done this way (hauler +12 cm, drayman +10 cm).
 - `van_box(b, p, windows)`: the generator keeps the deck start ≥ 0.25 m ahead of the tail, so
   every van had a stepped upper rear (and floating hinges / roof markers: the known gap from
   phase 1). The greenhouse section at the roof's rear edge is now extruded back to the tail:
@@ -57,9 +53,15 @@ Merged `ws/car-shapes` (phase 3) and reworked all seven again:
   slides the kit's end-mounted parts (grilles, plates, intakes, fog lamps, lips) back onto the
   raked face. Projector bowls with chrome reflector rings (`lamp::element`) in tansy's and
   satchel's lamps (one / two) and a big round reflector in tumbril's square lamps.
-- Still local (phase 3b part 2 covers them): `lift_front` (nose above the hood node) and
-  `van_box` (van deck flush with the tail). The drayman and furrow keep upright faces (the
-  drayman for budget, the furrow because a 90s steel-bumper truck has none).
+- The drayman and furrow keep upright faces (the drayman for budget, the furrow because a 90s
+  steel-bumper truck has none).
+- Phase 3 addenda (merged `d64c04b7`): the hauler's and drayman's tall noses now come from
+  `hood_dz` (front +0.12 / +0.10 m, `nose_h` 1.21) and the local nose-lift vertex warp is gone;
+  the three vans use `deck_min_m` 0.04, so their rear glass / doors reach the tail and
+  `van_box` only adds the painted door skin over the glass (solid doors on the drayman, two
+  windows on the European vans) plus seam, hinges, handle and brake lamp; the European vans get
+  black arch lips (`arch_lip_finish`) and black lower cladding (`cladding_z_m` 0.36 satchel /
+  0.42 tumbril); tansy's window line kicks up at the rear (`dlo_kink_m` 0.06).
 
 ## Per car
 Headline counts are pass 2; final pass 3 counts (full / mid): drayman 10931 / 5651, furrow
@@ -79,7 +81,7 @@ lamps and tow hooks, towing mirrors, cab clearance lamps, running boards.
 **Before:** read as a low regular-cab long-bed sport truck (one door, 0.65 m roof, small grille).
 **Changed:** cab moved back (`cabin_shift_m` −0.50) and the windshield base forward
 (`hood_length` 1.62), so the cab is ~2.4 m long with a rear-door window and the bed ~1.9 m;
-belt +8 cm, nose lifted 12 cm (`lift_front`) into a tall flat front; upright cab back
+belt +8 cm, nose lifted 12 cm (pass 2 `lift_front`, now `hood_dz`) into a tall flat front; upright cab back
 (`rear_glass_rake_deg` 6) with a roof run back to it; new kit: three-section chrome grille with
 two heavy bars and a blank badge, tall lamps (shaped: inner lower corner cut toward the grille bar) in chrome bezels with an amber LED strip (signal),
 chrome bumper with two intakes, fog lamps, air dam, red tow hooks, centre plate; crew-cab chrome
@@ -132,7 +134,7 @@ vertical tail lamps in the rear corners.
 **Before:** long low station-wagon nose, box tucked in above the belt, upper rear stepped
 25 cm in, hinges and roof markers floating behind it.
 **Changed:** `hood_length` 1.22, belt +6 cm, nose lifted 10 cm, box flares, black mirrors /
-handles; `square_up_sides` 6 cm; `van_box` flush rear (solid barn doors); kit: stacked lamps
+handles; `square_up_sides` 6 cm (pass 2; now `tumblehome_m`); `van_box` flush rear (solid barn doors); kit: stacked lamps
 (head over amber signal) in a black surround, grille with chrome top bar and badge, tall corner
 tail lamps, high brake lamp. Roof marker lamps removed (not fitted on vans this width).
 
@@ -141,7 +143,7 @@ tail lamps, high brake lamp. Roof marker lamps removed (not fitted on vans this 
 1.9 m wide, 2.25 m tall, short sloping bonnet that flows into a raked windshield, high belt,
 slab sides, flush barn doors with windows, big swept lamps, slim grille, plastic bumpers.
 **Changed:** separated from tumbril (they shared one style): `hood_length` 0.92 with a raised
-cowl, rounder nose, `square_up_sides` 6.5 cm, `van_box` with rear-door windows; kit: shaped swept
+cowl, rounder nose, `square_up_sides` 6.5 cm (pass 2; now `tumblehome_m`), `van_box` with rear-door windows; kit: shaped swept
 lamps (tall at the fender, tapering in and down to the grille) in a black bezel with the amber
 signal along their outer bottom, two-slat grille with badge, black lower
 bumper and intake, rubbing strip, side repeaters, tall corner tail lamps (red / amber / red).
@@ -195,7 +197,6 @@ over after row) and `overview_front.jpg` (all seven, before / after).
   LED strips); `lens_poly` here is a local stand-in.
 - Bodyside bow (convex side between sill and shoulder) and a per-station greenhouse plan taper.
 - More arch shapes and a lower cladding band in the ring.
-- Allow `tumblehome` below 0.10 m and a deck start closer than 0.25 m to the tail for `Van`
-  (then `square_up_sides` / `van_box` could go).
-- A `nose_h` / hood-front height above the lattice hood line (tall truck noses; then
-  `lift_front` could go).
+- (Done in phase 3 / addenda: tumblehome range, van deck near the tail, hood height, arch
+  shapes and cladding.) Open: a painted rear-door panel mode for vans (glass only where a
+  window is drawn), so `van_box`'s door skin could go.
