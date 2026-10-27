@@ -151,8 +151,40 @@ a narrow nose pulls its outer edge in (`phase3_knobs_keep_panels_on_their_region
 `plan_width` 0.80 at the nose). Sheets: `group_side_before_after.jpg`,
 `group_top_before_after.jpg` and the per-car sheets (regenerated).
 
-Still waiting on phase 3b (hood / deck dz, DLO top line and kink, face rake, nose height,
+Still waiting on the rest of phase 3b (hood / deck dz, DLO top line and kink, nose height,
 roof-arc exponent, smooth shading) for the touch-up pass.
+
+### Pass 3b part 1 (merged from `ws/car-shapes` @ b10e5e14)
+End faces and plan:
+
+| car | nose face rake / chin | nose plan bow (tip) | tail face rake | roof plan taper | lower lean-in |
+|---|---|---|---|---|---|
+| kestrel_ts | 22° / 0.06 | 0.25 (0.75) | 10° | 0.08 | – |
+| arashi_t4 | – / 0.03 | – | – | 0.04 | – |
+| talus_20t | – / – | – | – | 0.05 | – |
+| shiro_turbo | 30° / 0.06 | 0.25 (0.7) | 15° | 0.12 | 0.03 |
+| hakone_gt | 35° / 0.05 | 0.30 (0.7) | 20° | 0.15 | 0.04 |
+| sperber_32 | 12° / 0.05 | 0.15 (0.8) | 8° | 0.06 | – |
+
+- **Kit parts on raked faces** (`follow_faces` in `tuner.rs`): grilles, intakes, fogs, face
+  lamps, badges, plates, valances and diffusers built on the old vertical end plane are moved
+  onto the real face: rays on a 3 × 4 grid over each part's x / z span find the body shell, and
+  each vertex moves by the bilinear blend (rays that pass over or under the face and hit the
+  roof or floor are ignored). Exact whatever knobs shape the face (rake, chin, plan bow, the old
+  rounding knobs). Projected lamps (which already follow the surface) are skipped. Swept top
+  lamps shift back by `face_depth` so they lie on the nose top, not down the face.
+- **No tail plan bow**: kit parts placed from `Kit::wt()` collapse inward when a bow narrows the
+  tail tip; the `plan_width` taper already narrows the tails.
+- **Generator bug (reported):** with `nose_face_rake_deg` / `tail_face_rake_deg` ≠ 0,
+  front- / rear-view projected lamps (`Kit::proj_cluster` with `LampView::Front` / `Rear`) land
+  ~5 cm inside the face (talus measured: lens at y 2.01 behind a hood surface at 2.06 at the same
+  x / z; with the rake at 0 the lens sits 8 mm proud). Top-view lamps and chins are fine. So
+  arashi and talus (projected front and rear lamps) keep vertical faces for now; arashi keeps a
+  chin. On talus a chin also cut under the outboard signal, and the shared lamp code's 3b
+  outline handling put part of the old cut-corner signal under the bumper, so its head lamps
+  are now a plain trapezoid 6 cm inside the nose edge with an 18° wrap.
+- arashi's and talus's separate lamp housings were replaced by the projected cluster's flush
+  bezel (arashi 25 mm, so the white lenses read on the white body).
 
 ## Triangle counts
 
@@ -160,12 +192,12 @@ Hero budget 22k (mid LOD 7k); all six within it.
 
 | car | full before → after | mid before → after |
 |---|---|---|
-| kestrel_ts | 18914 → 19558 | 5051 → 5645 |
-| arashi_t4 | 18292 → 18302 | 4962 → 4622 |
-| talus_20t | 17376 → 19018 | 4464 → 5034 |
-| shiro_turbo | 18992 → 19361 | 5040 → 5211 |
-| hakone_gt | 18873 → 19707 | 4826 → 4721 |
-| sperber_32 | 19112 → 18976 | 4942 → 5116 |
+| kestrel_ts | 18914 → 19642 | 5051 → 5535 |
+| arashi_t4 | 18292 → 18816 | 4962 → 4828 |
+| talus_20t | 17376 → 19460 | 4464 → 5139 |
+| shiro_turbo | 18992 → 19450 | 5040 → 5192 |
+| hakone_gt | 18873 → 19884 | 4826 → 4601 |
+| sperber_32 | 19112 → 18916 | 4942 → 5064 |
 
 The rows of `every_car_has_turn_signals_integrated_into_its_lamps`'s table for these six cars
 were rebased to the new counts (the phase-1 doc asks per-car passes above +2 % to do this).
