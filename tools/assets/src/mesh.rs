@@ -930,9 +930,7 @@ pub fn generate_lod(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle, lo
     } else {
         loft_steps(style.tier)
     };
-    let ys = stations(&p, base, fine);
-    let mut rings: Vec<Vec<RingPt>> = ys.iter().map(|&y| p.ring(y)).collect();
-    round_ends(&p, &mut rings);
+    let (ys, rings) = loft_rings(&p, base, fine);
     let win = windows(&p);
     let mut b = Builder::new();
     if mid {
@@ -1241,6 +1239,15 @@ fn loft(
             }
         }
     }
+}
+
+/// The loft the mesh is built from: [`stations`] at steps (`base`, `fine`) and their rings,
+/// with the rounded end rings.
+pub fn loft_rings(p: &BodyProfile, base: f32, fine: f32) -> (Vec<f32>, Vec<Vec<RingPt>>) {
+    let ys = stations(p, base, fine);
+    let mut rings: Vec<Vec<RingPt>> = ys.iter().map(|&y| p.ring(y)).collect();
+    round_ends(p, &mut rings);
+    (ys, rings)
 }
 
 /// Set the first and last rings in by [`crate::style::BodyStyle::end_round_m`] (along each
