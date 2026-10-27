@@ -1,5 +1,5 @@
 //! Body-kit geometry shared by the performance styles: lamps, grilles, splitters, skirts,
-//! wings, diffusers, vents, louvres, side intakes, mirrors, handles, fillers, wipers.
+//! wings, diffusers, vents, louvres, side intakes, mirrors, handles, fillers (wipers: `trim`).
 //!
 //! Everything is built from the foundation's [`Builder`] primitives and positioned from the
 //! styled [`BodyProfile`], so it follows each car's real loft. [`Kit`] wraps the builder and
@@ -120,6 +120,11 @@ impl Seg {
     }
 }
 
+/// An outline given for the LEFT side (x < 0, or |x|) moved to side `sx` (x only).
+pub fn on_side(sx: f32, pts: &[[f32; 2]]) -> Vec<[f32; 2]> {
+    pts.iter().map(|q| [sx * q[0].abs(), q[1]]).collect()
+}
+
 /// The foundation's default door-mirror key of side `sx`.
 pub fn mirror_key(sx: f32) -> PartKey {
     sided(
@@ -215,12 +220,17 @@ pub struct Kit<'a> {
     pub yn: f32,
     /// Tail face y.
     pub yt: f32,
+    /// Lens grid step of [`Kit::proj_cluster`] lamps, m (0.01…0.08, see
+    /// [`crate::lamp::Lamp::step_m`]): coarser for cars near their triangle budget. Default 0.04.
+    pub lens_step_m: f32,
 }
 
 impl<'a> Kit<'a> {
     /// Wrap a builder; removes the foundation's default head / tail lamps, turn signals and
     /// mirrors (the kit re-emits them into the same parts in the car's own shapes).
     pub fn new(p: &'a BodyProfile, b: &'a mut Builder) -> Kit<'a> {
+        // The kit's mirrors (`Kit::mirrors`) replace the generic ones (`trim::mirrors`).
+        crate::trim::remove_generic(b, &crate::trim::GENERIC_MIRRORS);
         for sx in SIDES {
             for k in [headlight_key(sx), taillight_key(sx), mirror_key(sx)] {
                 b.set_geometry(&k.name, Vec::new(), Vec::new(), Vec::new());
@@ -238,6 +248,7 @@ impl<'a> Kit<'a> {
             b,
             yn: p.y_nose,
             yt: p.y_tail,
+            lens_step_m: 0.04,
         }
     }
 
@@ -267,7 +278,7 @@ impl<'a> Kit<'a> {
     pub fn roof_edge(&self, y: f32) -> f32 {
         let ring = self.p.ring(y);
         if self.p.has_greenhouse(y) {
-            -ring[12].p[0]
+            -ring[crate::profile::RING_PILLAR_IN].p[0]
         } else {
             self.p.half_width(y) - 0.1
         }
@@ -665,6 +676,251 @@ impl<'a> Kit<'a> {
         );
         let ik = indicator_front_key(sx);
         self.front_box(&ik, sx * sig[0], sx * sig[1], sig[2], sig[3], proud, bevel);
+    }
+
+    /// A head (`front`) or tail lamp of side `sx` projected onto the body
+    /// ([`crate::lamp`]): `outline` is given for the LEFT side in `view`'s coordinates (front /
+    /// rear / top: x < 0; side: the left side's `[y, z]`) and mirrored for the right. The lens
+    /// goes into the head / tail lamp part; with `seg` the turn signal is cut out of it as a
+    /// segment of the same lens (front: amber; rear: `rear_mat`, `EmissiveAmber` or `Taillight`;
+    /// `Outboard` / `Inboard` cut across the outline's first axis — the car's corner side; for
+    /// a side view, the end of the car — `Lower` / `Upper` along the second: z, or for a top
+    /// view y with `Lower` the leading strip). Without `seg` the kit must add the signal
+    /// itself (e.g. [`Kit::signals_beside_lamps`]). `bezel_w` > 0 adds a black bezel that wide
+    /// (`headlamp_bezel_l` / `taillamp_bezel_l` details on the frame). `yaw_deg` swings a
+    /// front / rear cast round the corner (wraparound lamps). The lens grid step is
+    /// [`Kit::lens_step_m`]. A top-view outline moves back to end 1 cm short of a raked end
+    /// face's top edge.
+    pub fn proj_cluster(
+        &mut self,
+        sx: f32,
+        front: bool,
+        view: crate::lamp::LampView,
+        outline: &[[f32; 2]],
+        seg: Option<Seg>,
+        rear_mat: MaterialSlot,
+        bezel_w: f32,
+        yaw_deg: f32,
+    ) {
+        use crate::lamp::{bezel, clip_outline, lens, Lamp, LampView};
+        let right = sx > 0.0;
+        let (view, mut pts): (LampView, Vec<[f32; 2]>) = match view {
+            LampView::Side { .. } => (LampView::Side { right }, outline.to_vec()),
+            v => (v, outline.iter().map(|q| [sx * q[0].abs(), q[1]]).collect()),
+        };
+        // A top-view lamp near a raked end face moves back (or forward, at the tail) until it
+        // ends 1 cm short of the edge where the top meets the face: past it the outline ran down
+        // the face, and the lens there sat under the body top's edge seen from ahead. Shape
+        // kept. No-op without a face rake.
+        if view == LampView::Top {
+            let p = self.p;
+            let depth = p.face_depth(front);
+            if depth > 1e-4 {
+                let y_ref = if front {
+                    p.y_nose - depth - 0.05
+                } else {
+                    p.y_tail + depth + 0.05
+                };
+                let z_top = pts
+                    .iter()
+                    .map(|q| p.top_point(y_ref, q[0]).0[2])
+                    .fold(f32::MIN, f32::max);
+                let set = p.face_setback(front, z_top);
+                let over = if front {
+                    pts.iter().map(|q| q[1]).fold(f32::MIN, f32::max) - (p.y_nose - set - 0.01)
+                } else {
+                    (p.y_tail + set + 0.01) - pts.iter().map(|q| q[1]).fold(f32::MAX, f32::min)
+                };
+                if set > 1e-4 && over > 0.0 {
+                    let dy = if front { -over } else { over };
+                    for q in &mut pts {
+                        q[1] += dy;
+                    }
+                }
+            }
+        }
+        let mut lamp = Lamp::new(view, pts.clone());
+        lamp.yaw_deg = yaw_deg;
+        lamp.step_m = self.lens_step_m;
+        let (lamp_key, sig_key, region) = if front {
+            (
+                headlight_key(sx),
+                indicator_front_key(sx),
+                BodyRegion::FrameFront,
+            )
+        } else {
+            (
+                taillight_key(sx),
+                indicator_rear_key(sx, rear_mat),
+                BodyRegion::FrameRear,
+            )
+        };
+        if bezel_w > 0.0 {
+            let name = if front {
+                "headlamp_bezel_l"
+            } else {
+                "taillamp_bezel_l"
+            };
+            let bk = sided(&dkey(name, region, M::Trim), sx);
+            bezel(self.b, self.p, &bk, &lamp, bezel_w);
+        }
+        let Some(seg) = seg else {
+            lens(self.b, self.p, &lamp_key, &lamp);
+            return;
+        };
+        let lo = |k: usize| pts.iter().map(|q| q[k]).fold(f32::MAX, f32::min);
+        let hi = |k: usize| pts.iter().map(|q| q[k]).fold(f32::MIN, f32::max);
+        let g = INDICATOR_SEAM_M;
+        // (axis, cut, signal on the high side of the cut).
+        let (axis, at, sig_high) = match (seg, view) {
+            (Seg::Outboard(w) | Seg::Inboard(w), LampView::Side { .. }) => {
+                let toward_end = matches!(seg, Seg::Outboard(_)) == front;
+                if toward_end {
+                    (0, hi(0) - w, true)
+                } else {
+                    (0, lo(0) + w, false)
+                }
+            }
+            (Seg::Outboard(w) | Seg::Inboard(w), _) => {
+                let outer_high = matches!(seg, Seg::Outboard(_)) == right;
+                if outer_high {
+                    (0, hi(0) - w, true)
+                } else {
+                    (0, lo(0) + w, false)
+                }
+            }
+            (Seg::Lower(h), LampView::Top) => (1, hi(1) - h, true),
+            (Seg::Upper(h), LampView::Top) => (1, lo(1) + h, false),
+            (Seg::Lower(h), _) => (1, lo(1) + h, false),
+            (Seg::Upper(h), _) => (1, hi(1) - h, true),
+        };
+        let below_cut = |d: f32| clip_outline(&pts, axis, at + d, true);
+        let above_cut = |d: f32| clip_outline(&pts, axis, at + d, false);
+        let (sig, rest) = if sig_high {
+            (above_cut(0.5 * g), below_cut(-0.5 * g))
+        } else {
+            (below_cut(-0.5 * g), above_cut(0.5 * g))
+        };
+        for (k, o) in [(&lamp_key, rest), (&sig_key, sig)] {
+            if o.len() >= 3 {
+                let mut l = lamp.clone();
+                l.outline = o;
+                lens(self.b, self.p, k, &l);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ shared panels
+    // Promoted from the phase-2 groups' local helpers (tuner / hatch `face_poly`, supercar
+    // `top_poly` / `side_poly` / `end_poly`, tuner `swept_top_lamp`); the draped ones are cast
+    // onto the built body like the projected lamps (`crate::lamp::panel`), so they follow
+    // curved, sculpted and raked surfaces and take concave outlines.
+    //
+    // ```ignore
+    // // Inside a style kit (`k: Kit`, side `sx`):
+    // // a mesh intake on the nose face, a vent on each fender top, a side gill, a badge:
+    // k.end_poly(&dkey("intake", BodyRegion::FrontBumper, M::Grille), true,
+    //     &[[-0.30, 0.25], [0.30, 0.25], [0.24, 0.36], [-0.24, 0.36]], 0.004, 0.02);
+    // k.top_poly(&sided(&dkey("fender_vent_l", BodyRegion::FrontLeftFender, M::Grille), sx),
+    //     &on_side(sx, &[[0.55, 1.6], [0.75, 1.6], [0.72, 1.3], [0.58, 1.3]]), 0.003, 0.01);
+    // k.side_poly(&dkey("gill_l", BodyRegion::FrontLeftFender, M::Trim), sx,
+    //     &[[0.9, 0.45], [1.1, 0.48], [1.1, 0.62], [0.95, 0.60]], 0.004, 0.01);
+    // k.face_poly(&dkey("badge", BodyRegion::Hood, M::Chrome), true,
+    //     &[[-0.04, 0.55], [0.04, 0.55], [0.04, 0.59], [-0.04, 0.59]], 0.006);
+    // ```
+
+    /// Flat prism on the nose (`front`) or tail face plane: convex outline `(x, z)` swept from
+    /// 2 cm inside the face to `proud` out of it (lamp lenses, grilles, badges on a flat face;
+    /// for a curved or raked face use [`Kit::end_poly`]).
+    pub fn face_poly(&mut self, key: &PartKey, front: bool, outline: &[[f32; 2]], proud: f32) {
+        let (y0, y1) = if front {
+            (self.yn - 0.02, self.yn + proud)
+        } else {
+            (self.yt + 0.02, self.yt - proud)
+        };
+        self.prism_y(key, outline, y0, y1);
+    }
+
+    /// Panel lying on the top surface (hood, fender tops, deck, roof): outline `pts` in chassis
+    /// `(x, y)` (any simple polygon), its face `lift` m above the paint and `thick` m deep.
+    pub fn top_poly(&mut self, key: &PartKey, pts: &[[f32; 2]], lift: f32, thick: f32) {
+        crate::lamp::panel(
+            self.b,
+            self.p,
+            key,
+            crate::lamp::LampView::Top,
+            pts,
+            lift,
+            lift - thick,
+        );
+    }
+
+    /// Panel on the body side of side `sx` (`key_left` is the left-side key; the right one is
+    /// derived): outline `pts` in `(y, z)`, its face `off` m out of the paint, `thick` m deep.
+    /// Follows sculpts, bulges and arches (and the greenhouse above the belt).
+    pub fn side_poly(
+        &mut self,
+        key_left: &PartKey,
+        sx: f32,
+        pts: &[[f32; 2]],
+        off: f32,
+        thick: f32,
+    ) {
+        let key = sided(key_left, sx);
+        let view = crate::lamp::LampView::Side { right: sx > 0.0 };
+        crate::lamp::panel(self.b, self.p, &key, view, pts, off, off - thick);
+    }
+
+    /// Panel on the nose (`front`) or tail face: outline `pts` in `(x, z)` (signed x), its face
+    /// `proud` m out of the surface and `depth` m deep, following the plan-rounded corners and a
+    /// raked / bowed face.
+    pub fn end_poly(
+        &mut self,
+        key: &PartKey,
+        front: bool,
+        pts: &[[f32; 2]],
+        proud: f32,
+        depth: f32,
+    ) {
+        let view = if front {
+            crate::lamp::LampView::Front
+        } else {
+            crate::lamp::LampView::Rear
+        };
+        crate::lamp::panel(self.b, self.p, key, view, pts, proud, proud - depth);
+    }
+
+    /// Head lamp of side `sx` lying on the nose top and sweeping back into the fender, drawn in
+    /// the top view and projected ([`Kit::proj_cluster`]): the lens runs across |x| `xin..xout`
+    /// at its front edge `y1`; its inboard edge goes back to `y0`, its outboard edge `sweep` m
+    /// further (a swept, tapering lamp). The outboard `sig_w` is the amber turn signal; a flush
+    /// dark bezel `border` m wide rings it.
+    pub fn swept_top_lamp(
+        &mut self,
+        sx: f32,
+        y0: f32,
+        y1: f32,
+        xin: f32,
+        xout: f32,
+        sweep: f32,
+        border: f32,
+        sig_w: f32,
+    ) {
+        let y1 = y1.min(self.yn - 0.01);
+        // Keep a real lens when a narrow nose pulls the outer edge in.
+        let xin = xin.min(xout - 0.15);
+        let sig_w = sig_w.min(0.4 * (xout - xin));
+        let outline = [[xin, y1], [xout, y1], [xout - 0.03, y0 - sweep], [xin, y0]];
+        self.proj_cluster(
+            sx,
+            true,
+            crate::lamp::LampView::Top,
+            &outline,
+            Some(Seg::Outboard(sig_w)),
+            M::EmissiveAmber,
+            border,
+            0.0,
+        );
     }
 
     /// Bounding box (lo, hi) of part `name` as built so far, or `None` if it is empty.
@@ -1286,7 +1542,8 @@ impl<'a> Kit<'a> {
     // ------------------------------------------------------------------ sides
 
     /// Wing-mirror on the front door (replaces the foundation's box): a tapered housing on a
-    /// stalk, optional contrast cap (`cap`), `y_off` from the door hinge.
+    /// stalk, optional contrast cap (`cap`), `y_off` back from 5 cm ahead of the sail front
+    /// (`BodyProfile::sail`, the A-pillar foot).
     pub fn mirrors(&mut self, y_off: f32, size: f32, cap: Option<MaterialSlot>) {
         for sx in SIDES {
             let MirrorFrame {
@@ -1339,7 +1596,8 @@ impl<'a> Kit<'a> {
 
     /// Placement of the door mirror of side `sx` (see [`Kit::mirrors`]).
     fn mirror_frame(&self, sx: f32, y_off: f32, size: f32) -> MirrorFrame {
-        let yh = self.p.y_fd_hinge - y_off;
+        // `y_off` back from the front of the sail at the A-pillar foot (+5 cm).
+        let yh = self.p.sail().1 + 0.05 - y_off;
         let zb = self.p.belt(yh) + 0.02;
         let w = self.side_x(yh, zb - 0.06).max(self.p.half_width(yh) - 0.05);
         let zl = zb + 0.03;
@@ -1356,6 +1614,7 @@ impl<'a> Kit<'a> {
 
     /// Door handles (front doors; rear doors too on 4-door cars), `mat`.
     pub fn door_handles(&mut self, mat: MaterialSlot) {
+        crate::trim::remove_generic(self.b, &crate::trim::GENERIC_HANDLES);
         let p = self.p;
         let mut doors: Vec<(BodyRegion, f32)> = Vec::new();
         match p.rear_door {
@@ -1379,6 +1638,7 @@ impl<'a> Kit<'a> {
 
     /// Fuel filler flap on the rear quarter (side `sx`), Ø `d`.
     pub fn fuel_filler(&mut self, sx: f32, d: f32, mat: MaterialSlot) {
+        crate::trim::remove_generic(self.b, &crate::trim::GENERIC_FUEL_DOOR);
         let p = self.p;
         let (yr, zr, rr) = self.arch(false);
         let y = yr + rr + 0.20;
@@ -1400,28 +1660,6 @@ impl<'a> Kit<'a> {
             12,
             true,
         );
-    }
-
-    /// Wipers lying on the windshield base (region `Windshield`).
-    pub fn wipers(&mut self) {
-        let p = self.p;
-        let k = dkey("wipers", BodyRegion::Windshield, M::Trim);
-        let y = p.y_fw - 0.06;
-        let hw = p.roof_half_w(y).min(p.half_width(y) - 0.2);
-        for (xa, xb) in [(-0.9 * hw, -0.08), (0.05, 0.8 * hw)] {
-            let ya = y - 0.03;
-            let yb = y - 0.11;
-            let za = self.top_z(ya, xa) + 0.012;
-            let zb = self.top_z(yb, xb) + 0.012;
-            self.plate(
-                &k,
-                [xa, ya, za],
-                [xb, yb, zb],
-                [0.0, 0.0, 1.0],
-                0.014,
-                0.012,
-            );
-        }
     }
 
     /// Fog / driving lamps on the nose face at ±x, z, radius r (lens `Headlight`, ring `Trim`).

@@ -3,7 +3,7 @@
 //!
 //! Every car is a [`BodyStyle`] built from a silhouette preset plus one custom detail function
 //! that emits that car's trim kit through the small helpers below: grilles, bumpers with rub
-//! strips, door handles, mirrors, wipers, plates, side markers, era-appropriate lamps (the
+//! strips, door handles, mirrors, plates, side markers, era-appropriate lamps (wipers: `trim`; the
 //! generic head / tail light boxes are reshaped in place), bed rails, step bumpers, mud flaps,
 //! van door tracks and hinges.
 //!
@@ -25,7 +25,8 @@ use crate::mesh::{indicator_front_key, indicator_rear_key, MaterialSlot, PartKin
 use crate::profile::BodyProfile;
 use crate::style::{
     ArchShape, BodyStyle, CaliperKind, CapKind, CarStyle, Detail, DetailCtx, EngineKind,
-    ExhaustKind, RimKind, Shape, Silhouette, SuspensionKind,
+    ExhaustKind, FuelDoor, RearDoorWindows, RimKind, Shape, SideSculpt, Silhouette, SuspensionKind,
+    TrimFinish,
 };
 
 use BodyRegion as R;
@@ -98,29 +99,44 @@ fn debug_sedan() -> CarStyle {
 /// Late-80s compact FF sedan, high mileage (research §3.2).
 fn junkyard_beater() -> CarStyle {
     let body = BodyStyle {
-        nose_h: Some(0.72),
-        nose_rake_deg: 10.0,
-        nose_plan_round: 0.10,
-        tail_plan_round: 0.12,
-        hood_crown: 0.01,
-        windshield_rake_deg: Some(54.0),
-        rear_glass_rake_deg: Some(42.0),
-        roof_dz: 0.02,
-        roof_crown: 0.01,
+        // Late-80s three-box: tall flat-glass cabin, flat panels, sharp waist crease, square
+        // ends, sagging tired springs.
+        nose_h: Some(0.73),
+        nose_rake_deg: 6.0,
+        nose_plan_round: 0.07,
+        tail_plan_round: 0.08,
+        hood_crown: 0.006,
+        windshield_rake_deg: Some(53.0),
+        rear_glass_rake_deg: Some(38.0),
+        roof_dz: 0.04,
+        roof_crown: 0.008,
         tumblehome: Some(0.10),
-        crease_z: 0.58,
-        crease_depth: 0.006,
-        shoulder_round: 0.025,
-        sill_tuck: 0.04,
+        glass_inset: 0.05,
+        glass_recess_m: 0.006,
+        crease_z: 0.56,
+        crease_depth: 0.012,
+        shoulder_round: 0.014,
+        sill_tuck: 0.03,
         flare_shape: ArchShape::Box,
         ride_dz: -0.015,
         stance_pitch_deg: -0.25,
         overhang_trim: (0.03, 0.05),
         tail_round: 0.12,
         tail_drop: 0.03,
+        // Late-80s glasshouse: thin pillars, flat glass, small black sail.
+        a_pillar_w_m: 0.06,
+        c_pillar_w_m: 0.09,
+        b_pillar_w_m: 0.10,
+        windshield_wrap_m: 0.02,
+        rear_glass_wrap_m: 0.02,
+        a_sail_len_m: 0.10,
+        end_round_m: 0.008,
+        fuel_door: FuelDoor::Left,
         ..BodyStyle::preset(Silhouette::Notchback)
     };
     let mut s = with_kit(body, beater_kit);
+    // Red-oxide primer on the replacement front-left fender.
+    s.accent_rgb = Some([122, 58, 46]);
     s.wheel.rim = RimKind::SteelHubcap;
     s.wheel.spokes = 0;
     s.wheel.cap = CapKind::Hubcap;
@@ -138,20 +154,55 @@ fn junkyard_beater() -> CarStyle {
 /// 2000s FF supermini 5-door (research §3.3).
 fn tansy_13() -> CarStyle {
     let body = BodyStyle {
-        nose_rake_deg: 30.0,
-        nose_plan_round: 0.40,
-        tail_plan_round: 0.25,
-        hood_crown: 0.02,
-        windshield_rake_deg: Some(60.0),
-        cowl_h: 0.03,
-        tumblehome: Some(0.13),
+        // Short sloping bonnet, the windshield base pulled forward (one-box-and-a-bit
+        // supermini), a softly arched tall roof.
+        hood_length: Some(0.86),
+        nose_h: Some(0.70),
+        nose_rake_deg: 38.0,
+        nose_plan_round: 0.44,
+        tail_plan_round: 0.36,
+        hood_crown: 0.03,
+        windshield_rake_deg: Some(61.0),
+        cowl_h: 0.06,
+        a_pillar_rake_deg: 9.0,
+        c_pillar_rake_deg: 5.0,
+        roof_arc: 0.45,
+        roof_crown: 0.035,
+        tumblehome: Some(0.15),
+        shoulder_round: 0.07,
+        sill_tuck: 0.07,
+        // Phase 3: rounded section, tucked sills, nose and tail tapered in plan.
+        side_bulge_m: 0.03,
+        side_bulge_z: 0.6,
+        rocker_in_m: 0.03,
+        plan_width: vec![[1.55, 1.0], [1.95, 0.93], [-1.50, 1.0], [-1.82, 0.95]],
+        a_pillar_w_m: 0.07,
+        c_pillar_w_m: 0.16,
+        windshield_wrap_m: 0.08,
         crease_z: 0.57,
         crease_depth: 0.008,
-        haunch: 0.01,
+        haunch: 0.022,
+        front_haunch: 0.012,
         flare: 0.005,
         belt_kick: 0.05,
-        belt_rake: 0.03,
-        overhang_trim: (0.0, -0.02),
+        belt_rake: 0.06,
+        // Short supermini overhangs.
+        overhang_trim: (-0.08, -0.08),
+        end_round_m: 0.04,
+        // Phase 3b: raked bumper face with a chin, leaning tailgate, rounded nose in plan, roof
+        // narrowing to the rear, lower body tucked in.
+        nose_face_rake_deg: 22.0,
+        nose_chin_m: 0.05,
+        tail_face_rake_deg: 12.0,
+        tail_chin_m: 0.04,
+        nose_plan_bow_m: 0.18,
+        nose_tip_w: 0.88,
+        roof_plan_taper: 0.08,
+        lower_lean_in_m: 0.02,
+        // Window line kicking up at the rear quarter glass.
+        dlo_kink_m: 0.06,
+        dlo_kink_len_m: 0.22,
+        fuel_door: FuelDoor::Left,
         ..BodyStyle::preset(Silhouette::Hatch)
     };
     let mut s = with_kit(body, supermini_kit);
@@ -172,22 +223,34 @@ fn tansy_13() -> CarStyle {
 /// 90s compact RWD pickup, regular cab (research §3.4).
 fn furrow_24() -> CarStyle {
     let body = BodyStyle {
-        nose_h: Some(0.88),
-        nose_rake_deg: 8.0,
-        nose_plan_round: 0.12,
-        tail_plan_round: 0.08,
-        hood_crown: 0.015,
-        windshield_rake_deg: Some(55.0),
-        tumblehome: Some(0.11),
+        // Squared-off 90s truck: flat hood, square corners, flat sides with a sharp crease.
+        nose_h: Some(0.90),
+        nose_rake_deg: 5.0,
+        nose_plan_round: 0.08,
+        tail_plan_round: 0.06,
+        hood_crown: 0.008,
+        end_round_m: 0.012,
+        windshield_rake_deg: Some(56.0),
+        // Upright cab back with a short roof run back to it (regular cab).
+        rear_glass_rake_deg: Some(5.0),
+        roof_len_trim: 0.10,
+        roof_crown: 0.012,
+        a_pillar_w_m: 0.065,
+        c_pillar_w_m: 0.12,
+        tumblehome_m: Some(0.08),
+        rocker_in_m: 0.02,
         crease_z: 0.59,
-        crease_depth: 0.010,
+        crease_depth: 0.014,
         flare: 0.015,
-        shoulder_round: 0.03,
+        shoulder_round: 0.016,
+        glass_inset: 0.07,
         sill_tuck: 0.04,
         stance_pitch_deg: 0.25,
         ..BodyStyle::preset(Silhouette::Pickup)
     };
     let mut s = with_kit(body, compact_pickup_kit);
+    // Two-tone tape stripe along the sides.
+    s.accent_rgb = Some([150, 28, 30]);
     s.wheel.rim = RimKind::Steel;
     s.wheel.spokes = 0;
     s.wheel.cap = CapKind::Centre;
@@ -204,15 +267,38 @@ fn furrow_24() -> CarStyle {
 /// 2010s full-size half-ton crew-cab pickup (research §3.5).
 fn hauler_1500() -> CarStyle {
     let body = BodyStyle {
-        nose_h: Some(1.05),
-        nose_rake_deg: 5.0,
+        // Crew cab: the cab moves back over the lattice's long bed (6-ft bed look) and the
+        // windshield base forward to a 1.6 m hood.
+        cabin_shift_m: -0.50,
+        hood_length: Some(1.62),
+        belt_dz: 0.08,
+        // Tall flat front: the hood front raised 12 cm over the lattice line (phase 3 `hood_dz`).
+        hood_dz: (0.0, 0.12),
+        nose_h: Some(1.21),
+        nose_rake_deg: 3.0,
         nose_plan_round: 0.15,
         tail_plan_round: 0.08,
         hood_crown: 0.03,
         hood_bulge_h: 0.03,
         hood_bulge_w: 0.55,
-        windshield_rake_deg: Some(58.0),
-        tumblehome: Some(0.12),
+        windshield_rake_deg: Some(57.0),
+        // Near-upright cab back, roof run back to it (rear-door window ends at the C-pillar).
+        rear_glass_rake_deg: Some(6.0),
+        roof_len_trim: 0.15,
+        // Near-vertical truck glass (phase 3 range), a crisp shoulder line the full length, a
+        // slightly bowed side, the nose tapered a touch in plan.
+        tumblehome_m: Some(0.07),
+        glass_inset: 0.06,
+        side_bulge_m: 0.012,
+        side_sculpt: vec![SideSculpt {
+            y0_m: -3.0,
+            y1_m: 2.6,
+            z0_m: 1.13,
+            z1_m: 1.165,
+            dx_m: 0.02,
+            falloff_m: 0.035,
+        }],
+        plan_width: vec![[2.3, 1.0], [2.85, 0.96]],
         roof_crown: 0.015,
         crease_z: 0.56,
         crease_depth: 0.015,
@@ -228,11 +314,12 @@ fn hauler_1500() -> CarStyle {
     s.wheel.rim = RimKind::Truck;
     s.wheel.spokes = 6;
     s.wheel.cap = CapKind::Centre;
-    s.wheel.lugs = 6;
+    // No lug nuts drawn (saves ~200 triangles for the 11k budget).
+    s.wheel.lugs = 0;
     s.wheel.pcd_r_m = 0.07;
     s.wheel.rim_material = M::Chrome;
-    // Keeps the crew cab (big loft + real wheels) under the 10k traffic budget.
-    s.wheel.segments = 14;
+    // Keeps the crew cab (big loft, open bed + real wheels) under the 11k traffic budget.
+    s.wheel.segments = 12;
     s.mechanical.engine = EngineKind::V8;
     s.mechanical.front_suspension = SuspensionKind::DoubleWishbone;
     s.mechanical.rear_suspension = SuspensionKind::SolidAxleLeaf;
@@ -243,24 +330,53 @@ fn hauler_1500() -> CarStyle {
     s
 }
 
-/// 2000s full-size RWD cargo van (research §3.6).
+/// 2000s full-size RWD cargo van (research §3.6): long upright V8 nose, tall slab-sided box,
+/// flush rear doors (see [`van_box`]).
 fn drayman_cargo() -> CarStyle {
     let body = BodyStyle {
-        nose_h: Some(1.10),
-        nose_rake_deg: 15.0,
-        nose_plan_round: 0.20,
+        // Short-ish engine nose under a tall windshield, its front raised 10 cm (`hood_dz`);
+        // rear glass / doors run to the tail (`deck_min_m`).
+        hood_length: Some(1.22),
+        belt_dz: 0.06,
+        hood_dz: (0.0, 0.10),
+        nose_h: Some(1.21),
+        deck_min_m: 0.02,
+        // Painted barn doors with two windows (glass break still works on the windows).
+        rear_door_windows: Some(RearDoorWindows {
+            side_inset_m: 0.10,
+            centre_gap_m: 0.05,
+            top_gap_m: 0.10,
+            height_m: 0.45,
+            corner_r_m: 0.04,
+        }),
+        nose_rake_deg: 12.0,
+        nose_plan_round: 0.22,
         tail_plan_round: 0.06,
         hood_crown: 0.03,
-        windshield_rake_deg: Some(48.0),
-        tumblehome: Some(0.10),
+        hood_bulge_h: 0.02,
+        hood_bulge_w: 0.5,
+        windshield_rake_deg: Some(50.0),
+        a_pillar_w_m: 0.09,
+        // Slab-sided box: near-vertical glass and cargo sides (phase 3 tumblehome range).
+        tumblehome_m: Some(0.05),
+        glass_inset: 0.04,
+        side_bulge_m: 0.012,
+        rocker_in_m: 0.02,
+        roof_crown: 0.02,
         crease_z: 0.50,
         crease_depth: 0.010,
-        flare: 0.01,
+        flare: 0.012,
+        flare_shape: ArchShape::Box,
         stance_pitch_deg: 0.2,
         overhang_trim: (0.0, 0.03),
+        mirrors: TrimFinish::Black,
+        door_handles: TrimFinish::Black,
+        drip_rail: TrimFinish::Black,
         ..BodyStyle::preset(Silhouette::Van)
     };
-    let mut s = with_kit(body, van_kit);
+    let mut s = with_kit(body, drayman_kit);
+    // 12 wheel segments keep the long van (projected lamps) under the 11k traffic budget.
+    s.wheel.segments = 12;
     s.wheel.rim = RimKind::Steel;
     s.wheel.spokes = 0;
     s.wheel.cap = CapKind::Small;
@@ -273,26 +389,56 @@ fn drayman_cargo() -> CarStyle {
     s
 }
 
-/// 2000s European FWD high-roof panel van (`satchel_20`, `tumbril_20`): the [`drayman_cargo`]
-/// van kit on a lower, more raked nose with a transverse I4, strut front and torsion-beam
-/// rear. `tumbril` gets a slightly steeper screen and longer rear overhang.
+/// 2000s European FWD high-roof panel van (`satchel_20`, `tumbril_20`): short sloping bonnet
+/// that runs into a raked screen, tall slab-sided box, flush barn doors with windows, a
+/// transverse I4, strut front and torsion-beam rear. `satchel` is the rounder one (swept lamps,
+/// body-colour bumper tops); `tumbril` the squarer, longer one (steeper screen, upright square
+/// lamps, full black plastic front, sliding-door track).
 fn euro_panel_van(tumbril: bool) -> CarStyle {
     let body = BodyStyle {
-        nose_h: Some(0.95),
-        nose_rake_deg: if tumbril { 26.0 } else { 30.0 },
-        nose_plan_round: 0.26,
+        hood_length: Some(if tumbril { 1.0 } else { 0.92 }),
+        cowl_h: if tumbril { 0.06 } else { 0.10 },
+        nose_h: Some(if tumbril { 1.0 } else { 0.96 }),
+        nose_rake_deg: if tumbril { 18.0 } else { 34.0 },
+        nose_plan_round: if tumbril { 0.20 } else { 0.34 },
         tail_plan_round: 0.06,
-        hood_crown: 0.03,
-        windshield_rake_deg: Some(if tumbril { 44.0 } else { 40.0 }),
-        tumblehome: Some(0.08),
+        hood_crown: if tumbril { 0.02 } else { 0.035 },
+        windshield_rake_deg: Some(if tumbril { 46.0 } else { 52.0 }),
+        a_pillar_w_m: 0.085,
+        windshield_wrap_m: if tumbril { 0.03 } else { 0.07 },
+        tumblehome_m: Some(0.045),
+        glass_inset: 0.04,
+        side_bulge_m: if tumbril { 0.01 } else { 0.022 },
+        rocker_in_m: 0.025,
+        // Nose narrowing in plan toward the bumper (rounder on satchel).
+        plan_width: vec![[1.9, 1.0], [2.5, if tumbril { 0.95 } else { 0.92 }]],
+        roof_crown: if tumbril { 0.02 } else { 0.03 },
         crease_z: 0.55,
         crease_depth: 0.008,
         flare: 0.01,
         stance_pitch_deg: 0.1,
         overhang_trim: (0.0, if tumbril { 0.05 } else { 0.02 }),
+        mirrors: TrimFinish::Black,
+        door_handles: TrimFinish::Black,
+        fuel_door: FuelDoor::Left,
+        // Rear doors to the tail; black plastic arch lips and lower cladding (commercial trim).
+        deck_min_m: 0.02,
+        // Painted barn doors with two windows (glass break still works on the windows).
+        rear_door_windows: Some(RearDoorWindows {
+            side_inset_m: 0.10,
+            centre_gap_m: 0.05,
+            top_gap_m: 0.10,
+            height_m: 0.45,
+            corner_r_m: 0.04,
+        }),
+        arch_lip_finish: TrimFinish::Black,
+        cladding_z_m: if tumbril { 0.42 } else { 0.36 },
+        // Phase 3b: raked plastic bumper with a chin (more on the rounder satchel).
+        nose_chin_m: if tumbril { 0.04 } else { 0.06 },
+        nose_face_rake_deg: if tumbril { 8.0 } else { 16.0 },
         ..BodyStyle::preset(Silhouette::Van)
     };
-    let mut s = with_kit(body, van_kit);
+    let mut s = with_kit(body, if tumbril { tumbril_kit } else { satchel_kit });
     s.wheel.rim = RimKind::Steel;
     s.wheel.spokes = 0;
     s.wheel.cap = CapKind::Small;
@@ -383,7 +529,6 @@ fn sedan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     belt_chrome(b, p);
     handles(b, p, M::Paint, false);
     side_markers(b, p, p.z_bumper_top.0 + 0.0);
-    wipers(b, p, 0.25);
     shark_fin(b, p);
 }
 
@@ -398,10 +543,17 @@ fn beater_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     reshape_pair(b, p, "headlight", |t, p, k| {
         lens_front(t, k, p, -(wf - 0.12), -0.37, l0, l1, 0.008, 0.03);
     });
-    // The amber corner lamp beside each sealed beam is its turn signal (same bezel).
-    reshape_indicators(b, p, true, M::EmissiveAmber, |t, p, k| {
-        lens_front(t, k, p, -(wf - 0.005), -(wf - 0.11), l0, l1, 0.008, 0.03);
-    });
+    // The amber corner lamp beside each sealed beam is its turn signal (same bezel), wrapping
+    // round the corner.
+    proj_signals(
+        b,
+        p,
+        true,
+        M::EmissiveAmber,
+        &rect(-(wf - 0.03), -(wf - 0.115), l0, l1),
+        15.0,
+        0.08,
+    );
     // Lamp bezels (chrome) around head + corner lamps.
     let bez = key("lamp_bezel_l", R::FrontLeftFender, M::Chrome);
     front_box(
@@ -423,6 +575,17 @@ fn beater_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     plate_front(b, p, 0.30);
     let zt = p.belt(p.y_tail);
     let wt = p.half_width(p.y_tail);
+    // The rear bumper hangs low on its left end (a broken bracket).
+    b.transform(
+        |k| k.name.starts_with("bumper_bar_r"),
+        |q| {
+            [
+                q[0],
+                q[1],
+                q[2] - 0.04 * (0.5 - 0.5 * q[0] / wt).clamp(0.0, 1.0),
+            ]
+        },
+    );
     // Full-width tail band: lamps outboard (amber inboard section), dark garnish between.
     reshape_pair(b, p, "taillight", |t, p, k| {
         lens_rear(
@@ -443,6 +606,28 @@ fn beater_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let gar = key("tail_garnish", R::Trunk, M::Trim);
     rear_box(b, &gar, p, -0.22, 0.22, zt - 0.15, zt - 0.06, 0.008, 0.03);
     plate_rear(b, p, zt - 0.32);
+    // Cracked left tail lamp held together with two strips of silver tape.
+    let tape = key("tail_tape", R::RearLeftQuarter, M::Metal);
+    let (tz0, tz1) = (zt - 0.17, zt - 0.04);
+    let tx = -(wt - 0.17);
+    for (a, c) in [(-0.06f32, 0.05f32), (0.05, -0.06)] {
+        let q = |x: f32, z: f32| [x, tail_y(p, x) - 0.016, z];
+        let (za, zb) = (tz0 - 0.01, tz1 + 0.01);
+        hexa(
+            b,
+            &tape,
+            [
+                q(tx + a - 0.02, za),
+                q(tx + a + 0.02, za),
+                [tx + a - 0.02, tail_y(p, tx + a) - 0.010, za],
+                [tx + a + 0.02, tail_y(p, tx + a) - 0.010, za],
+                q(tx + c - 0.02, zb),
+                q(tx + c + 0.02, zb),
+                [tx + c - 0.02, tail_y(p, tx + c) - 0.010, zb],
+                [tx + c + 0.02, tail_y(p, tx + c) - 0.010, zb],
+            ],
+        );
+    }
     // Sides: rub strip, drip rails, chrome handles, small black mirrors, antenna.
     side_strip(
         b,
@@ -456,7 +641,58 @@ fn beater_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     drip_rails(b, p);
     handles(b, p, M::Chrome, false);
     black_mirrors(b, p, (0.12, 0.07, 0.09), 0.05);
-    wipers(b, p, 0.22);
+    // Replacement front-left fender still in primer (upper half, arch to door gap), and a
+    // small primer patch low on the rear door.
+    let pf = key("primer_fender", R::FrontLeftFender, M::Accent);
+    let arch_top = p.arches[0].1 + p.arches[0].2;
+    b.surface_patch(
+        &pf,
+        p,
+        &Patch {
+            y0: p.y_fd_hinge + 0.012,
+            y1: p.y_nose - 0.38,
+            band: PatchBand::Side {
+                z0: arch_top + 0.03,
+                z1: p.z_belt - 0.045,
+            },
+            offset_m: 0.0035,
+            thickness_m: 0.002,
+            steps: (8, 4),
+        },
+    );
+    b.surface_patch(
+        &pf,
+        p,
+        &Patch {
+            y0: p.y_fd_hinge + 0.012,
+            y1: p.arches[0].0 - p.arches[0].2 - 0.03,
+            band: PatchBand::Side {
+                z0: p.z_door_bottom + 0.02,
+                z1: arch_top + 0.03,
+            },
+            offset_m: 0.0035,
+            thickness_m: 0.002,
+            steps: (3, 6),
+        },
+    );
+    if let Some((rh, re)) = p.rear_door {
+        let pd = key("primer_spot", R::LeftDoorR, M::Accent);
+        b.surface_patch(
+            &pd,
+            p,
+            &Patch {
+                y0: re + 0.10,
+                y1: 0.5 * (rh + re),
+                band: PatchBand::Side {
+                    z0: p.z_door_bottom + 0.05,
+                    z1: p.z_door_bottom + 0.17,
+                },
+                offset_m: 0.0035,
+                thickness_m: 0.002,
+                steps: (2, 1),
+            },
+        );
+    }
     let ant = key("antenna", R::FrontRightFender, M::Chrome);
     let ya = p.y_fw + 0.25;
     let xa = p.half_width(ya) - 0.10;
@@ -481,73 +717,136 @@ fn beater_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     );
 }
 
-/// tansy_13: teardrop lamps, smile intake, tall tail lamps, hatch spoiler, rear wiper, black
-/// bumper strips and rocker cladding.
+/// tansy_13 (2000s five-door supermini): big teardrop headlamps stepped down toward the
+/// grille with an amber lower corner, slim slot grille with a chrome bar and blank badge, wide lower
+/// intake with fog lamps, body-colour bumpers with a black lower lip / diffuser and rear
+/// reflectors, tall tail lamps, roof spoiler with the third brake lamp, rear wiper, chrome
+/// tailgate strip over the plate, black door rubbing strips, thin sill cladding.
 fn supermini_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let p = ctx.profile;
     let zn = p.belt(p.y_nose);
     let wf = p.half_width(p.y_nose);
-    reshape_pair(b, p, "headlight", |t, p, k| {
-        lens_front(
-            t,
-            k,
-            p,
-            -(wf - 0.005),
-            -0.30,
-            zn - 0.12,
-            zn - 0.045,
-            0.012,
-            0.035,
-        );
-    });
-    // Teardrop tail of the lamp = the amber turn signal: a narrower box sweeping up toward the
-    // fender corner, same face. It stops 1 cm short of the corner: its flat face is a chord of
-    // the rounded plan, and past the corner the bumper wrap would cover it
-    // (`lights_sit_outside_the_shell`).
-    reshape_indicators(b, p, true, M::EmissiveAmber, |t, p, k| {
-        lens_front(
-            t,
-            k,
-            p,
-            -(wf - 0.01),
-            -(wf - 0.10),
-            zn - 0.04,
-            zn + 0.0,
-            0.012,
-            0.05,
-        );
-    });
+    let (h0, h1) = (zn - 0.14, zn - 0.012);
+    // Teardrop lamp: high and wide at the fender, narrowing and dropping toward the grille.
+    let lamp = [
+        [-(wf - 0.02), h1],
+        [-0.40, h1 - 0.012],
+        [-0.29, h0 + 0.055],
+        [-0.36, h0 + 0.02],
+        [-(wf - 0.05), h0 + 0.035],
+    ];
+    // Projected onto the nose and wrapped 20 degrees round the corner, in a black bezel.
+    proj_lamps(b, p, true, &[lamp.to_vec()], 20.0, 0.03, 0.014);
+    head_lamp_bowls(b, p, &lamp, 20.0, 0.03, &[[-(wf - 0.13), h1 - 0.055]], 0.03);
+    // Amber signal under the lamp's outer half, in the same bezel line.
+    let sig = [
+        [-(wf - 0.05), h0 + 0.012],
+        [-0.42, h0 - 0.003],
+        [-0.45, h0 - 0.03],
+        [-(wf - 0.07), h0 - 0.015],
+    ];
+    proj_signals(b, p, true, M::EmissiveAmber, &sig, 20.0, 0.03);
+    // Upper slot grille with a chrome bar and a blank badge.
+    let slot = key("grille_upper", R::FrontBumper, M::Grille);
+    front_box(b, &slot, p, -0.26, 0.26, zn - 0.10, zn - 0.045, 0.006, 0.03);
+    let bar = key("grille_bar", R::FrontBumper, M::Chrome);
+    front_box(b, &bar, p, -0.26, 0.26, zn - 0.078, zn - 0.066, 0.012, 0.0);
+    let badge = key("grille_badge", R::FrontBumper, M::Chrome);
+    front_box(
+        b,
+        &badge,
+        p,
+        -0.055,
+        0.055,
+        zn - 0.105,
+        zn - 0.04,
+        0.016,
+        0.0,
+    );
+    // Wide lower intake (trapezoid: centre box + raised ends) with fog lamps.
+    let lower = key("grille_lower", R::FrontBumper, M::Grille);
+    front_box(b, &lower, p, -0.34, 0.34, 0.26, 0.38, 0.006, 0.03);
+    let fogb = key("fog_bezel_l", R::FrontBumper, M::Trim);
+    front_box(b, &fogb, p, -0.62, -0.46, 0.27, 0.36, 0.006, 0.03);
+    mirror(b, &fogb);
+    let fog = light("foglamp_l", R::FrontBumper, M::Headlight);
+    front_box(b, &fog, p, -0.60, -0.48, 0.29, 0.34, 0.012, 0.0);
+    mirror(b, &fog);
+    let lip = key("front_lip", R::FrontBumper, M::Trim);
+    front_box(b, &lip, p, -(wf - 0.12), wf - 0.12, 0.19, 0.23, 0.02, 0.02);
+    plate_front(b, p, 0.40);
+    // Rear: tall lamps (red top and bottom, amber band between).
     let zt = p.belt(p.y_tail);
     let wt = p.half_width(p.y_tail);
-    // Tall tail lamps: red top and bottom, an amber band between them.
-    let (tx0, tx1) = (-(wt - 0.005), -(wt - 0.17));
-    reshape_pair(b, p, "taillight", |t, p, k| {
-        lens_rear(t, k, p, tx0, tx1, zt - 0.22, zt - 0.095, 0.012, 0.03);
-        lens_rear(t, k, p, tx0, tx1, zt - 0.025, zt + 0.06, 0.012, 0.03);
-    });
-    reshape_indicators(b, p, false, M::EmissiveAmber, |t, p, k| {
-        lens_rear(t, k, p, tx0, tx1, zt - 0.09, zt - 0.03, 0.012, 0.03);
-    });
-    let slot = key("grille_upper", R::FrontBumper, M::Grille);
-    front_box(b, &slot, p, -0.24, 0.24, zn - 0.10, zn - 0.05, 0.006, 0.03);
-    // Smile intake: centre box + two raised ends.
-    let smile = key("grille_lower", R::FrontBumper, M::Grille);
-    front_box(b, &smile, p, -0.30, 0.30, 0.27, 0.37, 0.006, 0.03);
-    front_box(b, &smile, p, -0.42, -0.30, 0.30, 0.40, 0.006, 0.03);
-    front_box(b, &smile, p, 0.30, 0.42, 0.30, 0.40, 0.006, 0.03);
-    bumper(b, p, true, 0.44, 0.50, 0.025, M::Trim, None);
-    bumper(b, p, false, 0.40, 0.46, 0.025, M::Trim, None);
-    plate_front(b, p, 0.51);
-    plate_rear(b, p, zt - 0.29);
-    // Hatch spoiler over the rear glass + rear wiper.
-    let sp = key("hatch_spoiler", R::Roof, M::Paint);
-    let (r0, _, rz, _) = p.roof;
-    let hw = p.roof_half_w(r0) - 0.04;
-    b.beveled_box(
-        &sp,
-        [-hw, r0 - 0.16, rz - 0.02],
-        [hw, r0 + 0.06, rz + 0.025],
+    // Tall tail lamps whose inner edge leans out toward the top (they follow the D-pillar):
+    // red top and bottom, amber band between, in a black bezel.
+    let xo = -(wt - 0.005);
+    // (Kept below the belt: above it the tail narrows into the hatch.)
+    let xi = |z: f32| -(wt - 0.19) - 0.25 * (z - (zt - 0.28));
+    let seg = |z0: f32, z1: f32| [[xo, z0], [xi(z0), z0], [xi(z1), z1], [xo, z1]];
+    proj_lamps(
+        b,
+        p,
+        false,
+        &[
+            seg(zt - 0.28, zt - 0.155).to_vec(),
+            seg(zt - 0.085, zt - 0.005).to_vec(),
+        ],
+        18.0,
+        0.03,
         0.012,
+    );
+    proj_signals(
+        b,
+        p,
+        false,
+        M::EmissiveAmber,
+        &seg(zt - 0.148, zt - 0.092),
+        18.0,
+        0.03,
+    );
+    plate_rear(b, p, zt - 0.29);
+    let ts = key("tailgate_strip", R::Trunk, M::Chrome);
+    rear_box(b, &ts, p, -0.30, 0.30, zt - 0.145, zt - 0.125, 0.008, 0.0);
+    let dif = key("rear_diffuser", R::RearBumper, M::Trim);
+    rear_box(b, &dif, p, -(wt - 0.14), wt - 0.14, 0.22, 0.30, 0.02, 0.02);
+    let refl = light("rear_reflector_l", R::RearBumper, M::Taillight);
+    rear_box(
+        b,
+        &refl,
+        p,
+        -(wt - 0.16),
+        -(wt - 0.30),
+        0.33,
+        0.36,
+        0.008,
+        0.0,
+    );
+    mirror(b, &refl);
+    // Roof spoiler: a wedge off the roof's rear edge, third brake lamp under its lip.
+    let sp = key("hatch_spoiler", R::Roof, M::Paint);
+    let (r0, _, _, _) = p.roof;
+    let hw = p.roof_half_w(r0) - 0.05;
+    let zr = p.top(r0 + 0.02);
+    hexa(
+        b,
+        &sp,
+        [
+            [-hw, r0 - 0.12, zr - 0.035],
+            [hw, r0 - 0.12, zr - 0.035],
+            [-hw, r0 + 0.10, zr - 0.012],
+            [hw, r0 + 0.10, zr - 0.012],
+            [-hw, r0 - 0.15, zr - 0.005],
+            [hw, r0 - 0.15, zr - 0.005],
+            [-hw, r0 + 0.10, zr + 0.008],
+            [hw, r0 + 0.10, zr + 0.008],
+        ],
+    );
+    let bl = light("brake_lamp_c", R::Roof, M::Taillight);
+    b.cuboid(
+        &bl,
+        [-0.20, r0 - 0.145, zr - 0.05],
+        [0.20, r0 - 0.105, zr - 0.012],
     );
     let wip = key("rear_wiper", R::Trunk, M::Trim);
     let yw = p.y_deck + 0.10;
@@ -558,177 +857,359 @@ fn supermini_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         unit3([0.94, 0.0, 0.34], [0.0, 1.0, 0.0]),
         [0.18, 0.008, 0.008],
     );
-    rocker_cladding(b, p, 0.09, M::Trim);
-    handles(b, p, M::Trim, false);
-    side_markers(b, p, p.z_bumper_top.0 + 0.04);
-    wipers(b, p, 0.22);
+    // Sides: black rubbing strips on the doors, thin sill cladding.
+    let zr = p.z_door_bottom + 0.12;
+    side_strip(
+        b,
+        p,
+        "rub_strip",
+        M::Trim,
+        (p.y_quarter.0 - 0.05, p.y_fd_hinge - 0.02),
+        (zr, zr + 0.045),
+        0.010,
+    );
+    rocker_cladding(b, p, 0.06, M::Trim);
+    // Amber side repeater on each front fender, behind the arch.
+    let rp = light("side_repeater_l", R::FrontLeftFender, M::EmissiveAmber);
+    let yr = p.arches[0].0 - p.arches[0].2 - 0.10;
+    side_box(
+        b,
+        &rp,
+        p,
+        yr - 0.035,
+        yr + 0.035,
+        p.z_belt - 0.10,
+        p.z_belt - 0.075,
+        0.008,
+        0.004,
+    );
+    mirror(b, &rp);
 }
 
-/// furrow_24: framed bar grille, square lamps + amber corners, chrome bumper, bed rail caps,
-/// tailgate handle, vertical tail lamps, chrome step bumper, tall black mirrors, mud flaps.
+/// furrow_24 (90s compact regular-cab pickup): square lamps with wraparound amber corners in
+/// one chrome bezel, chrome-framed bar grille with a centre post and blank badge, chrome bumper
+/// with a black rubber strip over a slotted valance, two-tone tape stripe, tall black mirrors,
+/// cab-back sliding window, vertical tail lamps with a reverse section, a recessed lettering
+/// panel across the tailgate, chrome step bumper, bed rail caps, mud flaps.
 fn compact_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let p = ctx.profile;
     let zn = p.belt(p.y_nose);
     let wf = p.half_width(p.y_nose);
-    let (l0, l1) = (zn - 0.17, zn - 0.03);
+    let (l0, l1) = (zn - 0.17, zn - 0.035);
     reshape_pair(b, p, "headlight", |t, p, k| {
         lens_front(t, k, p, -(wf - 0.10), -0.45, l0, l1, 0.008, 0.03);
     });
     // The amber corner lamp beside each square lamp is its turn signal.
-    reshape_indicators(b, p, true, M::EmissiveAmber, |t, p, k| {
-        lens_front(t, k, p, -(wf - 0.003), -(wf - 0.09), l0, l1, 0.008, 0.03);
-    });
+    // Wrapping round the corner onto the fender.
+    proj_signals(
+        b,
+        p,
+        true,
+        M::EmissiveAmber,
+        &rect(-(wf - 0.025), -(wf - 0.105), l0, l1),
+        6.0,
+        0.08,
+    );
+    let bez = key("lamp_bezel_l", R::FrontLeftFender, M::Chrome);
+    front_box(
+        b,
+        &bez,
+        p,
+        -(wf - 0.001),
+        -0.44,
+        l0 - 0.015,
+        l1 + 0.015,
+        0.005,
+        0.02,
+    );
+    mirror(b, &bez);
     grille(b, p, 0.43, l0 - 0.01, l1 + 0.01, 2, M::Chrome);
+    let post = key("grille_post", R::FrontBumper, M::Chrome);
+    front_box(b, &post, p, -0.012, 0.012, l0 - 0.01, l1 + 0.01, 0.014, 0.0);
+    let badge = key("grille_badge", R::FrontBumper, M::Chrome);
+    front_box(
+        b,
+        &badge,
+        p,
+        -0.07,
+        0.07,
+        0.5 * (l0 + l1) - 0.03,
+        0.5 * (l0 + l1) + 0.03,
+        0.02,
+        0.0,
+    );
     bumper(b, p, true, 0.42, 0.60, 0.09, M::Chrome, None);
+    let rub = key("bumper_rub_f", R::FrontBumper, M::Trim);
+    front_box(b, &rub, p, -(wf - 0.13), wf - 0.13, 0.49, 0.53, 0.096, 0.0);
     let val = key("valance", R::FrontBumper, M::Trim);
     front_box(b, &val, p, -(wf - 0.10), wf - 0.10, 0.30, 0.42, 0.02, 0.03);
-    plate_front(b, p, 0.44);
+    let slot = key("valance_slots", R::FrontBumper, M::Grille);
+    for x in [-0.36f32, -0.12, 0.12] {
+        front_box(b, &slot, p, x, x + 0.24 - 0.03, 0.34, 0.38, 0.024, 0.0);
+    }
+    plate_on_face(b, p, true, 0.445, 0.09);
     let zt = p.belt(p.y_tail);
     let wt = p.half_width(p.y_tail);
-    // Vertical tail lamps; their top section is the red-on-red turn signal.
+    // Vertical tail lamps: white reverse at the bottom, red lamp, red-on-red turn signal on top.
     let (tx0, tx1) = (-(wt - 0.005), -(wt - 0.11));
     reshape_pair(b, p, "taillight", |t, p, k| {
-        lens_rear(t, k, p, tx0, tx1, zt - 0.36, zt - 0.155, 0.012, 0.03);
+        lens_rear(t, k, p, tx0, tx1, zt - 0.30, zt - 0.195, 0.012, 0.03);
     });
+    let rev = light("reverse_lamp_l", R::RearLeftQuarter, M::Headlight);
+    lens_rear(b, &rev, p, tx0, tx1, zt - 0.375, zt - 0.305, 0.012, 0.03);
+    mirror(b, &rev);
     reshape_indicators(b, p, false, M::Taillight, |t, p, k| {
-        lens_rear(t, k, p, tx0, tx1, zt - 0.15, zt - 0.06, 0.012, 0.03);
+        lens_rear(t, k, p, tx0, tx1, zt - 0.19, zt - 0.06, 0.012, 0.03);
     });
-    tailgate_handle(b, p, zt - 0.10);
+    tailgate_handle(b, p, zt - 0.09);
+    // Recessed lettering panel across the tailgate (blank).
+    let lp = key("tailgate_panel", R::Trunk, M::Trim);
+    rear_box(b, &lp, p, -0.48, 0.48, zt - 0.32, zt - 0.20, 0.003, 0.0);
     step_bumper(b, p, 0.38, 0.54, 0.13, M::Chrome, false);
-    plate_rear(b, p, 0.56);
+    plate_on_face(b, p, false, 0.40, 0.14);
     bed_rails(b, p, M::Trim);
     tall_mirrors(b, p, (0.10, 0.06, 0.18), 0.08);
     mud_flaps(b, p);
     handles(b, p, M::Trim, false);
     side_markers(b, p, p.z_bumper_top.0 + 0.05);
-    wipers(b, p, 0.22);
+    cab_back_window(b, p, 0.42, (p.z_deck + 0.17, p.roof.2 - 0.13), true);
+    // Two-tone tape stripe from the front fender to the tail, broken at the arches.
+    let zs = p.z_door_bottom + 0.16;
+    side_strip(
+        b,
+        p,
+        "tape_stripe",
+        M::Accent,
+        (p.y_tail + 0.12, p.y_nose - 0.15),
+        (zs, zs + 0.05),
+        0.002,
+    );
 }
 
-/// hauler_1500: big two-bar chrome grille, tall lamps, chrome bumper + red tow hooks, running
-/// boards, towing mirrors, cab clearance lamps, bed caps, step bumper with hitch, crew-cab
-/// handles.
+/// hauler_1500 (2010s full-size crew-cab pickup): tall flat nose (lifted 12 cm over the
+/// lattice's hood line), tall three-section chrome grille with two heavy bars and a blank
+/// badge, tall headlamps in chrome surrounds with an amber LED strip, chrome bumper with split
+/// intakes, fog lamps and red tow hooks, crew-cab handles and rear-door cut lines, cab-back
+/// sliding window, running boards, towing mirrors, cab clearance lamps, tailgate spoiler cap,
+/// tail lamps with a white reverse section at the bottom, chrome step bumper with
+/// hitch.
 fn fullsize_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let p = ctx.profile;
     let zn = p.belt(p.y_nose);
     let wf = p.half_width(p.y_nose);
-    let (l0, l1) = (zn - 0.20, zn - 0.03);
-    // Tall lamps with an amber strip along the bottom of the lens.
+    // Headlamps: tall rectangles outboard of the grille; the amber strip along the bottom of
+    // the lens is the turn signal.
+    let (h0, h1) = (zn - 0.25, zn - 0.045);
+    // Tall lamp, its inner lower corner cut away toward the grille bar.
+    let lamp = [
+        [-(wf - 0.02), h0 + 0.05],
+        [-0.70, h0 + 0.05],
+        [-0.62, h0 + 0.11],
+        [-0.62, h1],
+        [-(wf - 0.02), h1],
+    ];
     reshape_pair(b, p, "headlight", |t, p, k| {
-        lens_front(t, k, p, -(wf - 0.01), -0.64, l0 + 0.05, l1, 0.012, 0.03);
+        lens_poly(t, k, p, true, &lamp, 0.012, 0.03);
     });
     reshape_indicators(b, p, true, M::EmissiveAmber, |t, p, k| {
-        lens_front(t, k, p, -(wf - 0.01), -0.64, l0, l0 + 0.045, 0.012, 0.03);
+        let sig = [
+            [-(wf - 0.02), h0],
+            [-0.75, h0],
+            [-0.71, h0 + 0.045],
+            [-(wf - 0.02), h0 + 0.045],
+        ];
+        lens_poly(t, k, p, true, &sig, 0.012, 0.03);
     });
-    grille(b, p, 0.62, l0 - 0.10, l1 + 0.0, 2, M::Chrome);
-    // Lower grille in the bumper.
-    let lg = key("grille_lower", R::FrontBumper, M::Grille);
-    front_box(b, &lg, p, -0.45, 0.45, 0.50, 0.60, 0.008, 0.03);
-    bumper(b, p, true, 0.40, 0.70, 0.11, M::Chrome, None);
-    // Re-cut the lower grille through the bumper face.
-    front_box(b, &lg, p, -0.45, 0.45, 0.50, 0.60, 0.12, 0.0);
+    // Chrome bezel: one box round the lens, less proud than it.
+    let sur = key("lamp_bezel_l", R::FrontLeftFender, M::Chrome);
+    front_box(
+        b,
+        &sur,
+        p,
+        -(wf - 0.005),
+        -0.60,
+        h0 - 0.02,
+        h1 + 0.02,
+        0.008,
+        0.02,
+    );
+    mirror(b, &sur);
+    // Grille: black mesh, thick chrome surround, two heavy chrome bars, blank badge.
+    let (g0, g1) = (0.80, zn - 0.035);
+    let gm = key("grille", R::FrontBumper, M::Grille);
+    front_box(b, &gm, p, -0.58, 0.58, g0, g1, 0.004, 0.03);
+    let gf = key("grille_frame", R::FrontBumper, M::Chrome);
+    frame_front(b, &gf, p, [-0.58, 0.58, g0, g1], 0.045, 0.03);
+    for f in [0.36f32, 0.68] {
+        let z = g0 + (g1 - g0) * f;
+        front_box(b, &gf, p, -0.58, 0.58, z - 0.028, z + 0.028, 0.032, 0.0);
+    }
+    let zb = g0 + (g1 - g0) * 0.68;
+    let badge = key("grille_badge", R::FrontBumper, M::Chrome);
+    front_box(b, &badge, p, -0.10, 0.10, zb - 0.05, zb + 0.05, 0.045, 0.0);
+    // Chrome bumper with two black intakes, a centre plate, fog lamps and red tow hooks.
+    bumper(b, p, true, 0.50, 0.79, 0.11, M::Chrome, None);
+    let it = key("bumper_intake_l", R::FrontBumper, M::Grille);
+    front_box(b, &it, p, -0.50, -0.20, 0.56, 0.68, 0.118, 0.0);
+    mirror(b, &it);
+    let fog = light("foglamp_l", R::FrontBumper, M::Headlight);
+    front_box(b, &fog, p, -0.76, -0.62, 0.58, 0.66, 0.118, 0.0);
+    mirror(b, &fog);
     let hook = key("tow_hook_l", R::FrontBumper, M::Caliper);
-    front_box(b, &hook, p, -0.56, -0.48, 0.33, 0.40, 0.14, 0.0);
+    front_box(b, &hook, p, -0.58, -0.50, 0.44, 0.50, 0.13, 0.0);
     mirror(b, &hook);
-    plate_front(b, p, 0.42);
+    plate_on_face(b, p, true, 0.565, 0.12);
+    // Rear: tall tail lamps (red signal on top, red lamp, white reverse at the bottom).
     let zt = p.belt(p.y_tail);
     let wt = p.half_width(p.y_tail);
-    // Tall tail lamps; their top section is the red-on-red turn signal.
-    let (tx0, tx1) = (-(wt - 0.005), -(wt - 0.12));
+    let (tx0, tx1) = (-(wt - 0.005), -(wt - 0.13));
     reshape_pair(b, p, "taillight", |t, p, k| {
-        lens_rear(t, k, p, tx0, tx1, zt - 0.42, zt - 0.165, 0.012, 0.03);
+        lens_rear(t, k, p, tx0, tx1, zt - 0.395, zt - 0.175, 0.012, 0.03);
     });
     reshape_indicators(b, p, false, M::Taillight, |t, p, k| {
-        lens_rear(t, k, p, tx0, tx1, zt - 0.16, zt - 0.04, 0.012, 0.03);
+        lens_rear(t, k, p, tx0, tx1, zt - 0.17, zt - 0.04, 0.012, 0.03);
     });
-    tailgate_handle(b, p, zt - 0.10);
+    let rev = light("reverse_lamp_l", R::RearLeftQuarter, M::Headlight);
+    lens_rear(b, &rev, p, tx0, tx1, zt - 0.50, zt - 0.40, 0.012, 0.03);
+    mirror(b, &rev);
+    let cap = key("tailgate_cap", R::Trunk, M::Trim);
+    rear_box(
+        b,
+        &cap,
+        p,
+        -(wt - 0.16),
+        wt - 0.16,
+        zt - 0.035,
+        zt + 0.012,
+        0.02,
+        0.0,
+    );
+    tailgate_handle(b, p, zt - 0.11);
     step_bumper(b, p, 0.42, 0.62, 0.14, M::Chrome, true);
-    plate_rear(b, p, 0.64);
+    plate_on_face(b, p, false, 0.465, 0.15);
     bed_rails(b, p, M::Trim);
-    // Running boards between the arches.
+    // Running boards between the arches, on three brackets.
     let rb = key("running_board_l", R::FrameLeft, M::Trim);
-    let (ya, yb) = (p.y_quarter.0 + 0.30, p.y_fd_hinge + 0.05);
-    let zs = p.z_floor + 0.10;
+    let (ya, yb) = (p.arches[2].0 + 0.50, p.arches[0].0 - 0.50);
+    let zs = p.z_floor + 0.20;
     let xs = p.half_w + 0.02;
-    b.cuboid(&rb, [-(xs + 0.13), ya, zs], [-(xs - 0.10), yb, zs + 0.045]);
+    b.cuboid(&rb, [-(xs + 0.12), ya, zs], [-(xs - 0.10), yb, zs + 0.05]);
+    for y in [ya + 0.15, yb - 0.15] {
+        b.cuboid(
+            &rb,
+            [-(xs - 0.10), y - 0.03, zs - 0.06],
+            [-(xs - 0.25), y + 0.03, zs + 0.03],
+        );
+    }
     mirror(b, &rb);
-    tall_mirrors(b, p, (0.12, 0.08, 0.24), 0.14);
+    tall_mirrors(b, p, (0.13, 0.10, 0.27), 0.15);
     // Cab clearance lamps on the roof's front edge.
     let cl = light("clearance_lamps", R::Roof, M::EmissiveAmber);
     let yc = p.roof.1 - 0.05;
     let zc = p.top_point(yc, 0.0).0[2];
-    for x in [-0.25f32, 0.0, 0.25] {
+    for x in [-0.30f32, 0.0, 0.30] {
         b.cuboid(
             &cl,
             [x - 0.035, yc - 0.03, zc - 0.01],
             [x + 0.035, yc + 0.01, zc + 0.022],
         );
     }
-    handles(b, p, M::Chrome, true);
+    // Crew cab: chrome handles on both doors, the rear door's cut lines, cab-back window.
+    let y_rd = p.roof.0 + 0.04;
+    door_handles_at(
+        b,
+        p,
+        M::Chrome,
+        &[
+            (R::LeftDoorF, p.y_fd_rear + 0.17),
+            (R::LeftDoorR, y_rd + 0.17),
+        ],
+    );
+    door_cut(b, p, R::LeftDoorR, y_rd, p.y_fd_rear);
+    cab_back_window(b, p, 0.56, (p.z_deck + 0.20, p.roof.2 - 0.12), true);
     side_markers(b, p, p.z_bumper_top.0 + 0.06);
-    wipers(b, p, 0.30);
 }
 
-/// drayman_cargo: wide bar grille, black bumpers + rub strip, sliding-door track (right),
-/// barn-door seam + hinges, tall tail lamps, roof marker lamps, big two-glass mirrors, step
-/// bumper.
-fn van_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
+/// drayman_cargo (2000s US full-size cargo van): stacked square lamps with amber outer
+/// sections in a black surround, wide three-bar grille with a chrome top bar, black bumpers with
+/// a step pad, rub strip, flush barn doors (seam, hinges, handle, no glass), tall tail lamps in
+/// the rear corners, high-mount brake lamp, big two-glass mirrors.
+fn drayman_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let p = ctx.profile;
     let zn = p.belt(p.y_nose);
     let wf = p.half_width(p.y_nose);
-    let (l0, l1) = (zn - 0.20, zn - 0.03);
-    // Lamps with a vertical amber strip in the outer end of the lens.
-    reshape_pair(b, p, "headlight", |t, p, k| {
-        lens_front(t, k, p, -(wf - 0.095), -0.53, l0, l1, 0.012, 0.03);
-    });
+    let (l0, l1) = (zn - 0.21, zn - 0.03);
+    // Stacked lamps: the head lamp on top, the amber turn signal below it, same bezel.
+    proj_lamps(
+        b,
+        p,
+        true,
+        &[rect(-(wf - 0.04), -0.55, l0 + 0.075, l1)],
+        12.0,
+        0.08,
+        0.0,
+    );
+    // The signal is a plain box lens under the head lamp (budget).
     reshape_indicators(b, p, true, M::EmissiveAmber, |t, p, k| {
-        lens_front(t, k, p, -(wf - 0.01), -(wf - 0.09), l0, l1, 0.012, 0.03);
+        lens_front(t, k, p, -(wf - 0.04), -0.55, l0, l0 + 0.068, 0.012, 0.03);
     });
-    grille(b, p, 0.51, l0, l1 - 0.02, 3, M::Trim);
+    let bez = key("lamp_surround_l", R::FrontLeftFender, M::Trim);
+    front_box(
+        b,
+        &bez,
+        p,
+        -(wf - 0.01),
+        -0.53,
+        l0 - 0.02,
+        l1 + 0.02,
+        0.006,
+        0.02,
+    );
+    mirror(b, &bez);
+    grille(b, p, 0.50, l0, l1 - 0.02, 2, M::Trim);
+    let top = key("grille_top_bar", R::FrontBumper, M::Chrome);
+    front_box(b, &top, p, -0.52, 0.52, l1 - 0.035, l1 - 0.005, 0.02, 0.0);
+    let badge = key("grille_badge", R::FrontBumper, M::Chrome);
+    front_box(
+        b,
+        &badge,
+        p,
+        -0.08,
+        0.08,
+        0.5 * (l0 + l1) - 0.035,
+        0.5 * (l0 + l1) + 0.035,
+        0.022,
+        0.0,
+    );
     bumper(b, p, true, 0.40, 0.66, 0.08, M::Trim, None);
-    plate_front(b, p, 0.42);
-    let zt = p.top(p.y_tail + 0.05);
+    plate_on_face(b, p, true, 0.47, 0.08);
+    let zt = p.z_deck;
     let wt = p.half_width(p.y_tail);
-    // Tall tail lamps with the amber turn signal as their bottom section.
-    let (tx0, tx1) = (-(wt - 0.005), -(wt - 0.10));
-    reshape_pair(b, p, "taillight", |t, p, k| {
-        lens_rear(t, k, p, tx0, tx1, 1.065, 1.40, 0.012, 0.03);
-    });
-    reshape_indicators(b, p, false, M::EmissiveAmber, |t, p, k| {
-        lens_rear(t, k, p, tx0, tx1, 0.95, 1.06, 0.012, 0.03);
-    });
-    // Barn doors: centre seam, hinges, handle.
-    let seam = key("barn_seam", R::Trunk, M::Trim);
-    rear_box(b, &seam, p, -0.006, 0.006, 0.72, zt - 0.10, 0.004, 0.02);
-    let hinge = key("barn_hinge_l", R::Trunk, M::Trim);
-    for z in [0.95f32, 1.70] {
-        rear_box(
-            b,
-            &hinge,
-            p,
-            -(wt - 0.005),
-            -(wt - 0.06),
-            z - 0.05,
-            z + 0.05,
-            0.02,
-            0.01,
-        );
-    }
-    mirror(b, &hinge);
-    let hd = key("barn_handle", R::Trunk, M::Chrome);
-    rear_box(b, &hd, p, 0.03, 0.17, 1.10, 1.14, 0.025, 0.0);
-    // Roof marker lamps above the barn doors.
-    let ml = light("roof_markers", R::Roof, M::Taillight);
-    let ym = p.y_tail + 0.06;
-    for x in [-0.25f32, 0.0, 0.25] {
-        let z = p.top_point(ym, x).0[2];
-        b.cuboid(
-            &ml,
-            [x - 0.03, ym - 0.06, z - 0.02],
-            [x + 0.03, ym - 0.03, z + 0.02],
-        );
-    }
+    barn_door_trim(b, p);
+    // Tall tail lamps in the rear corners, amber signal at the bottom.
+    // Tall corner lamps below the belt step (red over amber).
+    let (tx0, tx1) = (-(wt - 0.03), -(wt - 0.13));
+    proj_lamps(
+        b,
+        p,
+        false,
+        &[rect(tx0, tx1, zt - 0.25, zt - 0.03)],
+        0.0,
+        0.08,
+        0.0,
+    );
+    proj_signals(
+        b,
+        p,
+        false,
+        M::EmissiveAmber,
+        &rect(tx0, tx1, zt - 0.37, zt - 0.26),
+        0.0,
+        0.08,
+    );
     step_bumper(b, p, 0.40, 0.56, 0.22, M::Trim, false);
-    plate_rear(b, p, 0.58);
+    plate_rear(b, p, 0.60);
+    // Rub strip as a single sheet (no shell): keeps the van under the 11k budget.
     side_strip(
         b,
         p,
@@ -736,13 +1217,209 @@ fn van_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         M::Trim,
         (p.y_tail + 0.25, p.y_fd_hinge + 0.4),
         (0.78, 0.86),
-        0.016,
+        0.0,
     );
-    sliding_door_track(b, p);
     tall_mirrors(b, p, (0.12, 0.08, 0.30), 0.16);
     handles(b, p, M::Trim, false);
     side_markers(b, p, p.z_bumper_top.0 + 0.08);
-    wipers(b, p, 0.30);
+}
+
+/// satchel_20 (rounder 2000s European panel van): big swept lamps with the amber signal at
+/// their inner end, slim two-slat grille with a blank badge between them, body-colour bumper
+/// top over a black lower bumper and intake, side rubbing strip, flush barn doors with
+/// windows, tall tail lamps, high brake lamp.
+fn satchel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
+    let p = ctx.profile;
+    let zn = p.belt(p.y_nose);
+    let wf = p.half_width(p.y_nose);
+    let (l0, l1) = (zn - 0.17, zn - 0.02);
+    // Big swept lamps: tall at the fender, tapering in and down toward the grille.
+    let lamp = [
+        [-(wf - 0.015), l0 + 0.03],
+        [-0.56, l0 + 0.045],
+        [-0.42, l0 + 0.09],
+        [-0.43, l1 - 0.01],
+        [-(wf - 0.02), l1],
+    ];
+    proj_lamps(b, p, true, &[lamp.to_vec()], 25.0, 0.08, 0.014);
+    // Twin projector bowls in the swept lamp.
+    head_lamp_bowls(
+        b,
+        p,
+        &lamp,
+        25.0,
+        0.08,
+        &[[-(wf - 0.11), l1 - 0.06], [-(wf - 0.24), l1 - 0.06]],
+        0.032,
+    );
+    let sig = [
+        [-(wf - 0.015), l0 - 0.01],
+        [-0.62, l0 + 0.005],
+        [-0.60, l0 + 0.035],
+        [-(wf - 0.015), l0 + 0.022],
+    ];
+    proj_signals(b, p, true, M::EmissiveAmber, &sig, 25.0, 0.08);
+    let gr = key("grille_upper", R::FrontBumper, M::Grille);
+    front_box(b, &gr, p, -0.40, 0.40, l0 + 0.04, l1 - 0.02, 0.006, 0.03);
+    let sl = key("grille_slats", R::FrontBumper, M::Trim);
+    for z in [l0 + 0.075, l0 + 0.11] {
+        front_box(b, &sl, p, -0.40, 0.40, z - 0.008, z + 0.008, 0.012, 0.0);
+    }
+    let badge = key("grille_badge", R::FrontBumper, M::Chrome);
+    front_box(b, &badge, p, -0.07, 0.07, l0 + 0.05, l1 - 0.03, 0.018, 0.0);
+    bumper(b, p, true, 0.36, 0.56, 0.06, M::Trim, None);
+    let intake = key("grille_lower", R::FrontBumper, M::Grille);
+    front_box(b, &intake, p, -0.45, 0.45, 0.42, 0.52, 0.065, 0.0);
+    plate_on_face(b, p, true, 0.575, 0.0);
+    euro_van_common(b, p, false);
+}
+
+/// tumbril_20 (squarer 2000s European panel van): upright square lamps with amber outer
+/// columns, a full black plastic front panel between them with a wide slatted grille and blank
+/// badge, deep black bumper with fog lamps, sliding-door track, flush barn doors with windows,
+/// tall tail lamps, high brake lamp.
+fn tumbril_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
+    let p = ctx.profile;
+    let zn = p.belt(p.y_nose);
+    let wf = p.half_width(p.y_nose);
+    let (l0, l1) = (zn - 0.22, zn - 0.025);
+    proj_lamps(
+        b,
+        p,
+        true,
+        &[rect(-(wf - 0.10), -0.52, l0, l1)],
+        10.0,
+        0.08,
+        0.012,
+    );
+    // A big round reflector in each square lamp.
+    head_lamp_bowls(
+        b,
+        p,
+        &rect(-(wf - 0.10), -0.52, l0, l1),
+        10.0,
+        0.08,
+        &[[-(wf - 0.205), 0.5 * (l0 + l1)]],
+        0.055,
+    );
+    proj_signals(
+        b,
+        p,
+        true,
+        M::EmissiveAmber,
+        &rect(-(wf - 0.015), -(wf - 0.105), l0, l1),
+        10.0,
+        0.08,
+    );
+    let panel = key("front_panel", R::FrontBumper, M::Trim);
+    front_box(
+        b,
+        &panel,
+        p,
+        -0.51,
+        0.51,
+        l0 - 0.03,
+        l1 + 0.005,
+        0.004,
+        0.03,
+    );
+    let gr = key("grille", R::FrontBumper, M::Grille);
+    front_box(b, &gr, p, -0.44, 0.44, l0 + 0.02, l1 - 0.04, 0.008, 0.0);
+    let sl = key("grille_slats", R::FrontBumper, M::Trim);
+    for i in 1..=3 {
+        let z = l0 + 0.02 + (l1 - l0 - 0.06) * i as f32 / 4.0;
+        front_box(b, &sl, p, -0.44, 0.44, z - 0.009, z + 0.009, 0.014, 0.0);
+    }
+    let badge = key("grille_badge", R::FrontBumper, M::Chrome);
+    front_box(
+        b,
+        &badge,
+        p,
+        -0.08,
+        0.08,
+        0.5 * (l0 + l1) - 0.03,
+        0.5 * (l0 + l1) + 0.04,
+        0.02,
+        0.0,
+    );
+    bumper(b, p, true, 0.36, 0.64, 0.08, M::Trim, None);
+    let fog = light("foglamp_l", R::FrontBumper, M::Headlight);
+    front_box(
+        b,
+        &fog,
+        p,
+        -(wf - 0.14),
+        -(wf - 0.27),
+        0.42,
+        0.48,
+        0.085,
+        0.0,
+    );
+    mirror(b, &fog);
+    let intake = key("grille_lower", R::FrontBumper, M::Grille);
+    front_box(b, &intake, p, -0.40, 0.40, 0.40, 0.48, 0.085, 0.0);
+    plate_on_face(b, p, true, 0.495, 0.08);
+    sliding_door_track_at(b, p, p.z_belt + 0.02);
+    euro_van_common(b, p, true);
+}
+
+/// Shared rear and sides of the two European panel vans.
+fn euro_van_common(b: &mut Builder, p: &BodyProfile, tumbril: bool) {
+    let zt = p.z_deck;
+    let wt = p.half_width(p.y_tail);
+    barn_door_trim(b, p);
+    // Tall tail lamps in the rear corners below the belt step: red, amber signal, red.
+    let (tx0, tx1) = (-(wt - 0.03), -(wt - if tumbril { 0.14 } else { 0.16 }));
+    proj_lamps(
+        b,
+        p,
+        false,
+        &[
+            rect(tx0, tx1, zt - 0.40, zt - 0.28),
+            rect(tx0, tx1, zt - 0.14, zt - 0.03),
+        ],
+        0.0,
+        0.08,
+        0.0,
+    );
+    proj_signals(
+        b,
+        p,
+        false,
+        M::EmissiveAmber,
+        &rect(tx0, tx1, zt - 0.27, zt - 0.15),
+        0.0,
+        0.08,
+    );
+    step_bumper(b, p, 0.36, 0.56, 0.12, M::Trim, false);
+    plate_on_face(b, p, false, 0.42, 0.12);
+    let zr = if tumbril { 0.70 } else { 0.76 };
+    side_strip(
+        b,
+        p,
+        "rub_strip",
+        M::Trim,
+        (p.y_tail + 0.20, p.y_nose - 0.25),
+        (zr, zr + 0.07),
+        0.014,
+    );
+    tall_mirrors(b, p, (0.11, 0.08, 0.27), 0.12);
+    handles(b, p, M::Trim, false);
+    // Amber side repeater on each front fender.
+    let rp = light("side_repeater_l", R::FrontLeftFender, M::EmissiveAmber);
+    let yr = p.arches[0].0 - p.arches[0].2 - 0.08;
+    side_box(
+        b,
+        &rp,
+        p,
+        yr - 0.035,
+        yr + 0.035,
+        zr + 0.12,
+        zr + 0.15,
+        0.008,
+        0.004,
+    );
+    mirror(b, &rp);
 }
 
 // =======================================================================================
@@ -1231,6 +1908,7 @@ fn plate_rear(b: &mut Builder, p: &BodyProfile, z: f32) {
 
 /// Door handles: one per door, just ahead of the door's rear edge, below the belt.
 fn handles(b: &mut Builder, p: &BodyProfile, mat: MaterialSlot, crew_cab: bool) {
+    crate::trim::remove_generic(b, &crate::trim::GENERIC_HANDLES);
     let mut doors = vec![(
         R::LeftDoorF,
         match p.rear_door {
@@ -1295,21 +1973,6 @@ fn side_markers(b: &mut Builder, p: &BodyProfile, z: f32) {
     mirror(b, &kr);
 }
 
-/// Two parked wipers along the windshield base, `len` long each.
-fn wipers(b: &mut Builder, p: &BodyProfile, len: f32) {
-    let k = key("wipers", R::Cabin, M::Trim);
-    let y = p.y_fw - 0.07;
-    for cx in [-0.32f32, 0.12] {
-        let z = p.top_point(y, cx).0[2] + 0.012;
-        b.oriented_box(
-            &k,
-            [cx, y, z],
-            unit3([1.0, 0.12, 0.06], [0.0, 1.0, 0.0]),
-            [len, 0.008, 0.007],
-        );
-    }
-}
-
 /// Chrome belt trim along the door glass bases.
 fn belt_chrome(b: &mut Builder, p: &BodyProfile) {
     let z = p.z_belt;
@@ -1359,6 +2022,7 @@ fn shark_fin(b: &mut Builder, p: &BodyProfile) {
 
 /// Chrome drip rails along both roof edges.
 fn drip_rails(b: &mut Builder, p: &BodyProfile) {
+    crate::trim::remove_generic(b, &crate::trim::GENERIC_DRIP_RAIL);
     let k = key("drip_rail_l", R::Roof, M::Chrome);
     let (r0, r1, _, _) = p.roof;
     let n = 4;
@@ -1387,15 +2051,14 @@ fn drip_rails(b: &mut Builder, p: &BodyProfile) {
 
 /// Hide the generic paint mirrors.
 fn hide_generic_mirrors(b: &mut Builder) {
-    for n in ["mirror_l", "mirror_r"] {
-        b.set_geometry(n, Vec::new(), Vec::new(), Vec::new());
-    }
+    crate::trim::remove_generic(b, &crate::trim::GENERIC_MIRRORS);
 }
 
 /// Small black door mirrors (`size` = out × along × up) on a stub `arm` long.
 fn black_mirrors(b: &mut Builder, p: &BodyProfile, size: (f32, f32, f32), arm: f32) {
     hide_generic_mirrors(b);
-    let y = p.y_fd_hinge - 0.14;
+    // On the sail at the A-pillar foot.
+    let y = 0.5 * (p.sail().0 + p.sail().1);
     let zb = p.belt(y);
     let (s, _) = p.side_point(y, zb - 0.02);
     let x0 = s[0];
@@ -1417,7 +2080,8 @@ fn black_mirrors(b: &mut Builder, p: &BodyProfile, size: (f32, f32, f32), arm: f
 /// Tall truck / van mirrors: two arms, a black head with a glass face toward the rear.
 fn tall_mirrors(b: &mut Builder, p: &BodyProfile, size: (f32, f32, f32), arm: f32) {
     hide_generic_mirrors(b);
-    let y = p.y_fd_hinge - 0.12;
+    // On the sail at the A-pillar foot.
+    let y = 0.5 * (p.sail().0 + p.sail().1);
     let zb = p.belt(y);
     let (s, _) = p.side_point(y, zb - 0.03);
     let x0 = s[0];
@@ -1555,25 +2219,202 @@ fn mud_flaps(b: &mut Builder, p: &BodyProfile) {
     mirror(b, &k);
 }
 
-/// Sliding-door track on the RIGHT side only (black strip from the slider back 1.3 m).
-fn sliding_door_track(b: &mut Builder, p: &BodyProfile) {
+// =======================================================================================
+// Car-shapes phase 2 helpers (traffic cars only; the older helpers above are shared with
+// debug_sedan and stay unchanged)
+// =======================================================================================
+
+/// Frame of bars `t` wide round `[x0, x1, z0, z1]` on the front face, `out` proud.
+fn frame_front(b: &mut Builder, k: &PartKey, p: &BodyProfile, r: [f32; 4], t: f32, out: f32) {
+    let [x0, x1, z0, z1] = r;
+    front_box(b, k, p, x0 - t, x1 + t, z1, z1 + t, out, 0.01);
+    front_box(b, k, p, x0 - t, x1 + t, z0 - t, z0, out, 0.01);
+    front_box(b, k, p, x0 - t, x0, z0, z1, out, 0.01);
+    front_box(b, k, p, x1, x1 + t, z0, z1, out, 0.01);
+}
+
+/// Plate (dark frame + light plate) centred on the front or rear face at height `z` (bottom),
+/// standing `out` proud of the body surface (on a bumper bar that far out).
+fn plate_on_face(b: &mut Builder, p: &BodyProfile, front: bool, z: f32, out: f32) {
+    let (fr, pl, region) = if front {
+        ("plate_frame_f", "plate_f", R::FrontBumper)
+    } else {
+        ("plate_frame_r", "plate_r", R::RearBumper)
+    };
+    let f = key(fr, region, M::Trim);
+    let q = key(pl, region, M::Metal);
+    if front {
+        front_box(
+            b,
+            &f,
+            p,
+            -0.27,
+            0.27,
+            z - 0.012,
+            z + 0.132,
+            out + 0.008,
+            0.0,
+        );
+        front_box(b, &q, p, -0.255, 0.255, z, z + 0.12, out + 0.014, 0.0);
+    } else {
+        rear_box(
+            b,
+            &f,
+            p,
+            -0.27,
+            0.27,
+            z - 0.012,
+            z + 0.132,
+            out + 0.008,
+            0.0,
+        );
+        rear_box(b, &q, p, -0.255, 0.255, z, z + 0.12, out + 0.014, 0.0);
+    }
+}
+
+/// Door handles (LEFT, mirrored) at the given (region, y) stations, just below the belt;
+/// replaces the generic handles.
+fn door_handles_at(b: &mut Builder, p: &BodyProfile, mat: MaterialSlot, at: &[(BodyRegion, f32)]) {
+    crate::trim::remove_generic(b, &crate::trim::GENERIC_HANDLES);
+    let z = p.z_belt - 0.10;
+    for (i, &(r, y)) in at.iter().enumerate() {
+        let rec = key(&format!("door_handle_recess_{i}_l"), r, M::Trim);
+        side_box(
+            b,
+            &rec,
+            p,
+            y - 0.085,
+            y + 0.085,
+            z - 0.024,
+            z + 0.026,
+            0.004,
+            0.004,
+        );
+        mirror(b, &rec);
+        let k = key(&format!("door_handle_{i}_l"), r, mat);
+        side_box(
+            b,
+            &k,
+            p,
+            y - 0.07,
+            y + 0.07,
+            z - 0.012,
+            z + 0.014,
+            0.014,
+            0.0,
+        );
+        mirror(b, &k);
+    }
+}
+
+/// Seam lines of a door panel that the generic seams do not draw (a crew cab's rear door on a
+/// lattice without a hinged rear door): rear edge at `y0`, bottom from `y0` to `y1`.
+fn door_cut(b: &mut Builder, p: &BodyProfile, r: BodyRegion, y0: f32, y1: f32) {
+    let k = key("door_cut_l", r, M::Trim);
+    let w = 0.005;
+    let zb = p.z_door_bottom + 0.03;
+    side_box(b, &k, p, y0 - w, y0 + w, zb, p.z_belt - 0.02, 0.0025, 0.002);
+    side_box(b, &k, p, y0, y1, zb - w, zb + w, 0.0025, 0.002);
+    mirror(b, &k);
+}
+
+/// Window in a pickup's cab-back wall: glass `half` wide over `zs`, in a black seal; `slider`
+/// adds the two divider bars of a sliding centre pane.
+fn cab_back_window(b: &mut Builder, p: &BodyProfile, half: f32, zs: (f32, f32), slider: bool) {
+    // The wall runs from the deck start (belt height) up to the roof's rear edge.
+    let (y0, z0) = (p.y_deck, p.z_deck);
+    let (y1, z1) = (p.roof.0, p.roof.2);
+    let face = |z: f32| y0 + (y1 - y0) * ((z - z0) / (z1 - z0).max(0.1)).clamp(0.0, 1.0);
+    let slab = |b: &mut Builder, k: &PartKey, x0: f32, x1: f32, za: f32, zb: f32, out: f32| {
+        let mut c = [[0.0f32; 3]; 8];
+        for (i, q) in c.iter_mut().enumerate() {
+            let x = if i & 1 == 0 { x0 } else { x1 };
+            let z = if i & 4 == 0 { za } else { zb };
+            let y = face(z) + if i & 2 == 0 { -out } else { 0.01 };
+            *q = [x, y, z];
+        }
+        hexa(b, k, c);
+    };
+    let seal = key("cab_back_glass_seal", R::Cabin, M::Trim);
+    slab(
+        b,
+        &seal,
+        -half - 0.025,
+        half + 0.025,
+        zs.0 - 0.025,
+        zs.1 + 0.025,
+        0.006,
+    );
+    let g = PartKey::body("cab_back_glass", R::Cabin, PartKind::Glass, M::Glass);
+    slab(b, &g, -half, half, zs.0, zs.1, 0.010);
+    if slider {
+        for x in [-0.22f32, 0.22] {
+            slab(b, &seal, x - 0.012, x + 0.012, zs.0, zs.1, 0.014);
+        }
+    }
+}
+
+/// Barn-door trim on a van's rear doors (the doors themselves, painted with two windows, are
+/// the generator's [`BodyStyle::rear_door_windows`]): centre seam, hinges (the lower pair
+/// inboard of the corner tail lamps), handle and high-mount brake lamp. Above the belt the door
+/// face runs from the deck start up to the roof's rear edge.
+fn barn_door_trim(b: &mut Builder, p: &BodyProfile) {
+    let (y0, z0) = (p.y_deck, p.z_deck);
+    let (y1, z1) = (p.roof.0, p.roof.2 - 0.03);
+    let face = |z: f32| y0 + (y1 - y0) * ((z - z0) / (p.roof.2 - z0).max(0.1)).clamp(0.0, 1.0);
+    let slab = |b: &mut Builder, k: &PartKey, x0: f32, x1: f32, za: f32, zb: f32, out: f32| {
+        let mut c = [[0.0f32; 3]; 8];
+        for (i, q) in c.iter_mut().enumerate() {
+            let x = if i & 1 == 0 { x0 } else { x1 };
+            let z = if i & 4 == 0 { za } else { zb };
+            let y = face(z) + if i & 2 == 0 { -out } else { 0.01 };
+            *q = [x, y, z];
+        }
+        hexa(b, k, c);
+    };
+    let seam = key("barn_seam", R::Trunk, M::Trim);
+    slab(b, &seam, -0.005, 0.005, z0 + 0.02, z1 - 0.06, 0.003);
+    rear_box(b, &seam, p, -0.005, 0.005, 0.70, z0, 0.003, 0.01);
+    let hinge = key("barn_hinge_l", R::Trunk, M::Trim);
+    let xl = -(p.half_width(p.y_tail) - 0.19);
+    rear_box(
+        b,
+        &hinge,
+        p,
+        xl,
+        xl + 0.065,
+        z0 - 0.30,
+        z0 - 0.20,
+        0.018,
+        0.0,
+    );
+    let xu = -(p.roof_half_w(p.roof.0) - 0.02);
+    slab(b, &hinge, xu, xu + 0.065, z1 - 0.35, z1 - 0.25, 0.018);
+    mirror(b, &hinge);
+    let hd = key("barn_handle", R::Trunk, M::Chrome);
+    slab(b, &hd, 0.03, 0.17, z0 + 0.04, z0 + 0.08, 0.022);
+    let bl = light("brake_lamp_c", R::Trunk, M::Taillight);
+    slab(b, &bl, -0.18, 0.18, z1 - 0.045, z1 - 0.012, 0.012);
+}
+
+/// Sliding-door track on the RIGHT side at height `z` (black strip from behind the slider back
+/// toward the tail) and the slider's handle.
+fn sliding_door_track_at(b: &mut Builder, p: &BodyProfile, z: f32) {
     let (rh, re) = p.rear_door.unwrap_or((p.y_fd_rear, p.y_fd_rear - 1.0));
-    let z = p.z_belt + 0.16;
-    let k = key("door_track_l", R::Cabin, M::Trim);
+    let k = key("door_track_l", R::RearLeftQuarter, M::Trim);
     side_box(
         b,
         &k,
         p,
-        re - 1.2,
+        p.y_tail + 0.35,
         re - 0.03,
-        z - 0.018,
-        z + 0.018,
-        0.02,
+        z - 0.016,
+        z + 0.016,
+        0.018,
         0.004,
     );
     b.mirror_part("door_track_l", &k.mirrored());
     b.set_geometry("door_track_l", Vec::new(), Vec::new(), Vec::new());
-    // Slider handle (right side).
     let h = key("slider_handle_l", R::LeftDoorR, M::Trim);
     let yh = rh - 0.12;
     let zh = p.z_belt - 0.10;
@@ -1590,4 +2431,197 @@ fn sliding_door_track(b: &mut Builder, p: &BodyProfile) {
     );
     b.mirror_part("slider_handle_l", &h.mirrored());
     b.set_geometry("slider_handle_l", Vec::new(), Vec::new(), Vec::new());
+}
+
+/// Shaped lamp lens on the front (`front`) or rear face: the convex outline `pts` (x, z; LEFT
+/// side, any winding) projected onto the end face (following its plan rounding), standing
+/// `out` proud and sunk `inn` into the body. No back face (inside the body).
+fn lens_poly(
+    b: &mut Builder,
+    k: &PartKey,
+    p: &BodyProfile,
+    front: bool,
+    pts: &[[f32; 2]],
+    out: f32,
+    inn: f32,
+) {
+    let n = pts.len();
+    if n < 3 {
+        return;
+    }
+    let dir = if front { 1.0 } else { -1.0 };
+    let face = |x: f32| if front { nose_y(p, x) } else { tail_y(p, x) };
+    let outer: Vec<[f32; 3]> = pts
+        .iter()
+        .map(|q| [q[0], face(q[0]) + dir * out, q[1]])
+        .collect();
+    let inner: Vec<[f32; 3]> = pts
+        .iter()
+        .map(|q| [q[0], face(q[0]) - dir * inn, q[1]])
+        .collect();
+    let cx = pts.iter().map(|q| q[0]).sum::<f32>() / n as f32;
+    let cz = pts.iter().map(|q| q[1]).sum::<f32>() / n as f32;
+    let c = [cx, face(cx) + dir * out, cz];
+    for i in 0..n {
+        let j = (i + 1) % n;
+        b.poly_facing(k, &[c, outer[i], outer[j]], [0.0, dir, 0.0]);
+        let mx = 0.5 * (pts[i][0] + pts[j][0]) - cx;
+        let mz = 0.5 * (pts[i][1] + pts[j][1]) - cz;
+        b.poly_facing(k, &[outer[i], inner[i], inner[j], outer[j]], [mx, 0.0, mz]);
+    }
+}
+
+/// A lamp of `view` with outline `pts`, cast `yaw` degrees round the corner, grid step `step`.
+fn lamp_of(
+    view: crate::lamp::LampView,
+    pts: &[[f32; 2]],
+    yaw: f32,
+    step: f32,
+) -> crate::lamp::Lamp {
+    let mut l = crate::lamp::Lamp::new(view, pts.to_vec());
+    l.yaw_deg = yaw;
+    l.step_m = step;
+    l
+}
+
+/// The view of a front / rear end lamp.
+fn end_view(front: bool) -> crate::lamp::LampView {
+    if front {
+        crate::lamp::LampView::Front
+    } else {
+        crate::lamp::LampView::Rear
+    }
+}
+
+/// Outline mirrored to the right side (x → −x).
+fn flip_x(pts: &[[f32; 2]]) -> Vec<[f32; 2]> {
+    pts.iter().map(|q| [-q[0], q[1]]).collect()
+}
+
+/// Replace the generic head (`front`) or tail lamps with lenses projected onto the body
+/// (`crate::lamp`): `lenses` are LEFT-side outlines (`[x, z]`, x < 0), all drawn into the
+/// `headlight_*` / `taillight_*` parts and mirrored for the right; `yaw` wraps them round the
+/// corner, `bezel_w` > 0 adds a black bezel round each (`headlamp_bezel_*` /
+/// `taillamp_bezel_*`).
+fn proj_lamps(
+    b: &mut Builder,
+    p: &BodyProfile,
+    front: bool,
+    lenses: &[Vec<[f32; 2]>],
+    yaw: f32,
+    step: f32,
+    bezel_w: f32,
+) {
+    let base = if front { "headlight" } else { "taillight" };
+    let keys = b.keys();
+    let (Some(kl), Some(kr)) = (
+        keys.iter().find(|k| k.name == format!("{base}_l")).cloned(),
+        keys.iter().find(|k| k.name == format!("{base}_r")).cloned(),
+    ) else {
+        return;
+    };
+    for k in [&kl, &kr] {
+        b.set_geometry(&k.name, Vec::new(), Vec::new(), Vec::new());
+    }
+    let region = if front { R::FrameFront } else { R::FrameRear };
+    let bname = if front {
+        "headlamp_bezel_l"
+    } else {
+        "taillamp_bezel_l"
+    };
+    let bl = key(bname, region, M::Trim);
+    let br = bl.mirrored();
+    for pts in lenses {
+        for (k, bk, o) in [(&kl, &bl, pts.clone()), (&kr, &br, flip_x(pts))] {
+            let l = lamp_of(end_view(front), &o, yaw, step);
+            if bezel_w > 0.0 {
+                crate::lamp::bezel(b, p, bk, &l, bezel_w);
+            }
+            crate::lamp::lens(b, p, k, &l);
+        }
+    }
+}
+
+/// Replace the front (`front`) or rear turn signals with projected lenses (LEFT outline `pts`,
+/// mirrored), material `mat` (front: amber; rear: amber or `Taillight`).
+fn proj_signals(
+    b: &mut Builder,
+    p: &BodyProfile,
+    front: bool,
+    mat: MaterialSlot,
+    pts: &[[f32; 2]],
+    yaw: f32,
+    step: f32,
+) {
+    let (kl, kr) = if front {
+        (indicator_front_key(false), indicator_front_key(true))
+    } else {
+        (
+            indicator_rear_key(false, mat),
+            indicator_rear_key(true, mat),
+        )
+    };
+    for (k, o) in [(&kl, pts.to_vec()), (&kr, flip_x(pts))] {
+        b.remove_part(&k.name);
+        b.part(k);
+        crate::lamp::lens(b, p, k, &lamp_of(end_view(front), &o, yaw, step));
+    }
+}
+
+/// Rectangle outline `[x0, x1] × [z0, z1]` for a projected lamp.
+fn rect(x0: f32, x1: f32, z0: f32, z1: f32) -> Vec<[f32; 2]> {
+    vec![[x0, z0], [x1, z0], [x1, z1], [x0, z1]]
+}
+
+/// Inner elements of a projected head lamp drawn by [`proj_lamps`] (same LEFT `outline`, `yaw`
+/// and `step`), mirrored per side: projector bowls (at `bowls`, radius `r`) in the lamp's own
+/// part, each with a chrome reflector ring (`lamp_ring_*` on the front frame).
+fn head_lamp_bowls(
+    b: &mut Builder,
+    p: &BodyProfile,
+    outline: &[[f32; 2]],
+    yaw: f32,
+    step: f32,
+    bowls: &[[f32; 2]],
+    r: f32,
+) {
+    use crate::lamp::{element, Element};
+    let ring_l = key("lamp_ring_l", R::FrameFront, M::Chrome);
+    let ring_r = ring_l.mirrored();
+    let keys = b.keys();
+    let (Some(kl), Some(kr)) = (
+        keys.iter().find(|k| k.name == "headlight_l").cloned(),
+        keys.iter().find(|k| k.name == "headlight_r").cloned(),
+    ) else {
+        return;
+    };
+    for (k, rk, sx) in [(&kl, &ring_l, 1.0f32), (&kr, &ring_r, -1.0)] {
+        let pts: Vec<[f32; 2]> = outline.iter().map(|q| [sx * q[0], q[1]]).collect();
+        let l = lamp_of(crate::lamp::LampView::Front, &pts, yaw, step);
+        for at in bowls {
+            let at = [sx * at[0], at[1]];
+            element(
+                b,
+                p,
+                k,
+                &l,
+                at,
+                &Element::Bowl {
+                    r_m: r,
+                    h_m: 0.6 * r,
+                },
+            );
+            element(
+                b,
+                p,
+                rk,
+                &l,
+                at,
+                &Element::Ring {
+                    r_m: r + 0.006,
+                    w_m: 0.006,
+                },
+            );
+        }
+    }
 }

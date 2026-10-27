@@ -54,6 +54,9 @@ pub enum ArchShape {
     Round,
     /// Squared arch: flat top with chamfered corners (trucks, box flares, 80s cars).
     Box,
+    /// Flat-top trapezoid: a short flat top and long slanted sides (off-road flares, 70s
+    /// trucks, modern crossover cladding arches).
+    Trapezoid,
 }
 
 /// Hood scoop / vent variant emitted on the hood (region `Hood`, so it swings with it).
@@ -72,6 +75,44 @@ pub enum HoodScoop {
     Shaker,
     /// Two flat dark vents either side of the centre line.
     Vents,
+}
+
+/// Finish of a small body part (handles, mirror housings, drip rails, B-pillars).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum TrimFinish {
+    /// Not drawn.
+    None,
+    /// Body colour (paint).
+    #[default]
+    Body,
+    /// Black plastic / rubber trim.
+    Black,
+    /// Chrome.
+    Chrome,
+}
+
+impl TrimFinish {
+    /// Material slot of the finish (`None` for [`TrimFinish::None`]).
+    pub fn material(self) -> Option<MaterialSlot> {
+        match self {
+            TrimFinish::None => None,
+            TrimFinish::Body => Some(MaterialSlot::Paint),
+            TrimFinish::Black => Some(MaterialSlot::Trim),
+            TrimFinish::Chrome => Some(MaterialSlot::Chrome),
+        }
+    }
+}
+
+/// Which side the fuel filler door is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum FuelDoor {
+    /// No fuel door drawn.
+    None,
+    /// Left rear quarter (x < 0).
+    Left,
+    /// Right rear quarter (x > 0).
+    #[default]
+    Right,
 }
 
 /// Every shape knob of the lofted body. Distances in metres, angles in degrees.
@@ -213,10 +254,283 @@ pub struct BodyStyle {
     /// How far the tail top falls inside `tail_round`, m. Range 0…0.25. Default 0.10.
     pub tail_drop: f32,
     /// Visual (front, rear) overhang trim, m (+ lengthens, − shortens the mesh past the
-    /// bumper nodes). Range −0.15…+0.10 each.
+    /// bumper nodes). Range [`OVERHANG_RANGE`] (−0.35…+0.25) each (−0.15…+0.10 before phase
+    /// 3). The nose never comes closer than 0.10 m to the hood's front edge or 0.06 m to the
+    /// front tire (tail: the quarter's end, the rear tire), so the bumper panels keep a strip
+    /// on their lattice region.
     pub overhang_trim: (f32, f32),
     /// Pickup bed depth below the rail, m (Pickup only). Range 0.2…0.6. Default 0.45.
     pub bed_depth: f32,
+
+    // --- Greenhouse framing (see `profile::BodyProfile::ring` and `mesh::loft`) ---
+    /// A-pillar width seen from the front, m: the body-colour band from the side-glass top edge
+    /// over the roof-rail corner to the windshield edge, following the windshield rake up to the
+    /// roof. Range 0.04…0.14. Default 0.075.
+    pub a_pillar_w_m: f32,
+    /// C-pillar (D-pillar on wagons / SUVs / vans) width seen from behind, at the rear glass, m.
+    /// Blends into [`BodyStyle::a_pillar_w_m`] along the roof. Range 0.04…0.30. Default 0.10.
+    pub c_pillar_w_m: f32,
+    /// B-pillar width in side view (between the front and rear side windows), m. Range
+    /// 0.05…0.25. Default 0.12.
+    pub b_pillar_w_m: f32,
+    /// B-pillar finish: [`TrimFinish::Black`] (default) or [`TrimFinish::Body`] (`None` and
+    /// `Chrome` draw body colour).
+    pub b_pillar: TrimFinish,
+    /// Length (along y) of the sail at the A-pillar foot, ahead of the front door glass (the
+    /// mirror patch), m. The front door glass runs forward under the A-pillar to it. Range
+    /// 0.04…0.40. Default 0.14.
+    pub a_sail_len_m: f32,
+    /// Sail finish: [`TrimFinish::Black`] (default) or body colour.
+    pub a_sail: TrimFinish,
+    /// Roof rail: drop from the roof top to the side-glass top edge, m. Range 0.02…0.10.
+    /// Default 0.05.
+    pub roof_rail_drop_m: f32,
+    /// How far every glass panel sits in behind the body surface (inset), m. Range 0…0.03.
+    /// Default 0.012.
+    pub glass_recess_m: f32,
+    /// Width of the black seal / frame round every glass panel, m (seen face-on). Range
+    /// 0…0.04. Default 0.018.
+    pub glass_frame_m: f32,
+    /// Plan-view wrap of the windshield: how far its corners sit behind its centre, m (the
+    /// glass curves back at the sides). Range 0…0.20. Default 0.06.
+    pub windshield_wrap_m: f32,
+    /// Plan-view wrap of the rear glass (corners ahead of its centre), m. Range 0…0.20.
+    /// Default 0.04.
+    pub rear_glass_wrap_m: f32,
+    /// Length of the black cowl / wiper panel at the windshield base (plan, along y), m.
+    /// 0 = none. Range 0…0.20. Default 0.07.
+    pub cowl_len_m: f32,
+    /// Wiper blades parked on the windshield above the cowl. Range 0…2. Default 2.
+    pub wipers: u8,
+    /// Drip rail / roof rail line along the roof edge and down the A- and C-pillars.
+    /// Default [`TrimFinish::Black`].
+    pub drip_rail: TrimFinish,
+
+    // --- Body details common to every car (see `trim.rs`) ---
+    /// Door handles (one per door). Default [`TrimFinish::Body`] on a black recess.
+    pub door_handles: TrimFinish,
+    /// Door-mirror housing finish (the base and glass are always black / mirror).
+    /// `None` = no generic mirrors. Default [`TrimFinish::Body`].
+    pub mirrors: TrimFinish,
+    /// Panel seams as thin dark lines: door cut lines, hood / trunk shut lines, bumper splits.
+    /// Default true.
+    pub panel_seams: bool,
+    /// Width of a panel seam line, m. Range 0.003…0.012. Default 0.006.
+    pub seam_w_m: f32,
+    /// Fuel filler door side. Default [`FuelDoor::Right`].
+    pub fuel_door: FuelDoor,
+    /// Wheel-arch lip: radial width of the body-colour lip round each wheel opening, m.
+    /// 0 = none. Range 0…0.04. Default 0.016.
+    pub arch_lip_m: f32,
+    /// Black liners inside the wheel arches (closes the open wheel wells). Default true.
+    pub arch_liners: bool,
+    /// Edge rounding of the nose and tail faces, m: the last loft ring at each end is set in
+    /// by this much all round, so bumpers read rounded instead of slab-cut. 0 = sharp.
+    /// Range 0…0.05. Default 0.03.
+    pub end_round_m: f32,
+
+    // --- Phase 3 shape knobs (car-shapes phase 3; every default leaves the body unchanged) ---
+    /// Plan-view width curve: control points `[y_m, scale]` (chassis y in metres, + forward;
+    /// any order) scaling the body half width at that station. Between points the scale eases
+    /// with a smoothstep (no overshoot); before the first / after the last point it holds.
+    /// Scale range [`PLAN_SCALE_RANGE`] (0.80…1.05). Empty (default) = 1 everywhere. Narrow
+    /// nose: `[[y_front_arch, 1.0], [y_nose, 0.88]]`; Coke-bottle waist: a 0.95 point at the
+    /// doors between 1.0 points at the arches. Over a wheel the body never narrows inside the
+    /// tire's outer face (+1 cm). The hood, deck and lamps follow (they read
+    /// [`crate::profile::BodyProfile::half_width`]); the greenhouse keeps its own width (it
+    /// only narrows when the glass base would cross it).
+    pub plan_width: Vec<[f32; 2]>,
+    /// Side sculpts: local side-wall offsets (side pods, scallops, coves, pontoon fenders,
+    /// shoulder lines). See [`SideSculpt`]. Empty by default. Offsets add up; the side point
+    /// never moves more than [`SCULPT_DX_RANGE`] in total.
+    pub side_sculpt: Vec<SideSculpt>,
+    /// Convex side section: outward bow of the body side between sill and belt, m (peak at
+    /// `side_bulge_z`, fading to 0 at the sill corner and the shoulder). Range 0…0.06.
+    /// Default 0 (flat slab).
+    pub side_bulge_m: f32,
+    /// Height of the side bulge peak as a fraction of sill → belt (0 = sill, 1 = belt).
+    /// Range 0.2…0.8. Default 0.55.
+    pub side_bulge_z: f32,
+    /// Sill tuck-in: how far the rocker and sill corner step in under the side, m (the lower
+    /// body tucks under, a "tucking hard into the sill" section). Range 0…0.08. Default 0.
+    pub rocker_in_m: f32,
+    /// Tumblehome with a wider range than [`BodyStyle::tumblehome`]: per-side inset of the roof
+    /// edge vs the body side, m. Range [`TUMBLEHOME_M_RANGE`] (0.03…0.36: near-vertical van or
+    /// SUV glass up to a narrow prototype canopy). `Some` overrides `tumblehome`. Default
+    /// `None`. Pair small values with a small `glass_inset` for upright glass.
+    pub tumblehome_m: Option<f32>,
+    /// Front fender tops raised above the hood centre, m: the outer band of the hood (|x| ≥
+    /// `fender_peak_w` of the half width) and the shoulder rise by this much from the front
+    /// wheel forward to the nose (fading in over 0.3 m behind the wheel arch; the nose fall still
+    /// applies, so nothing stands in front of lamps). Unlike `hood_valley` the hood centre and
+    /// the nose stay where they are, so kit head lamps stay visible. Range 0…0.12. Default 0.
+    pub front_fender_rise_m: f32,
+    /// Rear fender (haunch) tops raised above the deck centre, m: from the rear wheel back to
+    /// the tail (fading in over 0.3 m ahead of the arch). Range 0…0.12. Default 0.
+    pub rear_fender_rise_m: f32,
+    /// Where the fender peak starts, as a fraction of the half width from the centre line (the
+    /// rise fades in over 0.3 of the half width inboard of it). Range 0.5…0.95. Default 0.80.
+    pub fender_peak_w: f32,
+    /// Side-view lean of the nose face from vertical, degrees. + leans the top back (raked
+    /// bumper, up to 60), − leans it forward (shark nose, down to −15: the bottom sets back).
+    /// The face runs from the nose's underside to its leading edge (`nose_h`); loft points ahead
+    /// of the face are clamped onto it. The face (rake + chin) never reaches further back than
+    /// 0.10 m ahead of the windshield base; the tail face stops 0.03 m behind the deck / rear
+    /// glass start (a hatch's tailgate lean is limited by its short tail section): deeper
+    /// settings are scaled down to fit. Kit parts placed on the old vertical face follow the
+    /// raked one (`lamp::follow_end_faces`). A steep face (> ~35°) on a very short nose
+    /// (`overhang_trim` −0.3…−0.35) eats the 10 cm bumper strip. Default 0 (the vertical face).
+    pub nose_face_rake_deg: f32,
+    /// Chin / undercut: how far the lower 40 % of the nose face sweeps back at the bottom, m.
+    /// Range 0…0.25. Default 0.
+    pub nose_chin_m: f32,
+    /// Side-view lean of the tail face, degrees: + leans the top forward (tailgate lean, up to
+    /// 60), − leans it rearward (the bottom tucks forward, down to −15). Default 0.
+    pub tail_face_rake_deg: f32,
+    /// Undercut of the lower 40 % of the tail face (diffuser tuck), m. Range 0…0.25. Default 0.
+    pub tail_chin_m: f32,
+    /// Share of the nose face's height (from its bottom) the chin sweeps: lower keeps the
+    /// undercut under kit parts on the lower face (a mouth grille, brake ducts and intakes on an
+    /// undercut sit in the upper face's shadow from every normal camera height). Range
+    /// 0.05…0.6. Default 0.4.
+    pub nose_chin_h: f32,
+    /// Share of the tail face's height the tail chin sweeps (as [`BodyStyle::nose_chin_h`]).
+    /// Range 0.05…0.6. Default 0.4.
+    pub tail_chin_h: f32,
+    /// Plan-view bow of the nose: over this length the half width follows an elliptical arc
+    /// from the full width down to `nose_tip_w` of it at the nose, so the face is rounded or
+    /// pointed instead of flat, m. Range 0…0.5. Default 0 (flat face).
+    pub nose_plan_bow_m: f32,
+    /// Half width left at the very nose with `nose_plan_bow_m`, as a fraction. Range 0.1…1.0
+    /// (0.6 = rounded nose, 0.2 = pointed). Default 0.6.
+    pub nose_tip_w: f32,
+    /// Plan-view bow of the tail (as `nose_plan_bow_m`), m. Range 0…0.5. Default 0.
+    pub tail_plan_bow_m: f32,
+    /// Half width left at the very tail with `tail_plan_bow_m`. Range 0.1…1.0. Default 0.6.
+    pub tail_tip_w: f32,
+    /// Greenhouse plan taper: the roof (and side-glass top) narrows from the header to the rear
+    /// glass by this fraction of its half width, held behind it (roof narrower toward the
+    /// rear), separate from tumblehome and the A / C-pillar rakes. Range 0…0.3. Default 0.
+    pub roof_plan_taper: f32,
+    /// Lower-body lean-in below the character line (boat-tail / tucked section), m: side points
+    /// below the crease move in, most at the sill, 0 at the crease. Range 0…0.08. Default 0.
+    pub lower_lean_in_m: f32,
+    /// Hood height offsets against the lattice, m: (at the cowl, at the hood's front edge).
+    /// Raising the front also lets the nose leading edge (`nose_h`) rise above the lattice hood
+    /// line (tall flat truck / SUV hoods); lowering both gives a thin, low nose block. Range
+    /// −0.10…+0.12 each. Default (0, 0).
+    pub hood_dz: (f32, f32),
+    /// Deck (trunk lid / tail top) height offset against the lattice, m. Range −0.10…+0.10.
+    /// Default 0.
+    pub deck_dz: f32,
+    /// Exponent of the front half of the `roof_arc` curve (windshield base → roof middle):
+    /// 2 = the parabola; lower = fuller near the base, higher = flatter roof, steeper fall.
+    /// Range 1.0…4.0. Default 2.
+    pub roof_arc_front_exp: f32,
+    /// Exponent of the rear half of the `roof_arc` curve (roof middle → rear glass base or the
+    /// fastback / hatch line's end): lower (1.2–1.6) makes a fastback fall in one even curve from
+    /// just behind the header. Range 1.0…4.0. Default 2.
+    pub roof_arc_rear_exp: f32,
+    /// Quarter (rearmost side) window. `false` paints the opening (body colour). Default true.
+    pub quarter_glass: bool,
+    /// Painted rear doors (vans): `Some` makes the rear glass area body-colour door skin (Trunk
+    /// region) and puts glass only in the drawn windows ([`RearDoorWindows`]). Only on cars
+    /// with rear glass. Default `None` (the whole area glazed).
+    pub rear_door_windows: Option<RearDoorWindows>,
+    /// Shortest deck (trunk lid / tailgate top) behind the rear glass base, m: vans and some
+    /// hatches want the glass (and roof) nearly flush with the tail. Range 0.02…0.25. Default
+    /// 0.25.
+    pub deck_min_m: f32,
+    /// Lip at the base of the rear glass (a kick where hatch glass meets the tailgate), m.
+    /// Range 0…0.05. Default 0.
+    pub glass_base_lip_m: f32,
+    /// Arch lip finish ([`TrimFinish::Black`] for black flare lips, `Chrome`, else body
+    /// colour). Default [`TrimFinish::Body`].
+    pub arch_lip_finish: TrimFinish,
+    /// Lower-body cladding: loft faces of the side, bumpers and sills below this height (m
+    /// above ground) become black `<panel>_cladding` parts on the same region. The band edge
+    /// falls on ring points (put `crease_z` near it for a crisp line); it never rises past 6 cm
+    /// under the lower bumper top, and on the bumpers past half their height, so every bumper
+    /// keeps paint. 0 = none. Range 0…0.7. Default 0.
+    pub cladding_z_m: f32,
+    /// Side-window (DLO) kick-up at its rear end, m: the glass base rises by this much over the
+    /// last `dlo_kink_len_m` of the rearmost side window (a C-pillar upturn). Range 0…0.12.
+    /// Default 0.
+    pub dlo_kink_m: f32,
+    /// Length of the DLO kick-up, m. Range 0.05…0.40. Default 0.15.
+    pub dlo_kink_len_m: f32,
+    /// Side-window top line drop from the front door window's front to the rearmost window's
+    /// rear end, m (+ the top line falls toward the rear, independent of the roof edge; the roof
+    /// rail band widens). Range −0.03…+0.10. Default 0.
+    pub dlo_top_drop_m: f32,
+}
+
+/// Allowed range of a [`BodyStyle::plan_width`] scale.
+pub const PLAN_SCALE_RANGE: (f32, f32) = (0.80, 1.05);
+/// Allowed range of a [`SideSculpt::dx_m`] and of the summed sculpt offset, m.
+pub const SCULPT_DX_RANGE: (f32, f32) = (-0.08, 0.06);
+/// Allowed range of [`BodyStyle::tumblehome_m`], m.
+pub const TUMBLEHOME_M_RANGE: (f32, f32) = (0.03, 0.36);
+/// Allowed range of [`BodyStyle::overhang_trim`] (each end), m.
+pub const OVERHANG_RANGE: (f32, f32) = (-0.35, 0.25);
+
+/// Drawn windows in a painted van rear door ([`BodyStyle::rear_door_windows`]): one rounded
+/// rectangle each side of the centre seam, seen from behind, cast onto the door skin as glass
+/// with a black seal. Chassis metres; every field soft-clamped.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RearDoorWindows {
+    /// Window edge in from the body side at the tail. Range 0.03…0.40. Recipe 0.10.
+    pub side_inset_m: f32,
+    /// Window edge out from the centre line (half the gap across the seam). Range 0…0.30.
+    /// Recipe 0.05.
+    pub centre_gap_m: f32,
+    /// Window top below the roof top at the tail. Range 0.03…0.40. Recipe 0.10.
+    pub top_gap_m: f32,
+    /// Window height. Range 0.15…1.20 (kept above the rear bumper). Recipe 0.45.
+    pub height_m: f32,
+    /// Corner radius. Range 0…0.15. Recipe 0.04.
+    pub corner_r_m: f32,
+}
+
+/// A local side-wall offset ([`BodyStyle::side_sculpt`]): every side ring point (underside edge
+/// to shoulder) inside the box `y0_m..y1_m` × `z0_m..z1_m` moves out (+) or in (−) by `dx_m`,
+/// easing to 0 over `falloff_m` outside the box (smoothstep in y and in z). Chassis metres.
+///
+/// Recipes: side pod stepping in behind the front wheel: `y` from the arch's rear edge back
+/// 0.8 m, `z` from the sill to just under the belt, `dx −0.04`, falloff 0.15. Door scallop /
+/// cove: a short `y` span, a mid-height `z` band, `dx −0.025`, falloff 0.10. Pontoon fender:
+/// `y` over the arch ± 0.3, `z` from the arch top to the belt, `dx +0.04`, falloff 0.2 (pair
+/// with `front_fender_rise_m`). Shoulder line: a thin `z` band just under the belt, the whole
+/// length, `dx +0.015`, falloff 0.03.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SideSculpt {
+    /// Rear edge of the full-strength box, chassis y (m).
+    pub y0_m: f32,
+    /// Front edge of the full-strength box, chassis y (m).
+    pub y1_m: f32,
+    /// Lower edge, m above ground.
+    pub z0_m: f32,
+    /// Upper edge, m above ground.
+    pub z1_m: f32,
+    /// Offset, m (+ outward, − inward). Range [`SCULPT_DX_RANGE`].
+    pub dx_m: f32,
+    /// Soft edge outside the box (y and z), m. Range 0.02…0.5.
+    pub falloff_m: f32,
+}
+
+impl SideSculpt {
+    /// Offset (m, + outward) this sculpt gives a side point at (y, z).
+    pub fn dx_at(&self, y: f32, z: f32) -> f32 {
+        let f = self.falloff_m.clamp(0.02, 0.5);
+        let edge = |v: f32, a: f32, b: f32| {
+            let (lo, hi) = (a.min(b), a.max(b));
+            let d = (lo - v).max(v - hi).max(0.0);
+            crate::profile::smoothstep(1.0 - d / f)
+        };
+        self.dx_m.clamp(SCULPT_DX_RANGE.0, SCULPT_DX_RANGE.1)
+            * edge(y, self.y0_m, self.y1_m)
+            * edge(z, self.z0_m, self.z1_m)
+    }
 }
 
 impl Default for BodyStyle {
@@ -269,6 +583,62 @@ impl Default for BodyStyle {
             tail_drop: 0.10,
             overhang_trim: (0.0, 0.0),
             bed_depth: 0.45,
+            a_pillar_w_m: 0.075,
+            c_pillar_w_m: 0.10,
+            b_pillar_w_m: 0.12,
+            b_pillar: TrimFinish::Black,
+            a_sail_len_m: 0.14,
+            a_sail: TrimFinish::Black,
+            roof_rail_drop_m: 0.05,
+            glass_recess_m: 0.012,
+            glass_frame_m: 0.018,
+            windshield_wrap_m: 0.06,
+            rear_glass_wrap_m: 0.04,
+            cowl_len_m: 0.07,
+            wipers: 2,
+            drip_rail: TrimFinish::Black,
+            door_handles: TrimFinish::Body,
+            mirrors: TrimFinish::Body,
+            panel_seams: true,
+            seam_w_m: 0.006,
+            fuel_door: FuelDoor::Right,
+            arch_lip_m: 0.016,
+            arch_liners: true,
+            end_round_m: 0.03,
+            plan_width: Vec::new(),
+            side_sculpt: Vec::new(),
+            side_bulge_m: 0.0,
+            side_bulge_z: 0.55,
+            rocker_in_m: 0.0,
+            tumblehome_m: None,
+            front_fender_rise_m: 0.0,
+            rear_fender_rise_m: 0.0,
+            fender_peak_w: 0.80,
+            nose_face_rake_deg: 0.0,
+            nose_chin_m: 0.0,
+            tail_face_rake_deg: 0.0,
+            tail_chin_m: 0.0,
+            nose_chin_h: 0.4,
+            tail_chin_h: 0.4,
+            nose_plan_bow_m: 0.0,
+            nose_tip_w: 0.6,
+            tail_plan_bow_m: 0.0,
+            tail_tip_w: 0.6,
+            roof_plan_taper: 0.0,
+            lower_lean_in_m: 0.0,
+            hood_dz: (0.0, 0.0),
+            deck_dz: 0.0,
+            roof_arc_front_exp: 2.0,
+            roof_arc_rear_exp: 2.0,
+            quarter_glass: true,
+            rear_door_windows: None,
+            deck_min_m: 0.25,
+            glass_base_lip_m: 0.0,
+            arch_lip_finish: TrimFinish::Body,
+            cladding_z_m: 0.0,
+            dlo_kink_m: 0.0,
+            dlo_kink_len_m: 0.15,
+            dlo_top_drop_m: 0.0,
         }
     }
 }
@@ -811,10 +1181,10 @@ pub struct LiveryHint {
 /// Detail / triangle-budget tier of a car.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Tier {
-    /// Hero / performance / police: 8k–20k triangles, finer loft.
+    /// Hero / performance / police: 8k–22k triangles, finer loft.
     #[default]
     Hero,
-    /// Traffic: 4k–10k triangles, coarser loft.
+    /// Traffic: 4k–11k triangles, coarser loft.
     Traffic,
 }
 
@@ -822,8 +1192,8 @@ impl Tier {
     /// Triangle budget (min, max) of the whole mesh.
     pub fn tri_budget(self) -> (u32, u32) {
         match self {
-            Tier::Hero => (8000, 20000),
-            Tier::Traffic => (4000, 10000),
+            Tier::Hero => (8000, 22000),
+            Tier::Traffic => (4000, 11000),
         }
     }
 }

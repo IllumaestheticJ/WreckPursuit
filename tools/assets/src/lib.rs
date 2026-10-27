@@ -20,12 +20,14 @@
 
 pub mod builder;
 pub mod crumple;
+pub mod lamp;
 pub mod mechanical;
 pub mod mesh;
 pub mod profile;
 pub mod skin;
 pub mod style;
 pub mod styles;
+pub mod trim;
 pub mod validate;
 pub mod wheels;
 

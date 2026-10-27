@@ -1,6 +1,8 @@
 // Quick look at procedural car meshes without the testbed or the wasm build: renders
 // data/panels/meshes/<car>.json (rest pose, greybox materials + the mesh's tints) in headless
-// Chromium and writes front / rear 3/4 and side PNGs per car.
+// Chromium and writes front / rear 3/4, side, top and greenhouse close-up (cabin, cabin_rear) PNGs
+// per car; SHOT_CAM="x,y,z" SHOT_AT="x,y,z" (chassis space, m) adds <car>_custom.png;
+// MESH_DIR=<dir> renders <dir>/<id>.json (ids `<car>__<variant>` use <car>'s def).
 //   node tools/assets/mesh_shots.mjs <outDir> <car> [car ...]
 // Needs apps/testbed-web/node_modules (three, playwright-core).
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -68,6 +70,12 @@ window.shoot = async (mesh, car) => {
     const m = new THREE.Mesh(g, mat(p.material));
     if (p.wheel != null && car) m.position.fromArray(car.wheels[p.wheel].position_m);
     root.add(m);
+    // SHOT_WIRE=1: overlay the triangle edges (for facet / sliver checks).
+    if (window.shotWire) {
+      const w = new THREE.LineSegments(new THREE.WireframeGeometry(g), new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 }));
+      w.position.copy(m.position);
+      root.add(w);
+    }
   }
   // Chassis space: +X right, +Y forward, +Z up.
   const cam = new THREE.PerspectiveCamera(30, 1100 / 620, 0.1, 200);
@@ -80,6 +88,22 @@ window.shoot = async (mesh, car) => {
     cam.lookAt(0, 0, 0.55);
     r.render(scene, cam);
     shots[name] = r.domElement.toDataURL("image/png");
+  }
+  // Close-ups of the greenhouse (pillars, glass frames, cowl, mirrors) and the rear quarter.
+  const zTop = car ? car.body_size_m[2] : 1.4;
+  for (const [name, dir, at] of [["cabin", [0.55, 0.62, 0.42], [0, 0.35 * len * 0.25, 0.7 * zTop]], ["cabin_rear", [-0.62, -0.5, 0.38], [0, -0.1 * len, 0.65 * zTop]]]) {
+    const dc = 0.95 * len;
+    cam.position.set(at[0] + dir[0] * dc, at[1] + dir[1] * dc, at[2] + dir[2] * dc);
+    cam.lookAt(at[0], at[1], at[2]);
+    r.render(scene, cam);
+    shots[name] = r.domElement.toDataURL("image/png");
+  }
+  // Optional extra view: SHOT_CAM="x,y,z" SHOT_AT="x,y,z" (chassis space, m) → <car>_custom.png.
+  if (window.customCam) {
+    cam.position.fromArray(window.customCam[0]);
+    cam.lookAt(...window.customCam[1]);
+    r.render(scene, cam);
+    shots.custom = r.domElement.toDataURL("image/png");
   }
   return shots;
 };
@@ -101,11 +125,19 @@ await page.route("**/*", (route) => {
 });
 await page.goto("http://shots.local/");
 await page.waitForFunction(() => window.ready === true);
+if (process.env.SHOT_CAM && process.env.SHOT_AT) {
+  const v = (e) => e.split(",").map(Number);
+  await page.evaluate((c) => (window.customCam = c), [v(process.env.SHOT_CAM), v(process.env.SHOT_AT)]);
+}
+if (process.env.SHOT_WIRE === "1") await page.evaluate(() => (window.shotWire = true));
 for (const id of cars) {
-  const mesh = JSON.parse(readFileSync(join(repo, "data/panels/meshes", `${id}.json`), "utf8"));
+  // MESH_DIR=<dir> reads <dir>/<id>.json instead (e.g. `phase3_demo` output); an id
+  // `<car>__<variant>` takes the car def of <car>.
+  const meshDir = process.env.MESH_DIR ? resolve(process.env.MESH_DIR) : join(repo, "data/panels/meshes");
+  const mesh = JSON.parse(readFileSync(join(meshDir, `${id}.json`), "utf8"));
   let car = null;
   try {
-    car = JSON.parse(readFileSync(join(repo, "data/cars", `${id}.json`), "utf8"));
+    car = JSON.parse(readFileSync(join(repo, "data/cars", `${id.split("__")[0]}.json`), "utf8"));
   } catch {}
   const shots = await page.evaluate(([m, c]) => window.shoot(m, c), [mesh, car]);
   for (const [name, url] of Object.entries(shots)) {

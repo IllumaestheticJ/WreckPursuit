@@ -239,7 +239,7 @@ fn hinged_parts_start_at_their_hinge_line() {
 #[test]
 fn style_knob_extremes_never_panic() {
     use car_assets::mesh::generate_styled;
-    use car_assets::style::{BodyStyle, Silhouette};
+    use car_assets::style::{BodyStyle, SideSculpt, Silhouette};
     let root = repo_root();
     let silhouettes = [
         Silhouette::Notchback,
@@ -310,6 +310,86 @@ fn style_knob_extremes_never_panic() {
             for y in [p.y_tail, p.y_deck, r0, r1, p.y_fw, p.y_bf, p.y_nose] {
                 let _ = p.ring(y);
             }
+        }
+        // Greenhouse framing and trim knobs (car-shapes) at both extremes: full generation.
+        for k in [1.0f32, -1.0] {
+            let mut st = base.clone();
+            let b = &mut st.body;
+            b.a_pillar_w_m = k;
+            b.c_pillar_w_m = k;
+            b.b_pillar_w_m = k;
+            b.a_sail_len_m = k;
+            b.roof_rail_drop_m = k;
+            b.glass_recess_m = k;
+            b.glass_frame_m = k;
+            b.windshield_wrap_m = 5.0 * k;
+            b.rear_glass_wrap_m = 5.0 * k;
+            b.cowl_len_m = k;
+            b.wipers = if k > 0.0 { 9 } else { 0 };
+            b.seam_w_m = k;
+            b.arch_lip_m = k;
+            b.end_round_m = k;
+            let m = generate_styled(&car.def, &car.lattice, &st);
+            assert!(m.tri_count > 0, "{id}");
+        }
+        // Phase 3 knobs far past both ends of their ranges: full generation.
+        for k in [1.0f32, -1.0] {
+            let mut st = base.clone();
+            let b = &mut st.body;
+            b.plan_width = vec![
+                [-9.0, 9.0 * k],
+                [0.0, -9.0 * k],
+                [0.3, f32::NAN],
+                [9.0, 0.0],
+            ];
+            b.side_sculpt = vec![SideSculpt {
+                y0_m: 9.0 * k,
+                y1_m: -9.0 * k,
+                z0_m: -1.0,
+                z1_m: 5.0,
+                dx_m: 2.0 * k,
+                falloff_m: 5.0 * k,
+            }];
+            b.side_bulge_m = k;
+            b.side_bulge_z = 3.0 * k;
+            b.rocker_in_m = k;
+            b.tumblehome_m = Some(2.0 * k);
+            b.front_fender_rise_m = k;
+            b.rear_fender_rise_m = k;
+            b.fender_peak_w = 3.0 * k;
+            b.overhang_trim = (3.0 * k, 3.0 * k);
+            b.nose_face_rake_deg = 90.0 * k;
+            b.tail_face_rake_deg = -90.0 * k;
+            b.nose_chin_m = k;
+            b.tail_chin_m = k;
+            b.nose_plan_bow_m = 2.0 * k;
+            b.tail_plan_bow_m = 2.0 * k;
+            b.nose_tip_w = 3.0 * k;
+            b.tail_tip_w = -3.0 * k;
+            b.roof_plan_taper = k;
+            b.lower_lean_in_m = k;
+            b.hood_dz = (k, -k);
+            b.deck_dz = k;
+            b.roof_arc = 1.0;
+            b.roof_arc_front_exp = 9.0 * k;
+            b.roof_arc_rear_exp = -9.0 * k;
+            b.quarter_glass = k > 0.0;
+            b.deck_min_m = k;
+            b.glass_base_lip_m = k;
+            b.flare_shape = car_assets::style::ArchShape::Trapezoid;
+            b.cladding_z_m = 3.0 * k;
+            b.dlo_kink_m = k;
+            b.dlo_kink_len_m = k;
+            b.dlo_top_drop_m = k;
+            b.rear_door_windows = Some(car_assets::style::RearDoorWindows {
+                side_inset_m: 9.0 * k,
+                centre_gap_m: -9.0 * k,
+                top_gap_m: 9.0 * k,
+                height_m: -9.0 * k,
+                corner_r_m: 9.0 * k,
+            });
+            let m = generate_styled(&car.def, &car.lattice, &st);
+            assert!(m.tri_count > 0, "{id}");
         }
         // Full generation at the two cabin-shift ends (the slow part: once per car).
         for shift in [-0.6f32, 0.6] {
@@ -679,6 +759,14 @@ fn lights_sit_outside_the_shell() {
     let root = repo_root();
     for id in car_ids(&root) {
         let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
+        check_lights(&id, &mesh);
+    }
+}
+
+/// Head / tail lamps and their turn-signal segments of `mesh` are outside the body shell,
+/// seen from ahead / behind, in the right materials.
+fn check_lights(id: &str, mesh: &car_assets::mesh::CarMesh) {
+    {
         // Head / tail lamps and the turn-signal segments cut out of them (style kits add fog
         // lamps, DRLs, markers etc. in other regions).
         let lights: Vec<_> = mesh
@@ -733,7 +821,7 @@ fn lights_sit_outside_the_shell() {
                 faces += 1;
                 let cx = (a[0] + b[0] + c[0]) / 3.0;
                 let cz = (a[2] + b[2] + c[2]) / 3.0;
-                let hit = first_hit(&mesh, [cx, y, cz], dir);
+                let hit = first_hit(mesh, [cx, y, cz], dir);
                 if hit.as_deref() == Some(l.name.as_str()) {
                     seen += 1;
                 }
@@ -841,39 +929,42 @@ fn lights_move_with_the_front_and_rear_structure() {
     }
 }
 
-/// Full-mesh triangle counts before the turn signals were rebuilt into the lamp clusters
-/// (round 12, playtest row 136); the rebuild may add at most 2 % per car.
+/// Full-mesh triangle counts the turn-signal lamps may add at most 2 % to (round 12, playtest
+/// row 136: the signals were rebuilt into the lamp clusters). Rebased on 2026-10-27 to the
+/// counts after the car-shapes generator pass (framed glass, pillars, common trim), so it keeps
+/// guarding foundation growth; a deliberate per-car detail pass updates its row. Rebased again
+/// (same day) by each car's growth from the twisted-strip rows of the loft (`twist_rows`).
 const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
-    ("arashi_t4", 16916),
-    ("brigand_400", 19772),
-    ("bulwark_400", 19186),
-    ("debug_coupe", 16617),
-    ("debug_sedan", 8422),
-    ("drayman_cargo", 9435),
-    ("fulmine_v10", 18738),
-    ("furrow_24", 8490),
-    ("hakone_gt", 17829),
-    ("hauler_1500", 9781),
-    ("ironside_440", 18699),
-    ("junkyard_beater", 7960),
-    ("kestrel_ts", 17548),
-    ("lindwurm_4t", 16246),
-    ("lucciola_350", 17242),
-    ("marten_20", 15796),
-    ("rampart_50", 18826),
-    ("satchel_20", 8330),
-    ("sentinel_bastion", 17191),
-    ("sentinel_cruiser", 16963),
-    ("sentinel_vigil", 17715),
-    ("sentinel_warden", 17770),
-    ("sentinel_wolfhound", 17137),
-    ("shiro_turbo", 17918),
-    ("sperber_32", 17772),
-    ("stoat_16v", 15610),
-    ("talus_20t", 17062),
-    ("tansy_13", 7192),
-    ("tumbril_20", 8503),
-    ("vireo_xs", 15731),
+    ("arashi_t4", 19374),
+    ("brigand_400", 21935),
+    ("bulwark_400", 21377),
+    ("debug_coupe", 18723),
+    ("debug_sedan", 9785),
+    ("drayman_cargo", 10766),
+    ("fulmine_v10", 21938),
+    ("furrow_24", 10134),
+    ("hakone_gt", 20990),
+    ("hauler_1500", 10995),
+    ("ironside_440", 21146),
+    ("junkyard_beater", 9244),
+    ("kestrel_ts", 20690),
+    ("lindwurm_4t", 21157),
+    ("lucciola_350", 19966),
+    ("marten_20", 19876),
+    ("rampart_50", 21912),
+    ("satchel_20", 10868),
+    ("sentinel_bastion", 21603),
+    ("sentinel_cruiser", 21865),
+    ("sentinel_vigil", 21747),
+    ("sentinel_warden", 21239),
+    ("sentinel_wolfhound", 21666),
+    ("shiro_turbo", 20338),
+    ("sperber_32", 19954),
+    ("stoat_16v", 19594),
+    ("talus_20t", 20152),
+    ("tansy_13", 10248),
+    ("tumbril_20", 10845),
+    ("vireo_xs", 20576),
 ];
 
 /// Bounding box (lo, hi) of a part, m.
@@ -1038,4 +1129,1047 @@ fn every_car_has_turn_signals_integrated_into_its_lamps() {
         parity += 1;
     }
     assert!(parity >= 4, "parity meshes checked: {parity}");
+}
+
+/// The phase 3 knobs at strong in-range settings (narrow plan, deep sculpts, bulged section,
+/// tall fender tops, shortest and longest overhangs) still give valid meshes: every panel on
+/// its lattice region, skinned to its own nodes, inside the body size.
+#[test]
+fn phase3_knobs_keep_panels_on_their_regions() {
+    use car_assets::style::SideSculpt;
+    let root = repo_root();
+    for id in car_ids(&root) {
+        let car = load_car(&root, &id).unwrap();
+        let spec = PanelSpec::load(&panel_path(&root, &id)).unwrap();
+        let base = style_for(&car.def);
+        let p0 = BodyProfile::styled(&car.def, &car.lattice, &base.body);
+        // (Both ends at +0.25 can push a car that is already long past validate's ±15 % length
+        // sanity check: a style call, not a generator limit.)
+        for (k, oh) in [(0, (-0.35f32, 0.25f32)), (1, (0.25, -0.35))] {
+            let mut st = base.clone();
+            let b = &mut st.body;
+            b.plan_width = vec![
+                [p0.y_tail, 0.80],
+                [p0.y_tail + 0.8, 1.0],
+                [0.0, 0.90],
+                [p0.y_nose - 0.8, 1.05],
+                [p0.y_nose, 0.80],
+            ];
+            b.side_sculpt = vec![
+                SideSculpt {
+                    y0_m: -0.8,
+                    y1_m: 0.8,
+                    z0_m: 0.0,
+                    z1_m: 0.6,
+                    dx_m: -0.08,
+                    falloff_m: 0.2,
+                },
+                SideSculpt {
+                    y0_m: p0.y_tail,
+                    y1_m: p0.y_nose,
+                    z0_m: p0.z_belt - 0.08,
+                    z1_m: p0.z_belt - 0.05,
+                    dx_m: 0.06,
+                    falloff_m: 0.03,
+                },
+            ];
+            b.side_bulge_m = 0.06;
+            b.rocker_in_m = 0.08;
+            b.tumblehome_m = Some(if k == 0 { 0.03 } else { 0.36 });
+            b.front_fender_rise_m = 0.12;
+            b.rear_fender_rise_m = 0.12;
+            b.overhang_trim = oh;
+            // (A 50° face on the shortest nose eats the whole 10 cm bumper strip: no painted
+            // bumper left. 35° keeps one.)
+            b.nose_face_rake_deg = if k == 0 { 35.0 } else { -15.0 };
+            b.tail_face_rake_deg = if k == 0 { -15.0 } else { 35.0 };
+            b.nose_chin_m = 0.20;
+            b.tail_chin_m = 0.20;
+            b.nose_plan_bow_m = 0.45;
+            b.nose_tip_w = 0.2;
+            b.tail_plan_bow_m = 0.45;
+            b.tail_tip_w = 0.3;
+            b.roof_plan_taper = 0.3;
+            b.lower_lean_in_m = 0.08;
+            // (Raises on top of the 0.12 fender rises would push a low car past validate's
+            // height sanity check: keep them moderate here; the sweep covers the extremes.)
+            b.hood_dz = if k == 0 { (0.0, 0.10) } else { (-0.10, -0.10) };
+            b.deck_dz = if k == 0 { 0.03 } else { -0.10 };
+            b.roof_arc_rear_exp = 1.2;
+            b.quarter_glass = k == 0;
+            b.deck_min_m = 0.02;
+            b.glass_base_lip_m = 0.05;
+            b.flare_shape = car_assets::style::ArchShape::Trapezoid;
+            b.arch_lip_finish = car_assets::style::TrimFinish::Black;
+            b.cladding_z_m = 0.7;
+            b.dlo_kink_m = 0.12;
+            b.dlo_top_drop_m = 0.10;
+            let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+            car_assets::skin::bind_skin(&car.lattice, &mut m);
+            // Budgets are the style author's call (these settings add loft stations), and every
+            // outward knob stacked at once can pass validate's ±35 % / 15 % / 20 % size sanity
+            // check (meant for unit and pivot errors): regions, skinning and parts are checked.
+            let errs: Vec<String> = validate(&car, &m, Some(&spec))
+                .into_iter()
+                .filter(|e| !e.contains("budget") && !e.contains("pivot/scale"))
+                .collect();
+            assert!(errs.is_empty(), "{id} (overhang {oh:?}): {errs:#?}");
+        }
+    }
+}
+
+/// The plan-width curve never pulls the body inside a tire (outer face + 1 cm), even at the
+/// narrowest scale.
+#[test]
+fn plan_width_keeps_the_body_outside_the_tires() {
+    let root = repo_root();
+    for id in car_ids(&root) {
+        let car = load_car(&root, &id).unwrap();
+        let mut body = style_for(&car.def).body;
+        // Baseline without the car's own plan curve (a style may already pinch the waist).
+        body.plan_width.clear();
+        let w0 = BodyProfile::styled(&car.def, &car.lattice, &body);
+        body.plan_width = vec![[0.0, 0.80]];
+        let p = BodyProfile::styled(&car.def, &car.lattice, &body);
+        for (w, &(wy, _, _)) in car.def.wheels.iter().zip(&p.arches) {
+            let tire = w.position_m[0].abs() + 0.5 * w.width_m;
+            let want = (tire + 0.01).min(w0.half_width(wy));
+            let got = p.half_width(wy);
+            assert!(
+                got >= want - 1e-4,
+                "{id}: half width {got} over a wheel, tire at {tire}"
+            );
+        }
+        assert!(p.half_width(0.0) <= 0.81 * w0.half_width(0.0) + 0.05);
+    }
+}
+
+/// Fender tops raised with `front_fender_rise_m` (instead of sinking the hood with
+/// `hood_valley`) leave the car's kit head lamps visible, at the largest rise.
+#[test]
+fn fender_rise_keeps_kit_lamps_visible() {
+    let root = repo_root();
+    for id in ["nyx_proto", "morrigan_55", "ironside_440", "kestrel_ts"] {
+        let car = load_car(&root, id).unwrap();
+        let mut st = style_for(&car.def);
+        st.body.hood_valley = 0.0;
+        st.body.deck_valley = 0.0;
+        st.body.front_fender_rise_m = 0.12;
+        st.body.rear_fender_rise_m = 0.12;
+        // The peak starts inboard of the kits' fender-top lamps (they sit on its plateau, not
+        // across the band's bend).
+        st.body.fender_peak_w = 0.65;
+        let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+        car_assets::skin::bind_skin(&car.lattice, &mut m);
+        check_lights(id, &m);
+    }
+}
+
+/// Area (cm²) where two body / panel triangles near an end (`front`: within 0.6 m of the nose,
+/// else of the tail; below 0.6 m) lie in the same plane (within 1.5 mm, parallel or opposite)
+/// and overlap: such faces depth-fight in the renderer.
+fn end_coplanar_overlap_cm2(m: &car_assets::mesh::CarMesh, front: bool) -> f32 {
+    type V = [f32; 3];
+    let sub = |a: V, b: V| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: V, b: V| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = |a: V, b: V| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let ys: Vec<f32> = m
+        .parts
+        .iter()
+        .flat_map(|p| p.positions_mm.chunks_exact(3).map(|q| q[1] as f32))
+        .collect();
+    let (ymin, ymax) = ys
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(a, b), &y| (a.min(y), b.max(y)));
+    let mut tris: Vec<([V; 3], V, f32)> = Vec::new();
+    for p in &m.parts {
+        if !matches!(p.kind, PartKind::Panel | PartKind::Body) || p.wheel.is_some() {
+            continue;
+        }
+        let v = |i: u32| -> V {
+            let q = &p.positions_mm[i as usize * 3..i as usize * 3 + 3];
+            [q[0] as f32, q[1] as f32, q[2] as f32]
+        };
+        for t in p.indices.chunks_exact(3) {
+            let q = [v(t[0]), v(t[1]), v(t[2])];
+            let near = if front {
+                q.iter().all(|c| c[1] > ymax - 600.0)
+            } else {
+                q.iter().all(|c| c[1] < ymin + 600.0)
+            };
+            if !near || q.iter().any(|c| c[2] > 600.0) {
+                continue;
+            }
+            let n = cross(sub(q[1], q[0]), sub(q[2], q[0]));
+            let l = dot(n, n).sqrt();
+            if l < 20.0 {
+                continue;
+            }
+            let n = [n[0] / l, n[1] / l, n[2] / l];
+            tris.push((q, n, dot(n, q[0])));
+        }
+    }
+    // Area of the overlap of two triangles in the plane (axes k1, k2).
+    let area = |p: &[[f32; 2]]| -> f32 {
+        (0..p.len())
+            .map(|i| {
+                let (a, b) = (p[i], p[(i + 1) % p.len()]);
+                a[0] * b[1] - b[0] * a[1]
+            })
+            .sum::<f32>()
+            * 0.5
+    };
+    let mut total = 0.0;
+    for i in 0..tris.len() {
+        for j in i + 1..tris.len() {
+            let (a, b) = (&tris[i], &tris[j]);
+            let d = dot(a.1, b.1);
+            if d.abs() < 0.995 || (a.2 - d * b.2).abs() > 1.5 {
+                continue;
+            }
+            let ax = (0..3)
+                .max_by(|&x, &y| a.1[x].abs().total_cmp(&a.1[y].abs()))
+                .unwrap();
+            let (k1, k2) = ((ax + 1) % 3, (ax + 2) % 3);
+            let flat = |t: &[V; 3]| -> Vec<[f32; 2]> {
+                let mut p: Vec<[f32; 2]> = t.iter().map(|c| [c[k1], c[k2]]).collect();
+                if area(&p) < 0.0 {
+                    p.reverse();
+                }
+                p
+            };
+            let mut poly = flat(&a.0);
+            let clip = flat(&b.0);
+            for e in 0..3 {
+                let (c0, c1) = (clip[e], clip[(e + 1) % 3]);
+                let side = |q: [f32; 2]| {
+                    (c1[0] - c0[0]) * (q[1] - c0[1]) - (c1[1] - c0[1]) * (q[0] - c0[0])
+                };
+                let mut out = Vec::new();
+                for k in 0..poly.len() {
+                    let (p0, p1) = (poly[k], poly[(k + 1) % poly.len()]);
+                    let (s0, s1) = (side(p0), side(p1));
+                    if s0 >= 0.0 {
+                        out.push(p0);
+                    }
+                    if (s0 >= 0.0) != (s1 >= 0.0) {
+                        let t = s0 / (s0 - s1);
+                        out.push([p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t]);
+                    }
+                }
+                poly = out;
+                if poly.len() < 3 {
+                    break;
+                }
+            }
+            if poly.len() >= 3 {
+                total += area(&poly).max(0.0) / 100.0;
+            }
+        }
+    }
+    total
+}
+
+/// Chins (`nose_chin_m` / `tail_chin_m`) leave no coplanar, overlapping faces at the ends (the
+/// rounded end ring used to fold where the chin collapses the lowest ring points, so the cap
+/// and the last faces depth-fought in the smooth renderer): no more overlap than the same car
+/// without a chin.
+#[test]
+fn chins_leave_no_overlapping_end_faces() {
+    let root = repo_root();
+    for id in [
+        "marten_20",
+        "kestrel_ts",
+        "hauler_1500",
+        "sentinel_cruiser",
+        "tansy_13",
+    ] {
+        let car = load_car(&root, id).unwrap();
+        let base = style_for(&car.def);
+        let m0 = car_assets::mesh::generate_styled(&car.def, &car.lattice, &base);
+        let before = [
+            end_coplanar_overlap_cm2(&m0, true),
+            end_coplanar_overlap_cm2(&m0, false),
+        ];
+        for chin in [0.03f32, 0.06, 0.12] {
+            let mut st = base.clone();
+            st.body.nose_chin_m = chin;
+            st.body.tail_chin_m = chin;
+            let m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+            for (k, front) in [(0, true), (1, false)] {
+                let a = end_coplanar_overlap_cm2(&m, front);
+                assert!(
+                    a <= before[k] + 2.0,
+                    "{id} chin {chin} {}: {a:.0} cm² of overlapping faces (no chin: {:.0})",
+                    if front { "nose" } else { "tail" },
+                    before[k]
+                );
+            }
+        }
+    }
+}
+
+/// Share of the camera-facing triangles of part `name` that the body shell does not hide from a
+/// camera ahead of the nose, `elev_deg` above horizontal (rays through their centroids, as
+/// `check_lights`).
+fn seen_from_ahead(m: &car_assets::mesh::CarMesh, name: &str, elev_deg: f32) -> f32 {
+    let e = elev_deg.to_radians();
+    let to_cam = [0.0, e.cos(), e.sin()];
+    let (mut faces, mut seen) = (0, 0);
+    for p in m.parts.iter().filter(|p| p.name == name) {
+        for t in p.indices.chunks(3) {
+            let (a, b, c) = (
+                p.vertex(t[0] as usize),
+                p.vertex(t[1] as usize),
+                p.vertex(t[2] as usize),
+            );
+            let n = cross3(sub3(b, a), sub3(c, a));
+            let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            if l < 1e-9 || (n[0] * to_cam[0] + n[1] * to_cam[1] + n[2] * to_cam[2]) / l < 0.3 {
+                continue;
+            }
+            faces += 1;
+            let cen = [
+                (a[0] + b[0] + c[0]) / 3.0,
+                (a[1] + b[1] + c[1]) / 3.0,
+                (a[2] + b[2] + c[2]) / 3.0,
+            ];
+            let o = [cen[0], cen[1] + 3.0 * to_cam[1], cen[2] + 3.0 * to_cam[2]];
+            let d = [0.0, -to_cam[1], -to_cam[2]];
+            // Seen unless the body shell is in front (a grille's own slats may be).
+            let hit = first_hit(m, o, d);
+            let shell = hit
+                .as_deref()
+                .and_then(|h| m.parts.iter().find(|q| q.name == h))
+                .is_some_and(|q| matches!(q.kind, PartKind::Panel | PartKind::Body));
+            if !shell {
+                seen += 1;
+            }
+        }
+    }
+    if faces == 0 {
+        0.0
+    } else {
+        seen as f32 / faces as f32
+    }
+}
+
+/// Race-car noses (morrigan / nyx kits) with a raked face over a chin: with `nose_chin_h`
+/// keeping the undercut under the lower face, the mouth grille and the brake / nose ducts on it
+/// stay in view from ahead (straight and 12° above) about as well as without a chin. At the
+/// default 0.4 the undercut reaches up behind them and the upper face's overhang hides them
+/// from every normal camera height (race-offroad report).
+#[test]
+fn race_nose_parts_stay_visible_over_a_low_chin() {
+    let root = repo_root();
+    for (id, parts) in [
+        (
+            "morrigan_55",
+            ["front_mouth", "brake_duct_l", "brake_duct_r"],
+        ),
+        ("nyx_proto", ["nose_intake", "nose_duct_l", "nose_duct_r"]),
+    ] {
+        let car = load_car(&root, id).unwrap();
+        let mut st = style_for(&car.def);
+        st.body.nose_face_rake_deg = 20.0;
+        st.body.nose_chin_m = 0.0;
+        let open = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+        st.body.nose_chin_m = 0.08;
+        st.body.nose_chin_h = 0.15;
+        let low = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+        for name in parts {
+            for elev in [0.0f32, 12.0] {
+                let (a, b) = (
+                    seen_from_ahead(&open, name, elev),
+                    seen_from_ahead(&low, name, elev),
+                );
+                assert!(
+                    a > 0.2,
+                    "{id}/{name} at {elev}°: hidden even without a chin ({a:.2})"
+                );
+                assert!(
+                    b >= 0.7 * a,
+                    "{id}/{name} at {elev}°: {b:.2} of its faces seen over a low chin, {a:.2} without"
+                );
+            }
+        }
+    }
+}
+
+/// A top-view head lamp near the nose (nyx's fender-pod lamp, on the race-offroad nyx nose)
+/// with the face raked 20–40° and no chin: the outline moves back to end short of the face's
+/// top edge, so no lens sits under the body top seen from ahead
+/// (`lights_sit_outside_the_shell` failed at 20–25°, race-offroad report).
+#[test]
+fn top_view_lamps_stay_on_top_of_a_raked_nose() {
+    use car_assets::builder::{Builder, PartKey};
+    use car_assets::lamp::{ellipse, LampView};
+    use car_assets::mesh::MaterialSlot as M;
+    use car_assets::style::{Detail, DetailCtx, Shape};
+    use car_assets::styles::performance::kit::{Kit, Seg, SIDES};
+    fn pod_lamps(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
+        let p = ctx.profile;
+        let mut k = Kit::new(p, b);
+        let (wn, yn) = (p.half_width(p.y_nose), p.y_nose);
+        let (wt, zt) = (p.half_width(p.y_tail), p.belt(p.y_tail));
+        for sx in SIDES {
+            let tail = ellipse([-(wt - 0.20), zt - 0.10], [0.12, 0.05], 12);
+            k.proj_cluster(
+                sx,
+                false,
+                LampView::Rear,
+                &tail,
+                Some(Seg::Inboard(0.06)),
+                M::EmissiveAmber,
+                0.0,
+                0.0,
+            );
+            // Its tip nearer the nose than nyx's (12 cm): over a 20–40° rake it reaches past
+            // the face's top edge.
+            let lamp = [
+                [-(wn - 0.03), yn - 0.04],
+                [-(wn - 0.26), yn - 0.12],
+                [-(wn - 0.24), yn - 0.32],
+                [-(wn - 0.05), yn - 0.25],
+            ];
+            k.proj_cluster(
+                sx,
+                true,
+                LampView::Top,
+                &lamp,
+                Some(Seg::Outboard(0.08)),
+                M::EmissiveAmber,
+                0.0,
+                0.0,
+            );
+        }
+        // As the nyx kit: turn signals beside the lamps too.
+        k.signals_beside_lamps(0.06, M::EmissiveAmber);
+    }
+    let root = repo_root();
+    for id in ["nyx_proto", "morrigan_55"] {
+        let car = load_car(&root, id).unwrap();
+        for rake in [20.0f32, 25.0, 40.0] {
+            let mut st = style_for(&car.def);
+            // The race-offroad nyx nose: fender pods standing over a low, rounded nose.
+            st.body.front_fender_rise_m = 0.11;
+            st.body.rear_fender_rise_m = 0.09;
+            st.body.fender_peak_w = 0.68;
+            st.body.nose_h = Some(0.40);
+            st.body.nose_rake_deg = 30.0;
+            st.body.nose_plan_round = 0.10;
+            st.body.nose_face_rake_deg = rake;
+            st.body.nose_chin_m = 0.0;
+            // Only these lamps (the car's kit would cover the pods with its own parts).
+            st.details = vec![Detail::new(
+                "pod_lamps",
+                BodyRegion::FrameFront,
+                M::Trim,
+                Shape::Custom(pod_lamps),
+            )];
+            let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+            car_assets::skin::bind_skin(&car.lattice, &mut m);
+            check_lights(&format!("{id} rake {rake}"), &m);
+        }
+    }
+}
+
+/// Painted van rear doors (`rear_door_windows`): the rear glass area becomes body-colour door
+/// skin, glass only in the two drawn windows (a seal round each), on both LODs; the car still
+/// validates, inside its budget, with its lamps visible.
+#[test]
+fn painted_rear_doors_keep_glass_only_in_the_windows() {
+    use car_assets::style::RearDoorWindows;
+    let root = repo_root();
+    for id in ["drayman_cargo", "satchel_20", "tumbril_20"] {
+        let car = load_car(&root, id).unwrap();
+        let base = style_for(&car.def);
+        let mut st = base.clone();
+        st.body.rear_door_windows = Some(RearDoorWindows {
+            side_inset_m: 0.10,
+            centre_gap_m: 0.05,
+            top_gap_m: 0.10,
+            height_m: 0.45,
+            corner_r_m: 0.04,
+        });
+        let area = |m: &car_assets::mesh::CarMesh, name: &str| -> f32 {
+            m.parts
+                .iter()
+                .filter(|p| p.name == name)
+                .flat_map(|p| {
+                    p.indices.chunks_exact(3).map(move |t| {
+                        let v = |i: u32| {
+                            let q = &p.positions_mm[i as usize * 3..i as usize * 3 + 3];
+                            [q[0] as f32, q[1] as f32, q[2] as f32]
+                        };
+                        let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+                        let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                        let w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                        let x = [
+                            u[1] * w[2] - u[2] * w[1],
+                            u[2] * w[0] - u[0] * w[2],
+                            u[0] * w[1] - u[1] * w[0],
+                        ];
+                        0.5e-6 * (x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt()
+                    })
+                })
+                .sum()
+        };
+        // Fully glazed baseline: the car's style without painted doors (the vans' own styles
+        // may already use them).
+        let mut glazed = base.clone();
+        glazed.body.rear_door_windows = None;
+        let full = car_assets::mesh::generate_styled(&car.def, &car.lattice, &glazed);
+        let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+        car_assets::skin::bind_skin(&car.lattice, &mut m);
+        let errors = validate(&car, &m, None);
+        assert!(errors.is_empty(), "{id}: {errors:?}");
+        let (g0, g1) = (area(&full, "rear_glass"), area(&m, "rear_glass"));
+        assert!(
+            g1 > 0.3 && g1 < 0.8 * g0,
+            "{id}: rear glass {g1:.2} m² against {g0:.2} m² fully glazed"
+        );
+        assert!(
+            area(&m, "trunk") > area(&full, "trunk") + 0.3,
+            "{id}: no door skin"
+        );
+        assert!(area(&m, "rear_glass_seal") > 0.01, "{id}: no seal");
+        check_lights(id, &m);
+        let mid =
+            car_assets::mesh::generate_lod(&car.def, &car.lattice, &st, car_assets::mesh::Lod::Mid);
+        assert!(
+            area(&mid, "rear_glass") > 0.3,
+            "{id}: mid LOD lost the windows"
+        );
+    }
+}
+
+/// Lamps projected onto the surface (`lamp.rs` via `Kit::proj_cluster`): front-view lenses
+/// wrapping round the corner, top-view lenses on the nose, wraparound tail lamps, with their
+/// turn-signal segments and bezels, sit outside the shell and keep the turn-signal contract.
+#[test]
+fn projected_lamps_sit_outside_the_shell_and_keep_the_signal_contract() {
+    use car_assets::builder::{Builder, PartKey};
+    use car_assets::lamp::{ellipse, LampView};
+    use car_assets::mesh::MaterialSlot as M;
+    use car_assets::style::{Detail, DetailCtx, Shape};
+    use car_assets::styles::performance::kit::{Kit, Seg, SIDES};
+    fn front_view(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
+        let mut kit = Kit::new(ctx.profile, b);
+        let (wn, (_, zt)) = (kit.wn(), kit.nose_z());
+        let (wt, (_, tt)) = (kit.wt(), kit.tail_z());
+        for sx in SIDES {
+            // Kept under the nose face's top edge (an outline across a sharp edge splits over
+            // two surfaces).
+            let head = [
+                [-(wn - 0.30), zt - 0.13],
+                [-(wn - 0.01), zt - 0.09],
+                [-(wn - 0.01), zt - 0.045],
+                [-(wn - 0.36), zt - 0.06],
+            ];
+            let o = Seg::Outboard(0.10);
+            kit.proj_cluster(
+                sx,
+                true,
+                LampView::Front,
+                &head,
+                Some(o),
+                M::EmissiveAmber,
+                0.012,
+                20.0,
+            );
+            let tail = [
+                [-(wt - 0.34), tt - 0.13],
+                [-(wt + 0.03), tt - 0.13],
+                [-(wt + 0.03), tt - 0.03],
+                [-(wt - 0.40), tt - 0.05],
+            ];
+            let i = Seg::Inboard(0.09);
+            kit.proj_cluster(
+                sx,
+                false,
+                LampView::Rear,
+                &tail,
+                Some(i),
+                M::EmissiveAmber,
+                0.01,
+                35.0,
+            );
+        }
+    }
+    fn top_view(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
+        let mut kit = Kit::new(ctx.profile, b);
+        let (wn, yn) = (kit.wn(), kit.yn);
+        let (wt, (_, tt)) = (kit.wt(), kit.tail_z());
+        for sx in SIDES {
+            let tear = [
+                [-(wn - 0.05), yn - 0.03],
+                [-(wn - 0.30), yn - 0.07],
+                [-(wn - 0.24), yn - 0.26],
+                [-(wn - 0.10), yn - 0.42],
+                [-(wn - 0.05), yn - 0.30],
+            ];
+            let l = Seg::Outboard(0.06);
+            kit.proj_cluster(
+                sx,
+                true,
+                LampView::Top,
+                &tear,
+                Some(l),
+                M::EmissiveAmber,
+                0.01,
+                0.0,
+            );
+            let round = ellipse([-(wt - 0.16), tt - 0.10], [0.085, 0.065], 16);
+            let i = Seg::Inboard(0.05);
+            kit.proj_cluster(
+                sx,
+                false,
+                LampView::Rear,
+                &round,
+                Some(i),
+                M::Taillight,
+                0.012,
+                15.0,
+            );
+        }
+    }
+    // A concave (L-shaped) head lamp with a projector bowl, a chrome ring and an LED strip.
+    fn concave(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
+        use car_assets::lamp::{element, Element, Lamp};
+        use car_assets::styles::performance::kit::{dkey, headlight_key, sided};
+        let mut kit = Kit::new(ctx.profile, b);
+        let (wn, (_, zt)) = (kit.wn(), kit.nose_z());
+        let (wt, (_, tt)) = (kit.wt(), kit.tail_z());
+        for sx in SIDES {
+            let l = [
+                [-(wn - 0.40), zt - 0.14],
+                [-(wn - 0.02), zt - 0.14],
+                [-(wn - 0.02), zt - 0.05],
+                [-(wn - 0.14), zt - 0.05],
+                [-(wn - 0.14), zt - 0.10],
+                [-(wn - 0.40), zt - 0.10],
+            ];
+            let i = Seg::Inboard(0.06);
+            kit.proj_cluster(
+                sx,
+                true,
+                LampView::Front,
+                &l,
+                Some(i),
+                M::EmissiveAmber,
+                0.01,
+                15.0,
+            );
+            let pts = l.iter().map(|q| [sx * q[0].abs(), q[1]]).collect();
+            let lamp = Lamp::new(LampView::Front, pts);
+            let hk = headlight_key(sx);
+            let c = [sx * (wn - 0.08), zt - 0.10];
+            let bowl = Element::Bowl {
+                r_m: 0.03,
+                h_m: 0.01,
+            };
+            element(kit.b, ctx.profile, &hk, &lamp, c, &bowl);
+            let ring = sided(&dkey("lamp_ring_l", BodyRegion::FrameFront, M::Chrome), sx);
+            let rg = Element::Ring {
+                r_m: 0.036,
+                w_m: 0.006,
+            };
+            element(kit.b, ctx.profile, &ring, &lamp, c, &rg);
+            let strip = Element::Strip {
+                pts: vec![[sx * (wn - 0.38), zt - 0.12], [sx * (wn - 0.17), zt - 0.12]],
+                w_m: 0.012,
+            };
+            element(kit.b, ctx.profile, &hk, &lamp, c, &strip);
+            let tail = [
+                [-(wt - 0.30), tt - 0.12],
+                [-(wt - 0.02), tt - 0.12],
+                [-(wt - 0.02), tt - 0.03],
+                [-(wt - 0.30), tt - 0.03],
+            ];
+            let o = Seg::Outboard(0.08);
+            kit.proj_cluster(
+                sx,
+                false,
+                LampView::Rear,
+                &tail,
+                Some(o),
+                M::EmissiveAmber,
+                0.0,
+                0.0,
+            );
+        }
+    }
+    let root = repo_root();
+    for id in [
+        "kestrel_ts",
+        "vireo_xs",
+        "nyx_proto",
+        "hauler_1500",
+        "sentinel_cruiser",
+    ] {
+        let car = load_car(&root, id).unwrap();
+        let fs = [front_view as car_assets::style::DetailFn, top_view, concave];
+        // Upright faces, and raked / undercut ones (the lenses land on the drawn face).
+        for (f, rake) in fs.iter().flat_map(|&f| [(f, 0.0f32), (f, 1.0)]) {
+            let mut st = style_for(&car.def);
+            st.body.nose_face_rake_deg = 12.0 * rake;
+            st.body.nose_chin_m = 0.05 * rake;
+            st.body.tail_face_rake_deg = 10.0 * rake;
+            st.details = vec![Detail::new(
+                "lamps",
+                BodyRegion::Cabin,
+                M::Trim,
+                Shape::Custom(f),
+            )];
+            let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+            car_assets::skin::bind_skin(&car.lattice, &mut m);
+            check_lights(id, &m);
+            check_signals(id, &m);
+            for s in m.parts.iter().filter(|p| p.name.starts_with("indicator_")) {
+                assert!(car_assets::skin::is_end_lamp(s), "{id}/{}", s.name);
+            }
+            let bezels = m
+                .parts
+                .iter()
+                .filter(|p| p.name.contains("lamp_bezel"))
+                .count();
+            assert!(
+                bezels == 4 || bezels == 2,
+                "{id}: head (and tail) bezels: {bezels}"
+            );
+        }
+    }
+}
+
+/// `PatchBand::Greenhouse` follows the side above the belt (opera window / C-pillar patch), and
+/// cladding parts take the lower side in black on the panel's own region.
+#[test]
+fn greenhouse_patches_and_cladding() {
+    use car_assets::builder::{Builder, PartKey, Patch, PatchBand};
+    use car_assets::mesh::MaterialSlot as M;
+    let root = repo_root();
+    let car = load_car(&root, "ironside_440").unwrap();
+    let mut st = style_for(&car.def);
+    st.body.cladding_z_m = 0.40;
+    let p = BodyProfile::styled(&car.def, &car.lattice, &st.body);
+    let mut b = Builder::new();
+    let key = PartKey::body("opera_l", BodyRegion::Cabin, PartKind::Detail, M::Trim);
+    let y = 0.5 * (p.roof.0 + p.roof.1);
+    let (z0, z1) = (p.z_belt + 0.08, p.roof.2 - 0.08);
+    let patch = Patch {
+        y0: y - 0.1,
+        y1: y + 0.1,
+        band: PatchBand::Greenhouse { z0, z1 },
+        offset_m: 0.002,
+        thickness_m: 0.0,
+        steps: (2, 3),
+    };
+    b.surface_patch(&key, &p, &patch);
+    let (pos, _, idx) = b.geometry("opera_l").unwrap();
+    assert!(!idx.is_empty());
+    for q in pos {
+        let (s, _) = p.greenhouse_point(q[1], q[2]);
+        assert!(
+            (q[0] - s[0]).abs() < 0.01,
+            "patch off the greenhouse: {q:?} vs {s:?}"
+        );
+        assert!(q[0] < -0.2 && q[2] >= z0 - 1e-3 && q[2] <= z1 + 1e-3);
+    }
+    let m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+    let clad: Vec<_> = m
+        .parts
+        .iter()
+        .filter(|q| q.name.ends_with("_cladding"))
+        .collect();
+    assert!(
+        clad.len() >= 4,
+        "{:?}",
+        clad.iter().map(|q| &q.name).collect::<Vec<_>>()
+    );
+    for q in clad {
+        assert_eq!(q.material, M::Trim);
+        // The band edge falls on ring points: under the belt, starting below the knob height.
+        let zs: Vec<f32> = (0..q.vertex_count()).map(|v| q.vertex(v)[2]).collect();
+        let top = zs.iter().copied().fold(f32::MIN, f32::max);
+        let bottom = zs.iter().copied().fold(f32::MAX, f32::min);
+        assert!(
+            top < p.z_belt - 0.05,
+            "{}: top {top}, belt {}",
+            q.name,
+            p.z_belt
+        );
+        assert!(bottom < st.body.cladding_z_m, "{}: bottom {bottom}", q.name);
+    }
+}
+
+/// The shared panel helpers promoted into `Kit` (`face_poly`, `top_poly`, `side_poly`,
+/// `end_poly`, `swept_top_lamp`) build on a raked, sculpted body, stay on their surfaces and
+/// keep the mesh valid.
+#[test]
+fn shared_kit_panels_follow_the_body() {
+    use car_assets::builder::{Builder, PartKey};
+    use car_assets::mesh::MaterialSlot as M;
+    use car_assets::style::{Detail, DetailCtx, Shape};
+    use car_assets::styles::performance::kit::{dkey, on_side, Kit, SIDES};
+    fn panels(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
+        let p = ctx.profile;
+        let mut k = Kit::new(p, b);
+        let (wn, yn) = (k.wn(), k.yn);
+        let (_, zt) = k.nose_z();
+        let intake = [
+            [-0.25, zt - 0.30],
+            [0.25, zt - 0.30],
+            [0.20, zt - 0.20],
+            [-0.20, zt - 0.20],
+        ];
+        k.end_poly(
+            &dkey("t_intake", BodyRegion::FrontBumper, M::Grille),
+            true,
+            &intake,
+            0.004,
+            0.02,
+        );
+        k.face_poly(
+            &dkey("t_badge", BodyRegion::Trunk, M::Chrome),
+            false,
+            &[[-0.05, 0.6], [0.05, 0.6], [0.05, 0.64], [-0.05, 0.64]],
+            0.006,
+        );
+        let (fy, _, fr) = k.arch(true);
+        for sx in SIDES {
+            let vent = on_side(
+                sx,
+                &[
+                    [wn - 0.35, fy + 0.1],
+                    [wn - 0.15, fy + 0.1],
+                    [wn - 0.17, fy - 0.15],
+                    [wn - 0.33, fy - 0.15],
+                ],
+            );
+            let key = car_assets::styles::performance::kit::sided(
+                &dkey("t_vent_l", BodyRegion::FrontLeftFender, M::Grille),
+                sx,
+            );
+            k.top_poly(&key, &vent, 0.003, 0.01);
+            let gill = [
+                [fy - fr - 0.30, 0.40],
+                [fy - fr - 0.08, 0.42],
+                [fy - fr - 0.08, 0.55],
+                [fy - fr - 0.30, 0.52],
+            ];
+            k.side_poly(
+                &dkey("t_gill_l", BodyRegion::LeftDoorF, M::Trim),
+                sx,
+                &gill,
+                0.004,
+                0.01,
+            );
+            k.swept_top_lamp(
+                sx,
+                yn - 0.30,
+                yn - 0.05,
+                wn - 0.40,
+                wn - 0.06,
+                0.12,
+                0.01,
+                0.06,
+            );
+            let (wt, (_, tt)) = (k.wt(), k.tail_z());
+            let tail = [
+                [-(wt - 0.30), tt - 0.12],
+                [-(wt - 0.03), tt - 0.12],
+                [-(wt - 0.03), tt - 0.04],
+                [-(wt - 0.30), tt - 0.04],
+            ];
+            let rear = car_assets::lamp::LampView::Rear;
+            k.proj_cluster(sx, false, rear, &tail, None, M::Taillight, 0.0, 0.0);
+        }
+        k.signals_beside_lamps(0.06, M::EmissiveAmber);
+    }
+    let root = repo_root();
+    for id in ["kestrel_ts", "vireo_xs"] {
+        let car = load_car(&root, id).unwrap();
+        let spec = PanelSpec::load(&panel_path(&root, id)).unwrap();
+        let mut st = style_for(&car.def);
+        st.body.nose_face_rake_deg = 25.0;
+        st.body.nose_plan_bow_m = 0.25;
+        st.body.side_bulge_m = 0.03;
+        st.details = vec![Detail::new(
+            "panels",
+            BodyRegion::Cabin,
+            M::Trim,
+            Shape::Custom(panels),
+        )];
+        let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+        car_assets::skin::bind_skin(&car.lattice, &mut m);
+        for n in [
+            "t_intake",
+            "t_badge",
+            "t_vent_l",
+            "t_vent_r",
+            "t_gill_l",
+            "t_gill_r",
+            "headlight_l",
+            "headlight_r",
+        ] {
+            let q = m
+                .parts
+                .iter()
+                .find(|q| q.name == n)
+                .unwrap_or_else(|| panic!("{id}: no {n}"));
+            assert!(q.tri_count() > 0, "{id}/{n}");
+        }
+        let gill = m.parts.iter().find(|q| q.name == "t_gill_l").unwrap();
+        let (lo, hi) = part_box(gill);
+        assert!(
+            hi[0] < -0.5 && lo[2] > 0.3 && hi[2] < 0.65,
+            "{id}: gill {lo:?}..{hi:?}"
+        );
+        let errs: Vec<String> = validate(&car, &m, Some(&spec))
+            .into_iter()
+            .filter(|e| !e.contains("budget"))
+            .collect();
+        assert!(errs.is_empty(), "{id}: {errs:#?}");
+        check_lights(id, &m);
+    }
+}
+
+/// Body-shell surface y at chassis (x, z) seen from ahead (`front`) or behind: the first panel /
+/// body triangle a ray along ∓y meets.
+fn shell_y(mesh: &car_assets::mesh::CarMesh, x: f32, z: f32, front: bool) -> Option<f32> {
+    let mut best: Option<f32> = None;
+    for p in mesh
+        .parts
+        .iter()
+        .filter(|p| p.wheel.is_none() && matches!(p.kind, PartKind::Panel | PartKind::Body))
+    {
+        for t in p.indices.chunks(3) {
+            let (a, b, c) = (
+                p.vertex(t[0] as usize),
+                p.vertex(t[1] as usize),
+                p.vertex(t[2] as usize),
+            );
+            // Barycentric in the x–z plane.
+            let det = (b[0] - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (b[2] - a[2]);
+            if det.abs() < 1e-12 {
+                continue;
+            }
+            let l1 = ((x - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (z - a[2])) / det;
+            let l2 = ((b[0] - a[0]) * (z - a[2]) - (x - a[0]) * (b[2] - a[2])) / det;
+            if l1 < 0.0 || l2 < 0.0 || l1 + l2 > 1.0 {
+                continue;
+            }
+            let y = a[1] + (b[1] - a[1]) * l1 + (c[1] - a[1]) * l2;
+            let better = match best {
+                None => true,
+                Some(bb) => (front && y > bb) || (!front && y < bb),
+            };
+            if better {
+                best = Some(y);
+            }
+        }
+    }
+    best
+}
+
+/// Kit parts placed on the old vertical end face (boxes, grilles, generic and kit lamps,
+/// bumpers, badges) follow a raked / undercut face (`lamp::follow_end_faces`): none floats in
+/// front of the face, and the lamps stay visible.
+#[test]
+fn end_face_kit_parts_follow_a_raked_face() {
+    let root = repo_root();
+    for id in [
+        "kestrel_ts",
+        "ironside_440",
+        "talus_20t",
+        "vireo_xs",
+        "sentinel_cruiser",
+    ] {
+        let car = load_car(&root, id).unwrap();
+        // Each part's gap to the shell on the upright car (push bars, bumpers and splitters
+        // stand off on purpose): the raked car's gap may not grow past it.
+        let base = car_assets::mesh::generate_styled(&car.def, &car.lattice, &style_for(&car.def));
+        let gap = |m: &car_assets::mesh::CarMesh, q: &car_assets::mesh::MeshPart, front: bool| {
+            let (lo, hi) = part_box(q);
+            let (cx, cz) = (0.5 * (lo[0] + hi[0]), 0.5 * (lo[2] + hi[2]));
+            shell_y(m, cx, cz, front).map(|sy| if front { lo[1] - sy } else { sy - hi[1] })
+        };
+        for (nr, nc, tr) in [(14.0f32, 0.06f32, 10.0f32), (-10.0, 0.0, -8.0)] {
+            let mut st = style_for(&car.def);
+            st.body.nose_face_rake_deg = nr;
+            st.body.nose_chin_m = nc;
+            st.body.tail_face_rake_deg = tr;
+            let p = BodyProfile::styled(&car.def, &car.lattice, &st.body);
+            let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+            car_assets::skin::bind_skin(&car.lattice, &mut m);
+            check_lights(id, &m);
+            for front in [true, false] {
+                let plane = if front { p.y_nose } else { p.y_tail };
+                for q in m.parts.iter().filter(|q| {
+                    q.wheel.is_none() && matches!(q.kind, PartKind::Detail | PartKind::Light)
+                }) {
+                    let (lo, hi) = part_box(q);
+                    // Parts on the end face: within 8 cm of the old plane, not along the sides.
+                    let on_face = if front {
+                        hi[1] > plane - 0.08 && lo[1] > plane - 0.30
+                    } else {
+                        lo[1] < plane + 0.08 && hi[1] < plane + 0.30
+                    };
+                    if !on_face || hi[0] - lo[0] < 0.01 {
+                        continue;
+                    }
+                    let Some(back) = gap(&m, q, front) else {
+                        continue;
+                    };
+                    let was = base
+                        .parts
+                        .iter()
+                        .find(|b| b.name == q.name)
+                        .and_then(|b| gap(&base, b, front))
+                        .unwrap_or(0.0)
+                        .max(0.0);
+                    assert!(
+                        back <= was + 0.03,
+                        "{id} (rake {nr}/{tr}): {} floats {back} m off the face (upright: {was})",
+                        q.name
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// A raked tailgate (tail face rake on a car without a trunk lid) keeps its `trunk` part in the
+/// full mesh and the mid LOD.
+#[test]
+fn raked_tailgate_keeps_its_trunk_in_both_lods() {
+    use car_assets::mesh::{generate_lod, Lod};
+    let root = repo_root();
+    for id in [
+        "sentinel_bastion",
+        "stoat_16v",
+        "drayman_cargo",
+        "hauler_1500",
+    ] {
+        let car = load_car(&root, id).unwrap();
+        for rake in [4.0f32, 6.0, 15.0, 30.0] {
+            let mut st = style_for(&car.def);
+            st.body.tail_face_rake_deg = rake;
+            for lod in [Lod::Full, Lod::Mid] {
+                let m = generate_lod(&car.def, &car.lattice, &st, lod);
+                let trunk = m.parts.iter().find(|q| q.name == "trunk");
+                assert!(
+                    trunk.is_some_and(|q| q.tri_count() > 0),
+                    "{id} (tail rake {rake}, {lod:?}): no trunk"
+                );
+            }
+        }
+    }
 }

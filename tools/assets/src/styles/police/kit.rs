@@ -152,7 +152,7 @@ pub fn kit(id: &str) -> Kit {
             chrome: false,
         },
         pucks: &[(0.08, -0.56), (0.08, 0.56), (0.22, -0.56)],
-        whips: &[(0.90, 0.35, 0.75)],
+        whips: &[(0.90, 0.35, 0.66)],
         visor: false,
         rear_bar: false,
         advisor: true,
@@ -643,12 +643,26 @@ pub fn push_bar(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
     }
 }
 
-/// Grille insert with red (left) / blue (right) LED modules just below the nose top.
+/// Red (left) / blue (right) LED modules in the grille just below the nose top, each on a
+/// small black mounting plate standing proud of the car's own grille (`body.rs`).
 pub fn grille_leds(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
+    use crate::lamp::{lens, Lamp, LampView};
     let p = ctx.profile;
-    let yn = p.y_nose;
     let zt = p.z_nose - 0.05;
-    b.cuboid(k0, [-0.30, yn - 0.05, zt - 0.11], [0.30, yn + 0.004, zt]);
+    // Projected onto the nose (car-shapes phase 3), so they sit on a raked or curved face.
+    let rect = |x0: f32, x1: f32, z0: f32, z1: f32, proud: f32| {
+        let mut l = Lamp::new(
+            LampView::Front,
+            vec![[x0, z0], [x1, z0], [x1, z1], [x0, z1]],
+        );
+        l.proud_m = proud;
+        l.step_m = 0.08;
+        l
+    };
+    for sx in [-1.0f32, 1.0] {
+        let (x0, x1) = xs(sx, 0.06, 0.27);
+        lens(b, p, k0, &rect(x0, x1, zt - 0.085, zt - 0.03, 0.022));
+    }
     for (side, sx) in [("l", -1.0f32), ("r", 1.0)] {
         let colour = if sx < 0.0 {
             MaterialSlot::LightbarRed
@@ -663,11 +677,7 @@ pub fn grille_leds(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
         );
         for (a, c) in [(0.08f32, 0.13f32), (0.17, 0.25)] {
             let (x0, x1) = xs(sx, a, c);
-            b.cuboid(
-                &led,
-                [x0, yn - 0.02, zt - 0.075],
-                [x1, yn + 0.012, zt - 0.04],
-            );
+            lens(b, p, &led, &rect(x0, x1, zt - 0.075, zt - 0.04, 0.03));
         }
     }
 }
@@ -704,10 +714,11 @@ pub fn spotlight(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
     let k = kit(&ctx.def.id);
     let p = ctx.profile;
     let y = p.y_fw + (p.roof.1 - p.y_fw) * 0.30;
-    let z = p.z_belt + (p.roof.2 - p.z_belt) * 0.28;
+    let z = p.z_belt + (p.roof.2 - p.z_belt) * 0.32;
     let (pt, n) = p.side_point(y, z);
     let r = k.spot.r;
-    let c = [pt[0] + n[0] * (r + 0.035), y, z + n[2] * (r + 0.035)];
+    // Housing close to the pillar on a short bracket (it reads as mounted, not floating).
+    let c = [pt[0] + n[0] * (r + 0.015), y, z + n[2] * (r + 0.015)];
     b.cylinder(
         k0,
         [c[0], c[1] - 0.08, c[2]],
@@ -736,8 +747,8 @@ pub fn spotlight(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
         k0,
         c,
         [pt[0] - n[0] * 0.03, y, z - n[2] * 0.03],
-        0.013,
-        0.013,
+        0.022,
+        0.022,
         6,
         true,
     );
@@ -977,8 +988,8 @@ pub fn spoiler_lip(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
     );
 }
 
-/// Pedestal wing: carbon blade, end plates, two pedestals, red / blue LED strip on the
-/// trailing edge.
+/// Low decklid wing (the muscle coupe's stock performance-pack spoiler, ~6 cm up): carbon
+/// blade, end plates, two short pedestals, red / blue LED strip on the trailing edge.
 pub fn spoiler_wing(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
     let p = ctx.profile;
     let yc = p.y_tail + 0.20;
@@ -986,8 +997,8 @@ pub fn spoiler_wing(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
     let w = (p.half_width(yc) - 0.08).min(0.70);
     b.beveled_box(
         k0,
-        [-w, yc - 0.10, zd + 0.12],
-        [w, yc + 0.10, zd + 0.14],
+        [-w, yc - 0.10, zd + 0.055],
+        [w, yc + 0.10, zd + 0.072],
         0.006,
     );
     for sx in [-1.0f32, 1.0] {
@@ -996,10 +1007,10 @@ pub fn spoiler_wing(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
         b.cuboid(
             k0,
             [x - 0.015, yc - 0.06, zs - 0.01],
-            [x + 0.015, yc + 0.04, zd + 0.125],
+            [x + 0.015, yc + 0.04, zd + 0.06],
         );
         let (x0, x1) = xs(sx, w, w + 0.012);
-        b.cuboid(k0, [x0, yc - 0.11, zd + 0.09], [x1, yc + 0.10, zd + 0.165]);
+        b.cuboid(k0, [x0, yc - 0.11, zd + 0.035], [x1, yc + 0.10, zd + 0.09]);
     }
     for (side, sx) in [("l", -1.0f32), ("r", 1.0)] {
         let colour = if sx < 0.0 {
@@ -1016,8 +1027,8 @@ pub fn spoiler_wing(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
         let (x0, x1) = xs(sx, 0.005, 0.40);
         b.cuboid(
             &led,
-            [x0, yc - 0.106, zd + 0.122],
-            [x1, yc - 0.096, zd + 0.138],
+            [x0, yc - 0.106, zd + 0.057],
+            [x1, yc - 0.096, zd + 0.070],
         );
     }
 }
