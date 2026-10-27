@@ -669,6 +669,104 @@ impl<'a> Kit<'a> {
         self.front_box(&ik, sx * sig[0], sx * sig[1], sig[2], sig[3], proud, bevel);
     }
 
+    /// A head (`front`) or tail lamp of side `sx` projected onto the body
+    /// ([`crate::lamp`]): `outline` is given for the LEFT side in `view`'s coordinates (front /
+    /// rear / top: x < 0; side: the left side's `[y, z]`) and mirrored for the right. The lens
+    /// goes into the head / tail lamp part; with `seg` the turn signal is cut out of it as a
+    /// segment of the same lens (front: amber; rear: `rear_mat`, `EmissiveAmber` or `Taillight`;
+    /// `Outboard` / `Inboard` cut across the outline's first axis — the car's corner side; for
+    /// a side view, the end of the car — `Lower` / `Upper` along the second: z, or for a top
+    /// view y with `Lower` the leading strip). Without `seg` the kit must add the signal
+    /// itself (e.g. [`Kit::signals_beside_lamps`]). `bezel_w` > 0 adds a black bezel that wide
+    /// (`headlamp_bezel_l` / `taillamp_bezel_l` details on the frame). `yaw_deg` swings a
+    /// front / rear cast round the corner (wraparound lamps).
+    pub fn proj_cluster(
+        &mut self,
+        sx: f32,
+        front: bool,
+        view: crate::lamp::LampView,
+        outline: &[[f32; 2]],
+        seg: Option<Seg>,
+        rear_mat: MaterialSlot,
+        bezel_w: f32,
+        yaw_deg: f32,
+    ) {
+        use crate::lamp::{bezel, clip_outline, lens, Lamp, LampView};
+        let right = sx > 0.0;
+        let (view, pts): (LampView, Vec<[f32; 2]>) = match view {
+            LampView::Side { .. } => (LampView::Side { right }, outline.to_vec()),
+            v => (v, outline.iter().map(|q| [sx * q[0].abs(), q[1]]).collect()),
+        };
+        let mut lamp = Lamp::new(view, pts.clone());
+        lamp.yaw_deg = yaw_deg;
+        let (lamp_key, sig_key, region) = if front {
+            (
+                headlight_key(sx),
+                indicator_front_key(sx),
+                BodyRegion::FrameFront,
+            )
+        } else {
+            (
+                taillight_key(sx),
+                indicator_rear_key(sx, rear_mat),
+                BodyRegion::FrameRear,
+            )
+        };
+        if bezel_w > 0.0 {
+            let name = if front {
+                "headlamp_bezel_l"
+            } else {
+                "taillamp_bezel_l"
+            };
+            let bk = sided(&dkey(name, region, M::Trim), sx);
+            bezel(self.b, self.p, &bk, &lamp, bezel_w);
+        }
+        let Some(seg) = seg else {
+            lens(self.b, self.p, &lamp_key, &lamp);
+            return;
+        };
+        let lo = |k: usize| pts.iter().map(|q| q[k]).fold(f32::MAX, f32::min);
+        let hi = |k: usize| pts.iter().map(|q| q[k]).fold(f32::MIN, f32::max);
+        let g = INDICATOR_SEAM_M;
+        // (axis, cut, signal on the high side of the cut).
+        let (axis, at, sig_high) = match (seg, view) {
+            (Seg::Outboard(w) | Seg::Inboard(w), LampView::Side { .. }) => {
+                let toward_end = matches!(seg, Seg::Outboard(_)) == front;
+                if toward_end {
+                    (0, hi(0) - w, true)
+                } else {
+                    (0, lo(0) + w, false)
+                }
+            }
+            (Seg::Outboard(w) | Seg::Inboard(w), _) => {
+                let outer_high = matches!(seg, Seg::Outboard(_)) == right;
+                if outer_high {
+                    (0, hi(0) - w, true)
+                } else {
+                    (0, lo(0) + w, false)
+                }
+            }
+            (Seg::Lower(h), LampView::Top) => (1, hi(1) - h, true),
+            (Seg::Upper(h), LampView::Top) => (1, lo(1) + h, false),
+            (Seg::Lower(h), _) => (1, lo(1) + h, false),
+            (Seg::Upper(h), _) => (1, hi(1) - h, true),
+        };
+        let below_cut = |d: f32| clip_outline(&pts, axis, at + d, true);
+        let above_cut = |d: f32| clip_outline(&pts, axis, at + d, false);
+        let (sig, rest) = if sig_high {
+            (above_cut(0.5 * g), below_cut(-0.5 * g))
+        } else {
+            (below_cut(-0.5 * g), above_cut(0.5 * g))
+        };
+        for (k, o) in [(&lamp_key, rest), (&sig_key, sig)] {
+            if o.len() >= 3 {
+                let mut l = lamp.clone();
+                l.outline = o;
+                lens(self.b, self.p, k, &l);
+            }
+        }
+    }
+
     /// Bounding box (lo, hi) of part `name` as built so far, or `None` if it is empty.
     fn part_box(&self, name: &str) -> Option<([f32; 3], [f32; 3])> {
         let (pos, _, _) = self.b.geometry(name)?;

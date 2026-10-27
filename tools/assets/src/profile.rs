@@ -86,7 +86,9 @@ pub struct BodyProfile {
     pub y_fw: f32,
     /// Lattice hood hinge line y (`y_fw` before `cabin_shift_m` / `hood_length`).
     pub lattice_y_fw: f32,
-    /// Hood front edge y; ahead of it (below the belt) is the front bumper cover.
+    /// Hood front edge y; ahead of it (below the belt) is the front bumper cover. The lattice
+    /// hood front, unless a short front overhang ([`BodyStyle::overhang_trim`]) moved it back to
+    /// 10 cm behind the nose.
     pub y_bf: f32,
     /// Hood height at the firewall / at its front edge.
     pub z_hood: (f32, f32),
@@ -108,7 +110,8 @@ pub struct BodyProfile {
     pub trunk_lid: bool,
     /// Rear glass exists (else the greenhouse ends in a vertical cab-back wall).
     pub rear_glass: bool,
-    /// Rear quarters start (cabin rear) / end (rear bumper begins) y.
+    /// Rear quarters start (cabin rear) / end (rear bumper begins) y (the end at least 10 cm
+    /// ahead of the tail, see `y_bf`).
     pub y_quarter: (f32, f32),
     /// Front door hinge y (door front edge).
     pub y_fd_hinge: f32,
@@ -129,6 +132,10 @@ pub struct BodyProfile {
     pub roof_half: f32,
     /// Side-view length over which the nose top falls to `z_nose`.
     pub nose_run: f32,
+    /// Loft station steps (base, fine) the mesh is built with: set by `mesh::generate_lod`
+    /// (hero steps until then). [`crate::lamp`] casts onto the loft at these stations, so a
+    /// projected lens hugs the mesh it sits on.
+    pub loft_steps: (f32, f32),
 }
 
 fn region_nodes(l: &LatticeDef, r: BodyRegion) -> Vec<[f32; 3]> {
@@ -251,23 +258,23 @@ impl BodyProfile {
         let dz = st.ride_dz.clamp(-0.05, 0.08);
         let belt_dz = st.belt_dz.clamp(-0.06, 0.08);
         let oh = |v: f32| v.clamp(OVERHANG_RANGE.0, OVERHANG_RANGE.1);
-        // Short overhangs stop short of the hood front / quarter end (the bumper panels keep a
-        // strip on their region) and of the tires.
+        // Short overhangs stop 6 cm short of the tires; past the hood front / quarter end the
+        // visual hood front / quarter end move back with them, so the bumper panels always keep
+        // a 10 cm strip (their lattice nodes then sit a little ahead of / behind the mesh).
         let (front_tire, rear_tire) = def.wheels.iter().fold((f32::MIN, f32::MAX), |(f, r), w| {
             (
                 f.max(w.position_m[1] + w.radius_m),
                 r.min(w.position_m[1] - w.radius_m),
             )
         });
-        let y_nose = (range(&fb, 1).1 + 0.05 + oh(st.overhang_trim.0))
-            .max(y_bf + 0.10)
-            .max(front_tire + 0.06);
-        let y_tail = (range(&rb, 1).0 - 0.05 - oh(st.overhang_trim.1))
-            .min(qy0 - 0.10)
-            .min(rear_tire - 0.06);
+        let y_nose = (range(&fb, 1).1 + 0.05 + oh(st.overhang_trim.0)).max(front_tire + 0.06);
+        let y_tail = (range(&rb, 1).0 - 0.05 - oh(st.overhang_trim.1)).min(rear_tire - 0.06);
+        let lattice_y_bf = y_bf;
+        let y_bf = y_bf.min(y_nose - 0.10);
+        let qy0 = qy0.max(y_tail + 0.10);
         let z_hood = (
             hood_z_at(y_fw) + dz + belt_dz,
-            hood_z_at(y_bf) + dz + 0.3 * belt_dz,
+            hood_z_at(lattice_y_bf) + dz + 0.3 * belt_dz,
         );
         let z_belt = z_belt + dz + belt_dz;
         let z_deck = z_deck + dz + belt_dz;
@@ -354,6 +361,7 @@ impl BodyProfile {
             bed: None,
             roof_half,
             nose_run,
+            loft_steps: (0.07, 0.036),
         };
         if p.style.silhouette == Silhouette::Pickup && !trunk_lid && !rear_glass {
             let y0 = p.y_tail + 0.07;
