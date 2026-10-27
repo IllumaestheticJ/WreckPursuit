@@ -1,7 +1,7 @@
 # car-shapes phase 2 + pass 3: hatch group
 
 - **Workstream:** car-shapes phase 2, group `hatch` (brief: `docs/integration/car-shapes-phase2-brief.md`),
-  then pass 3 on the phase-3 generator (`ws/car-shapes` d8e0a524, merged in).
+  then pass 3 on the phase-3 / 3b generator (`ws/car-shapes` d8e0a524 and b10e5e14, merged in).
 - **Branch:** `ws/car-shapes-hatch` (from `origin/ws/car-shapes`)
 - **Cars:** `vireo_xs`, `stoat_16v`, `marten_20`, `lindwurm_4t`
 - **Files changed:** `tools/assets/src/styles/performance/hatch.rs` (style file, the only
@@ -29,10 +29,19 @@ the vireo; a floating skirt plank; wheels small in big arch gaps.
   sculpts. Values per car below.
 - **Stance:** `arch_gap` 0.07 → 0.05 (wheels fill the arches), `overhang_trim` (−0.05, −0.02):
   the visual nose ends at the bumper node row (front overhang 0.82–0.90 m, was 0.87–0.95 m).
+- **End faces (phase 3b):** raked nose faces with an undercut chin and a plan bow on the
+  vireo (20°, 5 cm, bow 0.25 m to 0.65), marten (28°, 6 cm, bow 0.30 m to 0.50) and lindwurm
+  (22°, 5 cm, bow 0.22 m to 0.70); leaning tailgates on those three (15° / 18° / 20°, capped by
+  the short hatch tail); roof plan taper 0.10–0.12 (stoat 0.04). The stoat keeps upright faces:
+  that is its identity (and a 6° tailgate lean left its coarse mid LOD without a tailgate panel).
+- **Face-mounted parts follow the faces:** every part on the nose / tail (grille inserts and
+  slats, mouths, ducts, bumper bands, badges, plates, reflectors, valances, fogs) is now a flat
+  patch projected onto the body (local `face_poly` / `face_box` / `slot_grille` / `round_fogs` /
+  `rear_diffuser` on `crate::lamp::lens`, coarse `step_m` 0.08), so nothing floats in front of a
+  raked or bowed face; the chin splitter starts at the undercut face bottom.
 - **Lamps (pass 3):** head and tail lamps are projected clusters (`Kit::proj_cluster`), the turn
   signal cut out of the same lens; reverse lamps, DRLs and light bars are extra projected lenses
-  (local `proj_lens`, on `crate::lamp::lens`). The local `face_poly` prism is kept only for the
-  flat intake / duct inserts.
+  (local `proj_lens`, on `crate::lamp::lens`).
 - **Local helpers in `hatch.rs` (no shared code):** blank badges, body-side strips split per
   panel (fender / front door / rear door / quarter, so each piece rides and detaches with its
   panel), centre high brake lamp under the roof spoiler, plate on a recess, rear reflectors, rear
@@ -50,12 +59,13 @@ the vireo; a floating skirt plank; wheels small in big arch gaps.
   0.87 at the nose and 0.93 at the tail; side bulge 0.035 m peaking at 60 % of the side, rocker
   tuck 0.045 m, tumblehome 0.17 m, fender tops 1.5 cm over the hood; no skirt (the sill tucks
   under).
-- **Detail:** teardrop head lamps projected onto the nose top with the amber signal at the outer
-  tip and a black bezel; grille slot with badge; trapezoid lower mouth with two bars, round fogs,
+- **Detail:** head lamps on the raked face cast round the bowed corners (yaw 25°, amber outer
+  end, bezel), carried on over the nose top as swept teardrop lenses (`headlamp_top_*`, fender
+  light parts); grille slot with badge; trapezoid lower mouth with two bars, round fogs,
   red accent line and lip. Rear: tall red-over-amber clusters with a clear reverse lens under
   them, cast round onto the quarters (yaw 25°), black hatch garnish with badge, high brake lamp,
   plate, reflectors, single tip.
-- **Triangles:** 18,039 full (phase 1: 17,065), 4,699 mid. Hero budget 22k.
+- **Triangles:** 20,003 full (phase 1: 17,065), 5,690 mid. Hero budget 22k.
 
 ### stoat_16v
 - **Reference:** early-90s European front-drive 16-valve hot hatch, about 4.05 m long, 1.7 m
@@ -73,7 +83,7 @@ the vireo; a floating skirt plank; wheels small in big arch gaps.
   doors; tail: wide lenses cast round the corners (yaw 20°) with amber outer ends, black ribs and
   clear inner strips, either side of a black plate panel on the tailgate; black roof spoiler with
   high brake lamp; black mirror caps.
-- **Triangles:** 18,312 full (phase 1: 16,894), 5,174 mid.
+- **Triangles:** 19,784 full (phase 1: 16,894), 6,683 mid.
 
 ### marten_20
 - **Reference:** early-90s European front-drive 2.0 hot hatch, about 4.05 m long, 1.7 m wide,
@@ -90,7 +100,7 @@ the vireo; a floating skirt plank; wheels small in big arch gaps.
   and skirts; tail: one red band of lamps (amber inboard sections, small reverse lenses) cast
   round the corners (yaw 30°) and a red reflector panel with badge across the tailgate; black
   lower valance, twin tips, body-colour roof spoiler with high brake lamp; filler on the left.
-- **Triangles:** 18,242 full (phase 1: 17,056), 4,614 mid.
+- **Triangles:** 19,198 full (phase 1: 17,056), 5,181 mid.
 
 ### lindwurm_4t
 - **Reference:** 2010s European all-wheel-drive hot hatch, 5-door, about 4.28 m long, 1.80 m
@@ -111,16 +121,21 @@ the vireo; a floating skirt plank; wheels small in big arch gaps.
   the top, black hatch garnish with badge, diffuser, quad tips, end-plated roof spoiler with high
   brake lamp, plate, reflectors; silver mirror caps with repeaters (mirrors 10 cm further back on
   the door than in phase 2, see checks); split-spoke wheels.
-- **Triangles:** 18,638 full (phase 1: 17,474), 4,959 mid.
+- **Triangles:** 20,816 full (phase 1: 17,474), 6,216 mid.
 
 ## Checks run (pass 3)
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p
-car-assets` (36 passed), `validate-car-asset` (39 cars ok), `gen-car-mesh --check`; `git status`
+car-assets` (37 passed), `validate-car-asset` (39 cars ok), `gen-car-mesh --check`; `git status`
 after a full `gen-car-mesh` shows only the four cars' meshes changed.
 - `phase3_knobs_keep_panels_on_their_regions` (extreme knobs on top of each car's style) first
   failed on lindwurm_4t: mesh width 2.432 m against the +35 % limit of 2.430 m, from the door
   mirrors following the stress-test shoulder out. Moving the mirrors 10 cm back on the door
   (`Kit::mirrors(0.20, …)`) gives 2.348 m; the stock car is unaffected.
+- Pass 3 fixes found by the tests: the vireo's top-view teardrop alone had no lens face
+  toward the front and did not bind to the bumper (`lights_sit_outside_the_shell`,
+  `lights_move_with_the_front_and_rear_structure`), so the head lamp is a face lens and the
+  teardrop a separate fender light part; the lindwurm's rear signal degenerated in the mid LOD
+  where the lamp top reached the leaning tailgate glass, so its tail lamps sit 4 cm lower.
 - Mod coverage, phase 2 (full run, 136 mods): 1 of 136 shows nothing on each car,
   `drivetrain_shifter_short` (interior, on the known list in `mod-visuals.md`). Pass 3 spot
   check: see below.
@@ -140,21 +155,10 @@ the accent moved to the stoat's rubbing strips and the lindwurm's side-duct blad
 blank shapes; lamp graphics are generic.
 
 ## Generator requests
-Sent to the lead 2026-10-27. Done in phase 3: plan-width curve, section curvature (bulge /
-rocker / tumblehome / sculpts), projected lamps that wrap the corners. Still open (phase 3b,
-announced):
-1. **Nose / tail face rake and bow:** the nose and tail faces are still flat vertical planes
-   from sill to nose height. A raked / undercut bumper face would let the vireo and marten noses
-   read as rounded and pointed in side view too.
-2. **Hatch tail:** hatch glass runs from the roof to `y_deck`, then a vertical tail face. Wanted
-   a tailgate lean and a kick / lip at the glass base (all four).
-3. **Quarter glass:** an explicit knob to suppress or size the quarter window (now only reachable
-   by shortening the roof).
-
-## Pass 3b plan (touch-up when phase 3b lands)
-- vireo / marten: face rake 15–25° with an undercut chin; marten nose height down to ~0.55 m.
-- all four: tailgate lean ~10° below the glass with a 1–2 cm lip; stoat stays near-vertical.
-- stoat: quarter-glass knob to size its small window explicitly (keep it); the others none.
+Sent to the lead 2026-10-27. Done in phase 3 / 3b: plan-width curve, section curvature, projected
+lamps that wrap the corners, face rake / chin / plan bow, tailgate lean, roof plan taper. Still
+open (announced): a lip at the hatch-glass base, the quarter-glass knob (stoat: size its small
+window explicitly), nose height, smooth shading.
 
 ## Contract change requests
 None.

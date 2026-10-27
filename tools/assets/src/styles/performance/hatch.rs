@@ -23,7 +23,7 @@
 use wp_contracts::{BodyRegion, VehicleDef};
 
 use crate::builder::{Builder, PartKey};
-use crate::lamp::{Lamp, LampView};
+use crate::lamp::{ellipse, Lamp, LampView};
 use crate::mesh::{MaterialSlot as M, INDICATOR_SEAM_M};
 use crate::style::{
     ArchShape, BodyStyle, CaliperKind, CapKind, CarStyle, DetailCtx, EngineKind, ExhaustKind,
@@ -35,15 +35,115 @@ use super::{kit_detail, rgb, wheels};
 
 // ---------------------------------------------------------------------------- local helpers
 
-/// Convex outline `pts` ((x, z), any winding) on the nose (`front`) or tail face, swept from
-/// 2 cm inside the face to `proud` out of it.
+/// Flat part lying on the nose (`front`) or tail surface: outline `pts` ((x, z), signed x,
+/// any simple polygon) cast onto the body from ahead / behind ([`crate::lamp`]) and standing
+/// `proud` over it, so it follows the face rake, chin and plan bow.
 fn face_poly(k: &mut Kit, key: &PartKey, front: bool, pts: &[[f32; 2]], proud: f32) {
-    let (y0, y1) = if front {
-        (k.yn - 0.02, k.yn + proud)
+    let view = if front {
+        LampView::Front
     } else {
-        (k.yt + 0.02, k.yt - proud)
+        LampView::Rear
     };
-    k.prism_y(key, pts, y0, y1);
+    let mut lamp = Lamp::new(view, pts.to_vec());
+    lamp.proud_m = proud.clamp(0.002, 0.03);
+    lamp.step_m = 0.08;
+    crate::lamp::lens(k.b, k.p, key, &lamp);
+}
+
+/// Rectangle `x0..x1` × `z0..z1` lying on the nose / tail surface (see [`face_poly`]).
+fn face_box(
+    k: &mut Kit,
+    key: &PartKey,
+    front: bool,
+    x0: f32,
+    x1: f32,
+    z0: f32,
+    z1: f32,
+    proud: f32,
+) {
+    face_poly(
+        k,
+        key,
+        front,
+        &[[x0, z0], [x1, z0], [x1, z1], [x0, z1]],
+        proud,
+    );
+}
+
+/// Slot grille on the nose surface: dark insert `±half` × `z0..z1` with `slats` bars.
+fn slot_grille(
+    k: &mut Kit,
+    name: &str,
+    region: BodyRegion,
+    half: f32,
+    z0: f32,
+    z1: f32,
+    slats: usize,
+    slat_mat: M,
+) {
+    let g = dkey(name, region, M::Grille);
+    face_box(k, &g, true, -half, half, z0, z1, 0.006);
+    let sk = dkey(&format!("{name}_slats"), region, slat_mat);
+    let h = (z1 - z0) / (slats as f32 + 1.0);
+    for i in 1..=slats {
+        let z = z0 + h * i as f32;
+        face_box(
+            k,
+            &sk,
+            true,
+            -half + 0.02,
+            half - 0.02,
+            z - 0.008,
+            z + 0.008,
+            0.014,
+        );
+    }
+}
+
+/// Round fog lamps (lens `Headlight`, black ring) at ±`x`, `z`, radius `r`, on the nose
+/// surface.
+fn round_fogs(k: &mut Kit, x: f32, z: f32, r: f32) {
+    for sx in SIDES {
+        let kf = sided(&lkey("fog_l", BodyRegion::FrontBumper, M::Headlight), sx);
+        let kr = sided(&dkey("fog_ring_l", BodyRegion::FrontBumper, M::Trim), sx);
+        let mut lamp = Lamp::new(LampView::Front, ellipse([sx * x, z], [r, r], 14));
+        lamp.proud_m = 0.012;
+        crate::lamp::lens(k.b, k.p, &kf, &lamp);
+        crate::lamp::bezel(k.b, k.p, &kr, &lamp, 0.012);
+    }
+}
+
+/// Rear diffuser: an underside plate, a dark valance `±half` × `h` lying on the tail surface
+/// and `fins` vertical fins sticking out `fin_out` behind it.
+fn rear_diffuser(k: &mut Kit, mat: M, half: f32, h: f32, fins: usize, fin_out: f32) {
+    let key = dkey("diffuser", BodyRegion::RearBumper, mat);
+    let y = k.yt;
+    let z0 = k.p.sill(y) - 0.02;
+    k.bx(&key, [-half, y + 0.30, z0], [half, y - 0.02, z0 + 0.025]);
+    face_box(k, &key, false, -half, half, z0, z0 + h, 0.012);
+    let f = dkey("diffuser_fins", BodyRegion::RearBumper, mat);
+    for i in 0..fins {
+        let x = -half + 0.06 + (2.0 * half - 0.12) * i as f32 / (fins - 1).max(1) as f32;
+        let prof = [
+            [y + 0.25, z0 + 0.02],
+            [y - fin_out, z0 + 0.02],
+            [y - fin_out, z0 + 0.6 * h],
+            [y - 0.01, z0 + h],
+        ];
+        k.prism_x(&f, &prof, x - 0.006, x + 0.006);
+    }
+}
+
+/// Chin splitter under the nose: a plate `t` thick reaching `fwd` past the bottom of the
+/// face (which a chin undercut sets back), `inset` in from the face width.
+fn chin_splitter(k: &mut Kit, mat: M, fwd: f32, inset: f32, t: f32) {
+    let key = dkey("splitter", BodyRegion::FrontBumper, mat);
+    let p = k.p;
+    let z = p.sill(k.yn);
+    let y = k.yn - p.style.nose_chin_m.clamp(0.0, 0.25).min(p.face_depth(true));
+    let w = p.half_width(y) - inset;
+    let prof = [[-w, z - t], [w, z - t], [w + 0.01, z], [-w - 0.01, z]];
+    k.prism_y(&key, &prof, y - 0.30, y + fwd);
 }
 
 /// Left-side outline `pts` ((|x|, z)) moved to side `sx`.
@@ -78,24 +178,26 @@ fn badge(k: &mut Kit, region: BodyRegion, front: bool, x: f32, z: f32, w: f32, h
         M::Chrome,
     );
     if front {
-        k.front_box(
+        face_box(
+            k,
             &kb,
+            true,
             x - 0.5 * w,
             x + 0.5 * w,
             z - 0.5 * h,
             z + 0.5 * h,
             0.022,
-            0.006,
         );
     } else {
-        k.rear_box(
+        face_box(
+            k,
             &kb,
+            false,
             x - 0.5 * w,
             x + 0.5 * w,
             z - 0.5 * h,
             z + 0.5 * h,
             0.022,
-            0.006,
         );
     }
 }
@@ -156,14 +258,15 @@ fn rear_reflectors(k: &mut Kit, z: f32, inset: f32) {
             &dkey("rear_reflector_l", BodyRegion::RearBumper, M::Taillight),
             sx,
         );
-        k.rear_box(
+        face_box(
+            k,
             &kr,
+            false,
             sx * (wt - inset - 0.10),
             sx * (wt - inset),
             z - 0.012,
             z + 0.012,
             0.016,
-            0.003,
         );
     }
 }
@@ -171,9 +274,9 @@ fn rear_reflectors(k: &mut Kit, z: f32, inset: f32) {
 /// Licence plate (blank, light) on a dark recess on the tail face.
 fn rear_plate(k: &mut Kit, region: BodyRegion, zc: f32) {
     let kp = dkey("plate_recess", region, M::Trim);
-    k.rear_box(&kp, -0.27, 0.27, zc - 0.07, zc + 0.07, 0.006, 0.0);
+    face_box(k, &kp, false, -0.27, 0.27, zc - 0.07, zc + 0.07, 0.006);
     let kq = dkey("plate", region, M::Metal);
-    k.rear_box(&kq, -0.25, 0.25, zc - 0.055, zc + 0.055, 0.012, 0.004);
+    face_box(k, &kq, false, -0.25, 0.25, zc - 0.055, zc + 0.055, 0.012);
 }
 
 /// Rear wiper parked on the hatch glass.
@@ -265,6 +368,14 @@ pub fn vireo(def: &VehicleDef) -> CarStyle {
     b.tumblehome_m = Some(0.17);
     b.front_fender_rise_m = 0.015;
     b.fender_peak_w = 0.82;
+    // Rounded nose in side view and plan (raked face, undercut chin, bowed corners), tailgate
+    // leaning in (capped by the short tail section), roof narrowing toward the hatch.
+    b.nose_face_rake_deg = 20.0;
+    b.nose_chin_m = 0.05;
+    b.nose_plan_bow_m = 0.25;
+    b.nose_tip_w = 0.65;
+    b.tail_face_rake_deg = 15.0;
+    b.roof_plan_taper = 0.10;
     s.details.push(kit_detail(vireo_kit));
     wheels(
         &mut s,
@@ -295,7 +406,9 @@ pub fn vireo(def: &VehicleDef) -> CarStyle {
 
 fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
-    let wn = k.wn();
+    // Face width just behind the plan bow (the face itself is narrower; projected parts
+    // follow the curve).
+    let wn = k.p.half_width(k.yn - 0.12);
     let wt = k.wt();
     let yn = k.yn;
     let (nz0, nz1) = k.nose_z();
@@ -306,27 +419,45 @@ fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     // fender, amber signal at the outer tip, black bezel.
     let (lt, lb) = (nz1 - 0.034, nz1 - 0.105);
     for sx in SIDES {
-        let tear = [
-            [-(wn - 0.04), yn - 0.03],
-            [-(wn - 0.30), yn - 0.06],
-            [-(wn - 0.26), yn - 0.22],
-            [-(wn - 0.11), yn - 0.38],
-            [-(wn - 0.04), yn - 0.27],
+        // Head lamp on the raked face, cast round the bowed corner, signal at the outer end.
+        let face = [
+            [-0.30, nz1 - 0.03],
+            [-(wn - 0.02), nz1 - 0.03],
+            [-(wn - 0.02), nz1 - 0.065],
+            [-(wn - 0.12), lb],
+            [-0.34, lb],
         ];
         k.proj_cluster(
             sx,
             true,
-            LampView::Top,
-            &tear,
-            Some(Seg::Outboard(0.07)),
+            LampView::Front,
+            &face,
+            Some(Seg::Outboard(0.10)),
             M::EmissiveAmber,
-            0.012,
-            0.0,
+            0.010,
+            25.0,
         );
+        // Its lens carries on over the nose top as a swept teardrop (a fender light part, not
+        // an end lamp), the outer points inside the top surface at their own station.
+        let y0 = yn - k.p.face_depth(true);
+        let edge = |y: f32, inset: f32| -(k.p.half_width(y) - inset);
+        let tear = [
+            [edge(y0 - 0.01, 0.07), y0 - 0.01],
+            [edge(y0 - 0.03, 0.32), y0 - 0.03],
+            [edge(y0 - 0.17, 0.28), y0 - 0.17],
+            [edge(y0 - 0.30, 0.12), y0 - 0.30],
+            [edge(y0 - 0.22, 0.06), y0 - 0.22],
+        ];
+        let kt = sided(
+            &lkey("headlamp_top_l", BodyRegion::FrontLeftFender, M::Headlight),
+            sx,
+        );
+        proj_lens(&mut k, &kt, sx, LampView::Top, &tear, 0.0, 0.010);
     }
 
     // --- Slim grille slot between the lamps, badge in it.
-    k.grille(
+    slot_grille(
+        &mut k,
         "grille",
         BodyRegion::Hood,
         0.27,
@@ -334,7 +465,6 @@ fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         lt - 0.02,
         1,
         M::Trim,
-        None,
     );
     badge(
         &mut k,
@@ -360,20 +490,30 @@ fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let kb = dkey("lower_mouth_bars", fb, M::Trim);
     for i in 1..=2 {
         let z = zm0 + (zm1 - zm0) * i as f32 / 3.0;
-        k.front_box(&kb, -0.47, 0.47, z - 0.007, z + 0.007, 0.014, 0.0);
+        face_box(&mut k, &kb, true, -0.47, 0.47, z - 0.007, z + 0.007, 0.014);
     }
-    k.fogs(wn - 0.13, 0.5 * (zm0 + zm1), 0.042);
+    round_fogs(&mut k, wn - 0.13, 0.5 * (zm0 + zm1), 0.042);
     let accent = dkey("accent_stripe", fb, M::Accent);
-    k.front_box(&accent, -0.52, 0.52, zm1 + 0.012, zm1 + 0.026, 0.016, 0.0);
-    k.splitter(M::Trim, 0.035, 0.12, 0.022, false);
-    k.front_box(
+    face_box(
+        &mut k,
         &accent,
+        true,
+        -0.52,
+        0.52,
+        zm1 + 0.012,
+        zm1 + 0.026,
+        0.016,
+    );
+    chin_splitter(&mut k, M::Trim, 0.035, 0.12, 0.022);
+    face_box(
+        &mut k,
+        &accent,
+        true,
         -wn + 0.13,
         wn - 0.13,
         nz0 + 0.008,
         nz0 + 0.026,
         0.03,
-        0.0,
     );
 
     // --- Rear: tall tri-colour clusters at the corners (red over amber over a clear reverse
@@ -411,14 +551,15 @@ fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     }
     // Black garnish across the tailgate between the clusters, badge on it.
     let kg = dkey("hatch_garnish", BodyRegion::Trunk, M::Trim);
-    k.rear_box(
+    face_box(
+        &mut k,
         &kg,
+        false,
         -wt + 0.26,
         wt - 0.26,
         zh - 0.10,
         zh - 0.01,
         0.012,
-        0.004,
     );
     badge(
         &mut k,
@@ -435,14 +576,15 @@ fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     rear_wiper(&mut k);
     rear_plate(&mut k, BodyRegion::RearBumper, tz0 + 0.26);
     let kv = dkey("rear_valance", BodyRegion::RearBumper, M::Trim);
-    k.rear_box(
+    face_box(
+        &mut k,
         &kv,
+        false,
         -wt + 0.06,
         wt - 0.06,
         tz0 + 0.02,
         tz0 + 0.10,
         0.012,
-        0.004,
     );
     rear_reflectors(&mut k, tz0 + 0.14, 0.05);
 
@@ -502,6 +644,8 @@ pub fn stoat(def: &VehicleDef) -> CarStyle {
     b.tumblehome_m = Some(0.10);
     b.front_fender_rise_m = 0.02;
     b.fender_peak_w = 0.86;
+    // Upright faces (the boxy identity) and a near-square roof.
+    b.roof_plan_taper = 0.04;
     s.details.push(kit_detail(stoat_kit));
     wheels(
         &mut s,
@@ -546,7 +690,7 @@ fn stoat_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let xi = 0.19;
     let xo = wn - 0.04;
     let band = dkey("front_band", BodyRegion::Hood, M::Trim);
-    k.front_box(&band, -xo, xo, zb - 0.012, zt + 0.012, 0.010, 0.004);
+    face_box(&mut k, &band, true, -xo, xo, zb - 0.012, zt + 0.012, 0.010);
     for sx in SIDES {
         k.front_cluster(
             sx,
@@ -574,7 +718,8 @@ fn stoat_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             k.round_lamp(&kr, true, sx * x, zc, 0.052, 0.026, None);
         }
     }
-    k.grille(
+    slot_grille(
+        &mut k,
         "grille",
         BodyRegion::Hood,
         xi - 0.015,
@@ -582,7 +727,6 @@ fn stoat_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         zt - 0.01,
         3,
         M::Trim,
-        None,
     );
     badge(
         &mut k,
@@ -597,7 +741,7 @@ fn stoat_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     // --- Black front bumper with a lower slot, fogs, and side wraps to the arches.
     let (bz0, bz1) = (nz0 + 0.02, nz0 + 0.24);
     let kb = dkey("bumper_band", fb, M::Trim);
-    k.front_box(&kb, -wn - 0.005, wn + 0.005, bz0, bz1, 0.035, 0.012);
+    face_box(&mut k, &kb, true, -wn - 0.005, wn + 0.005, bz0, bz1, 0.035);
     let (yf, _, rf) = k.arch(true);
     let kbs = dkey("bumper_band_side_l", fb, M::Trim);
     for sx in SIDES {
@@ -613,7 +757,8 @@ fn stoat_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             (3, 1),
         );
     }
-    k.grille(
+    slot_grille(
+        &mut k,
         "lower_slot",
         fb,
         0.36,
@@ -621,18 +766,18 @@ fn stoat_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         bz0 + 0.13,
         1,
         M::Trim,
-        None,
     );
     for sx in SIDES {
         let kf = sided(&lkey("fog_l", fb, M::Headlight), sx);
-        k.front_box(
+        face_box(
+            &mut k,
             &kf,
+            true,
             sx * (wn - 0.20),
             sx * (wn - 0.08),
             bz0 + 0.06,
             bz0 + 0.12,
             0.045,
-            0.006,
         );
     }
 
@@ -657,7 +802,7 @@ fn stoat_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let (lz0, lz1) = (tz1 - 0.21, tz1 - 0.05);
     let (lxi, lxo) = (0.30, wt - 0.045);
     let kp = dkey("tail_panel", BodyRegion::Trunk, M::Trim);
-    k.rear_box(&kp, -lxi + 0.01, lxi - 0.01, lz0, lz1, 0.010, 0.004);
+    face_box(&mut k, &kp, false, -lxi + 0.01, lxi - 0.01, lz0, lz1, 0.010);
     rear_plate(&mut k, BodyRegion::Trunk, 0.5 * (lz0 + lz1));
     for sx in SIDES {
         let cl = [
@@ -680,27 +825,46 @@ fn stoat_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             &lkey("reverse_lamp_l", BodyRegion::RearLeftQuarter, M::Headlight),
             sx,
         );
-        k.rear_box(&kc, sx * lxi, sx * (lxi + 0.06), lz0, lz1, 0.022, 0.006);
+        face_box(
+            &mut k,
+            &kc,
+            false,
+            sx * lxi,
+            sx * (lxi + 0.06),
+            lz0,
+            lz1,
+            0.022,
+        );
         let ribs = sided(
             &dkey("taillight_ribs_l", BodyRegion::RearLeftQuarter, M::Trim),
             sx,
         );
         for f in [0.36, 0.66] {
             let z = lz0 + f * (lz1 - lz0);
-            k.rear_box(
+            face_box(
+                &mut k,
                 &ribs,
+                false,
                 sx * (lxi + 0.07),
                 sx * (lxo - 0.12),
                 z - 0.004,
                 z + 0.004,
                 0.026,
-                0.0,
             );
         }
     }
     let (rz0, rz1) = (tz0 + 0.02, tz0 + 0.22);
     let krb = dkey("rear_bumper_band", rb, M::Trim);
-    k.rear_box(&krb, -wt - 0.005, wt + 0.005, rz0, rz1, 0.035, 0.012);
+    face_box(
+        &mut k,
+        &krb,
+        false,
+        -wt - 0.005,
+        wt + 0.005,
+        rz0,
+        rz1,
+        0.035,
+    );
     let (yr, _, rr) = k.arch(false);
     let krs = dkey("rear_bumper_band_side_l", rb, M::Trim);
     for sx in SIDES {
@@ -763,7 +927,14 @@ pub fn marten(def: &VehicleDef) -> CarStyle {
     // Wedge: pointed nose in plan, sides leaning in above the moulding (bulge low), a lean
     // greenhouse, tail tapered.
     let b = &mut s.body;
-    b.plan_width = plan_taper(def, 0.84, 0.92, 1.0);
+    b.plan_width = plan_taper(def, 0.90, 0.92, 1.0);
+    // Pointed wedge nose: strongly raked face with a chin, plan bow to a narrow tip.
+    b.nose_face_rake_deg = 28.0;
+    b.nose_chin_m = 0.06;
+    b.nose_plan_bow_m = 0.30;
+    b.nose_tip_w = 0.50;
+    b.tail_face_rake_deg = 18.0;
+    b.roof_plan_taper = 0.12;
     b.side_bulge_m = 0.022;
     b.side_bulge_z = 0.42;
     b.rocker_in_m = 0.035;
@@ -797,7 +968,9 @@ pub fn marten(def: &VehicleDef) -> CarStyle {
 
 fn marten_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
-    let wn = k.wn();
+    // Face width just behind the plan bow (the face itself is narrower; projected parts
+    // follow the curve).
+    let wn = k.p.half_width(k.yn - 0.12);
     let wt = k.wt();
     let (nz0, nz1) = k.nose_z();
     let (tz0, tz1) = k.tail_z();
@@ -826,7 +999,8 @@ fn marten_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             25.0,
         );
     }
-    k.grille(
+    slot_grille(
+        &mut k,
         "grille",
         BodyRegion::Hood,
         xi - 0.02,
@@ -834,7 +1008,6 @@ fn marten_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         lt - 0.012,
         0,
         M::Trim,
-        None,
     );
     badge(&mut k, BodyRegion::Hood, true, 0.0, lb - 0.035, 0.07, 0.045);
 
@@ -851,20 +1024,30 @@ fn marten_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     );
     let kbar = dkey("lower_mouth_bar", fb, M::Paint);
     let zc = 0.5 * (zi0 + zi1);
-    k.front_box(&kbar, -0.55, 0.55, zc - 0.016, zc + 0.016, 0.02, 0.006);
+    face_box(
+        &mut k,
+        &kbar,
+        true,
+        -0.55,
+        0.55,
+        zc - 0.016,
+        zc + 0.016,
+        0.02,
+    );
     for sx in SIDES {
         let kf = sided(&lkey("fog_l", fb, M::Headlight), sx);
-        k.front_box(
+        face_box(
+            &mut k,
             &kf,
+            true,
             sx * (wn - 0.20),
             sx * (wn - 0.07),
             zi0 + 0.03,
             zi1 - 0.03,
             0.016,
-            0.006,
         );
     }
-    k.splitter(M::Trim, 0.04, 0.10, 0.02, false);
+    chin_splitter(&mut k, M::Trim, 0.04, 0.10, 0.02);
 
     // --- Sides: black body-side mouldings, body-colour mirrors, black handles.
     side_strip(&mut k, "side_moulding", 0.38, 0.44, M::Trim, 0.014);
@@ -908,14 +1091,15 @@ fn marten_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         proj_lens(&mut k, &kc, sx, LampView::Rear, &rev, 30.0, 0.014);
     }
     let kpanel = dkey("tail_reflector_panel", BodyRegion::Trunk, M::Taillight);
-    k.rear_box(
+    face_box(
+        &mut k,
         &kpanel,
+        false,
         -lxi + 0.008,
         lxi - 0.008,
         lz0 + 0.01,
         lz1 - 0.01,
         0.014,
-        0.004,
     );
     badge(
         &mut k,
@@ -928,14 +1112,15 @@ fn marten_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     );
     rear_plate(&mut k, BodyRegion::RearBumper, tz0 + 0.25);
     let kv = dkey("rear_valance", BodyRegion::RearBumper, M::Trim);
-    k.rear_box(
+    face_box(
+        &mut k,
         &kv,
+        false,
         -wt + 0.05,
         wt - 0.05,
         tz0 + 0.02,
         tz0 + 0.12,
         0.014,
-        0.004,
     );
     rear_reflectors(&mut k, tz0 + 0.155, 0.05);
     let (chord, drop) = (0.16, 0.025);
@@ -1001,6 +1186,13 @@ pub fn lindwurm(def: &VehicleDef) -> CarStyle {
     b.front_fender_rise_m = 0.025;
     b.rear_fender_rise_m = 0.015;
     b.fender_peak_w = 0.80;
+    // Modern raked bumper with an undercut, slight bow; leaning tailgate; roof tapering back.
+    b.nose_face_rake_deg = 22.0;
+    b.nose_chin_m = 0.05;
+    b.nose_plan_bow_m = 0.22;
+    b.nose_tip_w = 0.70;
+    b.tail_face_rake_deg = 20.0;
+    b.roof_plan_taper = 0.12;
     b.side_sculpt = vec![
         // Shoulder line along the whole side, 8 cm under the belt.
         SideSculpt {
@@ -1061,7 +1253,9 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
     let p = ctx.profile;
     let yt = k.yt;
-    let wn = k.wn();
+    // Face width just behind the plan bow (the face itself is narrower; projected parts
+    // follow the curve).
+    let wn = k.p.half_width(k.yn - 0.12);
     let wt = k.wt();
     let (nz0, nz1) = k.nose_z();
     let (tz0, tz1) = k.tail_z();
@@ -1070,11 +1264,29 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     // --- Front: slim grille whose bars run out to the lamps, swept LED head lamps cast round
     // onto the fenders (amber outer end, black bezel) with a DRL brow along their top edge.
     let (gz0, gz1) = (nz1 - 0.10, nz1 - 0.035);
-    k.grille("grille", BodyRegion::Hood, 0.44, gz0, gz1, 0, M::Trim, None);
+    slot_grille(
+        &mut k,
+        "grille",
+        BodyRegion::Hood,
+        0.44,
+        gz0,
+        gz1,
+        0,
+        M::Trim,
+    );
     let kbar = dkey("grille_bars", BodyRegion::Hood, M::Trim);
     for f in [0.33, 0.66] {
         let z = gz0 + f * (gz1 - gz0);
-        k.front_box(&kbar, -0.47, 0.47, z - 0.006, z + 0.006, 0.016, 0.0);
+        face_box(
+            &mut k,
+            &kbar,
+            true,
+            -0.47,
+            0.47,
+            z - 0.006,
+            z + 0.006,
+            0.016,
+        );
     }
     badge(
         &mut k,
@@ -1129,18 +1341,19 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let km = dkey("lower_mouth_mesh", fb, M::Trim);
     for i in 1..3 {
         let z = zi0 + (zi1 - zi0) * i as f32 / 3.0;
-        k.front_box(&km, -0.38, 0.38, z - 0.005, z + 0.005, 0.012, 0.0);
+        face_box(&mut k, &km, true, -0.38, 0.38, z - 0.005, z + 0.005, 0.012);
     }
     for i in 1..8 {
         let x = -0.36 + 0.72 * i as f32 / 8.0;
-        k.front_box(
+        face_box(
+            &mut k,
             &km,
+            true,
             x - 0.005,
             x + 0.005,
             zi0 + 0.01,
             zi1 - 0.01,
             0.012,
-            0.0,
         );
     }
     for sx in SIDES {
@@ -1154,22 +1367,23 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         face_poly(&mut k, &kd, true, &on_side(sx, &duct), 0.006);
         let kb = sided(&dkey("side_duct_blade_l", fb, M::Accent), sx);
         for x in [0.56, 0.66] {
-            k.front_box(
+            face_box(
+                &mut k,
                 &kb,
+                true,
                 sx * (x - 0.008),
                 sx * (x + 0.008),
                 zi0 + 0.03,
                 zi1 - 0.05,
                 0.02,
-                0.0,
             );
         }
     }
-    k.splitter(M::Trim, 0.05, 0.10, 0.02, false);
+    chin_splitter(&mut k, M::Trim, 0.05, 0.10, 0.02);
 
     // --- Rear: two-piece wrap-around LED lamps with a light-bar signature, black garnish
     // with badge between them, diffuser, big roof spoiler with plates and a brake lamp.
-    let (z0, z1) = (tz1 - 0.13, tz1 - 0.03);
+    let (z0, z1) = (tz1 - 0.17, tz1 - 0.07);
     for sx in SIDES {
         let lamp = [
             [-0.30, z1],
@@ -1201,7 +1415,7 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         proj_lens(&mut k, &ki, sx, LampView::Rear, &bar, 30.0, 0.014);
     }
     let kg = dkey("hatch_garnish", BodyRegion::Trunk, M::Trim);
-    k.rear_box(&kg, -0.27, 0.27, z0 + 0.02, z1 - 0.02, 0.010, 0.004);
+    face_box(&mut k, &kg, false, -0.27, 0.27, z0 + 0.02, z1 - 0.02, 0.010);
     badge(
         &mut k,
         BodyRegion::Trunk,
@@ -1211,7 +1425,7 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         0.10,
         0.045,
     );
-    k.diffuser(M::Trim, 0.62, 0.16, 3, 0.05);
+    rear_diffuser(&mut k, M::Trim, 0.62, 0.16, 3, 0.05);
     let (chord, drop) = (0.30, 0.05);
     k.roof_spoiler(M::Paint, chord, drop, 0.02, 0.09);
     high_brake_lamp(&mut k, chord, drop, 0.16);
