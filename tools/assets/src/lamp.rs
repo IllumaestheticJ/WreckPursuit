@@ -250,6 +250,110 @@ fn bezel_inner(b: &mut Builder, p: &BodyProfile, key: &PartKey, lamp: &Lamp, wid
     }
 }
 
+/// A flat window of part `glass` (a glass key) with a seal of part `seal` `seal_w` wide
+/// (0.003…0.05) round it, for near-flat body faces such as a van's rear doors: the outline (any
+/// simple polygon in `view`'s coordinates) is triangulated on a coarse grid
+/// ([`FLAT_WINDOW_STEP_M`]) and cast onto the built body; the glass sits `proud_m` (0.001…0.02)
+/// over the surface with a rim wall down to it, the seal is a band [`BEZEL_LIFT_M`] over the
+/// surface (no skirt: meant for flat faces). No lens rings: about a third of a [`lens`] + [`bezel`]
+/// pair's triangles.
+#[allow(clippy::too_many_arguments)]
+pub fn flat_window(
+    b: &mut Builder,
+    p: &BodyProfile,
+    glass: &PartKey,
+    seal: &PartKey,
+    view: LampView,
+    outline: &[[f32; 2]],
+    proud_m: f32,
+    seal_w: f32,
+) {
+    let (g0, s0) = (b.vertex_count(&glass.name), b.vertex_count(&seal.name));
+    flat_window_inner(b, p, glass, seal, view, outline, proud_m, seal_w);
+    let (g1, s1) = (b.vertex_count(&glass.name), b.vertex_count(&seal.name));
+    b.mark_placed(&glass.name, g0, g1);
+    b.mark_placed(&seal.name, s0, s1);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn flat_window_inner(
+    b: &mut Builder,
+    p: &BodyProfile,
+    glass: &PartKey,
+    seal: &PartKey,
+    view: LampView,
+    outline: &[[f32; 2]],
+    proud_m: f32,
+    seal_w: f32,
+) {
+    let lamp = Lamp::new(view, outline.to_vec());
+    let Some(mut caster) = Caster::new(b, p, &lamp) else {
+        return;
+    };
+    // A van's rear glass leans forward to the roof: cast further than a lamp on the end face.
+    caster.max_d = caster.max_d.max(3.5);
+    let Some(mesh) = triangulate(outline, FLAT_WINDOW_STEP_M) else {
+        return;
+    };
+    // The resampled boundary, counter-clockwise in the view (edge normals (dy, −dx) point out).
+    let q: Vec<[f32; 2]> = mesh.rim.iter().map(|&i| mesh.pts[i]).collect();
+    let n = q.len();
+    let w = seal_w.clamp(0.003, 0.05);
+    let proud = proud_m.clamp(0.001, 0.02);
+    // Outline pushed out by `w` (mitred edge normals).
+    let edge_n = |i: usize| {
+        let (a, c) = (q[i], q[(i + 1) % n]);
+        let (dx, dy) = (c[0] - a[0], c[1] - a[1]);
+        let l = (dx * dx + dy * dy).sqrt().max(1e-6);
+        [dy / l, -dx / l]
+    };
+    let outer: Vec<Hit> = (0..n)
+        .map(|i| {
+            let (e0, e1) = (edge_n((i + n - 1) % n), edge_n(i));
+            let m = [e0[0] + e1[0], e0[1] + e1[1]];
+            let d = (m[0] * e1[0] + m[1] * e1[1]).max(0.3);
+            let o = [q[i][0] + w * m[0] / d, q[i][1] + w * m[1] / d];
+            caster.cast_or_pull(o, caster.c2)
+        })
+        .collect();
+    let hits = caster.cast_mesh(&mesh);
+    let c = caster.centre;
+    let lift = |h: Hit, d: f32| add(h.0, scale(h.1, d));
+    // Glass face over the surface.
+    for t in &mesh.tris {
+        let up = norm(add(add(hits[t[0]].1, hits[t[1]].1), hits[t[2]].1));
+        let tri = [0, 1, 2].map(|i| lift(hits[t[i]], proud));
+        b.poly_facing(glass, &tri, up);
+    }
+    for i in 0..n {
+        let k = (i + 1) % n;
+        let (a, e) = (hits[mesh.rim[i]], hits[mesh.rim[k]]);
+        let up = norm(add(a.1, e.1));
+        // Glass rim wall down to the surface.
+        let mid = scale(add(a.0, e.0), 0.5);
+        b.poly_facing(
+            glass,
+            &[lift(a, proud), a.0, e.0, lift(e, proud)],
+            sub(mid, c),
+        );
+        // Seal band (flat faces: no skirt).
+        let (d, f) = (outer[i], outer[k]);
+        b.poly_facing(
+            seal,
+            &[
+                lift(a, BEZEL_LIFT_M),
+                lift(d, BEZEL_LIFT_M),
+                lift(f, BEZEL_LIFT_M),
+                lift(e, BEZEL_LIFT_M),
+            ],
+            up,
+        );
+    }
+}
+
+/// Grid step of a [`flat_window`], m (coarse: a near-flat window needs few points).
+const FLAT_WINDOW_STEP_M: f32 = 0.25;
+
 /// An inner element of a lamp, placed on its lens face (see [`element`]).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Element {

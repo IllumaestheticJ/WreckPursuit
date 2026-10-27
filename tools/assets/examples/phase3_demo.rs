@@ -468,6 +468,18 @@ fn variants(
                 }];
             });
         }
+        "drayman_cargo" | "satchel_20" => {
+            // Painted barn doors with drawn windows (traffic group's van_box look).
+            v("painted_doors", &|s| {
+                s.body.rear_door_windows = Some(car_assets::style::RearDoorWindows {
+                    side_inset_m: 0.10,
+                    centre_gap_m: 0.05,
+                    top_gap_m: 0.10,
+                    height_m: 0.45,
+                    corner_r_m: 0.04,
+                });
+            });
+        }
         _ => {}
     }
     out
@@ -485,6 +497,8 @@ fn main() {
         "hauler_1500",
         "nyx_proto",
         "ironside_440",
+        "drayman_cargo",
+        "satchel_20",
     ] {
         let car = load_car(&root, id).expect("car");
         let base = style_for(&car.def);

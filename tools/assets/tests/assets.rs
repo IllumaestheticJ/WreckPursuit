@@ -381,6 +381,13 @@ fn style_knob_extremes_never_panic() {
             b.dlo_kink_m = k;
             b.dlo_kink_len_m = k;
             b.dlo_top_drop_m = k;
+            b.rear_door_windows = Some(car_assets::style::RearDoorWindows {
+                side_inset_m: 9.0 * k,
+                centre_gap_m: -9.0 * k,
+                top_gap_m: 9.0 * k,
+                height_m: -9.0 * k,
+                corner_r_m: 9.0 * k,
+            });
             let m = generate_styled(&car.def, &car.lattice, &st);
             assert!(m.tri_count > 0, "{id}");
         }
@@ -1255,6 +1262,72 @@ fn fender_rise_keeps_kit_lamps_visible() {
         let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
         car_assets::skin::bind_skin(&car.lattice, &mut m);
         check_lights(id, &m);
+    }
+}
+
+/// Painted van rear doors (`rear_door_windows`): the rear glass area becomes body-colour door
+/// skin, glass only in the two drawn windows (a seal round each), on both LODs; the car still
+/// validates, inside its budget, with its lamps visible.
+#[test]
+fn painted_rear_doors_keep_glass_only_in_the_windows() {
+    use car_assets::style::RearDoorWindows;
+    let root = repo_root();
+    for id in ["drayman_cargo", "satchel_20", "tumbril_20"] {
+        let car = load_car(&root, id).unwrap();
+        let base = style_for(&car.def);
+        let mut st = base.clone();
+        st.body.rear_door_windows = Some(RearDoorWindows {
+            side_inset_m: 0.10,
+            centre_gap_m: 0.05,
+            top_gap_m: 0.10,
+            height_m: 0.45,
+            corner_r_m: 0.04,
+        });
+        let area = |m: &car_assets::mesh::CarMesh, name: &str| -> f32 {
+            m.parts
+                .iter()
+                .filter(|p| p.name == name)
+                .flat_map(|p| {
+                    p.indices.chunks_exact(3).map(move |t| {
+                        let v = |i: u32| {
+                            let q = &p.positions_mm[i as usize * 3..i as usize * 3 + 3];
+                            [q[0] as f32, q[1] as f32, q[2] as f32]
+                        };
+                        let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+                        let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                        let w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                        let x = [
+                            u[1] * w[2] - u[2] * w[1],
+                            u[2] * w[0] - u[0] * w[2],
+                            u[0] * w[1] - u[1] * w[0],
+                        ];
+                        0.5e-6 * (x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt()
+                    })
+                })
+                .sum()
+        };
+        let full = car_assets::mesh::generate_styled(&car.def, &car.lattice, &base);
+        let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+        car_assets::skin::bind_skin(&car.lattice, &mut m);
+        let errors = validate(&car, &m, None);
+        assert!(errors.is_empty(), "{id}: {errors:?}");
+        let (g0, g1) = (area(&full, "rear_glass"), area(&m, "rear_glass"));
+        assert!(
+            g1 > 0.3 && g1 < 0.8 * g0,
+            "{id}: rear glass {g1:.2} m² against {g0:.2} m² fully glazed"
+        );
+        assert!(
+            area(&m, "trunk") > area(&full, "trunk") + 0.3,
+            "{id}: no door skin"
+        );
+        assert!(area(&m, "rear_glass_seal") > 0.01, "{id}: no seal");
+        check_lights(id, &m);
+        let mid =
+            car_assets::mesh::generate_lod(&car.def, &car.lattice, &st, car_assets::mesh::Lod::Mid);
+        assert!(
+            area(&mid, "rear_glass") > 0.3,
+            "{id}: mid LOD lost the windows"
+        );
     }
 }
 

@@ -680,7 +680,10 @@ fn classify_left(p: &BodyProfile, win: &Windows, y: f32, z: f32, seg: Seg, j: us
             } else if y >= ry0 {
                 key_for(Roof, PartKind::Panel)
             } else if y > p.y_deck {
-                if p.rear_glass && !pillar {
+                if p.rear_glass && !pillar && p.style.rear_door_windows.is_some() {
+                    // Painted rear doors: glass only in the drawn windows (`rear_door_windows`).
+                    key_for(Trunk, PartKind::Panel)
+                } else if p.rear_glass && !pillar {
                     key_for(RearGlass, PartKind::Glass)
                 } else {
                     key_for(Cabin, PartKind::Body)
@@ -1013,6 +1016,7 @@ pub fn generate_lod(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle, lo
     if style.underglow_rgb.is_some() {
         underglow(&p, &mut b);
     }
+    rear_door_windows(&p, &mut b);
     lights_and_mirrors(&p, &mut b);
     interior(&p, &mut b);
     hood_scoop(&p, &mut b);
@@ -1101,6 +1105,72 @@ pub fn generate_lod(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle, lo
         wheel_camber_deg: camber.iter().any(|c| c.abs() > 1e-4).then_some(camber),
         parts,
     }
+}
+
+/// Glass windows drawn in painted rear doors ([`crate::style::BodyStyle::rear_door_windows`]):
+/// a rounded rectangle each side of the seam cast onto the door skin (`rear_glass`, so it
+/// shatters like the full rear glass) with a black seal round it. No-op without the knob.
+fn rear_door_windows(p: &BodyProfile, b: &mut Builder) {
+    let Some(w) = p.style.rear_door_windows else {
+        return;
+    };
+    if !p.rear_glass {
+        return;
+    }
+    let half = p.half_width(p.y_tail);
+    // The rear glass rises from the deck to the roof's rear edge.
+    let top = p.top(p.roof.0);
+    let x_out = half - w.side_inset_m.clamp(0.03, 0.40);
+    let x_in = w.centre_gap_m.clamp(0.0, 0.30).min(x_out - 0.10);
+    let z1 = top - w.top_gap_m.clamp(0.03, 0.40);
+    let z0 = (z1 - w.height_m.clamp(0.15, 1.20)).max(p.z_bumper_top.1 + 0.10);
+    if x_out - x_in < 0.10 || z1 - z0 < 0.10 {
+        return;
+    }
+    let r = w
+        .corner_r_m
+        .clamp(0.0, 0.15)
+        .min(0.5 * (x_out - x_in))
+        .min(0.5 * (z1 - z0));
+    let glass = key_for(BodyRegion::RearGlass, PartKind::Glass);
+    let seal = seal_key(&glass);
+    for sx in [-1.0f32, 1.0] {
+        let outline = rounded_rect([sx * x_in, z0], [sx * x_out, z1], r);
+        crate::lamp::flat_window(
+            b,
+            p,
+            &glass,
+            &seal,
+            crate::lamp::LampView::Rear,
+            &outline,
+            0.004,
+            0.012,
+        );
+    }
+}
+
+/// Outline of a rectangle between corners `a` and `b` (any order) with corners rounded by `r`
+/// (two points per corner, a 45° chamfer-like arc; sharp when `r` is 0), counter-clockwise.
+fn rounded_rect(a: [f32; 2], b: [f32; 2], r: f32) -> Vec<[f32; 2]> {
+    let (x0, x1) = (a[0].min(b[0]), a[0].max(b[0]));
+    let (y0, y1) = (a[1].min(b[1]), a[1].max(b[1]));
+    if r <= 1e-4 {
+        return vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+    }
+    let corners = [
+        ([x1 - r, y0 + r], -90.0f32),
+        ([x1 - r, y1 - r], 0.0),
+        ([x0 + r, y1 - r], 90.0),
+        ([x0 + r, y0 + r], 180.0),
+    ];
+    let mut out = Vec::new();
+    for (c, a0) in corners {
+        for i in 0..2 {
+            let a = (a0 + 30.0 + 30.0 * i as f32).to_radians();
+            out.push([c[0] + r * a.cos(), c[1] + r * a.sin()]);
+        }
+    }
+    out
 }
 
 /// Key of the black seal round a glass part (same region, so it swings / detaches with it).
