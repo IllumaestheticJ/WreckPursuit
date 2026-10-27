@@ -192,6 +192,14 @@ blatant speed the same way (detection does not depend on the car model).
   sight). Its expectations still pass; the pending `pursuit_started_before(6.0)` is now 6.017 s
   (was 9.117 s).
 
+## Police scenarios
+
+`crates/wp_police/scenarios/escape_break_contact_night.ron` re-aimed (escapes max 8 → 9): the
+racer there starts wanted at 2.6× the city limit (~22 m/s over, slightly conspicuous), so units
+recognise it sooner and further out. First pursuit 74.6 → 63.9 s (mean, its 10 runs; over 30
+runs 118 → 92 s), pursuits 24 → 26 of 30, share escaped about the same (21/24 → 24/26), no
+captures either way. 9 escapes in its 10 runs (main: 8, already the top of the band).
+
 ## Changes outside my crates
 
 None.
