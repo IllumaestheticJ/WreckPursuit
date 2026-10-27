@@ -270,6 +270,16 @@ Every mesh on `ws/car-shapes` is unchanged by phase 3 (no regeneration to merge)
 - Changing the ring point count (18 per side) would break every style that indexes ring points.
 Request to the lead (renderer owner): smooth-shaded paint in the greybox style, see above.
 
+### Checks run (phase 3)
+`cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test -p car-assets`
+(36 tests incl. the extended soft-clamp sweep), `validate-car-asset` (all cars ok),
+`gen-car-mesh --check` (no stale mesh: phase 3 changes no mesh), `cargo build --target
+wasm32-unknown-unknown -p wp_wasm`, `npm ci && npm run wasm && npx tsc --noEmit -p .`,
+`node e2e/mod_coverage.mjs kestrel_ts ombra_v12 hauler_1500`: the same 8 known car/mod pairs as
+phase 1 show nothing (short / sequential shifter, radar, sport tyres on the exotic, the Ombra
+halo, front sway bar on the truck). `wasm-pack` was not installed in the container (installed
+with `cargo install wasm-pack`).
+
 ### Not covered here (phase-2 requests outside this brief)
 Nose / tail face rake in side view and a plan bow of the face, tailgate lean, a quarter-glass
 knob (hatch group); a forward-leaning shark nose (muscle); a C-pillar window kink (tuner); nose
