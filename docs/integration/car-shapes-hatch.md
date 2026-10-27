@@ -114,8 +114,19 @@ none float or hide inside the shell.
   it is shared `trim.rs` code).
 
 ## Generator requests
-None needed. Nice to have: a public `Kit` helper for a face lens of any convex outline (what
-`face_poly` does locally here), so other styles can stop using boxes for lamps.
-
+What limited this group (sent to the lead 2026-10-27 for a shared generator phase):
+1. **Nose / tail face shape:** the nose and tail faces are flat vertical planes from sill to
+   nose height (only the top falls back, and `end_round_m` insets the last ring). Wanted: a face
+   rake in side view (bumper leaning back / undercut chin) and a plan-view bow of the face, so a
+   90s rounded nose or a modern pointed nose is possible and lamps can follow it.
+2. **Lamp lenses that follow the surface:** lenses are face-aligned prisms or top patches; a lens
+   that wraps round the plan-rounded corner onto the fender (one part, any convex outline) is
+   the biggest missing cue on every modern car. `face_poly` here is a local stop-gap.
+3. **Section curvature:** the lower side is slab-sided between crease and sill; wanted a side
+   bow (plan curvature along the length, widest at the doors) and a convex section knob.
+4. **Hatch tail:** hatch glass always runs from the roof to `y_deck`, then a vertical tail face.
+   Wanted a tailgate lean (lower tailgate panel raked) and a kick / lip at the glass base.
+5. **Quarter glass:** an explicit knob to suppress or size the quarter window (now only reachable
+   by shortening the roof).
 ## Contract change requests
 None.
