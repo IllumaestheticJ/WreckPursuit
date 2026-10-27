@@ -27,8 +27,14 @@
   above the hood, one crisp mid-side character line; the corner tail lamps are now projected
   lenses swung 35° round onto the quarters (bottom strip = signal).
 - The 70s cars use 18 wheel segments (was 20) to pay for the extra loft stations.
-- Waiting on phase 3b (nose / tail rake and chin, hood / deck dz, roof-arc exponent, DLO
-  kink, arch shapes, smooth shading) for a touch-up pass.
+- **Phase 3b part 1 (b10e5e14):** rampart nose face leans forward 6° (shark nose), roof
+  narrows 12 % toward the fastback, lower body leans in 3 cm, projector bowls inside the head
+  lamps; ironside roof taper 8 % and 3 cm lower lean-in; bulwark 2 cm lower lean-in. A chin
+  undercut and a stronger lean (−12°) were tried on the rampart but left the face-plane kit
+  (lower mouth, fogs, splitter, tail panel, diffuser) floating, so they stay off until those
+  parts are re-placed on the raked face.
+- Still waiting on phase 3b part 2 (smooth shading, nose height / hood dz, roof-arc exponent)
+  for a touch-up pass.
 
 ## Second pass (after the lead's "be bold" and "no brand cues" notes)
 - **Proportions:** ironside hood +7 cm longer (cabin −0.42 m), roof −3 cm, coke-bottle hips
@@ -120,10 +126,10 @@ ribbed reflector panel, landau roof with chrome band, rubber side strip, chrome 
 ## Triangle counts (hero budget 22k, mid 7k)
 | car | full before | full now | mid before | mid now |
 |---|---|---|---|---|
-| ironside_440 | 19809 | 20318 | 5451 | 5822 |
-| rampart_50 | 19954 | 20910 | 5380 | 5910 |
-| bulwark_400 | 20579 | 20825 | 5621 | 6171 |
-| brigand_400 | 20986 | 21363 | 6042 | 6375 |
+| ironside_440 | 19809 | 20278 | 5451 | 5812 |
+| rampart_50 | 19954 | 21317 | 5380 | 5902 |
+| bulwark_400 | 20579 | 20825 | 5621 | 6151 |
+| brigand_400 | 20986 | 21463 | 6042 | 6340 |
 
 ## Checks
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p
@@ -150,13 +156,14 @@ per-car before (left) / after (right) sheets `docs/media/car-shapes/muscle/<car>
 - No opera windows on the brigand's C-pillar: side patches can't follow the greenhouse surface.
 
 ## Generator requests (sent to the lead 2026-10-27)
-1. Per-station side section: a waist pinch at the doors swelling over the arches in plan
+1. ~~Per-station side section~~ (done in phase 3: `plan_width`, `side_sculpt`): a waist pinch at the doors swelling over the arches in plan
    (coke-bottle line), e.g. `waist_pinch_m`.
-2. Forward-leaning nose: negative `nose_rake_deg` (to about −15°) for modern shark noses.
-3. Shaped lamp lens primitive: polygon outline extruded off the face that follows the
-   plan-round corners, with an inner bezel inset.
+2. ~~Forward-leaning nose~~ (done in phase 3b: `nose_face_rake_deg`).
+3. ~~Shaped lamp lens primitive~~ (done in phase 3: `lamp`, `Kit::proj_cluster`).
 4. Side patch that follows the greenhouse surface (opera windows, C-pillar badges).
-5. Lower-body tumblehome (boat-tail section) as its own knob.
+5. ~~Lower-body tumblehome~~ (done in phase 3b: `lower_lean_in_m`).
+6. New: a face-following variant of `Kit::front_box` / `rear_box` (or a y offset taking the
+   face rake and chin at z), so grilles, mouths and diffusers can sit on a raked face.
 
 ## Contract change requests
 None.
