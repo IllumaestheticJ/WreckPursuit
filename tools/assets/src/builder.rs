@@ -177,6 +177,9 @@ struct PartBuild {
     uv: Vec<[f32; 2]>,
     idx: Vec<u32>,
     dedupe: BTreeMap<(i64, i64), u32>,
+    /// Vertex ranges already placed on the body surface (projected lamps / panels, surface
+    /// patches): the end-face follow pass (`lamp::follow_end_faces`) leaves them alone.
+    placed: Vec<(u32, u32)>,
 }
 
 /// Collects triangles per part with optional per-part vertex dedupe.
@@ -251,6 +254,7 @@ impl Builder {
             uv: Vec::new(),
             idx: Vec::new(),
             dedupe: BTreeMap::new(),
+            placed: Vec::new(),
         });
         self.parts.len() - 1
     }
@@ -585,6 +589,13 @@ impl Builder {
 
     /// Thin shell following the loft surface (see [`Patch`]).
     pub fn surface_patch(&mut self, key: &PartKey, profile: &BodyProfile, patch: &Patch) {
+        let before = self.vertex_count(&key.name);
+        self.surface_patch_inner(key, profile, patch);
+        let after = self.vertex_count(&key.name);
+        self.mark_placed(&key.name, before, after);
+    }
+
+    fn surface_patch_inner(&mut self, key: &PartKey, profile: &BodyProfile, patch: &Patch) {
         let (y0, y1) = (patch.y0.min(patch.y1), patch.y0.max(patch.y1));
         let step = self.patch_step_m.unwrap_or(0.06);
         let ny = if patch.steps.0 > 0 {
@@ -713,6 +724,9 @@ impl Builder {
         };
         let part = self.part(to);
         let base = self.parts[part].pos.len() as u32;
+        for &(a, b) in &src.placed {
+            self.parts[part].placed.push((base + a, base + b));
+        }
         for (q, uv) in src.pos.iter().zip(&src.uv) {
             self.parts[part].pos.push([-q[0], q[1], q[2]]);
             self.parts[part].uv.push(*uv);
@@ -768,6 +782,46 @@ impl Builder {
             p.uv = uv;
             p.idx = idx;
             p.dedupe.clear();
+            p.placed.clear();
+        }
+    }
+
+    /// Vertex count of part `name` (0 if missing).
+    pub fn vertex_count(&self, name: &str) -> usize {
+        self.parts
+            .iter()
+            .find(|p| p.key.name == name)
+            .map_or(0, |p| p.pos.len())
+    }
+
+    /// Mark vertices `from..to` of part `name` as placed on the body surface (see
+    /// `PartBuild::placed`).
+    pub fn mark_placed(&mut self, name: &str, from: usize, to: usize) {
+        if let Some(p) = self.parts.iter_mut().find(|p| p.key.name == name) {
+            if to > from {
+                p.placed.push((from as u32, to.min(p.pos.len()) as u32));
+            }
+        }
+    }
+
+    /// True if vertex `v` of part `name` was placed on the body surface.
+    pub fn is_placed(&self, name: &str, v: usize) -> bool {
+        self.parts
+            .iter()
+            .find(|p| p.key.name == name)
+            .is_some_and(|p| {
+                p.placed
+                    .iter()
+                    .any(|&(a, b)| (a as usize..b as usize).contains(&v))
+            })
+    }
+
+    /// Move vertex `v` of part `name` to `q`.
+    pub fn set_vertex(&mut self, name: &str, v: usize, q: [f32; 3]) {
+        if let Some(p) = self.parts.iter_mut().find(|p| p.key.name == name) {
+            if let Some(slot) = p.pos.get_mut(v) {
+                *slot = q;
+            }
         }
     }
 

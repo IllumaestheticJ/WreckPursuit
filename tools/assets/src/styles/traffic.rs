@@ -22,7 +22,7 @@ use wp_contracts::{BodyRegion, VehicleDef};
 
 use crate::builder::{Builder, PartKey, Patch, PatchBand};
 use crate::mesh::{indicator_front_key, indicator_rear_key, MaterialSlot, PartKind};
-use crate::profile::{smoothstep, BodyProfile};
+use crate::profile::BodyProfile;
 use crate::style::{
     ArchShape, BodyStyle, CaliperKind, CapKind, CarStyle, Detail, DetailCtx, EngineKind,
     ExhaustKind, FuelDoor, RimKind, Shape, SideSculpt, Silhouette, SuspensionKind, TrimFinish,
@@ -188,11 +188,12 @@ fn tansy_13() -> CarStyle {
         // Short supermini overhangs.
         overhang_trim: (-0.08, -0.08),
         end_round_m: 0.04,
-        // Phase 3b: raked bumper face, rounded nose in plan, roof
+        // Phase 3b: raked bumper face with a chin, leaning tailgate, rounded nose in plan, roof
         // narrowing to the rear, lower body tucked in.
         nose_face_rake_deg: 22.0,
-        // Chin and tailgate lean (0.05 m, 12°) are off until the generator's face-bottom
-        // clipping fix lands (spikes under the body from low angles).
+        nose_chin_m: 0.05,
+        tail_face_rake_deg: 12.0,
+        tail_chin_m: 0.04,
         nose_plan_bow_m: 0.18,
         nose_tip_w: 0.88,
         roof_plan_taper: 0.08,
@@ -312,7 +313,8 @@ fn hauler_1500() -> CarStyle {
     s.wheel.rim = RimKind::Truck;
     s.wheel.spokes = 6;
     s.wheel.cap = CapKind::Centre;
-    s.wheel.lugs = 6;
+    // No lug nuts drawn (saves ~200 triangles for the 11k budget).
+    s.wheel.lugs = 0;
     s.wheel.pcd_r_m = 0.07;
     s.wheel.rim_material = M::Chrome;
     // Keeps the crew cab (big loft, open bed + real wheels) under the 11k traffic budget.
@@ -364,8 +366,8 @@ fn drayman_cargo() -> CarStyle {
         ..BodyStyle::preset(Silhouette::Van)
     };
     let mut s = with_kit(body, drayman_kit);
-    // 14 wheel segments keep the long van (projected lamps) under the 11k traffic budget.
-    s.wheel.segments = 14;
+    // 12 wheel segments keep the long van (projected lamps) under the 11k traffic budget.
+    s.wheel.segments = 12;
     s.wheel.rim = RimKind::Steel;
     s.wheel.spokes = 0;
     s.wheel.cap = CapKind::Small;
@@ -414,8 +416,8 @@ fn euro_panel_van(tumbril: bool) -> CarStyle {
         deck_min_m: 0.04,
         arch_lip_finish: TrimFinish::Black,
         cladding_z_m: if tumbril { 0.42 } else { 0.36 },
-        // Phase 3b: raked plastic bumper (more on the rounder satchel); the chin waits for the
-        // generator's face-bottom clipping fix.
+        // Phase 3b: raked plastic bumper with a chin (more on the rounder satchel).
+        nose_chin_m: if tumbril { 0.04 } else { 0.06 },
         nose_face_rake_deg: if tumbril { 8.0 } else { 16.0 },
         ..BodyStyle::preset(Silhouette::Van)
     };
@@ -865,7 +867,6 @@ fn supermini_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         0.004,
     );
     mirror(b, &rp);
-    conform_to_faces(b, p);
 }
 
 /// furrow_24 (90s compact regular-cab pickup): square lamps with wraparound amber corners in
@@ -972,8 +973,8 @@ fn compact_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 /// lattice's hood line), tall three-section chrome grille with two heavy bars and a blank
 /// badge, tall headlamps in chrome surrounds with an amber LED strip, chrome bumper with split
 /// intakes, fog lamps and red tow hooks, crew-cab handles and rear-door cut lines, cab-back
-/// sliding window, running boards, towing mirrors, cab clearance lamps, tailgate spoiler cap
-/// and badge, tail lamps with a white reverse section at the bottom, chrome step bumper with
+/// sliding window, running boards, towing mirrors, cab clearance lamps, tailgate spoiler cap,
+/// tail lamps with a white reverse section at the bottom, chrome step bumper with
 /// hitch.
 fn fullsize_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let p = ctx.profile;
@@ -1037,8 +1038,6 @@ fn fullsize_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let fog = light("foglamp_l", R::FrontBumper, M::Headlight);
     front_box(b, &fog, p, -0.76, -0.62, 0.58, 0.66, 0.118, 0.0);
     mirror(b, &fog);
-    let dam = key("air_dam", R::FrontBumper, M::Trim);
-    front_box(b, &dam, p, -(wf - 0.14), wf - 0.14, 0.42, 0.50, 0.07, 0.02);
     let hook = key("tow_hook_l", R::FrontBumper, M::Caliper);
     front_box(b, &hook, p, -0.58, -0.50, 0.44, 0.50, 0.13, 0.0);
     mirror(b, &hook);
@@ -1069,8 +1068,6 @@ fn fullsize_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         0.0,
     );
     tailgate_handle(b, p, zt - 0.11);
-    let tb = key("tailgate_badge", R::Trunk, M::Chrome);
-    rear_box(b, &tb, p, -0.16, 0.16, zt - 0.30, zt - 0.24, 0.012, 0.0);
     step_bumper(b, p, 0.42, 0.62, 0.14, M::Chrome, true);
     plate_on_face(b, p, false, 0.465, 0.15);
     bed_rails(b, p, M::Trim);
@@ -1113,20 +1110,6 @@ fn fullsize_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     );
     door_cut(b, p, R::LeftDoorR, y_rd, p.y_fd_rear);
     cab_back_window(b, p, 0.56, (p.z_deck + 0.20, p.roof.2 - 0.12), true);
-    let fb = key("fender_badge_l", R::FrontLeftFender, M::Chrome);
-    let yf = p.arches[0].0 - 0.62;
-    side_box(
-        b,
-        &fb,
-        p,
-        yf - 0.12,
-        yf + 0.12,
-        p.z_belt - 0.20,
-        p.z_belt - 0.16,
-        0.008,
-        0.003,
-    );
-    mirror(b, &fb);
     side_markers(b, p, p.z_bumper_top.0 + 0.06);
 }
 
@@ -1279,7 +1262,6 @@ fn satchel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     front_box(b, &intake, p, -0.45, 0.45, 0.42, 0.52, 0.065, 0.0);
     plate_on_face(b, p, true, 0.575, 0.0);
     euro_van_common(b, p, false);
-    conform_to_faces(b, p);
 }
 
 /// tumbril_20 (squarer 2000s European panel van): upright square lamps with amber outer
@@ -1369,7 +1351,6 @@ fn tumbril_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     plate_on_face(b, p, true, 0.495, 0.08);
     sliding_door_track_at(b, p, p.z_belt + 0.02);
     euro_van_common(b, p, true);
-    conform_to_faces(b, p);
 }
 
 /// Shared rear and sides of the two European panel vans.
@@ -2668,81 +2649,6 @@ fn proj_signals(
 /// Rectangle outline `[x0, x1] × [z0, z1]` for a projected lamp.
 fn rect(x0: f32, x1: f32, z0: f32, z1: f32) -> Vec<[f32; 2]> {
     vec![[x0, z0], [x1, z0], [x1, z1], [x0, z1]]
-}
-
-/// Slide the kit's end-mounted parts (grilles, plates, intakes, bumper bars, fog lamps …) back
-/// onto a raked / chinned end face (`nose_face_rake_deg`, `nose_chin_m`, tail likewise): the
-/// kit helpers place them on a vertical face at `y_nose` / `y_tail`. The face's set-back per
-/// height is measured from the body panels near the centre line, capped at the profile's face
-/// depth; vertices fade from full shift at the end to none 0.3 m in. Projected lamps (which
-/// already follow the surface) and body / glass parts are left alone. Call it last in a kit.
-fn conform_to_faces(b: &mut Builder, p: &BodyProfile) {
-    const BIN: f32 = 0.02;
-    const NB: usize = 160;
-    for front in [true, false] {
-        let depth = p.face_depth(front);
-        if depth <= 0.005 {
-            continue;
-        }
-        let end = if front { p.y_nose } else { p.y_tail };
-        let dir = if front { 1.0 } else { -1.0 };
-        // Outermost body point (along the end direction) per height bin, near the centre line.
-        let mut reach = [f32::NAN; NB];
-        for k in b.keys() {
-            if k.wheel.is_some() || !matches!(k.kind, PartKind::Panel | PartKind::Body) {
-                continue;
-            }
-            let Some((pos, _, _)) = b.geometry(&k.name) else {
-                continue;
-            };
-            for q in pos {
-                if q[0].abs() > 0.4 || dir * (end - q[1]) > 0.6 {
-                    continue;
-                }
-                let i = ((q[2] / BIN) as usize).min(NB - 1);
-                let v = dir * q[1];
-                if reach[i].is_nan() || v > reach[i] {
-                    reach[i] = v;
-                }
-            }
-        }
-        // Set-back per bin (0 = on the end plane), gaps filled from the nearest bin below.
-        let mut back = [0.0f32; NB];
-        let mut last = 0.0f32;
-        for i in 0..NB {
-            if !reach[i].is_nan() {
-                last = (dir * end - reach[i]).clamp(0.0, depth + 0.02);
-            }
-            back[i] = last;
-        }
-        let projected = |n: &str| {
-            [
-                "headlight",
-                "taillight",
-                "indicator_",
-                "headlamp_bezel",
-                "taillamp_bezel",
-            ]
-            .iter()
-            .any(|s| n.starts_with(s))
-        };
-        b.transform(
-            |k| {
-                k.wheel.is_none()
-                    && matches!(k.kind, PartKind::Detail | PartKind::Light)
-                    && !projected(&k.name)
-            },
-            |q| {
-                let into = dir * (end - q[1]);
-                if into > 0.3 {
-                    return q;
-                }
-                let i = ((q[2].max(0.0) / BIN) as usize).min(NB - 1);
-                let w = 1.0 - smoothstep((into - 0.1) / 0.2);
-                [q[0], q[1] - dir * back[i] * w, q[2]]
-            },
-        );
-    }
 }
 
 /// Inner elements of a projected head lamp drawn by [`proj_lamps`] (same LEFT `outline`, `yaw`
