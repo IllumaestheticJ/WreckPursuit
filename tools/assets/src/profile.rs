@@ -132,10 +132,6 @@ pub struct BodyProfile {
     pub roof_half: f32,
     /// Side-view length over which the nose top falls to `z_nose`.
     pub nose_run: f32,
-    /// Loft station steps (base, fine) the mesh is built with: set by `mesh::generate_lod`
-    /// (hero steps until then). [`crate::lamp`] casts onto the loft at these stations, so a
-    /// projected lens hugs the mesh it sits on.
-    pub loft_steps: (f32, f32),
 }
 
 fn region_nodes(l: &LatticeDef, r: BodyRegion) -> Vec<[f32; 3]> {
@@ -361,7 +357,6 @@ impl BodyProfile {
             bed: None,
             roof_half,
             nose_run,
-            loft_steps: (0.07, 0.036),
         };
         if p.style.silhouette == Silhouette::Pickup && !trunk_lid && !rear_glass {
             let y0 = p.y_tail + 0.07;
@@ -478,10 +473,18 @@ impl BodyProfile {
         f.max(b)
     }
 
-    /// Share of [`Self::fender_rise`] a top point at `u` = |x| / shoulder half width gets.
-    fn fender_band(&self, u: f32) -> f32 {
+    /// Fender-top rise of a top point at (y, x), m: [`Self::fender_rise`] times the band
+    /// across the width. The band is measured on the body's full half width (not the local one,
+    /// which narrows toward the ends), so at a given x the rise never grows toward the nose or
+    /// tail: no lip in front of lamps.
+    pub fn fender_top(&self, y: f32, x: f32) -> f32 {
+        let rise = self.fender_rise(y);
+        if rise <= 0.0 {
+            return 0.0;
+        }
         let pw = self.style.fender_peak_w.clamp(0.5, 0.95);
-        smoothstep((u - (pw - 0.3)) / 0.3)
+        let u = x.abs() / self.half_w.max(0.1);
+        rise * smoothstep((u - (pw - 0.3)) / 0.3)
     }
 
     /// Side-wall offset (m, + outward) of a side ring point at (y, z): sculpts plus the side
@@ -865,10 +868,6 @@ impl BodyProfile {
                 * band
                 * fade;
         }
-        let rise = self.fender_rise(y);
-        if rise > 0.0 {
-            z += rise * self.fender_band(u);
-        }
         // Valleys: the centre sinks, the outer edge (fender / haunch tops) stays.
         let valley_band = 1.0 - smoothstep((u - 0.55) / 0.35);
         if y >= self.y_fw {
@@ -971,7 +970,8 @@ impl BodyProfile {
             let rw = tx[2].max(0.04);
             let rd = s.roof_rail_drop_m.clamp(0.02, 0.10).min(0.45 * hg);
             let gc = |x: f32| self.greenhouse_crown(y, x / rw);
-            let fc = |x: f32| top + self.top_crown(y, (x / xs).min(1.0), false);
+            let fc =
+                |x: f32| top + self.top_crown(y, (x / xs).min(1.0), false) + self.fender_top(y, x);
             let z8 = belt + 0.01f32.min(0.25 * hg);
             let z10 = (top - rd + gc(tx[2])).max(z8);
             let mut z = [
@@ -1026,7 +1026,11 @@ impl BodyProfile {
             // Flat top (hood / deck) at the greenhouse's x positions.
             for &x in &tx {
                 pts.push(RingPt {
-                    p: [-x, y, top + self.top_crown(y, (x / xs).min(1.0), false)],
+                    p: [
+                        -x,
+                        y,
+                        top + self.top_crown(y, (x / xs).min(1.0), false) + self.fender_top(y, x),
+                    ],
                     seg: Seg::Top,
                 });
             }

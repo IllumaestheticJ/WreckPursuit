@@ -2,9 +2,9 @@
 //!
 //! A [`Lamp`] is a 2D outline in the coordinates of a view (the nose seen from ahead, the tail
 //! from behind, a side, or the top). Every point of the outline is cast along the view
-//! direction onto the loft exactly as the mesh is built (same stations, the rounded end rings
-//! included; see [`crate::mesh::loft_rings`]), so the lens follows the curved nose, fender or
-//! tail: a lens drawn in the front view near the corner wraps round the plan-rounded corner
+//! direction onto the body's panel / body triangles already built (the loft runs before style
+//! details), so the lens sits proud of exactly the drawn surface and follows the curved nose,
+//! fender or tail: a lens drawn in the front view near the corner wraps round the plan-rounded corner
 //! onto the fender (more with [`Lamp::yaw_deg`]), one drawn in the top view lies on the hood
 //! or fender top.
 //!
@@ -22,8 +22,8 @@
 //! Chassis metres; deterministic.
 
 use crate::builder::{Builder, PartKey};
-use crate::mesh::{loft_rings, INDICATOR_SEAM_M};
-use crate::profile::{BodyProfile, RingPt};
+use crate::mesh::{PartKind, INDICATOR_SEAM_M};
+use crate::profile::BodyProfile;
 
 /// The view an outline is drawn in, and the direction its points are cast along.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -58,7 +58,8 @@ pub struct Lamp {
     pub yaw_deg: f32,
     /// Lens face over the surface, m (0.002…0.03). Default 0.008.
     pub proud_m: f32,
-    /// Lens back under the surface, m (0…0.03). Default 0.010.
+    /// How far the lens rim reaches under the surface, m (0…0.01; keep it small: rim faces seen
+    /// edge-on on a corner then dip into the body or under a bezel). Default 0.
     pub depth_m: f32,
     /// Grid step of the lens, m (0.01…0.08): perimeter spacing (8…32 points), rings every two
     /// steps (1…3 rings). Default 0.04. A lens costs ≈ 2 × points × rings + 2 × points
@@ -74,7 +75,7 @@ impl Lamp {
             outline,
             yaw_deg: 0.0,
             proud_m: 0.008,
-            depth_m: 0.010,
+            depth_m: 0.0,
             step_m: 0.04,
         }
     }
@@ -130,27 +131,29 @@ pub fn split_outline(outline: &[[f32; 2]], axis: usize, at: f32) -> (Vec<[f32; 2
     )
 }
 
-/// The lens of `lamp` into part `key` (a closed shell following the surface).
+/// The lens of `lamp` into part `key` (a face following the surface, with a rim wall).
 pub fn lens(b: &mut Builder, p: &BodyProfile, key: &PartKey, lamp: &Lamp) {
-    let Some(caster) = Caster::new(p, lamp) else {
+    let Some(caster) = Caster::new(b, p, lamp) else {
         return;
     };
     let grid = caster.grid(lamp);
     let proud = lamp.proud_m.clamp(0.002, 0.03);
-    let depth = lamp.depth_m.clamp(0.0, 0.03);
-    shell(b, key, &grid, proud, -depth);
+    let depth = lamp.depth_m.clamp(0.0, 0.01);
+    shell(b, &caster, key, &grid, proud, -depth);
 }
 
-/// A trim bezel `width_m` wide (0.003…0.05) round `lamp`'s outline into part `key`: a ring
-/// from the lens edge at half the lens's proud height down to the surface, with a skirt into
-/// the body. Draw the lens with [`lens`] (same `lamp`) on top of it.
+/// How far a [`bezel`] band stands off the surface, m (flush: it never shadows the lens rim).
+pub const BEZEL_LIFT_M: f32 = 0.001;
+
+/// A trim bezel `width_m` wide (0.003…0.05) round `lamp`'s outline into part `key`: a band
+/// [`BEZEL_LIFT_M`] over the surface from the lens edge outward, with a skirt into the body.
+/// Draw the lens with [`lens`] (same `lamp`) on top of it.
 pub fn bezel(b: &mut Builder, p: &BodyProfile, key: &PartKey, lamp: &Lamp, width_m: f32) {
-    let Some(caster) = Caster::new(p, lamp) else {
+    let Some(caster) = Caster::new(b, p, lamp) else {
         return;
     };
     let w = width_m.clamp(0.003, 0.05);
-    let proud = lamp.proud_m.clamp(0.002, 0.03);
-    let depth = lamp.depth_m.clamp(0.0, 0.03);
+    let depth = lamp.depth_m.clamp(0.0, 0.01);
     let ring_in = caster.boundary(lamp, 0.0);
     let ring_out = caster.boundary(lamp, w);
     let centre = caster.centre;
@@ -159,10 +162,10 @@ pub fn bezel(b: &mut Builder, p: &BodyProfile, key: &PartKey, lamp: &Lamp, width
         let k = (i + 1) % n;
         let (a, c) = (ring_in[i], ring_in[k]);
         let (d, e) = (ring_out[i], ring_out[k]);
-        let ai = add(a.0, scale(a.1, 0.5 * proud));
-        let ci = add(c.0, scale(c.1, 0.5 * proud));
-        let dout = add(d.0, scale(d.1, 0.002));
-        let eout = add(e.0, scale(e.1, 0.002));
+        let ai = add(a.0, scale(a.1, BEZEL_LIFT_M));
+        let ci = add(c.0, scale(c.1, BEZEL_LIFT_M));
+        let dout = add(d.0, scale(d.1, BEZEL_LIFT_M));
+        let eout = add(e.0, scale(e.1, BEZEL_LIFT_M));
         let up = norm(add(a.1, d.1));
         b.poly_facing(key, &[ai, dout, eout, ci], up);
         // Skirt from the bezel's outer edge into the body.
@@ -176,19 +179,20 @@ pub fn bezel(b: &mut Builder, p: &BodyProfile, key: &PartKey, lamp: &Lamp, width
 /// One projected grid point: (surface point, outward normal).
 type Hit = ([f32; 3], [f32; 3]);
 
-/// Casts view points onto the loft.
+/// A body triangle seen in the view: vertex (u, v) and distance along the cast direction.
+type ViewTri = [[f32; 3]; 3];
+
+/// Casts view points onto the body: the loft's panel / body triangles already in the builder
+/// (the mesh itself, so a lens is proud of exactly what is drawn).
 struct Caster {
-    ys: Vec<f32>,
-    rings: Vec<Vec<RingPt>>,
+    tris: Vec<ViewTri>,
     /// Cast direction (unit).
     dir: [f32; 3],
     /// View axes: first and second outline coordinate.
     u: [f32; 3],
     v: [f32; 3],
-    /// Start of a cast for outline point (0, 0): far outside the body.
+    /// Start of a cast for outline point (0, 0): outside the body.
     origin: [f32; 3],
-    /// Longest cast, m.
-    reach: f32,
     /// 2D centroid of the outline.
     c2: [f32; 2],
     /// Surface point of the centroid.
@@ -196,30 +200,36 @@ struct Caster {
 }
 
 impl Caster {
-    fn new(p: &BodyProfile, lamp: &Lamp) -> Option<Caster> {
+    fn new(b: &Builder, p: &BodyProfile, lamp: &Lamp) -> Option<Caster> {
         if lamp.outline.len() < 3 {
             return None;
         }
-        let (ys, rings) = loft_rings(p);
-        if ys.len() < 2 {
-            return None;
-        }
         let c2 = centroid(&lamp.outline);
-        let reach = (p.y_nose - p.y_tail) + 2.0 * p.half_w + 2.0;
         let yaw = lamp.yaw_deg.clamp(0.0, 60.0).to_radians();
         let (sy, cy) = wp_math::sin_cos(yaw);
         let side = if c2[0] < 0.0 { -1.0 } else { 1.0 };
         let (dir, u, v, origin) = match lamp.view {
             LampView::Front => {
-                // From ahead (and, with yaw, from the outline's side), travelling in.
+                // From ahead (and, with yaw, from the outline's side), travelling in; the cast
+                // plane passes through the nose face.
                 let dir = [-side * sy, -cy, 0.0];
                 let u = horizontal_across(dir, [1.0, 0.0, 0.0]);
-                (dir, u, [0.0, 0.0, 1.0], [0.0, p.y_nose + 1.0, 0.0])
+                (
+                    dir,
+                    u,
+                    [0.0, 0.0, 1.0],
+                    sub([0.0, p.y_nose, 0.0], scale(dir, 1.5)),
+                )
             }
             LampView::Rear => {
                 let dir = [-side * sy, cy, 0.0];
                 let u = horizontal_across(dir, [1.0, 0.0, 0.0]);
-                (dir, u, [0.0, 0.0, 1.0], [0.0, p.y_tail - 1.0, 0.0])
+                (
+                    dir,
+                    u,
+                    [0.0, 0.0, 1.0],
+                    sub([0.0, p.y_tail, 0.0], scale(dir, 1.5)),
+                )
             }
             LampView::Side { right } => {
                 let sx = if right { 1.0 } else { -1.0 };
@@ -237,27 +247,45 @@ impl Caster {
                 [0.0, 0.0, p.z_max() + 1.0],
             ),
         };
-        // Yawed front / rear views: start far back along the swung ray so the cast plane
-        // passes through the face.
-        let origin = match lamp.view {
-            LampView::Front | LampView::Rear => {
-                let face = if lamp.view == LampView::Front {
-                    p.y_nose
-                } else {
-                    p.y_tail
-                };
-                sub([0.0, face, 0.0], scale(dir, 1.5))
+        // Body triangles whose view footprint overlaps the outline (+ bezel and normal margin).
+        let m = 0.08;
+        let lo = [
+            lamp.outline.iter().map(|q| q[0]).fold(f32::MAX, f32::min) - m,
+            lamp.outline.iter().map(|q| q[1]).fold(f32::MAX, f32::min) - m,
+        ];
+        let hi = [
+            lamp.outline.iter().map(|q| q[0]).fold(f32::MIN, f32::max) + m,
+            lamp.outline.iter().map(|q| q[1]).fold(f32::MIN, f32::max) + m,
+        ];
+        let mut tris = Vec::new();
+        for key in b.keys() {
+            if key.wheel.is_some() || !matches!(key.kind, PartKind::Panel | PartKind::Body) {
+                continue;
             }
-            _ => origin,
-        };
+            let Some((pos, _, idx)) = b.geometry(&key.name) else {
+                continue;
+            };
+            for t in idx.chunks_exact(3) {
+                let tri: ViewTri = [0, 1, 2].map(|i| {
+                    let d = sub(pos[t[i] as usize], origin);
+                    [dot(d, u), dot(d, v), dot(d, dir)]
+                });
+                let out = (0..2)
+                    .any(|k| tri.iter().all(|w| w[k] < lo[k]) || tri.iter().all(|w| w[k] > hi[k]));
+                if !out {
+                    tris.push(tri);
+                }
+            }
+        }
+        if tris.is_empty() {
+            return None;
+        }
         let mut caster = Caster {
-            ys,
-            rings,
+            tris,
             dir,
             u,
             v,
             origin,
-            reach: reach.max(3.5),
             c2,
             centre: [0.0; 3],
         };
@@ -270,121 +298,58 @@ impl Caster {
         add(self.origin, add(scale(self.u, q[0]), scale(self.v, q[1])))
     }
 
-    /// Is `q` inside the loft? Rings are interpolated linearly between stations (the loft's
-    /// faces), the left half mirrored.
-    fn inside(&self, q: [f32; 3]) -> bool {
-        let y = q[1];
-        let n = self.ys.len();
-        if y < self.ys[0] || y > self.ys[n - 1] {
-            return false;
+    /// First body surface point along the cast of view point `q` and the outward normal of
+    /// the triangle hit (turned to the viewer), or None.
+    fn cast_tri(&self, q: [f32; 2]) -> Option<Hit> {
+        let mut best: Option<(f32, usize)> = None;
+        for (i, t) in self.tris.iter().enumerate() {
+            let (a, b, c) = (t[0], t[1], t[2]);
+            let det = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);
+            if det.abs() < 1e-12 {
+                continue;
+            }
+            let l1 = ((q[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (q[1] - a[1])) / det;
+            let l2 = ((b[0] - a[0]) * (q[1] - a[1]) - (q[0] - a[0]) * (b[1] - a[1])) / det;
+            let e = -1e-5;
+            if l1 < e || l2 < e || l1 + l2 > 1.0 - e {
+                continue;
+            }
+            let d = a[2] + (b[2] - a[2]) * l1 + (c[2] - a[2]) * l2;
+            if d > 0.0 && best.is_none_or(|x| d < x.0) {
+                best = Some((d, i));
+            }
         }
-        let s = match self.ys.iter().position(|&ys| ys >= y) {
-            Some(0) => 0,
-            Some(i) => i - 1,
-            None => n - 2,
+        let (d, i) = best?;
+        let t = self.tris[i];
+        // Triangle normal from view coordinates back to chassis space, turned to the viewer.
+        let w = |k: usize| {
+            add(
+                add(scale(self.u, t[k][0]), scale(self.v, t[k][1])),
+                scale(self.dir, t[k][2]),
+            )
         };
-        let (y0, y1) = (self.ys[s], self.ys[s + 1]);
-        let t = if y1 - y0 > 1e-6 {
-            ((y - y0) / (y1 - y0)).clamp(0.0, 1.0)
+        let n = norm(cross(sub(w(1), w(0)), sub(w(2), w(0))));
+        let n = if dot(n, self.dir) > 0.0 {
+            scale(n, -1.0)
         } else {
-            0.0
+            n
         };
-        let (ra, rb) = (&self.rings[s], &self.rings[s + 1]);
-        let pt = |j: usize| -> [f32; 2] {
-            let (a, c) = (ra[j].p, rb[j].p);
-            [-(a[0] + (c[0] - a[0]) * t), a[2] + (c[2] - a[2]) * t]
-        };
-        // Polygon in (|x|, z): centre line at the underside, the ring, centre line at the top.
-        let ax = q[0].abs();
-        let z = q[2];
-        let m = ra.len();
-        let mut poly: Vec<[f32; 2]> = Vec::with_capacity(m + 1);
-        poly.push([0.0, pt(0)[1]]);
-        for j in 0..m {
-            poly.push(pt(j));
-        }
-        let mut inside = false;
-        let k = poly.len();
-        for i in 0..k {
-            let a = poly[i];
-            let c = poly[(i + 1) % k];
-            if (a[1] > z) != (c[1] > z) {
-                let x = a[0] + (z - a[1]) / (c[1] - a[1]) * (c[0] - a[0]);
-                if ax < x {
-                    inside = !inside;
-                }
-            }
-        }
-        inside
-    }
-
-    /// First surface point along the cast of view point `q`, or None.
-    fn cast(&self, q: [f32; 2]) -> Option<[f32; 3]> {
-        let o = self.start(q);
-        let step = 0.01;
-        let mut t = 0.0;
-        let mut prev = 0.0;
-        while t <= self.reach {
-            if self.inside(add(o, scale(self.dir, t))) {
-                let (mut lo, mut hi) = (prev, t);
-                for _ in 0..14 {
-                    let mid = 0.5 * (lo + hi);
-                    if self.inside(add(o, scale(self.dir, mid))) {
-                        hi = mid;
-                    } else {
-                        lo = mid;
-                    }
-                }
-                return Some(add(o, scale(self.dir, hi)));
-            }
-            prev = t;
-            t += step;
-        }
-        None
+        Some((add(self.start(q), scale(self.dir, d)), n))
     }
 
     /// Surface point and normal of view point `q`, pulled toward `toward` (a point known to
     /// hit) until the cast hits.
     fn cast_or_pull(&self, q: [f32; 2], toward: [f32; 2]) -> Hit {
         let mut f = 1.0f32;
-        let mut q2 = q;
-        let mut hit = self.cast(q2);
+        let mut hit = self.cast_tri(q);
         while hit.is_none() && f > 0.02 {
             f -= 0.08;
-            q2 = [
+            hit = self.cast_tri([
                 toward[0] + (q[0] - toward[0]) * f,
                 toward[1] + (q[1] - toward[1]) * f,
-            ];
-            hit = self.cast(q2);
+            ]);
         }
-        let h = hit.unwrap_or_else(|| self.start(q));
-        (h, self.normal(q2, h))
-    }
-
-    /// Outward normal at the surface point `h` of view point `q`, from neighbouring casts.
-    fn normal(&self, q: [f32; 2], h: [f32; 3]) -> [f32; 3] {
-        let e = 0.006;
-        let at = |du: f32, dv: f32| self.cast([q[0] + du, q[1] + dv]);
-        let back = scale(self.dir, -1.0);
-        let pu = at(e, 0.0).map(|x| sub(x, h));
-        let mu = at(-e, 0.0).map(|x| sub(h, x));
-        let pv = at(0.0, e).map(|x| sub(x, h));
-        let mv = at(0.0, -e).map(|x| sub(h, x));
-        let du = pu.or(mu);
-        let dv = pv.or(mv);
-        match (du, dv) {
-            (Some(a), Some(c)) => {
-                let n = norm(cross(a, c));
-                // Grazing casts (a corner seen edge-on) give wild normals: keep them on the
-                // viewer's side.
-                if dot(n, back) < 0.0 {
-                    scale(n, -1.0)
-                } else {
-                    n
-                }
-            }
-            _ => back,
-        }
+        hit.unwrap_or_else(|| (self.start(q), scale(self.dir, -1.0)))
     }
 
     /// Polar grid of the lens: centre, then `nr` rings of the resampled outline.
@@ -431,51 +396,86 @@ impl Caster {
 }
 
 /// Lens over a polar grid: the face at `hi` along the normals and a rim wall down to `lo`
-/// (under the surface; the back is inside the body and left open).
-fn shell(b: &mut Builder, key: &PartKey, grid: &[Vec<Hit>], hi: f32, lo: f32) {
-    let off = |h: &Hit, d: f32| add(h.0, scale(h.1, d));
-    let c = &grid[0][0];
+/// (under the surface; the back is inside the body and left open). Faces whose middle would
+/// sit less than half of `hi` clear of the body (a chord across a rounded corner) are pushed
+/// toward the viewer until they clear it.
+fn shell(b: &mut Builder, caster: &Caster, key: &PartKey, grid: &[Vec<Hit>], hi: f32, lo: f32) {
     let n = grid.get(1).map_or(0, |r| r.len());
     if n < 3 {
         return;
     }
-    // The lens back is inside the body and never seen: only the face and the rim wall.
-    {
-        let d = hi;
-        let face = |b: &mut Builder, q: &[[f32; 3]], nrm: [f32; 3]| {
-            b.poly_facing(key, q, nrm);
-        };
-        let r1 = &grid[1];
-        for i in 0..n {
-            let k = (i + 1) % n;
-            let nrm = norm(add(add(c.1, r1[i].1), r1[k].1));
-            face(b, &[off(c, d), off(&r1[i], d), off(&r1[k], d)], nrm);
-        }
-        for r in 1..grid.len() - 1 {
-            let (a, e) = (&grid[r], &grid[r + 1]);
-            for i in 0..n {
-                let k = (i + 1) % n;
-                let nrm = norm(add(add(a[i].1, a[k].1), add(e[i].1, e[k].1)));
-                face(
-                    b,
-                    &[off(&a[i], d), off(&e[i], d), off(&e[k], d), off(&a[k], d)],
-                    nrm,
-                );
-            }
+    // Vertex (row, index) → slot; row 0 is the centre.
+    let slot = |r: usize, i: usize| if r == 0 { 0 } else { 1 + (r - 1) * n + i % n };
+    let mut top: Vec<[f32; 3]> = vec![add(grid[0][0].0, scale(grid[0][0].1, hi))];
+    for row in &grid[1..] {
+        for h in row {
+            top.push(add(h.0, scale(h.1, hi)));
         }
     }
-    // Rim wall round the outer ring.
-    let last = &grid[grid.len() - 1];
+    let mut tris: Vec<[usize; 3]> = Vec::new();
     for i in 0..n {
-        let k = (i + 1) % n;
+        tris.push([slot(0, 0), slot(1, i), slot(1, i + 1)]);
+    }
+    for r in 1..grid.len() - 1 {
+        for i in 0..n {
+            let (a0, a1, e0, e1) = (
+                slot(r, i),
+                slot(r, i + 1),
+                slot(r + 1, i),
+                slot(r + 1, i + 1),
+            );
+            tris.push([a0, e0, e1]);
+            tris.push([a0, e1, a1]);
+        }
+    }
+    let depth = |q: [f32; 3]| dot(sub(q, caster.origin), caster.dir);
+    for _ in 0..3 {
+        let mut push = vec![0.0f32; top.len()];
+        for t in &tris {
+            let c = scale(add(add(top[t[0]], top[t[1]]), top[t[2]]), 1.0 / 3.0);
+            let d = sub(c, caster.origin);
+            let Some((s, _)) = caster.cast_tri([dot(d, caster.u), dot(d, caster.v)]) else {
+                continue;
+            };
+            let need = 0.5 * hi - (depth(s) - depth(c));
+            if need > 1e-4 {
+                for &v in t {
+                    push[v] = push[v].max(need);
+                }
+            }
+        }
+        if push.iter().all(|&x| x <= 0.0) {
+            break;
+        }
+        for (q, &d) in top.iter_mut().zip(&push) {
+            *q = sub(*q, scale(caster.dir, d));
+        }
+    }
+    let hit = |v: usize| -> &Hit {
+        if v == 0 {
+            &grid[0][0]
+        } else {
+            &grid[1 + (v - 1) / n][(v - 1) % n]
+        }
+    };
+    for t in &tris {
+        let nrm = norm(add(add(hit(t[0]).1, hit(t[1]).1), hit(t[2]).1));
+        b.poly_facing(key, &[top[t[0]], top[t[1]], top[t[2]]], nrm);
+    }
+    // Rim wall round the outer ring, from the (pushed) face down under the surface.
+    let r = grid.len() - 1;
+    let centre = grid[0][0].0;
+    for i in 0..n {
+        let (s0, s1) = (slot(r, i), slot(r, i + 1));
+        let (h0, h1) = (hit(s0), hit(s1));
         let q = [
-            off(&last[i], lo),
-            off(&last[k], lo),
-            off(&last[k], hi),
-            off(&last[i], hi),
+            add(h0.0, scale(h0.1, lo)),
+            add(h1.0, scale(h1.1, lo)),
+            top[s1],
+            top[s0],
         ];
         let mid = scale(add(add(q[0], q[1]), add(q[2], q[3])), 0.25);
-        b.poly_facing(key, &q, sub(mid, c.0));
+        b.poly_facing(key, &q, sub(mid, centre));
     }
 }
 
@@ -560,5 +560,69 @@ fn norm(a: [f32; 3]) -> [f32; 3] {
         [0.0, 0.0, 1.0]
     } else {
         scale(a, 1.0 / l)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_keeps_both_sides_apart_by_the_seam() {
+        let sq = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let (lo, hi) = split_outline(&sq, 0, 0.3);
+        let max_lo = lo.iter().map(|q| q[0]).fold(f32::MIN, f32::max);
+        let min_hi = hi.iter().map(|q| q[0]).fold(f32::MAX, f32::min);
+        assert!((max_lo - (0.3 - 0.5 * INDICATOR_SEAM_M)).abs() < 1e-6);
+        assert!((min_hi - (0.3 + 0.5 * INDICATOR_SEAM_M)).abs() < 1e-6);
+        assert_eq!(lo.len(), 4);
+        assert_eq!(hi.len(), 4);
+        // A cut outside the outline keeps it whole on one side.
+        assert_eq!(clip_outline(&sq, 1, 2.0, true).len(), 4);
+        assert!(clip_outline(&sq, 1, 2.0, false).is_empty());
+    }
+
+    #[test]
+    fn resample_and_centroid() {
+        let e = ellipse([0.5, -0.2], [0.2, 0.1], 12);
+        let c = centroid(&e);
+        assert!((c[0] - 0.5).abs() < 1e-4 && (c[1] + 0.2).abs() < 1e-4);
+        let r = resample(&e, 0.01);
+        assert!((8..=32).contains(&r.len()), "{}", r.len());
+        let r = resample(&[[0.0, 0.0], [0.01, 0.0], [0.0, 0.01]], 0.04);
+        assert!(r.len() >= 3 && r.len() <= 8, "{}", r.len());
+    }
+
+    #[test]
+    fn a_lens_sits_proud_of_the_body_it_is_cast_on() {
+        let root = crate::repo_root();
+        let car = crate::load_car(&root, "kestrel_ts").unwrap();
+        let st = crate::style::style_for(&car.def);
+        let p = BodyProfile::styled(&car.def, &car.lattice, &st.body);
+        let mut b = Builder::new();
+        // A box "body" standing in for the loft: its front face at y_nose.
+        let body = PartKey::body(
+            "hood",
+            wp_contracts::BodyRegion::Hood,
+            PartKind::Panel,
+            crate::mesh::MaterialSlot::Livery,
+        );
+        b.cuboid(&body, [-0.8, p.y_nose - 1.0, 0.2], [0.8, p.y_nose, 0.8]);
+        let key = PartKey::body(
+            "headlight_l",
+            wp_contracts::BodyRegion::FrameFront,
+            PartKind::Light,
+            crate::mesh::MaterialSlot::Headlight,
+        );
+        let lamp = Lamp::new(LampView::Front, ellipse([-0.5, 0.6], [0.12, 0.05], 12));
+        lens(&mut b, &p, &key, &lamp);
+        let (pos, _, idx) = b.geometry("headlight_l").unwrap();
+        assert!(idx.len() >= 3 * 12);
+        let ymax = pos.iter().map(|q| q[1]).fold(f32::MIN, f32::max);
+        let ymin = pos.iter().map(|q| q[1]).fold(f32::MAX, f32::min);
+        assert!((ymax - (p.y_nose + 0.008)).abs() < 1e-4, "{ymax}");
+        assert!(ymin >= p.y_nose - 1e-4, "{ymin}");
+        let xmin = pos.iter().map(|q| q[0]).fold(f32::MAX, f32::min);
+        assert!((xmin + 0.62).abs() < 0.01, "{xmin}");
     }
 }

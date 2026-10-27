@@ -191,6 +191,10 @@ the car (and travel with a crushed bumper). Style kits re-shape these four parts
 other lamp a style adds (fog lamps, DRLs, reverse lamps, light bars, roof / side markers, a trunk
 light bar) is a normal `light` / `lightbar` part skinned to its own region (bumper, fender,
 trunk, roof …) like any other part. Renderer: `apps/testbed-web/src/render/panels.ts`.
+Styles that draw lamps with `car_assets::lamp` (`Kit::proj_cluster`, car-shapes phase 3) put the
+lens into these same parts (and the `indicator_*` segment into its part) and may add a flush black
+bezel: `headlamp_bezel_l/_r` / `taillamp_bezel_l/_r` (`FrameFront` / `FrameRear`, `detail`,
+`trim`).
 
 ### Turn signals (`indicator_*`, playtest row 136)
 

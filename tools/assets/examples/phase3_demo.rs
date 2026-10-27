@@ -65,18 +65,20 @@ fn wrap_lamps(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
     let mut kit = relamp(p, b, true, true);
     let (wn, (_, zt)) = (kit.wn(), kit.nose_z());
     for sx in SIDES {
+        // Front-view outlines stay inside the nose half width and under the face's top edge;
+        // the yaw does the wrap round the corner.
         let head = [
-            [-(wn - 0.30), zt - 0.11],
-            [-(wn + 0.02), zt - 0.07],
-            [-(wn + 0.02), zt - 0.025],
-            [-(wn - 0.36), zt - 0.04],
+            [-(wn - 0.30), zt - 0.13],
+            [-(wn - 0.01), zt - 0.09],
+            [-(wn - 0.01), zt - 0.045],
+            [-(wn - 0.36), zt - 0.06],
         ];
         kit.proj_cluster(
             sx,
             true,
             LampView::Front,
             &head,
-            Some(Seg::Outboard(0.06)),
+            Some(Seg::Outboard(0.10)),
             MaterialSlot::EmissiveAmber,
             0.012,
             20.0,
@@ -102,7 +104,7 @@ fn wrap_lamps(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
 }
 
 /// Hatch: teardrop head lamps drawn in the top view, lying on the curved nose and swept back
-/// along the fender top (leading amber strip), round tail lamps on the rounded tail.
+/// along the fender top (amber outer tip), round tail lamps on the rounded tail.
 fn swept_lamps(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
     let p = ctx.profile;
     let mut kit = relamp(p, b, true, true);
@@ -120,7 +122,7 @@ fn swept_lamps(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
             true,
             LampView::Top,
             &tear,
-            Some(Seg::Lower(0.04)),
+            Some(Seg::Outboard(0.06)),
             MaterialSlot::EmissiveAmber,
             0.010,
             0.0,
@@ -148,10 +150,10 @@ fn led_strips(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
     let (wt, (_, tt)) = (kit.wt(), kit.tail_z());
     for sx in SIDES {
         let strip = [
-            [-(wn - 0.40), zt - 0.035],
-            [-(wn + 0.02), zt - 0.02],
-            [-(wn + 0.02), zt + 0.005],
-            [-(wn - 0.42), zt - 0.012],
+            [-(wn - 0.40), zt - 0.06],
+            [-(wn - 0.01), zt - 0.045],
+            [-(wn - 0.01), zt - 0.02],
+            [-(wn - 0.42), zt - 0.035],
         ];
         kit.proj_cluster(
             sx,
@@ -210,11 +212,11 @@ fn variants(
     };
     match id {
         "kestrel_ts" => {
-            // Coke-bottle waist: full width over the arches, 5 % in at the doors.
+            // Coke-bottle waist: full width over the arches, 8 % in at the doors.
             v("plan_coke", &|s| {
                 s.body.plan_width = vec![
                     [fy - fr - 0.1, 1.0],
-                    [0.5 * (fy + ry), 0.95],
+                    [0.5 * (fy + ry), 0.92],
                     [ry + rr + 0.1, 1.0],
                 ];
             });
