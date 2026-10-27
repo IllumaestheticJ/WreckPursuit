@@ -160,7 +160,11 @@ because the coarse one cut under the crowned windshield and flickered.
 - Final sheet: `docs/media/car-shapes/race-offroad/final.jpg` (each row one car: original `main`
   mesh and final mesh, front / rear / side / top). Per-car `<car>_before_after.jpg` refreshed
   (before = the ws/car-shapes phase-1 meshes).
-- Full mod coverage: see the next commit (run in progress).
+- Full mod coverage (136 mods × 5 cars, after the touch-up): 10 pairs show nothing. Known list:
+  short shifter (morrigan, merlo, mesquite, erg), sequential shifter + radar + turbo 1 on the
+  Mesquite, sway bars under the car (nyx front, erg rear). Erg turbo 1 was also reported, but on
+  its own (`MODS=fi_turbo_1`) it shows in the open-bay views: Erg's render noise is 14 px, so it
+  sits at the threshold.
 
 ## Checks
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p car-assets`
