@@ -152,6 +152,14 @@ after a full `gen-car-mesh` shows only the four cars' meshes changed.
   three-door, but all four lattices have detachable front and rear doors. Doors must keep
   detaching per lattice region, so the meshes are 5-door hatches. A 3-door look needs a lattice
   change (physics), out of scope here.
+- Low-view check (lead's tail-rake / chin / glass-top warning, 2026-10-27): low rear 3/4, low
+  side and low front 3/4 renders of all four show no spikes under the raked tails or chins, and
+  the rear side-glass top edges are straight (no `dlo_top_drop_m` used here). Tail rakes kept.
+  One generator-level artefact: a sawtooth of thin twisted triangles on the hatch C-pillar sail
+  (vireo, marten, lindwurm; the stoat with its quarter window is clean). It was already faint in
+  the phase-2 meshes and is stronger now; switching off roof plan taper, tail rake, side bulge or
+  `tumblehome_m`, or narrowing the C-pillar, does not remove it, so it comes from the loft's
+  triangulation of the sail at the fine tail stations (reported to the lead).
 - Pre-existing, shared: the black arch liner leaves a gap at the top of the rear arches through
   which the rear spring shows from low side angles (shared `trim.rs` code, not changed here).
 
