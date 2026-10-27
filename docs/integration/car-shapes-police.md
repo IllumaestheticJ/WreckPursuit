@@ -180,7 +180,16 @@ sentinel_vigil` on the pass-2 meshes: 136 mods per car, 7 car/mod pairs show not
 known list from phase 1 (no outside view): `drivetrain_shifter_short` on all five,
 `elec_radar_1` on the warden and the vigil. Body kits, wings, lips, vinyls and bull bars show and
 sit on the new bodies (stock and mod shots checked).
-Pass 3 / 3b / addenda: re-run on the final meshes in progress; result below when done.
+Final meshes (pass 3 / 3b / addenda, `38231a10`): 8 car/mod pairs show nothing.
+`drivetrain_shifter_short` on all five and `elec_radar_1` on the cruiser and warden are the known
+no-outside-view pairs. `brakes_hydro_handbrake` on the warden was missed once in the full run but
+shows when re-run alone (`MODS=brakes_hydro_handbrake node e2e/mod_coverage.mjs sentinel_warden`:
+every mod shows); the warden's interior and partition are byte-identical to pass 2, where it
+showed, so it is a borderline pixel count on the interior lever, not a body change.
+
+Low-angle check for the rake / chin clipping bug (lead, phase 3): `low_views.jpg` (low front 3/4,
+low rear 3/4, low side, all five) shows clean face bottom edges, and no panel vertex in the front
+/ rear 0.6 m sits below the floor line on the raked cars (same with the chins zeroed).
 
 ## Shots
 `docs/media/car-shapes/police/`:
