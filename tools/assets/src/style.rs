@@ -425,6 +425,10 @@ pub struct BodyStyle {
     pub roof_arc_rear_exp: f32,
     /// Quarter (rearmost side) window. `false` paints the opening (body colour). Default true.
     pub quarter_glass: bool,
+    /// Painted rear doors (vans): `Some` makes the rear glass area body-colour door skin (Trunk
+    /// region) and puts glass only in the drawn windows ([`RearDoorWindows`]). Only on cars
+    /// with rear glass. Default `None` (the whole area glazed).
+    pub rear_door_windows: Option<RearDoorWindows>,
     /// Shortest deck (trunk lid / tailgate top) behind the rear glass base, m: vans and some
     /// hatches want the glass (and roof) nearly flush with the tail. Range 0.02…0.25. Default
     /// 0.25.
@@ -461,6 +465,24 @@ pub const SCULPT_DX_RANGE: (f32, f32) = (-0.08, 0.06);
 pub const TUMBLEHOME_M_RANGE: (f32, f32) = (0.03, 0.36);
 /// Allowed range of [`BodyStyle::overhang_trim`] (each end), m.
 pub const OVERHANG_RANGE: (f32, f32) = (-0.35, 0.25);
+
+/// Drawn windows in a painted van rear door ([`BodyStyle::rear_door_windows`]): one rounded
+/// rectangle each side of the centre seam, seen from behind, cast onto the door skin as glass
+/// with a black seal. Chassis metres; every field soft-clamped.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RearDoorWindows {
+    /// Window edge in from the body side at the tail. Range 0.03…0.40. Recipe 0.10.
+    pub side_inset_m: f32,
+    /// Window edge out from the centre line (half the gap across the seam). Range 0…0.30.
+    /// Recipe 0.05.
+    pub centre_gap_m: f32,
+    /// Window top below the roof top at the tail. Range 0.03…0.40. Recipe 0.10.
+    pub top_gap_m: f32,
+    /// Window height. Range 0.15…1.20 (kept above the rear bumper). Recipe 0.45.
+    pub height_m: f32,
+    /// Corner radius. Range 0…0.15. Recipe 0.04.
+    pub corner_r_m: f32,
+}
 
 /// A local side-wall offset ([`BodyStyle::side_sculpt`]): every side ring point (underside edge
 /// to shoulder) inside the box `y0_m..y1_m` × `z0_m..z1_m` moves out (+) or in (−) by `dx_m`,
@@ -599,6 +621,7 @@ impl Default for BodyStyle {
             roof_arc_front_exp: 2.0,
             roof_arc_rear_exp: 2.0,
             quarter_glass: true,
+            rear_door_windows: None,
             deck_min_m: 0.25,
             glass_base_lip_m: 0.0,
             arch_lip_finish: TrimFinish::Body,

@@ -984,8 +984,8 @@ interface Batch {
 }
 
 /**
- * Batches drawn smooth-shaded with crease-angle split normals (car-shapes phase 3b): the painted
- * body. Their materials are made without `flatShading`; the low-poly art style forces flat
+ * Materials whose batches are drawn smooth-shaded with crease-angle split normals (car-shapes
+ * phase 3b): the painted body and its painted mod parts (`mod:paint` / `mod:livery` batches). Their materials are made without `flatShading`; the low-poly art style forces flat
  * shading back on (`render/style.ts`), so that style stays faceted.
  */
 const SMOOTH_BATCHES = new Set(["paint", "livery"]);
@@ -1706,8 +1706,9 @@ export class PanelBody {
       let smooth: Batch["smooth"];
       let position: THREE.BufferAttribute;
       let indexAttr: THREE.BufferAttribute;
-      if (!FLAT_CARS && SMOOTH_BATCHES.has(key)) {
-        // Crease map from the rest pose (per model, like the index template).
+      if (!FLAT_CARS && SMOOTH_BATCHES.has(material)) {
+        // Crease map from the rest pose (per model, like the index template; a mod batch
+        // ("mod:paint": body kits, wings, lips, flares) is this car's own, built once with it).
         let c = own ? undefined : tmpl.crease;
         if (!c) {
           const rest = new Float32Array(nv * 3);

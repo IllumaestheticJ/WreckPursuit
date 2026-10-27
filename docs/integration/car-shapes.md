@@ -172,6 +172,7 @@ change.
 | `cladding_z_m` | m | 0…0.7 | 0 | black `<panel>_cladding` parts below this height (bumpers keep their upper half) |
 | `dlo_kink_m`, `dlo_kink_len_m` | m | 0…0.12, 0.05…0.40 | 0, 0.15 | side-window base kicks up at the rear of the last window |
 | `dlo_top_drop_m` | m | −0.03…+0.10 | 0 | side-window top line falls toward the rear, independent of the roof edge |
+| `rear_door_windows` | `Option<RearDoorWindows>` | per field (see below) | `None` | painted van rear doors: glass only in two drawn windows |
 | `PatchBand::Greenhouse { z0, z1 }` | | | | patches on the side above the belt (`BodyProfile::greenhouse_point`) |
 
 New type `SideSculpt { y0_m, y1_m, z0_m, z1_m, dx_m, falloff_m }` (chassis metres;
@@ -435,6 +436,10 @@ the lead) smooth-shades the painted body in the renderer:
 - Ring point count (18 per side) unchanged: changing it would break every style that indexes
   ring points.
 
+- Painted mod parts (`mod:paint` / `mod:livery` batches: body kits, wings, lips, flares) are
+  smooth-shaded too, so they match the body: the batch choice goes by material, and a mod
+  batch's crease map is built once with it (it is the car's own, like its index).
+
 ### Lead addenda (merged phase-2 generator requests)
 Items 1–4 of the lead's merged list: lamp primitive (concave outlines, depth, bezel, inner
 elements) — `lamp.rs`; face rake / chin / plan bow per end; plan taper (nose: `plan_width` or
@@ -444,9 +449,29 @@ Items 5–8 and the tuner group's (a)/(b): nose height and hood / deck heights (
 `deck_dz`), roof arc exponents, `quarter_glass`, `glass_base_lip_m` (hatch lip; the tailgate lean
 is `tail_face_rake_deg`), `deck_min_m` (van deck near the tail), `ArchShape::Trapezoid`,
 `arch_lip_finish`, `cladding_z_m`, `PatchBand::Greenhouse`, `dlo_kink_m` / `dlo_top_drop_m`.
-Item 9 (the faceted fans on the black A-pillar sail and on sharp-plan tail corners) is not done:
-any fix changes every car's mesh, which this pass must not do; it is a candidate for the lead's
-next all-cars regeneration. Arch lips and liners now add the side sculpt / bulge offset, so they
+Item 9 (the faceted fans on the black A-pillar sail and on sharp-plan tail corners) was done
+with (f) in the all-cars regeneration commit ("Twisted loft strips" above). Arch lips and liners now add the side sculpt / bulge offset, so they
 stay on a sculpted side (0 when those knobs are off).
+
+### Painted van rear doors (`rear_door_windows`, traffic group request)
+`BodyStyle::rear_door_windows: Option<RearDoorWindows>` (default `None`, meshes unchanged). On a
+car with rear glass, `Some` turns the whole rear glass area into body-colour door skin (`trunk`,
+Trunk region, so it dents with the rear doors) and casts two windows onto it, one
+each side of the centre seam, as `rear_glass` (same part name and region, so glass break works
+as before) with a black `rear_glass_seal` band. It replaces the traffic group's local `van_box`
+overlay.
+- Fields (chassis m, soft-clamped): `side_inset_m` 0.03–0.40 (window edge in from the body
+  side), `centre_gap_m` 0–0.30 (half the gap across the seam), `top_gap_m` 0.03–0.40 (below the
+  roof's rear edge), `height_m` 0.15–1.20 (the bottom stays 10 cm over the rear bumper),
+  `corner_r_m` 0–0.15. Recipe: 0.10 / 0.05 / 0.10 / 0.45 / 0.04.
+- Built with the new `lamp::flat_window` (outline cast on a coarse 25 cm grid, glass 4 mm proud
+  with a rim wall, a 12 mm seal band, no lens rings): +330 triangles on `drayman_cargo` (10 900
+  of the 11 000 traffic budget, so little room for more van detail), +280 on `satchel_20`. Both
+  LODs.
+- Demo: `phase3_demo` variants `drayman_cargo__painted_doors`, `satchel_20__painted_doors`;
+  sheet `docs/media/car-shapes/phase3/van_doors.jpg`. Test
+  `painted_rear_doors_keep_glass_only_in_the_windows` (3 vans: validates, glass area 0.3 m² …
+  80 % of the full glass, door skin added, seal, lamps visible, mid LOD keeps the windows); the
+  soft-clamp sweep covers the knob.
 
 ## Lead feedback

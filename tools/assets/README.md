@@ -102,7 +102,9 @@ built in another worktree with a shared `CARGO_TARGET_DIR` writes into *that* wo
 - **Projected lamps** (`src/lamp.rs`, `Kit::proj_cluster`): a 2D outline in a front / rear /
   side / top view cast onto the body triangles already built, so the lens sits `proud_m` over the
   drawn surface (wraps round corners with `yaw_deg`, lies on curved noses and fender tops); the
-  turn signal is cut out of the same outline; optional flush bezel. Scratch demo:
+  turn signal is cut out of the same outline; optional flush bezel. `lamp::flat_window` is the
+  cheap variant for flat glass drawn on a face (no lens rings; the painted van rear doors of
+  `rear_door_windows` use it). Scratch demo:
   `cargo run --release -p car-assets --example phase3_demo -- <dir>`, render with
   `MESH_DIR=<dir> node tools/assets/mesh_shots.mjs <out> <car>__<variant>`.
 - **Parts**: each loft face is classified by station and segment (lower side / belt ledge /
