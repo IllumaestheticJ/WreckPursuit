@@ -483,7 +483,7 @@ pub fn rampart(def: &VehicleDef) -> CarStyle {
         front_haunch: 0.030,
         flare: 0.012,
         flare_shape: ArchShape::Round,
-        arch_gap: 0.045,
+        arch_gap: 0.06,
         ride_dz: -0.01,
         stance_pitch_deg: 0.2,
         ducktail_h: 0.035,

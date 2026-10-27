@@ -883,7 +883,7 @@ const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
     ("lindwurm_4t", 17474),
     ("lucciola_350", 18170),
     ("marten_20", 17056),
-    ("rampart_50", 19830),
+    ("rampart_50", 19568),
     ("satchel_20", 9221),
     ("sentinel_bastion", 18932),
     ("sentinel_cruiser", 18497),

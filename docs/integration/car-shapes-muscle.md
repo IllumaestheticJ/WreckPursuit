@@ -66,7 +66,7 @@ low-profile tyres; over-the-top stripes.
 
 **Changed:** belt +4 cm net (high belt, small side glass), roof arc 0.5 (smooth fastback),
 windshield 63°→62°, roof −3 cm; sharper shoulder crease; rounder nose and tail plan, softer tail
-(tail_round 0.18→0.24); tighter arch gap; black mirrors; grille frame now a trapezoid with a blank
+(tail_round 0.18→0.24); arch gap 7→6 cm (4.5 cm hid the sport-tyre mod); black mirrors; grille frame now a trapezoid with a blank
 badge; angular shaped headlamps and split wedge tail lamps (second pass); quarter scoops; blank tail
 badge.
 
@@ -101,7 +101,7 @@ ribbed reflector panel, landau roof with chrome band, rubber side strip, chrome 
 | car | full before | full now | mid before | mid now |
 |---|---|---|---|---|
 | ironside_440 | 19809 | 21008 | 5451 | 5702 |
-| rampart_50 | 19954 | 19830 | 5380 | 5322 |
+| rampart_50 | 19954 | 19568 | 5380 | 5188 |
 | bulwark_400 | 20579 | 21539 | 5621 | 6027 |
 | brigand_400 | 20986 | 21793 | 6042 | 5922 |
 
@@ -110,9 +110,11 @@ ribbed reflector panel, landau roof with chrome band, rubber side strip, chrome 
 car-assets` (incl. the turn-signal contract on full and mid meshes), `validate-car-asset` (all
 cars ok), `gen-car-mesh --check`. Mod coverage: see below.
 
-`node e2e/mod_coverage.mjs ironside_440 rampart_50 bulwark_400 brigand_400` (after `npm ci && npm run wasm`):
-- ironside_440: 2 of 136 mods show nothing, both known non-visual (`drivetrain_shifter_short`, `elec_radar_1`); 4 not for Muscle.
-- rampart_50, bulwark_400, brigand_400: running at time of this commit; results to follow.
+`node e2e/mod_coverage.mjs <car>` on the final meshes (after `npm ci && npm run wasm`): each
+car shows 134 of 136 mods (4 not for Muscle); the two misses are the known non-visual ones from
+`mod-visuals.md` (`drivetrain_shifter_short` on all four, `elec_radar_1` on ironside, bulwark,
+brigand). On rampart, `tires_sport` was hidden by a 4.5 cm arch gap; at 6 cm it shows again
+(`MODS=tires_sport` re-run: 0 missing).
 
 ## Shots
 `docs/media/car-shapes/muscle/{before,after}/<car>_{front,rear,side,top,cabin,cabin_rear}.jpg`;
