@@ -234,6 +234,8 @@ This supersedes the notes above where they differ.
 - Smooth shading checked in the real renderer (`apps/testbed-web/e2e/smooth_shots.mjs`, front
   shots in `docs/media/car-shapes/tuner/smooth/`): nothing it exposed needed a fix (no seams,
   spikes or lens gaps); hakone's and shiro's lower mouths read a little boxy.
+- Mod coverage (all six, final meshes): 9 car/mod pairs show nothing, all no-visual mods on
+  the known list (`drivetrain_shifter_short`, `tires_sport`).
 - Budgets after the all-cars regeneration: full 19.4k–21.0k of 22k, mid 4.6k–5.5k of 7k.
 - Final sheet: `docs/media/car-shapes/tuner/final.jpg` (before = the original `main` meshes;
   per car front 3/4, side, rear 3/4). The per-car `<car>_before_after.jpg` and group sheets
