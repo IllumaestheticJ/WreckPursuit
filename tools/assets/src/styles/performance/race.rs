@@ -20,14 +20,18 @@
 use wp_contracts::{BodyRegion, VehicleDef};
 
 use crate::builder::{Builder, PartKey};
-use crate::lamp::LampView;
+use crate::lamp::{clip_outline, lens, Lamp, LampView};
 use crate::mesh::MaterialSlot as M;
+use crate::mesh::INDICATOR_SEAM_M;
 use crate::style::{
     ArchShape, BodyStyle, CapKind, CarStyle, DetailCtx, FuelDoor, RimKind, SideSculpt, Silhouette,
     TrimFinish,
 };
 
-use super::kit::{dkey, lkey, sided, taillight_key, top_band, Kit, Seg, Stand, Wing, SIDES};
+use super::kit::{
+    dkey, headlight_key, indicator_front_key, indicator_rear_key, lkey, sided, taillight_key,
+    top_band, Kit, Seg, Stand, Wing, SIDES,
+};
 use super::{kit_detail, rgb, wheels};
 
 // ---------------------------------------------------------------------- shared helpers
@@ -67,6 +71,65 @@ fn sided_vent(
     let region = key.region.unwrap_or(region_l);
     let (a, c) = (sx * xin, sx * xout);
     k.top_vent(&key.name, region, y0, y1, a.min(c), a.max(c), slats, mat);
+}
+
+/// [`Kit::proj_cluster`] with a coarser lens grid (`step_m`, see [`crate::lamp::Lamp`]) for a
+/// car at the edge of its triangle budget: the lamp lens and its turn-signal segment cut
+/// across x (`Seg::Outboard` / `Seg::Inboard` only), no bezel. `outline` is the LEFT side's.
+#[allow(clippy::too_many_arguments)]
+fn lean_cluster(
+    k: &mut Kit,
+    sx: f32,
+    front: bool,
+    view: LampView,
+    outline: &[[f32; 2]],
+    seg: Seg,
+    rear_mat: M,
+    yaw_deg: f32,
+    step_m: f32,
+) {
+    let right = sx > 0.0;
+    let pts: Vec<[f32; 2]> = outline.iter().map(|q| [sx * q[0].abs(), q[1]]).collect();
+    let mut lamp = Lamp::new(view, pts.clone());
+    lamp.yaw_deg = yaw_deg;
+    lamp.step_m = step_m;
+    let (lamp_key, sig_key) = if front {
+        (headlight_key(sx), indicator_front_key(sx))
+    } else {
+        (taillight_key(sx), indicator_rear_key(sx, rear_mat))
+    };
+    let lo = pts.iter().map(|q| q[0]).fold(f32::MAX, f32::min);
+    let hi = pts.iter().map(|q| q[0]).fold(f32::MIN, f32::max);
+    let outer = !matches!(seg, Seg::Inboard(_));
+    let w = match seg {
+        Seg::Outboard(w) | Seg::Inboard(w) | Seg::Lower(w) | Seg::Upper(w) => w,
+    };
+    // Signal on the high-x side of the cut when it is the right side's outer end or the left
+    // side's inner end (as `proj_cluster`).
+    let (at, sig_high) = if outer == right {
+        (hi - w, true)
+    } else {
+        (lo + w, false)
+    };
+    let g = 0.5 * INDICATOR_SEAM_M;
+    let (sig, rest) = if sig_high {
+        (
+            clip_outline(&pts, 0, at + g, false),
+            clip_outline(&pts, 0, at - g, true),
+        )
+    } else {
+        (
+            clip_outline(&pts, 0, at - g, true),
+            clip_outline(&pts, 0, at + g, false),
+        )
+    };
+    for (key, o) in [(&lamp_key, rest), (&sig_key, sig)] {
+        if o.len() >= 3 {
+            let mut l = lamp.clone();
+            l.outline = o;
+            lens(k.b, k.p, key, &l);
+        }
+    }
 }
 
 /// Windscreen sun strip: a band `depth` m long (in plan) across the top of the windscreen.
@@ -127,7 +190,8 @@ fn rain_light(k: &mut Kit, z: f32, w: f32, h: f32, proud: f32) {
 /// Blank door number panel (side `sx`) in the accent colour on the front door.
 fn number_panel(k: &mut Kit, sx: f32, y0: f32, y1: f32, z0: f32, z1: f32) {
     let kp = dkey("number_panel_l", BodyRegion::LeftDoorF, M::Accent);
-    k.side_patch(&kp, sx, y0, y1, z0, z1, 0.003, 0.003, (2, 2));
+    // Three rows up and 8 mm off: the bulged / sculpted door side bows out between rows.
+    k.side_patch(&kp, sx, y0, y1, z0, z1, 0.008, 0.003, (2, 3));
 }
 
 // ---------------------------------------------------------------------- morrigan_55
@@ -150,6 +214,10 @@ pub fn morrigan(def: &VehicleDef) -> CarStyle {
         front_fender_rise_m: 0.08,
         rear_fender_rise_m: 0.06,
         fender_peak_w: 0.65,
+        // Raked nose face over a chin undercut (splitter lip), tucked diffuser tail.
+        nose_face_rake_deg: 20.0,
+        nose_chin_m: 0.08,
+        tail_chin_m: 0.06,
         side_sculpt: vec![
             SideSculpt {
                 y0_m: fy - fr - 0.85,
@@ -217,7 +285,7 @@ pub fn morrigan(def: &VehicleDef) -> CarStyle {
         &mut s,
         def,
         RimKind::Monoblock,
-        10,
+        6,
         0.74,
         M::Trim,
         CapKind::CentreLock,
@@ -255,15 +323,16 @@ fn morrigan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [-(wn - 0.17), yn - 0.50],
             [-(wn - 0.07), yn - 0.42],
         ];
-        k.proj_cluster(
+        lean_cluster(
+            &mut k,
             sx,
             true,
             LampView::Top,
             &lamp,
-            Some(Seg::Outboard(0.045)),
+            Seg::Outboard(0.045),
             M::EmissiveAmber,
             0.0,
-            0.0,
+            0.07,
         );
     }
     let kp = dkey("endurance_pod", fb, M::Trim);
@@ -279,8 +348,8 @@ fn morrigan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         0.50,
         nz0 + 0.06,
         pz0 - 0.03,
-        3,
-        10,
+        2,
+        6,
         M::Carbon,
     );
     for sx in SIDES {
@@ -300,26 +369,31 @@ fn morrigan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.canards(M::Carbon, nz0 + 0.14);
     k.canards(M::Carbon, nz0 + 0.25);
 
-    // --- Hood: louvred extractors over the front wheel wells either side of the power bulge,
-    // pins, carbon centre stripe; side exit vents behind the front wheels.
-    k.louvres(
-        BodyRegion::Hood,
-        yf - 0.10,
-        yf + 0.34,
-        5,
-        0.14,
-        0.44,
-        M::Carbon,
-    );
-    k.hood_pins(p.y_bf - 0.08, 0.55);
-    k.top_stripe(
-        "hood_stripe",
-        BodyRegion::Hood,
+    // --- Hood: extractors over the front wheel wells either side of the power bulge, carbon
+    // centre stripe; side exit vents behind the front wheels.
+    for sx in SIDES {
+        sided_vent(
+            &mut k,
+            "hood_extractor_l",
+            BodyRegion::Hood,
+            sx,
+            yf - 0.10,
+            yf + 0.30,
+            0.16,
+            0.44,
+            4,
+            M::Carbon,
+        );
+    }
+    let khs = dkey("hood_stripe", BodyRegion::Hood, M::Carbon);
+    k.patch(
+        &khs,
         p.y_fw + 0.04,
         p.y_bf - 0.02,
-        -0.05,
-        0.05,
-        M::Carbon,
+        top_band(-0.05, 0.05),
+        0.008,
+        0.0,
+        (8, 1),
     );
     for sx in SIDES {
         // Fender exit vent behind the front wheel: dark opening with three carbon blades.
@@ -404,20 +478,6 @@ fn morrigan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         let ye = yr + rr + 0.16;
         let ze = p.sill(ye) + 0.10;
         k.side_box(&ky, sx, ye, ze, 0.30, 0.06, 0.03, 0.0);
-        // Quick-fill fuel couplings in the rear quarter windows.
-        let kn = sided(&dkey("fuel_coupling_l", BodyRegion::Cabin, M::Chrome), sx);
-        let yq = 0.5 * (p.y_fd_rear + p.y_deck) + 0.05;
-        let zq = p.z_belt + 0.12;
-        let xq = k.side_x(yq, zq);
-        k.b.cylinder(
-            &kn,
-            [sx * (xq - 0.02), yq, zq],
-            [sx * (xq + 0.035), yq, zq],
-            0.035,
-            0.03,
-            10,
-            true,
-        );
     }
     // Carbon sill pods between the wheels (the GT class's deep side skirts).
     k.skirts(M::Carbon, 0.08, 0.16);
@@ -454,18 +514,19 @@ fn morrigan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [-(wt + 0.02), tz1 - 0.040],
             [-(wt - 0.44), tz1 - 0.045],
         ];
-        k.proj_cluster(
+        lean_cluster(
+            &mut k,
             sx,
             false,
             LampView::Rear,
             &tail,
-            Some(Seg::Inboard(0.09)),
+            Seg::Inboard(0.09),
             M::EmissiveAmber,
-            0.0,
             30.0,
+            0.07,
         );
     }
-    k.diffuser(M::Carbon, 0.80, 0.18, 7, 0.16);
+    k.diffuser(M::Carbon, 0.80, 0.18, 5, 0.16);
     rain_light(&mut k, tz0 + 0.20, 0.08, 0.08, 0.05);
     tow_straps(&mut k, -0.34, nz0 + 0.10, 0.40, tz0 + 0.24);
 
@@ -486,6 +547,9 @@ pub fn nyx(def: &VehicleDef) -> CarStyle {
         front_fender_rise_m: 0.11,
         rear_fender_rise_m: 0.09,
         fender_peak_w: 0.68,
+        nose_face_rake_deg: 25.0,
+        nose_chin_m: 0.10,
+        tail_chin_m: 0.08,
         tumblehome_m: Some(0.34),
         plan_width: vec![
             [fy + fr + 0.05, 1.0],
@@ -928,6 +992,9 @@ pub fn merlo(def: &VehicleDef) -> CarStyle {
         side_bulge_m: 0.02,
         rocker_in_m: 0.035,
         front_fender_rise_m: 0.02,
+        nose_face_rake_deg: 12.0,
+        nose_chin_m: 0.06,
+        tail_chin_m: 0.05,
         nose_h: Some(0.60),
         nose_rake_deg: 30.0,
         nose_plan_round: 0.28,
@@ -1012,7 +1079,7 @@ fn merlo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             &head,
             Some(Seg::Outboard(0.10)),
             M::EmissiveAmber,
-            0.010,
+            0.0,
             25.0,
         );
     }
@@ -1044,23 +1111,26 @@ fn merlo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     }
     k.hood_pins(p.y_bf - 0.06, 0.60);
     // White centre stripe over bonnet and boot lid.
-    k.top_stripe(
-        "hood_stripe",
-        BodyRegion::Hood,
+    // Coarse grids (8 × 1 cells): the fine `top_stripe` grid costs ~270 triangles here.
+    let khs = dkey("hood_stripe", BodyRegion::Hood, M::Accent);
+    k.patch(
+        &khs,
         p.y_fw + 0.04,
         p.y_bf - 0.02,
-        -0.09,
-        0.09,
-        M::Accent,
+        top_band(-0.09, 0.09),
+        0.008,
+        0.0,
+        (8, 1),
     );
-    k.top_stripe(
-        "trunk_stripe",
-        BodyRegion::Trunk,
+    let kts = dkey("trunk_stripe", BodyRegion::Trunk, M::Accent);
+    k.patch(
+        &kts,
         k.yt + 0.08,
         p.y_deck - 0.04,
-        -0.09,
-        0.09,
-        M::Accent,
+        top_band(-0.09, 0.09),
+        0.008,
+        0.0,
+        (6, 1),
     );
     k.fuel_filler(-1.0, 0.11, M::Trim);
 

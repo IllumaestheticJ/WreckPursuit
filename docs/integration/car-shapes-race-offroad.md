@@ -137,6 +137,31 @@ because the coarse one cut under the crowned windshield and flickered.
   shows the plan taper and waists). Mod spot-check (8 kit / wing / bull-bar / vinyl mods on all
   five): nothing missing.
 
+## Touch-up (merged ws/car-shapes @ 86693a0d: smooth shading, raked faces, all-cars regen)
+- Merge: the five mesh conflicts were taken from this branch and regenerated (no hand-merged
+  JSON). The all-cars regeneration's denser loft put morrigan at 23.4k, merlo at 22.3k and the
+  mesquite mid LOD at 7 058; trimmed back:
+  - **Morrigan:** 6-spoke rims (10 → 6; 5 spokes cost more), hood extractor vents instead of
+    the louvre field, no hood pins or quick-fill couplings, coarser mouth mesh, hood stripe grid
+    and diffuser (5 fins), and the projected lamps built with a coarser lens grid (`lean_cluster`
+    in race.rs: `Kit::proj_cluster` with `Lamp::step_m` 0.07 instead of 0.04). The engine
+    detail cannot be turned off from the style (the mechanical table forces it).
+  - **Merlo:** coarse hood / trunk stripe grids, no head-lamp bezel.
+  - **Mesquite:** grille 2 × 4, two bypass shocks per side instead of three.
+- New knobs: nose face rake + chin and a tail chin on the race cars (Morrigan 20° / 0.08 /
+  0.06, Nyx 25° / 0.10 / 0.08, Merlo 12° / 0.06 / 0.05); Mesquite `hood_dz` (0.06, 0.12) with
+  `nose_h` 1.30 for the tall flat truck hood. `tail_face_rake_deg` stays 0.
+- Smooth shading in the real renderer (`e2e/smooth_shots.mjs`): no seams or flipped faces on the
+  five cars. One fix it and the low views exposed: door number panels cut under the bulged door
+  side (now 3 rows, 8 mm off).
+- Low rear 3/4 and low side views: no spikes under the faces.
+- Triangles (full / mid): morrigan 21 906 / 6 294, nyx 21 714 / 6 425, merlo 21 915 / 5 607,
+  mesquite 21 457 / 6 996, erg 21 126 / 6 398 (budgets 22k / 7k).
+- Final sheet: `docs/media/car-shapes/race-offroad/final.jpg` (each row one car: original `main`
+  mesh and final mesh, front / rear / side / top). Per-car `<car>_before_after.jpg` refreshed
+  (before = the ws/car-shapes phase-1 meshes).
+- Full mod coverage: see the next commit (run in progress).
+
 ## Checks
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p car-assets`
 (incl. the turn-signal +2 % table and `lights_sit_outside_the_shell`), `validate-car-asset`

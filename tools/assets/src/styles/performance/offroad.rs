@@ -249,7 +249,9 @@ pub fn mesquite(def: &VehicleDef) -> CarStyle {
         tumblehome_m: Some(0.05),
         glass_inset: 0.05,
         rocker_in_m: 0.05,
-        nose_h: Some(1.22),
+        // Tall flat truck hood: the front edge raised 12 cm over the lattice hood line.
+        hood_dz: (0.06, 0.12),
+        nose_h: Some(1.30),
         nose_rake_deg: 4.0,
         nose_plan_round: 0.16,
         tail_plan_round: 0.10,
@@ -368,7 +370,7 @@ fn mesquite_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         }
     }
     let (gz0, gz1) = (nz1 - 0.40, nz1 - 0.02);
-    k.mesh_grille("grille", fb, 0.56, gz0, gz1, 2, 5, M::Trim);
+    k.mesh_grille("grille", fb, 0.56, gz0, gz1, 2, 4, M::Trim);
     let kgf = dkey("grille_frame", fb, M::Trim);
     k.front_box(&kgf, -0.59, 0.59, gz1, gz1 + 0.03, 0.018, 0.0);
     k.front_box(&kgf, -0.59, 0.59, gz0 - 0.03, gz0, 0.018, 0.0);
@@ -750,7 +752,7 @@ fn mesquite_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         let kc = sided(&dkey("bypass_cap_l", fr, M::Accent), sx);
         let x = sx * (p.half_width(ar.0) - 0.36);
         let z0 = ar.1 + ar.2 + 0.06;
-        for (i, dy) in [0.16f32, -0.02, -0.20].into_iter().enumerate() {
+        for (i, dy) in [0.12f32, -0.08].into_iter().enumerate() {
             let r = if i == 1 { 0.045 } else { 0.032 };
             let zt = rail + 0.18 - 0.04 * i as f32;
             k.b.cylinder(&kb, [x, ar.0 + dy, z0], [x, ar.0 + dy, zt], r, r, 6, false);
