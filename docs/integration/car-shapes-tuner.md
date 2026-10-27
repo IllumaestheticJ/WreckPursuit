@@ -186,18 +186,34 @@ End faces and plan:
 - arashi's and talus's separate lamp housings were replaced by the projected cluster's flush
   bezel (arashi 25 mm, so the white lenses read on the white body).
 
+### Phase 3 addenda (merged from `ws/car-shapes` @ d64c04b7)
+- Hood / deck heights: `hood_dz.1` (front) −0.05 kestrel / sperber, −0.03 arashi / talus,
+  −0.06 hakone; `deck_dz` −0.04 kestrel / sperber, −0.03 arashi / talus / shiro. The thick
+  flat nose and tail blocks in side view are thinner. shiro keeps its hood front (−0.03 still
+  left its front fender 3.0 cm off the crushed front in `front_crumples_and_follows_the_crushed_front`,
+  limit 3.0 cm; the fender fold binds to the lattice hood line).
+- DLO top line: `dlo_top_drop_m` 0.03 shiro, 0.04 hakone (teardrop side glass), 0.02 sperber.
+  No C-pillar kink on sperber: it is a strong brand cue for that body type (rule 9).
+- `roof_arc_rear_exp` 1.4 on hakone (the hatch falls in one curve from the header).
+- `face_poly` / `on_side` now come from the shared kit (same signatures; the local copies are
+  gone). The local `swept_top_lamp` stays: it reads the outer edge from the body's plan width at
+  each corner (bowed noses) and shifts back by `face_depth`, which the shared one does not.
+- The projected-lamp / face-rake issue is still there after the addenda: talus with an 8° nose
+  rake puts 69 of 84 head-lamp lens faces under the hood (`lights_sit_outside_the_shell`).
+  Repro: add `b.nose_face_rake_deg = 8.0;` in `tuner::talus`, regenerate, run that test.
+
 ## Triangle counts
 
 Hero budget 22k (mid LOD 7k); all six within it.
 
 | car | full before → after | mid before → after |
 |---|---|---|
-| kestrel_ts | 18914 → 19642 | 5051 → 5535 |
-| arashi_t4 | 18292 → 18816 | 4962 → 4828 |
-| talus_20t | 17376 → 19460 | 4464 → 5139 |
-| shiro_turbo | 18992 → 19450 | 5040 → 5192 |
-| hakone_gt | 18873 → 19884 | 4826 → 4601 |
-| sperber_32 | 19112 → 18916 | 4942 → 5064 |
+| kestrel_ts | 18914 → 19654 | 5051 → 5463 |
+| arashi_t4 | 18292 → 18820 | 4962 → 4854 |
+| talus_20t | 17376 → 19464 | 4464 → 5080 |
+| shiro_turbo | 18992 → 19454 | 5040 → 5282 |
+| hakone_gt | 18873 → 19844 | 4826 → 4614 |
+| sperber_32 | 19112 → 18880 | 4942 → 5062 |
 
 The rows of `every_car_has_turn_signals_integrated_into_its_lamps`'s table for these six cars
 were rebased to the new counts (the phase-1 doc asks per-car passes above +2 % to do this).

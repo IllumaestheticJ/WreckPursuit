@@ -11,8 +11,8 @@
 //!
 //! Phase 3 (pass 3): every car also uses the shared section and plan knobs (`plan_width`,
 //! `side_sculpt`, `side_bulge_m`, `rocker_in_m`, fender rises, long overhang trims) and the
-//! projected lamp clusters (`Kit::proj_cluster`). Local helpers: [`face_poly`] (shaped grilles
-//! and intakes), [`swept_top_lamp`] (a top-view swept lamp on `proj_cluster`), [`blister`],
+//! projected lamp clusters (`Kit::proj_cluster`), the shared `Kit::face_poly` / `kit::on_side`
+//! (shaped grilles and intakes, promoted from this file). Local helpers: [`swept_top_lamp`] (a top-view swept lamp on `proj_cluster`), [`blister`],
 //! [`shoulder_line`].
 
 use wp_contracts::{BodyRegion, VehicleDef};
@@ -27,28 +27,12 @@ use crate::style::{
 };
 
 use super::kit::{
-    dkey, headlight_key, indicator_front_key, indicator_rear_key, lkey, sided, taillight_key,
-    top_band, Kit, Seg, Stand, Wing, SIDES,
+    dkey, headlight_key, indicator_front_key, indicator_rear_key, lkey, on_side, sided,
+    taillight_key, top_band, Kit, Seg, Stand, Wing, SIDES,
 };
 use super::{kit_detail, rgb, wheels};
 
 // ---------------------------------------------------------------------- local helpers
-
-/// Convex outline `(x, z)` on the nose (`front`) or tail face, standing `proud` m out of it
-/// (its back buried 2 cm in the body): lamp lenses, grilles and intakes with real shapes.
-fn face_poly(k: &mut Kit, key: &PartKey, front: bool, outline: &[[f32; 2]], proud: f32) {
-    let (y0, y1) = if front {
-        (k.yn - 0.02, k.yn + proud)
-    } else {
-        (k.yt + 0.02, k.yt - proud)
-    };
-    k.prism_y(key, outline, y0, y1);
-}
-
-/// An outline given for the right side (|x|) placed on side `sx`.
-fn on_side(sx: f32, outline: &[[f32; 2]]) -> Vec<[f32; 2]> {
-    outline.iter().map(|q| [sx * q[0], q[1]]).collect()
-}
 
 /// Head lamp lying on the nose top that sweeps back into the fender (side `sx`), drawn in the
 /// top view and projected onto the body (`Kit::proj_cluster`): the lens runs from |x| `xin`
@@ -307,7 +291,7 @@ fn blank_badge(k: &mut Kit, region: BodyRegion, front: bool, z: f32, w: f32, h: 
         [-0.6 * a, z + c],
         [-a, z + 0.6 * c],
     ];
-    face_poly(k, &kb, front, &o, 0.022);
+    k.face_poly(&kb, front, &o, 0.022);
 }
 
 // ---------------------------------------------------------------------- kestrel_ts
@@ -383,6 +367,8 @@ pub fn kestrel(def: &VehicleDef) -> CarStyle {
     b.nose_tip_w = 0.75;
     b.tail_face_rake_deg = 10.0;
     b.roof_plan_taper = 0.08;
+    b.hood_dz = (0.0, -0.05);
+    b.deck_dz = -0.04;
     s.details.push(kit_detail(kestrel_kit));
     wheels(
         &mut s,
@@ -438,8 +424,7 @@ fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     // Trapezoid upper slot grille (wider at the top) with two dark slats and a blank badge.
     let (gz0, gz1) = (nz1 - 0.11, nz1 - 0.03);
     let g = dkey("grille", BodyRegion::Hood, M::Grille);
-    face_poly(
-        &mut k,
+    k.face_poly(
         &g,
         true,
         &[[-0.31, gz1], [0.31, gz1], [0.26, gz0], [-0.26, gz0]],
@@ -455,8 +440,7 @@ fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     // Wide trapezoid lower mouth with a mesh, fog pods in the corners.
     let (zm0, zm1) = (nz0 + 0.06, nz0 + 0.26);
     let lm = dkey("lower_mouth", fb, M::Grille);
-    face_poly(
-        &mut k,
+    k.face_poly(
         &lm,
         true,
         &[[-0.50, zm0], [0.50, zm0], [0.42, zm1], [-0.42, zm1]],
@@ -486,7 +470,7 @@ fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
                 [x0 + 0.03, zf + 0.07],
             ],
         );
-        face_poly(&mut k, &kp, true, &o, 0.008);
+        k.face_poly(&kp, true, &o, 0.008);
     }
     k.fogs(wn - 0.155, zf, 0.05);
     k.splitter(M::Trim, 0.05, 0.10, 0.025, false);
@@ -662,6 +646,8 @@ pub fn arashi(def: &VehicleDef) -> CarStyle {
     // No end-face rake: front / rear-view projected lamps land inside a raked face
     // (generator request, see the integration doc); the chin is fine.
     b.roof_plan_taper = 0.04;
+    b.hood_dz = (0.0, -0.03);
+    b.deck_dz = -0.03;
     s.details.push(kit_detail(arashi_kit));
     wheels(
         &mut s,
@@ -744,8 +730,7 @@ fn arashi_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     // Deep bumper: central intake, big round driving lamps, tow hook.
     let (zm0, zm1) = (nz0 + 0.07, nz0 + 0.22);
     let lm = dkey("lower_mouth", fb, M::Grille);
-    face_poly(
-        &mut k,
+    k.face_poly(
         &lm,
         true,
         &[[-0.34, zm0], [0.34, zm0], [0.30, zm1], [-0.30, zm1]],
@@ -925,6 +910,8 @@ pub fn talus(def: &VehicleDef) -> CarStyle {
     // No end-face rake: front / rear-view projected lamps land inside a raked face
     // (generator request, see the integration doc); a chin cuts under the signal here.
     b.roof_plan_taper = 0.05;
+    b.hood_dz = (0.0, -0.03);
+    b.deck_dz = -0.03;
     s.details.push(kit_detail(talus_kit));
     wheels(
         &mut s,
@@ -1007,8 +994,7 @@ fn talus_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     // Bumper: one big intercooler mesh mouth with the fogs in its outer corners.
     let (zm0, zm1) = (nz0 + 0.06, nz0 + 0.30);
     let lm = dkey("lower_mouth", fb, M::Grille);
-    face_poly(
-        &mut k,
+    k.face_poly(
         &lm,
         true,
         &[
@@ -1042,7 +1028,7 @@ fn talus_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
                 [wn - 0.26, zm0 + 0.14],
             ],
         );
-        face_poly(&mut k, &kp, true, &o, 0.008);
+        k.face_poly(&kp, true, &o, 0.008);
     }
     k.fogs(wn - 0.165, zm0 + 0.08, 0.05);
     k.splitter(M::Trim, 0.04, 0.12, 0.02, false);
@@ -1216,6 +1202,10 @@ pub fn shiro(def: &VehicleDef) -> CarStyle {
     b.tail_face_rake_deg = 15.0;
     b.roof_plan_taper = 0.12;
     b.lower_lean_in_m = 0.03;
+    // No hood drop: it makes the front fender float in the 50 km/h crumple test (fold
+    // binding on the lattice hood line).
+    b.deck_dz = -0.03;
+    b.dlo_top_drop_m = 0.03;
     s.details.push(kit_detail(shiro_kit));
     wheels(
         &mut s,
@@ -1284,8 +1274,7 @@ fn shiro_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let (zm0, zm1) = (nz0 + 0.05, nz0 + 0.23);
     let q = ((wn - 0.08) / 0.56).min(1.0);
     let lm = dkey("lower_mouth", fb, M::Grille);
-    face_poly(
-        &mut k,
+    k.face_poly(
         &lm,
         true,
         &[
@@ -1371,7 +1360,7 @@ fn shiro_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
         // Lens tapers down toward the plate (inboard end lower).
         let o = [[xa, z0 + 0.03], [xb, z0], [xb, z1], [xa, z1 - 0.01]];
-        face_poly(&mut k, &kh, false, &o, 0.014);
+        k.face_poly(&kh, false, &o, 0.014);
         let kg = sided(
             &dkey("taillight_lens_l", BodyRegion::RearLeftQuarter, M::Glass),
             sx,
@@ -1383,7 +1372,7 @@ fn shiro_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [xb - e, z1 - 0.01],
             [xa + e, z1 - 0.02],
         ];
-        face_poly(&mut k, &kg, false, &o, 0.022);
+        k.face_poly(&kg, false, &o, 0.022);
         let tk = taillight_key(sx);
         let r = 0.5 * (z1 - z0) - 0.022;
         let zc = 0.5 * (z0 + z1);
@@ -1518,6 +1507,9 @@ pub fn hakone(def: &VehicleDef) -> CarStyle {
     b.tail_face_rake_deg = 20.0;
     b.roof_plan_taper = 0.15;
     b.lower_lean_in_m = 0.04;
+    b.hood_dz = (0.0, -0.06);
+    b.dlo_top_drop_m = 0.04;
+    b.roof_arc_rear_exp = 1.4;
     s.details.push(kit_detail(hakone_kit));
     wheels(
         &mut s,
@@ -1591,8 +1583,7 @@ fn hakone_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let (zm0, zm1) = (nz0 + 0.05, nz0 + 0.28);
     let (h, c) = ((wn - 0.14).min(0.42), 0.07);
     let lm = dkey("lower_mouth", fb, M::Grille);
-    face_poly(
-        &mut k,
+    k.face_poly(
         &lm,
         true,
         &[
@@ -1640,7 +1631,7 @@ fn hakone_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
                 [wn - 0.25, zm0 + 0.11],
             ],
         );
-        face_poly(&mut k, &ki, true, &o, 0.006);
+        k.face_poly(&ki, true, &o, 0.006);
     }
     k.splitter(M::Trim, 0.03, 0.14, 0.02, false);
 
@@ -1696,15 +1687,9 @@ fn hakone_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
                 [xs + 0.008, zb],
             ],
         );
-        face_poly(&mut k, &taillight_key(sx), false, &o, 0.024);
+        k.face_poly(&taillight_key(sx), false, &o, 0.024);
         let o = on_side(sx, &[[xi, za + 0.01], [xs, za], [xs, zb], [xi, zb - 0.01]]);
-        face_poly(
-            &mut k,
-            &indicator_rear_key(sx, M::EmissiveAmber),
-            false,
-            &o,
-            0.024,
-        );
+        k.face_poly(&indicator_rear_key(sx, M::EmissiveAmber), false, &o, 0.024);
         // A dark horizontal bar across the red lens (two-tier tail).
         let kr = sided(
             &dkey("taillight_bar_l", BodyRegion::RearLeftQuarter, M::Trim),
@@ -1812,6 +1797,9 @@ pub fn sperber(def: &VehicleDef) -> CarStyle {
     b.nose_tip_w = 0.8;
     b.tail_face_rake_deg = 8.0;
     b.roof_plan_taper = 0.06;
+    b.hood_dz = (0.0, -0.05);
+    b.deck_dz = -0.04;
+    b.dlo_top_drop_m = 0.02;
     s.details.push(kit_detail(sperber_kit));
     wheels(
         &mut s,
@@ -1862,10 +1850,9 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         ]
     };
     let gf = dkey("grille_frame", BodyRegion::Hood, M::Trim);
-    face_poly(&mut k, &gf, true, &rounded(0.25, gz0, gz1, 0.03), 0.010);
+    k.face_poly(&gf, true, &rounded(0.25, gz0, gz1, 0.03), 0.010);
     let g = dkey("grille", BodyRegion::Hood, M::Grille);
-    face_poly(
-        &mut k,
+    k.face_poly(
         &g,
         true,
         &rounded(0.235, gz0 + 0.012, gz1 - 0.012, 0.024),
@@ -1901,7 +1888,7 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
                 [0.27, nz1 - 0.13],
             ],
         );
-        face_poly(&mut k, &kh, true, &o, 0.010);
+        k.face_poly(&kh, true, &o, 0.010);
         let hk = headlight_key(sx);
         let r = 0.040;
         let zl = nz1 - 0.07;
@@ -1931,12 +1918,11 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
                 [wn - 0.26, nz0 + 0.21],
             ],
         );
-        face_poly(&mut k, &kd, true, &o, 0.006);
+        k.face_poly(&kd, true, &o, 0.006);
     }
     let lm = dkey("lower_intake", fb, M::Grille);
     let (zm0, zm1) = (nz0 + 0.06, nz0 + 0.22);
-    face_poly(
-        &mut k,
+    k.face_poly(
         &lm,
         true,
         &[[-0.40, zm0], [0.40, zm0], [0.36, zm1], [-0.36, zm1]],
@@ -1998,7 +1984,7 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
                 [0.36, lz1],
             ],
         );
-        face_poly(&mut k, &tk, false, &o, 0.026);
+        k.face_poly(&tk, false, &o, 0.026);
         let ka = indicator_rear_key(sx, M::EmissiveAmber);
         let o = on_side(
             sx,
@@ -2009,7 +1995,7 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
                 [0.53, lz0 + 0.022],
             ],
         );
-        face_poly(&mut k, &ka, false, &o, 0.030);
+        k.face_poly(&ka, false, &o, 0.030);
         let kw = PartKey {
             kind: PartKind::Light,
             ..dkey(
