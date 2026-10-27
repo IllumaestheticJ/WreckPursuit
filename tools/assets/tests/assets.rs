@@ -239,7 +239,7 @@ fn hinged_parts_start_at_their_hinge_line() {
 #[test]
 fn style_knob_extremes_never_panic() {
     use car_assets::mesh::generate_styled;
-    use car_assets::style::{BodyStyle, Silhouette};
+    use car_assets::style::{BodyStyle, SideSculpt, Silhouette};
     let root = repo_root();
     let silhouettes = [
         Silhouette::Notchback,
@@ -329,6 +329,35 @@ fn style_knob_extremes_never_panic() {
             b.seam_w_m = k;
             b.arch_lip_m = k;
             b.end_round_m = k;
+            let m = generate_styled(&car.def, &car.lattice, &st);
+            assert!(m.tri_count > 0, "{id}");
+        }
+        // Phase 3 knobs far past both ends of their ranges: full generation.
+        for k in [1.0f32, -1.0] {
+            let mut st = base.clone();
+            let b = &mut st.body;
+            b.plan_width = vec![
+                [-9.0, 9.0 * k],
+                [0.0, -9.0 * k],
+                [0.3, f32::NAN],
+                [9.0, 0.0],
+            ];
+            b.side_sculpt = vec![SideSculpt {
+                y0_m: 9.0 * k,
+                y1_m: -9.0 * k,
+                z0_m: -1.0,
+                z1_m: 5.0,
+                dx_m: 2.0 * k,
+                falloff_m: 5.0 * k,
+            }];
+            b.side_bulge_m = k;
+            b.side_bulge_z = 3.0 * k;
+            b.rocker_in_m = k;
+            b.tumblehome_m = Some(2.0 * k);
+            b.front_fender_rise_m = k;
+            b.rear_fender_rise_m = k;
+            b.fender_peak_w = 3.0 * k;
+            b.overhang_trim = (3.0 * k, 3.0 * k);
             let m = generate_styled(&car.def, &car.lattice, &st);
             assert!(m.tri_count > 0, "{id}");
         }
@@ -700,6 +729,14 @@ fn lights_sit_outside_the_shell() {
     let root = repo_root();
     for id in car_ids(&root) {
         let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
+        check_lights(&id, &mesh);
+    }
+}
+
+/// Head / tail lamps and their turn-signal segments of `mesh` are outside the body shell,
+/// seen from ahead / behind, in the right materials.
+fn check_lights(id: &str, mesh: &car_assets::mesh::CarMesh) {
+    {
         // Head / tail lamps and the turn-signal segments cut out of them (style kits add fog
         // lamps, DRLs, markers etc. in other regions).
         let lights: Vec<_> = mesh
@@ -754,7 +791,7 @@ fn lights_sit_outside_the_shell() {
                 faces += 1;
                 let cx = (a[0] + b[0] + c[0]) / 3.0;
                 let cz = (a[2] + b[2] + c[2]) / 3.0;
-                let hit = first_hit(&mesh, [cx, y, cz], dir);
+                let hit = first_hit(mesh, [cx, y, cz], dir);
                 if hit.as_deref() == Some(l.name.as_str()) {
                     seen += 1;
                 }
@@ -1061,4 +1098,233 @@ fn every_car_has_turn_signals_integrated_into_its_lamps() {
         parity += 1;
     }
     assert!(parity >= 4, "parity meshes checked: {parity}");
+}
+
+/// The phase 3 knobs at strong in-range settings (narrow plan, deep sculpts, bulged section,
+/// tall fender tops, shortest and longest overhangs) still give valid meshes: every panel on
+/// its lattice region, skinned to its own nodes, inside the body size.
+#[test]
+fn phase3_knobs_keep_panels_on_their_regions() {
+    use car_assets::style::SideSculpt;
+    let root = repo_root();
+    for id in car_ids(&root) {
+        let car = load_car(&root, &id).unwrap();
+        let spec = PanelSpec::load(&panel_path(&root, &id)).unwrap();
+        let base = style_for(&car.def);
+        let p0 = BodyProfile::styled(&car.def, &car.lattice, &base.body);
+        // (Both ends at +0.25 can push a car that is already long past validate's ±15 % length
+        // sanity check: a style call, not a generator limit.)
+        for (k, oh) in [(0, (-0.35f32, 0.25f32)), (1, (0.25, -0.35))] {
+            let mut st = base.clone();
+            let b = &mut st.body;
+            b.plan_width = vec![
+                [p0.y_tail, 0.80],
+                [p0.y_tail + 0.8, 1.0],
+                [0.0, 0.90],
+                [p0.y_nose - 0.8, 1.05],
+                [p0.y_nose, 0.80],
+            ];
+            b.side_sculpt = vec![
+                SideSculpt {
+                    y0_m: -0.8,
+                    y1_m: 0.8,
+                    z0_m: 0.0,
+                    z1_m: 0.6,
+                    dx_m: -0.08,
+                    falloff_m: 0.2,
+                },
+                SideSculpt {
+                    y0_m: p0.y_tail,
+                    y1_m: p0.y_nose,
+                    z0_m: p0.z_belt - 0.08,
+                    z1_m: p0.z_belt - 0.05,
+                    dx_m: 0.06,
+                    falloff_m: 0.03,
+                },
+            ];
+            b.side_bulge_m = 0.06;
+            b.rocker_in_m = 0.08;
+            b.tumblehome_m = Some(if k == 0 { 0.03 } else { 0.36 });
+            b.front_fender_rise_m = 0.12;
+            b.rear_fender_rise_m = 0.12;
+            b.overhang_trim = oh;
+            let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+            car_assets::skin::bind_skin(&car.lattice, &mut m);
+            // Budgets are the style author's call (these settings add loft stations).
+            let errs: Vec<String> = validate(&car, &m, Some(&spec))
+                .into_iter()
+                .filter(|e| !e.contains("budget"))
+                .collect();
+            assert!(errs.is_empty(), "{id} (overhang {oh:?}): {errs:#?}");
+        }
+    }
+}
+
+/// The plan-width curve never pulls the body inside a tire (outer face + 1 cm), even at the
+/// narrowest scale.
+#[test]
+fn plan_width_keeps_the_body_outside_the_tires() {
+    let root = repo_root();
+    for id in car_ids(&root) {
+        let car = load_car(&root, &id).unwrap();
+        let mut body = style_for(&car.def).body;
+        let w0 = BodyProfile::styled(&car.def, &car.lattice, &body);
+        body.plan_width = vec![[0.0, 0.80]];
+        let p = BodyProfile::styled(&car.def, &car.lattice, &body);
+        for (w, &(wy, _, _)) in car.def.wheels.iter().zip(&p.arches) {
+            let tire = w.position_m[0].abs() + 0.5 * w.width_m;
+            let want = (tire + 0.01).min(w0.half_width(wy));
+            let got = p.half_width(wy);
+            assert!(
+                got >= want - 1e-4,
+                "{id}: half width {got} over a wheel, tire at {tire}"
+            );
+        }
+        assert!(p.half_width(0.0) <= 0.81 * w0.half_width(0.0) + 0.05);
+    }
+}
+
+/// Fender tops raised with `front_fender_rise_m` (instead of sinking the hood with
+/// `hood_valley`) leave the car's kit head lamps visible, at the largest rise.
+#[test]
+fn fender_rise_keeps_kit_lamps_visible() {
+    let root = repo_root();
+    for id in ["nyx_proto", "morrigan_55", "ironside_440", "kestrel_ts"] {
+        let car = load_car(&root, id).unwrap();
+        let mut st = style_for(&car.def);
+        st.body.hood_valley = 0.0;
+        st.body.deck_valley = 0.0;
+        st.body.front_fender_rise_m = 0.12;
+        st.body.rear_fender_rise_m = 0.12;
+        // The peak starts inboard of the kits' fender-top lamps (they sit on its plateau, not
+        // across the band's bend).
+        st.body.fender_peak_w = 0.65;
+        let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+        car_assets::skin::bind_skin(&car.lattice, &mut m);
+        check_lights(id, &m);
+    }
+}
+
+/// Lamps projected onto the surface (`lamp.rs` via `Kit::proj_cluster`): front-view lenses
+/// wrapping round the corner, top-view lenses on the nose, wraparound tail lamps, with their
+/// turn-signal segments and bezels, sit outside the shell and keep the turn-signal contract.
+#[test]
+fn projected_lamps_sit_outside_the_shell_and_keep_the_signal_contract() {
+    use car_assets::builder::{Builder, PartKey};
+    use car_assets::lamp::{ellipse, LampView};
+    use car_assets::mesh::MaterialSlot as M;
+    use car_assets::style::{Detail, DetailCtx, Shape};
+    use car_assets::styles::performance::kit::{Kit, Seg, SIDES};
+    fn front_view(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
+        let mut kit = Kit::new(ctx.profile, b);
+        let (wn, (_, zt)) = (kit.wn(), kit.nose_z());
+        let (wt, (_, tt)) = (kit.wt(), kit.tail_z());
+        for sx in SIDES {
+            // Kept under the nose face's top edge (an outline across a sharp edge splits over
+            // two surfaces).
+            let head = [
+                [-(wn - 0.30), zt - 0.13],
+                [-(wn - 0.01), zt - 0.09],
+                [-(wn - 0.01), zt - 0.045],
+                [-(wn - 0.36), zt - 0.06],
+            ];
+            let o = Seg::Outboard(0.10);
+            kit.proj_cluster(
+                sx,
+                true,
+                LampView::Front,
+                &head,
+                Some(o),
+                M::EmissiveAmber,
+                0.012,
+                20.0,
+            );
+            let tail = [
+                [-(wt - 0.34), tt - 0.13],
+                [-(wt + 0.03), tt - 0.13],
+                [-(wt + 0.03), tt - 0.03],
+                [-(wt - 0.40), tt - 0.05],
+            ];
+            let i = Seg::Inboard(0.09);
+            kit.proj_cluster(
+                sx,
+                false,
+                LampView::Rear,
+                &tail,
+                Some(i),
+                M::EmissiveAmber,
+                0.01,
+                35.0,
+            );
+        }
+    }
+    fn top_view(ctx: &DetailCtx, _k: &PartKey, b: &mut Builder) {
+        let mut kit = Kit::new(ctx.profile, b);
+        let (wn, yn) = (kit.wn(), kit.yn);
+        let (wt, (_, tt)) = (kit.wt(), kit.tail_z());
+        for sx in SIDES {
+            let tear = [
+                [-(wn - 0.05), yn - 0.03],
+                [-(wn - 0.30), yn - 0.07],
+                [-(wn - 0.24), yn - 0.26],
+                [-(wn - 0.10), yn - 0.42],
+                [-(wn - 0.05), yn - 0.30],
+            ];
+            let l = Seg::Outboard(0.06);
+            kit.proj_cluster(
+                sx,
+                true,
+                LampView::Top,
+                &tear,
+                Some(l),
+                M::EmissiveAmber,
+                0.01,
+                0.0,
+            );
+            let round = ellipse([-(wt - 0.16), tt - 0.10], [0.085, 0.065], 16);
+            let i = Seg::Inboard(0.05);
+            kit.proj_cluster(
+                sx,
+                false,
+                LampView::Rear,
+                &round,
+                Some(i),
+                M::Taillight,
+                0.012,
+                15.0,
+            );
+        }
+    }
+    let root = repo_root();
+    for id in [
+        "kestrel_ts",
+        "vireo_xs",
+        "nyx_proto",
+        "hauler_1500",
+        "sentinel_cruiser",
+    ] {
+        let car = load_car(&root, id).unwrap();
+        for f in [front_view as car_assets::style::DetailFn, top_view] {
+            let mut st = style_for(&car.def);
+            st.details = vec![Detail::new(
+                "lamps",
+                BodyRegion::Cabin,
+                M::Trim,
+                Shape::Custom(f),
+            )];
+            let mut m = car_assets::mesh::generate_styled(&car.def, &car.lattice, &st);
+            car_assets::skin::bind_skin(&car.lattice, &mut m);
+            check_lights(id, &m);
+            check_signals(id, &m);
+            for s in m.parts.iter().filter(|p| p.name.starts_with("indicator_")) {
+                assert!(car_assets::skin::is_end_lamp(s), "{id}/{}", s.name);
+            }
+            let bezels = m
+                .parts
+                .iter()
+                .filter(|p| p.name.contains("lamp_bezel"))
+                .count();
+            assert_eq!(bezels, 4, "{id}: head and tail bezels");
+        }
+    }
 }
