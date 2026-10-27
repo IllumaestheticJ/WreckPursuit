@@ -23,12 +23,11 @@ use crate::style::{
 };
 
 use super::kit::{
-    dkey, headlight_key, indicator_front_key, indicator_rear_key, sided, taillight_key, top_band,
-    Kit, Seg, SIDES,
+    dkey, headlight_key, indicator_front_key, indicator_rear_key, on_side, sided, taillight_key,
+    top_band, Kit, Seg, SIDES,
 };
 use super::supercar::{
-    built_parts, end_poly, flip_x, rear_stroke, shape3, shear_to_faces, side_poly, stadium,
-    top_poly, top_stroke, Shape3,
+    built_parts, rear_stroke, shape3, shear_to_faces, side_groove, stadium, top_stroke, Shape3,
 };
 use super::{kit_detail, rgb, wheels};
 
@@ -180,7 +179,7 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [hw * cx, zm + hh * sz]
         })
         .collect();
-    end_poly(&mut k, &kg, true, &oval, 0.006, 0.03);
+    k.face_poly(&kg, true, &oval, 0.006);
     let ks = dkey("nose_intake_slats", fb, M::Trim);
     for i in 1..5 {
         let z = zi0 + (zi1 - zi0) * i as f32 / 5.0;
@@ -194,7 +193,7 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [wn - 0.05, zi1 - 0.05],
             [0.64, zi1 - 0.03],
         ];
-        end_poly(&mut k, &kd, true, &flip_x(&duct, sx), 0.006, 0.03);
+        k.face_poly(&kd, true, &on_side(sx, &duct), 0.006);
     }
     k.splitter(M::Trim, 0.03, 0.12, 0.018, false);
 
@@ -213,7 +212,7 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [y1 - 0.20, z1],
             [y0, z1 - 0.02],
         ];
-        side_poly(&mut k, &ki, sx, &scoop, 0.002, 0.012);
+        k.side_poly(&ki, sx, &scoop, 0.002, 0.012);
         let kl = dkey("side_intake_lip_l", BodyRegion::RearLeftQuarter, M::Paint);
         let lip = [
             [y1 - 0.06, z0 + 0.06],
@@ -223,7 +222,7 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [y1 - 0.025, 0.5 * (z0 + z1) + 0.02],
             [y1 - 0.09, z0 + 0.07],
         ];
-        side_poly(&mut k, &kl, sx, &lip, 0.014, 0.02);
+        k.side_poly(&kl, sx, &lip, 0.014, 0.02);
     }
 
     // --- Louvred engine deck.
@@ -432,12 +431,12 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [wf - 0.04, yl - 0.34],
             [0.55, yl - 0.27],
         ];
-        top_poly(&mut k, &kh, &flip_x(&hous, sx), 0.004, 0.012);
+        k.top_poly(&kh, &on_side(sx, &hous), 0.004, 0.012);
         let kl = sided(
             &dkey("headlamp_lens_l", BodyRegion::FrontLeftFender, M::Glass),
             sx,
         );
-        top_poly(&mut k, &kl, &flip_x(&lens, sx), 0.009, 0.012);
+        k.top_poly(&kl, &on_side(sx, &lens), 0.009, 0.012);
         let hk = headlight_key(sx);
         // Bolt: out along the front edge, a sharp kink back inward, then out to the rear tip.
         let b0 = [sx * 0.48, yl - 0.135];
@@ -453,7 +452,7 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [0.74, yl - 0.21],
             [0.64, yl - 0.22],
         ];
-        top_poly(&mut k, &hk, &flip_x(&proj, sx), 0.012, 0.01);
+        k.top_poly(&hk, &on_side(sx, &proj), 0.012, 0.01);
         let ik = indicator_front_key(sx);
         let sig = [
             [wl - 0.13, yl - 0.06],
@@ -461,7 +460,7 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [wl - 0.08, yl - 0.09],
             [wl - 0.14, yl - 0.10],
         ];
-        top_poly(&mut k, &ik, &flip_x(&sig, sx), 0.022, 0.02);
+        k.top_poly(&ik, &on_side(sx, &sig), 0.022, 0.02);
     }
 
     // --- Black lower front: two big trapezoid intakes split by a slanted blade, centre
@@ -475,7 +474,7 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [wn - 0.03, zd1 - 0.02],
             [0.52, zd1],
         ];
-        end_poly(&mut k, &kg, true, &flip_x(&duct, sx), 0.006, 0.03);
+        k.face_poly(&kg, true, &on_side(sx, &duct), 0.006);
         let km = sided(&dkey("front_duct_mesh_l", fb, M::Trim), sx);
         for i in 1..4 {
             let z = zd0 + (zd1 - zd0) * i as f32 / 4.0;
@@ -498,7 +497,7 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [wn - 0.10, zd0 + 0.01],
             [wn - 0.18, zd0 + 0.01],
         ];
-        end_poly(&mut k, &kb, true, &flip_x(&blade, sx), 0.018, 0.03);
+        k.face_poly(&kb, true, &on_side(sx, &blade), 0.018);
     }
     k.mesh_grille(
         "centre_slot",
@@ -529,28 +528,13 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [yi1 - 0.08, zi1],
             [yi0, zi1 - 0.04],
         ];
-        side_poly(&mut k, &ki, sx, &intake, 0.002, 0.01);
-        let kb = dkey("side_intake_blade_l", BodyRegion::RearLeftQuarter, M::Paint);
-        let zm = 0.5 * (zi0 + zi1);
-        let blade = [
-            [yi0, zm - 0.012],
-            [yi1 - 0.10, zm - 0.012],
-            [yi1 - 0.08, zm + 0.012],
-            [yi0, zm + 0.012],
-        ];
-        side_poly(&mut k, &kb, sx, &blade, 0.014, 0.02);
+        k.side_poly(&ki, sx, &intake, 0.002, 0.01);
         // The diagonal crease: a thin dark groove from the front arch's top rear to the
         // intake's lower front corner.
         let kc = dkey("side_line_l", BodyRegion::LeftDoorF, M::Grille);
         let (ya, za) = (yf - rf + 0.02, zf + 0.10);
         let (yb, zb) = (yi1 - 0.14, zi0 + 0.06);
-        let line = [
-            [ya, za],
-            [ya - 0.04, za - 0.012],
-            [yb, zb - 0.010],
-            [yb + 0.02, zb + 0.004],
-        ];
-        side_poly(&mut k, &kc, sx, &line, 0.003, 0.008);
+        side_groove(&mut k, &kc, sx, [ya, za - 0.006], [yb, zb], 0.012);
     }
     k.skirts(M::Carbon, 0.04, 0.05);
 
@@ -581,7 +565,7 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [xo, yr + 0.06],
             [xo - 0.14, yr + 0.02],
         ];
-        top_poly(&mut k, &kv, &flip_x(&vent, sx), 0.004, 0.01);
+        k.top_poly(&kv, &on_side(sx, &vent), 0.004, 0.01);
     }
 
     // --- Rear: integrated lip spoiler, slatted black fascia, lightning-bolt tail strokes.
@@ -613,7 +597,7 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [wt - 0.10, zt - 0.08],
             [0.42, zt - 0.02],
         ];
-        end_poly(&mut k, &kh, false, &flip_x(&hous, sx), 0.010, 0.03);
+        k.face_poly(&kh, false, &on_side(sx, &hous), 0.010);
         let tk = taillight_key(sx);
         // Bolt: along the top, a kink down and back inward, then out to the corner.
         let b0 = [sx * 0.44, zt + 0.005];
@@ -631,7 +615,7 @@ fn fulmine_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [wt - 0.025, zt + 0.005],
             [wt - 0.06, zt + 0.005],
         ];
-        end_poly(&mut k, &ka, false, &flip_x(&sig, sx), 0.022, 0.03);
+        k.face_poly(&ka, false, &on_side(sx, &sig), 0.022);
     }
     k.diffuser(M::Carbon, 0.70, 0.16, 6, 0.07);
 

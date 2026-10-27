@@ -34,8 +34,8 @@ use crate::style::{
 };
 
 use super::kit::{
-    dkey, headlight_key, indicator_front_key, indicator_rear_key, lkey, sided, taillight_key,
-    top_band, Kit, Stand, Wing, SIDES,
+    dkey, headlight_key, indicator_front_key, indicator_rear_key, lkey, on_side, sided,
+    taillight_key, top_band, Kit, Stand, Wing, SIDES,
 };
 use super::{kit_detail, rgb, wheels};
 
@@ -112,29 +112,11 @@ pub(super) fn top_stroke(
     stroke(k, key, pa, pc, n, width, 0.012);
 }
 
-// ------------------------------------------------------------------ shaped-panel helpers
+// ------------------------------------------------------------------ local shape helpers
 //
-// Local to the exotic / supercar styles (phase 2 of the car-shapes pass): flat outlines that
-// follow the loft, so lamps, intakes and vents can take their real shapes instead of boxes.
-// Outlines must be star-shaped round their vertex mean (every vertex visible from it); edges
-// are subdivided so the panel drapes over curved surfaces.
-
-/// Outline `pts` with every edge split into pieces of at most `step` m.
-fn subdivide(pts: &[[f32; 2]], step: f32) -> Vec<[f32; 2]> {
-    let n = pts.len();
-    let mut out = Vec::new();
-    for i in 0..n {
-        let a = pts[i];
-        let c = pts[(i + 1) % n];
-        let len = ((c[0] - a[0]).powi(2) + (c[1] - a[1]).powi(2)).sqrt();
-        let m = ((len / step).ceil() as usize).max(1);
-        for j in 0..m {
-            let t = j as f32 / m as f32;
-            out.push([a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t]);
-        }
-    }
-    out
-}
+// The draped panels moved to the shared `Kit::{top_poly, side_poly, end_poly, face_poly}`.
+// What stays here: the pill outline, the quarter window, phase-3 body shaping from the wheels
+// and the shear that moves kit parts built on the vertical end planes onto the real faces.
 
 /// Mean of an outline.
 fn mean2(pts: &[[f32; 2]]) -> [f32; 2] {
@@ -143,112 +125,6 @@ fn mean2(pts: &[[f32; 2]]) -> [f32; 2] {
         .iter()
         .fold([0.0, 0.0], |s, q| [s[0] + q[0], s[1] + q[1]]);
     [s[0] / n, s[1] / n]
-}
-
-/// Places an outline point (2-D) at an offset from a surface (see [`drape`]).
-type Place<'a> = &'a dyn Fn(&Kit, [f32; 2], f32) -> [f32; 3];
-
-/// Draped thin shell: outline `o` (2-D, already subdivided) placed by `at(q, offset)` onto a
-/// surface. The face is built from concentric rings (`rings`: scale toward the outline's
-/// mean, outer first, starting at 1.0) and a centre fan, every
-/// ring point placed on the surface, so the panel follows curved and recessed surfaces inside
-/// its outline too; the back is one fan `thick` below, the rim joins the outer edges. Faces are
-/// turned along `up` (face), against it (back) or away from the middle (rim).
-fn drape(
-    k: &mut Kit,
-    key: &PartKey,
-    o: &[[f32; 2]],
-    off: f32,
-    thick: f32,
-    up: [f32; 3],
-    rings: &[f32],
-    at: Place,
-) {
-    let n = o.len();
-    let c = mean2(o);
-    let toward = |q: [f32; 2], t: f32| [c[0] + (q[0] - c[0]) * t, c[1] + (q[1] - c[1]) * t];
-    let rings: Vec<Vec<[f32; 3]>> = rings
-        .iter()
-        .map(|&t| o.iter().map(|&q| at(k, toward(q, t), off)).collect())
-        .collect();
-    let ct = at(k, c, off);
-    let bot: Vec<[f32; 3]> = o.iter().map(|&q| at(k, q, off - thick)).collect();
-    let cb = at(k, c, off - thick);
-    let down = [-up[0], -up[1], -up[2]];
-    let mid = [
-        0.5 * (ct[0] + cb[0]),
-        0.5 * (ct[1] + cb[1]),
-        0.5 * (ct[2] + cb[2]),
-    ];
-    for i in 0..n {
-        let j = (i + 1) % n;
-        for r in 0..rings.len() - 1 {
-            let (a, b) = (&rings[r], &rings[r + 1]);
-            k.b.poly_facing(key, &[a[i], a[j], b[j]], up);
-            k.b.poly_facing(key, &[a[i], b[j], b[i]], up);
-        }
-        let last = &rings[rings.len() - 1];
-        k.b.poly_facing(key, &[ct, last[i], last[j]], up);
-        k.b.poly_facing(key, &[cb, bot[j], bot[i]], down);
-        let top = &rings[0];
-        let q = [top[i], top[j], bot[j], bot[i]];
-        let e = [
-            0.25 * (q[0][0] + q[1][0] + q[2][0] + q[3][0]),
-            0.25 * (q[0][1] + q[1][1] + q[2][1] + q[3][1]),
-            0.25 * (q[0][2] + q[1][2] + q[2][2] + q[3][2]),
-        ];
-        k.b.poly_facing(key, &q, [e[0] - mid[0], e[1] - mid[1], e[2] - mid[2]]);
-    }
-}
-
-/// Panel lying on the top surface (hood, fender tops, deck): outline `pts` in chassis (x, y),
-/// its face `lift` m above the paint and `thick` m deep.
-pub(super) fn top_poly(k: &mut Kit, key: &PartKey, pts: &[[f32; 2]], lift: f32, thick: f32) {
-    let o = subdivide(pts, 0.05);
-    let at = |k: &Kit, q: [f32; 2], d: f32| [q[0], q[1], k.top_z(q[1], q[0]) + d];
-    drape(k, key, &o, lift, thick, [0.0, 0.0, 1.0], &[1.0], &at);
-}
-
-/// Point `off` m out from the side surface of side `sx` at (y, z), and the outward normal.
-fn side_at(k: &Kit, sx: f32, y: f32, z: f32, off: f32) -> ([f32; 3], [f32; 3]) {
-    let (pt, n) = k.p.side_point(y, z);
-    let (pt, n) = if sx > 0.0 {
-        ([-pt[0], pt[1], pt[2]], [-n[0], n[1], n[2]])
-    } else {
-        (pt, n)
-    };
-    ([pt[0] + n[0] * off, pt[1], pt[2] + n[2] * off], n)
-}
-
-/// Extra lift of every [`side_poly`] panel over the loft's facets, m.
-const SIDE_LIFT_M: f32 = 0.010;
-
-/// Panel on the body side of side `sx` (key given for the left side; the right one is
-/// derived): outline `pts` in (y, z), its face `off` m out of the paint, `thick` m deep.
-pub(super) fn side_poly(
-    k: &mut Kit,
-    key_left: &PartKey,
-    sx: f32,
-    pts: &[[f32; 2]],
-    off: f32,
-    thick: f32,
-) {
-    let key = sided(key_left, sx);
-    let o = subdivide(pts, 0.05);
-    let n = side_at(k, sx, mean2(&o)[0], mean2(&o)[1], 0.0).1;
-    let at = move |k: &Kit, q: [f32; 2], d: f32| side_at(k, sx, q[0], q[1], d).0;
-    // The loft's flat facets sit up to ≈ 1 cm off the smooth surface on sculpted sides; lift
-    // every side panel by that much (stacking order between panels unchanged).
-    drape(
-        k,
-        &key,
-        &o,
-        off + SIDE_LIFT_M,
-        thick + SIDE_LIFT_M,
-        n,
-        &[1.0, 0.5],
-        &at,
-    );
 }
 
 /// y of the nose (`front`) or tail face at (x, z): the end face where the plan-rounded
@@ -280,25 +156,6 @@ pub(super) fn face_y(k: &Kit, front: bool, x: f32, z: f32) -> f32 {
         }
     }
     b
-}
-
-/// Panel on the nose (`front`) or tail face: outline `pts` in (x, z), its face `proud` m out
-/// of the face and `depth` m deep, following the plan-rounded corners.
-pub(super) fn end_poly(
-    k: &mut Kit,
-    key: &PartKey,
-    front: bool,
-    pts: &[[f32; 2]],
-    proud: f32,
-    depth: f32,
-) {
-    let d = if front { 1.0 } else { -1.0 };
-    let o = subdivide(pts, 0.06);
-    // On the vertical end plane; [`shear_to_faces`] then moves it onto the real face (plan
-    // corners, rake, chin), like every other kit part built on the face.
-    let y0 = if front { k.yn } else { k.yt };
-    let at = move |_: &Kit, q: [f32; 2], off: f32| [q[0], y0 + d * off, q[1]];
-    drape(k, key, &o, proud, depth, [0.0, d, 0.0], &[1.0], &at);
 }
 
 /// Names of the parts that already have geometry (call right after [`Kit::new`]), so
@@ -365,10 +222,26 @@ fn smoothstep01(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// Mirror an outline given for the left side (x < 0) to side `sx` (x only; order kept, the
-/// helpers turn every face outward themselves).
-pub(super) fn flip_x(pts: &[[f32; 2]], sx: f32) -> Vec<[f32; 2]> {
-    pts.iter().map(|q| [sx * q[0].abs(), q[1]]).collect()
+/// Thin dark groove on the body side of side `sx` from (y, z) `a` to `c`: one plate `w` m wide
+/// standing 2 mm out of the surface (a cheap line where a draped panel would cost hundreds of
+/// triangles).
+pub(super) fn side_groove(
+    k: &mut Kit,
+    key_left: &PartKey,
+    sx: f32,
+    a: [f32; 2],
+    c: [f32; 2],
+    w: f32,
+) {
+    let key = sided(key_left, sx);
+    let at = |q: [f32; 2]| {
+        // `side_point` is the left side (x < 0); mirror for the right.
+        let (pt, n) = k.p.side_point(q[0], q[1]);
+        let x = pt[0] + n[0] * 0.002;
+        [if sx < 0.0 { x } else { -x }, q[0], pt[2] + n[2] * 0.002]
+    };
+    let (pa, pc) = (at(a), at(c));
+    k.plate(&key, pa, pc, [0.0, 0.0, 1.0], w, 0.008);
 }
 
 /// Rear quarter window behind the door glass on side `sx` (for bodies whose loft paints that
@@ -405,9 +278,9 @@ pub(super) fn quarter_window(k: &mut Kit, sx: f32, gap: f32, max_len: f32, drop:
             .collect()
     };
     let ks = dkey("quarter_glass_seal_l", BodyRegion::RearLeftQuarter, M::Trim);
-    side_poly(k, &ks, sx, &seal, 0.002, 0.008);
+    k.side_poly(&ks, sx, &seal, 0.002, 0.008);
     let kg = dkey("quarter_glass_l", BodyRegion::RearLeftQuarter, M::Glass);
-    side_poly(k, &kg, sx, &glass, 0.005, 0.006);
+    k.side_poly(&kg, sx, &glass, 0.005, 0.006);
 }
 
 /// Stadium (pill) outline centred at (`cx`, `cz`): `hw` half length along the first axis,
@@ -661,7 +534,7 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [wl - 0.14, yl - 0.10],
             [0.42, yl - 0.10],
         ];
-        top_poly(&mut k, &kh, &flip_x(&blade, sx), 0.004, 0.012);
+        k.top_poly(&kh, &on_side(sx, &blade), 0.004, 0.012);
         let hk = headlight_key(sx);
         let h0 = [sx * 0.57, yl - 0.06];
         let h1 = [sx * (wl - 0.05), yl - 0.028];
@@ -676,7 +549,7 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [wf - 0.08, yl - 0.16],
             [wf - 0.15, yl - 0.17],
         ];
-        top_poly(&mut k, &hk, &flip_x(&lens, sx), 0.020, 0.018);
+        k.top_poly(&hk, &on_side(sx, &lens), 0.020, 0.018);
         // Amber signal: the inner end of the blade.
         let ik = indicator_front_key(sx);
         let sig = [
@@ -685,7 +558,7 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [0.55, yl - 0.095],
             [0.46, yl - 0.095],
         ];
-        top_poly(&mut k, &ik, &flip_x(&sig, sx), 0.022, 0.02);
+        k.top_poly(&ik, &on_side(sx, &sig), 0.022, 0.02);
         let kv = sided(
             &dkey("corner_intake_l", BodyRegion::FrontLeftFender, M::Grille),
             sx,
@@ -696,7 +569,7 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [0.64, nz1 - 0.15],
             [0.52, nz1 - 0.12],
         ];
-        end_poly(&mut k, &kv, true, &flip_x(&slot, sx), 0.016, 0.03);
+        k.face_poly(&kv, true, &on_side(sx, &slot), 0.016);
         let kb = sided(
             &dkey(
                 "corner_intake_vane_l",
@@ -734,7 +607,7 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         [0.15, yn - 0.50],
         [-0.15, yn - 0.50],
     ];
-    top_poly(&mut k, &kd, &duct, 0.004, 0.01);
+    k.top_poly(&kd, &duct, 0.004, 0.01);
 
     // --- Glass canopy: dark roof sheet, dihedral door cut lines in the roof, door seams.
     roof_sheet(&mut k, "canopy_roof_base", 0.03, 0.004, M::Trim);
@@ -840,12 +713,12 @@ fn halberd_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             sx,
         );
         let ch = [
-            [xs - 0.10, r0 - 0.10],
-            [xs - 0.04, r0 - 0.10],
+            [xs - 0.10, p.y_deck - 0.06],
+            [xs - 0.04, p.y_deck - 0.06],
             [xs - 0.04, k.yt + 0.45],
             [xs - 0.12, k.yt + 0.45],
         ];
-        top_poly(&mut k, &kc, &flip_x(&ch, sx), 0.003, 0.008);
+        k.top_poly(&kc, &on_side(sx, &ch), 0.003, 0.008);
     }
 
     // --- Full-width active airbrake lying flush on the tail of the deck.
@@ -1045,12 +918,12 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
             sx,
         );
-        top_poly(&mut k, &kh, &flip_x(&hous, sx), 0.004, 0.012);
+        k.top_poly(&kh, &on_side(sx, &hous), 0.004, 0.012);
         let kl = sided(
             &dkey("headlamp_lens_l", BodyRegion::FrontLeftFender, M::Glass),
             sx,
         );
-        top_poly(&mut k, &kl, &flip_x(&lens, sx), 0.009, 0.012);
+        k.top_poly(&kl, &on_side(sx, &lens), 0.009, 0.012);
         let hk = headlight_key(sx);
         // Double chevron pointing outward (this maker's signature).
         for d in [0.0, 0.09] {
@@ -1066,7 +939,7 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [wf - 0.075, yl - 0.30],
             [wf - 0.13, yl - 0.30],
         ];
-        top_poly(&mut k, &hk, &flip_x(&proj, sx), 0.012, 0.01);
+        k.top_poly(&hk, &on_side(sx, &proj), 0.012, 0.01);
         let ik = indicator_front_key(sx);
         let sig = [
             [wl - 0.12, yl - 0.05],
@@ -1074,7 +947,7 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [wl - 0.07, yl - 0.09],
             [wl - 0.13, yl - 0.095],
         ];
-        top_poly(&mut k, &ik, &flip_x(&sig, sx), 0.022, 0.02);
+        k.top_poly(&ik, &on_side(sx, &sig), 0.022, 0.02);
     }
     // --- Huge corner intakes (trapezoids leaning in at the top) split by two body-colour
     //     bars, narrow centre slot under the pointed nose, carbon splitter.
@@ -1083,7 +956,7 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         let (xi, xo) = (0.34, wn - 0.03);
         let kg = sided(&dkey("front_intake_l", fb, M::Grille), sx);
         let intake = [[xi, zi0], [xo, zi0], [xo, zi1 - 0.03], [xi + 0.14, zi1]];
-        end_poly(&mut k, &kg, true, &flip_x(&intake, sx), 0.006, 0.03);
+        k.face_poly(&kg, true, &on_side(sx, &intake), 0.006);
         // Two body-colour bars split the intake into three stacked slots.
         let kb = sided(&dkey("front_intake_blade_l", fb, M::Paint), sx);
         for f in [0.36, 0.68] {
@@ -1095,7 +968,7 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
                 [xo + 0.005, z + 0.016],
                 [xe - 0.01, z + 0.016],
             ];
-            end_poly(&mut k, &kb, true, &flip_x(&bar, sx), 0.02, 0.03);
+            k.face_poly(&kb, true, &on_side(sx, &bar), 0.02);
         }
         // Horizontal mesh bars behind the blade.
         let km = sided(&dkey("front_intake_mesh_l", fb, M::Trim), sx);
@@ -1146,7 +1019,7 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [sx * 0.26, ya],
             [sx * 0.12, ya],
         ];
-        top_poly(&mut k, &kd, &duct, 0.003, 0.008);
+        k.top_poly(&kd, &duct, 0.003, 0.008);
     }
 
     // --- Scissor-door seams, giant angular side intake, shoulder air "ears".
@@ -1159,13 +1032,7 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         let kc = dkey("side_line_l", BodyRegion::LeftDoorF, M::Grille);
         let (ya, za) = (yf - rf + 0.02, zf + 0.12);
         let (yb, zb) = (y1 + 0.10, z0 + 0.10);
-        let line = [
-            [ya, za],
-            [ya - 0.04, za - 0.012],
-            [yb, zb - 0.010],
-            [yb + 0.02, zb + 0.004],
-        ];
-        side_poly(&mut k, &kc, sx, &line, 0.003, 0.008);
+        side_groove(&mut k, &kc, sx, [ya, za - 0.006], [yb, zb], 0.012);
     }
     for sx in SIDES {
         let ki = dkey("side_intake_l", BodyRegion::RearLeftQuarter, M::Grille);
@@ -1364,7 +1231,7 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let ze = (p.z_floor + 0.14).max(0.24);
     let kx = dkey("exhaust_surround", BodyRegion::RearBumper, M::Trim);
     let surround = stadium(0.0, ze, 0.27, 0.075, 5);
-    end_poly(&mut k, &kx, false, &surround, 0.03, 0.05);
+    k.face_poly(&kx, false, &surround, 0.03);
     k.diffuser(M::Carbon, 0.80, 0.15, 5, 0.12);
 
     k.mirrors(0.18, 0.09, Some(M::Trim));
@@ -1396,7 +1263,8 @@ pub fn ostwind(def: &VehicleDef) -> CarStyle {
         windshield_rake_deg: Some(60.0),
         a_pillar_rake_deg: 10.0,
         c_pillar_rake_deg: 6.0,
-        roof_arc: 0.55,
+        roof_arc: 0.90,
+        roof_arc_rear_exp: 1.4,
         tumblehome: Some(0.22),
         rear_glass_bow: 0.05,
         crease_z: 0.50,
@@ -1885,7 +1753,7 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [wf - 0.12, yl - 0.36],
             [0.52, yl - 0.14],
         ];
-        top_poly(&mut k, &kh, &flip_x(&hous, sx), 0.004, 0.012);
+        k.top_poly(&kh, &on_side(sx, &hous), 0.004, 0.012);
         let hk = headlight_key(sx);
         // Twin bars (this maker's signature): two parallel light bars running from the inner
         // front corner back along the lens to the outer rear, the upper one longer.
@@ -1900,7 +1768,7 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [wl - 0.13, yl - 0.17],
             [wl - 0.21, yl - 0.18],
         ];
-        top_poly(&mut k, &hk, &flip_x(&proj, sx), 0.012, 0.010);
+        k.top_poly(&hk, &on_side(sx, &proj), 0.012, 0.010);
         let ik = indicator_front_key(sx);
         let sig = [
             [0.43, yl - 0.085],
@@ -1908,7 +1776,7 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [0.56, yl - 0.12],
             [0.50, yl - 0.13],
         ];
-        top_poly(&mut k, &ik, &flip_x(&sig, sx), 0.022, 0.02);
+        k.top_poly(&ik, &on_side(sx, &sig), 0.022, 0.02);
     }
     // --- Front: narrow black upper grille between the lamps over a straight silver line;
     //     big low centre intake; tall corner intakes, each split by one
@@ -1920,7 +1788,7 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         [0.36, nz1 - 0.03],
         [-0.36, nz1 - 0.03],
     ];
-    end_poly(&mut k, &kg, true, &ug, 0.006, 0.03);
+    k.face_poly(&kg, true, &ug, 0.006);
     let kbl = dkey("nose_blade", fb, M::Metal);
     let blade = [
         [-0.46, nz1 - 0.125],
@@ -1928,13 +1796,13 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         [0.48, nz1 - 0.105],
         [-0.48, nz1 - 0.105],
     ];
-    end_poly(&mut k, &kbl, true, &blade, 0.014, 0.03);
+    k.face_poly(&kbl, true, &blade, 0.014);
     let (zo0, zo1) = (nz0 + 0.04, nz1 - 0.15);
     for sx in SIDES {
         let (xi, xo) = (0.48, wn - 0.035);
         let kg = sided(&dkey("front_intake_l", fb, M::Grille), sx);
         let intake = [[xi, zo0], [xo, zo0], [xo, zo1 + 0.02], [xi + 0.06, zo1]];
-        end_poly(&mut k, &kg, true, &flip_x(&intake, sx), 0.006, 0.03);
+        k.face_poly(&kg, true, &on_side(sx, &intake), 0.006);
         let km = sided(&dkey("front_intake_bars_l", fb, M::Trim), sx);
         for i in 1..3 {
             let z = zo0 + (zo1 - zo0) * i as f32 / 3.0;
@@ -1956,7 +1824,7 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [xm + 0.07, zo1],
             [xm + 0.03, zo1],
         ];
-        end_poly(&mut k, &kb, true, &flip_x(&bl, sx), 0.02, 0.03);
+        k.face_poly(&kb, true, &on_side(sx, &bl), 0.02);
     }
     k.mesh_grille(
         "centre_intake",
@@ -2027,7 +1895,7 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [p.y_fd_rear + 0.01, zr + 0.06],
             [ys + 0.02, zb - 0.13],
         ];
-        side_poly(&mut k, &kd, sx, &door, 0.002, 0.01);
+        k.side_poly(&kd, sx, &door, 0.002, 0.01);
         let kq = dkey("quarter_intake_l", BodyRegion::RearLeftQuarter, M::Grille);
         let quarter = [
             [p.y_fd_rear - 0.01, zb - 0.07],
@@ -2035,7 +1903,7 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [yq, zr + 0.02],
             [p.y_fd_rear - 0.01, zr + 0.06],
         ];
-        side_poly(&mut k, &kq, sx, &quarter, 0.002, 0.01);
+        k.side_poly(&kq, sx, &quarter, 0.002, 0.01);
         let kf = dkey("door_fold_l", BodyRegion::LeftDoorF, M::Paint);
         let lip = [
             [ys - 0.02, zb - 0.085],
@@ -2043,7 +1911,7 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [p.y_fd_rear + 0.01, zb - 0.075],
             [ys, zb - 0.10],
         ];
-        side_poly(&mut k, &kf, sx, &lip, 0.012, 0.02);
+        k.side_poly(&kf, sx, &lip, 0.012, 0.02);
         let kl = dkey("quarter_fold_l", BodyRegion::RearLeftQuarter, M::Paint);
         let lip_q = [
             [p.y_fd_rear - 0.01, zb - 0.055],
@@ -2051,7 +1919,7 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [yq + 0.06, zb - 0.065],
             [p.y_fd_rear - 0.01, zb - 0.075],
         ];
-        side_poly(&mut k, &kl, sx, &lip_q, 0.012, 0.02);
+        k.side_poly(&kl, sx, &lip_q, 0.012, 0.02);
         let ka = dkey("door_accent_l", BodyRegion::LeftDoorF, M::Accent);
         let acc = [
             [ys + 0.10, zb - 0.14],
@@ -2059,7 +1927,7 @@ fn kagero_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             [p.y_fd_rear + 0.01, zr + 0.06],
             [ys + 0.10, zb - 0.155],
         ];
-        side_poly(&mut k, &ka, sx, &acc, 0.008, 0.012);
+        k.side_poly(&ka, sx, &acc, 0.008, 0.012);
     }
     k.skirts(M::Trim, 0.03, 0.05);
     fender_outlet(&mut k, 2, M::Paint);
