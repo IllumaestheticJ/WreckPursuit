@@ -340,7 +340,7 @@ fn drayman_cargo() -> CarStyle {
         belt_dz: 0.06,
         hood_dz: (0.0, 0.10),
         nose_h: Some(1.21),
-        deck_min_m: 0.04,
+        deck_min_m: 0.02,
         // Painted barn doors with two windows (glass break still works on the windows).
         rear_door_windows: Some(RearDoorWindows {
             side_inset_m: 0.10,
@@ -422,7 +422,7 @@ fn euro_panel_van(tumbril: bool) -> CarStyle {
         door_handles: TrimFinish::Black,
         fuel_door: FuelDoor::Left,
         // Rear doors to the tail; black plastic arch lips and lower cladding (commercial trim).
-        deck_min_m: 0.04,
+        deck_min_m: 0.02,
         // Painted barn doors with two windows (glass break still works on the windows).
         rear_door_windows: Some(RearDoorWindows {
             side_inset_m: 0.10,
@@ -1187,16 +1187,13 @@ fn drayman_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let wt = p.half_width(p.y_tail);
     barn_door_trim(b, p);
     // Tall tail lamps in the rear corners, amber signal at the bottom.
-    // Tall corner lamps, split at the belt step (rear door skin above, body below).
+    // Tall corner lamps below the belt step (red over amber).
     let (tx0, tx1) = (-(wt - 0.03), -(wt - 0.13));
     proj_lamps(
         b,
         p,
         false,
-        &[
-            rect(tx0, tx1, zt - 0.17, zt - 0.02),
-            rect(tx0, tx1, zt + 0.03, zt + 0.24),
-        ],
+        &[rect(tx0, tx1, zt - 0.25, zt - 0.03)],
         0.0,
         0.08,
         0.0,
@@ -1206,7 +1203,7 @@ fn drayman_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         p,
         false,
         M::EmissiveAmber,
-        &rect(tx0, tx1, zt - 0.29, zt - 0.18),
+        &rect(tx0, tx1, zt - 0.37, zt - 0.26),
         0.0,
         0.08,
     );
@@ -1371,15 +1368,15 @@ fn euro_van_common(b: &mut Builder, p: &BodyProfile, tumbril: bool) {
     let zt = p.z_deck;
     let wt = p.half_width(p.y_tail);
     barn_door_trim(b, p);
-    // Tall tail lamps in the rear corners: red, amber signal, red again (stacked).
+    // Tall tail lamps in the rear corners below the belt step: red, amber signal, red.
     let (tx0, tx1) = (-(wt - 0.03), -(wt - if tumbril { 0.14 } else { 0.16 }));
     proj_lamps(
         b,
         p,
         false,
         &[
-            rect(tx0, tx1, zt - 0.30, zt - 0.17),
-            rect(tx0, tx1, zt + 0.02, zt + 0.14),
+            rect(tx0, tx1, zt - 0.40, zt - 0.28),
+            rect(tx0, tx1, zt - 0.14, zt - 0.03),
         ],
         0.0,
         0.08,
@@ -1390,7 +1387,7 @@ fn euro_van_common(b: &mut Builder, p: &BodyProfile, tumbril: bool) {
         p,
         false,
         M::EmissiveAmber,
-        &rect(tx0, tx1, zt - 0.16, zt + 0.01),
+        &rect(tx0, tx1, zt - 0.27, zt - 0.15),
         0.0,
         0.08,
     );

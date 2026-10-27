@@ -940,7 +940,7 @@ const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
     ("bulwark_400", 21279),
     ("debug_coupe", 18723),
     ("debug_sedan", 9785),
-    ("drayman_cargo", 10844),
+    ("drayman_cargo", 10766),
     ("fulmine_v10", 20946),
     ("furrow_24", 10134),
     ("hakone_gt", 19577),
@@ -963,7 +963,7 @@ const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
     ("stoat_16v", 17374),
     ("talus_20t", 17740),
     ("tansy_13", 10248),
-    ("tumbril_20", 10879),
+    ("tumbril_20", 10845),
     ("vireo_xs", 17597),
 ];
 
