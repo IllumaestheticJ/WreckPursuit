@@ -145,7 +145,8 @@ impl Sim {
     /// single model while non-empty; empty restores it). Each AI car unit gets its model once,
     /// the first tick the sim sees it, from the highest wanted level of any racer at that
     /// moment ([`pick_police_model`], hashed by the run seed and unit id), and keeps it for
-    /// life — including while it drives kinematically without a body. Deterministic: units in
+    /// life — including while it drives kinematically without a body. When the level outgrows
+    /// a unit's model the police retire it out of sight and its replacement is picked anew. Deterministic: units in
     /// `wp_police` order, no RNG draws, so runs that only use `set_police_car` are unchanged.
     pub fn set_police_cars(&mut self, fleet: Vec<PoliceModel>) {
         self.police_fleet = fleet;
@@ -179,7 +180,8 @@ impl Sim {
             .unwrap_or(0)
     }
 
-    /// Give every new AI car unit a fleet model; forget retired units.
+    /// Give every new AI car unit a fleet model; forget retired units; tell the police which
+    /// units drive a model below the current level ([`PoliceSystem::set_outdated_units`]).
     fn assign_police_models(&mut self) {
         if self.police_fleet.is_empty() {
             return;
@@ -193,14 +195,23 @@ impl Sim {
             .filter(|u| !self.police_unit_models.contains_key(&u.id))
             .map(|u| u.id)
             .collect();
-        if new.is_empty() {
-            return;
-        }
         let level = self.police_dispatch_level().max(self.police_fleet_floor);
         for unit in new {
             let m = pick_police_model(&self.police_fleet, level, self.config.seed, unit);
             self.police_unit_models.insert(unit, m);
         }
+        // Owner 2026-10-26 ("cars should match my stars"): units in a model the level has
+        // outgrown are retired out of sight by wp_police and replaced in upgraded cars.
+        let level = level.clamp(1, 5);
+        let outdated: Vec<UnitId> = self
+            .police_unit_models
+            .iter()
+            .filter(|(_, m)| {
+                self.police_fleet[(**m).min(self.police_fleet.len() - 1)].max_level < level
+            })
+            .map(|(u, _)| *u)
+            .collect();
+        self.police.set_outdated_units(&outdated);
     }
 
     /// Measured limits of the police car model (`wp_vehicle::metrics`, see
@@ -637,6 +648,41 @@ mod tests {
             .collect();
         assert!(!models.is_empty());
         assert!(models.iter().all(|m| *m >= 3), "{models:?}");
+    }
+
+    #[test]
+    fn cars_follow_the_wanted_level() {
+        // Owner 2026-10-26 ("cars should match my stars"): patrols out before the racer is
+        // wanted are the low-heat models; at level 5 they are retired out of sight and every
+        // unit that appears from then on is a Wolfhound or a Vigil.
+        let mut sim = city_run(Some(fleet()), 0);
+        sim.set_input(EntityId(1), VehicleInput::default()).unwrap();
+        for _ in 0..1200 {
+            sim.step_fixed();
+        }
+        let before: Vec<UnitId> = sim.police().units().iter().map(|u| u.id).collect();
+        assert!(before
+            .iter()
+            .filter_map(|u| sim.police_unit_model(*u))
+            .all(|m| m <= 1));
+        sim.police_mut().set_heat(EntityId(1), 95.0);
+        for _ in 0..4800 {
+            sim.step_fixed();
+        }
+        assert_eq!(sim.police_dispatch_level(), 5);
+        let units = sim.police().units();
+        let retired = before
+            .iter()
+            .filter(|u| !units.iter().any(|v| v.id == **u))
+            .count();
+        assert!(retired > 0, "no low-tier unit retired");
+        let new: Vec<usize> = units
+            .iter()
+            .filter(|u| !before.contains(&u.id))
+            .filter_map(|u| sim.police_unit_model(u.id))
+            .collect();
+        assert!(!new.is_empty(), "no unit appeared at level 5");
+        assert!(new.iter().all(|m| *m >= 3), "{new:?}");
     }
 
     #[test]

@@ -263,7 +263,7 @@ pub fn session_car_models(sc: &simcli::Scenario, has_city: bool) -> SessionModel
             .collect(),
         (true, false) => vec![simcli::run::TRAFFIC_CAR.to_string()],
     };
-    let police_models: Vec<String> = if has_city && sc.police_cars && sc.police_fleet() {
+    let police_models: Vec<String> = if has_city && sc.police_cars && sc.uses_police_fleet() {
         simcli::run::CAR_MIX_POLICE
             .iter()
             .map(|m| m.0.to_string())
@@ -432,9 +432,17 @@ mod tests {
             }
         }
         assert_eq!(m.cars, want);
-        // Without the mix: one traffic and one police model.
-        let mut single = sc.clone();
-        single.car_mix = false;
+        // Without the traffic mix every city session still has the star-keyed police fleet
+        // (owner 2026-10-26, "cars should match my stars"): one traffic model, five police.
+        let mut fleet_only = sc.clone();
+        fleet_only.car_mix = false;
+        assert!(fleet_only.police_fleet);
+        let m = session_car_models(&fleet_only, true);
+        assert_eq!(m.traffic_models, vec![simcli::run::TRAFFIC_CAR]);
+        assert_eq!(m.police_models, police);
+        // Without any fleet: one traffic and one police model.
+        let mut single = fleet_only;
+        single.police_fleet = false;
         let m = session_car_models(&single, true);
         assert_eq!(m.cars, vec!["debug_sedan", simcli::run::POLICE_CAR]);
         assert_eq!(m.traffic.as_deref(), Some(simcli::run::TRAFFIC_CAR));

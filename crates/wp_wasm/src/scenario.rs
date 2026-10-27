@@ -155,6 +155,8 @@ pub fn free_drive_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
         dense_patrols: false,
         restart_after_capture: false,
         car_mix: false,
+        // Owner 2026-10-26: the cop cars follow the wanted level in every city session.
+        police_fleet: true,
         police_unit_level: None,
         slow: false,
         // Hinged panels + per-panel meshes in the browser (workstream R).
