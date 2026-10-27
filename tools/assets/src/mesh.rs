@@ -521,7 +521,7 @@ fn windows(p: &BodyProfile) -> Windows {
     let q0 = p.roof.0 + 0.08;
     let q1 = last - 0.04;
     let van = p.style.silhouette == crate::style::Silhouette::Van;
-    let quarter = (!van && q1 - q0 > 0.2).then_some((q0, q1));
+    let quarter = (!van && p.style.quarter_glass && q1 - q0 > 0.2).then_some((q0, q1));
     let rear = if van { None } else { rear };
     // B-pillar: between the front window and the rear door window or quarter glass.
     let b_pillar = match (rear, quarter) {
@@ -588,6 +588,30 @@ fn classify_left(p: &BodyProfile, win: &Windows, y: f32, z: f32, seg: Seg, j: us
                 RearBumper if z > p.z_bumper_top.1 + 0.04 => RearLeftQuarter,
                 other => other,
             };
+            let mut clad = p
+                .style
+                .cladding_z_m
+                .clamp(0.0, 0.7)
+                .min(p.z_bumper_top.0.min(p.z_bumper_top.1) - 0.06);
+            // Bumpers keep their upper half painted.
+            if let FrontBumper | RearBumper = r {
+                let top = if r == FrontBumper {
+                    p.z_bumper_top.0
+                } else {
+                    p.z_bumper_top.1
+                };
+                // A raked end face lowers the bumper's top locally.
+                let top = p.face_band(y).map_or(top, |(_, hi)| top.min(hi));
+                clad = clad.min(0.5 * (p.z_floor + top));
+            }
+            if clad > 0.0 && z < clad {
+                return PartKey::body(
+                    &format!("{}_cladding", panel_name(r)),
+                    r,
+                    PartKind::Body,
+                    MaterialSlot::Trim,
+                );
+            }
             panel(r)
         }
         Seg::Ledge => panel(lower(y, f32::MAX)),

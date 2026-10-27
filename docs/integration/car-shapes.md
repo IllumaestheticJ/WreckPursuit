@@ -158,6 +158,18 @@ change.
 | `nose_tip_w` / `tail_tip_w` | fraction | 0.1…1.0 | 0.6 | half width left at the very end with a bow |
 | `roof_plan_taper` | fraction | 0…0.3 | 0 | roof narrows header → rear glass (greenhouse plan taper) |
 | `lower_lean_in_m` | m | 0…0.08 | 0 | lower body leans in below the crease (boat-tail section) |
+| `hood_dz` | (m, m) | −0.10…+0.12 each | (0, 0) | hood height vs the lattice at the cowl / at its front (nose may rise above the lattice hood line) |
+| `deck_dz` | m | −0.10…+0.10 | 0 | deck / tail top height vs the lattice |
+| `roof_arc_front_exp` / `roof_arc_rear_exp` | — | 1…4 | 2 | exponent of the `roof_arc` halves (rear 1.2–1.6: one even fastback fall) |
+| `quarter_glass` | bool | | true | `false` paints the quarter window opening |
+| `deck_min_m` | m | 0.02…0.25 | 0.25 | shortest deck behind the rear glass base (vans: glass near the tail) |
+| `glass_base_lip_m` | m | 0…0.05 | 0 | kick at the rear-glass base (hatch tailgate lip) |
+| `flare_shape: ArchShape::Trapezoid` | | | | new arch outline: short flat top, long slanted sides |
+| `arch_lip_finish` | `TrimFinish` | | `Body` | `Black` / `Chrome` arch lips |
+| `cladding_z_m` | m | 0…0.7 | 0 | black `<panel>_cladding` parts below this height (bumpers keep their upper half) |
+| `dlo_kink_m`, `dlo_kink_len_m` | m | 0…0.12, 0.05…0.40 | 0, 0.15 | side-window base kicks up at the rear of the last window |
+| `dlo_top_drop_m` | m | −0.03…+0.10 | 0 | side-window top line falls toward the rear, independent of the roof edge |
+| `PatchBand::Greenhouse { z0, z1 }` | | | | patches on the side above the belt (`BodyProfile::greenhouse_point`) |
 
 New type `SideSculpt { y0_m, y1_m, z0_m, z1_m, dx_m, falloff_m }` (chassis metres;
 `SideSculpt::dx_at(y, z)` gives its offset). New module `car_assets::lamp` (projected lamps) and
@@ -225,6 +237,30 @@ Station `y` values are chassis metres (+ forward). Take wheel stations from your
   (separate from `tumblehome` and the A / C-pillar plan rakes). **Lower lean-in
   (`lower_lean_in_m`)** 0.03–0.06 tucks the body in below the crease (boat-tail section); put
   `crease_z` where the lean should start.
+- **Hood and deck heights (`hood_dz`, `deck_dz`).** Thick flat nose / tail blocks on saloons:
+  lower the hood front (`hood_dz.1` −0.04…−0.08) and the deck (`deck_dz` −0.03…−0.06). Tall flat
+  truck / SUV hoods: raise the front (+0.06…+0.10), which also raises the nose leading edge's
+  upper clamp (`nose_h` can now sit above the lattice hood-front node). The lattice and the hood
+  hinge are unchanged (visual only).
+- **Roof arc exponents.** With `roof_arc` 0.8–1.0, `roof_arc_rear_exp` 1.2–1.6 makes a fastback
+  fall in one even curve from just behind the header; 2.5–3 keeps the roof flat longer and drops
+  late. `roof_arc_front_exp` does the same for the windshield side.
+- **Quarter glass / deck / glass lip.** `quarter_glass: false` paints the quarter opening
+  (blind C-pillar, opera-window cars, panel vans). `deck_min_m` 0.05–0.10 lets a van's or hatch's
+  rear glass come close to the tail. `glass_base_lip_m` 0.02–0.04 adds the kick where hatch glass
+  meets the tailgate.
+- **Arches and cladding.** `ArchShape::Trapezoid` (flat top, slanted sides) for off-road flares and
+  crossover arches; `arch_lip_finish: Black` for black flare lips; `cladding_z_m` 0.35–0.50 puts a
+  black band on the lower doors, fenders, quarters, sills and the lower half of the bumpers
+  (parts `door_fl_cladding` … on the panel's own region, so they dent and detach with it).
+- **Side-window shape.** `dlo_kink_m` 0.06–0.10 over `dlo_kink_len_m` 0.15–0.25 gives the
+  upturned window line at the C-pillar (a 70s–2000s German-sedan-style kink, described
+  generically); `dlo_top_drop_m` 0.03–0.06 drops the window top toward the rear (the roof rail
+  band widens), so the DLO top no longer follows the roof edge.
+- **Greenhouse patches.** `PatchBand::Greenhouse { z0, z1 }` in a `Patch` (`Kit::patch`,
+  `Shape::Patch`) follows the side above the belt — belt ledge, side glass, roof rail and the
+  C-pillar sail over a rear-glass slope: opera windows, C-pillar badges, louvres, a pillar
+  applique. Put it behind the roof's rear edge (`p.roof.0`) for the sail.
 - **Overhangs (`overhang_trim`).** Now −0.35…+0.25 m per end. The nose / tail stop 6 cm short of
   the tires; past the lattice hood front (quarter end) the visual hood front (quarter end) moves
   back with them, so the bumper panels always keep a 10 cm strip on their region (their lattice
@@ -271,7 +307,7 @@ the cars' styles) of kestrel_ts, vireo_xs, hauler_1500, nyx_proto and ironside_4
 `MESH_DIR=<dir> node tools/assets/mesh_shots.mjs <out> <car>__<variant> …` renders them
 (`mesh_shots.mjs` now takes `MESH_DIR`; an id `<car>__<variant>` uses `<car>`'s def). Sheets:
 `docs/media/car-shapes/phase3/{plan_width,sculpt_section,fender_rise,overhang,face_shape,
-lamps_front,lamps_rear}.jpg` (base on the left, knob on the right).
+heights_greenhouse,lamps_front,lamps_rear}.jpg` (base on the left, knob on the right).
 
 ### Tests added
 `style_knob_extremes_never_panic` sweeps every phase-3 knob far past both ends (NaN control
@@ -314,7 +350,14 @@ with `cargo install wasm-pack`).
 Items 1–4 of the lead's merged list: lamp primitive (concave outlines, depth, bezel, inner
 elements) — `lamp.rs`; face rake / chin / plan bow per end; plan taper (nose: `plan_width` or
 the plan bow; waist: `plan_width`; greenhouse: `roof_plan_taper`); section shape (`side_bulge_m`,
-`lower_lean_in_m`, `tumblehome_m` down to 0.03, recesses via `side_sculpt`). The remaining
-items follow in a later pass (see below).
+`lower_lean_in_m`, `tumblehome_m` down to 0.03, recesses via `side_sculpt`).
+Items 5–8 and the tuner group's (a)/(b): nose height and hood / deck heights (`hood_dz`,
+`deck_dz`), roof arc exponents, `quarter_glass`, `glass_base_lip_m` (hatch lip; the tailgate lean
+is `tail_face_rake_deg`), `deck_min_m` (van deck near the tail), `ArchShape::Trapezoid`,
+`arch_lip_finish`, `cladding_z_m`, `PatchBand::Greenhouse`, `dlo_kink_m` / `dlo_top_drop_m`.
+Item 9 (the faceted fans on the black A-pillar sail and on sharp-plan tail corners) is not done:
+any fix changes every car's mesh, which this pass must not do; it is a candidate for the lead's
+next all-cars regeneration. Arch lips and liners now add the side sculpt / bulge offset, so they
+stay on a sculpted side (0 when those knobs are off).
 
 ## Lead feedback
