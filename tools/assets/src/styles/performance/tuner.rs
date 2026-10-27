@@ -208,7 +208,7 @@ fn blank_badge(k: &mut Kit, region: BodyRegion, front: bool, z: f32, w: f32, h: 
 /// pedestal wing, round-element tails, roof vent, mud flaps, gold wheels.
 pub fn kestrel(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        nose_h: Some(0.66),
+        nose_h: Some(0.62),
         nose_rake_deg: 24.0,
         nose_plan_round: 0.30,
         tail_plan_round: 0.24,
@@ -226,7 +226,7 @@ pub fn kestrel(def: &VehicleDef) -> CarStyle {
         belt_dz: 0.03,
         crease_z: 0.60,
         crease_depth: 0.010,
-        shoulder_round: 0.05,
+        shoulder_round: 0.07,
         haunch: 0.020,
         front_haunch: 0.030,
         flare: 0.030,
@@ -238,6 +238,9 @@ pub fn kestrel(def: &VehicleDef) -> CarStyle {
         c_pillar_w_m: 0.14,
         windshield_wrap_m: 0.07,
         fuel_door: FuelDoor::Right,
+        overhang_trim: (-0.06, -0.08),
+        sill_tuck: 0.09,
+        tail_round: 0.25,
         arch_gap: 0.045,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
@@ -495,6 +498,8 @@ pub fn arashi(def: &VehicleDef) -> CarStyle {
         rear_glass_wrap_m: 0.03,
         end_round_m: 0.025,
         fuel_door: FuelDoor::Right,
+        overhang_trim: (-0.04, -0.06),
+        sill_tuck: 0.07,
         arch_gap: 0.045,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
@@ -741,8 +746,8 @@ pub fn talus(def: &VehicleDef) -> CarStyle {
         crease_z: 0.42,
         crease_depth: 0.008,
         shoulder_round: 0.03,
-        haunch: 0.045,
-        front_haunch: 0.045,
+        haunch: 0.055,
+        front_haunch: 0.055,
         flare: 0.018,
         flare_shape: ArchShape::Round,
         ride_dz: -0.025,
@@ -754,6 +759,8 @@ pub fn talus(def: &VehicleDef) -> CarStyle {
         c_pillar_w_m: 0.13,
         windshield_wrap_m: 0.05,
         fuel_door: FuelDoor::Left,
+        overhang_trim: (-0.03, -0.06),
+        sill_tuck: 0.08,
         arch_gap: 0.045,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
@@ -1004,7 +1011,7 @@ fn talus_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 pub fn shiro(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         cabin_shift_m: -0.06,
-        nose_h: Some(0.58),
+        nose_h: Some(0.55),
         nose_rake_deg: 32.0,
         nose_plan_round: 0.32,
         tail_plan_round: 0.25,
@@ -1013,7 +1020,7 @@ pub fn shiro(def: &VehicleDef) -> CarStyle {
         a_pillar_rake_deg: 10.0,
         rear_glass_rake_deg: Some(63.0),
         roof_arc: 0.35,
-        roof_dz: -0.01,
+        roof_dz: -0.03,
         roof_len_trim: 0.10,
         tumblehome: Some(0.15),
         belt_dz: 0.05,
@@ -1021,21 +1028,22 @@ pub fn shiro(def: &VehicleDef) -> CarStyle {
         belt_kick: 0.02,
         crease_z: 0.56,
         crease_depth: 0.012,
-        shoulder_round: 0.05,
-        haunch: 0.030,
+        shoulder_round: 0.08,
+        haunch: 0.045,
         front_haunch: 0.020,
         flare: 0.035,
         flare_shape: ArchShape::Box,
         ride_dz: -0.045,
         stance_pitch_deg: 0.2,
         ducktail_h: 0.02,
-        overhang_trim: (0.04, 0.0),
+        overhang_trim: (0.02, -0.08),
         a_pillar_w_m: 0.07,
         c_pillar_w_m: 0.16,
         b_pillar_w_m: 0.08,
         windshield_wrap_m: 0.08,
         rear_glass_wrap_m: 0.08,
         fuel_door: FuelDoor::Right,
+        sill_tuck: 0.09,
         arch_gap: 0.045,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
@@ -1272,7 +1280,7 @@ fn shiro_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 pub fn hakone(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
         cabin_shift_m: -0.14,
-        nose_h: Some(0.60),
+        nose_h: Some(0.56),
         nose_rake_deg: 40.0,
         nose_plan_round: 0.42,
         tail_plan_round: 0.32,
@@ -1283,14 +1291,14 @@ pub fn hakone(def: &VehicleDef) -> CarStyle {
         a_pillar_rake_deg: 12.0,
         roof_arc: 0.55,
         c_pillar_rake_deg: 8.0,
-        tumblehome: Some(0.21),
+        tumblehome: Some(0.24),
         belt_dz: 0.035,
         belt_kick: 0.02,
         crease_z: 0.50,
         crease_depth: 0.0,
-        shoulder_round: 0.10,
-        haunch: 0.050,
-        front_haunch: 0.030,
+        shoulder_round: 0.12,
+        haunch: 0.065,
+        front_haunch: 0.045,
         flare: 0.012,
         ride_dz: -0.02,
         rear_glass_bow: 0.06,
@@ -1303,6 +1311,9 @@ pub fn hakone(def: &VehicleDef) -> CarStyle {
         rear_glass_wrap_m: 0.10,
         end_round_m: 0.04,
         fuel_door: FuelDoor::Left,
+        roof_dz: -0.02,
+        sill_tuck: 0.10,
+        overhang_trim: (0.0, -0.05),
         arch_gap: 0.045,
         ..BodyStyle::preset(Silhouette::Fastback)
     });
@@ -1346,8 +1357,8 @@ fn hakone_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         swept_top_lamp(
             &mut k,
             sx,
-            yn - 0.24,
-            yn - 0.07,
+            yn - 0.27,
+            yn - 0.10,
             0.38,
             wn - 0.08,
             0.24,
@@ -1522,7 +1533,7 @@ pub fn sperber(def: &VehicleDef) -> CarStyle {
         crease_z: 0.64,
         crease_depth: 0.014,
         shoulder_round: 0.045,
-        haunch: 0.025,
+        haunch: 0.035,
         front_haunch: 0.020,
         flare: 0.015,
         ride_dz: -0.02,
@@ -1531,6 +1542,8 @@ pub fn sperber(def: &VehicleDef) -> CarStyle {
         windshield_wrap_m: 0.06,
         door_handles: TrimFinish::Chrome,
         fuel_door: FuelDoor::Right,
+        overhang_trim: (-0.08, -0.04),
+        sill_tuck: 0.08,
         arch_gap: 0.045,
         ..BodyStyle::preset(Silhouette::Notchback)
     });

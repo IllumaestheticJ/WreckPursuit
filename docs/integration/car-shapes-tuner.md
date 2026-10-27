@@ -27,6 +27,11 @@
   (`cowl_h`), so the windshield is shorter and the cabin reads as a saloon.
 - **Stance.** `arch_gap` 0.07 → 0.045 on all six: the tyres fill the arches (was a big black gap
   over each wheel).
+- **Proportion pass** (after the lead's 2026-10-27 heads-up): shorter visual overhangs
+  (`overhang_trim`, front −0.08…+0.02, rear −0.04…−0.08), more sill tuck-under and shoulder
+  rounding (less slab-sided sections), bigger haunches on talus / hakone / sperber, lower noses
+  on kestrel / shiro / hakone, lower roofs on shiro / hakone. The shortened ends drop the
+  bumper-split seam lines on some cars (the split station now sits at the mesh end).
 - **Greenhouse knobs** per car (pillar widths, glass wrap, B-pillar width on the coupes).
 - Generic door handles and fuel doors (phase 1 trim) are used instead of the old kit boxes,
   with the finish and side set per car (`door_handles`, `fuel_door`). Kit mirrors stay.
@@ -119,12 +124,12 @@ Hero budget 22k (mid LOD 7k); all six within it.
 
 | car | full before → after | mid before → after |
 |---|---|---|
-| kestrel_ts | 18914 → 19220 | 5051 → 5647 |
-| arashi_t4 | 18292 → 17902 | 4962 → 4330 |
-| talus_20t | 17376 → 18034 | 4464 → 4516 |
-| shiro_turbo | 18992 → 19144 | 5040 → 5124 |
-| hakone_gt | 18873 → 19247 | 4826 → 4952 |
-| sperber_32 | 19112 → 19724 | 4942 → 5030 |
+| kestrel_ts | 18914 → 19074 | 5051 → 5459 |
+| arashi_t4 | 18292 → 18022 | 4962 → 4624 |
+| talus_20t | 17376 → 17680 | 4464 → 4646 |
+| shiro_turbo | 18992 → 18956 | 5040 → 5006 |
+| hakone_gt | 18873 → 19215 | 4826 → 5154 |
+| sperber_32 | 19112 → 19572 | 4942 → 5130 |
 
 The rows of `every_car_has_turn_signals_integrated_into_its_lamps`'s table for these six cars
 were rebased to the new counts (the phase-1 doc asks per-car passes above +2 % to do this).
@@ -133,7 +138,7 @@ were rebased to the new counts (the phase-1 doc asks per-car passes above +2 % t
 `cargo fmt`, `cargo clippy -p car-assets --all-targets -- -D warnings`, `cargo test -p
 car-assets` (18 + 11 pass, incl. `lights_sit_outside_the_shell`), `validate-car-asset` (all cars
 ok), `gen-car-mesh --check` (no other car's mesh changed). `npm ci && npm run wasm && node
-e2e/mod_coverage.mjs <the six cars>`: MODCOV_RESULT.
+e2e/mod_coverage.mjs <the six cars>`: 7 car/mod pairs show nothing, all no-visual mods already on the known list (`drivetrain_shifter_short` on kestrel / arashi / talus / sperber, `tires_sport` on talus / shiro / hakone); bumpers, lips, wings, bull bars and vinyls show.
 
 Shots were checked from front / rear 3/4, side, top and nose / tail close-ups for gaps, floating
 parts, glass through pillars and lens faces under the body.
@@ -151,9 +156,20 @@ for front 3/4, nose close-up, rear 3/4, tail close-up, side, top.
   Other groups edit neighbouring rows of the same table, so expect a trivial merge conflict there.
 
 ## Generator requests
-None needed. Nice to have later (not done, would be shared): `top_quad` / `swept_top_lamp` /
-`face_poly` could move into `kit.rs` for other groups; a rear-side-window kink (the German
-sedan's C-pillar notch) would need a greenhouse knob.
+Sent to the lead (2026-10-27). With the knobs alone the side silhouettes stay close to the old
+ones; these are what limit the "obvious from a thumbnail" bar for this group:
+1. **Hood and deck heights independent of the lattice** (`hood_dz` at cowl / nose, `deck_dz`
+   vs the belt): today the hood line comes from lattice nodes and the deck sits at the belt,
+   which makes the thick, flat nose and tail blocks in every side view.
+2. **Curved side sections**: an outward bow between rocker and shoulder (`side_bow_m`) and a
+   lower-body tuck (`rocker_in_m`), so flanks are not vertical slabs.
+3. **Curved nose / tail faces in side view**: bumper bow and a set-back chin / lower valance,
+   instead of one raked plane per end.
+4. **Plan-view taper over a length** (`nose_taper_m` / `tail_taper_m` + length), not only corner
+   rounding.
+5. **Side-window (DLO) shape**: rear side window kink, window top line independent of the roof.
+6. **Shaped lens helpers in `kit.rs`**: `top_quad` (surface-following shell over any plan quad),
+   `swept_top_lamp` and `face_poly` from `tuner.rs` can move to the shared kit as they are.
 
 ## Known gaps
 - The side views still show tall flat flanks on the saloons: the belt / sill heights and the
