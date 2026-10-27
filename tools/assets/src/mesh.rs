@@ -673,6 +673,32 @@ fn classify_left(p: &BodyProfile, win: &Windows, y: f32, z: f32, seg: Seg, j: us
     }
 }
 
+/// True for a rear-facing loft face of a raked tail face on a tailgate car (no trunk lid, no
+/// open bed), above the rear bumper: it is the tailgate, as the end cap's upper part is
+/// (`tail_face_rake_deg` / `tail_chin_m` turn the end cap into loft faces). `q` = the face's
+/// corners (ring point j, j + 1 at station s, ring point j at station s + 1), LEFT side.
+fn tailgate_face(p: &BodyProfile, y: f32, z: f32, q: [[f32; 3]; 3]) -> bool {
+    let depth = p.face_depth(false);
+    if p.trunk_lid || p.bed.is_some() || depth <= 1e-4 || y > p.y_tail + depth + 0.01 {
+        return false;
+    }
+    if z <= p.z_bumper_top.1 + 0.04 {
+        return false;
+    }
+    // Outward normal of the left-side face: (a1 − a0) × (b0 − a0).
+    let (u, v) = (
+        [q[1][0] - q[0][0], q[1][1] - q[0][1], q[1][2] - q[0][2]],
+        [q[2][0] - q[0][0], q[2][1] - q[0][1], q[2][2] - q[0][2]],
+    );
+    let n = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
+    let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+    l > 1e-9 && n[1] / l < -0.6
+}
+
 /// Loft stations: base steps, fine steps near the ends and arches, plus every zone
 /// boundary (so panel splits fall on station edges), ascending.
 pub fn stations(p: &BodyProfile, base: f32, fine: f32) -> Vec<f32> {
@@ -689,6 +715,17 @@ pub fn stations(p: &BodyProfile, base: f32, fine: f32) -> Vec<f32> {
     ];
     for &(wy, _, r) in &p.arches {
         zones.push((wy - r - 0.15, wy + r + 0.15));
+    }
+    // Raked / undercut end faces (phase 3) are lofted too: fine steps over their depth.
+    for front in [true, false] {
+        let depth = p.face_depth(front);
+        if depth > 1e-4 {
+            zones.push(if front {
+                (p.y_nose - depth - 0.05, p.y_nose + 1.0)
+            } else {
+                (p.y_tail - 1.0, p.y_tail + depth + 0.05)
+            });
+        }
     }
     let fine_at = |y: f32| zones.iter().any(|&(a, b)| y >= a && y <= b);
     let mut ys = vec![p.y_tail];
@@ -1108,6 +1145,8 @@ fn loft(
                         MaterialSlot::Livery,
                     )
                 }
+            } else if tailgate_face(p, ym, zm, [a0, a1, b0]) {
+                key_for(BodyRegion::Trunk, PartKind::Panel)
             } else {
                 classify_left(p, win, ym, zm, seg, j)
             };

@@ -397,10 +397,11 @@ impl BodyProfile {
         let ni = (0.23 * self.style.nose_plan_round).clamp(0.01, 0.12);
         let ti = (0.23 * self.style.tail_plan_round).clamp(0.01, 0.12);
         let w = self.half_w - ni * n - ti * t;
-        if self.style.plan_width.is_empty() {
+        let bow = self.end_bow(y);
+        if self.style.plan_width.is_empty() && bow >= 1.0 {
             return w;
         }
-        let ws = w * self.plan_scale(y);
+        let ws = w * bow * self.plan_scale(y);
         if ws >= w {
             return ws;
         }
@@ -420,6 +421,146 @@ impl BodyProfile {
             })
             .fold(ws, f32::max);
         ws.max(floor)
+    }
+
+    /// Plan-view bow factor at `y` ([`BodyStyle::nose_plan_bow_m`] / `tail_plan_bow_m`): 1
+    /// outside the bow, an elliptical arc down to the tip width at the end.
+    pub fn end_bow(&self, y: f32) -> f32 {
+        let s = &self.style;
+        let arc = |bow: f32, tip: f32, d: f32| -> f32 {
+            let bow = bow.clamp(0.0, 0.5);
+            if bow <= 0.0 || d >= bow {
+                return 1.0;
+            }
+            let t = 1.0 - d.max(0.0) / bow;
+            let f0 = tip.clamp(0.1, 1.0);
+            f0 + (1.0 - f0) * (1.0 - t * t).max(0.0).sqrt()
+        };
+        arc(s.nose_plan_bow_m, s.nose_tip_w, self.y_nose - y)
+            * arc(s.tail_plan_bow_m, s.tail_tip_w, y - self.y_tail)
+    }
+
+    /// Depth (along y) of the nose / tail face profile from the face rake and chin knobs, m
+    /// (0 when they are off).
+    pub fn face_depth(&self, front: bool) -> f32 {
+        let (rake, chin, zb, zt) = self.face_params(front);
+        tan_deg(rake.abs()) * (zt - zb).max(0.0) + chin
+    }
+
+    /// (rake °, chin m, face bottom z, face top z) of an end. The face never reaches past the
+    /// windshield base − 0.10 m (nose) or the deck / rear-glass start + 0.03 m (tail): a deeper
+    /// setting is scaled down to fit (those stations are lattice zone boundaries); with less than
+    /// 4 cm of room the face stays vertical.
+    fn face_params(&self, front: bool) -> (f32, f32, f32, f32) {
+        let s = &self.style;
+        let (rake, chin, zb, zt, room) = if front {
+            (
+                s.nose_face_rake_deg.clamp(-15.0, 60.0),
+                s.nose_chin_m.clamp(0.0, 0.25),
+                self.sill(self.y_nose),
+                self.z_nose,
+                self.y_nose - self.y_fw - 0.10,
+            )
+        } else {
+            (
+                s.tail_face_rake_deg.clamp(-15.0, 60.0),
+                s.tail_chin_m.clamp(0.0, 0.25),
+                self.sill(self.y_tail),
+                self.belt(self.y_tail),
+                self.y_deck - self.y_tail - 0.03,
+            )
+        };
+        if rake == 0.0 && chin == 0.0 {
+            return (rake, chin, zb, zt);
+        }
+        // No room for a face (a tail trimmed past the deck start): keep it vertical.
+        if room < 0.04 {
+            return (0.0, 0.0, zb, zt);
+        }
+        let r = tan_deg(rake.abs());
+        let depth = r * (zt - zb).max(0.0) + chin;
+        if depth <= room {
+            return (rake, chin, zb, zt);
+        }
+        let k = room / depth;
+        let rake = (r * k).atan().to_degrees() * rake.signum();
+        (rake, chin * k, zb, zt)
+    }
+
+    /// Allowed height band (lo, hi) of the loft at `y` from the end face profiles, or `None`
+    /// where no face knob reaches. A point at height z is behind the face when its set-back
+    /// (rake: from the face bottom up, or from the top down when leaning forward; chin: the
+    /// lower 40 % sweeping back) is at most the distance to the end.
+    fn face_band(&self, y: f32) -> Option<(f32, f32)> {
+        let mut band: Option<(f32, f32)> = None;
+        for front in [true, false] {
+            let depth = self.face_depth(front);
+            let d = if front {
+                self.y_nose - y
+            } else {
+                y - self.y_tail
+            };
+            if depth <= 1e-4 || d >= depth {
+                continue;
+            }
+            let (rake, chin, zb, zt) = self.face_params(front);
+            let r = tan_deg(rake);
+            let zc = zb + 0.4 * (zt - zb).max(0.05);
+            let setback = |z: f32| -> f32 {
+                let rk = if r >= 0.0 {
+                    r * (z - zb).max(0.0)
+                } else {
+                    -r * (zt - z).max(0.0)
+                };
+                rk + chin * smoothstep((zc - z) / (zc - zb).max(0.02))
+            };
+            // Scan heights in 1 cm steps for the allowed run, then refine both ends.
+            // From the face bottom (the underside there) up: below it the chin would read as
+            // a flat set-back and pull points under the car.
+            let (z0, z1) = (zb.min(zt - 0.05), self.z_max() + 0.2);
+            let steps = ((z1 - z0) / 0.01).ceil() as usize;
+            let at = |i: usize| z0 + (z1 - z0) * i as f32 / steps as f32;
+            let ok: Vec<bool> = (0..=steps).map(|i| setback(at(i)) <= d).collect();
+            let (lo, hi) = match (ok.iter().position(|&o| o), ok.iter().rposition(|&o| o)) {
+                (Some(a), Some(b)) => {
+                    let refine = |mut out: f32, mut inn: f32| {
+                        for _ in 0..12 {
+                            let m = 0.5 * (out + inn);
+                            if setback(m) <= d {
+                                inn = m;
+                            } else {
+                                out = m;
+                            }
+                        }
+                        inn
+                    };
+                    let lo = if a == 0 {
+                        at(0)
+                    } else {
+                        refine(at(a - 1), at(a))
+                    };
+                    let hi = if b == steps {
+                        at(steps)
+                    } else {
+                        refine(at(b + 1), at(b))
+                    };
+                    (lo, hi)
+                }
+                _ => {
+                    // Ahead of the whole face: collapse onto its foremost height.
+                    let zm = (0..=steps)
+                        .map(at)
+                        .min_by(|a, b| setback(*a).total_cmp(&setback(*b)))
+                        .unwrap_or(zb);
+                    (zm, zm)
+                }
+            };
+            band = Some(match band {
+                Some((l, h)) => (l.max(lo), h.min(hi).max(l.max(lo))),
+                None => (lo, hi),
+            });
+        }
+        band
     }
 
     /// Plan-width scale at `y` from [`BodyStyle::plan_width`] (1 when empty): smoothstep
@@ -489,9 +630,13 @@ impl BodyProfile {
 
     /// Side-wall offset (m, + outward) of a side ring point at (y, z): sculpts plus the side
     /// bulge (`f` = height fraction sill → belt).
-    fn side_offset(&self, y: f32, z: f32, f: f32) -> f32 {
+    fn side_offset(&self, y: f32, z: f32, f: f32, fc: f32) -> f32 {
         let s = &self.style;
         let mut dx = 0.0;
+        let lean = s.lower_lean_in_m.clamp(0.0, 0.08);
+        if lean > 0.0 && f < fc {
+            dx -= lean * (1.0 - f.max(0.0) / fc.max(0.05));
+        }
         if !s.side_sculpt.is_empty() {
             let sum: f32 = s.side_sculpt.iter().map(|c| c.dx_at(y, z)).sum();
             dx += sum.clamp(SCULPT_DX_RANGE.0, SCULPT_DX_RANGE.1);
@@ -788,7 +933,14 @@ impl BodyProfile {
             * (y - (self.roof.1 - 0.2)).max(0.0);
         let taper_rear = tan_deg(self.style.c_pillar_rake_deg.clamp(0.0, 25.0))
             * ((self.roof.0 + 0.2) - y).max(0.0);
-        (self.roof_half - taper - taper_rear).max(0.45 * self.roof_half)
+        let mut w = (self.roof_half - taper - taper_rear).max(0.45 * self.roof_half);
+        let pt = self.style.roof_plan_taper.clamp(0.0, 0.3);
+        if pt > 0.0 {
+            let (r0, r1, _, _) = self.roof;
+            let t = ((r1 - y) / (r1 - r0).max(0.05)).clamp(0.0, 1.0);
+            w = (w * (1.0 - pt * t)).max(0.45 * self.roof_half);
+        }
+        w
     }
 
     /// True inside the open pickup bed (strictly between its end walls).
@@ -942,10 +1094,11 @@ impl BodyProfile {
             pts[2].p[0] += 0.6 * ri;
             pts[0].p[0] = pts[0].p[0].max(pts[1].p[0] + 0.005).min(-0.2);
         }
-        if !s.side_sculpt.is_empty() || s.side_bulge_m > 0.0 {
+        if !s.side_sculpt.is_empty() || s.side_bulge_m > 0.0 || s.lower_lean_in_m > 0.0 {
+            let fc = (zc - sill) / h.max(0.05);
             for (j, pt) in pts.iter_mut().enumerate() {
                 let z = pt.p[2];
-                let dx = self.side_offset(y, z, (z - sill) / h.max(0.05));
+                let dx = self.side_offset(y, z, (z - sill) / h.max(0.05), fc);
                 // The shoulder never crosses inside the glass base.
                 let lim = if j == RING_SHOULDER {
                     -(gb + 0.01)
@@ -1033,6 +1186,12 @@ impl BodyProfile {
                     ],
                     seg: Seg::Top,
                 });
+            }
+        }
+        // End face profiles (phase 3): points ahead of a raked / undercut face move onto it.
+        if let Some((lo, hi)) = self.face_band(y) {
+            for pt in pts.iter_mut() {
+                pt.p[2] = pt.p[2].max(lo).min(hi);
             }
         }
         debug_assert_eq!(pts.len(), RING_POINTS);
