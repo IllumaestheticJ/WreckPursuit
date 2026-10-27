@@ -15,9 +15,6 @@
   (zero at the windshield base, full ahead of the hood's front edge, faded in between heights
   `z0..z1`). The lattice keeps truck / van hoods low and `nose_h` cannot go above the
   lattice hood line, so the tall flat noses are done this way (hauler +12 cm, drayman +10 cm).
-- `square_up_sides(b, p, out)`: pushes the greenhouse sides out above the belt (roof edge out by
-  `out`, glass base unchanged), because `tumblehome` cannot go under 0.10 m and vans read
-  tucked-in. Applied last in the van kits so their parts move with the surface.
 - `van_box(b, p, windows)`: the generator keeps the deck start ≥ 0.25 m ahead of the tail, so
   every van had a stepped upper rear (and floating hinges / roof markers: the known gap from
   phase 1). The greenhouse section at the roof's rear edge is now extruded back to the tail:
@@ -28,12 +25,36 @@
 - `cab_back_window`: pickup cab-back glass with seal (and a sliding centre pane).
 - `door_handles_at`, `door_cut`: crew-cab handles on recesses and the rear door's cut lines
   (the lattice has no hinged rear door on `hauler_1500`).
-- `lens_poly` + `grow`: lamp lenses with any convex outline projected onto the end face (and
-  bezels round them), instead of axis-aligned boxes.
+- `proj_lamps`, `proj_signals`, `rect` (pass 3): head / tail lamps and turn signals as lenses
+  projected onto the body with the phase 3 `crate::lamp` module (any outline, wrapped round
+  the corner by a yaw, optional bezel), mirrored per side. Used on every car except the hauler,
+  whose lamps stay on `lens_poly` (a polygon lens on the end face, far cheaper): it is at
+  10,999 of 11k triangles.
 - `frame_front`, `plate_on_face` (a plate on a bumper bar that stands proud), and
   `sliding_door_track_at`.
 
+## Pass 3 (phase 3 generator knobs, 2026-10-27)
+Merged `ws/car-shapes` (phase 3) and reworked all seven again:
+- Projected lenses with wrap: tansy's teardrop head lamps (20°) and D-pillar tail lamps (18°)
+  in black bezels, the beater's and furrow's amber corner lamps wrapping onto the fender,
+  satchel's swept lamps (25°) in a bezel, tumbril's square lamps in a bezel, the drayman's
+  stacked lamps; all van tail lamps now sit on the flush rear face (they stood proud of the
+  rounded corner before) and the lower barn hinges moved inboard of them.
+- Van / truck sections: `tumblehome_m` 0.045–0.08 with a 4–6 cm glass ledge (drayman,
+  satchel, tumbril, hauler, furrow); the local `square_up_sides` warp is gone. A slight side
+  bow (`side_bulge_m` 0.01–0.03) and tucked rockers on the vans, tansy and the hauler.
+- Plan views: tansy's nose and tail taper (0.93 / 0.95), the European vans' noses narrow toward
+  the bumper (0.92 satchel, 0.95 tumbril), the hauler's nose 0.96.
+- tansy: shorter overhangs (−8 cm each end), rounder section (bulge 0.03 at 60 %, rockers in).
+- hauler: crisp full-length shoulder line (`side_sculpt`, +2 cm band under the belt).
+- Still local (phase 3b covers them): `lift_front` (nose above the hood node) and `van_box`
+  (van deck flush with the tail).
+
 ## Per car
+Headline counts are pass 2; pass 3 counts (full / mid): drayman 10869 / 5543, furrow 10010 /
+4956, hauler 10999 / 5909, beater 9106 / 4453, satchel 9746 / 5037, tansy 9650 / 4347,
+tumbril 10135 / 5010 (all within traffic 11k / mid 7k).
+
 Reference descriptions are generic (no real names). Triangle counts: full (phase 1) / mid
 (phase 1). Budgets: traffic 4k–11k, mid 2k–7k.
 
@@ -153,11 +174,11 @@ over after row) and `overview_front.jpg` (all seven, before / after).
 - The van rear corners are an extrusion of the roof-rear section, so the side panel there is a
   separate part (`rear_corner_*`, on the quarter region); it dents with the quarter, not with
   the rear doors.
-- Kit lamps on the vans' rear corners stand a few cm proud of the rounded body corner (wrap
-  look).
+- Projected lenses cost far more than boxes (≈ +1.2k on tansy); the hauler keeps its
+  polygon lenses for budget.
 
 ## Generator requests
-(Also sent to the lead on 2026-10-27.)
+(Sent to the lead on 2026-10-27; phase 3 covered the lamp, section and tumblehome items.)
 - A shared shaped-lens helper with bezel and inner elements (projector bowls, reflector rings,
   LED strips); `lens_poly` here is a local stand-in.
 - Bodyside bow (convex side between sill and shoulder) and a per-station greenhouse plan taper.
