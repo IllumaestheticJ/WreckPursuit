@@ -25,7 +25,8 @@ use crate::mesh::{indicator_front_key, indicator_rear_key, MaterialSlot, PartKin
 use crate::profile::BodyProfile;
 use crate::style::{
     ArchShape, BodyStyle, CaliperKind, CapKind, CarStyle, Detail, DetailCtx, EngineKind,
-    ExhaustKind, FuelDoor, RimKind, Shape, SideSculpt, Silhouette, SuspensionKind, TrimFinish,
+    ExhaustKind, FuelDoor, RearDoorWindows, RimKind, Shape, SideSculpt, Silhouette, SuspensionKind,
+    TrimFinish,
 };
 
 use BodyRegion as R;
@@ -340,6 +341,14 @@ fn drayman_cargo() -> CarStyle {
         hood_dz: (0.0, 0.10),
         nose_h: Some(1.21),
         deck_min_m: 0.04,
+        // Painted barn doors with two windows (glass break still works on the windows).
+        rear_door_windows: Some(RearDoorWindows {
+            side_inset_m: 0.10,
+            centre_gap_m: 0.05,
+            top_gap_m: 0.10,
+            height_m: 0.45,
+            corner_r_m: 0.04,
+        }),
         nose_rake_deg: 12.0,
         nose_plan_round: 0.22,
         tail_plan_round: 0.06,
@@ -414,6 +423,14 @@ fn euro_panel_van(tumbril: bool) -> CarStyle {
         fuel_door: FuelDoor::Left,
         // Rear doors to the tail; black plastic arch lips and lower cladding (commercial trim).
         deck_min_m: 0.04,
+        // Painted barn doors with two windows (glass break still works on the windows).
+        rear_door_windows: Some(RearDoorWindows {
+            side_inset_m: 0.10,
+            centre_gap_m: 0.05,
+            top_gap_m: 0.10,
+            height_m: 0.45,
+            corner_r_m: 0.04,
+        }),
         arch_lip_finish: TrimFinish::Black,
         cladding_z_m: if tumbril { 0.42 } else { 0.36 },
         // Phase 3b: raked plastic bumper with a chin (more on the rounder satchel).
@@ -1132,15 +1149,10 @@ fn drayman_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         0.08,
         0.0,
     );
-    proj_signals(
-        b,
-        p,
-        true,
-        M::EmissiveAmber,
-        &rect(-(wf - 0.04), -0.55, l0, l0 + 0.068),
-        12.0,
-        0.08,
-    );
+    // The signal is a plain box lens under the head lamp (budget).
+    reshape_indicators(b, p, true, M::EmissiveAmber, |t, p, k| {
+        lens_front(t, k, p, -(wf - 0.04), -0.55, l0, l0 + 0.068, 0.012, 0.03);
+    });
     let bez = key("lamp_surround_l", R::FrontLeftFender, M::Trim);
     front_box(
         b,
@@ -1173,7 +1185,7 @@ fn drayman_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     plate_on_face(b, p, true, 0.47, 0.08);
     let zt = p.z_deck;
     let wt = p.half_width(p.y_tail);
-    van_box(b, p, false);
+    barn_door_trim(b, p);
     // Tall tail lamps in the rear corners, amber signal at the bottom.
     // Tall corner lamps, split at the belt step (rear door skin above, body below).
     let (tx0, tx1) = (-(wt - 0.03), -(wt - 0.13));
@@ -1200,6 +1212,7 @@ fn drayman_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     );
     step_bumper(b, p, 0.40, 0.56, 0.22, M::Trim, false);
     plate_rear(b, p, 0.60);
+    // Rub strip as a single sheet (no shell): keeps the van under the 11k budget.
     side_strip(
         b,
         p,
@@ -1207,7 +1220,7 @@ fn drayman_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         M::Trim,
         (p.y_tail + 0.25, p.y_fd_hinge + 0.4),
         (0.78, 0.86),
-        0.016,
+        0.0,
     );
     tall_mirrors(b, p, (0.12, 0.08, 0.30), 0.16);
     handles(b, p, M::Trim, false);
@@ -1357,7 +1370,7 @@ fn tumbril_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 fn euro_van_common(b: &mut Builder, p: &BodyProfile, tumbril: bool) {
     let zt = p.z_deck;
     let wt = p.half_width(p.y_tail);
-    van_box(b, p, true);
+    barn_door_trim(b, p);
     // Tall tail lamps in the rear corners: red, amber signal, red again (stacked).
     let (tx0, tx1) = (-(wt - 0.03), -(wt - if tumbril { 0.14 } else { 0.16 }));
     proj_lamps(
@@ -2344,135 +2357,47 @@ fn cab_back_window(b: &mut Builder, p: &BodyProfile, half: f32, zs: (f32, f32), 
     }
 }
 
-/// Van rear: the loft keeps the upper rear at least 25 cm ahead of the bumper face (deck
-/// start ≥ tail + 0.25 m), which reads as a stepped estate tail. The greenhouse section at the
-/// roof's rear edge is extruded straight back to the tail instead (rear corner pillars on the
-/// quarters, the roof extension on the roof, a flat rear face on the rear doors), so the box
-/// is flush from the belt to the roof. On its face: the barn doors' centre seam, hinges,
-/// handle, high brake lamp and (with `windows`) two door windows in black seals.
-fn van_box(b: &mut Builder, p: &BodyProfile, windows: bool) {
-    let y_a = p.roof.0 + 0.01;
-    let y_t = p.y_tail + 0.004;
-    let ring = p.ring(y_a);
-    // Left half from the glass base (8) to the centre top (17).
-    let sec: Vec<[f32; 3]> = ring[8..].iter().map(|r| r.p).collect();
-    let side = key("rear_corner_l", R::RearLeftQuarter, M::Paint);
-    let roof = key("roof_extension", R::Roof, M::Paint);
-    let side = PartKey {
-        kind: PartKind::Panel,
-        ..side
-    };
-    let roof = PartKey {
-        kind: PartKind::Panel,
-        ..roof
-    };
-    for j in 0..sec.len() - 1 {
-        let (q0, q1) = (sec[j], sec[j + 1]);
-        let (dx, dz) = (q1[0] - q0[0], q1[2] - q0[2]);
-        let n = [-dz, 0.0, dx];
-        let k = if j + 8 < crate::profile::RING_PILLAR_IN {
-            &side
-        } else {
-            &roof
-        };
-        for sgn in [1.0f32, -1.0] {
-            let m = |q: [f32; 3], y: f32| [q[0] * sgn, y, q[2]];
-            let quad = [m(q0, y_a), m(q1, y_a), m(q1, y_t), m(q0, y_t)];
-            b.poly_facing(k, &quad, [n[0] * sgn, 0.0, n[2]]);
-        }
-    }
-    // Mirror the side strip into its own right-hand part.
-    let right = side.mirrored();
-    let (pos, _, idx) = b
-        .geometry(&side.name)
-        .map(|(a, u, i)| (a.to_vec(), u.to_vec(), i.to_vec()))
-        .unwrap_or_default();
-    let mut lp = Vec::new();
-    let mut rp = Vec::new();
-    let mut li = Vec::new();
-    let mut ri = Vec::new();
-    for t in idx.chunks_exact(3) {
-        let c = (pos[t[0] as usize][0] + pos[t[1] as usize][0] + pos[t[2] as usize][0]) / 3.0;
-        let (vp, vi) = if c < 0.0 {
-            (&mut lp, &mut li)
-        } else {
-            (&mut rp, &mut ri)
-        };
-        for &v in t {
-            vi.push(vp.len() as u32);
-            vp.push(pos[v as usize]);
-        }
-    }
-    let luv = vec![[0.5f32, 0.5]; lp.len()];
-    let ruv = vec![[0.5f32, 0.5]; rp.len()];
-    b.set_geometry(&side.name, lp, luv, li);
-    b.part(&right);
-    b.set_geometry(&right.name, rp, ruv, ri);
-    // Flat rear face (the barn doors' upper half).
-    let skin = PartKey::body("rear_door_skin", R::Trunk, PartKind::Panel, M::Paint);
-    let mut face: Vec<[f32; 3]> = sec.iter().map(|q| [q[0], y_t, q[2]]).collect();
-    face.extend(sec.iter().rev().skip(1).map(|q| [-q[0], y_t, q[2]]));
-    let zc = face.iter().map(|q| q[2]).sum::<f32>() / face.len() as f32;
-    for i in 0..face.len() {
-        let j = (i + 1) % face.len();
-        b.poly_facing(&skin, &[[0.0, y_t, zc], face[i], face[j]], [0.0, -1.0, 0.0]);
-    }
-    // Close the belt ledge behind the doors: the face carries on down to just below the deck.
-    let (xb, zb) = (sec[0][0], sec[0][2]);
-    let zl = p.z_deck - p.style.tail_drop.clamp(0.0, 0.25) - 0.05;
-    b.poly_facing(
-        &skin,
-        &[[xb, y_t, zl], [-xb, y_t, zl], [-xb, y_t, zb], [xb, y_t, zb]],
-        [0.0, -1.0, 0.0],
-    );
-    let z0 = sec[0][2];
-    let z1 = sec[sec.len() - 1][2] - 0.03;
-    let half_at = |z: f32| {
-        // Half width of the section at height z (outermost point at or below it).
-        sec.iter()
-            .filter(|q| q[2] <= z + 1e-3)
-            .map(|q| -q[0])
-            .fold(sec[0][0].abs(), f32::max)
-    };
+/// Barn-door trim on a van's rear doors (the doors themselves, painted with two windows, are
+/// the generator's [`BodyStyle::rear_door_windows`]): centre seam, hinges (the lower pair
+/// inboard of the corner tail lamps), handle and high-mount brake lamp. Above the belt the door
+/// face runs from the deck start up to the roof's rear edge.
+fn barn_door_trim(b: &mut Builder, p: &BodyProfile) {
+    let (y0, z0) = (p.y_deck, p.z_deck);
+    let (y1, z1) = (p.roof.0, p.roof.2 - 0.03);
+    let face = |z: f32| y0 + (y1 - y0) * ((z - z0) / (p.roof.2 - z0).max(0.1)).clamp(0.0, 1.0);
     let slab = |b: &mut Builder, k: &PartKey, x0: f32, x1: f32, za: f32, zb: f32, out: f32| {
         let mut c = [[0.0f32; 3]; 8];
         for (i, q) in c.iter_mut().enumerate() {
             let x = if i & 1 == 0 { x0 } else { x1 };
             let z = if i & 4 == 0 { za } else { zb };
-            let y = y_t + if i & 2 == 0 { -out } else { 0.01 };
+            let y = face(z) + if i & 2 == 0 { -out } else { 0.01 };
             *q = [x, y, z];
         }
         hexa(b, k, c);
     };
     let seam = key("barn_seam", R::Trunk, M::Trim);
-    slab(b, &seam, -0.005, 0.005, z0, z1 - 0.06, 0.003);
+    slab(b, &seam, -0.005, 0.005, z0 + 0.02, z1 - 0.06, 0.003);
     rear_box(b, &seam, p, -0.005, 0.005, 0.70, z0, 0.003, 0.01);
     let hinge = key("barn_hinge_l", R::Trunk, M::Trim);
-    for z in [z0 - 0.25, z1 - 0.30] {
-        let x = -(half_at(z).min(p.half_width(p.y_tail)) - 0.02);
-        if z < z0 {
-            // Inboard of the corner tail lamps.
-            let x = x + 0.17;
-            rear_box(b, &hinge, p, x, x + 0.065, z - 0.05, z + 0.05, 0.018, 0.0);
-        } else {
-            slab(b, &hinge, x, x + 0.065, z - 0.05, z + 0.05, 0.018);
-        }
-    }
+    let xl = -(p.half_width(p.y_tail) - 0.19);
+    rear_box(
+        b,
+        &hinge,
+        p,
+        xl,
+        xl + 0.065,
+        z0 - 0.30,
+        z0 - 0.20,
+        0.018,
+        0.0,
+    );
+    let xu = -(p.roof_half_w(p.roof.0) - 0.02);
+    slab(b, &hinge, xu, xu + 0.065, z1 - 0.35, z1 - 0.25, 0.018);
     mirror(b, &hinge);
     let hd = key("barn_handle", R::Trunk, M::Chrome);
-    slab(b, &hd, 0.03, 0.17, z0 + 0.03, z0 + 0.07, 0.022);
+    slab(b, &hd, 0.03, 0.17, z0 + 0.04, z0 + 0.08, 0.022);
     let bl = light("brake_lamp_c", R::Trunk, M::Taillight);
-    slab(b, &bl, -0.18, 0.18, z1 - 0.07, z1 - 0.03, 0.012);
-    if windows {
-        let (wz0, wz1) = (z0 + 0.18, z1 - 0.20);
-        let seal = key("rear_door_glass_seal", R::Trunk, M::Trim);
-        let g = PartKey::body("rear_door_glass", R::Trunk, PartKind::Glass, M::Glass);
-        let xo = half_at(wz0) - 0.12;
-        slab(b, &seal, -xo - 0.02, -0.05, wz0 - 0.02, wz1 + 0.02, 0.004);
-        slab(b, &seal, 0.05, xo + 0.02, wz0 - 0.02, wz1 + 0.02, 0.004);
-        slab(b, &g, -xo, -0.07, wz0, wz1, 0.007);
-        slab(b, &g, 0.07, xo, wz0, wz1, 0.007);
-    }
+    slab(b, &bl, -0.18, 0.18, z1 - 0.045, z1 - 0.012, 0.012);
 }
 
 /// Sliding-door track on the RIGHT side at height `z` (black strip from behind the slider back
