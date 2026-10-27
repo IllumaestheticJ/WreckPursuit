@@ -21,7 +21,8 @@ cargo run --release -p car-assets --example crumple_matrix -- Arcade [frame tick
 node tools/assets/panels_shots.mjs                   # browser checks + screenshots (docs/media/panels)
 node tools/assets/mesh_shots.mjs <dir> <car> ...      # rest-pose shots: front / rear / side / top / cabin / cabin_rear
                                                      #   (+ SHOT_CAM=x,y,z SHOT_AT=x,y,z → <car>_custom.png;
-                                                     #    MESH_DIR=<dir> renders <dir>/<car>.json)
+                                                     #    MESH_DIR=<dir> renders <dir>/<car>.json;
+                                                     #    SHOT_WIRE=1 overlays the triangle edges)
 node tools/assets/crumple_shots.mjs after            # hood crumple shots at 8 m / 30 m
 ```
 
@@ -69,7 +70,9 @@ built in another worktree with a shared `CARGO_TARGET_DIR` writes into *that* wo
   zone boundary, window and pillar edge and the cowl edge. The flat top uses the greenhouse's x
   positions and a ring blends from flat to greenhouse over its first 5 cm of cabin height
   (`BodyProfile::greenhouse_weight`), so the windshield base and the deck joins have no fans of
-  thin faces. Side points under a wheel arch are lifted onto the arch (round or box) with the
+  thin faces. Each quad is split along the diagonal that folds less; a long thin quad that is
+  twisted by more than 3° (C-pillar sail, A-pillar glass, tail corners) is cut into up to 3 rows
+  across (`twist_rows`), so flat shading shows no sawtooth. Side points under a wheel arch are lifted onto the arch (round or box) with the
   flare lip; haunches swell the sides around the arches; the first and last rings are set in by
   `end_round_m` (rounded nose / tail face edges, no extra triangles).
 - **Greenhouse** (car-shapes, 2026-10-27; knobs in `BodyStyle` "Greenhouse framing"): body-colour

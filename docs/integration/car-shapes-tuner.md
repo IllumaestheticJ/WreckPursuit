@@ -216,18 +216,41 @@ the belt, and its tumblehome is 0.22 (was 0.26). Remaining on hakone: shading fa
 fastback C-pillar sail (thin loft triangles under the curved roof edge); faint on the original
 mesh too, a shared-loft item.
 
+### Final touch-up (merged from `ws/car-shapes`: smooth shading, raked-face fixes, all-cars regeneration)
+This supersedes the notes above where they differ.
+- The local `follow_faces` (and its ray-cast helpers) is deleted: the shared
+  `lamp::follow_end_faces` moves kit parts onto raked / undercut end faces now.
+- The projected-lamp / face-rake bug is fixed upstream: the talus repro (nose rake 8°) passes
+  `lights_sit_outside_the_shell`. arashi and talus got their face rakes back (arashi 6° / 5°,
+  talus 8° / 6°).
+- Tail face rakes are back (kestrel 10°, shiro 15°, hakone 20°, sperber 8°); the tail-bottom
+  spikes no longer appear (low rear 3/4 and low front 3/4 of all six:
+  `group_low_rear.jpg`).
+- Swept top lamps: the amber signal moved to the inboard end (its front edge faces straight
+  ahead; an outboard one was pulled round the bowed corner and had no forward face under the
+  shared `end_face_kit_parts_follow_a_raked_face` test's forced −10° / 14° noses); the lamp
+  shifts back only for the rake part of a backward-raked face. kestrel's nose bow tip is 0.9
+  (was 0.75) so its lamps keep their width.
+- Smooth shading checked in the real renderer (`apps/testbed-web/e2e/smooth_shots.mjs`, front
+  shots in `docs/media/car-shapes/tuner/smooth/`): nothing it exposed needed a fix (no seams,
+  spikes or lens gaps); hakone's and shiro's lower mouths read a little boxy.
+- Budgets after the all-cars regeneration: full 19.4k–21.0k of 22k, mid 4.6k–5.5k of 7k.
+- Final sheet: `docs/media/car-shapes/tuner/final.jpg` (before = the original `main` meshes;
+  per car front 3/4, side, rear 3/4). The per-car `<car>_before_after.jpg` and group sheets
+  were redone against `main` too.
+
 ## Triangle counts
 
 Hero budget 22k (mid LOD 7k); all six within it.
 
-| car | full before → after | mid before → after |
+| car | full before (10-26 table) → after | mid before → after |
 |---|---|---|
-| kestrel_ts | 18914 → 19684 | 5051 → 5575 |
-| arashi_t4 | 18292 → 18820 | 4962 → 4854 |
-| talus_20t | 17376 → 19464 | 4464 → 5080 |
-| shiro_turbo | 18992 → 19485 | 5040 → 5309 |
-| hakone_gt | 18873 → 19873 | 4826 → 4645 |
-| sperber_32 | 19112 → 18914 | 4942 → 5112 |
+| kestrel_ts | 18914 → 20690 | 5051 → 5514 |
+| arashi_t4 | 18292 → 19374 | 4962 → 4765 |
+| talus_20t | 17376 → 20152 | 4464 → 4956 |
+| shiro_turbo | 18992 → 20338 | 5040 → 5306 |
+| hakone_gt | 18873 → 20990 | 4826 → 4587 |
+| sperber_32 | 19112 → 19954 | 4942 → 5125 |
 
 The rows of `every_car_has_turn_signals_integrated_into_its_lamps`'s table for these six cars
 were rebased to the new counts (the phase-1 doc asks per-car passes above +2 % to do this).

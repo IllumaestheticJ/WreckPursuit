@@ -39,8 +39,8 @@ use super::{kit_detail, rgb, wheels};
 /// to `margin` m inside the body edge at its front edge `y1`; its inboard edge goes back to
 /// `y0`, its outboard edge `sweep` m further, so the rear edge is a diagonal (a swept, tapering
 /// lamp). The outer edge follows the body's plan width (a bowed nose narrows it toward the
-/// tip). The outboard `sig_w` is the amber turn signal; a flush dark bezel `border` m wide
-/// rings it.
+/// tip). The inboard `sig_w` is the amber turn signal (its front edge faces straight ahead; an
+/// outboard one is pulled round a bowed corner); a flush dark bezel `border` m wide rings it.
 #[allow(clippy::too_many_arguments)]
 fn swept_top_lamp(
     k: &mut Kit,
@@ -53,171 +53,39 @@ fn swept_top_lamp(
     border: f32,
     sig_w: f32,
 ) {
-    // Behind a raked nose face: the lamp lies on the nose top, not down the face.
-    let back = k.p.face_depth(true);
-    let (y0, y1) = (y0 - back, (y1 - back).min(k.yn - 0.01));
+    // Behind a nose face raked back (top set back): the lamp lies on the nose top, not down
+    // the face. The chin sets back only the lower face, and a forward-leaning (shark) face
+    // needs no shift.
+    let back = if k.p.style.nose_face_rake_deg > 0.0 {
+        (k.p.face_depth(true) - k.p.style.nose_chin_m.max(0.0)).max(0.0)
+    } else {
+        0.0
+    };
+    // A forward-leaning face: run the lens to the top edge (points past the silhouette are
+    // pulled onto it), so its front rim faces forward.
+    let y1_max = if k.p.style.nose_face_rake_deg < 0.0 {
+        k.yn + 0.02
+    } else {
+        k.yn - 0.01
+    };
+    let (y0, y1) = (y0 - back, (y1 - back).min(y1_max));
     let yr = y0 - sweep;
     let xo1 = k.p.half_width(y1) - margin;
     let xor = k.p.half_width(yr) - margin - 0.03;
     // Keep a real lens when a narrow nose pulls the outer edge in (knob sweeps).
     let xin = xin.min(xo1 - 0.15);
-    let sig_w = sig_w.min(0.4 * (xo1 - xin));
+    let sig_w = sig_w.min(0.5 * (xo1 - xin));
     let outline = [[xin, y1], [xo1, y1], [xor.max(xin + 0.1), yr], [xin, y0]];
     k.proj_cluster(
         sx,
         true,
         LampView::Top,
         &outline,
-        Some(Seg::Outboard(sig_w)),
+        Some(Seg::Inboard(sig_w)),
         M::EmissiveAmber,
         border,
         0.0,
     );
-}
-
-/// Body-shell triangles (loft panels and body parts) of a builder, for [`surface_y`].
-fn shell_tris(b: &Builder) -> Vec<[[f32; 3]; 3]> {
-    let mut out = Vec::new();
-    for key in b.keys() {
-        if !matches!(key.kind, PartKind::Panel | PartKind::Body) {
-            continue;
-        }
-        if let Some((pos, _, idx)) = b.geometry(&key.name) {
-            for t in idx.chunks(3) {
-                if t.len() == 3 {
-                    out.push([pos[t[0] as usize], pos[t[1] as usize], pos[t[2] as usize]]);
-                }
-            }
-        }
-    }
-    out
-}
-
-/// Where a ray along −y (`front`, from far ahead) or +y (from far behind) at (x, z) first meets
-/// the shell: the largest (front) / smallest y of the triangles over that point, if any.
-fn surface_y(tris: &[[[f32; 3]; 3]], x: f32, z: f32, front: bool) -> Option<f32> {
-    let mut best: Option<f32> = None;
-    for t in tris {
-        let (a, b, c) = (t[0], t[1], t[2]);
-        // Barycentric coordinates of (x, z) in the triangle projected on the x–z plane.
-        let d = (b[0] - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (b[2] - a[2]);
-        if d.abs() < 1e-9 {
-            continue;
-        }
-        let u = ((x - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (z - a[2])) / d;
-        let v = ((b[0] - a[0]) * (z - a[2]) - (x - a[0]) * (b[2] - a[2])) / d;
-        if u < 0.0 || v < 0.0 || u + v > 1.0 {
-            continue;
-        }
-        let y = a[1] + u * (b[1] - a[1]) + v * (c[1] - a[1]);
-        best = Some(match best {
-            None => y,
-            Some(bb) if front => bb.max(y),
-            Some(bb) => bb.min(y),
-        });
-    }
-    best
-}
-
-/// Moves the kit parts built on the old vertical nose / tail face plane (detail and light
-/// parts lying within 0.4 m of the end and reaching its plane) onto the real end face, which
-/// the face rake, chin and plan bow knobs set back: rays on a 3 × 4 grid over the part's x and
-/// z span find the shell, and every vertex moves by the bilinear blend of those offsets, so the
-/// part keeps its distance from a curved face. Parts named `<skip>_l` / `<skip>_r` (projected
-/// lamps, which already follow the surface) stay put.
-fn follow_faces(k: &mut Kit, skip: &[&str]) {
-    let (yn, yt) = (k.yn, k.yt);
-    let tris = shell_tris(k.b);
-    for key in k.b.keys() {
-        if !matches!(key.kind, PartKind::Detail | PartKind::Light) || key.wheel.is_some() {
-            continue;
-        }
-        if skip
-            .iter()
-            .any(|s| key.name == format!("{s}_l") || key.name == format!("{s}_r"))
-        {
-            continue;
-        }
-        let Some((pos, _, _)) = k.b.geometry(&key.name) else {
-            continue;
-        };
-        if pos.is_empty() {
-            continue;
-        }
-        let mut lo = [f32::MAX; 3];
-        let mut hi = [f32::MIN; 3];
-        for q in pos {
-            for i in 0..3 {
-                lo[i] = lo[i].min(q[i]);
-                hi[i] = hi[i].max(q[i]);
-            }
-        }
-        let front = lo[1] > yn - 0.40 && hi[1] > yn - 0.05;
-        let rear = hi[1] < yt + 0.40 && lo[1] < yt + 0.05;
-        if !(front || rear) {
-            continue;
-        }
-        // The old face plane the kit placed the part on.
-        let plane = if front { yn } else { yt };
-        let (nx, nz) = (3usize, 4usize);
-        let xs: Vec<f32> = (0..nx)
-            .map(|i| lo[0] + (hi[0] - lo[0]) * i as f32 / (nx - 1) as f32)
-            .collect();
-        let zs: Vec<f32> = (0..nz)
-            .map(|j| {
-                (lo[2] + 0.005) + ((hi[2] - lo[2]) - 0.01).max(0.0) * j as f32 / (nz - 1) as f32
-            })
-            .collect();
-        let mut grid = vec![[0.0f32; 4]; nx];
-        let mut moved = false;
-        for (i, &x) in xs.iter().enumerate() {
-            // A ray over the top of the face (or under it) meets the roof / underbody far from
-            // the end: those count as misses and take the nearest hit in the column.
-            let col: Vec<Option<f32>> = zs
-                .iter()
-                .map(|&z| {
-                    surface_y(&tris, x, z, front)
-                        .map(|ys| ys - plane)
-                        .filter(|d| d.abs() <= 0.25)
-                })
-                .collect();
-            for (j, cell) in grid[i].iter_mut().enumerate() {
-                let near = col
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(jj, c)| c.map(|d| (jj.abs_diff(j), d)))
-                    .min_by_key(|e| e.0)
-                    .map(|e| e.1)
-                    .unwrap_or(0.0);
-                *cell = near;
-                moved |= near.abs() >= 0.002;
-            }
-        }
-        if !moved {
-            continue;
-        }
-        let blend = |v: f32, axis: &[f32]| -> (usize, f32) {
-            let n = axis.len();
-            if axis[n - 1] - axis[0] < 1e-6 {
-                return (0, 0.0);
-            }
-            let t = ((v - axis[0]) / (axis[n - 1] - axis[0])).clamp(0.0, 1.0) * (n - 1) as f32;
-            let i = (t.floor() as usize).min(n - 2);
-            (i, t - i as f32)
-        };
-        let name = key.name.clone();
-        k.b.transform(
-            |kk| kk.name == name,
-            |q| {
-                let (i, u) = blend(q[0], &xs);
-                let (j, v) = blend(q[2], &zs);
-                let g = |a: usize, b: usize| grid[a.min(nx - 1)][b.min(nz - 1)];
-                let d = (1.0 - u) * ((1.0 - v) * g(i, j) + v * g(i, j + 1))
-                    + u * ((1.0 - v) * g(i + 1, j) + v * g(i + 1, j + 1));
-                [q[0], q[1] + d, q[2]]
-            },
-        );
-    }
 }
 
 /// Front (`true`) / rear axle station and wheel radius from the car def.
@@ -364,10 +232,11 @@ pub fn kestrel(def: &VehicleDef) -> CarStyle {
     b.nose_face_rake_deg = 22.0;
     b.nose_chin_m = 0.06;
     b.nose_plan_bow_m = 0.25;
-    b.nose_tip_w = 0.75;
+    b.nose_tip_w = 0.9;
     b.roof_plan_taper = 0.08;
     b.hood_dz = (0.0, -0.05);
     b.deck_dz = -0.04;
+    b.tail_face_rake_deg = 10.0;
     s.details.push(kit_detail(kestrel_kit));
     wheels(
         &mut s,
@@ -417,7 +286,7 @@ fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.04,
             0.16,
             0.018,
-            0.07,
+            0.09,
         );
     }
     // Trapezoid upper slot grille (wider at the top) with two dark slats and a blank badge.
@@ -570,7 +439,6 @@ fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.skirts(M::Paint, 0.025, 0.06);
     k.mirrors(0.10, 0.11, None);
     k.fender_repeaters();
-    follow_faces(&mut k, &["headlight", "indicator_front", "headlamp_bezel"]);
 }
 
 // ---------------------------------------------------------------------- arashi_t4
@@ -642,11 +510,11 @@ pub fn arashi(def: &VehicleDef) -> CarStyle {
     b.front_fender_rise_m = 0.015;
     b.overhang_trim = (-0.08, -0.10);
     b.nose_chin_m = 0.03;
-    // No end-face rake: front / rear-view projected lamps land inside a raked face
-    // (generator request, see the integration doc); the chin is fine.
     b.roof_plan_taper = 0.04;
     b.hood_dz = (0.0, -0.03);
     b.deck_dz = -0.03;
+    b.nose_face_rake_deg = 6.0;
+    b.tail_face_rake_deg = 5.0;
     s.details.push(kit_detail(arashi_kit));
     wheels(
         &mut s,
@@ -822,17 +690,6 @@ fn arashi_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.skirts(M::Paint, 0.015, 0.05);
     k.mirrors(0.09, 0.10, None);
     k.fender_repeaters();
-    follow_faces(
-        &mut k,
-        &[
-            "headlight_",
-            "indicator_front_",
-            "headlamp_bezel_",
-            "taillight_",
-            "indicator_rear_",
-            "taillamp_bezel_",
-        ],
-    );
 }
 
 // ---------------------------------------------------------------------- talus_20t
@@ -906,11 +763,11 @@ pub fn talus(def: &VehicleDef) -> CarStyle {
     b.front_fender_rise_m = 0.03;
     b.rear_fender_rise_m = 0.025;
     b.overhang_trim = (-0.08, -0.12);
-    // No end-face rake: front / rear-view projected lamps land inside a raked face
-    // (generator request, see the integration doc); a chin cuts under the signal here.
     b.roof_plan_taper = 0.05;
     b.hood_dz = (0.0, -0.03);
     b.deck_dz = -0.03;
+    b.nose_face_rake_deg = 8.0;
+    b.tail_face_rake_deg = 6.0;
     s.details.push(kit_detail(talus_kit));
     wheels(
         &mut s,
@@ -1114,17 +971,6 @@ fn talus_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.skirts(M::Trim, 0.015, 0.05);
     k.mirrors(0.08, 0.12, None);
     k.fender_repeaters();
-    follow_faces(
-        &mut k,
-        &[
-            "headlight_",
-            "indicator_front_",
-            "headlamp_bezel_",
-            "taillight_",
-            "indicator_rear_",
-            "taillamp_bezel_",
-        ],
-    );
 }
 
 // ---------------------------------------------------------------------- shiro_turbo
@@ -1204,6 +1050,7 @@ pub fn shiro(def: &VehicleDef) -> CarStyle {
     // binding on the lattice hood line).
     b.deck_dz = -0.03;
     b.dlo_top_drop_m = 0.03;
+    b.tail_face_rake_deg = 15.0;
     s.details.push(kit_detail(shiro_kit));
     wheels(
         &mut s,
@@ -1425,7 +1272,6 @@ fn shiro_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     }
     k.mirrors(0.10, 0.10, Some(M::Carbon));
     k.fender_repeaters();
-    follow_faces(&mut k, &["headlight", "indicator_front", "headlamp_bezel"]);
 }
 
 // ---------------------------------------------------------------------- hakone_gt
@@ -1506,6 +1352,7 @@ pub fn hakone(def: &VehicleDef) -> CarStyle {
     b.lower_lean_in_m = 0.04;
     b.hood_dz = (0.0, -0.06);
     b.roof_arc_rear_exp = 1.4;
+    b.tail_face_rake_deg = 20.0;
     s.details.push(kit_detail(hakone_kit));
     wheels(
         &mut s,
@@ -1711,7 +1558,6 @@ fn hakone_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     k.mirrors(0.12, 0.11, None);
     k.fender_repeaters();
-    follow_faces(&mut k, &["headlight", "indicator_front", "headlamp_bezel"]);
 }
 
 // ---------------------------------------------------------------------- sperber_32
@@ -1795,6 +1641,7 @@ pub fn sperber(def: &VehicleDef) -> CarStyle {
     b.hood_dz = (0.0, -0.05);
     b.deck_dz = -0.04;
     b.dlo_top_drop_m = 0.02;
+    b.tail_face_rake_deg = 8.0;
     s.details.push(kit_detail(sperber_kit));
     wheels(
         &mut s,
@@ -2043,7 +1890,6 @@ fn sperber_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.skirts(M::Paint, 0.02, 0.05);
     k.mirrors(0.10, 0.11, Some(M::Carbon));
     k.mirror_repeaters(0.10, 0.11, true);
-    follow_faces(&mut k, &[]);
 }
 
 // ---------------------------------------------------------------------- debug_coupe
