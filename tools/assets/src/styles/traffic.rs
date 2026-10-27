@@ -198,6 +198,9 @@ fn tansy_13() -> CarStyle {
         nose_tip_w: 0.88,
         roof_plan_taper: 0.08,
         lower_lean_in_m: 0.02,
+        // Window line kicking up at the rear quarter glass.
+        dlo_kink_m: 0.06,
+        dlo_kink_len_m: 0.22,
         fuel_door: FuelDoor::Left,
         ..BodyStyle::preset(Silhouette::Hatch)
     };
@@ -268,7 +271,9 @@ fn hauler_1500() -> CarStyle {
         cabin_shift_m: -0.50,
         hood_length: Some(1.62),
         belt_dz: 0.08,
-        nose_h: Some(1.10),
+        // Tall flat front: the hood front raised 12 cm over the lattice line (phase 3 `hood_dz`).
+        hood_dz: (0.0, 0.12),
+        nose_h: Some(1.21),
         nose_rake_deg: 3.0,
         nose_plan_round: 0.15,
         tail_plan_round: 0.08,
@@ -327,10 +332,13 @@ fn hauler_1500() -> CarStyle {
 /// flush rear doors (see [`van_box`]).
 fn drayman_cargo() -> CarStyle {
     let body = BodyStyle {
-        // Short-ish engine nose under a tall windshield; the kit lifts the nose 10 cm.
+        // Short-ish engine nose under a tall windshield, its front raised 10 cm (`hood_dz`);
+        // rear glass / doors run to the tail (`deck_min_m`).
         hood_length: Some(1.22),
         belt_dz: 0.06,
-        nose_h: Some(1.12),
+        hood_dz: (0.0, 0.10),
+        nose_h: Some(1.21),
+        deck_min_m: 0.04,
         nose_rake_deg: 12.0,
         nose_plan_round: 0.22,
         tail_plan_round: 0.06,
@@ -403,6 +411,10 @@ fn euro_panel_van(tumbril: bool) -> CarStyle {
         mirrors: TrimFinish::Black,
         door_handles: TrimFinish::Black,
         fuel_door: FuelDoor::Left,
+        // Rear doors to the tail; black plastic arch lips and lower cladding (commercial trim).
+        deck_min_m: 0.04,
+        arch_lip_finish: TrimFinish::Black,
+        cladding_z_m: if tumbril { 0.42 } else { 0.36 },
         // Phase 3b: raked plastic bumper with a chin (more on the rounder satchel).
         nose_face_rake_deg: if tumbril { 8.0 } else { 16.0 },
         nose_chin_m: if tumbril { 0.04 } else { 0.06 },
@@ -966,9 +978,7 @@ fn compact_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 /// hitch.
 fn fullsize_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let p = ctx.profile;
-    const LIFT: f32 = 0.12;
-    lift_front(b, p, LIFT, 0.86, 1.16);
-    let zn = p.belt(p.y_nose) + LIFT;
+    let zn = p.belt(p.y_nose);
     let wf = p.half_width(p.y_nose);
     // Headlamps: tall rectangles outboard of the grille; the amber strip along the bottom of
     // the lens is the turn signal.
@@ -1127,9 +1137,7 @@ fn fullsize_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 /// the rear corners, high-mount brake lamp, big two-glass mirrors.
 fn drayman_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let p = ctx.profile;
-    const LIFT: f32 = 0.10;
-    lift_front(b, p, LIFT, 0.95, 1.20);
-    let zn = p.belt(p.y_nose) + LIFT;
+    let zn = p.belt(p.y_nose);
     let wf = p.half_width(p.y_nose);
     let (l0, l1) = (zn - 0.21, zn - 0.03);
     // Stacked lamps: the head lamp on top, the amber turn signal below it, same bezel.
@@ -2225,22 +2233,6 @@ fn mud_flaps(b: &mut Builder, p: &BodyProfile) {
 // Car-shapes phase 2 helpers (traffic cars only; the older helpers above are shared with
 // debug_sedan and stay unchanged)
 // =======================================================================================
-
-/// Lift the front of the body (every non-wheel part already built) by up to `h`: zero at the
-/// windshield base, full ahead of the hood's front edge, faded in between heights `z0` (no
-/// lift: bumper, arches) and `z1` (full lift). Raises a hood that the lattice keeps low (tall
-/// truck / van noses). Call it before placing the kit's own parts.
-fn lift_front(b: &mut Builder, p: &BodyProfile, h: f32, z0: f32, z1: f32) {
-    let (yf, yb) = (p.y_fw, p.y_bf);
-    b.transform(
-        |k| k.wheel.is_none(),
-        |q| {
-            let t = smoothstep((q[1] - yf) / (yb - yf).max(0.1));
-            let s = smoothstep((q[2] - z0) / (z1 - z0).max(0.01));
-            [q[0], q[1], q[2] + h * t * s]
-        },
-    );
-}
 
 /// Frame of bars `t` wide round `[x0, x1, z0, z1]` on the front face, `out` proud.
 fn frame_front(b: &mut Builder, k: &PartKey, p: &BodyProfile, r: [f32; 4], t: f32, out: f32) {
