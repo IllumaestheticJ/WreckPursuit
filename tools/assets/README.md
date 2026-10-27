@@ -15,11 +15,13 @@ cargo run -p car-assets --bin validate-car-asset [car ...]
 cargo run --release -p car-assets --bin panels-bench # perf, 24 cars
 cargo run --release -p car-assets --example panel_probe -- apps/simcli/scenarios/panels/side_swipe_door.ron
 cargo run -p car-assets --example profile_dump -- [--ring <y>] <car>  # styled anchors, regions, a cross-section
+cargo run --release -p car-assets --example phase3_demo -- <dir>  # phase 3 knob demo meshes (<car>__<variant>.json)
 cargo test -p car-assets                             # every car valid + meshes up to date + turn-signal contract
 cargo run --release -p car-assets --example crumple_matrix -- Arcade [frame ticks]  # hood/fender/bumper crumple, 30/50/70 km/h
 node tools/assets/panels_shots.mjs                   # browser checks + screenshots (docs/media/panels)
 node tools/assets/mesh_shots.mjs <dir> <car> ...      # rest-pose shots: front / rear / side / top / cabin / cabin_rear
-                                                     #   (+ SHOT_CAM=x,y,z SHOT_AT=x,y,z → <car>_custom.png)
+                                                     #   (+ SHOT_CAM=x,y,z SHOT_AT=x,y,z → <car>_custom.png;
+                                                     #    MESH_DIR=<dir> renders <dir>/<car>.json)
 node tools/assets/crumple_shots.mjs after            # hood crumple shots at 8 m / 30 m
 ```
 
@@ -87,6 +89,19 @@ built in another worktree with a shared `CARGO_TARGET_DIR` writes into *that* wo
   `GENERIC_DRIP_RAIL` / `GENERIC_WIPERS`; `Kit::new`, `Kit::door_handles`, `Kit::fuel_filler`,
   traffic `handles` / `drip_rails` / `black_mirrors` / `tall_mirrors` do). Kit and traffic mirrors
   are placed from the sail (`BodyProfile::sail`) too.
+- **Phase 3 shape knobs** (car-shapes phase 3, 2026-10-27; `BodyStyle` "Phase 3 shape knobs",
+  defaults change nothing): `plan_width` (plan-view half-width curve, never inside a tire),
+  `side_sculpt` (`SideSculpt` boxes: pods, coves, pontoons, shoulder lines), `side_bulge_m` /
+  `side_bulge_z` (convex section), `rocker_in_m` (sill tuck-in), `tumblehome_m` (0.03…0.36),
+  `front_fender_rise_m` / `rear_fender_rise_m` / `fender_peak_w` (fender tops above the hood
+  centre), `overhang_trim` widened to −0.35…+0.25 (short noses move the visual hood front back,
+  keeping a 10 cm bumper strip). How-to per knob: `docs/integration/car-shapes.md` "Phase 3 knobs".
+- **Projected lamps** (`src/lamp.rs`, `Kit::proj_cluster`): a 2D outline in a front / rear /
+  side / top view cast onto the body triangles already built, so the lens sits `proud_m` over the
+  drawn surface (wraps round corners with `yaw_deg`, lies on curved noses and fender tops); the
+  turn signal is cut out of the same outline; optional flush bezel. Scratch demo:
+  `cargo run --release -p car-assets --example phase3_demo -- <dir>`, render with
+  `MESH_DIR=<dir> node tools/assets/mesh_shots.mjs <out> <car>__<variant>`.
 - **Parts**: each loft face is classified by station and segment (lower side / belt ledge /
   greenhouse / top / bed) into a body region: bumpers, hood, fenders, doors (door windows ride with
   their door), quarter glass, sills, roof, windshield, rear glass (or cab-back wall), trunk or

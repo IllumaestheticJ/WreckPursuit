@@ -1,7 +1,8 @@
 // Quick look at procedural car meshes without the testbed or the wasm build: renders
 // data/panels/meshes/<car>.json (rest pose, greybox materials + the mesh's tints) in headless
 // Chromium and writes front / rear 3/4, side, top and greenhouse close-up (cabin, cabin_rear) PNGs
-// per car; SHOT_CAM="x,y,z" SHOT_AT="x,y,z" (chassis space, m) adds <car>_custom.png.
+// per car; SHOT_CAM="x,y,z" SHOT_AT="x,y,z" (chassis space, m) adds <car>_custom.png;
+// MESH_DIR=<dir> renders <dir>/<id>.json (ids `<car>__<variant>` use <car>'s def).
 //   node tools/assets/mesh_shots.mjs <outDir> <car> [car ...]
 // Needs apps/testbed-web/node_modules (three, playwright-core).
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -123,10 +124,13 @@ if (process.env.SHOT_CAM && process.env.SHOT_AT) {
   await page.evaluate((c) => (window.customCam = c), [v(process.env.SHOT_CAM), v(process.env.SHOT_AT)]);
 }
 for (const id of cars) {
-  const mesh = JSON.parse(readFileSync(join(repo, "data/panels/meshes", `${id}.json`), "utf8"));
+  // MESH_DIR=<dir> reads <dir>/<id>.json instead (e.g. `phase3_demo` output); an id
+  // `<car>__<variant>` takes the car def of <car>.
+  const meshDir = process.env.MESH_DIR ? resolve(process.env.MESH_DIR) : join(repo, "data/panels/meshes");
+  const mesh = JSON.parse(readFileSync(join(meshDir, `${id}.json`), "utf8"));
   let car = null;
   try {
-    car = JSON.parse(readFileSync(join(repo, "data/cars", `${id}.json`), "utf8"));
+    car = JSON.parse(readFileSync(join(repo, "data/cars", `${id.split("__")[0]}.json`), "utf8"));
   } catch {}
   const shots = await page.evaluate(([m, c]) => window.shoot(m, c), [mesh, car]);
   for (const [name, url] of Object.entries(shots)) {
