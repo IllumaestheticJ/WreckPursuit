@@ -49,6 +49,8 @@ export interface RaceCard {
   bounty_locked?: boolean;
   /** Purse bonus the career's bounty earns here (fraction). */
   bounty_bonus?: number;
+  /** Rep a result earns here, times the usual: the field's strength against your car. */
+  rep_scale?: number;
 }
 
 /** `wp_wasm::race::OddsCard`: a bet on yourself. */
@@ -125,6 +127,8 @@ export interface RacePayout {
   purse: number;
   clean_bonus: number;
   rep: number;
+  /** Of `rep`, what the field's strength added (negative: a slower field than your car). */
+  field_rep?: number;
   bounty: number;
   /** High-stakes purse bonus for the career's bounty. */
   bounty_bonus?: number;
@@ -307,6 +311,15 @@ function Picker(props: { cards: RaceCard[]; status: BetStatus; onStart: (id: str
                       {" "}· +{Math.round((c.bounty_bonus ?? 0) * 100)}% bounty bonus
                     </span>
                   )}
+                  {c.rep_scale !== undefined && Math.abs(c.rep_scale - 1) >= 0.05 && (
+                    <span
+                      class={c.rep_scale > 1 ? "wp-ok" : "wp-dim"}
+                      data-testid="rep-scale"
+                      title="The field brings cars to match yours and your rep; a tougher field earns more rep, a slower one less"
+                    >
+                      {" "}· rep ×{c.rep_scale.toFixed(1)}
+                    </span>
+                  )}
                 </span>
                 <Button
                   variant="primary"
@@ -483,7 +496,15 @@ function Results(props: { report: RaceReport; onAgain: () => void; onPicker: () 
             )}
             <div class="wp-spread">
               <span class="wp-dim">Rep</span>
-              <span class="wp-mono">{p.rep > 0 ? `+${p.rep}` : p.rep}</span>
+              <span class="wp-mono">
+                {p.rep > 0 ? `+${p.rep}` : p.rep}
+                {(p.field_rep ?? 0) !== 0 && (
+                  <span class="wp-dim" data-testid="field-rep" title="What the field's strength added to (or took from) the rep">
+                    {" "}({(p.field_rep ?? 0) > 0 ? "+" : ""}
+                    {p.field_rep} field)
+                  </span>
+                )}
+              </span>
             </div>
             {(p.bounty_bonus ?? 0) > 0 && (
               <div class="wp-spread">

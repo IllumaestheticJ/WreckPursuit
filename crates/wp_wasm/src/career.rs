@@ -827,7 +827,8 @@ impl Career {
             .and_then(|uid| self.profile.account.car(uid))
             .and_then(|car| self.loaded_car(car).ok());
         let bounty = self.profile.account.bounty;
-        let mut cards = crate::race::race_cards(car.as_ref(), self.mode());
+        let rep = self.profile.account.rep;
+        let mut cards = crate::race::race_cards(car.as_ref(), self.mode(), rep);
         for c in &mut cards {
             use wp_contracts::Legality;
             let Some(legality) = [
@@ -2142,6 +2143,14 @@ impl Career {
         let acct = &self.profile.account;
         let uid = acct.active_car.expect("start_blocker checked");
         let heat = self.profile.carry.heat;
+        let mut sc = sc;
+        // A picker race's field brings cars to match the career car as it is (mods included)
+        // and the career's rep (owner, 2026-10-27); a touge battle keeps its opponent.
+        if let Some((def, _)) = crate::race::race_for_scenario(&sc.name) {
+            let car = self.loaded_car(acct.try_car(uid).map_err(e2s)?)?;
+            let def = crate::race::scaled_field(&def, &car, acct.rep);
+            crate::race::apply_field(&mut sc, &def);
+        }
         let (mut session, player) = self.car_session(uid, sc, heat)?;
         let acct = &self.profile.account;
         let run = if session.run().is_some() {

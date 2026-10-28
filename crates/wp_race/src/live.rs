@@ -191,7 +191,7 @@ impl LiveRace {
         }
         let mut drivers: Vec<AiEntrant> = ai
             .iter()
-            .zip(def.ai)
+            .zip(&def.ai)
             .map(|(e, d)| AiEntrant {
                 racer: e.entity,
                 profile: def.driver_profile(d),
