@@ -33,7 +33,6 @@ use crate::heat::WantedLevel;
 use crate::radio::{RadioCue, RadioTier};
 use crate::tools::{
     roadblock_layout, spike_layout, GapPick, Roadblock, SpikeStrip, ToolSite, NODE_CLEARANCE_M,
-    VERGE_REACH_M,
 };
 use crate::unit::{Assignment, UnitRole, LANE_OFFSET_M};
 use crate::PoliceSystem;
@@ -1224,10 +1223,7 @@ impl PoliceSystem {
         owner: EntityId,
         expires: crate::time::SimTime,
     ) -> Option<ToolId> {
-        let sec = self.tool_section(&site, self.z_hint(site.pos));
-        if !sec.sealable(VERGE_REACH_M) {
-            return None;
-        }
+        let sec = self.block_section(&site, self.z_hint(site.pos))?;
         let rb = &self.cfg.tools.roadblock;
         let layout = roadblock_layout(
             &site,
@@ -1268,6 +1264,7 @@ impl PoliceSystem {
             expires,
             scripted: true,
             barricade: Some(layout.barricade),
+            z_m: sec.z_m,
         });
         self.stats.roadblocks += 1;
         self.pending.push(PoliceEvent::RoadblockPlaced {

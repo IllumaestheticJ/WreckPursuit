@@ -21,8 +21,11 @@ use crate::section::{Section, SECTION_REACH_M};
 use crate::time::SimTime;
 use crate::tools::{
     plan_site_where, roadblock_layout, spike_layout, GapPick, Roadblock, SiteRules, SpikeStrip,
-    ToolSite, VERGE_REACH_M,
+    ToolSite, BLOCK_ALONG_M, VERGE_REACH_M,
 };
+
+/// A roadblock's hard stops must also hold this far before and after its barrier line, m.
+pub const BLOCK_STOPS_ALONG_M: f32 = 0.8;
 use crate::unit::{Assignment, DriveCommand, Tactic, Track, Unit, UnitRole, LANE_OFFSET_M};
 use crate::PoliceSystem;
 
@@ -4005,12 +4008,14 @@ impl PoliceSystem {
         // Owner 2026-10-28: a roadblock seals the whole road (hard stop to hard stop) but for
         // one barricaded gap; only sites where that is possible are taken.
         let z = self.racers.get(&racer).map_or(0.0, |r| r.pos[2]);
-        let sealable = |site: &ToolSite| self.tool_section(site, z).sealable(VERGE_REACH_M);
+        let sealable = |site: &ToolSite| self.block_section(site, z).is_some();
         let site = plan_site_where(&self.graph, p, v, &rules, road.map(|r| r.0), &sealable)
             .map_err(CaptainError::Site)?;
         let n = rb.units[0] + self.rng.below(rb.units[1] - rb.units[0] + 1);
         let gap = [GapPick::Left, GapPick::Centre, GapPick::Right][self.rng.below(3) as usize];
-        let sec = self.tool_section(&site, z);
+        let sec = self
+            .block_section(&site, z)
+            .unwrap_or_else(|| self.tool_section(&site, z));
         let layout = roadblock_layout(
             &site,
             &sec,
@@ -4044,6 +4049,7 @@ impl PoliceSystem {
             expires: now.plus(lifetime),
             scripted: false,
             barricade,
+            z_m: sec.z_m,
         });
         self.captain.roadblock_ready = now.plus(cooldown);
         self.stats.roadblocks += 1;
@@ -4069,6 +4075,13 @@ impl PoliceSystem {
         }
     }
 
+    /// The road across `pos` for traffic along `dir` (see [`crate::section`]), as the
+    /// roadblock and spike layouts see it; `z_hint` about the height of the road meant. For
+    /// tests and tools.
+    pub fn road_section(&self, pos: [f32; 2], dir: [f32; 2], z_hint: f32) -> Section {
+        self.tool_section(&Self::scenario_site(pos, dir), z_hint)
+    }
+
     /// Scenario / test placement: a roadblock's barriers across the road at `pos`, facing
     /// traffic that travels along `dir`, attributed to `racer`. Unlike
     /// [`PoliceSystem::captain_command`] this bypasses every dispatch rule (pursuit, unlock
@@ -4078,7 +4091,10 @@ impl PoliceSystem {
     pub fn place_roadblock_at(&mut self, racer: EntityId, pos: [f32; 2], dir: [f32; 2]) -> ToolId {
         let rb = &self.cfg.tools.roadblock;
         let site = Self::scenario_site(pos, dir);
-        let sec = self.tool_section(&site, 0.0);
+        let line = Self::scenario_site(add(pos, scale(site.dir, BLOCK_ALONG_M)), dir);
+        let sec = self
+            .block_section(&site, 0.0)
+            .unwrap_or_else(|| self.tool_section(&line, 0.0));
         let layout = roadblock_layout(
             &site,
             &sec,
@@ -4098,6 +4114,7 @@ impl PoliceSystem {
             expires,
             scripted: false,
             barricade: Some(layout.barricade),
+            z_m: sec.z_m,
         });
         self.stats.roadblocks += 1;
         self.pending.push(PoliceEvent::RoadblockPlaced {
@@ -4299,6 +4316,36 @@ impl PoliceSystem {
         Ok(id)
     }
 
+    /// The road across a roadblock at `site` (its barrier line stands [`BLOCK_ALONG_M`] past
+    /// the site), if the block can seal it there: hard stops on both sides at the line and
+    /// [`BLOCK_STOPS_ALONG_M`] either side of it (no wall ending at the line, no corner a car
+    /// could slip round). `None`: the road cannot be sealed there.
+    pub(crate) fn block_section(&self, site: &ToolSite, z_hint: f32) -> Option<Section> {
+        let at = |d: f32| ToolSite {
+            pos: add(site.pos, scale(site.dir, d)),
+            ..*site
+        };
+        let sec = self.tool_section(&at(BLOCK_ALONG_M), z_hint);
+        if !sec.sealable(VERGE_REACH_M) {
+            return None;
+        }
+        for d in [
+            BLOCK_ALONG_M - BLOCK_STOPS_ALONG_M,
+            BLOCK_ALONG_M + BLOCK_STOPS_ALONG_M,
+        ] {
+            if !self.tool_section(&at(d), z_hint).sealable(VERGE_REACH_M) {
+                return None;
+            }
+        }
+        Some(sec)
+    }
+
+    /// [`Self::block_section`] for a block at `pos` facing traffic along `dir` (for tests and
+    /// tools): the section at its barrier line, or `None` where it cannot seal the road.
+    pub fn block_section_at(&self, pos: [f32; 2], dir: [f32; 2], z_hint: f32) -> Option<Section> {
+        self.block_section(&Self::scenario_site(pos, dir), z_hint)
+    }
+
     /// The road across `site` (owner 2026-10-28, [`crate::section`]): the city's paving and
     /// hard stops when known (`z_hint`: about the racer's height, to tell a deck from the road
     /// under it); else the carriageway from the road graph's lanes ([`Self::tool_span`],
@@ -4308,6 +4355,9 @@ impl PoliceSystem {
             if let Some(z) = self.section.road_z(site.pos, site.dir, z_hint) {
                 return self.section.section(site.pos, site.dir, z, SECTION_REACH_M);
             }
+        }
+        if site.segment.0 as usize >= self.graph.segments.len() {
+            return Section::plain(-ROAD_HALF_WIDTH_M, ROAD_HALF_WIDTH_M);
         }
         let span = self.tool_span(site);
         let (mut lo, mut hi) = if dot(span.flow, site.dir) >= 0.0 {

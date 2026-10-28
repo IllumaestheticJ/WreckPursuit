@@ -180,6 +180,10 @@ pub struct Roadblock {
     /// before the rule.
     #[serde(default)]
     pub barricade: Option<Barricade>,
+    /// Road height at the site, m, when the city's geometry is known: `wp_sim` stands the
+    /// barriers on the surface nearest it (the deck, not the road under it).
+    #[serde(default)]
+    pub z_m: Option<f32>,
 }
 
 /// The one gap a roadblock leaves open (about one car width, [`GAP_W_M`]) and the breakable
@@ -211,8 +215,8 @@ pub const VERGE_REACH_M: f32 = 12.0;
 pub const BARRICADE_HALF_H_M: f32 = 0.55;
 /// See [`BARRICADE_HALF_H_M`].
 pub const BARRICADE_HALF_D_M: f32 = 0.3;
-/// Barricade mass (timber frame weighted with sandbags), kg.
-pub const BARRICADE_MASS_KG: f32 = 90.0;
+/// Barricade mass: a timber frame (~30 kg) with sandbags on its feet (~100 kg), kg.
+pub const BARRICADE_MASS_KG: f32 = 132.0;
 /// A spike strip's end lies this far under its unit's car (its inner side), m.
 pub const SPIKE_UNDER_CAR_M: f32 = 0.4;
 /// Half width of a parked police car, m.
@@ -247,7 +251,8 @@ pub struct BlockLayout {
     pub hi: f32,
 }
 
-/// Lay a roadblock across `sec` at `site`: one barrier line from the left hard stop to the
+/// Lay a roadblock across `sec` (measured at the barrier line, [`BLOCK_ALONG_M`] past `site`)
+/// at `site`: one barrier line from the left hard stop to the
 /// right one (into them by [`STOP_OVERLAP_M`]; the paved edges where a side has no stop),
 /// boxes overlapping by [`BARRIER_OVERLAP_M`], broken only by one [`GAP_W_M`] gap on the
 /// carriageway at `gap`, which a wooden barricade fills. `he` is the barrier box's half
@@ -718,6 +723,7 @@ mod tests {
             stop_hi: Some(16.0),
             opposing: false,
             on_road: true,
+            z_m: None,
         };
         assert!(sec.sealable(VERGE_REACH_M));
         for gap in [GapPick::Left, GapPick::Centre, GapPick::Right] {
@@ -785,6 +791,7 @@ mod tests {
             stop_hi: None,
             opposing: false,
             on_road: true,
+            z_m: None,
         };
         let lay = spike_layout(&site_north(), &sec);
         assert!((lay.a[0] - -2.0).abs() < 1e-4, "{:?}", lay.a);

@@ -34,7 +34,10 @@ pub use physics::{
     PhysicsWorld, SAFETY_FLOOR_Z,
 };
 pub use police_link::{PoliceModel, POLICE_SLOT_RESERVE};
-pub use police_tools::{BarrierView, SpikeStripView, ToolPart, BARRICADE_BREAK_MPS};
+pub use police_tools::{
+    BarrierView, ProbeFilter, SpikeStripView, ToolPart, BARRICADE_BREAK_MPS, BARRICADE_HIT_MASS_KG,
+    BARRICADE_PIECES,
+};
 pub use systems::{SystemId, Systems};
 pub use traffic_link::TRAFFIC_SLOT_RESERVE;
 pub use weather_link::{WEATHER_CELL_M, WEATHER_GRID_MARGIN_M};
@@ -286,6 +289,9 @@ pub struct Sim {
     tool_bodies: Vec<police_tools::ToolBody>,
     /// Roadblock barricades smashed so far (`police_tools`).
     barricades_broken: u32,
+    /// Barricade smashes this tick: `(vehicle slot, the hit's damage contact)`, merged into
+    /// the tick's contacts after the physics step.
+    barricade_hits: Vec<(usize, wp_contracts::ContactImpulse)>,
     city_colliders: CityColliders,
     /// Hilly cities: props still resting (not colliding with terrain), in creation order.
     resting_props: Vec<(
@@ -331,6 +337,7 @@ impl Sim {
             debris: Vec::new(),
             tool_bodies: Vec::new(),
             barricades_broken: 0,
+            barricade_hits: Vec::new(),
             city_colliders: CityColliders::default(),
             resting_props: Vec::new(),
             resting_bodies: Default::default(),
@@ -668,6 +675,13 @@ impl Sim {
     /// down), ignoring vehicles and props. See [`PhysicsWorld::static_ground_z`].
     pub fn static_ground_z(&self, xy: [f32; 2], from_z: f32, max_m: f32) -> Option<f32> {
         self.physics.static_ground_z(xy, from_z, max_m)
+    }
+
+    /// Height of the drivable ground (road, sidewalk and terrain meshes; never barriers,
+    /// buildings, decor or bodies) below `(xy, from_z)`, at most `max_m` down. See
+    /// [`PhysicsWorld::drivable_ground_z`].
+    pub fn drivable_ground_z(&self, xy: [f32; 2], from_z: f32, max_m: f32) -> Option<f32> {
+        self.physics.drivable_ground_z(xy, from_z, max_m)
     }
 
     /// Whether the current city has terrain (hills, decks): spawns are then placed on the
@@ -1502,6 +1516,11 @@ impl Sim {
             &infos,
         );
         out.extend(std::mem::take(&mut tick_contacts.events));
+        for (slot, c) in std::mem::take(&mut self.barricade_hits) {
+            if let Some(v) = tick_contacts.per_vehicle.get_mut(slot) {
+                v.push(c);
+            }
+        }
         // Battering-ram mods: effective mass (body impulses, before the vehicles read their
         // bodies) and damage dealt / taken in car-on-car hits. On the solver's impulses, before
         // any damage scaling below.

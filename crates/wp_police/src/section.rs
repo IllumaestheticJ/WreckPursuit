@@ -6,7 +6,7 @@
 //!   `right_m`), its raised sidewalks ([`wp_world::surface::SIDEWALK_W_M`] past a kerbed edge)
 //!   and the junction / bend / dead-end patches between ribbons;
 //! - **hard stops**: building walls, tunnel walls, concrete barriers (highway edges and
-//!   medians, at full height only: their sloped free ends are not counted) and guard rails
+//!   medians, down their sloped free ends to a third of full height) and guard rails
 //!   (bridge decks, the bare back edges of deck sidewalks). The same lines `wp_sim` makes solid.
 //!
 //! [`SectionIndex::section`] walks across the road at a tool site, both ways from the site
@@ -18,7 +18,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::graph::{add, closest_on_segment, cross, dot, len, normalize, perp_left, scale, sub};
+use crate::graph::{add, cross, dot, len, normalize, perp_left, scale, sub};
 
 /// Grid cell size, m.
 const CELL_M: f32 = 25.0;
@@ -32,9 +32,9 @@ const SEAM_M: f32 = 0.6;
 const Z_BELOW_M: f32 = 2.0;
 /// See [`Z_BELOW_M`].
 const Z_ABOVE_M: f32 = 2.5;
-/// A barrier profile point counts as full height from this fraction up (median ends slope to
-/// the road: a car rides up them).
-const FULL_HEIGHT_FRAC: f32 = 0.9;
+/// A barrier profile point counts as a stop from this fraction of full height up (median ends
+/// slope to the road: a car rides up the low part only).
+const STOP_HEIGHT_FRAC: f32 = 0.3;
 /// Default reach of a walk across the road from the site, m.
 pub const SECTION_REACH_M: f32 = 48.0;
 
@@ -102,6 +102,8 @@ pub struct Section {
     pub opposing: bool,
     /// The site point itself is on carriageway.
     pub on_road: bool,
+    /// Road height at the site, m (`None` without city geometry).
+    pub z_m: Option<f32>,
 }
 
 impl Section {
@@ -117,6 +119,7 @@ impl Section {
             stop_hi: Some(hi),
             opposing: false,
             on_road: true,
+            z_m: None,
         }
     }
 
@@ -299,7 +302,7 @@ impl SectionIndex {
         }
         for profile in wp_world::surface::median_barrier_profiles(net) {
             for w in profile.windows(2) {
-                if w[0].1 >= FULL_HEIGHT_FRAC && w[1].1 >= FULL_HEIGHT_FRAC {
+                if w[0].1.max(w[1].1) >= STOP_HEIGHT_FRAC {
                     stops.push(line_stop(w[0].0, w[1].0, 0.81));
                 }
             }
@@ -340,8 +343,15 @@ impl SectionIndex {
             if l < 1e-3 {
                 continue;
             }
-            let (t, q) = closest_on_segment(xy(a), xy(c), p);
-            let lat = cross(scale(d, 1.0 / l), sub(p, q)) * -1.0;
+            let u = scale(d, 1.0 / l);
+            let r = sub(p, xy(a));
+            let s_along = dot(r, u);
+            // Only the ribbon segment `p` lies across (not one further along the road).
+            if s_along < -0.05 || s_along > l + 0.05 {
+                continue;
+            }
+            let t = (s_along / l).clamp(0.0, 1.0);
+            let lat = dot(r, [u[1], -u[0]]);
             if lat < -b.left_m - 0.3 || lat > b.right_m + 0.3 {
                 continue;
             }
@@ -518,6 +528,7 @@ impl SectionIndex {
             stop_hi,
             opposing,
             on_road,
+            z_m: Some(z),
         }
     }
 }
