@@ -27,6 +27,8 @@ export interface StatsView {
   class_index: number;
   bracket: string;
   mass_kg: number;
+  /** Peak engine power, mechanical hp (mods applied). */
+  power_hp: number;
   est_0_100_s: number;
   top_speed_kmh: number;
   lateral_g: number;
@@ -559,6 +561,10 @@ export interface WorkshopScreen {
   stands: StandView[];
   /** Engine torque left after worn parts (1 = nothing lost). */
   torque_factor: number;
+  /** Peak engine power as the car drives now (parts, mods, wear), hp. */
+  power_hp: number;
+  /** Peak engine power of the stock car, hp. */
+  stock_power_hp: number;
   catalog: CatalogEntry[];
   cash: number;
   def_id: string;

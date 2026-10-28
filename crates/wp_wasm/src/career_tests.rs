@@ -1353,3 +1353,36 @@ fn a_career_race_field_matches_the_career_car() {
         );
     }
 }
+
+#[test]
+fn every_car_has_a_horsepower_and_an_engine_mod_raises_it() {
+    let (mut c, uid) = career_with("kestrel_ts", 200_000, DamageMode::Arcade);
+    for d in c.dealer().to_vec() {
+        assert!(
+            (40.0..=2000.0).contains(&d.stats.power_hp),
+            "{}: {} hp",
+            d.def_id,
+            d.stats.power_hp
+        );
+    }
+    // A used car may have worn engine parts: never more than stock.
+    let w0 = c.workshop(uid).unwrap();
+    assert!(
+        w0.power_hp <= w0.stock_power_hp + 0.5,
+        "{} vs {}",
+        w0.power_hp,
+        w0.stock_power_hp
+    );
+    let before = c.view().cars[0].stats.clone().unwrap().power_hp;
+    c.install_mod(uid, "engine_intake_1").unwrap();
+    let after = c.view().cars[0].stats.clone().unwrap().power_hp;
+    assert!(after > before, "intake: {before} -> {after} hp");
+    let w = c.workshop(uid).unwrap();
+    assert!(
+        w.power_hp > w0.power_hp + 0.5,
+        "{} -> {} hp",
+        w0.power_hp,
+        w.power_hp
+    );
+    assert_eq!(w.stock_power_hp, w0.stock_power_hp);
+}
