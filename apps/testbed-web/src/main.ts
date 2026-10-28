@@ -820,6 +820,8 @@ async function main(): Promise<void> {
       const touge = id.startsWith("touge:") ? sim.tougeResult() : null;
       const card = touge ? undefined : sim.raceList(sc.entities[0]?.car ?? DEFAULT_CAR, sc.mode).find((c) => c.id === id);
       ids.forEach((e, i) => names.set(e, i === 0 ? "You" : (touge?.opponent ?? card?.drivers[i - 1]?.name ?? `#${e}`)));
+      // The touge NPC races in its roster colour, the colour a won pink slip arrives in.
+      if (touge && ids[1] !== undefined) app.views.get(ids[1])?.setPaint(touge.opponent_paint);
       course = parseCourse(sim.raceCourse());
     }
     raceMarker.setCourse(course);

@@ -1376,6 +1376,12 @@ impl RaceRun {
         self.touge.as_ref()
     }
 
+    /// Tests: the touge battle state, mutable.
+    #[cfg(test)]
+    pub(crate) fn touge_mut(&mut self) -> Option<&mut crate::touge::TougeRun> {
+        self.touge.as_mut()
+    }
+
     /// The buy-in charged at the start (fee, ledger lines), if any.
     pub fn entry(&self) -> Option<&(i64, Vec<LedgerLine>)> {
         self.entry.as_ref()

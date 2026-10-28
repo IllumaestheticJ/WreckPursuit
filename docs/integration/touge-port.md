@@ -90,6 +90,20 @@ goldens were never merged in).
   waits for the NPC's race to end so its car comes home as it finished. Before, a player who
   went through the wall waited for the NPC to drive the rest of the pass (minutes) before the
   side bet and rep settled.
+- **Pink-slip fixes (lead, `lead/pinkslip-fix`, owner report 2026-10-28):**
+  - *No winnings:* a won pink slip no longer waits for the NPC's race to end. The panel offers
+    "Back to garage" as soon as the battle is decided, so a player who won at the line and left
+    before the NPC finished closed the run with nothing settled: no purse, no rep, no car. The
+    NPC's car is now captured the tick the battle is decided (or earlier, if its race ends
+    first) and everything settles that tick.
+  - *Colour change:* each touge NPC has a roster paint (`TougeRacer::paint`); the testbed paints
+    the NPC with it (`TougeReport::opponent_paint`) and it flows `OpponentCar.paint` →
+    `WonCar.paint` → `OwnedCar.paint`. Before, the NPC raced in the renderer's per-entity colour
+    and the won car got a uid-based factory colour. NPCs race stock cars, so no mods / variant.
+  - *Worthless after repair:* a won car's `purchase_price` is the model's
+    `Economy::market_basis` (the cheapest dealer price, the same basis as cars from old saves)
+    instead of 0, so a repaired won car sells for `dealer_buy_frac ×` that, below any dealer
+    price.
 
 ## Owner rules
 

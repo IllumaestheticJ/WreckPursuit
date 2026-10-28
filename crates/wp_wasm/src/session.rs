@@ -620,6 +620,12 @@ impl Session {
         self.race.as_ref()
     }
 
+    /// Tests: the picker race, mutable.
+    #[cfg(test)]
+    pub(crate) fn race_mut(&mut self) -> Option<&mut RaceRun> {
+        self.race.as_mut()
+    }
+
     /// The free-roam street racers attached to this session, if any.
     pub fn roam(&self) -> Option<&RoamRun> {
         self.roam.as_ref()

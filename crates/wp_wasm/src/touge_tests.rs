@@ -316,3 +316,77 @@ fn a_career_touge_win_pays_the_career_and_the_pass_has_no_police() {
         "the carried heat waits for the city"
     );
 }
+
+/// Owner report: "pink slip races have no winnings" and "pink slip cars change color when i get
+/// them". A career pink slip won at the line, with the NPC still racing, settles that tick (it
+/// used to wait for the NPC to finish, and "Back to garage" closed the run first with nothing
+/// paid): the purse and the NPC's car land on the career, the car in the colour it raced in and
+/// worth real money.
+#[test]
+fn a_career_pink_slip_won_at_the_line_pays_the_purse_and_brings_the_car_in_its_colours() {
+    use wp_economy::{Condition, Economy};
+    let econ: Economy = crate::garage::with_economy(|e| e.clone());
+    let mut c = crate::career::Career::new(econ, DamageMode::Arcade);
+    c.profile_mut().account.cash = 50_000;
+    c.profile_mut().account.rep = 1_000_000;
+    let uid = c.buy_car(CAR, Condition::Used).unwrap();
+    c.set_active(uid).unwrap();
+    c.profile_mut().account.rep = rep_for(Feature::PinkSlips).max(rep_for(Feature::BossRaces));
+    let st = setup("touge_ashfall_grade", "up", "boss");
+    let paint = st.racer().paint;
+    set_next_wager(Wager::PinkSlip);
+    let sc = touge_scenario(&st, CAR, DamageMode::Arcade, false).unwrap();
+    let mut s = c.start_run(sc).unwrap();
+    let seq = s.run().unwrap().account().next_event_seq;
+    s.run_ticks(240 * 2);
+    let r = s.race().unwrap().touge().unwrap().report();
+    assert!(r.wager_taken, "{:?}", r.wager_error);
+    assert_eq!(r.opponent_paint, paint);
+    // The player takes the line; the NPC is still on the mountain.
+    let tick = s.tick();
+    s.race_mut()
+        .unwrap()
+        .touge_mut()
+        .unwrap()
+        .battle_mut()
+        .decide_as(tick, BattleResult::Won);
+    s.run_ticks(1);
+    let npc_running = s
+        .race()
+        .unwrap()
+        .live()
+        .judge()
+        .results()
+        .iter()
+        .any(|x| x.racer == NPC && x.status == wp_contracts::RacerStatus::Running);
+    assert!(npc_running, "the NPC is still racing");
+    let r = s.race().unwrap().touge().unwrap().report();
+    assert_eq!(r.settle_error, None);
+    let out = r
+        .settlement
+        .expect("settled the tick the battle was decided");
+    let purse = wp_race::touge::TougeTable::embedded().boss.purse;
+    assert!(purse > 0);
+    assert_eq!(out.purse, purse, "a won pink slip pays the boss purse");
+    let won = out.car_won.expect("the NPC car is won");
+    // "Back to garage" right away.
+    c.finish_run(&mut s).unwrap();
+    let on_career: Vec<i64> = c
+        .profile()
+        .ledger
+        .iter()
+        .filter(|e| e.seq >= seq)
+        .map(|e| e.cash_delta)
+        .collect();
+    assert!(
+        on_career.contains(&purse),
+        "the purse is on the career ledger: {on_career:?}"
+    );
+    let car = c.profile().account.car(won).expect("won car in the garage");
+    assert_eq!(car.def_id, "lindwurm_4t");
+    assert_eq!(car.paint, Some(paint), "in the colour it raced in");
+    let view = c.view();
+    let v = view.cars.iter().find(|v| v.uid == won.0).unwrap();
+    assert_eq!(v.paint, paint, "the garage draws it in that colour");
+    assert!(v.sale_price > 1_000, "worth real money: {}", v.sale_price);
+}
