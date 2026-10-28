@@ -608,9 +608,11 @@ export const sim = {
   debugKnockProp: (entity: number, prop: number, speed: number): number => wasm.debug_knock_prop(entity, prop, speed),
 
   // ----- career (machine G; crates/wp_wasm/src/career.rs). Every call throws on refusal. ---
-  careerNew: (mode: string): CareerView => JSON.parse(wasm.career_new(mode)),
+  /** New career; `stockSeed` (u32, picked by the host: see `newCareerStockSeed`) seeds its car-lot stock. */
+  careerNew: (mode: string, stockSeed: number): CareerView => JSON.parse(wasm.career_new(mode, stockSeed >>> 0)),
   /** New career with a custom opening balance (preview / demo builds start rich). */
-  careerNewWithCash: (mode: string, cash: number): CareerView => JSON.parse(wasm.career_new_with_cash(mode, cash)),
+  careerNewWithCash: (mode: string, cash: number, stockSeed: number): CareerView =>
+    JSON.parse(wasm.career_new_with_cash(mode, cash, stockSeed >>> 0)),
   careerLoad: (text: string): CareerView => JSON.parse(wasm.career_load_json(text)),
   careerSave: (): string => wasm.career_save_json(),
   careerExists: (): boolean => wasm.career_exists(),

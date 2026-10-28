@@ -11,7 +11,9 @@
 //! migrates older versions step by step ([`migrate`]) and refuses saves from a newer build.
 //! Version 2 added [`crate::OwnedCar::purchase_price`] (resale is valued from the price paid);
 //! the 1 → 2 step marks every car of an old save as "price unknown", valued at the cheapest
-//! price the player could have paid. Fields added later must be
+//! price the player could have paid. Version 3 added [`CareerProfile::stock_seed`] (each
+//! career's own car-lot stock); the 2 → 3 step derives one from the old save's contents
+//! ([`legacy_stock_seed`]). Fields added later must be
 //! `#[serde(default)]` so older saves of the same version still load.
 //!
 //! Carry-over rules (tables in `consequences.toml [career]`, [`Economy::carry_heat`]):
@@ -26,6 +28,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::{DamageMode, PlayerId};
+use wp_math::StateHasher;
 
 use crate::data::Economy;
 
@@ -39,7 +42,12 @@ pub const PROFILE_FORMAT: &str = "wreckpursuit-career";
 
 /// Current profile version (bump it, and add a [`migrate`] step, when the shape changes in a
 /// way `#[serde(default)]` cannot absorb).
-pub const PROFILE_VERSION: u32 = 2;
+pub const PROFILE_VERSION: u32 = 3;
+
+/// Stock seed of careers built without a host seed ([`Economy::new_career`]: tests, simcli,
+/// headless tools), so their lot stock and every golden built from it stay fixed. The browser
+/// picks a random seed per career instead ([`Economy::new_career_seeded`]).
+pub const DEFAULT_STOCK_SEED: u32 = 0x5EED_107C;
 
 /// What one run leaves for the next.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
@@ -145,6 +153,13 @@ pub struct CareerProfile {
     /// Lot cars bought on the current day (so a bought car leaves the lot until it restocks).
     #[serde(default)]
     pub lot_sales: LotSales,
+    /// This career's car-lot stock seed: [`Economy::lot_stock`] mixes it with the lot and the
+    /// day, so each career sees its own cars and the same day of the same career always shows
+    /// the same ones. Picked by the host when the career is created (the browser uses
+    /// `crypto.getRandomValues`; the economy never reads a clock or OS randomness), derived
+    /// from the save for version 2 saves ([`legacy_stock_seed`]), and kept by export / import
+    /// like every other field.
+    pub stock_seed: u32,
 }
 
 /// Lot spaces sold on one in-game day (`wp_economy::lots`); stale days count as empty.
@@ -174,8 +189,21 @@ impl LotSales {
 
 impl Economy {
     /// A new career: an account with the starting cash and no car (the dealer or the economy
-    /// floor car is the first stop).
+    /// floor car is the first stop). Its lot stock uses the fixed [`DEFAULT_STOCK_SEED`]
+    /// (tests and headless tools); a host that wants per-career stock calls
+    /// [`Self::new_career_seeded`].
     pub fn new_career(&self, player: PlayerId, mode: DamageMode) -> CareerProfile {
+        self.new_career_seeded(player, mode, DEFAULT_STOCK_SEED)
+    }
+
+    /// [`Self::new_career`] with the lot stock seed the host picked for this career
+    /// ([`CareerProfile::stock_seed`]).
+    pub fn new_career_seeded(
+        &self,
+        player: PlayerId,
+        mode: DamageMode,
+        stock_seed: u32,
+    ) -> CareerProfile {
         let (account, ledger) = self.open_account(player);
         CareerProfile {
             format: PROFILE_FORMAT.to_string(),
@@ -188,6 +216,7 @@ impl Economy {
             lattices: BTreeMap::new(),
             run_in_pursuit: None,
             lot_sales: LotSales::default(),
+            stock_seed,
         }
     }
 
@@ -326,6 +355,8 @@ impl CareerProfile {
 /// Steps, oldest first; each edits the JSON and sets `version` to `n + 1`. When the shape
 /// changes again, bump [`PROFILE_VERSION`] and add the next step.
 /// - 1 → 2: every owned car gets `"purchase_price": null` (price paid unknown).
+/// - 2 → 3: the save gets a `stock_seed` derived from its own contents ([`legacy_stock_seed`])
+///   and forgets today's lot sales (they named slots of the stock before the seed).
 pub fn migrate(mut value: serde_json::Value) -> Result<serde_json::Value, ProfileError> {
     let obj = value
         .as_object()
@@ -345,6 +376,10 @@ pub fn migrate(mut value: serde_json::Value) -> Result<serde_json::Value, Profil
     if version == 1 {
         value = step_1_to_2(value)?;
         version = 2;
+    }
+    if version == 2 {
+        value = step_2_to_3(value)?;
+        version = 3;
     }
     if version < PROFILE_VERSION {
         return Err(ProfileError::NoMigration { found: version });
@@ -368,6 +403,76 @@ fn step_1_to_2(mut value: serde_json::Value) -> Result<serde_json::Value, Profil
     }
     value["version"] = serde_json::Value::from(2);
     Ok(value)
+}
+
+/// 2 → 3: a per-career lot stock seed (see [`legacy_stock_seed`]). Today's lot sales are
+/// dropped: they named (lot, slot) pairs of the stock rolled without a seed, which now hold
+/// other cars.
+fn step_2_to_3(mut value: serde_json::Value) -> Result<serde_json::Value, ProfileError> {
+    let seed = legacy_stock_seed(&value);
+    let obj = value
+        .as_object_mut()
+        .ok_or_else(|| ProfileError::Invalid("expected a JSON object".into()))?;
+    obj.entry("stock_seed")
+        .or_insert(serde_json::Value::from(seed));
+    obj.remove("lot_sales");
+    value["version"] = serde_json::Value::from(3);
+    Ok(value)
+}
+
+/// The stock seed a save written before seeds existed (version ≤ 2) gets on migration.
+///
+/// Old saves have no creation-time randomness to draw on, and every browser career shares one
+/// player id, so the seed is a hash of the whole save as it stands (player id, mode, cash,
+/// day, garage, ledger tail, ...), walked with object keys in sorted order so it does not
+/// depend on the JSON's key order or whitespace. The same file therefore always gets the same
+/// seed (loading it twice never rerolls the lots), two different careers almost surely get
+/// different ones, and once the migrated career is saved the seed is stored and no longer
+/// derived. Never 0 (a hash of 0 maps to 1), so no old save lands on an "unset"-looking value.
+pub fn legacy_stock_seed(save: &serde_json::Value) -> u32 {
+    fn walk(h: &mut StateHasher, v: &serde_json::Value) {
+        use serde_json::Value;
+        match v {
+            Value::Null => h.write_u32(0),
+            Value::Bool(b) => {
+                h.write_u32(1);
+                h.write_u32(*b as u32);
+            }
+            Value::Number(n) => {
+                h.write_u32(2);
+                h.write_bytes(n.to_string().as_bytes());
+            }
+            Value::String(s) => {
+                h.write_u32(3);
+                h.write_u64(s.len() as u64);
+                h.write_bytes(s.as_bytes());
+            }
+            Value::Array(a) => {
+                h.write_u32(4);
+                h.write_u64(a.len() as u64);
+                for x in a {
+                    walk(h, x);
+                }
+            }
+            Value::Object(o) => {
+                h.write_u32(5);
+                h.write_u64(o.len() as u64);
+                let mut keys: Vec<&String> = o.keys().collect();
+                keys.sort();
+                for k in keys {
+                    h.write_u64(k.len() as u64);
+                    h.write_bytes(k.as_bytes());
+                    walk(h, &o[k]);
+                }
+            }
+        }
+    }
+    let mut h = StateHasher::new();
+    h.write_bytes(b"legacy-stock-seed");
+    walk(&mut h, save);
+    let x = h.finish();
+    let seed = (x ^ (x >> 32)) as u32;
+    seed.max(1)
 }
 
 #[cfg(test)]
@@ -425,22 +530,115 @@ mod tests {
         assert_eq!(again, back);
     }
 
+    /// `p` as a version 2 save (before stock seeds), with some sales today.
+    fn as_v2(p: &CareerProfile) -> serde_json::Value {
+        let mut v: serde_json::Value = serde_json::from_str(&p.to_json()).unwrap();
+        v["version"] = 2.into();
+        v.as_object_mut().unwrap().remove("stock_seed");
+        v
+    }
+
+    #[test]
+    fn new_careers_take_the_host_seed_or_the_fixed_default() {
+        let e = econ();
+        assert_eq!(
+            e.new_career(PlayerId(1), DamageMode::Arcade).stock_seed,
+            DEFAULT_STOCK_SEED
+        );
+        let p = e.new_career_seeded(PlayerId(1), DamageMode::Arcade, 0xABCD_0123);
+        assert_eq!(p.stock_seed, 0xABCD_0123);
+    }
+
+    #[test]
+    fn version_2_saves_get_a_stable_derived_seed() {
+        let e = econ();
+        let mut p = e.new_career(PlayerId(1), DamageMode::Arcade);
+        p.lot_sales.record(p.account.day, "budget_motors", 2);
+        let v2 = as_v2(&p).to_string();
+        let a = CareerProfile::from_json(&v2).unwrap();
+        assert_eq!(a.version, PROFILE_VERSION);
+        assert_ne!(a.stock_seed, 0);
+        // Loading the same old file again gives the same seed.
+        assert_eq!(
+            CareerProfile::from_json(&v2).unwrap().stock_seed,
+            a.stock_seed
+        );
+        // So does the same save with other key order / whitespace.
+        let pretty = serde_json::to_string_pretty(&as_v2(&p)).unwrap();
+        assert_eq!(
+            CareerProfile::from_json(&pretty).unwrap().stock_seed,
+            a.stock_seed
+        );
+        // Once written by this build the seed is stored, whatever the career does next.
+        let mut b = CareerProfile::from_json(&a.to_json()).unwrap();
+        assert_eq!(b.stock_seed, a.stock_seed);
+        e.next_night(&mut b);
+        assert_eq!(
+            CareerProfile::from_json(&b.to_json()).unwrap().stock_seed,
+            a.stock_seed
+        );
+        // Old sales named slots of the unseeded stock: dropped.
+        assert_eq!(a.lot_sales, LotSales::default());
+        // Different old careers get different seeds.
+        let mut q = e.new_career(PlayerId(1), DamageMode::Arcade);
+        q.account.cash += 1;
+        let qa = CareerProfile::from_json(&as_v2(&q).to_string()).unwrap();
+        assert_ne!(qa.stock_seed, a.stock_seed);
+        let s = CareerProfile::from_json(
+            &as_v2(&e.new_career(PlayerId(1), DamageMode::Simulation)).to_string(),
+        )
+        .unwrap();
+        assert_ne!(s.stock_seed, a.stock_seed);
+        // A version 1 save goes through both steps and gets one too.
+        let mut v1 = as_v2(&p);
+        v1["version"] = 1.into();
+        let one = CareerProfile::from_json(&v1.to_string()).unwrap();
+        assert_ne!(one.stock_seed, 0);
+        assert_eq!(
+            CareerProfile::from_json(&v1.to_string())
+                .unwrap()
+                .stock_seed,
+            one.stock_seed
+        );
+    }
+
+    #[test]
+    fn export_import_keeps_the_seed() {
+        let e = econ();
+        let p = e.new_career_seeded(PlayerId(1), DamageMode::Simulation, 0x0BAD_F00D);
+        let back = CareerProfile::from_json(&p.to_json()).unwrap();
+        assert_eq!(back.stock_seed, 0x0BAD_F00D);
+        assert_eq!(back, p);
+    }
+
+    #[test]
+    fn a_current_save_without_a_seed_is_refused() {
+        let e = econ();
+        let p = e.new_career(PlayerId(1), DamageMode::Arcade);
+        let mut v: serde_json::Value = serde_json::from_str(&p.to_json()).unwrap();
+        v.as_object_mut().unwrap().remove("stock_seed");
+        assert!(matches!(
+            CareerProfile::from_json(&v.to_string()),
+            Err(ProfileError::Invalid(_))
+        ));
+    }
+
     #[test]
     fn versions_are_checked() {
         let e = econ();
         let p = e.new_career(PlayerId(1), DamageMode::Simulation);
         let mut v: serde_json::Value = serde_json::from_str(&p.to_json()).unwrap();
-        v["version"] = 3.into();
+        v["version"] = 4.into();
         assert_eq!(
             CareerProfile::from_json(&v.to_string()),
-            Err(ProfileError::TooNew { found: 3 })
+            Err(ProfileError::TooNew { found: 4 })
         );
         v["version"] = 0.into();
         assert_eq!(
             CareerProfile::from_json(&v.to_string()),
             Err(ProfileError::NoMigration { found: 0 })
         );
-        v["version"] = 2.into();
+        v["version"] = 3.into();
         v["format"] = "something-else".into();
         assert!(matches!(
             CareerProfile::from_json(&v.to_string()),

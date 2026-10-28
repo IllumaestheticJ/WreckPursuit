@@ -126,11 +126,23 @@ function spikeRoadZ(tools: Float32Array, x: number, y: number): number | undefin
   }
   return undefined;
 }
+/**
+ * A fresh career's car-lot stock seed (owner request 2026-10-28: lot stock is "random per career
+ * by the day"). Drawn here, in the host, because the Rust economy never reads OS randomness; the
+ * save keeps it, so the same day of the same career always shows the same cars.
+ */
+function newCareerStockSeed(): number {
+  const a = new Uint32Array(1);
+  crypto.getRandomValues(a);
+  return a[0];
+}
+
 function newCareer(mode: string): CareerView {
+  const seed = newCareerStockSeed();
   const p = params.get("cash");
-  if (p === "market") return sim.careerNew(mode);
+  if (p === "market") return sim.careerNew(mode, seed);
   const n = p === null ? DEMO_CASH : Number(p);
-  return sim.careerNewWithCash(mode, Number.isFinite(n) && n >= 0 ? n : DEMO_CASH);
+  return sim.careerNewWithCash(mode, Number.isFinite(n) && n >= 0 ? n : DEMO_CASH, seed);
 }
 
 interface AppState {

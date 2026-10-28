@@ -89,7 +89,7 @@ Data: `data/economy/{prices,stakes,consequences,market,lots}.toml`, `data/mods/*
 `OwnedCar::tune` holds the car's four-slider tune (`CarTune`, 1..=5, 3 = stock;
 `docs/integration/tune.md`). `Economy::set_tune` is free and writes no ledger line; the car must
 be in the garage (like mod work). The field is `#[serde(default)]` and skipped when stock, so
-career saves keep version 2. Tests: `cargo test -p wp_economy --test tune`.
+career saves need no version bump. Tests: `cargo test -p wp_economy --test tune`.
 
 ## Garage workshop (`parts`)
 
@@ -178,7 +178,17 @@ let (job, _) = econ.mechanic_install(&mut acct, car, "radiator", &PartSource::Bu
 - `CareerProfile` is the browser save: account, ledger tail (`career.ledger_keep` = 200 lines),
   carried heat, career counters and each car's lattice damage (opaque text from the damage
   system). JSON with `format: "wreckpursuit-career"` and `version`; `migrate` refuses newer
-  saves and steps older ones up (v1 → v2 adds `purchase_price: null` to every car).
+  saves and steps older ones up (v1 → v2 adds `purchase_price: null` to every car; v2 → v3
+  adds `stock_seed`, below).
+- `stock_seed` (u32, version 3) is the career's car-lot seed: lot stock is random per career
+  by the day. The host picks it at creation (`new_career_seeded`; the browser draws it with
+  `crypto.getRandomValues` and passes it to `career_new`); `new_career` uses the fixed
+  `DEFAULT_STOCK_SEED` so tests, simcli and goldens stay stable. Old saves get
+  `legacy_stock_seed(save)`: a hash of the whole save JSON (keys sorted, so key order and
+  whitespace do not matter), never 0. The same file always derives the same seed, different
+  careers almost surely differ, and once re-saved the seed is stored; the migration also
+  drops that day's `lot_sales` (they named slots of the unseeded stock). Export / import keep
+  the seed like every other field.
 - Each finished run is one in-game night (`close_run` → `end_of_day`: premiums, pound storage,
   auctions); `next_night` lets a night pass without driving.
 - Heat: a capture or a wreck clears it; a run that ends free carries `heat × 0.5`, capped at
@@ -190,11 +200,20 @@ let (job, _) = econ.mechanic_install(&mut acct, car, "radiator", &PartSource::Bu
 ### Car lots (`lots`, `data/economy/lots.toml`)
 Where cars come from in the career: **dealerships** (tiers 1–3: budget, mainstream, prestige),
 **used car lots** (a bargain lot and a certified one) and **junkyards** (two yards).
-- `Economy::lot_stock(lot, day, roster)` is a pure function of (lot id, day, roster): a
-  `wp_math::Rng` seeded from the lot id and the day fills `slots` spaces with chance
+- `Economy::lot_stock(stock_seed, lot, day, roster)` is a pure function of (career stock seed,
+  lot id, day, roster): a `wp_math::Rng` seeded from the career's `CareerProfile::stock_seed`,
+  the lot id and the day fills `slots` spaces with chance
   `fill_chance` each, from the roster models whose class and base price the lot carries.
   Every lot restocks daily and never shows every model every day; dealerships show each model
   at most once. Each slot forks its own RNG, so one space's roll never shifts another's.
+  Every career sees its own stock; the same day of the same career always shows the same cars
+  (reopening a lot or reloading never rerolls), and a purchase finds its car again by
+  (lot, day, slot) with the career's seed. Wear, junkyard faults, rare variants and paint all
+  come from that one stream.
+- No lot car sells for less than the economy would pay back for it straight away: a rare
+  variant's mods are refunded at resale (`mod_resale_frac`), so its yard price is raised to at
+  least its immediate `sale_price` (rounded up to 50). Without this a few rare variants were a
+  buy-and-flip profit.
 - Dealership cars are new (`market_price(New) × price_scale`, health 1, new tyres).
 - Used cars roll a condition in the lot's band and get wear to match (`ListingWear`): dents on
   up to seven panels, tired components (never below 0.35: they run), worn tyres. Price =
