@@ -141,6 +141,29 @@ pub fn resting_prop_groups() -> InteractionGroups {
     )
 }
 
+/// Collision group of the water barrels at blunt barrier ends (`wp_world::barrier_ends`).
+/// Barrels never touch each other: a car runs into them one at a time and shoves each along
+/// (a crushing cushion). Touching, a row of rigid barrels backed by the concrete end stopped a
+/// car as dead as the bare end did.
+pub const BARREL_GROUP: Group = Group::GROUP_4;
+
+/// Collision group of the barrier and rail meshes ([`BARRIER_USER_DATA`]).
+pub const BARRIER_GROUP: Group = Group::GROUP_5;
+
+/// Interaction groups of a water barrel: everything but other barrels and the barriers, and
+/// while it rests (`resting`) not the terrain either. A barrel pressed against the concrete
+/// end it guards was as hard as the concrete; this way the car shoves the whole cushion along
+/// (through the barrier end if it must) and meets the concrete slowed by the barrels' mass.
+pub fn barrel_groups(resting: bool) -> InteractionGroups {
+    let mut filter = Group::ALL
+        .difference(BARREL_GROUP)
+        .difference(BARRIER_GROUP);
+    if resting {
+        filter = filter.difference(TERRAIN_GROUP);
+    }
+    InteractionGroups::new(BARREL_GROUP, filter, InteractionTestMode::And)
+}
+
 /// A full copy of the Rapier state. `PhysicsPipeline` only holds per-step scratch buffers and
 /// counters, so the copy gets a fresh one (stepping it gives the same results).
 impl Clone for PhysicsWorld {
@@ -784,6 +807,11 @@ fn barrier_colliders(
             b.friction(BARRIER_FRICTION)
                 .restitution(0.0)
                 .user_data(BARRIER_USER_DATA)
+                .collision_groups(InteractionGroups::new(
+                    BARRIER_GROUP,
+                    Group::ALL,
+                    InteractionTestMode::And,
+                ))
                 .build(),
         ),
         Err(e) => {
