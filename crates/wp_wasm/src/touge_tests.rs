@@ -50,14 +50,15 @@ fn launch(s: &mut Session, id: EntityId, s_m: f32, side: f32, angle_deg: f32, sp
         .unwrap();
 }
 
-/// The pass's longest stretch of edge `kind` that starts 100 m in or later: `(middle, side)`.
+/// The pass's longest stretch of edge `kind` on the course as raced (100 m or more in from
+/// its base end, not in the summit run-off): `(middle, side)`.
 fn longest(s: &Session, kind: EdgeKind) -> (f32, f32) {
     let track = wp_world::touge::generate_builtin(&s.sim().world().network().id)
         .unwrap()
         .track;
     let e = track
         .spans(kind)
-        .filter(|e| e.from_m > 100.0)
+        .filter(|e| e.from_m > track.course_from_m + 100.0 && e.to_m < track.course_to_m)
         .max_by(|a, b| (a.to_m - a.from_m).total_cmp(&(b.to_m - b.from_m)))
         .copied()
         .unwrap();
@@ -315,4 +316,162 @@ fn a_career_touge_win_pays_the_career_and_the_pass_has_no_police() {
         60.0,
         "the carried heat waits for the city"
     );
+}
+
+/// How a battle's two cars came off the line and where they stopped (see
+/// [`run_battle_past_the_line`]).
+#[derive(Debug)]
+struct RunOffResult {
+    /// Per car (player, NPC): speed at the finish line, m/s.
+    finish_mps: [f32; 2],
+    /// Per car: furthest distance past the finish line, m (along the road; past the end of
+    /// the paving it keeps counting into the bed).
+    furthest_m: [f32; 2],
+    /// Per car: speed when the run ended, m/s.
+    final_mps: [f32; 2],
+    /// Per car: totaled.
+    totaled: [bool; 2],
+    /// The battle's outcome.
+    outcome: Option<wp_race::touge::BattleOutcome>,
+}
+
+/// Run an autopilot battle (both cars driven by the race AI) to the line, then on until both
+/// cars have stopped (or `after_s` past the second finish).
+fn run_battle_past_the_line(setup: &TougeSetup, max_s: u32, after_s: u32) -> RunOffResult {
+    use wp_contracts::RacerStatus;
+    let mut s = battle(setup, true, Wager::None, None);
+    let id = s.sim().world().network().id.clone();
+    let track = wp_world::touge::generate_builtin(&id).unwrap().track;
+    let up = setup.direction == wp_race::touge::Direction::Uphill;
+    let line = track.finish_m[usize::from(up)];
+    let past = |s_m: f32| if up { s_m - line } else { line - s_m };
+    let cars = [PLAYER, NPC];
+    let mut near = [None::<f32>; 2];
+    let mut finish_mps = [f32::NAN; 2];
+    let mut furthest_m = [f32::NEG_INFINITY; 2];
+    let mut done_tick = None;
+    let mut still_ticks = 0u32;
+    let b = s
+        .race()
+        .unwrap()
+        .touge()
+        .unwrap()
+        .battle()
+        .boundary()
+        .clone();
+    for tick in 0..240 * max_s {
+        s.run_ticks(1);
+        let results = s.race().unwrap().live().judge().results();
+        for (i, e) in cars.iter().enumerate() {
+            let st = s.vehicle(*e).unwrap().vehicle.state();
+            let (sm, _) = b.locate(st.pos, near[i]);
+            near[i] = Some(sm);
+            // Into the bed: the distance along its axis beyond the paving.
+            let trap = &track.traps[usize::from(up)];
+            let (a, _) = trap.local(wp_world::geom::xy(st.pos));
+            let x = if a > 0.0 { past(sm) + a } else { past(sm) };
+            let finished = results
+                .iter()
+                .any(|r| r.racer == *e && r.status == RacerStatus::Finished);
+            if finished && finish_mps[i].is_nan() {
+                finish_mps[i] = st.speed_mps;
+            }
+            if finished {
+                furthest_m[i] = furthest_m[i].max(x);
+            }
+        }
+        let all_done = results.iter().all(|r| r.status != RacerStatus::Running);
+        if all_done && done_tick.is_none() {
+            done_tick = Some(tick);
+        }
+        if let Some(t0) = done_tick {
+            let still = cars
+                .iter()
+                .all(|e| s.vehicle(*e).unwrap().vehicle.state().speed_mps.abs() < 0.3);
+            still_ticks = if still { still_ticks + 1 } else { 0 };
+            if still_ticks > 240 || tick - t0 > 240 * after_s {
+                break;
+            }
+        }
+    }
+    let speeds = cars.map(|e| s.vehicle(e).unwrap().vehicle.state().speed_mps);
+    let totaled = cars.map(|e| s.vehicle(e).unwrap().damage.summary().total_loss);
+    RunOffResult {
+        finish_mps,
+        furthest_m,
+        final_mps: speeds,
+        totaled,
+        outcome: s
+            .race()
+            .unwrap()
+            .touge()
+            .unwrap()
+            .battle()
+            .outcome()
+            .cloned(),
+    }
+}
+
+/// Every car that finished stopped on the paved run-off, short of the gravel bed, and nobody
+/// was totaled after the line (only a car that went off the mountain before it).
+fn assert_stopped_in_the_run_off(name: &str, r: &RunOffResult) {
+    let paved = wp_world::touge::RUN_OFF_M;
+    for i in 0..2 {
+        if r.finish_mps[i].is_nan() {
+            continue; // did not finish (off the mountain, or still out on the course)
+        }
+        assert!(
+            r.furthest_m[i] < paved - 20.0,
+            "{name}: car {i} ran {} m past the line ({paved} m paved): {r:?}",
+            r.furthest_m[i]
+        );
+        assert!(
+            r.final_mps[i].abs() < 0.5,
+            "{name}: car {i} still moving: {r:?}"
+        );
+        assert!(!r.totaled[i], "{name}: a finisher was totaled: {r:?}");
+    }
+    assert!(
+        r.finish_mps.iter().any(|v| !v.is_nan()),
+        "{name}: nobody finished: {r:?}"
+    );
+    // Decided, and a car that went out was one that never finished.
+    let o = r.outcome.as_ref().expect("battle decided");
+    if let Some(e) = o.totaled {
+        let i = usize::from(e == NPC);
+        assert!(
+            r.finish_mps[i].is_nan(),
+            "{name}: finisher {e:?} out: {r:?}"
+        );
+    }
+}
+
+#[test]
+fn ai_finishers_stop_in_the_run_off() {
+    // Owner 2026-10-28: room to slow down after the finish. Both AI cars race Ashfall Grade
+    // downhill (dry: the longest stop of the sweep below), cross the line at ~38 m/s and pull
+    // up on the paved run-off; neither is totaled or reset there.
+    let st = TougeSetup::from_keys("touge_ashfall_grade", "down", "day", "dry", "boss").unwrap();
+    let r = run_battle_past_the_line(&st, 200, 60);
+    eprintln!("{r:?}");
+    assert_stopped_in_the_run_off("ashfall down dry", &r);
+    assert!(r.finish_mps.iter().all(|v| *v > 25.0), "{r:?}");
+}
+
+#[test]
+#[ignore = "sweep: every pass both ways, dry and rain (~8 min); run with --ignored --nocapture"]
+fn sweep_battles_stop_in_the_run_off() {
+    // 2026-10-28 sweep (boss vs autopilot, day): finish speeds 27-46 m/s, stops 72-256 m past
+    // the line (340 m paved); two rain battles ended early with the NPC off the mountain on
+    // the course (the known wet-AI gap, docs/integration/touge.md), none in a run-off.
+    for map in wp_world::touge::TOUGE_IDS {
+        for dir in ["down", "up"] {
+            for surface in ["dry", "rain"] {
+                let st = TougeSetup::from_keys(map, dir, "day", surface, "boss").unwrap();
+                let r = run_battle_past_the_line(&st, 260, 60);
+                eprintln!("{map} {dir} {surface}: {r:?}");
+                assert_stopped_in_the_run_off(&format!("{map} {dir} {surface}"), &r);
+            }
+        }
+    }
 }
