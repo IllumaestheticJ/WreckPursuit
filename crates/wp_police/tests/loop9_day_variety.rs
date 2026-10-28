@@ -247,6 +247,11 @@ fn after_racer(u: &wp_police::unit::Unit) -> bool {
 /// One daytime Loop 9 chase: the racer at `mph`, from a start `seed / 8` of the lap round,
 /// for `run_s` seconds.
 pub fn run(mph: f32, seed: u64, run_s: f32, cfg: PoliceConfig) -> Variety {
+    run_ops(mph, seed, run_s, cfg, true)
+}
+
+/// [`run`] with the commander's Loop 9 operations on or off (`ops`).
+pub fn run_ops(mph: f32, seed: u64, run_s: f32, cfg: PoliceConfig, ops: bool) -> Variety {
     let world = world_at(14.0);
     let setup = PoliceSetup {
         seed: 0x00DA_7100 ^ seed,
@@ -257,7 +262,8 @@ pub fn run(mph: f32, seed: u64, run_s: f32, cfg: PoliceConfig) -> Variety {
     let course = Course::new(route.polyline.iter().map(|p| [p[0], p[1], p[2]]).collect());
     let line: Vec<[f32; 2]> = course.pts.iter().map(|p| [p[0], p[1]]).collect();
     let rc = RaceCourse::new(&line);
-    let profile = RaceProfiles::builtin().get("loop9_day").unwrap().clone();
+    let mut profile = RaceProfiles::builtin().get("loop9_day").unwrap().clone();
+    profile.dynamic_ops = ops;
     police.start_race("loop9_day", &profile, &rc, &[RACER]);
     let speed = mph * MPH;
     let start = course.length() * ((seed % 8) as f32 / 8.0);
@@ -477,31 +483,54 @@ fn loop9_day_variety_table() {
     }
 }
 
-/// Acceptance: a daytime Loop 9 chase is varied (release build; `--ignored`, run by
-/// `just police-variety` and listed in the integration doc).
+/// Acceptance: a daytime Loop 9 chase is varied. The same two 120 s chases at 120 mph with
+/// the commander's Loop 9 operations off (as before them) and on: on, more distinct tactics
+/// (all five operations among them), a larger share of units sent in from off the course
+/// (ramps), a smaller share sent from behind the racer, and units peeling off and rejoining.
 #[test]
-#[ignore]
 fn loop9_day_chase_is_varied() {
-    let mut all = Variety::default();
+    let mut off = Variety::default();
+    let mut on = Variety::default();
     for seed in 0..2 {
-        all.merge(&run(120.0, seed, 120.0, PoliceConfig::builtin()));
+        off.merge(&run_ops(120.0, seed, 120.0, PoliceConfig::builtin(), false));
+        on.merge(&run_ops(120.0, seed, 120.0, PoliceConfig::builtin(), true));
     }
-    println!("{}", line("120", &all, 2));
-    assert!(all.tactics.len() >= 8, "tactics {:?}", all.tactics);
-    assert!(all.sectors_used() >= 3, "sectors {:?}", all.sectors);
+    println!("{}", line("120, ops off", &off, 2));
+    println!("{}", line("120, ops on", &on, 2));
+    let share =
+        |v: &Variety, n: u32| n as f32 / v.commit_sectors.values().sum::<u32>().max(1) as f32;
+    let behind = |v: &Variety| share(v, v.commit_sectors.get("behind").copied().unwrap_or(0));
+    let ramps = |v: &Variety| share(v, v.commit_off_course);
     assert!(
-        all.off_course >= 2,
-        "off-course approaches {}",
-        all.off_course
+        on.tactics.len() >= off.tactics.len() + 4,
+        "tactics {:?} vs {:?}",
+        on.tactics,
+        off.tactics
+    );
+    for op in ["flank", "converge", "speed-trap", "rotate", "peel-off"] {
+        assert!(on.tactics.contains(op), "no {op}: {:?}", on.tactics);
+    }
+    assert!(
+        on.commit_sectors.values().filter(|n| **n > 0).count() >= 3,
+        "sent from {:?}",
+        on.commit_sectors
     );
     assert!(
-        all.trailing_pct() <= 70.0,
-        "trailing {:.0} %",
-        all.trailing_pct()
+        ramps(&on) >= 1.5 * ramps(&off) && ramps(&on) >= 0.2,
+        "sent from off the course: {:.2} on vs {:.2} off",
+        ramps(&on),
+        ramps(&off)
     );
     assert!(
-        all.patrols_moving_pct() >= 50.0,
+        behind(&on) < behind(&off),
+        "sent from behind: {:.2} on vs {:.2} off",
+        behind(&on),
+        behind(&off)
+    );
+    assert!(on.rejoins > off.rejoins, "no unit peeled off and rejoined");
+    assert!(
+        on.patrols_moving_pct() >= 60.0,
         "patrols moving {:.0} %",
-        all.patrols_moving_pct()
+        on.patrols_moving_pct()
     );
 }

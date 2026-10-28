@@ -396,6 +396,15 @@ fn roadblocks_seal_the_road_but_for_the_barricaded_gap() {
             );
             assert!(hit, "{what}: nothing solid at the {side} stop ({x:.2})");
         }
+        eprintln!(
+            "  {:?} block at ({:.1}, {:.1}) dir ({:.3}, {:.3}): {:.1} m stop to stop, gap {g0:.2}..{g1:.2}",
+            p.place,
+            p.pos[0],
+            p.pos[1],
+            p.dir[0],
+            p.dir[1],
+            hi - lo
+        );
         checked += 1;
     }
     eprintln!("{checked} roadblocks probed");
