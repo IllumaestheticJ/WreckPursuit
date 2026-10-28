@@ -113,6 +113,20 @@ fn world_shops_match_the_generated_world() {
         .map(|w| (w.name.to_string(), w.district, w.kind, w.city))
         .collect();
     assert_eq!(table, generated);
+    // The tow service prices distances from the table's positions (no world in the garage).
+    for (w, g) in crate::garage_visit::WORLD_SHOPS
+        .iter()
+        .zip(crate::garage_visit::sites(&world))
+    {
+        let off = (w.pos[0] - g.pos[0]).hypot(w.pos[1] - g.pos[1]);
+        assert!(
+            off < 1.0,
+            "{}: table {:?}, world {:?}",
+            w.name,
+            w.pos,
+            g.pos
+        );
+    }
     for s in SPAWNS {
         assert!(
             table.iter().any(|t| t.3 == s.id),

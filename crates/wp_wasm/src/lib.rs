@@ -66,6 +66,7 @@ pub mod siren_cue;
 pub mod street;
 pub mod street_odds;
 pub mod touge;
+pub mod tow;
 pub mod weather;
 
 #[cfg(test)]
@@ -1610,6 +1611,34 @@ pub fn debug_set_heat(entity: u32, heat: f32) -> Result<(), JsValue> {
         s.debug_sim_mut()?
             .police_mut()
             .set_heat(EntityId(entity), heat);
+        Ok(())
+    })
+}
+
+/// Debug / e2e: wreck `entity`'s car: the dents of a 60 km/h frontal barrier hit
+/// (`wp_damage::barrier::run_barrier`), then written off (`DamageModel::declare_total_loss`).
+/// Changes the run and is **not** recorded in replays.
+#[wasm_bindgen]
+pub fn debug_total_loss(entity: u32) -> Result<(), JsValue> {
+    with(|s| {
+        let id = EntityId(entity);
+        let car = s.car(id).ok_or("unknown vehicle")?.clone();
+        let mode = s.sim().mode_table().clone();
+        let (m, _) = wp_damage::barrier::run_barrier(
+            &car,
+            &mode,
+            wp_damage::barrier::ImpactKind::Frontal,
+            60.0,
+            0.0,
+            0.3,
+            1,
+        );
+        let dm = s
+            .debug_sim_mut()?
+            .damage_mut(id)
+            .map_err(|e| e.to_string())?;
+        dm.restore_full(&m.save_full()).map_err(|e| e.to_string())?;
+        dm.declare_total_loss();
         Ok(())
     })
 }

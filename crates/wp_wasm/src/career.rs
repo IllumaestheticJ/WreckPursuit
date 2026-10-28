@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use wp_contracts::{
     DamageMode, DamageSim, DistrictId, EntityId, LoadedCar, RepairItem, VehicleClass, VehicleDef,
-    WantedLevel,
+    VehicleSim, WantedLevel,
 };
 use wp_damage::{DamageModel, FullDamageSnapshot, PreownedWear};
 use wp_economy::{
@@ -49,6 +49,7 @@ use wp_economy::{
 use crate::data::mem_data;
 use crate::run::{LedgerLine, PlayerRun, RunOutcome, PLAYER_ACCOUNT};
 use crate::session::{PlayerGadgets, Session};
+use crate::tow::{TowNeed, TowOffer, TowPlace, TowReceipt, TowWatch};
 
 /// Grip gained per metre of extra tyre width over stock (the Wider Tires mod's +2 cm: +4 %).
 const WIDTH_GRIP_PER_M: f32 = 2.0;
@@ -215,6 +216,20 @@ pub struct CarView {
     pub damage_before_capture: bool,
     /// Tyres (FL, FR, RL, RR). Repairs never fix them: replace them on their own.
     pub tires: TireView,
+    /// Where the car sits (`None` in the pound): its home garage, a shop the tow service took
+    /// it to, or `Road` (a wreck left where it stopped).
+    pub spot: Option<SpotView>,
+}
+
+/// Where a car sits, as the career screen names places (`CareerPlace` plus `Road`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SpotView {
+    /// `Garage` (repair shop), `Home` (own garage) or `Road`.
+    pub kind: &'static str,
+    /// Shop name, home garage id, or `road`.
+    pub id: String,
+    /// Display name.
+    pub name: String,
 }
 
 /// A car's tyres in the garage.
@@ -592,6 +607,12 @@ pub struct Career {
     /// A run the game was closed in during a pursuit, settled as a bust when the save was
     /// loaded (B05); taken once by the UI ([`Career::take_abandoned`]).
     abandoned: Option<RunClose>,
+    /// Where the last tow left the player ([`Career::place`]); cleared when a run starts.
+    place: Option<TowPlace>,
+    /// Flipped / stuck watch of the run's car ([`Career::tow_need`]).
+    tow_watch: TowWatch,
+    /// What the watch last said.
+    watched: Option<TowNeed>,
 }
 
 fn e2s(e: EconomyError) -> String {
@@ -707,6 +728,9 @@ impl Career {
             run: None,
             dealer: None,
             abandoned: None,
+            place: None,
+            tow_watch: TowWatch::default(),
+            watched: None,
         }
     }
 
@@ -1092,7 +1116,236 @@ impl Career {
             stats: self.stats_for(&c.def_id, &c.mods).ok(),
             damage_before_capture: c.damage.sustained_before_capture,
             tires: self.tire_view(c),
+            spot: (c.location == CarLocation::Garage).then(|| self.spot_view(c.uid)),
         }
+    }
+
+    fn spot_view(&self, uid: CarUid) -> SpotView {
+        match self.car_spot(uid) {
+            wp_economy::CarSpot::Road { .. } => SpotView {
+                kind: "Road",
+                id: "road".into(),
+                name: "out on the road".into(),
+            },
+            wp_economy::CarSpot::Shop { name } => SpotView {
+                kind: "Garage",
+                id: name.clone(),
+                name,
+            },
+            wp_economy::CarSpot::Home { id } => SpotView {
+                kind: "Home",
+                name: self.home_name(&id),
+                id,
+            },
+        }
+    }
+
+    fn home_name(&self, id: &str) -> String {
+        self.econ
+            .progression
+            .home_garage(id)
+            .map_or_else(|| id.to_string(), |h| h.name.clone())
+    }
+
+    // ----- the tow service (`crate::tow`) ---------------------------------------------------
+
+    /// Where car `uid` sits between runs: its spot ([`wp_economy::CareerProfile::car_spots`]),
+    /// else the career's home garage.
+    pub fn car_spot(&self, uid: CarUid) -> wp_economy::CarSpot {
+        self.profile
+            .car_spots
+            .get(&uid.0)
+            .cloned()
+            .unwrap_or_else(|| wp_economy::CarSpot::Home { id: self.home_id() })
+    }
+
+    /// Where the last tow left the player (the place the career screen opens at), until the
+    /// next run starts.
+    pub fn place(&self) -> Option<&TowPlace> {
+        self.place.as_ref()
+    }
+
+    /// The session `s` if it is driving car `uid` in this career's run.
+    fn live_run<'a>(&self, uid: CarUid, s: Option<&'a Session>) -> Option<&'a Session> {
+        let run = self.run?;
+        (run.car == uid).then_some(())?;
+        s.filter(|s| s.is_career())
+    }
+
+    /// Why the run's car cannot be driven on (`None`: it can). Call it every so often during a
+    /// run: flipped and stuck need a few seconds of sim time ([`TowWatch`]).
+    pub fn tow_need(&mut self, s: &Session) -> Option<TowNeed> {
+        let run = self.run?;
+        let s = self.live_run(run.car, Some(s))?;
+        let p = *s.entities().first()?;
+        let v = s.vehicle(p)?;
+        let need = TowNeed::of_damage(v.damage.summary().total_loss, &v.damage.handling_effects())
+            .or_else(|| {
+                let st = v.vehicle.state();
+                let speed = st.lin_vel.iter().map(|x| x * x).sum::<f32>().sqrt();
+                self.tow_watch.observe(
+                    s.tick(),
+                    speed,
+                    crate::tow::up_z(st.rot),
+                    s.input(p).throttle,
+                )
+            });
+        self.watched = need;
+        need
+    }
+
+    /// What a tow of car `uid` would be now: from the run being driven in `s` when `uid` is the
+    /// run's car (live position, the run's cash, the police on it), else from where the car
+    /// sits. Refusals (pound, police) come back in [`TowOffer::refused`].
+    pub fn tow_offer(&self, uid: CarUid, s: Option<&Session>) -> Result<TowOffer, String> {
+        let live = self.live_run(uid, s);
+        if live.is_none() {
+            self.guard()?;
+        }
+        let acct = live
+            .and_then(|s| s.run())
+            .map_or(&self.profile.account, |r| r.account());
+        let car = acct.try_car(uid).map_err(e2s)?;
+        let car_name = car.variant_name.clone().unwrap_or_else(|| {
+            base_car(&car.def_id)
+                .map(|l| l.def.display_name)
+                .unwrap_or_else(|_| car.def_id.clone())
+        });
+        let here;
+        let (from, need, refused) = match live {
+            Some(s) => {
+                let p = s.entities()[0];
+                let v = s.vehicle(p).ok_or("the car is gone")?;
+                let total_loss = v.damage.summary().total_loss;
+                let need =
+                    TowNeed::of_damage(total_loss, &v.damage.handling_effects()).or(self.watched);
+                let pos = v.vehicle.state().pos;
+                let police = s.sim().police().racer(p);
+                let wanted = police.is_some_and(|r| r.pursued() || r.level > WantedLevel::None);
+                let over = s.run().is_some_and(|r| r.is_over());
+                // A totaled car is the capture rules' first (crate::run): only once the run has
+                // settled without a capture may it be towed while the police are about.
+                let refused =
+                    (wanted && !(total_loss && over)).then_some(crate::tow::POLICE_REFUSAL);
+                here = None;
+                ([pos[0], pos[1]], need, refused)
+            }
+            None => {
+                let spot = self.car_spot(uid);
+                let from = crate::tow::spot_pos(&spot)
+                    .or_else(|| crate::garage_visit::home_spot(&self.home_id()).map(|h| h.anchor))
+                    .unwrap_or([0.0, 0.0]);
+                let wanted = self.profile.carry.heat > 0.0
+                    && level_for_heat(self.profile.carry.heat) > WantedLevel::None;
+                let need = TowNeed::of_damage(car.damage.total_loss, &car.damage.handling);
+                let refused =
+                    (wanted && !car.damage.total_loss).then_some(crate::tow::POLICE_REFUSAL);
+                here = Some(spot);
+                (from, need, refused)
+            }
+        };
+        let refused = if car.location != CarLocation::Garage {
+            Some(crate::tow::POUND_REFUSAL)
+        } else {
+            refused
+        };
+        let homes: Vec<(String, String)> = self
+            .econ
+            .unlocked_homes(acct)
+            .map(|h| (h.id.clone(), h.name.clone()))
+            .collect();
+        let destinations = if refused.is_some() {
+            Vec::new()
+        } else {
+            crate::tow::destinations(&self.econ, from, here.as_ref(), &homes, acct.cash)
+        };
+        Ok(TowOffer {
+            car: uid.0,
+            car_name,
+            from,
+            need,
+            refused: refused.map(str::to_string),
+            cash: acct.cash,
+            ends_run: live.is_some(),
+            destinations,
+        })
+    }
+
+    /// Tow car `uid` to the destination `kind` (`Garage` | `Home`) `id` (shop name / home
+    /// garage id) of [`Career::tow_offer`]. From a run (`s` drives the car) the tow is charged
+    /// on the run's account and the run ends; the car arrives with its damage, and the player
+    /// is at that place ([`Career::place`]). Refused (nothing changes) for the offer's
+    /// refusals, an unknown destination, or a destination the player cannot pay for.
+    pub fn tow(
+        &mut self,
+        uid: CarUid,
+        kind: &str,
+        id: &str,
+        s: Option<&mut Session>,
+    ) -> Result<TowReceipt, String> {
+        let offer = self.tow_offer(uid, s.as_deref())?;
+        if let Some(why) = offer.refused {
+            return Err(why);
+        }
+        let dest = offer
+            .destinations
+            .iter()
+            .find(|d| format!("{:?}", d.place.kind) == kind && d.place.id == id)
+            .cloned()
+            .ok_or_else(|| format!("no tow to {kind} {id:?} from here"))?;
+        if !dest.available {
+            return Err(format!(
+                "Not enough cash for the tow to {} (${}): only the nearest shop tows on account",
+                dest.place.name, dest.price
+            ));
+        }
+        let job = wp_economy::TowJob {
+            to: dest.place.name.clone(),
+            metres: dest.metres,
+            on_account: dest.nearest,
+        };
+        let (price, ev, run) = match s.filter(|_| offer.ends_run) {
+            Some(s) => {
+                // Charged on the run's account (same cash the offer was priced with), then the
+                // run is handed back like "back to the garage".
+                let charged = match s.run_mut() {
+                    Some(r) => Some(r.tow(&job)?),
+                    None => None,
+                };
+                let close = self.finish_run(s)?;
+                let (price, ev) = match charged {
+                    Some(c) => c,
+                    None => {
+                        let c = self
+                            .econ
+                            .tow_car(&mut self.profile.account, uid, &job)
+                            .map_err(e2s)?;
+                        self.post(c.1.clone());
+                        c
+                    }
+                };
+                (price, ev, Some(close))
+            }
+            None => {
+                let (price, ev) = self
+                    .econ
+                    .tow_car(&mut self.profile.account, uid, &job)
+                    .map_err(e2s)?;
+                self.post(ev.clone());
+                (price, ev, None)
+            }
+        };
+        self.profile.car_spots.insert(uid.0, dest.place.spot());
+        self.place = Some(dest.place.clone());
+        Ok(TowReceipt {
+            car: uid.0,
+            place: dest.place,
+            metres: dest.metres,
+            price,
+            cash_after: self.profile.account.cash,
+            ledger: ev.iter().map(LedgerLine::of).collect(),
+            run,
+        })
     }
 
     fn tire_view(&self, c: &OwnedCar) -> TireView {
@@ -2064,6 +2317,8 @@ impl Career {
             .retrieve_from_impound(&mut self.profile.account, uid)
             .map_err(e2s)?;
         self.post(ev);
+        // The pound delivers the car home.
+        self.profile.car_spots.remove(&uid.0);
         Ok(fee)
     }
 
@@ -2318,6 +2573,12 @@ impl Career {
             car: uid,
             start_seq: acct.next_event_seq,
         });
+        // The car drives off from home (runs spawn there): it is no longer parked anywhere
+        // else, and the player has left the place a tow brought them to.
+        self.profile.car_spots.remove(&uid.0);
+        self.place = None;
+        self.tow_watch = TowWatch::default();
+        self.watched = None;
         Ok(session)
     }
 
@@ -2395,6 +2656,22 @@ impl Career {
                 }
             }
             None => self.reseat_active(start.car),
+        }
+        // A car that cannot be driven stays where it stopped (the tow service brings it in); a
+        // tow from the run overwrites this with its destination.
+        if let (Some(car), Some(v)) = (
+            self.profile.account.car(start.car),
+            player.and_then(|p| s.vehicle(p)),
+        ) {
+            if car.location == CarLocation::Garage && !car.damage.is_drivable() {
+                let pos = v.vehicle.state().pos;
+                self.profile.car_spots.insert(
+                    start.car.0,
+                    wp_economy::CarSpot::Road {
+                        pos: [pos[0], pos[1]],
+                    },
+                );
+            }
         }
         // A touge battle has no police: it leaves the carried heat as it was.
         let touge = crate::touge::setup_for_scenario(&s.scenario().name).is_some();
@@ -2698,6 +2975,52 @@ pub fn career_workshop_session(uid: u32, scenario_json: &str) -> Result<Vec<u32>
 #[wasm_bindgen]
 pub fn career_end_run() -> Result<String, JsValue> {
     Ok(json(&end_active_run()?))
+}
+
+/// Run `f` on the career with the installed session (`None` without one).
+fn with_career_session<T>(
+    f: impl FnOnce(&mut Career, Option<&mut Session>) -> Result<T, String>,
+) -> Result<T, JsValue> {
+    let out = crate::with_session_opt(|s| {
+        CAREER.with(|c| match c.borrow_mut().as_mut() {
+            Some(c) => f(c, s),
+            None => Err("no career: call career_new() or career_load_json()".into()),
+        })
+    });
+    out.map_err(crate::err)
+}
+
+/// Why the career run's car cannot be driven on (`crate::tow::TowNeed` name: `Wrecked`,
+/// `EngineDead`, `WheelOff`, `Flipped`, `Stuck`), or `""`. Poll it a few times a second during
+/// a career run to offer "Call a tow truck".
+#[wasm_bindgen]
+pub fn career_tow_need() -> Result<String, JsValue> {
+    with_career_session(|c, s| {
+        Ok(s.and_then(|s| c.tow_need(s))
+            .map_or(String::new(), |n| format!("{n:?}")))
+    })
+}
+
+/// The tow offer for car `uid` ([`crate::tow::TowOffer`] JSON): during a career run for the
+/// run's car (live), else from where the car sits.
+#[wasm_bindgen]
+pub fn career_tow_offer_json(uid: u32) -> Result<String, JsValue> {
+    with_career_session(|c, s| c.tow_offer(CarUid(uid), s.as_deref()).map(|o| json(&o)))
+}
+
+/// Tow car `uid` to `kind` (`Garage` | `Home`) `id` (shop name / home garage id). From a run
+/// this ends the run. Returns [`crate::tow::TowReceipt`] JSON; the player is then at that
+/// place ([`career_place_json`]).
+#[wasm_bindgen]
+pub fn career_tow(uid: u32, kind: &str, id: &str) -> Result<String, JsValue> {
+    with_career_session(|c, s| c.tow(CarUid(uid), kind, id, s).map(|r| json(&r)))
+}
+
+/// Where the last tow left the player (`{kind, id, name}`), or `null` (no tow since the last
+/// run started).
+#[wasm_bindgen]
+pub fn career_place_json() -> Result<String, JsValue> {
+    with_career(|c| Ok(json(&c.place())))
 }
 
 fn condition(name: &str) -> Result<Condition, String> {
