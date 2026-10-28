@@ -35,6 +35,7 @@ npm run typecheck
 | `e2e/photo.mjs` | photo mode check (`npm run e2e:photo`): freeze, free camera, filters, save, clipboard, replay |
 | `e2e/run.mjs` | Playwright check; `SHOTS=dir` writes screenshots, `BENCH=1` measures 1/8/24 cars |
 | `e2e/crash_fx.mjs` | crash effects check + `FX_SHOTS=dir` screenshots (run by `e2e/run.mjs` too) |
+| `e2e/debris_glow.mjs` | `npm run e2e:debris`: detached panels (front bumper, a door) shade like the car's panels in both art styles, day and night, with headlights and the light bar on: debris meshes have normals, nothing on them glows, lamp lenses go dark; `DEBRIS_SHOTS=dir` writes screenshots (`docs/media/debris-glow/`), `ONLY=lowpoly_night`, `KIND=headon\|tbone` |
 | `e2e/controls_settings.mjs` | `npm run e2e:controls`: per-device input shaping — keyboard defaults, AssistProfile speed sensitivity per device (keyboard 0.75 / gamepad 0.70 / wheel 0), persistence, test bars + test mode, saturation / dead zone effect, panel ↔ menu, preset highlight |
 | `e2e/presets.mjs` | `npm run e2e:presets`: Rookie / Street / Sim buttons set damage mode + assists in one click, a hand-ticked box shows "custom", the preset survives a reload |
 | `e2e/race_spots.mjs` | `npm run e2e:race-spots`: honk-to-start race spots (`src/race_spots.ts`): spots listed and drawn, prompts, honk while stopped starts the race on the same map (`CITY=ashpeak` for the combined map) |
