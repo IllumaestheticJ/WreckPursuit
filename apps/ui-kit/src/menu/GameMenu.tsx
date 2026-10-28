@@ -6,7 +6,7 @@
  * ```ts
  * import { mountGameMenu, defaultGameSettings, loadGameSettings } from "../../ui-kit/src/live";
  * const menu = mountGameMenu(overlay, { host, settings: loadGameSettings(defaultGameSettings()), cameras });
- * menu.openMain();             // title screen
+ * menu.openMain();             // title screen: Career, Settings, Load / Save game, Controls
  * menu.openPause();            // Esc / gamepad Start while driving
  * ```
  *
@@ -20,24 +20,30 @@ import { keyAction, PadNav, stepIndex, type NavAction } from "./nav";
 import { ASSIST_LEVELS, CAR_DETAILS, DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type AssistLevel, type CarDetail, type GameSettings, type RadioFilter, type SettingsStorage, type Volumes } from "./settings";
 import { CONTROL_DEVICES, CONTROL_RANGES, defaultDeviceControls, type ControlDevice, type DeviceControls, type InputProbe } from "./controls";
 import { paintInputBars } from "./bars";
-import { loadMenuMap, saveMenuMap, type MenuMap } from "./maps";
 import "../ui/theme.css";
 import "./menu.css";
 
-/** What the main menu can start. */
-export type PlayChoice = "chase" | "chaseRain" | "races" | "touge" | "free" | "garage";
+/** What the main menu can start. Owner 2026-10-27: the main menu is only Career, Settings,
+ * Load / Save game and Controls; every run (Free Roam, races, touge) starts from the career. */
+export type PlayChoice = "career";
 
 /** Menu actions that can ask "are you sure?" first (they end a session or wipe choices). */
-export type MenuConfirm = "restart" | "garage" | "quit" | "resetSettings";
+export type MenuConfirm = "restart" | "garage" | "quit" | "resetSettings" | "loadGame";
 
 /** Which screen is showing ("closed" = none). */
-export type MenuScreen = "closed" | "main" | "pause" | "settings";
+export type MenuScreen = "closed" | "main" | "pause" | "settings" | "saves";
 
 /** What the host does for the menu. */
 export interface GameMenuHost {
-  /** Main menu choice: start that session (the menu has already closed). `map` is the
-   * main screen's map id (`GameMenuOptions.maps`; "" when the host lists none). */
-  play(choice: PlayChoice, map: string): void;
+  /** Main menu choice: open it (the menu has already closed). */
+  play(choice: PlayChoice): void;
+  /** Load / Save game → Save game: write the game to a file. Returns the line to show (e.g.
+   * "Saved wreckpursuit-career-night4.json"). Leave out to hide the Load / Save item. */
+  saveGame?(): string;
+  /** Load / Save game → Load game (after "are you sure?"): ask for a save file and load it.
+   * Resolves with the line to show, or null when nothing was picked; rejects with the reason
+   * the file could not be loaded. */
+  loadGame?(): Promise<string | null>;
   /** Pause → Restart: the same session again (the menu has already closed). */
   restart(): void;
   /** Pause → Garage (career). The menu has already closed. */
@@ -79,12 +85,6 @@ export interface GameMenuOptions {
   developerDefault?: boolean;
   /** Storage for persistence (default localStorage; null = none). */
   storage?: SettingsStorage | null;
-  /** Maps the main screen offers (a "Map" picker when there are two or more; the first is the
-   * default). Night run, rainy night, street races and free drive start on the chosen one. */
-  maps?: MenuMap[];
-  /** Label of the main screen's map picker (default "Map"; the testbed says "Spawn in": its
-   * entries are the cities of one world). */
-  mapLabel?: string;
 }
 
 /** The menu's own "are you sure?" wording per action (the host may replace the line). */
@@ -93,6 +93,7 @@ const CONFIRM: Record<MenuConfirm, { title: string; text: string; yes: string }>
   garage: { title: "Go to the garage?", text: "This ends the current session.", yes: "Go to garage" },
   quit: { title: "Quit to main menu?", text: "Progress in this session is lost.", yes: "Quit" },
   resetSettings: { title: "Reset all settings?", text: "Graphics, audio, assists, controls and camera all go back to their defaults.", yes: "Reset" },
+  loadGame: { title: "Load a saved game?", text: "It replaces the career you have now. Save it first to keep it.", yes: "Choose file" },
 };
 
 /** Element that Left / Right adjust (cycle buttons, toggles). */
@@ -106,8 +107,8 @@ export class GameMenu {
   screen: MenuScreen = "closed";
   /** The controls panel is open on top (the menu is hidden meanwhile). */
   suspended = false;
-  /** The main screen's map id (remembered per browser; "" without `maps`). */
-  map: string;
+  /** The line under Load / Save game (what the last save or load did). */
+  saveNote: { text: string; bad: boolean } | null = null;
   private settingsFrom: "main" | "pause" = "pause";
   private readonly root: HTMLElement;
   private readonly pad = new PadNav();
@@ -128,7 +129,6 @@ export class GameMenu {
     private readonly opts: GameMenuOptions,
   ) {
     this.settings = opts.settings;
-    this.map = loadMenuMap(opts.maps ?? [], opts.storage === undefined ? undefined : opts.storage);
     this.countersteer = !!opts.countersteer;
     this.root = document.createElement("div");
     this.root.id = "wp-game-menu";
@@ -176,7 +176,7 @@ export class GameMenu {
 
   /** Title screen. */
   openMain(): void {
-    this.show("main", "gm-play-chase");
+    this.show("main", "gm-play-career");
   }
 
   /** Pause menu (pauses the host via onOpenChange). */
@@ -214,12 +214,10 @@ export class GameMenu {
     this.change({ ...this.settings, ...patch });
   }
 
-  /** Choose the main screen's map (remembered per browser). */
-  setMap(id: string): void {
-    if (!(this.opts.maps ?? []).some((m) => m.id === id) || id === this.map) return;
-    this.map = id;
-    saveMenuMap(id, this.opts.storage === undefined ? undefined : this.opts.storage);
-    this.draw();
+  /** Load / Save game screen (from the main menu). */
+  openSaves(): void {
+    this.saveNote = null;
+    this.show("saves", "gm-save");
   }
 
   /** Remove from the page. */
@@ -371,6 +369,7 @@ export class GameMenu {
 
   private back(): void {
     if (this.screen === "settings") this.show(this.settingsFrom, "gm-settings");
+    else if (this.screen === "saves") this.show("main", "gm-saves");
     else if (this.screen === "pause") this.close();
   }
 
@@ -450,13 +449,19 @@ export class GameMenu {
     } else if (this.screen === "main") {
       body = (
         <MainScreen
-          maps={this.opts.maps ?? []}
-          mapLabel={this.opts.mapLabel ?? "Map"}
-          map={this.map}
-          setMap={(id) => this.setMap(id)}
-          play={(c) => this.act(() => h.play(c, this.map))}
+          play={(c) => this.act(() => h.play(c))}
           settings={() => this.openSettings("main")}
+          saves={h.saveGame || h.loadGame ? () => this.openSaves() : null}
           controls={() => this.controls()}
+        />
+      );
+    } else if (this.screen === "saves") {
+      body = (
+        <SavesScreen
+          note={this.saveNote}
+          save={h.saveGame ? () => this.saveGame() : null}
+          load={h.loadGame ? () => this.confirm("loadGame", "gm-load", () => this.loadGame()) : null}
+          back={() => this.back()}
         />
       );
     } else if (this.screen === "pause") {
@@ -501,6 +506,28 @@ export class GameMenu {
     );
   }
 
+  private saveGame(): void {
+    try {
+      this.saveNote = { text: this.opts.host.saveGame!(), bad: false };
+    } catch (e) {
+      this.saveNote = { text: errorText(e), bad: true };
+    }
+    this.draw();
+  }
+
+  private loadGame(): void {
+    this.opts.host.loadGame!().then(
+      (text) => {
+        if (text !== null) this.saveNote = { text, bad: false };
+        this.draw();
+      },
+      (e) => {
+        this.saveNote = { text: errorText(e), bad: true };
+        this.draw();
+      },
+    );
+  }
+
   private controls(): void {
     this.suspended = true;
     this.root.hidden = true;
@@ -519,6 +546,11 @@ const DAMAGE_HINT: Record<"Arcade" | "Simulation" | "Extreme", string> = {
 };
 export function mountGameMenu(parent: HTMLElement, opts: GameMenuOptions): GameMenu {
   return new GameMenu(parent, opts);
+}
+
+/** An error's message for a menu line (wp_wasm prefixes dropped). */
+function errorText(e: unknown): string {
+  return String((e as Error)?.message ?? e).replace(/^(Error: )?wp_wasm: /, "");
 }
 
 function firstPad(): Gamepad | null {
@@ -558,36 +590,39 @@ function Brand(props: { kicker: string }) {
   );
 }
 
-const PLAY: { id: PlayChoice; label: string; hint: string }[] = [
-  { id: "chase", label: "Night run", hint: "Night in the city. You're speeding; the police will come." },
-  { id: "chaseRain", label: "Rainy night", hint: "Same chase on a soaked road" },
-  { id: "races", label: "Street races", hint: "Races against AI drivers" },
-  { id: "touge", label: "Touge battles", hint: "One-on-one down sealed mountain passes. Bets and pink slips with rep" },
-  { id: "free", label: "Free drive", hint: "Explore the city with traffic" },
-  { id: "garage", label: "Garage", hint: "Your career: cars, repairs, mods" },
-];
-
-function MainScreen(props: { maps: MenuMap[]; mapLabel: string; map: string; setMap: (id: string) => void; play: (c: PlayChoice) => void; settings: () => void; controls: () => void }) {
-  const cur = props.maps.find((m) => m.id === props.map);
+function MainScreen(props: { play: (c: PlayChoice) => void; settings: () => void; saves: (() => void) | null; controls: () => void }) {
   return (
     <div class="wp-gm-card wp-gm-main" role="dialog" aria-label="Main menu">
       <Brand kicker="// PORT VESPER · NIGHT SHIFT" />
       <p class="wp-gm-tag">Street racing, soft-body crashes and police chases in a living city.</p>
-      {props.maps.length > 1 && (
-        <div class="wp-gm-map">
-          <Row label={props.mapLabel} hint={cur?.note ?? `Night run, rainy night, street races and free drive start here`}>
-            <Cycle id="gm-map" label={props.mapLabel} value={props.map} options={props.maps.map((m) => ({ id: m.id, label: m.label }))} onChange={props.setMap} />
-          </Row>
-        </div>
-      )}
       <nav class="wp-gm-list" aria-label="Main menu">
-        {PLAY.map((p, i) => (
-          <Item key={p.id} id={`gm-play-${p.id}`} label={p.label} hint={p.hint} primary={i === 0} onClick={() => props.play(p.id)} />
-        ))}
+        <Item id="gm-play-career" label="Career" hint="Free Roam, street races, touge, cars and shops" primary onClick={() => props.play("career")} />
         <Item id="gm-settings" label="Settings" hint="Graphics · audio · assists · units" onClick={props.settings} />
+        {props.saves && <Item id="gm-saves" label="Load / Save game" hint="Keep your career in a file, or load one" onClick={props.saves} />}
         <Item id="gm-controls" label="Controls" hint="Keyboard and gamepad bindings" onClick={props.controls} />
       </nav>
       <Keys />
+    </div>
+  );
+}
+
+/** Load / Save game: the career as a file (it also saves itself in this browser). */
+function SavesScreen(props: { note: { text: string; bad: boolean } | null; save: (() => void) | null; load: (() => void) | null; back: () => void }) {
+  return (
+    <div class="wp-gm-card wp-gm-pause" role="dialog" aria-label="Load / Save game" data-testid="gm-saves">
+      <Brand kicker="// LOAD / SAVE GAME" />
+      <p class="wp-gm-tag">Your career saves itself in this browser after every change. Save it to a file to keep a copy or move it to another computer.</p>
+      <nav class="wp-gm-list" aria-label="Load / Save game">
+        {props.save && <Item id="gm-save" label="Save game" hint="Download the career as a file" primary onClick={props.save} />}
+        {props.load && <Item id="gm-load" label="Load game" hint="Pick a save file; it replaces this career" onClick={props.load} />}
+        <Item id="gm-saves-back" label="Back" onClick={props.back} />
+      </nav>
+      {props.note && (
+        <p class={`wp-gm-tag ${props.note.bad ? "wp-danger" : "wp-ok"}`} data-testid="gm-save-note" role="status">
+          {props.note.text}
+        </p>
+      )}
+      <div class="wp-gm-foot wp-mono">Esc / B back · ↑↓ move · Enter / A select</div>
     </div>
   );
 }

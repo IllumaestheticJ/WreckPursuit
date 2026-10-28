@@ -9,11 +9,12 @@
  * beater), Impound (release or let the auction countdown run), Career (rep tier, progress to
  * the next, what each tier unlocks), Ledger. The head has cash / debt / rep /
  * bounty / carried heat and
- * starts the next run (free drive or night run) with the active car.
+ * starts the next run (Free Roam: day / night, clear / rain / fog; street races; touge) with the
+ * active car.
  */
 import { render, type ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { Badge, Button, Confirm as ConfirmRow, Delta, isBigSpend, Meter, Money, Panel, severityColor, Stat, Tabs } from "../ui/kit";
+import { Badge, Button, ChoiceField, Confirm as ConfirmRow, Delta, isBigSpend, Meter, Modal, Money, Panel, severityColor, Stat, Tabs } from "../ui/kit";
 import { pct, words } from "../ui/format";
 import type {
   CareerApi,
@@ -31,8 +32,11 @@ import type {
   ShopRequest,
   ShopSite,
   StatsView,
+  RoamChoice,
+  RoamTime,
+  RoamWeather,
 } from "./types";
-import { pickTextFile } from "./store";
+import { loadRoamChoice, pickTextFile, saveRoamChoice } from "./store";
 import { isStockTune, normalizeTune, STOCK_TUNE, TUNE_SLIDERS, TUNE_STEPS, tuneSummary } from "./tune";
 import "./garage.css";
 
@@ -940,6 +944,42 @@ function NewCareer(props: { api: CareerApi; run: (f: () => CareerView) => void; 
   );
 }
 
+const ROAM_TIMES: { id: RoamTime; label: string }[] = [
+  { id: "day", label: "Day" },
+  { id: "night", label: "Night" },
+];
+const ROAM_WEATHER: { id: RoamWeather; label: string }[] = [
+  { id: "clear", label: "Clear" },
+  { id: "rain", label: "Rain" },
+  { id: "fog", label: "Fog" },
+];
+
+/** The Free Roam pop-up: time of day and weather, then Drive. The choice is remembered. */
+function FreeRoamPicker(props: { onDrive: (c: RoamChoice) => void; onClose: () => void }) {
+  const [c, setC] = useState<RoamChoice>(() => loadRoamChoice());
+  const drive = () => {
+    saveRoamChoice(c);
+    props.onDrive(c);
+  };
+  return (
+    <Modal title="Free Roam" onClose={props.onClose}>
+      <div class="wp-cg-roam" data-testid="free-roam">
+        <p class="wp-dim" style={{ marginTop: 0 }}>
+          Drive the city in your car, with traffic and police about. Speeding and crashes draw heat.
+        </p>
+        <ChoiceField label="Time" value={c.time} options={ROAM_TIMES} onChange={(time) => setC({ ...c, time })} />
+        <ChoiceField label="Weather" value={c.weather} options={ROAM_WEATHER} onChange={(weather) => setC({ ...c, weather })} />
+        <div class="wp-row" style={{ gap: "0.5em", marginTop: "0.8em", justifyContent: "flex-end" }}>
+          <Button onClick={props.onClose}>Cancel</Button>
+          <Button variant="primary" onClick={drive} testid="free-roam-drive">
+            Drive
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function GarageScreen(props: { api: CareerApi; initial: CareerView; message: string | null; at: string | null }) {
   const { api } = props;
   const [view, setView] = useState<CareerView>(props.initial);
@@ -955,6 +995,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
     }
   };
   const [importAsk, setImportAsk] = useState(false);
+  const [roaming, setRoaming] = useState(false);
   const importSave = () => {
     setImportAsk(false);
     pickTextFile().then(
@@ -967,7 +1008,8 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
   close.current = api.close;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // A pop-up (Free Roam) takes Escape itself.
+      if (e.key === "Escape" && !document.querySelector(".wp-modal-back")) {
         e.preventDefault();
         close.current();
       }
@@ -1002,11 +1044,8 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
         </div>
       </header>
       <div class="wp-row wp-cg-start" style={{ gap: "0.5em", flexWrap: "wrap", marginBottom: "0.8em" }}>
-        <Button variant="primary" disabled={!view.can_start} onClick={() => api.startRun("chase")}>
-          Night run
-        </Button>
-        <Button disabled={!view.can_start} onClick={() => api.startRun("free")}>
-          Free drive
+        <Button variant="primary" disabled={!view.can_start} onClick={() => setRoaming(true)} testid="career-free-roam" title="Drive the city: pick day or night and clear, rain or fog">
+          Free Roam
         </Button>
         {api.races && (
           <Button disabled={!view.can_start} onClick={() => api.races?.()} testid="career-races" title="Race picker: buy-in, purse, bets and rep go through this career">
@@ -1041,6 +1080,15 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
           yes="Choose file"
           onYes={importSave}
           onNo={() => setImportAsk(false)}
+        />
+      )}
+      {roaming && (
+        <FreeRoamPicker
+          onClose={() => setRoaming(false)}
+          onDrive={(c) => {
+            setRoaming(false);
+            api.startRun("free", c);
+          }}
         />
       )}
       {fresh && <NewCareer api={api} run={run} onDone={() => setFresh(false)} />}

@@ -244,61 +244,83 @@ m = await menu();
 check(!(await page.evaluate(() => window.__wp.controls.isOpen)) && m.screen === "pause" && m.visible && m.paused, `closing it returns to the pause menu (${m.screen}, visible ${m.visible})`);
 await press("Escape");
 
-// ----- 6. Title screen (?menu=1, the demo's start page) ----------------------------------------
+// ----- 6. Title screen (?menu=1): Career, Settings, Load / Save game, Controls only ----------
+// Owner 2026-10-27: "the basic menu should be: Career, settings, load/save game, controls - and
+// nothing else. everything is accessed from inside career menu"; spawn points only in career.
 await page.evaluate(() => localStorage.removeItem("wp.gameSettings.v1"));
 await page.goto(`${URL}?menu=1`);
 await ready();
 await frames(3);
 m = await menu();
 const player = await page.evaluate(() => ({ player: document.body.classList.contains("wp-player"), devPanel: getComputedStyle(document.getElementById("controls")).display }));
-check(m.screen === "main" && m.visible && m.paused && m.focus === "gm-play-chase", `?menu=1 opens the main menu, paused, Night run focused (${m.screen}, ${m.focus})`);
+check(m.screen === "main" && m.visible && m.paused && m.focus === "gm-play-career", `?menu=1 opens the main menu, paused, Career focused (${m.screen}, ${m.focus})`);
 check(player.player && player.devPanel === "none", `developer panels off by default there (${JSON.stringify(player)})`);
+const items = await page.evaluate(() => [...document.querySelectorAll("#wp-game-menu .wp-gm-list [data-nav]")].map((e) => e.id));
+check(JSON.stringify(items) === JSON.stringify(["gm-play-career", "gm-settings", "gm-saves", "gm-controls"]), `main menu items are Career, Settings, Load / Save game, Controls (${items.join(", ")})`);
+check(!(await page.$("#gm-map")), "no spawn picker on the main menu");
 await shot("menu_main.png");
-await press("Enter");
-await frames(4);
-m = await menu();
-const sc = await page.evaluate(() => window.__wp.sim.scenario().name);
-check(m.screen === "closed" && !m.paused && sc === "night_run", `Enter starts the night run (${sc}, menu ${m.screen})`);
 
-// ----- 7. Spawn choice on the title screen (owner 2026-10-25: one world, pick the city) -------
-await page.evaluate(() => localStorage.removeItem("wp.menu.map.v1"));
-await page.goto(`${URL}?menu=1`);
-await ready();
-await frames(3);
-const mapLabel = () => page.evaluate(() => document.querySelector("#gm-map b")?.textContent ?? "");
-check((await mapLabel()) === "Port Vesper", `the Spawn picker defaults to Port Vesper (${await mapLabel()})`);
-await page.focus("#gm-map");
-await press("ArrowRight");
+// Load / Save game: Save downloads the career; Load asks first.
+await page.click("#gm-saves");
 await frames(2);
-const note = await page.evaluate(() => document.querySelector(".wp-gm-map small")?.textContent ?? "");
-check((await mapLabel()) === "Ashpeak City" && /connected world/i.test(note), `Right picks Ashpeak City, noting the one connected world ("${note}")`);
-check((await page.evaluate(() => localStorage.getItem("wp.menu.map.v1"))) === "ashpeak_city", "the spawn choice is stored");
-// Street races take place in the world from any spawn: Port Vesper's and Ashpeak County's races are listed.
-await page.click("#gm-play-races");
-await frames(3);
-const ids = await page.evaluate(() => (window.__wp.raceView.cards ?? []).map((c) => c.id));
-check(ids.includes("loop9_circuit") && (ids.includes("crowfoot_ascent") || ids.includes("loop9_ashpeak_highway")), `Street races lists the world's races (${ids.join(", ")})`);
-await page.evaluate(() => window.__wp.raceView.closePicker());
-// Reload: the choice is remembered; Free drive starts in the world, downtown Ashpeak City.
-await page.goto(`${URL}?menu=1`);
-await ready();
-await frames(3);
-check((await mapLabel()) === "Ashpeak City", `the spawn choice survives a reload (${await mapLabel()})`);
-await page.click("#gm-play-free");
+m = await menu();
+check(m.screen === "saves" && m.focus === "gm-save", `Load / Save game opens its screen (${m.screen}, ${m.focus})`);
+const download = page.waitForEvent("download", { timeout: 5000 }).catch(() => null);
+await page.click("#gm-save");
+const dl = await download;
+const saveNote = await page.evaluate(() => document.querySelector('[data-testid="gm-save-note"]')?.textContent ?? "");
+check(!!dl && /wreckpursuit-career-night\d+\.json/.test(dl.suggestedFilename()) && /^Saved/.test(saveNote), `Save game downloads the career (${dl?.suggestedFilename()}, "${saveNote}")`);
+await shot("menu_saves.png");
+await page.click("#gm-load");
+await frames(2);
+check((await page.evaluate(() => window.__wp.menu.confirming)) === "loadGame", "Load game asks before replacing the career");
+await press("Escape");
+await press("Escape");
+await frames(2);
+m = await menu();
+check(m.screen === "main" && m.focus === "gm-saves", `Esc goes back to the main menu (${m.screen}, ${m.focus})`);
+
+// Career opens the garage; Free Roam is a pop-up there (Day / Night, Clear / Rain / Fog).
+await page.evaluate(() => {
+  localStorage.removeItem("wp.freeRoam.v1");
+  // A fresh career has no car yet: take the free floor car so runs can start.
+  if (!window.__wp.careerApi.view().can_start) window.__wp.careerApi.floorCar();
+});
+await page.click("#gm-play-career");
+await page.waitForSelector('[data-testid="career-garage"]', { timeout: 10000 });
+const startRow = await page.evaluate(() => [...document.querySelectorAll(".wp-cg-start button")].map((b) => b.textContent.trim()));
+check(startRow.includes("Free Roam") && !startRow.some((t) => /Night run|Free drive|Rainy/.test(t)), `the garage has one Free Roam button (${startRow.join(", ")})`);
+await page.click('[data-testid="career-free-roam"]');
+await page.waitForSelector('[data-testid="free-roam"]', { timeout: 5000 });
+await page.click('[data-testid="free-roam"] button:text-is("Day")');
+await page.click('[data-testid="free-roam"] button:text-is("Fog")');
+await page.mouse.move(5, 700);
+await frames(2);
+await shot("garage_free_roam.png");
+await page.click('[data-testid="free-roam-drive"]');
 await page.waitForFunction(() => window.__wp.sim.cityId() === "ashpeak", null, { timeout: 120000 }).catch(() => {});
-const city = await page.evaluate(() => window.__wp.sim.cityId());
-const at = await page.evaluate(() => window.__wp.sim.scenario().entities[0].pos);
-check(city === "ashpeak" && at[1] > 3650, `Free drive starts in the world in Ashpeak City (${city}, ${at})`);
-// Harnell Crossing: the night run starts in the village west of Port Vesper.
-await page.evaluate(() => localStorage.setItem("wp.menu.map.v1", "harnell_crossing"));
-await page.goto(`${URL}?menu=1`);
-await ready();
-await frames(3);
-await page.click("#gm-play-chase");
-await page.waitForFunction(() => window.__wp.sim.cityId() === "ashpeak", null, { timeout: 120000 }).catch(() => {});
-const hAt = await page.evaluate(() => window.__wp.sim.scenario().entities[0].pos);
-check(hAt[0] < -2500, `the night run starts in Harnell Crossing (${hAt})`);
-await page.evaluate(() => localStorage.removeItem("wp.menu.map.v1"));
+const roam = await page.evaluate(() => {
+  const sc = window.__wp.sim.scenario();
+  return { active: window.__wp.sim.careerRunActive(), hour: sc.time_of_day_h, weather: sc.weather?.kind ?? null, city: window.__wp.sim.cityId(), garage: window.__wp.garage.open };
+});
+check(roam.active && !roam.garage && roam.city === "ashpeak" && roam.hour === 12 && roam.weather === "Fog", `Free Roam Day + Fog starts a career run in the world at noon in fog (${JSON.stringify(roam)})`);
+await frames(30);
+await shot("free_roam_day_fog.png");
+check((await page.evaluate(() => localStorage.getItem("wp.freeRoam.v1"))) === JSON.stringify({ time: "day", weather: "fog" }), "the Free Roam choice is remembered");
+// Night + Rain from the garage again.
+await page.evaluate(() => window.__wp.openGarage());
+await page.click('[data-testid="career-free-roam"]');
+await page.click('[data-testid="free-roam"] button:text-is("Night")');
+await page.click('[data-testid="free-roam"] button:text-is("Rain")');
+await page.click('[data-testid="free-roam-drive"]');
+await frames(30);
+const roam2 = await page.evaluate(() => {
+  const sc = window.__wp.sim.scenario();
+  return { hour: sc.time_of_day_h, weather: sc.weather?.kind ?? null };
+});
+check(roam2.hour === 23 && roam2.weather === "HeavyRain", `Free Roam Night + Rain: 23:00 in a downpour (${JSON.stringify(roam2)})`);
+await shot("free_roam_night_rain.png");
+await page.evaluate(() => localStorage.removeItem("wp.freeRoam.v1"));
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();

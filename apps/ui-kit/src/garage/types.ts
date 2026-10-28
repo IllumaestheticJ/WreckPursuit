@@ -351,6 +351,17 @@ export interface RunClose {
 /** Which run the garage starts. */
 export type RunKind = "free" | "chase";
 
+/** Free Roam's time of day (owner 2026-10-27: one Free Roam button with a Day / Night,
+ * Clear / Rain / Fog pop-up replaces night run, rainy night and free drive). */
+export type RoamTime = "day" | "night";
+/** Free Roam's weather. */
+export type RoamWeather = "clear" | "rain" | "fog";
+/** What the Free Roam pop-up picked. */
+export interface RoamChoice {
+  time: RoamTime;
+  weather: RoamWeather;
+}
+
 /** What the garage screen can do (the testbed implements it over wp_wasm). Every action
  * returns the new view, or throws an Error whose message is shown to the player. */
 export interface CareerApi {
@@ -384,7 +395,9 @@ export interface CareerApi {
   newCareer(mode: DamageMode): CareerView;
   exportSave(): void;
   importSave(text: string): CareerView;
-  startRun(kind: RunKind): void;
+  /** Start a run with the active car. `roam`: Free Roam's time and weather (a free drive in
+   * the city with traffic and police). */
+  startRun(kind: RunKind, roam?: RoamChoice): void;
   /** Open the street-race picker as a career run (buy-in, purse, bets and rep on the career;
    * back to the garage after). Optional: hosts without races hide the button (row 167). */
   races?(): void;
