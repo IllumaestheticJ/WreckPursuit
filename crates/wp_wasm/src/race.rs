@@ -181,6 +181,7 @@ pub fn race_scenario_in(
     // AI cars drive with the AI assist profile; the testbed applies the player's own preset.
     sc.assists = simcli::scenario::AssistSpec::Ai;
     sc.police_presence = Some(def.police_presence());
+    sc.police_unit_level = def.police_unit_level();
     sc.traffic_density = Some(def.traffic_density);
     let world = simcli::data::load_world(mem_data(), &sc.city, world_config(&sc))
         .map_err(|e| e.to_string())?

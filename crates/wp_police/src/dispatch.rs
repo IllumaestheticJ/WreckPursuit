@@ -2271,6 +2271,7 @@ impl PoliceSystem {
 
     fn maintain_pool(&mut self, world: &dyn WorldQuery) {
         self.retire_off_corridor(world);
+        self.retire_outdated(world);
         for d in District::ALL {
             let table = self.cfg.presence.patrols.get(d).get(self.phase);
             // The commander's surge patrols (calls piling up in the district) come on top,
@@ -2314,6 +2315,31 @@ impl PoliceSystem {
                 && self.may_vanish(world, i)
         });
         if let Some(i) = off {
+            self.despawn(i);
+        }
+    }
+
+    /// Owner 2026-10-26 ("cars should match my stars"): retire one unit in a car below the
+    /// wanted level ([`PoliceSystem::set_outdated_units`]) that nobody can see. Units holding
+    /// a roadblock or a spike strip stay; player units are never outdated.
+    fn retire_outdated(&mut self, world: &dyn WorldQuery) {
+        if self.outdated.is_empty() {
+            return;
+        }
+        let pick = (0..self.units.len()).find(|&i| {
+            let u = &self.units[i];
+            u.kind == UnitKind::Car
+                && u.player.is_none()
+                && self.outdated.binary_search(&u.id).is_ok()
+                && !matches!(
+                    u.assignment,
+                    Assignment::RoadblockAt { .. } | Assignment::SpikeAt { .. }
+                )
+                && self.may_vanish(world, i)
+        });
+        if let Some(i) = pick {
+            let id = self.units[i].id;
+            self.outdated.retain(|u| *u != id);
             self.despawn(i);
         }
     }
