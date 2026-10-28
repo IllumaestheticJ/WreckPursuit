@@ -120,24 +120,31 @@ impl Economy {
     }
 
     /// Body price the resale value starts from: what was paid for the car
-    /// ([`OwnedCar::purchase_price`]). Cars from old saves (no recorded price) use the lowest
-    /// price the player could have paid: the floor car's price for the floor model, else the
-    /// cheapest dealer condition.
+    /// ([`OwnedCar::purchase_price`]). Cars from old saves (no recorded price) use the model's
+    /// [`Economy::market_basis`].
     pub fn resale_basis(&self, car: &OwnedCar) -> Money {
         if let Some(paid) = car.purchase_price {
             return paid.max(0);
         }
+        self.market_basis(&car.def_id, car.class, car.base_price)
+    }
+
+    /// The lowest price the player could have paid for a car of this model: the floor car's
+    /// price for the floor model, else the cheapest dealer condition. Resale basis of cars with
+    /// no recorded price and of cars won in a pink slip (`Economy::take_pink_slip_car`), so
+    /// selling either always returns less than the dealer would charge for the same model.
+    pub fn market_basis(&self, def_id: &str, class: VehicleClass, base_price: u32) -> Money {
         let spec = CarSpec {
-            def_id: car.def_id.clone(),
-            class: car.class,
-            base_price: car.base_price,
+            def_id: def_id.to_string(),
+            class,
+            base_price,
         };
         let dealer = Condition::ALL
             .iter()
             .map(|c| self.market_price(&spec, *c))
             .min()
             .unwrap_or(0);
-        if car.def_id == self.market.floor_car.def_id {
+        if def_id == self.market.floor_car.def_id {
             dealer.min(self.market.floor_car.price)
         } else {
             dealer
