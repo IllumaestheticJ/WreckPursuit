@@ -620,6 +620,10 @@ pub struct CatalogEntry {
     pub reason: Option<String>,
     /// What the mechanic charges to fit what one purchase brings (every slot of a set).
     pub install_fee: Money,
+    /// Names of installed mods that fitting this grade takes off because it does their job
+    /// (coilovers replace separate dampers); refunded at resale value.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replaces: Vec<String>,
 }
 
 /// Where the part the mechanic fits comes from.
@@ -1482,7 +1486,15 @@ impl Economy {
             }
             next.slots.insert(q.kind.clone(), Some(f));
         }
-        let next_mods = self.derive_mods(&c.mods, &next);
+        let mut next_mods = self.derive_mods(&c.mods, &next);
+        // Completing a set that supersedes a fitted mod (coilovers on all four corners take
+        // the place of separate dampers) takes that mod off, refunded at resale value.
+        let superseded = self.catalog.superseded_in(&next_mods);
+        next_mods.retain(|m| !superseded.contains(m));
+        let mut refunds = Vec::new();
+        for id in &superseded {
+            refunds.push((id.clone(), self.mod_refund(id)?));
+        }
         self.check_mods(c, slot, &c.mods, &next_mods)?;
         // A part inside an assembly may finish a rebuild: every member within its limit.
         let rebuilt = match &s.parent {
@@ -1515,6 +1527,9 @@ impl Economy {
             }
             c.mods = next_mods;
             c.parts = Some(next);
+            for (mod_id, refund) in refunds {
+                tx.credit(refund, EventReason::ModRemoved { mod_id }, Some(car));
+            }
             Ok(PartFit { restore })
         })
     }
@@ -1807,6 +1822,7 @@ impl Economy {
                     count: 1,
                     reason: None,
                     install_fee: one_fee,
+                    replaces: Vec::new(),
                 });
             }
             let mut grades: Vec<_> = self
@@ -1837,6 +1853,13 @@ impl Economy {
                     count,
                     reason,
                     install_fee: if count > 1 { set_fee } else { one_fee },
+                    replaces: c
+                        .mods
+                        .iter()
+                        .filter(|i| m.supersedes.contains(i))
+                        .filter_map(|i| self.catalog.get(i))
+                        .map(|o| o.name.clone())
+                        .collect(),
                 });
             }
         }

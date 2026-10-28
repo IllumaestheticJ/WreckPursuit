@@ -365,6 +365,9 @@ function Catalog(props: {
                     {c.name}
                     {c.count > 1 && <span class="wp-dim"> ×{c.count}</span>}
                     {c.tier > 0 && <span class="wp-dim"> · T{c.tier}</span>}
+                    {c.replaces && c.replaces.length > 0 && (
+                      <span class="wp-dim" data-testid="ws-cat-replaces"> · replaces {c.replaces.join(", ")} (refunded at 40 %)</span>
+                    )}
                   </span>
                   <Money value={c.price} />
                   <Button
