@@ -34,7 +34,7 @@ pub use physics::{
     PhysicsWorld, SAFETY_FLOOR_Z,
 };
 pub use police_link::{PoliceModel, POLICE_SLOT_RESERVE};
-pub use police_tools::{BarrierView, SpikeStripView};
+pub use police_tools::{BarrierView, SpikeStripView, ToolPart, BARRICADE_BREAK_MPS};
 pub use systems::{SystemId, Systems};
 pub use traffic_link::TRAFFIC_SLOT_RESERVE;
 pub use weather_link::{WEATHER_CELL_M, WEATHER_GRID_MARGIN_M};
@@ -284,6 +284,8 @@ pub struct Sim {
     debris: Vec<rapier3d::prelude::RigidBodyHandle>,
     /// Roadblock barrier bodies (see `police_tools`).
     tool_bodies: Vec<police_tools::ToolBody>,
+    /// Roadblock barricades smashed so far (`police_tools`).
+    barricades_broken: u32,
     city_colliders: CityColliders,
     /// Hilly cities: props still resting (not colliding with terrain), in creation order.
     resting_props: Vec<(
@@ -328,6 +330,7 @@ impl Sim {
             applied_contacts: Vec::new(),
             debris: Vec::new(),
             tool_bodies: Vec::new(),
+            barricades_broken: 0,
             city_colliders: CityColliders::default(),
             resting_props: Vec::new(),
             resting_bodies: Default::default(),
@@ -1485,6 +1488,7 @@ impl Sim {
         self.wake_props();
         self.wake_resting_props();
         self.update_ghosts();
+        self.break_barricades();
         let parked = if sys.damage {
             self.parked_candidates()
         } else {

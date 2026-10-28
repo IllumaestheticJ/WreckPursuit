@@ -140,8 +140,8 @@ export const META_FLAG = { siren: 1, headlights: 2, brake: 4, horn: 8, turnLeft:
 export const TOOL_STRIDE = 11;
 /** Offsets inside one police_tools() record (box centre, orientation, half extents). */
 export const TL = { kind: 0, x: 1, y: 2, z: 3, qx: 4, qy: 5, qz: 6, qw: 7, hx: 8, hy: 9, hz: 10 } as const;
-/** police_tools() kinds. */
-export const TOOL_KIND = { barrier: 0, spikes: 1 } as const;
+/** police_tools() kinds: solid barrier, spike strip, the gap's wooden barricade, a loose piece of a smashed one. */
+export const TOOL_KIND = { barrier: 0, spikes: 1, barricade: 2, piece: 3 } as const;
 
 /** `race_standings()` record (wp_wasm::race::STANDING_STRIDE floats per racer). */
 export const RACE_STRIDE = 10;
