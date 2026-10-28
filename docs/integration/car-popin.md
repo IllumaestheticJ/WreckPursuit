@@ -93,7 +93,21 @@ Cars still appear inside the camera's view cone (31–38 per downtown shot) but 
 (grey rings).
 
 ## Perf numbers
-PERF_PLACEHOLDER
+Cloud container (4 vCPU, Xeon 2.1 GHz), release.
+
+| Measurement | Before | After | Budget |
+|---|---|---|---|
+| Native traffic, combined world, ~400 agents (`density_scale` 4), player riding city traffic downtown, per 60 Hz frame: mean / p99 | 0.10–0.12 / 0.32–0.36 ms | 0.10–0.11 / 0.40–0.55 ms | 2 ms |
+| Same, highway ride: mean / p99 | 0.03–0.08 / 0.18–0.32 ms | 0.05–0.07 / 0.58–0.60 ms | 2 ms |
+| `CityMap::line_of_sight`, combined world, 300 / 600 / 1000 m sight lines | 1.8 / 3.7 / 4.6 µs | — | — |
+| Browser `e2e/perf_check.mjs` desktop chase (SwiftShader, auto = low profile): fps / p50 frame / draw calls / triangles | 3.3 fps / 283 ms / 419 / 369k | 4.0 fps / 217 ms / 417 / 360k | < 600 draw calls, ≤ 400k tris |
+| Same, rainy night | 3.5 fps / 250 ms / 388 / 337k | 4.0 fps / 217 ms / 382 / 326k | same |
+
+p99 lands on the spawn-update frames (one in 15), where the line-of-sight veto runs; worst single
+frames (1–4 ms) are container noise in both builds. The browser runs fail the machine-dependent
+real-time-factor and allocation checks identically before and after on this box (pre-existing).
+Free Roam frame times per shot are in `docs/media/popin/*_summary.json` (gfx high, ~1 fps under
+SwiftShader, not comparable across runs).
 
 ## Goldens
 GOLDENS_PLACEHOLDER
