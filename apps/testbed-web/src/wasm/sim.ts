@@ -617,6 +617,8 @@ export const sim = {
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
   debugParkNearPolice: (entity: number, aheadM: number): number => wasm.debug_park_near_police(entity, aheadM),
   /** Aim `entity` at a parked car (`prop` < 0: the nearest) at `speed` m/s; returns the prop index. */
+  /** Debug / e2e: write the car off (total loss, dents as they are); not in replays. */
+  debugTotalLoss: (entity: number): void => wasm.debug_total_loss(entity),
   debugKnockProp: (entity: number, prop: number, speed: number): number => wasm.debug_knock_prop(entity, prop, speed),
 
   // ----- career (machine G; crates/wp_wasm/src/career.rs). Every call throws on refusal. ---
@@ -654,6 +656,13 @@ export const sim = {
   careerNextNight: (): CareerView => JSON.parse(wasm.career_next_night()),
   careerBuyInformant: (tier: string): CareerView => JSON.parse(wasm.career_buy_informant(tier)),
   careerPayOffBounty: (): CareerView => JSON.parse(wasm.career_pay_off_bounty()),
+  // ----- tow service (crates/wp_wasm/src/tow.rs) ---------------------------------------------
+  /** Why the career run's car cannot be driven on, or null (poll a few times a second). */
+  careerTowNeed: (): TowNeed | null => (wasm.career_tow_need() || null) as TowNeed | null,
+  /** Tow destinations and prices for car `uid` (live during its run). */
+  careerTowOffer: (uid: number): TowOffer => JSON.parse(wasm.career_tow_offer_json(uid)),
+  /** Tow car `uid` to `kind` (`Garage` | `Home`) `id`; from a run this ends the run. */
+  careerTow: (uid: number, kind: string, id: string): TowReceipt => JSON.parse(wasm.career_tow(uid, kind, id)),
   // ----- car lots (crates/wp_wasm/src/lots.rs) ----------------------------------------------
   careerLot: (lotId: string): LotStockView => JSON.parse(wasm.career_lot_json(lotId)),
   careerBuyListing: (lotId: string, slot: number): CareerView => JSON.parse(wasm.career_buy_listing(lotId, slot)),
@@ -713,6 +722,9 @@ import type {
   RepairQuote,
   RunClose,
   ShopRequest,
+  TowNeed,
+  TowOffer,
+  TowReceipt,
   WorkshopScreen,
 } from "../../../ui-kit/src/garage/types";
 

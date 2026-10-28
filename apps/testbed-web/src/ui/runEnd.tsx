@@ -102,7 +102,7 @@ function Ledger({ lines }: { lines: LedgerLine[] }) {
   );
 }
 
-function RunEndPanel(props: { report: RunReport; error: string | null; onRepair: () => void; onRestart: () => void; onGarage?: () => void }) {
+function RunEndPanel(props: { report: RunReport; error: string | null; onRepair: () => void; onRestart: () => void; onGarage?: () => void; onTow?: () => void }) {
   const r = props.report;
   const caught = r.outcome === "Captured" || r.outcome === "CapturedTotalLoss";
   return (
@@ -140,6 +140,11 @@ function RunEndPanel(props: { report: RunReport; error: string | null; onRepair:
             Repair &amp; continue (<Money value={r.continue_cost} />)
           </Button>
           <Button onClick={props.onRestart}>Restart</Button>
+          {props.onTow && r.car_status === "Garage" && (
+            <Button onClick={props.onTow} testid="run-end-tow" title="tow the car to a repair shop or your garage">
+              Call a tow truck
+            </Button>
+          )}
           {props.onGarage && <Button onClick={props.onGarage}>Garage</Button>}
         </div>
       </Panel>
@@ -179,6 +184,8 @@ export class RunEndView {
       onClose: () => void;
       /** Career runs (machine G): "Garage" ends the run and opens the garage; `null` hides it. */
       garage?: () => (() => void) | null;
+      /** Career runs: "Call a tow truck" (the tow service's destinations); `null` hides it. */
+      tow?: () => (() => void) | null;
     },
   ) {}
 
@@ -233,6 +240,7 @@ export class RunEndView {
             onRepair={() => this.repair()}
             onRestart={() => this.actions.restart()}
             onGarage={this.actions.garage?.() ?? undefined}
+            onTow={this.actions.tow?.() ?? undefined}
           />
         </div>,
         this.el,

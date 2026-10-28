@@ -112,6 +112,57 @@ export interface CarView {
   damage_before_capture: boolean;
   /** Tyres: a repair never fixes them; replace them here. */
   tires: TireView;
+  /** Where the car sits (`career::SpotView`; null in the pound): its home garage, the repair
+   * shop a tow took it to, or `Road` (a wreck left where it stopped). Older hosts send none. */
+  spot?: CarSpotView | null;
+}
+
+/** `career::SpotView`: a place (`CareerPlace`) or out on the road. */
+export interface CarSpotView {
+  kind: PlaceKind | "Road";
+  id: string;
+  name: string;
+}
+
+/** `tow::TowNeed`: why the car cannot be driven on. */
+export type TowNeed = "Wrecked" | "EngineDead" | "WheelOff" | "Flipped" | "Stuck";
+
+/** `tow::TowDestination`. */
+export interface TowDestination {
+  place: CareerPlace;
+  city_label: string;
+  /** Road distance, m. */
+  metres: number;
+  price: number;
+  /** The nearest repair shop: tows even without the cash (the shortfall becomes debt). */
+  nearest: boolean;
+  /** The player can take this tow now. */
+  available: boolean;
+}
+
+/** `tow::TowOffer` (`career_tow_offer_json`). */
+export interface TowOffer {
+  car: number;
+  car_name: string;
+  from: [number, number];
+  need: TowNeed | null;
+  /** Why no tow is possible (police, pound); destinations are then empty. */
+  refused: string | null;
+  cash: number;
+  /** The tow ends the run being driven. */
+  ends_run: boolean;
+  destinations: TowDestination[];
+}
+
+/** `tow::TowReceipt` (`career_tow`). */
+export interface TowReceipt {
+  car: number;
+  place: CareerPlace;
+  metres: number;
+  price: number;
+  cash_after: number;
+  ledger: LedgerLine[];
+  run: RunClose | null;
 }
 
 /** `career::TireView` (FL, FR, RL, RR). */
@@ -447,6 +498,11 @@ export interface CareerApi {
   waypoint?(): CareerPlace | null;
   /** Start career runs from the player's garage `id`. */
   setHome?(id: string): CareerView;
+  /** The tow offer for car `uid` (optional: hosts without the tow service hide "Tow to …"). */
+  towOffer?(uid: number): TowOffer;
+  /** Tow car `uid` to a destination of its offer; the player is then at that place
+   * (`place()`), so its garage work opens. */
+  tow?(uid: number, to: CareerPlace): CareerView;
   close(): void;
 }
 

@@ -9,11 +9,14 @@
  * - a safehouse: the workshop (as its pull-in panel offers);
  * - a car lot: selling to the dealer, walking that lot.
  *
- * A car that cannot be driven is towed: its repairs are open anywhere (else the player would be
- * stuck). With no usable car at all the player takes a taxi to a lot (`visitLot`). Insurance,
- * the pound, informants and the bounty are phone calls: open anywhere.
+ * A car that cannot be driven is worked on where it sits (`CarView.spot`), not where the player
+ * is: at a repair shop the tow took it to, everything of that shop; anywhere else (a wreck left
+ * on the road, a dead car at home) it needs the tow service first (`tow`: "Tow to …", owner
+ * 2026-10-28). Hosts that do not say where cars sit keep the old rule (a wreck's repairs are
+ * open anywhere). With no usable car at all the player takes a taxi to a lot (`visitLot`).
+ * Insurance, the pound, informants and the bounty are phone calls: open anywhere.
  */
-import type { CareerPlace, CarView } from "./types";
+import type { CareerPlace, CarSpotView, CarView } from "./types";
 
 /** What is open for one car at one place. */
 export interface Access {
@@ -23,32 +26,44 @@ export interface Access {
   tires: boolean;
   sell: boolean;
   repair: boolean;
-  /** Repairs are at this shop (by name) only; null = the panel's own pick (tow, old hosts). */
+  /** Repairs are at this shop (by name) only; null = the panel's own pick (old hosts). */
   repairShop: string | null;
-  /** The repairs are a tow (the car cannot be driven to a shop). */
+  /** The car cannot be driven and is not at a repair shop: offer the tow service ("Tow to …"). */
   tow: boolean;
 }
 
 /** Everything open, repairs at any shop: hosts that do not say where the player is. */
 export const OPEN: Access = { workshop: true, mods: true, tune: true, tires: true, sell: true, repair: true, repairShop: null, tow: false };
 
-/** What is open for `car` with the player at `place` (`undefined`: the host does not track it). */
-export function garageAccess(place: CareerPlace | null | undefined, car: Pick<CarView, "drivable">): Access {
-  if (place === undefined) return OPEN;
+/** What a place offers (the player, or a car that cannot move, is there). */
+function atPlace(place: CareerPlace | null): Access {
   const kind = place?.kind ?? null;
   const garage = kind === "Garage" || kind === "Home";
   const shop = kind === "Garage";
-  const tow = !shop && !car.drivable;
   return {
     workshop: garage || kind === "Safehouse",
     mods: garage,
     tune: garage,
     tires: garage,
     sell: kind === "Lot",
-    repair: shop || tow,
+    repair: shop,
     repairShop: shop ? place!.name : null,
-    tow,
+    tow: false,
   };
+}
+
+/** What is open for `car` with the player at `place` (`undefined`: the host does not track it). */
+export function garageAccess(place: CareerPlace | null | undefined, car: Pick<CarView, "drivable"> & { spot?: CarSpotView | null }): Access {
+  if (place === undefined) return OPEN;
+  if (car.drivable) return atPlace(place);
+  if (car.spot === undefined) {
+    // Old hosts: the wreck is towed in by whichever shop the player picks.
+    const a = atPlace(place);
+    return a.repair ? a : { ...a, repair: true, repairShop: null, tow: true };
+  }
+  if (car.spot === null) return atPlace(null);
+  const where = car.spot.kind === "Road" ? null : { kind: car.spot.kind, id: car.spot.id, name: car.spot.name };
+  return { ...atPlace(where), tow: car.spot.kind !== "Garage" };
 }
 
 /** The lot visit is open: the player is at that lot, or has no car they can drive there. */

@@ -42,6 +42,7 @@ import type {
 } from "./types";
 import { loadRoamChoice, pickTextFile, saveRoamChoice } from "./store";
 import { type Access, canWalkLot, garageAccess, placeLine } from "./access";
+import { TOW_NEED, TowList, TowNotes, towLedgerLabel } from "./Tow";
 import { isStockTune, normalizeTune, STOCK_TUNE, TUNE_SLIDERS, TUNE_STEPS, tuneSummary } from "./tune";
 import "./garage.css";
 
@@ -71,6 +72,7 @@ const REASON: Record<string, string> = {
   Fine: "Fine",
   Bail: "Bail",
   Towing: "Towing",
+  Tow: "Tow",
   Escape: "Escape",
   BountyCleared: "Bounty cleared",
   InformantTip: "Informant",
@@ -118,6 +120,8 @@ function CarCard({ car, selected, onSelect }: { car: CarView; selected: boolean;
       <div class="wp-row" style={{ gap: "0.3em", flexWrap: "wrap" }}>
         {car.active && <Badge tone="ok">Active</Badge>}
         {car.location === "Impound" && <Badge tone="danger">Pound</Badge>}
+        {car.location === "Garage" && car.spot?.kind === "Road" && <Badge tone="warn">On the road</Badge>}
+        {car.location === "Garage" && car.spot?.kind === "Garage" && <Badge tone="info" title={`towed to ${car.spot.name}`}>At {car.spot.name}</Badge>}
         {car.total_loss && (
           <Badge tone="danger" solid>
             Wrecked
@@ -159,6 +163,8 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; at
   const [scrapAsk, setScrapAsk] = useState(false);
   if (car.location !== "Garage") return null;
   if (!access.repair) {
+    // A car that needs the tow service gets the Tow panel instead.
+    if (access.tow && api.towOffer && api.tow) return null;
     return car.repair_lines.length === 0 ? null : (
       <Panel title="Repair" tag="at a shop">
         <p class="wp-dim" data-testid="repair-drive-to">
@@ -221,7 +227,7 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; at
               </Button>
             </div>
           )}
-          {access.tow && <p class="wp-dim" data-testid="repair-tow">The car can't be driven: the shop's tow truck brings it in.</p>}
+          {access.tow && !api.towOffer && <p class="wp-dim" data-testid="repair-tow">The car can't be driven: the shop's tow truck brings it in.</p>}
           {wanted && shop === "Legit" && <p class="wp-warn">You are wanted ({view.carried_level}): a legit shop will report you.</p>}
           <table class="wp-table" data-testid="repair-lines">
             <thead>
@@ -284,6 +290,33 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; at
           )}
         </>
       )}
+    </Panel>
+  );
+}
+
+/** "Tow to …": a car that cannot be driven and is not at a repair shop (a wreck left on the
+ * road, a dead car at home). The only garage action that is not drive-to. */
+function TowPanel(props: { car: CarView; api: CareerApi; access: Access; run: (f: () => CareerView) => void }) {
+  const { car, api, access } = props;
+  if (car.location !== "Garage" || !access.tow || !api.towOffer || !api.tow) return null;
+  let offer;
+  try {
+    offer = api.towOffer(car.uid);
+  } catch (e) {
+    return (
+      <Panel title="Tow to …">
+        <p class="wp-danger">{String((e as Error).message ?? e).replace(/^wp_wasm: /, "")}</p>
+      </Panel>
+    );
+  }
+  const where = car.spot?.kind === "Road" ? "out on the road" : car.spot ? `at ${car.spot.name}` : "";
+  return (
+    <Panel title="Tow to …" tag={where}>
+      <p class="wp-dim" data-testid="tow-why" style={{ marginTop: 0 }}>
+        {offer.need ? `${TOW_NEED[offer.need]} ` : ""}It can't be driven {where}: the tow service brings it to a repair shop or one of your garages.
+      </p>
+      <TowList offer={offer} onPick={(d) => props.run(() => api.tow!(car.uid, d.place))} />
+      <TowNotes offer={offer} />
     </Panel>
   );
 }
@@ -515,6 +548,7 @@ function CarsTab(props: { view: CareerView; api: CareerApi; at: string | null; r
             </p>
           )}
         </Panel>
+        <TowPanel key={`w${car.uid}`} car={car} api={api} access={access} run={props.run} />
         <RepairPanel key={`r${car.uid}`} car={car} view={view} api={api} at={props.at} access={access} run={props.run} />
         <TiresPanel key={`t${car.uid}`} car={car} view={view} api={api} access={access} run={props.run} />
         <InsurancePanel car={car} view={view} api={api} run={props.run} />
@@ -740,6 +774,8 @@ function PoundTab(props: { view: CareerView; api: CareerApi; run: (f: () => Care
 
 /** Ledger line label; career / betting entries are `Adjustment`s with a `career:` / `bet:` note. */
 function reasonLabel(l: CareerView["ledger"][number]): string {
+  const tow = towLedgerLabel(l);
+  if (tow) return tow;
   const note = (l.detail as { Adjustment?: { note?: string } } | null)?.Adjustment?.note;
   if (note) {
     const [scope, kind, raw] = note.split(":");
