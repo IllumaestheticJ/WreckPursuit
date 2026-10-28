@@ -43,7 +43,7 @@ import { ControlsPanel } from "./ui/controls";
 import { DEBUG_LAYERS, layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
-import { clearDebris, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
+import { clearDebris, debrisAudit, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
 import { LodDirector, metaIndicators } from "./render/lod";
 import { PoliceToolsView } from "./render/police_tools";
 import { PropView } from "./render/props";
@@ -2528,6 +2528,9 @@ async function main(): Promise<void> {
     meshTimings,
     /** Crash effects: `fx.stats()`, `fx.setQuality("low" | "med" | "high")` (render/fx). */
     fx,
+    /** Detached-panel debris (render/panels.ts): `debris()` lists every debris mesh with its
+     * shading inputs (normals, emissive, broken lamp; e2e/debris_glow.mjs). */
+    debris: debrisAudit,
     /** Turn signals (e2e/signals.mjs): `probe(true)` records each traffic car's flags and lit
      * lamps per frame into `rows()` (render/lod.ts IndicatorRow); `stalk` is the player's
      * cosmetic stalk, `player()` its lit lamps and `playerLenses()` its mesh's indicator lenses. */
