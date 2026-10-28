@@ -54,8 +54,12 @@ pub const SPAWN_SPACING_M: f32 = 80.0;
 /// A roamer stuck (or wrecked) this long is put back on the road, s.
 pub const RESCUE_STUCK_S: f32 = 30.0;
 
-/// ... but only while the player is at least this far from it (out of sight), m.
+/// ... but only while the player is at least this far from it, m, and cannot see it vanish
+/// or come out (`wp_world::World::in_player_view`, lead/car-popin).
 pub const RESCUE_UNSEEN_M: f32 = 150.0;
+
+/// Candidate slots per rescue: the first one out of the player's view is used.
+const RESCUE_SLOT_CANDIDATES: usize = 8;
 
 /// Ticks between rescue checks (4 Hz).
 const RESCUE_EVERY_TICKS: u64 = 60;
@@ -299,8 +303,9 @@ impl RoamRun {
     }
 
     /// Roamers to put back on the road now (checked at 4 Hz): stranded or wrecked for
-    /// [`RESCUE_STUCK_S`], at least [`RESCUE_UNSEEN_M`] from `player`, each with a free slot
-    /// of its haunt away from every vehicle. Call [`RoamRun::rescued`] once the session has
+    /// [`RESCUE_STUCK_S`], at least [`RESCUE_UNSEEN_M`] from `player` and out of its view
+    /// (`World::in_player_view`), each with a free slot of its haunt away from every vehicle
+    /// and out of the player's view too. Call [`RoamRun::rescued`] once the session has
     /// applied each.
     pub fn rescues(&self, sim: &Sim, player: Option<EntityId>) -> Vec<Rescue> {
         if !sim.tick().is_multiple_of(RESCUE_EVERY_TICKS) {
@@ -323,7 +328,9 @@ impl RoamRun {
             let (Some(&(idx, haunt)), Some(p)) = (self.who.get(&e), pos_of(e)) else {
                 continue;
             };
-            if me.is_some_and(|m| geom::dist(m, geom::xy(p)) < RESCUE_UNSEEN_M) {
+            if me.is_some_and(|m| geom::dist(m, geom::xy(p)) < RESCUE_UNSEEN_M)
+                || sim.world().in_player_view(p)
+            {
                 continue;
             }
             let mut avoid = taken.clone();
@@ -331,15 +338,15 @@ impl RoamRun {
             if let Some(m) = me {
                 avoid.push(m);
             }
-            let slot = spawn_slots(
+            let slots = spawn_slots(
                 sim.world(),
                 self.roamers.haunts(),
-                &[haunt],
+                &[haunt; RESCUE_SLOT_CANDIDATES],
                 &avoid,
                 SPAWN_SPACING_M.max(RESCUE_UNSEEN_M),
                 sim.tick() ^ (e.0 as u64) << 32,
             );
-            if let Some(slot) = slot.first() {
+            if let Some(slot) = slots.iter().find(|s| !sim.world().in_player_view(s.pos)) {
                 out.push(Rescue {
                     entity: e,
                     idx,

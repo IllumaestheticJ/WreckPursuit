@@ -187,6 +187,22 @@ pub fn max_spawnable_boost(f: f32) -> f32 {
 /// is this close, m. Everyone else follows [`siren`].
 pub const SIREN_RADIUS_M: f32 = 60.0;
 
+/// Line-of-sight veto ([`TrafficConfig::view_radius_m`]): driver's eye above the player's
+/// position, m.
+pub const LOS_EYE_UP_M: f32 = 1.3;
+/// Chase cameras the veto looks from, `[back, up]` from the player's position along its
+/// forward direction, m: the testbed's near chase (5.6 m back, 1.8 m up, plus pull-back and
+/// pitch) and far chase (8.5 m, 2.9 m, plus pull-back).
+pub const LOS_CAMS_M: [[f32; 2]; 2] = [[6.0, 2.2], [10.0, 3.0]];
+/// The point of a traffic car the camera must not see appear: its roof above the road, m.
+pub const LOS_ROOF_UP_M: f32 = 1.4;
+/// At most this many line-of-sight tests per spawn update (every 0.25 s), so its cost stays
+/// bounded (2-5 µs each on the combined world, so <= ~0.7 ms in that one frame). Past it,
+/// every car still to check counts as seen: no spawn or despawn until the next update.
+pub const LOS_BUDGET: u32 = 160;
+/// The same for removing wrecks out of sight in the LOD update (a handful of cars).
+pub const LOS_BUDGET_WRECKS: u32 = 24;
+
 const NONE: u32 = NO_SEG;
 const HALF_L: f32 = CAR_LENGTH_M * 0.5;
 const SPAWN_PERIOD_S: f32 = 0.25;
@@ -491,6 +507,13 @@ pub struct TrafficConfig {
     /// This is the distance at which traffic pops in, so it is kept beyond the draw distance
     /// a player needs at highway speed (default 320 m).
     pub sight_radius_m: f32,
+    /// Past `sight_radius_m`, an agent a player's camera can see (line of sight from the
+    /// driver's eye or the chase camera, now or 1 s ahead, [`CityMap::line_of_sight`]: terrain,
+    /// buildings, bridge decks, tunnels) within this distance can be neither spawned nor
+    /// despawned either, m. Cars appear behind buildings, crests and bends, never on screen.
+    /// Default 1000 m: the testbed's thinnest (clear daytime) fog hides about 92 % of a car
+    /// there and it is ~3 px long at 720p (owner report "cars render in free roam too close").
+    pub view_radius_m: f32,
     /// Agents within this distance of a player or race route become physical, m.
     pub physical_radius_m: f32,
     /// Fraction of casual drivers.
@@ -522,6 +545,7 @@ impl Default for TrafficConfig {
             // with it so the density around the player stays about the same.
             active_radius_m: 440.0,
             sight_radius_m: 320.0,
+            view_radius_m: 1000.0,
             physical_radius_m: 80.0,
             casual_fraction: 0.25,
             aggressive_fraction: 0.05,
@@ -3553,6 +3577,7 @@ impl Traffic {
             best
         };
         let mut cands: Vec<(f32, u32)> = Vec::new();
+        let mut wreck_los_left = LOS_BUDGET_WRECKS;
         // Physical agents that may be demoted, with their distance (cap shrink, below).
         let mut kept: Vec<(f32, u32)> = Vec::new();
         let mut physical = 0usize;
@@ -3582,6 +3607,12 @@ impl Traffic {
                 if a.disabled
                     && d > r + 100.0
                     && !self.visible(geom::xy(self.poses[i].p), inp.tracked)
+                    && !self.in_line_of_sight(
+                        map,
+                        self.poses[i].p,
+                        inp.tracked,
+                        Some(&mut wreck_los_left),
+                    )
                 {
                     self.agents[i].despawn = true;
                     self.stats.despawned += 1;
@@ -3669,6 +3700,70 @@ impl Traffic {
             let ahead = [p[0] + t.vel[0], p[1] + t.vel[1]];
             geom::dist(q, p) < r || geom::dist(q, ahead) < r
         })
+    }
+
+    /// Whether a player's camera can see a car standing on the road at `q` (road height):
+    /// within [`TrafficConfig::view_radius_m`] with a clear line of sight from the driver's
+    /// eye or the chase camera behind the car, now or 1 s ahead. The spawn / despawn veto on
+    /// top of [`Traffic::visible`]; never while populating (nobody has seen the city yet).
+    /// Up to 6 [`CityMap::line_of_sight`] calls per player, so callers ask only for the few
+    /// agents and spawn spots that would otherwise appear or vanish. `budget`: tests left
+    /// (counted down; at 0 everything counts as seen), `None` = not budgeted.
+    fn in_line_of_sight(
+        &self,
+        map: &CityMap,
+        q: V3,
+        tracked: &[TrackedVehicle],
+        mut budget: Option<&mut u32>,
+    ) -> bool {
+        if self.populating {
+            return false;
+        }
+        let r = self.config.view_radius_m;
+        let roof = [q[0], q[1], q[2] + LOS_ROOF_UP_M];
+        // One test; once the budget is spent, everything counts as seen.
+        let mut los = |a: V3| -> bool {
+            if let Some(left) = budget.as_deref_mut() {
+                if *left == 0 {
+                    return true;
+                }
+                *left -= 1;
+            }
+            map.line_of_sight(a, roof)
+        };
+        tracked.iter().filter(|t| t.player).any(|t| {
+            let ahead = [
+                t.pos[0] + t.vel[0],
+                t.pos[1] + t.vel[1],
+                t.pos[2] + t.vel[2],
+            ];
+            // Standing still: "1 s ahead" is the same place.
+            let moving = t.vel[0].abs() + t.vel[1].abs() > 0.5;
+            let f = t.forward;
+            [t.pos, ahead]
+                .iter()
+                .take(if moving { 2 } else { 1 })
+                .any(|p| {
+                    if geom::dist(geom::xy(*p), geom::xy(q)) >= r {
+                        return false;
+                    }
+                    let cam =
+                        |[back, up]: [f32; 2]| [p[0] - f[0] * back, p[1] - f[1] * back, p[2] + up];
+                    los(cam(LOS_CAMS_M[1]))
+                        || los(cam(LOS_CAMS_M[0]))
+                        || los([p[0], p[1], p[2] + LOS_EYE_UP_M])
+                })
+        })
+    }
+
+    /// Whether a car standing at `q` (road height) would be seen by a player: within
+    /// [`TrafficConfig::sight_radius_m`] of one (now or 1 s ahead), or in the line of sight of
+    /// its driver's eye or chase camera within [`TrafficConfig::view_radius_m`]. The rule traffic
+    /// spawns and despawns by; other systems that make a car appear or vanish (street racers,
+    /// free-roam roamers) ask it through [`crate::World::in_player_view`]. Not budgeted: up to
+    /// 6 line-of-sight tests per player.
+    pub fn in_player_view(&self, map: &CityMap, q: V3, tracked: &[TrackedVehicle]) -> bool {
+        self.visible(geom::xy(q), tracked) || self.in_line_of_sight(map, q, tracked, None)
     }
 
     /// Per-zone density targets (after scaling to the cap) for the current inputs.
@@ -3853,6 +3948,8 @@ impl Traffic {
             kind_c[kind_of(z)] += counts[z] as f32;
         }
 
+        // Line-of-sight tests left this update (despawns, then spawn spots).
+        let mut los_left = LOS_BUDGET;
         // Despawn: out of the active area, map-closed lanes, stuck, or zone surplus.
         let mut removed_in_zone = vec![false; targets.len()];
         for i in 0..self.agents.len() {
@@ -3876,8 +3973,12 @@ impl Traffic {
                 !removed_in_zone[z]
                     && ((kind_c[k] > kind_t[k] * 1.04 + 1.0 && c > t + 0.5) || c > t * 1.5 + 3.0)
             });
-            // A car stuck inside a junction box goes too (it is what holds the box).
-            if (outside || closed || stuck || surplus) && (!in_connector || stuck) {
+            // A car stuck inside a junction box goes too (it is what holds the box). Never one
+            // a player's camera can see (it would vanish on screen).
+            if (outside || closed || stuck || surplus)
+                && (!in_connector || stuck)
+                && !self.in_line_of_sight(map, self.poses[i].p, inp.tracked, Some(&mut los_left))
+            {
                 if timed_out {
                     self.stats.stuck_recycled += 1;
                 } else if jammed {
@@ -3909,7 +4010,7 @@ impl Traffic {
             let mut want = deficit.round().max(1.0) as usize;
             while want > 0 && spawned < budget && room > 0 && kind_c[k] < kind_t[k] - 0.5 {
                 want -= 1;
-                if self.try_spawn(map, inp, z, global, &focus) {
+                if self.try_spawn(map, inp, z, global, &focus, &mut los_left) {
                     spawned += 1;
                     room -= 1;
                     kind_c[k] += 1.0;
@@ -3925,6 +4026,7 @@ impl Traffic {
         z: usize,
         global: bool,
         focus: &[V2],
+        los_left: &mut u32,
     ) -> bool {
         let n = self.zone_samples[z].len();
         if n == 0 {
@@ -3984,6 +4086,10 @@ impl Traffic {
                     .iter()
                     .any(|h| geom::dist(geom::xy(h.pos), smp.pos) < h.radius_m + 30.0)
             {
+                continue;
+            }
+            // Never where a player's camera can see the spot (pop-in on screen).
+            if self.in_line_of_sight(map, seg.point_at(s).0, inp.tracked, Some(los_left)) {
                 continue;
             }
             let personality = {

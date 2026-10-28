@@ -72,6 +72,14 @@ car and yielding to sirens; head-on emergency braking; speeding, wrong-way, red-
 collision violations; seamless LOD promotion/demotion (pose jump < 0.6 m, speed continuous,
 physical cars stay on the road); routes, circuits and closures; parked cars.
 
+Traffic pop-in (`tests/popin.rs`, lead/car-popin): on the combined world (Port Vesper +
+Ashpeak), six 40 s drives (highway / city, noon / night, two seeds) riding with traffic: no
+agent spawns within N = 320 m of the player, none in a chase camera's line of sight within
+1000 m (cameras placed independently of the traffic code), at most 1 % of despawns in view;
+cars within 150 m and cars in view stay ≥ 70 % of the radius-only rule; parked cars never
+change during play. `classify_browser_popins` (ignored) classifies the browser pop-ins of
+`apps/testbed-web/e2e/popin_shots.mjs` by line of sight.
+
 Blocked vehicles (`tests/blocked.rs`, playtest row 32): a stopped car in one lane of a 1+1
 street is passed in the oncoming lane (or turned away from) with no contact; a car parked across
 the lane; a 2+2 arterial (lane changes, never the oncoming lane); a single-lane one-way street
@@ -576,7 +584,17 @@ whole map is active (headless tests). Every 0.25 s: despawn out-of-area, closed-
 zones with deficits on free lane spots (≥ 12 m gaps). **Sightline rule (prototype)**: nothing
 spawns or despawns within 320 m of a player's current position or of where it will be in 1 s
 (was 150 m / 400 m active until the LOD pop-in fix, playtest row 25: cars popped in and out
-in plain view on Port Vesper's highway and hill sightlines; `tests/lod_draw.rs` measures it). Agents in
+in plain view on Port Vesper's highway and hill sightlines; `tests/lod_draw.rs` measures it).
+**Line-of-sight veto** (lead/car-popin, owner report "cars also render in free roam too close"):
+past 320 m an agent can still be neither spawned nor despawned where a player's driver eye or
+chase camera (near 6 m back / 2.2 m up, far 10 m / 3 m; now or 1 s ahead) has a clear
+`CityMap::line_of_sight` to its roof within `view_radius_m` (1000 m: the testbed's thinnest
+daytime fog hides ~92 % of a car there, ~3 px at 720p). So cars appear behind buildings, crests
+and bends, or beyond 1 km, never on screen (before: about one spawn in ten, 40–85 a minute on a
+highway drive, appeared in plain view 320–500 m away). At most `LOS_BUDGET` (160) tests per
+spawn update; past it every car counts as seen until the next update. The same rule is public
+as `World::in_player_view` for anything else that makes a car appear or vanish (street racers,
+free-roam roamers in `wp_wasm`). `tests/popin.rs` checks it on the combined world. Agents in
 view are left out of the per-zone counts; the part of the target that lies in view and is not
 yet filled by cars in view is added to the spawnable zones around the players (≤ 2×,
 `MAX_SPAWNABLE_BOOST`; at night less, `max_spawnable_boost(f_time)`: none at or below 0.2 —
@@ -798,6 +816,11 @@ per 60 Hz frame (0.27 ms avg with collision diagnostics); 10-min soaks × 3 seed
 aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
 
 ## Known gaps
+- Traffic pop-in: a car that reaches the end of a road with no way on (a dead end at the map
+  edge) is removed wherever it is, even in view (0.1 % of despawns in `tests/popin.rs`). The
+  line-of-sight veto only counts terrain, buildings, decks, tunnels and structures (not trees,
+  props or other cars), and the populate at session start keeps its 150 m rule (nobody has seen
+  the city yet).
 - Water is scenery: a car that leaves a bridge drives on the river bed (no buoyancy, drag,
   drowning or engine flooding yet). `CityMap::water_surface_at` is there for whoever adds it.
 - The Kettle Street drawbridge, rail line and Westline viaduct from `docs/design/CITY.md` are

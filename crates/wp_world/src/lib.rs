@@ -454,6 +454,15 @@ impl World {
         self.traffic.views(&self.map)
     }
 
+    /// Whether a car standing at `q` (road height) would be seen by a player tracked last tick
+    /// ([`World::set_tracked_vehicles`]): within `TrafficConfig::sight_radius_m` of one, or in
+    /// its driver's or chase camera's line of sight within `TrafficConfig::view_radius_m`.
+    /// Traffic never spawns or despawns where this holds; anything else that makes a car
+    /// appear or vanish (street racers, free-roam roamers) should not either.
+    pub fn in_player_view(&self, q: [f32; 3]) -> bool {
+        self.traffic.in_player_view(&self.map, q, &self.tracked)
+    }
+
     /// Number of civilian agents.
     pub fn agent_count(&self) -> usize {
         self.traffic.agents().len()
