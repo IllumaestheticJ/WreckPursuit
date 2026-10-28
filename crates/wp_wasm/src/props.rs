@@ -32,6 +32,8 @@ pub const KIND_CONE: f32 = 1.0;
 pub const KIND_KRAIL: f32 = 2.0;
 /// See [`KIND_PARKED_CAR`].
 pub const KIND_GUARD_RAIL: f32 = 3.0;
+/// See [`KIND_PARKED_CAR`].
+pub const KIND_WATER_BARREL: f32 = 4.0;
 
 /// Position change below which a prop counts as not moved, m.
 const MOVE_EPS_M: f32 = 1e-4;
@@ -45,6 +47,7 @@ pub fn kind_code(kind: PropKind) -> f32 {
         PropKind::Cone => KIND_CONE,
         PropKind::KRail => KIND_KRAIL,
         PropKind::GuardRail => KIND_GUARD_RAIL,
+        PropKind::WaterBarrel => KIND_WATER_BARREL,
     }
 }
 
@@ -187,7 +190,12 @@ mod tests {
         assert!(s.sim().prop_count() > 100, "city has parked cars");
         assert_eq!(list.len(), s.sim().prop_count() * PROP_STRIDE);
         for r in list.chunks(PROP_STRIDE) {
-            assert!(r[0] == KIND_PARKED_CAR || r[0] == KIND_CONE || r[0] == KIND_KRAIL);
+            assert!(
+                r[0] == KIND_PARKED_CAR
+                    || r[0] == KIND_CONE
+                    || r[0] == KIND_KRAIL
+                    || r[0] == KIND_WATER_BARREL
+            );
             let qn = r[4] * r[4] + r[5] * r[5] + r[6] * r[6] + r[7] * r[7];
             assert!((qn - 1.0).abs() < 1e-3, "unit quaternion");
             assert!(r[8] > 0.1 && r[9] > 0.1 && r[10] > 0.1, "half extents");
