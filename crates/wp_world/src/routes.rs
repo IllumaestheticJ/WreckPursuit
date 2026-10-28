@@ -162,6 +162,28 @@ pub fn shortest_path(map: &CityMap, from: (SegId, f32), to: (SegId, f32)) -> Opt
     None
 }
 
+/// A point of a lane change from lane `x` to its neighbour `to`: abreast of arc length `sx` on
+/// `x`, `t` (0..1, eased) of the way across.
+pub fn lane_change_point(map: &CityMap, x: SegId, to: SegId, sx: f32, t: f32) -> V3 {
+    let p = map.seg(x).point_at(sx).0;
+    let sb = map.seg(to);
+    let q = sb
+        .point_at(sb.project(geom::xy(p)).s.clamp(0.0, sb.length))
+        .0;
+    let w = lane_change_ease(t);
+    [
+        p[0] + (q[0] - p[0]) * w,
+        p[1] + (q[1] - p[1]) * w,
+        p[2] + (q[2] - p[2]) * w,
+    ]
+}
+
+/// Smoothstep easing of a lane change's progress `t` (0..1).
+pub fn lane_change_ease(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 fn build_route(
     map: &CityMap,
     segs: Vec<SegId>,
@@ -172,21 +194,39 @@ fn build_route(
     let mut polyline: Vec<V3> = Vec::new();
     let mut lanes = Vec::new();
     let mut turn_marks: Vec<usize> = Vec::new();
-    let last = segs.len() - 1;
-    for (k, &sid) in segs.iter().enumerate() {
+    let spans = route_spans(map, &segs, s_start, s_end);
+    for (k, &(sid, a, b)) in spans.iter().enumerate() {
         let s = map.seg(sid);
-        let a = if k == 0 { s_start } else { 0.0 };
-        let b = if k == last { s_end } else { s.length };
         if let Some(l) = s.lane() {
             lanes.push(l);
         }
+        // A lane left by a lane change: the line moves across over its last stretch.
+        let change = spans
+            .get(k + 1)
+            .filter(|n| is_lane_change(map, sid, n.0))
+            .map(|n| (n.0, (b - LANE_CHANGE_M).max(a)));
         let mut pts = vec![s.point_at(a).0];
         for (i, p) in s.pts.iter().enumerate() {
-            if s.cum[i] > a + 0.01 && s.cum[i] < b - 0.01 {
+            let before = change.map_or(b, |c| c.1);
+            if s.cum[i] > a + 0.01 && s.cum[i] < before - 0.01 {
                 pts.push(*p);
             }
         }
-        pts.push(s.point_at(b).0);
+        match change {
+            Some((to, from_s)) => {
+                let steps = ((b - from_s) / 4.0).ceil().max(1.0) as usize;
+                for j in 0..=steps {
+                    let sx = from_s + (b - from_s) * j as f32 / steps as f32;
+                    let t = if b > from_s {
+                        (sx - from_s) / (b - from_s)
+                    } else {
+                        1.0
+                    };
+                    pts.push(lane_change_point(map, sid, to, sx, t));
+                }
+            }
+            None => pts.push(s.point_at(b).0),
+        }
         for p in pts {
             if polyline
                 .last()
@@ -260,7 +300,10 @@ fn build_route(
 }
 
 /// Lane-legal route between two points (start snapped to a lane agreeing with
-/// `start_heading` if given).
+/// `start_heading` if given, finish to the nearest lane), keeping to the lanes it starts on
+/// ([`shortest_path`], no lane changes): scripted scenario drivers, the retired picker races
+/// and their goldens are laid out on these routes. AI street racers use [`plan_route_via`],
+/// which changes lanes and lets the finish stand for its road.
 pub fn plan_route(
     map: &CityMap,
     start: V3,
@@ -342,13 +385,93 @@ type Reached = Option<(f32, Vec<SegId>)>;
 /// paths on from it to the next pick's lanes).
 type Pick = (f32, (SegId, f32), Vec<SegId>, Option<Vec<Reached>>);
 
+/// Length of road a route's lane change takes, m: the route's line moves across one lane over
+/// this distance, and a lane must have this much road left after where the route joins it
+/// (plus [`LANE_CHANGE_END_M`]) to change out of it.
+pub const LANE_CHANGE_M: f32 = 40.0;
+/// A lane change never ends closer than this to the end of either lane, m (the stop line, a
+/// ramp's gore).
+pub const LANE_CHANGE_END_M: f32 = 10.0;
+/// Time a lane change costs a route on top of the road it covers, s: enough that a route does
+/// not weave for a second's gain, small next to going round a block.
+const LANE_CHANGE_S: f32 = 2.5;
+
+/// Whether segments `a` → `b`, consecutive in a route, are a lane change: both lanes, side by
+/// side on one road in one direction (`Lane::left` / `Lane::right` chain). Every other pair of
+/// consecutive route segments is a lane → connector → lane hand-over (`Segment::next`).
+pub fn is_lane_change(map: &CityMap, a: SegId, b: SegId) -> bool {
+    a != b && parallel_lanes(map, a, b)
+}
+
+/// Where a lane change from lane `x` (joined at arc length `entry_x`) to the neighbouring lane
+/// `b` happens: `(arc length on x where the car is fully across, arc length on b there)`, or
+/// `None` when `x` has too little road left or `b` does not run beside that stretch. As early
+/// as the lane allows ([`LANE_CHANGE_M`] after joining it), and never before `b` starts.
+pub fn lane_change_at(map: &CityMap, x: SegId, entry_x: f32, b: SegId) -> Option<(f32, f32)> {
+    let (sx, sb) = (map.seg(x), map.seg(b));
+    if !sb.drivable {
+        return None;
+    }
+    let b_starts = sx.project(geom::xy(sb.pts[0])).s;
+    let sw = (entry_x + LANE_CHANGE_M).max(b_starts + LANE_CHANGE_END_M);
+    if sw > sx.length - LANE_CHANGE_END_M {
+        return None;
+    }
+    let pr = sb.project(geom::xy(sx.point_at(sw).0));
+    if pr.s < 0.0 || pr.s > sb.length - LANE_CHANGE_END_M || pr.dist > 1.5 * (sx.width + sb.width) {
+        return None;
+    }
+    Some((sw, pr.s))
+}
+
+/// The arc range `(seg, a, b)` driven on each of a route's segments `segs`, the first from
+/// `s_start`, the last to `s_end`: whole segments, except a lane left by a lane change
+/// ([`is_lane_change`]), which ends where [`lane_change_at`] puts the change and its
+/// neighbour starts abreast. The planner and the AI corridor both read routes this way.
+pub fn route_spans(
+    map: &CityMap,
+    segs: &[SegId],
+    s_start: f32,
+    s_end: f32,
+) -> Vec<(SegId, f32, f32)> {
+    let mut out = Vec::with_capacity(segs.len());
+    let mut entry = s_start;
+    for (k, &seg) in segs.iter().enumerate() {
+        let len = map.seg(seg).length;
+        let (b, next_entry) = match segs.get(k + 1) {
+            Some(&nx) if is_lane_change(map, seg, nx) => {
+                match lane_change_at(map, seg, entry, nx) {
+                    Some((sw, sb)) => (sw, sb),
+                    // Not where the planner would put one (a hand-built route): across at once.
+                    None => {
+                        let sw = (entry + LANE_CHANGE_M).min(len);
+                        let pr = map.seg(nx).project(geom::xy(map.seg(seg).point_at(sw).0));
+                        (sw, pr.s.clamp(0.0, map.seg(nx).length))
+                    }
+                }
+            }
+            Some(_) => (len, 0.0),
+            None => (s_end, 0.0),
+        };
+        out.push((seg, entry, b.max(entry)));
+        entry = next_entry;
+    }
+    out
+}
+
 /// The quickest legal path (travel time at the limit) from lane position `from` to each of
 /// `targets`: `(time s, segments from `from.0` to the target's)`, `None` for a target the
-/// search did not reach. A target behind `from` on its lane goes round the block. One A*
-/// for all targets (heuristic: straight-line time to the nearest at 30 m/s); it stops when
-/// every target is reached or its paths pass [`SEARCH_FACTOR`] × the quickest found plus
-/// [`SEARCH_SLACK_S`] (a lane that far round is no use, and an unreachable one would
-/// otherwise search the whole city).
+/// search did not reach. Lane changes to a neighbouring lane of the same road and direction
+/// are allowed ([`lane_change_at`], [`LANE_CHANGE_S`] each), so a route can move over for a
+/// turn or a ramp instead of going round the block. A target behind `from` on its lane goes
+/// round the block. One A* for all targets (heuristic: straight-line time to the nearest at
+/// 30 m/s); it stops when every target is reached or its paths pass [`SEARCH_FACTOR`] × the
+/// quickest found plus [`SEARCH_SLACK_S`] (a lane that far round is no use, and an
+/// unreachable one would otherwise search the whole city).
+///
+/// Labels are kept as the time the car would have been at arc length 0 of the segment at its
+/// limit (`time there - entry / limit`), so a lane joined part way along by a lane change
+/// compares fairly with the same lane entered at its start.
 fn paths_to_any(map: &CityMap, from: (SegId, f32), targets: &[(SegId, f32)]) -> Vec<Reached> {
     const START: u32 = u32::MAX - 1;
     let mut out: Vec<Reached> = vec![None; targets.len()];
@@ -365,48 +488,100 @@ fn paths_to_any(map: &CityMap, from: (SegId, f32), targets: &[(SegId, f32)]) -> 
         .iter()
         .map(|t| geom::xy(map.seg(t.0).point_at(t.1).0))
         .collect();
-    let h = |s: SegId| {
-        let p = geom::xy(map.seg(s).pts[0]);
+    let h = |s: SegId, at: f32| {
+        let p = geom::xy(map.seg(s).point_at(at).0);
         pts.iter()
             .map(|q| geom::dist(p, *q))
             .fold(f32::INFINITY, f32::min)
             / 30.0
     };
+    // Two search states per segment: entered at its start (from a connector or lane end), and
+    // joined part way along by a lane change (state `2·seg + 1`), so a lane joined late by a
+    // change still counts as reachable from its start for a target behind the join.
     let n = map.segs.len();
-    let mut g = vec![f32::INFINITY; n];
-    let mut came = vec![u32::MAX; n];
-    let mut done = vec![false; n];
+    let mut g = vec![f32::INFINITY; 2 * n];
+    let mut entry = vec![0.0f32; 2 * n];
+    let mut came = vec![u32::MAX; 2 * n];
+    let mut done = vec![false; 2 * n];
     let mut heap = BinaryHeap::new();
-    for &nx in &start.next {
-        let cost = (start.length - from.1) / start.speed_limit.max(1.0);
-        if cost < g[nx as usize] {
-            g[nx as usize] = cost;
-            came[nx as usize] = START;
-            heap.push(Open {
-                f: cost + h(nx),
-                seg: nx,
-            });
+    // Expand a segment reached with virtual time `v` (time at its arc 0), joined at `e`; `tag`
+    // is the state it is expanded from.
+    let expand = |seg: SegId,
+                  v: f32,
+                  e: f32,
+                  tag: u32,
+                  g: &mut Vec<f32>,
+                  entry: &mut Vec<f32>,
+                  came: &mut Vec<u32>,
+                  heap: &mut BinaryHeap<Open>| {
+        let s = map.seg(seg);
+        let lim = s.speed_limit.max(1.0);
+        for &nx in &s.next {
+            let cost = v + s.length / lim;
+            let st = 2 * nx as usize;
+            if cost < g[st] {
+                g[st] = cost;
+                entry[st] = 0.0;
+                came[st] = tag;
+                heap.push(Open {
+                    f: cost + h(nx, 0.0),
+                    seg: st as u32,
+                });
+            }
         }
-    }
-    while let Some(Open { f, seg }) = heap.pop() {
-        if done[seg as usize] {
+        let Some(l) = s.lane() else {
+            return;
+        };
+        let lane = &map.net.lanes[l as usize];
+        for side in [lane.left, lane.right].into_iter().flatten() {
+            let Some((sw, sb)) = lane_change_at(map, seg, e, side) else {
+                continue;
+            };
+            let at = v + sw / lim + LANE_CHANGE_S;
+            let cost = at - sb / map.seg(side).speed_limit.max(1.0);
+            let st = 2 * side as usize + 1;
+            if cost < g[st] {
+                g[st] = cost;
+                entry[st] = sb;
+                came[st] = tag;
+                heap.push(Open {
+                    f: at + h(side, sb),
+                    seg: st as u32,
+                });
+            }
+        }
+    };
+    expand(
+        from.0,
+        -from.1 / start.speed_limit.max(1.0),
+        from.1,
+        START,
+        &mut g,
+        &mut entry,
+        &mut came,
+        &mut heap,
+    );
+    while let Some(Open { f, seg: st }) = heap.pop() {
+        let st = st as usize;
+        if done[st] {
             continue;
         }
         if f > SEARCH_FACTOR * best + SEARCH_SLACK_S || out.iter().all(Option::is_some) {
             break;
         }
-        done[seg as usize] = true;
+        done[st] = true;
+        let seg = (st / 2) as SegId;
         let s = map.seg(seg);
         for (k, t) in targets.iter().enumerate() {
-            if t.0 != seg || out[k].is_some() {
+            if t.0 != seg || out[k].is_some() || t.1 < entry[st] {
                 continue;
             }
-            let time = g[seg as usize] + t.1 / s.speed_limit.max(1.0);
+            let time = g[st] + t.1 / s.speed_limit.max(1.0);
             let mut path = vec![seg];
-            let mut cur = seg;
-            while came[cur as usize] != START && path.len() <= n {
-                cur = came[cur as usize];
-                path.push(cur);
+            let mut cur = st;
+            while came[cur] != START && path.len() <= 2 * n {
+                cur = came[cur] as usize;
+                path.push((cur / 2) as SegId);
             }
             path.push(from.0);
             path.reverse();
@@ -416,17 +591,10 @@ fn paths_to_any(map: &CityMap, from: (SegId, f32), targets: &[(SegId, f32)]) -> 
         if !s.drivable {
             continue;
         }
-        for &nx in &s.next {
-            let cost = g[seg as usize] + s.length / s.speed_limit.max(1.0);
-            if cost < g[nx as usize] {
-                g[nx as usize] = cost;
-                came[nx as usize] = seg;
-                heap.push(Open {
-                    f: cost + h(nx),
-                    seg: nx,
-                });
-            }
-        }
+        let (v, e) = (g[st], entry[st]);
+        expand(
+            seg, v, e, st as u32, &mut g, &mut entry, &mut came, &mut heap,
+        );
     }
     out
 }
@@ -443,8 +611,8 @@ fn pick_lanes(map: &CityMap, p: V3) -> Vec<(SegId, f32)> {
 /// Lane-legal open route from `start` through the waypoints `via` in order to `finish`
 /// (start snapped to a lane agreeing with `start_heading` if given). A pick, waypoint or
 /// finish, stands for the whole road under it, both directions and every lane
-/// ([`road_lanes_at`]; routes never change lanes mid-road, so only some of a wide road's lanes
-/// are reachable from a given lane): a waypoint goes on the lane that is quickest to reach
+/// ([`road_lanes_at`]; routes change lanes where that is quicker, [`paths_to_any`]): a
+/// waypoint goes on the lane that is quickest to reach
 /// from where the route is plus quickest to leave for the next pick, the finish on the lane
 /// quickest to reach. A pick on the far carriageway of a divided road, on the opposing lane of
 /// a street or on the wrong lane runs through the near side instead of round the block (owner,
@@ -519,8 +687,9 @@ pub fn plan_route_between_pois(
 }
 
 /// `next` moved onto `cur`'s lane when it is a parallel lane of the same road and direction
-/// (routes do not change lanes mid-road: a waypoint on the neighbouring lane of a wide road,
-/// e.g. Loop 9's three lanes beside its median, would otherwise be unreachable).
+/// (circuits keep to their lanes, [`plan_circuit`] plans with the lane-locked
+/// [`shortest_path`]: a waypoint on the neighbouring lane of a wide road, e.g. Loop 9's three
+/// lanes beside its median, would otherwise be unreachable).
 fn same_lane_group(map: &CityMap, cur: (SegId, f32), next: (SegId, f32), p: V3) -> (SegId, f32) {
     let (SegKind::Lane { lane: a }, SegKind::Lane { lane: b }) =
         (map.seg(cur.0).kind, map.seg(next.0).kind)
@@ -565,7 +734,9 @@ fn parallel_lanes(map: &CityMap, a: SegId, b: SegId) -> bool {
     false
 }
 
-/// Closed circuit visiting the polygon vertices in order and returning to the first.
+/// Closed circuit visiting the polygon vertices in order and returning to the first. Circuits
+/// keep the lane-locked planner ([`shortest_path`], no lane changes): the picker's Loop 9
+/// courses, their police tables, goldens and learned AI rows are laid out on those lanes.
 pub fn plan_circuit(map: &CityMap, polygon: &[V2]) -> Option<Route> {
     if polygon.len() < 2 {
         return None;

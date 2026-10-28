@@ -746,10 +746,14 @@ export interface StreetRacer {
   shift: "AllDay" | "Night" | "Loop";
   wins: number;
   losses: number;
+  /** Risk they take racing, 0..1 (oncoming lanes, traffic gaps, red lights). */
+  risk: number;
+  /** Its name: Cautious, Measured, Bold or Reckless. */
+  risk_level: string;
 }
 
 /** Open challenge (`wp_wasm::street::Offer`). */
-export interface StreetOffer extends Omit<StreetRacer, "mode" | "shift"> {
+export interface StreetOffer extends Omit<StreetRacer, "mode" | "shift" | "risk"> {
   bet_min: number;
   bet_max: number;
   cash: number;
