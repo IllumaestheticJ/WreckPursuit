@@ -20,9 +20,15 @@
 //!   runoff apron (on the outside of hairpins and tight bends) with a rail at its back;
 //! - pine forest on the slopes ([`DecorKind::PineTree`]) and dirt zones on the runoff aprons
 //!   and drops (`WorldQuery::surface_at` reads them as dirt);
-//! - fixed walls ([`DecorKind::Fence`] boxes, solid in `wp_sim`) across both ends of the road;
+//! - a run-off past both ends of the spec's course ([`RUN_OFF_M`] of paved road beyond each
+//!   finish line, straight on and levelling out, lined like the rest of the pass), then a
+//!   gravel arrester bed ([`TRAP_M`], dirt zone, flat) inside one continuous guard rail that
+//!   flares out from the road's rail line, rounds the bed's end and comes back to the cut bank
+//!   on the other side, with a fixed wall ([`DecorKind::Fence`] box, solid in `wp_sim`)
+//!   behind it;
 //! - four race-grid POIs: `<name> base start` / `<name> summit finish` (uphill) and
-//!   `<name> summit start` / `<name> base finish` (downhill).
+//!   `<name> summit start` / `<name> base finish` (downhill), at the course's ends
+//!   ([`GRID_IN_M`], [`FINISH_IN_M`]); the run-offs lie beyond the finish lines.
 //!
 //! The race rules (a car that falls off the mountain or leaves the road's corridor is totaled
 //! and the battle is over) live in `wp_race::touge`; this module only builds the place.
@@ -126,8 +132,28 @@ pub const EDGE_CARVE_M: f32 = 0.3;
 pub const MARGIN_M: f32 = 100.0;
 /// Start grids sit this far in from each end of the road, m.
 pub const GRID_IN_M: f32 = 60.0;
-/// Finish lines sit this far in from each end of the road, m.
+/// Finish lines sit this far in from each end of the spec's course, m (the course as raced
+/// ends here; the road runs on past it into the run-off).
 pub const FINISH_IN_M: f32 = 40.0;
+/// Paved run-off past each finish line, m: the road runs on this far beyond the line (straight
+/// on, levelling out) before its gravel arrester bed, so a car finishing at 200 km/h can brake
+/// to a stop on it, wet or dry (test `run_offs_stop_a_car_from_200_kmh_dry_and_wet`). Owner 2026-10-28: "touge tracks need more run off so we can
+/// slow down after we finish".
+pub const RUN_OFF_M: f32 = 340.0;
+/// Road added before the spec's course at the base and after it at the summit, m (the paved
+/// run-off less the [`FINISH_IN_M`] of the course that was already past the line).
+pub const RUN_OFF_EXT_M: f32 = RUN_OFF_M - FINISH_IN_M;
+/// Over this much of the run-off its grade fades from the course's end grade to level, m.
+pub const RUN_OFF_FADE_M: f32 = 60.0;
+/// Gravel arrester bed past each end of the road, m from the end of the paving to the back of
+/// its rail (the apex of the rounded end).
+pub const TRAP_M: f32 = 45.0;
+/// Level ground kept outside an arrester bed's rail, m (a terrain cell and a bit: the ground
+/// between the grid's vertices stays level right up to the rail).
+pub const TRAP_SHELF_M: f32 = 1.2 * TERRAIN_CELL_M;
+/// Gravel arrester bed: half width between the faces of its rails, m (wider than the road:
+/// the rails flare out to it from the road's rail line over [`RAIL_FLARE_M`]).
+pub const TRAP_HALF_W_M: f32 = 8.0;
 /// A spec drop on the outside of a bend tighter than this (radius, m) keeps its guard rail
 /// there.
 pub const DROP_RAIL_BEND_R_M: f32 = 200.0;
@@ -248,9 +274,21 @@ pub struct TougeTrack {
     pub id: String,
     /// Display name.
     pub name: String,
-    /// Road length base → summit, m.
+    /// Road length end to end (run-offs included), m. Distances along the road (`edges`,
+    /// the fields below) are from the base end of the base run-off.
     pub length_m: f32,
-    /// Summit height above the base, m.
+    /// Where the spec's course starts (its base end) along the road, m: the base run-off is
+    /// the road before it.
+    pub course_from_m: f32,
+    /// Where the spec's course ends (its summit end), m: the summit run-off is the road after.
+    pub course_to_m: f32,
+    /// Finish lines along the road, m: `[downhill (base), uphill (summit)]`.
+    pub finish_m: [f32; 2],
+    /// Start grids (pole) along the road, m: `[uphill (base), downhill (summit)]`.
+    pub start_m: [f32; 2],
+    /// The arrester beds past the road's ends: `[base, summit]`.
+    pub traps: [Trap; 2],
+    /// Summit height above the base (the course's ends), m.
     pub climb_m: f32,
     /// Steepest grade along the road (rise over run, 0.1 = 10 %).
     pub max_grade: f32,
@@ -274,6 +312,91 @@ impl TougeTrack {
     pub fn edge_m(&self, kind: EdgeKind) -> f32 {
         self.spans(kind).map(|e| e.to_m - e.from_m).sum()
     }
+}
+
+/// A gravel arrester bed past one end of the road (see the module docs), in plan.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Trap {
+    /// The end of the paving the bed starts at, m (XY).
+    pub origin: V2,
+    /// Unit XY direction out of the road into the bed.
+    pub dir: V2,
+    /// Height of the bed's flat floor, m.
+    pub floor_z: f32,
+}
+
+impl Trap {
+    /// `p` in the bed's frame: `(along, lateral)`, m: along from the end of the paving
+    /// (negative = back on the road), lateral positive to the right of [`Trap::dir`].
+    pub fn local(&self, p: V2) -> (f32, f32) {
+        let d = geom::sub(p, self.origin);
+        (
+            geom::dot(d, self.dir),
+            geom::dot(d, geom::right_of(self.dir)),
+        )
+    }
+
+    /// World XY of bed point `(along, lateral)`.
+    pub fn world(&self, along: f32, lateral: f32) -> V2 {
+        geom::add(
+            geom::add(self.origin, geom::scale(self.dir, along)),
+            geom::scale(geom::right_of(self.dir), lateral),
+        )
+    }
+
+    /// How far outside the bed's rail line `p` is, m (negative inside, `None` beside the road
+    /// before the bed starts). `rail0` = the rail line's offset where it leaves the road.
+    pub fn outside(&self, p: V2, rail0: f32) -> Option<f32> {
+        let (a, l) = self.local(p);
+        if a < 0.0 {
+            return None;
+        }
+        let (centre, r) = trap_back(rail0);
+        Some(if a <= centre {
+            l.abs() - trap_rail_w(a, rail0)
+        } else {
+            geom::dist([a, l], [centre, 0.0]) - r
+        })
+    }
+}
+
+/// Offset of an arrester bed's rail line `along` m into the bed: flaring out from the road's
+/// rail line (`rail0`) to the bed's full width over [`RAIL_FLARE_M`].
+fn trap_rail_w(along: f32, rail0: f32) -> f32 {
+    let full = TRAP_HALF_W_M + 0.5 * RAIL_W_M;
+    rail0 + (full - rail0) * smoothstep(0.0, RAIL_FLARE_M, along)
+}
+
+/// An arrester bed's rounded end: `(along of the centre, radius)` of its rail line.
+fn trap_back(rail0: f32) -> (f32, f32) {
+    let r = trap_rail_w(RAIL_FLARE_M, rail0);
+    (TRAP_M - r, r)
+}
+
+/// An arrester bed's rail line in its own frame `(along, lateral)`, every ~2 m: out along the
+/// `side` (+1 right of [`Trap::dir`], -1 left) from the road, round the end, back along the
+/// other side to the road. The first and last points sit on the road's rail line at the end
+/// of the paving.
+fn trap_rail_line(side: f32, rail0: f32) -> Vec<V2> {
+    let (centre, r) = trap_back(rail0);
+    let mut out = Vec::new();
+    let n_side = (centre / STEP_M).ceil() as usize;
+    for i in 0..=n_side {
+        let a = centre * i as f32 / n_side as f32;
+        out.push([a, side * trap_rail_w(a, rail0)]);
+    }
+    let n_arc = (core::f32::consts::PI * r / STEP_M).ceil() as usize;
+    for i in 1..n_arc {
+        // From the `side` side (angle 0 = along +lateral·side) round through the apex.
+        let t = core::f32::consts::PI * i as f32 / n_arc as f32;
+        let (sn, cs) = wp_math::sin_cos(t);
+        out.push([centre + r * sn, side * r * cs]);
+    }
+    for i in (0..=n_side).rev() {
+        let a = centre * i as f32 / n_side as f32;
+        out.push([a, -side * trap_rail_w(a, rail0)]);
+    }
+    out
 }
 
 /// Everything [`generate`] builds.
@@ -677,12 +800,59 @@ fn offset_line(centre: &[V3], surf_z: impl Fn(usize) -> f32, lat: f32, ks: &[usi
         .collect()
 }
 
+/// The course's samples with a run-off of [`RUN_OFF_EXT_M`] added at each end: straight on
+/// along the course's end direction, every [`STEP_M`], its grade fading from the course's end
+/// grade to level over [`RUN_OFF_FADE_M`], unbanked. Returns `(xy, z, bank, pre)` with `pre`
+/// = the index of the course's first sample.
+fn with_run_offs(xy: &[V2], z: &[f32], bank: &[f32]) -> (Vec<V2>, Vec<f32>, Vec<f32>, usize) {
+    let n = xy.len();
+    let steps = (RUN_OFF_EXT_M / STEP_M).round() as usize;
+    // Height `x` m out along a run-off leaving the course at grade `g`: the grade fades
+    // linearly to 0 over the fade length, then the road is level.
+    let rise = |g: f32, x: f32| -> f32 {
+        let f = x.min(RUN_OFF_FADE_M);
+        g * (f - f * f / (2.0 * RUN_OFF_FADE_M))
+    };
+    // `(end point, outward direction, outward grade)` at either end.
+    let end = |a: usize, b: usize| -> (V2, V2, f32) {
+        let run = geom::dist(xy[a], xy[b]).max(1e-6);
+        (
+            xy[a],
+            geom::normalize(geom::sub(xy[a], xy[b])),
+            (z[a] - z[b]) / run,
+        )
+    };
+    let (p0, d0, g0) = end(0, 1);
+    let (p1, d1, g1) = end(n - 1, n - 2);
+    let mut out_xy = Vec::with_capacity(n + 2 * steps);
+    let mut out_z = Vec::with_capacity(n + 2 * steps);
+    for i in (1..=steps).rev() {
+        let x = i as f32 * STEP_M;
+        out_xy.push(geom::add(p0, geom::scale(d0, x)));
+        out_z.push(z[0] + rise(g0, x));
+    }
+    out_xy.extend_from_slice(xy);
+    out_z.extend_from_slice(z);
+    for i in 1..=steps {
+        let x = i as f32 * STEP_M;
+        out_xy.push(geom::add(p1, geom::scale(d1, x)));
+        out_z.push(z[n - 1] + rise(g1, x));
+    }
+    let mut out_bank = vec![0.0; steps];
+    out_bank.extend_from_slice(bank);
+    out_bank.resize(n + 2 * steps, 0.0);
+    (out_xy, out_z, out_bank, steps)
+}
+
 /// Build pass `spec` (see the module docs).
 pub fn generate(spec: &TougeSpec) -> TougeBuild {
     let seed = seed_of(&spec.id);
-    let (xy, kap) = turtle(&spec.legs);
-    let z = smooth(&profile(&kap, spec.climb_m), 6, 3, 0);
-    let bank = banking(&kap);
+    // The spec's course (exactly as before the run-offs), then the run-offs added before and
+    // after it.
+    let (course_xy, course_kap) = turtle(&spec.legs);
+    let course_z = smooth(&profile(&course_kap, spec.climb_m), 6, 3, 0);
+    let course_bank = banking(&course_kap);
+    let (xy, z, bank, pre) = with_run_offs(&course_xy, &course_z, &course_bank);
     let n = xy.len();
 
     // The road: one node at each end, every sample in between as a via point.
@@ -726,8 +896,10 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
     let nc = centre.len();
     let cum = geom::cumulative(&centre);
     let length = *cum.last().unwrap_or(&0.0);
+    // The spec's course along the road (distances in the spec are from its base end).
+    let course_from = cum[pre];
+    let course_to = cum[pre + course_xy.len() - 1];
     let half = surf.left_m.max(surf.right_m);
-    let wall_off = half + WALL_GAP_M;
     let k_at = |s: f32| -> (usize, f32) {
         let k = cum
             .partition_point(|c| *c <= s)
@@ -758,6 +930,16 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
         let b = surf.z_at((k + 1).min(nc - 1), lat);
         a + (b - a) * t
     };
+
+    // The gravel arrester beds past both ends of the paving, and the line of the road's guard
+    // rails (the beds' rails leave the road there).
+    let rail0 = half + RAIL_GAP_M + 0.5 * RAIL_W_M;
+    let trap_at = |k: usize, j: usize| Trap {
+        origin: geom::xy(centre[k]),
+        dir: geom::normalize(geom::sub(geom::xy(centre[k]), geom::xy(centre[j]))),
+        floor_z: centre[k][2] - CARVE_BELOW_M,
+    };
+    let traps = [trap_at(0, 1), trap_at(nc - 1, nc - 2)];
 
     // The mountain without the road cut into it: the mean slope through the road, bent to the
     // road heights near it (samples every 8 m), on a coarse grid; then relief that grows away
@@ -806,7 +988,10 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
     let in_range = |k: usize, a: f32, b: f32| cum[k] >= a && cum[k] <= b;
     // Where a car runs wide (the outside of a bend, its approach and exit, either way) a drop
     // keeps its rail: open drops are on straights and the inside of bends.
-    let bends = arcs(&spec.legs);
+    let bends: Vec<(f32, f32, f32, f32)> = arcs(&spec.legs)
+        .into_iter()
+        .map(|(s0, s1, turn, r)| (s0 + course_from, s1 + course_from, turn, r))
+        .collect();
     let outside_of_bend = |k: usize, side: f32| {
         bends.iter().any(|&(s0, s1, turn, r)| {
             r < DROP_RAIL_BEND_R_M
@@ -815,7 +1000,10 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
         })
     };
     for &[a, b] in &spec.drops {
-        let (a, b) = (a.clamp(0.0, length), b.clamp(0.0, length));
+        let (a, b) = (
+            a.clamp(0.0, course_to - course_from) + course_from,
+            b.clamp(0.0, course_to - course_from) + course_from,
+        );
         let side = low[k_at(0.5 * (a + b)).0];
         for k in (0..nc).filter(|k| in_range(*k, a, b) && !outside_of_bend(*k, side)) {
             let (this, other) = if side > 0.0 {
@@ -829,13 +1017,13 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
             }
         }
     }
-    for (s0, s1, turn, r) in arcs(&spec.legs) {
+    for &(s0, s1, turn, r) in &bends {
         if r > RUNOFF_MAX_R_M && turn.abs() < RUNOFF_MIN_TURN_DEG {
             continue;
         }
         let (a, b) = (
-            (s0 + 0.35 * (s1 - s0)).max(GRID_IN_M),
-            (s1 + 20.0).min(length - GRID_IN_M),
+            (s0 + 0.35 * (s1 - s0)).max(course_from + GRID_IN_M),
+            (s1 + 20.0).min(course_to - GRID_IN_M),
         );
         // Outside of a left turn is the right edge.
         let edge = if turn > 0.0 { &mut edge_r } else { &mut edge_l };
@@ -975,19 +1163,29 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
                     zt = zt.min(e + depth * x / (reach - x).max(0.05));
                 }
             }
+            // An arrester bed: flat inside its rail and a terrain cell past it (so the ground
+            // between the vertices stays level right up to the rail), then back to the ground
+            // over 4 m.
+            for t in &traps {
+                if let Some(e) = t.outside(p, rail0) {
+                    let w = smoothstep(TRAP_SHELF_M, TRAP_SHELF_M + 4.0, e);
+                    zt = t.floor_z + (zt - t.floor_z) * w;
+                }
+            }
             hf.z[(j * hf.nx + i) as usize] = zt;
         }
     }
 
-    // End walls across the road, just inside each end.
+    // End walls across the back of each arrester bed, just behind its rail.
     let mut decor = Vec::new();
-    for s in [1.0f32, length - 1.0] {
-        let (p, d) = at_s(&centre, &cum, s);
-        let width = 2.0 * (wall_off + WALL_W_M);
+    for t in &traps {
+        let (_, r) = trap_back(rail0);
+        let p = t.world(TRAP_M + 0.5 * RAIL_W_M + WALL_GAP_M + 0.5 * WALL_W_M, 0.0);
+        let width = 2.0 * (r + RAIL_W_M + WALL_W_M);
         decor.push(Decor {
             kind: DecorKind::Fence,
-            pos: [p[0], p[1], p[2] - 0.05 - 0.06 * half],
-            yaw: geom::yaw_of(geom::right_of(d)),
+            pos: [p[0], p[1], t.floor_z + CARVE_BELOW_M - 0.05 - 0.06 * half],
+            yaw: geom::yaw_of(geom::right_of(t.dir)),
             size: [WALL_W_M, width, WALL_H_M + 0.15 * half],
         });
     }
@@ -998,8 +1196,12 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
     // Sections follow the rail's own line (longer than the centreline outside a bend), share
     // their end points with their neighbours (in plan and in height, pitched to the grade),
     // and stand on the ground; the beam (local −X) faces the road.
+    // Each arrester bed's rail carries on from the road's rail line at that end (round the
+    // bed and back to the cut bank on the other side).
     let mut rails = Vec::new();
     let flare = (0.5 * RAIL_FLARE_M / STEP_M).round() as usize;
+    // `(side, foot line, first sample, one past the last sample)` per stretch along the road.
+    let mut stretches: Vec<(f32, Vec<V3>, usize, usize)> = Vec::new();
     for side in [-1.0f32, 1.0] {
         let lat_of = |k: usize| match edge_of(k, side) {
             EdgeKind::Rail => Some(half + RAIL_GAP_M + 0.5 * RAIL_W_M),
@@ -1032,7 +1234,52 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
                     [p[0], p[1], foot]
                 })
                 .collect();
+            stretches.push((side, line, k, j));
             k = j;
+        }
+    }
+    for (end, t) in traps.iter().enumerate() {
+        let (k_end, sign) = if end == 0 { (0, -1.0) } else { (nc - 1, 1.0) };
+        let touches = |st: &(f32, Vec<V3>, usize, usize)| {
+            if end == 0 {
+                st.2 == 0
+            } else {
+                st.3 == nc
+            }
+        };
+        let i = match stretches.iter().position(touches) {
+            Some(i) => i,
+            None => {
+                stretches.push((low[k_end], Vec::new(), k_end, k_end + 1));
+                stretches.len() - 1
+            }
+        };
+        let side = stretches[i].0;
+        // The bed's frame runs out of the road: the road's right is its right at the summit,
+        // its left at the base.
+        let mut u: Vec<V3> = trap_rail_line(side * sign, rail0)
+            .into_iter()
+            .map(|[a, l]| {
+                let q = t.world(a, l);
+                [q[0], q[1], t.floor_z]
+            })
+            .collect();
+        let line = &mut stretches[i].1;
+        if end == 0 {
+            // Prepended: from the far side round to this one, the road's rail line next.
+            u.reverse();
+            if !line.is_empty() {
+                u.pop();
+            }
+            u.append(line);
+            *line = u;
+        } else {
+            let skip = usize::from(!line.is_empty());
+            line.extend_from_slice(&u[skip..]);
+        }
+    }
+    for (side, line, _, _) in stretches {
+        {
             if line.len() < 2 {
                 continue;
             }
@@ -1134,6 +1381,18 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
             polygon,
         });
     }
+    // The arrester beds: gravel out to their rails.
+    for t in &traps {
+        let polygon: Vec<V2> = trap_rail_line(1.0, rail0)
+            .into_iter()
+            .map(|[a, l]| t.world(a, l))
+            .collect();
+        zones.push(Zone {
+            kind: DistrictKind::Industrial,
+            density_base: 0.0,
+            polygon,
+        });
+    }
     zones.push(Zone {
         kind: DistrictKind::Suburb,
         density_base: 0.0,
@@ -1163,6 +1422,12 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
             }
             seg_grid.near(q, 30.0, &mut near_segs);
             if nearest(&centre, &cum, &near_segs, q).is_some_and(|b| b.2 < half + RUNOFF_W_M + 3.0)
+            {
+                continue;
+            }
+            if traps
+                .iter()
+                .any(|t| t.outside(q, rail0).is_some_and(|e| e < 4.0))
             {
                 continue;
             }
@@ -1201,28 +1466,30 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
     };
     let up_lane = lanes.fwd.first().copied();
     let down_lane = lanes.bwd.first().copied();
+    let start_m = [course_from + GRID_IN_M, course_to - GRID_IN_M];
+    let finish_m = [course_from + FINISH_IN_M, course_to - FINISH_IN_M];
     let pois = vec![
         poi(
             format!("{} base start", spec.name),
-            GRID_IN_M,
+            start_m[0],
             true,
             up_lane,
         ),
         poi(
             format!("{} summit finish", spec.name),
-            length - FINISH_IN_M,
+            finish_m[1],
             true,
             up_lane,
         ),
         poi(
             format!("{} summit start", spec.name),
-            length - GRID_IN_M,
+            start_m[1],
             false,
             down_lane,
         ),
         poi(
             format!("{} base finish", spec.name),
-            FINISH_IN_M,
+            finish_m[0],
             false,
             down_lane,
         ),
@@ -1253,7 +1520,12 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
         id: spec.id.clone(),
         name: spec.name.clone(),
         length_m: length,
-        climb_m: centre[nc - 1][2] - centre[0][2],
+        course_from_m: course_from,
+        course_to_m: course_to,
+        finish_m,
+        start_m,
+        traps,
+        climb_m: centre[pre + course_xy.len() - 1][2] - centre[pre][2],
         max_grade,
         half_width_m: half,
         edges,
@@ -1424,9 +1696,11 @@ mod tests {
                 t.edge_m(EdgeKind::Runoff),
                 t.edge_m(EdgeKind::Drop),
             );
+            let course = t.course_to_m - t.course_from_m;
+            assert!(course > 2200.0 && course < 3600.0, "{}: {course}", t.id);
             assert!(
-                t.length_m > 2200.0 && t.length_m < 3600.0,
-                "{}: {}",
+                (t.length_m - course - 2.0 * RUN_OFF_EXT_M).abs() < 1.0,
+                "{}: {} m of road for a {course} m course",
                 t.id,
                 t.length_m
             );
@@ -1458,7 +1732,7 @@ mod tests {
             if spec.forest > 0.0 {
                 assert!(t.trees > 300, "{}: {} trees", t.id, t.trees);
             }
-            // The runoff aprons and drops read as dirt.
+            // The runoff aprons, drops and both arrester beds read as dirt.
             let dirt = b
                 .net
                 .zones
@@ -1467,7 +1741,7 @@ mod tests {
                 .count();
             assert_eq!(
                 dirt,
-                t.spans(EdgeKind::Runoff).count() + t.spans(EdgeKind::Drop).count(),
+                t.spans(EdgeKind::Runoff).count() + t.spans(EdgeKind::Drop).count() + 2,
                 "{}",
                 t.id
             );
@@ -1486,7 +1760,7 @@ mod tests {
         for (s0, s1, turn, _) in hairpins {
             let outside = if turn > 0.0 { 1.0 } else { -1.0 };
             assert_eq!(
-                edge_at(&b, 0.5 * (s0 + s1) + 5.0, outside),
+                edge_at(&b, b.track.course_from_m + 0.5 * (s0 + s1) + 5.0, outside),
                 EdgeKind::Runoff
             );
         }
@@ -1501,6 +1775,7 @@ mod tests {
                     continue;
                 }
                 let outside = turn.signum();
+                let (s0, s1) = (s0 + b.track.course_from_m, s1 + b.track.course_from_m);
                 let mut s = s0 - DROP_RAIL_MARGIN_M + 3.0;
                 while s < s1 + DROP_RAIL_MARGIN_M - 3.0 {
                     assert_ne!(
@@ -1607,10 +1882,32 @@ mod tests {
             let c = &b.net.surfaces[0].centre;
             let cum = geom::cumulative(c);
             let half = b.track.half_width_m;
+            let len = *cum.last().unwrap();
+            let rail0 = half + RAIL_GAP_M + 0.5 * RAIL_W_M;
             for r in &b.rails {
                 assert_eq!(r.kind, PropKind::GuardRail);
                 assert_eq!(r.mass_kg, RAIL_MASS_KG);
                 let p = geom::project(c, &cum, geom::xy(r.pos));
+                let x = geom::right_of(geom::dir_of_yaw(r.yaw));
+                if p.s < 0.0 || p.s > len {
+                    // Round an arrester bed: on its rail line, the beam towards its inside
+                    // (the bed's axis, or the centre of its rounded end).
+                    let t = &b.track.traps[usize::from(p.s > len)];
+                    let q = geom::xy(r.pos);
+                    let e = t.outside(q, rail0).unwrap();
+                    // Sections are chords of the rounded end: their middles sit inside the arc.
+                    assert!(e.abs() < 0.5, "{}: bed rail {e} m off its line", b.track.id);
+                    let (a, _) = t.local(q);
+                    let (centre, _) = trap_back(rail0);
+                    let inside = t.world(a.clamp(0.0, centre), 0.0);
+                    let to_inside = geom::normalize(geom::sub(inside, q));
+                    assert!(
+                        geom::dot(x, to_inside) < -0.9,
+                        "{}: bed rail faces away",
+                        b.track.id
+                    );
+                    continue;
+                }
                 let out = p.dist - half;
                 assert!(
                     (RAIL_GAP_M..=RUNOFF_W_M + 0.1).contains(&out),
@@ -1618,7 +1915,6 @@ mod tests {
                     b.track.id
                 );
                 // Local −X (the beam) towards the road.
-                let x = geom::right_of(geom::dir_of_yaw(r.yaw));
                 let (q, _) = geom::point_at(c, &cum, p.s);
                 let to_road = geom::normalize(geom::sub(geom::xy(q), geom::xy(r.pos)));
                 assert!(
@@ -1627,6 +1923,264 @@ mod tests {
                     b.track.id
                 );
             }
+        }
+    }
+
+    #[test]
+    fn the_course_as_raced_is_the_spec_course() {
+        // The run-offs are added outside the spec's course: its road, start grids and finish
+        // lines are where they were, so race lengths, times and AI pacing do not move.
+        for b in all() {
+            let t = &b.track;
+            let spec = spec(&t.id).unwrap();
+            let (xy, _) = turtle(&spec.legs);
+            let c = &b.net.surfaces[0].centre;
+            let cum = geom::cumulative(c);
+            let pre = cum.partition_point(|s| *s < t.course_from_m - 0.01);
+            assert_eq!(pre, (RUN_OFF_EXT_M / STEP_M).round() as usize, "{}", t.id);
+            for (i, q) in xy.iter().enumerate() {
+                assert!(
+                    geom::dist(geom::xy(c[pre + i]), *q) < 1e-3,
+                    "{} i={i}",
+                    t.id
+                );
+            }
+            let course = t.course_to_m - t.course_from_m;
+            assert!((course - arcs_len(&spec.legs)).abs() < 0.05, "{}", t.id);
+            assert_eq!(t.finish_m[0] - t.course_from_m, FINISH_IN_M);
+            assert!((t.course_to_m - t.finish_m[1] - FINISH_IN_M).abs() < 1e-3);
+            assert_eq!(t.start_m[0] - t.course_from_m, GRID_IN_M);
+            assert!((t.course_to_m - t.start_m[1] - GRID_IN_M).abs() < 1e-3);
+            // The POIs stand on those distances.
+            for (name, s) in [
+                ("base finish", t.finish_m[0]),
+                ("summit finish", t.finish_m[1]),
+                ("base start", t.start_m[0]),
+                ("summit start", t.start_m[1]),
+            ] {
+                let poi = b.net.pois.iter().find(|p| p.name.ends_with(name)).unwrap();
+                let pr = geom::project(c, &cum, geom::xy(poi.pos));
+                assert!((pr.s - s).abs() < 0.05, "{} {name}: {} vs {s}", t.id, pr.s);
+            }
+        }
+    }
+
+    /// Length of the turtle path of `legs` (straights plus arc chords, as [`turtle`] samples).
+    fn arcs_len(legs: &[Leg]) -> f32 {
+        let (xy, _) = turtle(legs);
+        xy.windows(2).map(|w| geom::dist(w[0], w[1])).sum()
+    }
+
+    /// The paved run-off past one finish line: centreline samples `(s, z)` from the line to the
+    /// end of the paving, in the direction of travel.
+    fn run_off(b: &TougeBuild, uphill: bool) -> Vec<(f32, f32)> {
+        let c = &b.net.surfaces[0].centre;
+        let cum = geom::cumulative(c);
+        let t = &b.track;
+        let mut out: Vec<(f32, f32)> = if uphill {
+            let f = t.finish_m[1];
+            let mut v = vec![(f, geom::point_at(c, &cum, f).0[2])];
+            v.extend(
+                cum.iter()
+                    .zip(c)
+                    .filter(|(s, _)| **s > f)
+                    .map(|(s, p)| (*s, p[2])),
+            );
+            v
+        } else {
+            let f = t.finish_m[0];
+            let mut v = vec![(f, geom::point_at(c, &cum, f).0[2])];
+            v.extend(
+                cum.iter()
+                    .zip(c)
+                    .filter(|(s, _)| **s < f)
+                    .rev()
+                    .map(|(s, p)| (*s, p[2])),
+            );
+            v
+        };
+        // Distances from the line.
+        let s0 = out[0].0;
+        for p in &mut out {
+            p.0 = (p.0 - s0).abs();
+        }
+        out
+    }
+
+    /// Distance to brake to a stop from `v` m/s on run-off `pts` (`(distance, z)` along it) with
+    /// tyre-road friction `mu` after `reaction_s` at speed, the grade helping uphill and
+    /// hindering downhill. `None` if the car is still moving at the end of the paving.
+    fn stopping_distance(pts: &[(f32, f32)], v: f32, mu: f32, reaction_s: f32) -> Option<f32> {
+        let g = 9.81;
+        let react = v * reaction_s;
+        let mut v2 = v * v;
+        for w in pts.windows(2) {
+            let (s0, z0) = w[0];
+            let (s1, z1) = w[1];
+            if s1 <= react {
+                continue;
+            }
+            let ds = s1 - s0.max(react);
+            let run = (s1 - s0).max(1e-6);
+            let sin = (z1 - z0) / run;
+            let cos = (1.0 - sin * sin).max(0.0).sqrt();
+            let a = g * (mu * cos + sin);
+            if v2 <= 2.0 * a * ds {
+                return Some(s0.max(react) + v2 / (2.0 * a));
+            }
+            v2 -= 2.0 * a * ds;
+        }
+        None
+    }
+
+    /// Finish speed the run-offs are sized for: 200 km/h, m/s.
+    const FINISH_SPEED_MPS: f32 = 200.0 / 3.6;
+    /// Dry tyre on the pass's road, friction coefficient.
+    const MU_DRY: f32 = 0.9;
+    /// Fully wet road (touge battles run in heavy rain): ~0.6 of the dry grip (the street /
+    /// sport / all-terrain tyres' `WetAsphalt` ratios are 0.62–0.72), friction coefficient.
+    const MU_WET: f32 = 0.55;
+    /// Driver reaction at the line before the brakes are full on, s.
+    const REACTION_S: f32 = 0.5;
+
+    #[test]
+    fn run_offs_stop_a_car_from_200_kmh_dry_and_wet() {
+        // Owner 2026-10-28: "touge tracks need more run off so we can slow down after we
+        // finish". Both directions of every pass: from 200 km/h at the finish line, after
+        // half a second at speed, a car brakes to a stop on the paved run-off, dry (μ 0.9) or
+        // wet (μ 0.55), with the gravel arrester bed beyond as a last resort.
+        for b in all() {
+            for uphill in [true, false] {
+                let id = &b.track.id;
+                let pts = run_off(&b, uphill);
+                let paved = pts.last().unwrap().0;
+                let grade = (pts.last().unwrap().1 - pts[0].1) / paved;
+                let dry = stopping_distance(&pts, FINISH_SPEED_MPS, MU_DRY, REACTION_S);
+                let wet = stopping_distance(&pts, FINISH_SPEED_MPS, MU_WET, REACTION_S);
+                eprintln!(
+                    "{id} {}: run-off {paved:.0} m paved + {TRAP_M} m bed, mean grade {:+.2} %, \
+                     stops from 200 km/h in {:.0} m dry / {:.0} m wet",
+                    if uphill { "uphill" } else { "downhill" },
+                    grade * 100.0,
+                    dry.unwrap_or(f32::NAN),
+                    wet.unwrap_or(f32::NAN),
+                );
+                assert!(paved >= RUN_OFF_M - 0.5, "{id}: {paved} m of run-off");
+                let dry = dry.unwrap_or_else(|| panic!("{id} uphill={uphill}: no dry stop"));
+                let wet = wet.unwrap_or_else(|| panic!("{id} uphill={uphill}: no wet stop"));
+                assert!(dry < 0.75 * paved, "{id} uphill={uphill}: dry {dry} m");
+                assert!(wet < paved - 10.0, "{id} uphill={uphill}: wet {wet} m");
+            }
+        }
+    }
+
+    #[test]
+    fn run_offs_are_sealed_on_both_sides_and_end_in_a_railed_gravel_bed() {
+        for b in all() {
+            let id = b.track.id.clone();
+            let t = b.net.terrain.as_ref().unwrap();
+            let half = b.track.half_width_m;
+            let rail0 = half + RAIL_GAP_M + 0.5 * RAIL_W_M;
+            let near_rail = |q: V2| {
+                b.rails
+                    .iter()
+                    .map(|r| geom::dist(geom::xy(r.pos), q))
+                    .fold(f32::INFINITY, f32::min)
+            };
+            let c = &b.net.surfaces[0].centre;
+            let cum = geom::cumulative(c);
+            for (end, (from, to)) in [
+                (0.0, b.track.finish_m[0]),
+                (b.track.finish_m[1], b.track.length_m),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                // Along the paved run-off: on each side a guard rail (the downhill side) or
+                // the cut bank rising beside the road (uphill), never an open drop or an
+                // apron; and nothing falls away inside the rail.
+                let mut s = from + 1.0;
+                while s < to - 1.0 {
+                    for side in [-1.0f32, 1.0] {
+                        match edge_at(&b, s, side) {
+                            EdgeKind::Rail => {
+                                let (q, _) = beside(&b, s, side, rail0 - half);
+                                let d = near_rail(q);
+                                assert!(d < 2.6, "{id} s={s} side={side}: no rail ({d} m)");
+                                let (v, z) = beside(&b, s, side, 0.2);
+                                assert!(t.height_at(v) > z - 0.6, "{id} s={s}: verge falls away");
+                            }
+                            EdgeKind::Bank => {
+                                let (q, z) = beside(&b, s, side, BANK_VERGE_M + 3.0);
+                                assert!(
+                                    t.height_at(q) > z + 1.0,
+                                    "{id} s={s} side={side}: bank only {} m up",
+                                    t.height_at(q) - z
+                                );
+                            }
+                            k => panic!("{id} s={s} side={side}: {k:?} in the run-off"),
+                        }
+                    }
+                    s += 2.0;
+                }
+                // The bed: flat gravel inside one rail that leaves the road's rail line,
+                // rounds the end and comes back to the road on the other side, a fixed wall
+                // behind it, no trees in it.
+                let trap = &b.track.traps[end];
+                let (p_end, _) = geom::point_at(c, &cum, if end == 0 { 0.0 } else { to });
+                assert!(geom::dist(trap.origin, geom::xy(p_end)) < 1e-3, "{id}");
+                for [a, l] in trap_rail_line(1.0, rail0) {
+                    let q = trap.world(a, l);
+                    let d = near_rail(q);
+                    assert!(d < 2.6, "{id}: bed {end} has no rail at ({a}, {l}): {d} m");
+                }
+                // (From a terrain cell past the paving: the ground under the paving is carved.)
+                let mut a = TERRAIN_CELL_M + 0.5;
+                while a < TRAP_M - 1.0 {
+                    let mut l = -TRAP_HALF_W_M;
+                    while l <= TRAP_HALF_W_M {
+                        let q = trap.world(a, l);
+                        if trap.outside(q, rail0).unwrap() < -0.5 {
+                            let dz = t.height_at(q) - trap.floor_z;
+                            assert!(dz.abs() < 0.05, "{id}: bed {end} at ({a}, {l}): {dz}");
+                            assert!(
+                                b.net
+                                    .zones
+                                    .iter()
+                                    .find(|z| geom::point_in_polygon(q, &z.polygon))
+                                    .is_some_and(|z| z.kind == DistrictKind::Industrial),
+                                "{id}: bed {end} at ({a}, {l}) is not gravel"
+                            );
+                        }
+                        l += 1.0;
+                    }
+                    a += 1.5;
+                }
+                let behind = trap.world(TRAP_M + 0.5, 0.0);
+                assert!(
+                    b.net.decor.iter().any(|d| d.kind == DecorKind::Fence
+                        && geom::dist(geom::xy(d.pos), behind) < 1.0
+                        && d.size[1] > 2.0 * TRAP_HALF_W_M),
+                    "{id}: no wall behind bed {end}"
+                );
+                assert!(
+                    !b.net.decor.iter().any(|d| d.kind == DecorKind::PineTree
+                        && trap
+                            .outside(geom::xy(d.pos), rail0)
+                            .is_some_and(|e| e < 3.0)),
+                    "{id}: a tree in bed {end}"
+                );
+            }
+            // No other wall across the road: the run-offs are open to their beds.
+            assert_eq!(
+                b.net
+                    .decor
+                    .iter()
+                    .filter(|d| d.kind == DecorKind::Fence)
+                    .count(),
+                2,
+                "{id}"
+            );
         }
     }
 
