@@ -151,9 +151,11 @@ mod tests {
             !dir.join("ashpeak.greybox.b64.txt").exists(),
             "ashpeak.greybox.b64.txt is shipped again: the parts replace it (`just city-ashpeak`)"
         );
-        // About four times Port Vesper's area on a 16 m drawn ground (24.9 MB at first).
+        // About four times Port Vesper's area on a 16 m drawn ground (24.9 MB at first; 30.2 MB
+        // after the median barrier terminals and buried tunnel decks, PRs #128 and #137). The
+        // browser loads the county parts, not this file.
         assert!(
-            shipped.len() < 30_000_000,
+            shipped.len() < 31_000_000,
             "ashpeak greybox grew to {} bytes",
             shipped.len()
         );
