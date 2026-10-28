@@ -425,6 +425,9 @@ function UpgradeRow(props: { shop: Shop; entry: CatalogEntry | null; mod: ModOpt
           {name}
           {entry && entry.count > 1 && <span class="wp-dim"> ×{entry.count}</span>}
           {(entry?.tier ?? mod?.tier ?? 0) > 0 && <span class="wp-dim"> · T{entry?.tier ?? mod?.tier}</span>}
+          {entry?.replaces && entry.replaces.length > 0 && (
+            <span class="wp-dim" data-testid="ws-cat-replaces"> · replaces {entry.replaces.join(", ")} (refunded at 40 %)</span>
+          )}
           {installed && <span class="wp-ok"> · on the car</span>}
           {!installed && entry?.grade && shop.screen.inventory.some((x) => x.part.grade === entry.grade) && <span class="wp-dim"> · in the inventory</span>}
         </span>
