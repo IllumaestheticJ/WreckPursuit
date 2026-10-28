@@ -495,7 +495,9 @@ fn spike_strips_cover_the_paving_up_to_their_unit() {
     let paving = SectionIndex::from_city(world.map());
     let cands = sites(sim.police(), world, *bounds);
     let mut per: std::collections::BTreeMap<Place, (u32, u32)> = Default::default();
-    let mut placed: Vec<(Place, [f32; 2], [f32; 2], Section, u32)> = Vec::new();
+    // (place, site, travel dir, section, strip tool id)
+    type StripSite = (Place, [f32; 2], [f32; 2], Section, u32);
+    let mut placed: Vec<StripSite> = Vec::new();
     for (place, pos, dir) in cands {
         let sec = sim.police().road_section(pos, dir, 0.0);
         let e = per.entry(place).or_default();

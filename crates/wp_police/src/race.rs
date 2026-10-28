@@ -114,9 +114,6 @@ impl DeckFoot {
     }
 }
 
-/// A spike car parked beside a Loop 9 strip keeps its side this far inside the paved edge
-/// (the barrier's face), m.
-
 /// A highway surface runs along a tool's flow when |cos| between them is at least this.
 const PAVED_ALONG_MIN_COS: f32 = 0.9;
 
