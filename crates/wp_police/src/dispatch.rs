@@ -14,14 +14,14 @@ use crate::events::{
     DisableCause, IncidentId, PoliceEvent, PursuitOutcome, ToolId, UnitId, UnitKind,
 };
 use crate::graph::{
-    add, dist, dot, len, lerp2, normalize, perp_left, scale, sub, xy, District, NodeId, PoiKind,
-    RoadClass,
+    add, dist, dot, len, lerp2, normalize, scale, sub, xy, District, NodeId, PoiKind, RoadClass,
 };
 use crate::heat::{PursuitStatus, WantedLevel};
+use crate::section::{Section, SECTION_REACH_M};
 use crate::time::SimTime;
 use crate::tools::{
-    plan_site, plan_site_where, roadblock_barriers, roadblock_unit_spots, Roadblock, SiteRules,
-    SpikeStrip, ToolSite,
+    plan_site_where, roadblock_layout, spike_layout, GapPick, Roadblock, SiteRules, SpikeStrip,
+    ToolSite, VERGE_REACH_M,
 };
 use crate::unit::{Assignment, DriveCommand, Tactic, Track, Unit, UnitRole, LANE_OFFSET_M};
 use crate::PoliceSystem;
@@ -153,18 +153,6 @@ pub(crate) struct ToolSpan {
     pub outer: f32,
     /// The site is on a one-way carriageway.
     pub oneway: bool,
-}
-
-impl ToolSpan {
-    /// Unit vector to the right of the flow.
-    pub fn right(&self) -> [f32; 2] {
-        [self.flow[1], -self.flow[0]]
-    }
-
-    /// The site point moved `off` m to the right of the flow.
-    pub fn at(&self, site: [f32; 2], off: f32) -> [f32; 2] {
-        add(site, scale(self.right(), off))
-    }
 }
 
 /// A reckless-driving report this close to an open call about another racer joins that call
@@ -4014,22 +4002,27 @@ impl PoliceSystem {
             min_sight_m: rb.min_sight_m,
             highway_ok: level <= rb.highway_max_level,
         };
-        let site =
-            plan_site(&self.graph, p, v, &rules, road.map(|r| r.0)).map_err(CaptainError::Site)?;
+        // Owner 2026-10-28: a roadblock seals the whole road (hard stop to hard stop) but for
+        // one barricaded gap; only sites where that is possible are taken.
+        let z = self.racers.get(&racer).map_or(0.0, |r| r.pos[2]);
+        let sealable = |site: &ToolSite| self.tool_section(site, z).sealable(VERGE_REACH_M);
+        let site = plan_site_where(&self.graph, p, v, &rules, road.map(|r| r.0), &sealable)
+            .map_err(CaptainError::Site)?;
         let n = rb.units[0] + self.rng.below(rb.units[1] - rb.units[0] + 1);
-        // Row 133: across the racer's carriageway only (centred on it, never over the
-        // median of a divided road).
-        let span = self.tool_span(&site);
-        let mut across = site;
-        across.pos = span.at(site.pos, 0.5 * (span.inner + span.outer));
-        let half = 0.5 * (span.outer - span.inner);
-        let barriers =
-            roadblock_barriers(&across, rb.barrier_half_extents_m, rb.barrier_mass_kg, half);
+        let gap = [GapPick::Left, GapPick::Centre, GapPick::Right][self.rng.below(3) as usize];
+        let sec = self.tool_section(&site, z);
+        let layout = roadblock_layout(
+            &site,
+            &sec,
+            rb.barrier_half_extents_m,
+            rb.barrier_mass_kg,
+            gap,
+        );
         let lifetime = rb.lifetime_s;
         let cooldown = rb.cooldown_s.get(self.phase);
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
-        for (pos, heading) in roadblock_unit_spots(&across, n, half) {
+        for (pos, heading) in layout.unit_spots.iter().take(n as usize).copied() {
             self.tool_cars.push(PendingToolCar {
                 tool: id,
                 pos,
@@ -4040,6 +4033,8 @@ impl PoliceSystem {
                 },
             });
         }
+        let barriers = layout.barriers;
+        let barricade = Some(layout.barricade);
         self.roadblocks.push(Roadblock {
             id,
             racer,
@@ -4048,6 +4043,7 @@ impl PoliceSystem {
             barriers,
             expires: now.plus(lifetime),
             scripted: false,
+            barricade,
         });
         self.captain.roadblock_ready = now.plus(cooldown);
         self.stats.roadblocks += 1;
@@ -4082,11 +4078,13 @@ impl PoliceSystem {
     pub fn place_roadblock_at(&mut self, racer: EntityId, pos: [f32; 2], dir: [f32; 2]) -> ToolId {
         let rb = &self.cfg.tools.roadblock;
         let site = Self::scenario_site(pos, dir);
-        let barriers = roadblock_barriers(
+        let sec = self.tool_section(&site, 0.0);
+        let layout = roadblock_layout(
             &site,
+            &sec,
             rb.barrier_half_extents_m,
             rb.barrier_mass_kg,
-            ROAD_HALF_WIDTH_M,
+            GapPick::Right,
         );
         let expires = self.now.plus(rb.lifetime_s);
         let id = ToolId(self.next_tool);
@@ -4096,9 +4094,10 @@ impl PoliceSystem {
             racer,
             site,
             units: Vec::new(),
-            barriers,
+            barriers: layout.barriers,
             expires,
             scripted: false,
+            barricade: Some(layout.barricade),
         });
         self.stats.roadblocks += 1;
         self.pending.push(PoliceEvent::RoadblockPlaced {
@@ -4122,14 +4121,10 @@ impl PoliceSystem {
         let site = Self::scenario_site(pos, dir);
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
-        let post = add(
-            site.pos,
-            scale(
-                perp_left(site.dir),
-                ROAD_HALF_WIDTH_M + SPIKE_CAR_SHOULDER_M,
-            ),
-        );
-        let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, post, site.dir);
+        let _ = length;
+        let lay = spike_layout(&site, &self.tool_section(&site, 0.0));
+        let post = lay.post;
+        let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, post, lay.heading);
         self.assign(
             i,
             Assignment::SpikeAt {
@@ -4137,7 +4132,8 @@ impl PoliceSystem {
                 tool: id,
             },
         );
-        let mut strip = SpikeStrip::across(id, racer, site, length, None, self.now.plus(lifetime));
+        let mut strip =
+            SpikeStrip::between(id, racer, site, lay.a, lay.b, None, self.now.plus(lifetime));
         strip.unit = Some(self.units[i].id);
         strip.post = Some(post);
         self.lay_spikes(strip);
@@ -4262,9 +4258,14 @@ impl PoliceSystem {
         // vehicles) where the car may appear ([`Self::spike_post_ok`]: out of sight, or very
         // far out on a straight): the car and strip appear there together. No such site: no
         // spikes this time (the captain tries again next think).
-        let post_of = |site: &ToolSite| self.spike_post(site, &self.tool_span(site));
+        // Owner 2026-10-28: the strip covers the whole paved road and ends under its car.
+        let z = self.racers.get(&racer).map_or(0.0, |r| r.pos[2]);
         let hidden = |site: &ToolSite| {
-            let post = post_of(site);
+            let sec = self.tool_section(site, z);
+            if !sec.spikeable() {
+                return false;
+            }
+            let post = spike_layout(site, &sec).post;
             self.spot_clear(post) && self.spike_post_ok(world, post, SPIKE_PICK_MARGIN_M)
         };
         // Nothing hidden in the usual range (a long straight in plain view): look up to
@@ -4277,29 +4278,19 @@ impl PoliceSystem {
         let site = plan_site_where(&self.graph, p, v, &rules, road, &hidden)
             .or_else(|_| plan_site_where(&self.graph, p, v, &far, road, &hidden))
             .map_err(CaptainError::Site)?;
-        let (length, lifetime, cooldown) =
-            (sc.length_m, sc.lifetime_s, sc.cooldown_s.get(self.phase));
+        let (lifetime, cooldown) = (sc.lifetime_s, sc.cooldown_s.get(self.phase));
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
-        // Row 133: the car parks on the right shoulder of the racer's own carriageway,
-        // facing its traffic; on a one-way carriageway (a divided road's half) the strip
-        // spans that carriageway, lane edge to median. Nothing is on the road yet: the strip
-        // waits for its car (`SpikeRun`, decided on the next think, which has the world).
-        let span = self.tool_span(&site);
-        let post = self.spike_post(&site, &span);
+        // Nothing is on the road yet: the strip waits for its car (`SpikeRun`, decided on
+        // the next think, which has the world).
+        let lay = spike_layout(&site, &self.tool_section(&site, z));
+        let post = lay.post;
         let expires = now.plus(lifetime);
-        let strip = if span.oneway {
-            let end =
-                |off: f32| span.at(site.pos, self.strip_end_on_paving(site.pos, span.flow, off));
-            let (a, b) = (end(span.inner), end(span.outer));
-            SpikeStrip::between(id, racer, site, a, b, None, expires)
-        } else {
-            SpikeStrip::across(id, racer, site, length, None, expires)
-        };
+        let strip = SpikeStrip::between(id, racer, site, lay.a, lay.b, None, expires);
         self.spike_runs.push(SpikeRun {
             strip,
             post,
-            heading: span.flow,
+            heading: lay.heading,
         });
         self.spikes_decided.push((id, racer));
         self.captain.spikes_ready = now.plus(cooldown);
@@ -4308,13 +4299,44 @@ impl PoliceSystem {
         Ok(id)
     }
 
-    /// Where the AI captain's spike car parks beside a strip at `site`: on the right
-    /// shoulder of the racer's carriageway ([`SPIKE_CAR_SHOULDER_M`] past `span`'s outer edge),
-    /// kept on the paved highway in a Loop 9 race ([`Self::spike_car_on_paving`]: the lane
-    /// count overstates some carriageways and their shoulder ends at a barrier).
-    fn spike_post(&self, site: &ToolSite, span: &ToolSpan) -> [f32; 2] {
-        let off = span.outer + SPIKE_CAR_SHOULDER_M;
-        span.at(site.pos, self.spike_car_on_paving(site.pos, span.flow, off))
+    /// The road across `site` (owner 2026-10-28, [`crate::section`]): the city's paving and
+    /// hard stops when known (`z_hint`: about the racer's height, to tell a deck from the road
+    /// under it); else the carriageway from the road graph's lanes ([`Self::tool_span`],
+    /// kerbs at its edges), kept inside tunnel walls and, in a Loop 9 race, the paved highway.
+    pub(crate) fn tool_section(&self, site: &ToolSite, z_hint: f32) -> Section {
+        if !self.section.is_empty() {
+            if let Some(z) = self.section.road_z(site.pos, site.dir, z_hint) {
+                return self.section.section(site.pos, site.dir, z, SECTION_REACH_M);
+            }
+        }
+        let span = self.tool_span(site);
+        let (mut lo, mut hi) = if dot(span.flow, site.dir) >= 0.0 {
+            (span.inner, span.outer)
+        } else {
+            (-span.outer, -span.inner)
+        };
+        // The span is measured from the road graph's line: a site off it (a race course on a
+        // lane) shifts by its own offset.
+        if let Some(r) = self.graph.nearest_on_road(site.pos) {
+            if r.dist_m < 2.0 * ROAD_HALF_WIDTH_M {
+                let off = dot(sub(site.pos, r.point), [site.dir[1], -site.dir[0]]);
+                lo -= off;
+                hi -= off;
+            }
+        }
+        let paved = if self.race_corridor().is_some() {
+            self.paved_edges(site.pos, site.dir)
+        } else {
+            None
+        };
+        for (elo, ehi) in [self.tunnel_walls(site.pos, site.dir), paved]
+            .into_iter()
+            .flatten()
+        {
+            lo = lo.max(elo);
+            hi = hi.min(ehi);
+        }
+        Section::plain(lo, hi)
     }
 
     /// The traffic flow and lateral span a tool at `site` may use (row 133, see

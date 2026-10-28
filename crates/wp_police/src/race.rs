@@ -27,19 +27,23 @@ use crate::config::{ConfigError, PoliceConfig};
 use crate::dispatch::ROAD_HALF_WIDTH_M;
 use crate::events::{PoliceEvent, ToolId, UnitId, UnitKind};
 use crate::graph::{
-    add, closest_on_segment, dist, dot, len, normalize, perp_left, scale, sub, xy, NodeId,
-    SegmentId,
+    add, closest_on_segment, dist, dot, len, normalize, scale, sub, xy, NodeId, SegmentId,
 };
 use crate::heat::WantedLevel;
 use crate::radio::{RadioCue, RadioTier};
 use crate::tools::{
-    roadblock_barriers, roadblock_unit_spots, Roadblock, SpikeStrip, ToolSite, NODE_CLEARANCE_M,
+    roadblock_layout, spike_layout, GapPick, Roadblock, SpikeStrip, ToolSite, NODE_CLEARANCE_M,
+    VERGE_REACH_M,
 };
 use crate::unit::{Assignment, UnitRole, LANE_OFFSET_M};
 use crate::PoliceSystem;
 
 /// A tactic switched off unlocks at this wanted level, which no racer reaches (L5 is the top).
 pub const NEVER_LEVEL: u8 = 6;
+
+/// A scripted roadblock slides on along its road at most this far looking for a spot where
+/// the road can be sealed, m.
+const ROUTE_BLOCK_SLIDE_M: f32 = 300.0;
 
 /// Scripted tools keep this far from the start line and the finish, m.
 const ENDS_CLEAR_M: f32 = 40.0;
@@ -115,7 +119,6 @@ impl DeckFoot {
 
 /// A spike car parked beside a Loop 9 strip keeps its side this far inside the paved edge
 /// (the barrier's face), m.
-const PAVED_EDGE_CLEAR_M: f32 = 0.5;
 
 /// A highway surface runs along a tool's flow when |cos| between them is at least this.
 const PAVED_ALONG_MIN_COS: f32 = 0.9;
@@ -1048,46 +1051,6 @@ impl PoliceSystem {
             .map(|(_, e)| e)
     }
 
-    /// A spike car's lateral spot `off` (+ right of `flow`, m, from `p`) kept where a car can
-    /// stand. In a tunnel (every pursuit; owner, 2026-10-26: the Talon Tunnel's spike car stood
-    /// in the rock, 2.2 m past the wall) it stays inside the walls; in a race with a patrol
-    /// corridor (Loop 9: the owner's highway races) it also stays on the paved highway, inside
-    /// the edge and median barriers. Elsewhere `off` as given.
-    pub(crate) fn spike_car_on_paving(&self, p: [f32; 2], flow: [f32; 2], off: f32) -> f32 {
-        self.spike_car_within(p, flow, off, self.race_corridor().is_some())
-    }
-
-    /// [`Self::spike_car_on_paving`] with the paving check on when `paving`.
-    fn spike_car_within(&self, p: [f32; 2], flow: [f32; 2], off: f32, paving: bool) -> f32 {
-        let m = crate::avoid::UNIT_HALF_WIDTH_M + PAVED_EDGE_CLEAR_M;
-        let mut off = off;
-        let paved = if paving {
-            self.paved_edges(p, flow)
-        } else {
-            None
-        };
-        for (lo, hi) in [self.tunnel_walls(p, flow), paved].into_iter().flatten() {
-            off = off.min(hi - m).max(lo + m);
-        }
-        off
-    }
-
-    /// A strip end's lateral spot `off` (+ right of `flow`, m, from `p`) kept inside a tunnel's
-    /// walls and, in a Loop 9 race, on the paved highway (see [`Self::spike_car_on_paving`]): no
-    /// strip runs into a wall or through a barrier.
-    pub(crate) fn strip_end_on_paving(&self, p: [f32; 2], flow: [f32; 2], off: f32) -> f32 {
-        let paved = if self.race_corridor().is_some() {
-            self.paved_edges(p, flow)
-        } else {
-            None
-        };
-        let mut off = off;
-        for (lo, hi) in [self.tunnel_walls(p, flow), paved].into_iter().flatten() {
-            off = off.min(hi).max(lo);
-        }
-        off
-    }
-
     /// Road centre and half width at the road nearest `p` (the course point itself and the
     /// default half width without a road graph).
     fn road_at(&self, p: [f32; 2]) -> ([f32; 2], f32) {
@@ -1097,7 +1060,7 @@ impl PoliceSystem {
         }
     }
 
-    fn half_width(&self, s: SegmentId) -> f32 {
+    pub(crate) fn half_width(&self, s: SegmentId) -> f32 {
         let seg = self.graph.segment(s);
         let w = (seg.lanes_fwd as f32 + seg.lanes_back as f32) * seg.lane_width_m * 0.5;
         if w > 1.0 {
@@ -1244,38 +1207,39 @@ impl PoliceSystem {
         None
     }
 
+    /// Height hint for a tool at `p`: the deck's when `p` is on an elevated deck (the road on
+    /// it, not the one below), else 0 (the road along the site wins anyway).
+    fn z_hint(&self, p: [f32; 2]) -> f32 {
+        self.deck_at(p).unwrap_or(0.0)
+    }
+
+    /// A scripted roadblock at `site` sealing the road (owner 2026-10-28: hard stop to hard
+    /// stop but for one barricaded gap at `gap`), with up to `units` cars behind it. `None`
+    /// (nothing placed) where the road cannot be sealed.
     fn push_roadblock(
         &mut self,
         site: ToolSite,
-        half_width_m: f32,
         units: u32,
-        gap: Option<(GapSide, f32)>,
+        gap: GapPick,
         owner: EntityId,
         expires: crate::time::SimTime,
-    ) -> ToolId {
+    ) -> Option<ToolId> {
+        let sec = self.tool_section(&site, self.z_hint(site.pos));
+        if !sec.sealable(VERGE_REACH_M) {
+            return None;
+        }
         let rb = &self.cfg.tools.roadblock;
-        let he = rb.barrier_half_extents_m;
-        let across = perp_left(site.dir);
-        // Lateral offset (+ left) of a point from the block's centre.
-        let lateral = |p: [f32; 2]| dot(sub(p, site.pos), across);
-        let open = |x: f32, half: f32| match gap {
-            Some((GapSide::Left, g)) if g > 0.0 => x + half > half_width_m - g,
-            Some((GapSide::Right, g)) if g > 0.0 => x - half < -half_width_m + g,
-            _ => false,
-        };
-        let barriers: Vec<_> = roadblock_barriers(&site, he, rb.barrier_mass_kg, half_width_m)
-            .into_iter()
-            .filter(|c| !open(lateral([c.pos[0], c.pos[1]]), he[0]))
-            .collect();
+        let layout = roadblock_layout(
+            &site,
+            &sec,
+            rb.barrier_half_extents_m,
+            rb.barrier_mass_kg,
+            gap,
+        );
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
-        let spots: Vec<_> = roadblock_unit_spots(&site, units.max(1), half_width_m)
-            .into_iter()
-            .filter(|(p, _)| !open(lateral(*p), 1.2))
-            .take(units as usize)
-            .collect();
         let mut ids = Vec::new();
-        for (pos, heading) in spots {
+        for (pos, heading) in layout.unit_spots.iter().take(units as usize).copied() {
             let assignment = Assignment::RoadblockAt {
                 segment: site.segment,
                 tool: id,
@@ -1300,9 +1264,10 @@ impl PoliceSystem {
             racer: owner,
             site,
             units: ids,
-            barriers,
+            barriers: layout.barriers,
             expires,
             scripted: true,
+            barricade: Some(layout.barricade),
         });
         self.stats.roadblocks += 1;
         self.pending.push(PoliceEvent::RoadblockPlaced {
@@ -1311,7 +1276,7 @@ impl PoliceSystem {
             pos: [site.pos[0], site.pos[1], 0.0],
             sight_m: site.sight_m,
         });
-        id
+        Some(id)
     }
 
     fn place_route_block(
@@ -1322,42 +1287,44 @@ impl PoliceSystem {
         expires: crate::time::SimTime,
     ) -> Option<ToolId> {
         let total = course.length();
-        let end = total - ENDS_CLEAR_M;
+        let end =
+            (total - ENDS_CLEAR_M).min((b.at * total).max(ENDS_CLEAR_M) + ROUTE_BLOCK_SLIDE_M);
         let mut s = (b.at * total).max(ENDS_CLEAR_M);
-        // Off the junction boxes: the first spot clear of every junction.
-        while s <= end && self.near_junction(course.point_at(s), NODE_CLEARANCE_M + 5.0) {
+        let gap = match b.gap_side {
+            GapSide::Left => GapPick::Left,
+            GapSide::Right => GapPick::Right,
+        };
+        // The first spot clear of every junction where the road can be sealed.
+        while s <= end {
+            if self.near_junction(course.point_at(s), NODE_CLEARANCE_M + 5.0) {
+                s += 5.0;
+                continue;
+            }
+            let pos = course.point_at(s);
+            let seg = self
+                .graph
+                .nearest_on_road(pos)
+                .map_or(SegmentId(0), |r| r.segment);
+            let from_node = if self.graph.segments.is_empty() {
+                NodeId(0)
+            } else {
+                self.graph.segment(seg).a
+            };
+            let site = ToolSite {
+                segment: seg,
+                from_node,
+                d_m: 0.0,
+                pos,
+                dir: course.dir_at(s),
+                sight_m: 0.0,
+                ahead_m: s,
+            };
+            if let Some(id) = self.push_roadblock(site, b.units, gap, owner, expires) {
+                return Some(id);
+            }
             s += 5.0;
         }
-        if s > end {
-            return None;
-        }
-        let (centre, hw) = self.road_at(course.point_at(s));
-        let seg = self
-            .graph
-            .nearest_on_road(centre)
-            .map_or(SegmentId(0), |r| r.segment);
-        let from_node = if self.graph.segments.is_empty() {
-            NodeId(0)
-        } else {
-            self.graph.segment(seg).a
-        };
-        let site = ToolSite {
-            segment: seg,
-            from_node,
-            d_m: 0.0,
-            pos: centre,
-            dir: course.dir_at(s),
-            sight_m: 0.0,
-            ahead_m: s,
-        };
-        Some(self.push_roadblock(
-            site,
-            hw,
-            b.units,
-            Some((b.gap_side, b.gap_m)),
-            owner,
-            expires,
-        ))
+        None
     }
 
     fn place_side_block(
@@ -1367,20 +1334,26 @@ impl PoliceSystem {
         owner: EntityId,
         expires: crate::time::SimTime,
     ) -> Option<ToolId> {
-        let (pos, dir, seg) = self
-            .walk_road(r.node, r.segment, b.into_m)
-            .or_else(|| self.walk_road(r.node, r.segment, NODE_CLEARANCE_M))?;
-        let site = ToolSite {
-            segment: seg,
-            from_node: r.node,
-            d_m: b.into_m,
-            pos,
-            dir,
-            sight_m: 0.0,
-            ahead_m: 0.0,
-        };
-        let hw = self.half_width(seg);
-        Some(self.push_roadblock(site, hw, b.units, None, owner, expires))
+        let mut into = b.into_m.max(NODE_CLEARANCE_M);
+        while into <= b.into_m.max(NODE_CLEARANCE_M) + ROUTE_BLOCK_SLIDE_M {
+            let Some((pos, dir, seg)) = self.walk_road(r.node, r.segment, into) else {
+                break;
+            };
+            let site = ToolSite {
+                segment: seg,
+                from_node: r.node,
+                d_m: into,
+                pos,
+                dir,
+                sight_m: 0.0,
+                ahead_m: 0.0,
+            };
+            if let Some(id) = self.push_roadblock(site, b.units, GapPick::Right, owner, expires) {
+                return Some(id);
+            }
+            into += 5.0;
+        }
+        None
     }
 
     /// A scripted spike strip over part of the course, with its own unit parked on the
@@ -1396,33 +1369,17 @@ impl PoliceSystem {
         owner: EntityId,
         expires: crate::time::SimTime,
     ) -> Option<ToolId> {
+        let _ = on_paving;
         let total = course.length();
         let s = (sp.at * total).clamp(0.0, total);
         let dir = course.dir_at(s);
-        let pos = add(course.point_at(s), scale(perp_left(dir), sp.offset_m));
+        // Owner 2026-10-28: the strip covers the whole paved road (`length_m` / `offset_m`
+        // no longer apply) and ends under its car on the right edge.
+        let pos = course.point_at(s);
         let seg = self
             .graph
             .nearest_on_road(pos)
             .map_or(SegmentId(0), |r| r.segment);
-        // The unit parks on the shoulder on the strip's side of the road, facing the racers.
-        let (centre, hw) = self.road_at(course.point_at(s));
-        let side = if sp.offset_m >= 0.0 {
-            perp_left(dir)
-        } else {
-            scale(perp_left(dir), -1.0)
-        };
-        let right = [dir[1], -dir[0]];
-        let off = dot(
-            sub(add(centre, scale(side, hw + SHOULDER_CLEAR_M)), centre),
-            right,
-        );
-        let post = add(
-            centre,
-            scale(right, self.spike_car_within(centre, dir, off, on_paving)),
-        );
-        if self.warmed_up && self.in_racer_view_opt(None, post, true) {
-            return None;
-        }
         let site = ToolSite {
             segment: seg,
             from_node: NodeId(0),
@@ -1432,6 +1389,15 @@ impl PoliceSystem {
             sight_m: 0.0,
             ahead_m: s,
         };
+        let sec = self.tool_section(&site, self.z_hint(pos));
+        if !sec.spikeable() {
+            return None;
+        }
+        let lay = spike_layout(&site, &sec);
+        let post = lay.post;
+        if self.warmed_up && self.in_racer_view_opt(None, post, true) {
+            return None;
+        }
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
         let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, post, dir);
@@ -1442,7 +1408,7 @@ impl PoliceSystem {
                 tool: id,
             },
         );
-        let mut strip = SpikeStrip::across(id, owner, site, sp.length_m, None, expires);
+        let mut strip = SpikeStrip::between(id, owner, site, lay.a, lay.b, None, expires);
         strip.scripted = true;
         strip.unit = Some(self.units[i].id);
         strip.post = Some(post);
@@ -1707,8 +1673,13 @@ mod tests {
         }
     }
 
+    /// Lateral offset of `q` from `p`, + right of `dir`.
+    fn lateral(p: [f32; 2], dir: [f32; 2], q: [f32; 2]) -> f32 {
+        dot(sub(q, p), [dir[1], -dir[0]])
+    }
+
     #[test]
-    fn loop9_spike_cars_stay_inside_the_highway_paving() {
+    fn loop9_spike_strips_cover_the_highway_paving_up_to_their_car() {
         let mut police =
             PoliceSystem::with_city(PoliceConfig::builtin(), highway(), PoliceSetup::default());
         // The eastbound carriageway's paving: 12 m wide around y = -8 (y -14 .. -2), its barriers
@@ -1724,8 +1695,6 @@ mod tests {
         assert_eq!(police.paved_edges(p, [-1.0, 0.0]), Some((-8.0, 4.0)));
         assert_eq!(police.paved_edges([800.0, 40.0], east), None);
         assert_eq!(police.paved_edges(p, [0.0, 1.0]), None);
-        // No race (or a race without a patrol corridor): the shoulder spot as given.
-        assert_eq!(police.spike_car_on_paving(p, east, 12.0), 12.0);
         let prof = RaceProfiles::builtin().get("loop9_day").unwrap().clone();
         let prof = RaceProfile {
             route_blocks: Vec::new(),
@@ -1736,20 +1705,38 @@ mod tests {
         };
         let c = RaceCourse::new(&[[0.0, -7.75], [1600.0, -7.75]]);
         police.start_race("loop9_day", &prof, &c, &[EntityId(1)]);
-        // Loop 9: a spot past the outer edge comes back inside it with the car's half width and
-        // a margin to spare; one past the median edge likewise; one on the paving stays.
-        let m = crate::avoid::UNIT_HALF_WIDTH_M + PAVED_EDGE_CLEAR_M;
-        assert!((police.spike_car_on_paving(p, east, 12.0) - (8.0 - m)).abs() < 1e-4);
-        assert!((police.spike_car_on_paving(p, east, -9.0) - (-4.0 + m)).abs() < 1e-4);
-        assert_eq!(police.spike_car_on_paving(p, east, 3.0), 3.0);
-        // Strip ends stop at the paved edge.
-        assert_eq!(police.strip_end_on_paving(p, east, 9.25), 8.0);
-        // Off the highway paving nothing changes.
-        assert_eq!(police.spike_car_on_paving([800.0, 40.0], east, 12.0), 12.0);
+        let site = ToolSite {
+            segment: SegmentId(0),
+            from_node: NodeId(0),
+            d_m: 0.0,
+            pos: p,
+            dir: east,
+            sight_m: 0.0,
+            ahead_m: 0.0,
+        };
+        let sec = police.tool_section(&site, 0.0);
+        let lay = crate::tools::spike_layout(&site, &sec);
+        // Owner 2026-10-28: the strip runs from the median-side edge to under its car, which
+        // stands inside the outer edge: nothing paved is left open.
+        let (a, b, car) = (
+            lateral(p, east, lay.a),
+            lateral(p, east, lay.b),
+            lateral(p, east, lay.post),
+        );
+        assert!((a - -4.0).abs() < 1e-3, "strip starts at {a}");
+        assert!(
+            car + crate::tools::UNIT_HALF_W_M <= 8.0 + 1e-3,
+            "car at {car}"
+        );
+        assert!(
+            b > car - crate::tools::UNIT_HALF_W_M,
+            "strip ends at {b}, car at {car}"
+        );
+        assert!(b < car, "strip ends under the car's inner half");
     }
 
     #[test]
-    fn spike_cars_stay_inside_tunnel_walls_in_any_pursuit() {
+    fn spike_strips_and_cars_stay_inside_tunnel_walls_in_any_pursuit() {
         let mut police =
             PoliceSystem::with_city(PoliceConfig::builtin(), highway(), PoliceSetup::default());
         // One bore for both carriageways, walls 16.6 m either side of y = 0 (the Talon Tunnel).
@@ -1757,18 +1744,23 @@ mod tests {
             centre: vec![[400.0, 0.0], [1200.0, 0.0]],
             half_width_m: 16.6,
         });
-        // Eastbound lane line at y = -7.05; the shoulder spot (outer edge 9.25 + 2.5 m) would be
-        // 18.8 m from the bore's centre, in the rock. No race: the walls still hold it.
         let (p, east) = ([800.0, -7.05], [1.0, 0.0]);
-        let m = crate::avoid::UNIT_HALF_WIDTH_M + PAVED_EDGE_CLEAR_M;
-        let off = police.spike_car_on_paving(p, east, 11.75);
-        assert!((off - (16.6 - 7.05 - m)).abs() < 1e-3, "{off}");
-        assert!((police.strip_end_on_paving(p, east, 9.25) - 9.25).abs() < 1e-4);
-        assert!((police.strip_end_on_paving(p, east, 12.0) - (16.6 - 7.05)).abs() < 1e-3);
-        // Outside the tunnel nothing changes.
-        assert_eq!(
-            police.spike_car_on_paving([200.0, -7.05], east, 11.75),
-            11.75
+        let site = ToolSite {
+            segment: SegmentId(0),
+            from_node: NodeId(0),
+            d_m: 0.0,
+            pos: p,
+            dir: east,
+            sight_m: 0.0,
+            ahead_m: 0.0,
+        };
+        let sec = police.tool_section(&site, 0.0);
+        assert!(sec.paved_hi <= 16.6 - 7.05 + 1e-3 && sec.paved_lo >= -16.6 - 7.05 - 1e-3);
+        let lay = crate::tools::spike_layout(&site, &sec);
+        let car = lateral(p, east, lay.post);
+        assert!(
+            car + crate::tools::UNIT_HALF_W_M <= 16.6 - 7.05 + 1e-3,
+            "car at {car}"
         );
     }
 
@@ -1870,16 +1862,35 @@ mod tests {
                     .nodes
                     .iter()
                     .all(|n| dist(n.pos, rb.site.pos) >= 15.0));
-                // The gap: no barrier within gap_m of one edge.
+                // Owner 2026-10-28: barriers kerb to kerb but for one car-width gap, at the
+                // profile's side, with the barricade in it.
                 let hw = ROAD_HALF_WIDTH_M;
-                let left: Vec<f32> = rb
+                let mut spans: Vec<(f32, f32)> = rb
                     .barriers
                     .iter()
-                    .map(|b| b.pos[1] - rb.site.pos[1])
+                    .map(|b| {
+                        (
+                            b.pos[1] - b.half_extents_m[0],
+                            b.pos[1] + b.half_extents_m[0],
+                        )
+                    })
                     .collect();
-                let open_left = left.iter().all(|y| *y + 1.2 <= hw - 3.5 + 1e-3);
-                let open_right = left.iter().all(|y| *y - 1.2 >= -hw + 3.5 - 1e-3);
-                assert!(open_left ^ open_right, "one side open: {left:?}");
+                spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+                assert!(spans[0].0 <= -hw + 1e-3, "{spans:?}");
+                assert!(spans.last().unwrap().1 >= hw - 1e-3, "{spans:?}");
+                let gaps: Vec<(f32, f32)> = spans
+                    .windows(2)
+                    .filter(|w| w[1].0 > w[0].1 + 1e-3)
+                    .map(|w| (w[0].1, w[1].0))
+                    .collect();
+                assert_eq!(gaps.len(), 1, "{spans:?}");
+                let (g0, g1) = gaps[0];
+                assert!((g1 - g0 - crate::tools::GAP_W_M).abs() < 1e-3);
+                let bc = rb.barricade.expect("barricade");
+                assert!(bc.collider.pos[1] - bc.collider.half_extents_m[0] <= g0);
+                assert!(bc.collider.pos[1] + bc.collider.half_extents_m[0] >= g1);
+                // At one edge of the road (left of the racing direction is +y here).
+                assert!(g1 >= hw - 0.4 || g0 <= -hw + 0.4, "gap {g0}..{g1}");
             } else {
                 // Down a cross street, across it.
                 assert!(d > 15.0, "side block only {d:.1} m off the course");
@@ -1934,7 +1945,7 @@ mod tests {
     }
 
     #[test]
-    fn spikes_cover_part_of_the_course_only() {
+    fn scripted_spikes_cover_the_whole_road() {
         let mut police = system();
         let prof = RaceProfiles::builtin()
             .get("grid_highway_sprint")
@@ -1952,16 +1963,31 @@ mod tests {
         assert!(dist(u.body.pos, s.site.pos) <= crate::dispatch::SPIKE_UNIT_LEASH_M);
         police.remove_tools_for(None);
         assert_eq!(police.spike_strips().len(), 1);
-        let s = &police.spike_strips()[0];
-        assert!((dist(s.a, s.b) - prof.spikes[0].length_m).abs() < 1e-3);
-        // A car in the next lane (3.5 m left of the course line) misses it.
-        let sp = prof.spikes[0];
-        let x = sp.at * c.length();
-        let lane = 3.5 + sp.offset_m;
-        let hit = s.wheels_crossing([x - 5.0, -1.75 + lane], [x + 5.0, -1.75 + lane], 0.8);
-        assert_eq!(hit, [false; 4]);
-        let hit = s.wheels_crossing([x - 5.0, -1.75], [x + 5.0, -1.75], 0.8);
-        assert!(hit.iter().any(|w| *w));
+        let s = police.spike_strips()[0].clone();
+        let car = police
+            .units()
+            .iter()
+            .find(|u| u.id == uid)
+            .unwrap()
+            .body
+            .pos;
+        // Owner 2026-10-28: every lane is spiked; past the strip's end stands its car.
+        let x = prof.spikes[0].at * c.length();
+        let mut lane = -12.0;
+        while lane <= 12.0 {
+            let y = -1.75 + lane;
+            let hit = s.wheels_crossing([x - 5.0, y], [x + 5.0, y], 0.8);
+            let through_car = (y - car[1]).abs() < 2.0 * crate::tools::UNIT_HALF_W_M;
+            let on_road =
+                y.abs() <= police.half_width(SegmentId(0)) + 0.01 || hit.iter().any(|w| *w);
+            assert!(
+                !on_road || hit.iter().any(|w| *w) || through_car,
+                "a car at y = {y} drives past the strip {:?}..{:?} (car at {car:?})",
+                s.a,
+                s.b
+            );
+            lane += 0.5;
+        }
     }
 
     #[test]
