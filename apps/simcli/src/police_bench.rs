@@ -185,6 +185,8 @@ impl BenchCell {
             covered_los: true,
             police_tools: true,
             car_mix: false,
+            police_fleet: false,
+            police_unit_level: None,
             police_presence: None,
             dense_patrols: false,
             slow: false,

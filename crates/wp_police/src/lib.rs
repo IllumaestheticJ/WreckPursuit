@@ -505,6 +505,9 @@ pub struct PoliceSystem {
     pub(crate) think_accum: f32,
     pub(crate) phase: DayPhase,
     pub(crate) warmed_up: bool,
+    /// Units whose car is below the current wanted level ([`PoliceSystem::set_outdated_units`]),
+    /// sorted: retired out of sight so their replacements come in the upgraded cars.
+    pub(crate) outdated: Vec<UnitId>,
     pub(crate) racers: BTreeMap<EntityId, RacerRecord>,
     pub(crate) obs: BTreeMap<EntityId, RacerObs>,
     pub(crate) recognition_s: BTreeMap<EntityId, f32>,
@@ -726,6 +729,7 @@ impl PoliceSystem {
             think_accum: 0.0,
             phase: DayPhase::Day,
             warmed_up: false,
+            outdated: Vec::new(),
             racers: BTreeMap::new(),
             last_ambush: BTreeMap::new(),
             first_backup: BTreeMap::new(),
@@ -1454,6 +1458,18 @@ impl PoliceSystem {
             &self.cfg.pursuit.avoid,
             dt,
         )
+    }
+
+    /// Units whose car model is below the racers' wanted level (`wp_sim` decides from its
+    /// heat-keyed fleet). The dispatcher retires one of them per tick once nobody can see it
+    /// and it is at least `response.despawn_min_m` from every racer, unless it holds a
+    /// roadblock or a spike strip; patrols, responders and backup then refill as usual, so
+    /// the cars on the road follow the wanted level without popping in view. Empty = nothing
+    /// to retire (the default).
+    pub fn set_outdated_units(&mut self, units: &[UnitId]) {
+        self.outdated.clear();
+        self.outdated.extend_from_slice(units);
+        self.outdated.sort_unstable();
     }
 
     /// Bind a unit to the vehicle entity `wp_sim` spawned for it, with that car's steering

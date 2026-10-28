@@ -262,6 +262,12 @@ impl RaceDef {
         }
     }
 
+    /// Wanted level the race's police cars are picked at, at least (`Scenario::police_unit_level`,
+    /// the profile's `unit_level`); `None` = the single standard police car.
+    pub fn police_unit_level(&self) -> Option<u8> {
+        self.police_profile().and_then(|p| p.unit_level)
+    }
+
     /// This race's police profile (`data/police/races.toml`, keyed by the race id): how the
     /// police work this race. Applied by [`crate::police::start_race`].
     pub fn police_profile(&self) -> Option<wp_police::race::RaceProfile> {

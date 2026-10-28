@@ -18,6 +18,7 @@
     assists: ai,
     traffic_density: 0.1,
     police_presence: 1.0,
+    police_fleet: true,
     panels: true,
     entities: [
         (
