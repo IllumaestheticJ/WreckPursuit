@@ -17,6 +17,7 @@ const mod = (id: string, over: Partial<ModOption> = {}): ModOption => ({
   replaces: null,
   stats_after: null,
   requires: [],
+  removes: [],
   ...over,
 });
 
@@ -44,6 +45,8 @@ const screen = (catalog: CatalogEntry[], over: Partial<WorkshopScreen> = {}): Wo
   inventory: [],
   stands: [],
   torque_factor: 1,
+  power_hp: 150,
+  stock_power_hp: 150,
   catalog,
   cash: 100000,
   def_id: "x",
