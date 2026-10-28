@@ -623,15 +623,18 @@ pub struct RaceRun {
 
 impl RaceRun {
     /// Attach race `def` to a freshly built session (before the first tick): `ids` are the
-    /// scenario entities in scenario order (player first, then `def.ai`), `cars` by car id.
+    /// scenario entities in scenario order (player first, then `def.ai`), `cars` by car id,
+    /// `modded` the entities spawned with mods (`BuiltSim::modded`).
     /// Marks the AI cars `VehicleKind::AiRacer`, starts the countdown and charges the buy-in
     /// on `run`'s account (when there is one).
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         def: &RaceDef,
         autopilot: bool,
         sim: &mut Sim,
         ids: &[EntityId],
         cars: &BTreeMap<String, LoadedCar>,
+        modded: &BTreeMap<EntityId, LoadedCar>,
         sc: &Scenario,
         run: Option<&mut PlayerRun>,
     ) -> Result<Self, String> {
@@ -652,8 +655,11 @@ impl RaceRun {
         // A touge battle in the rain: the AI plans for the wet road.
         let grip = touge_setup.map_or(1.0, |t| t.surface.ai_grip());
         let entrant = |i: usize| -> Result<LiveEntrant, String> {
-            let car = cars
-                .get(&sc.entities[i].car)
+            // An AI car with mods (a touge NPC's build) plans with the car it drives; the
+            // player's entry keeps the stock figures (it only steers on autopilot).
+            let ai_build = if i > 0 { modded.get(&ids[i]) } else { None };
+            let car = ai_build
+                .or_else(|| cars.get(&sc.entities[i].car))
                 .ok_or_else(|| format!("car {} not loaded", sc.entities[i].car))?;
             let mut capability = CarCapability::for_car(car);
             capability.max_lat_g *= grip;

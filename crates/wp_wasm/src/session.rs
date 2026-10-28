@@ -258,6 +258,7 @@ impl Session {
                 &mut sim,
                 &ids,
                 &cars,
+                &modded,
                 &sc,
                 run.as_mut(),
             )?),

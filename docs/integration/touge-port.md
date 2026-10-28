@@ -104,6 +104,17 @@ goldens were never merged in).
     `Economy::market_basis` (the cheapest dealer price, the same basis as cars from old saves)
     instead of 0, so a repaired won car sells for `dealer_buy_frac ×` that, below any dealer
     price.
+  - *Unmodified opponents:* every NPC has a fixed build (`TougeRacer::mods`): challengers 7–8
+    mods (intake/exhaust, springs, rims, a lip or skirts, a vinyl), bosses 13–16 (stage-2
+    engine, coilovers, brakes, LSD, forged rims, splitter + wing or diffuser, kits or a
+    widebody, a vinyl). The NPC's scenario entity carries them (simcli spawns the modified car;
+    the race AI plans with the modified car's capability, `RaceRun::new` takes
+    `BuiltSim::modded`), the testbed draws them (`entity_visuals_json` + `setLook` with
+    `TougeReport::opponent_mods`), and a won pink slip arrives with them. Fairness
+    (`touge_builds_stay_beatable`): bosses 6–19 % quicker 0–100, +10–18 km/h top speed,
+    +1–3 % skidpad grip; challengers 3–4 % quicker, +1–2 % grip. Semi-slicks were left off the
+    bosses: they added ~18 % grip, too much on a pass where grip decides. Touge has no
+    rep-scaled field (`scaled_field` does not exist), so the builds are the whole boss edge.
 
 ## Owner rules
 

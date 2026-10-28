@@ -48,6 +48,8 @@ impl Economy {
     /// dealer charges for it. Posts `PinkSlipWon`. Returns the new car's uid.
     pub fn take_pink_slip_car(&self, acct: &mut PlayerAccount, car: WonCar) -> EconResult<CarUid> {
         let basis = self.market_basis(&car.def_id, car.class, car.base_price);
+        let mut mods = car.mods;
+        mods.sort();
         transact(acct, |tx| {
             let def_id = car.def_id.clone();
             let uid = tx.add_car(OwnedCar {
@@ -55,7 +57,7 @@ impl Economy {
                 def_id: car.def_id,
                 class: car.class,
                 base_price: car.base_price,
-                mods: car.mods,
+                mods,
                 damage: car.damage,
                 location: CarLocation::Garage,
                 insurance: None,

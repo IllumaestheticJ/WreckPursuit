@@ -243,6 +243,11 @@ pub struct TougeRacer {
     /// Body colour 0xRRGGBB the NPC's car races in (the renderer paints it with this), and the
     /// colour a won pink slip arrives in.
     pub paint: u32,
+    /// The NPC's build (`data/mods` ids): installed on its car in the race (physics and look,
+    /// scenario `EntitySpec::mods`) and on the car a won pink slip brings home. Fixed per racer:
+    /// challengers moderately built, bosses heavily. Every mod is legal for the car's class
+    /// (`tests::touge_builds_are_legal_and_visible`).
+    pub mods: &'static [&'static str],
 }
 
 /// The pass's two NPCs, in [`MAPS`] order: `(challenger, boss)`. Their `id`s (`touge_<first
@@ -259,6 +264,15 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
             },
             title: "Crown regular",
             paint: 0xd8d8d2,
+            mods: &[
+                "engine_intake_1",
+                "engine_exhaust_1",
+                "susp_springs_1",
+                "wheels_mesh",
+                "body_front_lip",
+                "body_side_skirts",
+                "vinyl_pinstripe",
+            ],
         },
         TougeRacer {
             driver: AiDriverDef {
@@ -270,6 +284,24 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
             },
             title: "King of the Crown",
             paint: 0x1e1e22,
+            mods: &[
+                "engine_intake_2",
+                "engine_exhaust_2",
+                "engine_ecu_2",
+                "susp_coilovers_2",
+                "susp_arb_front",
+                "brakes_pads_1",
+                "brakes_kit_1",
+                "drivetrain_lsd_1",
+                "wheels_forged",
+                "aero_splitter",
+                "aero_wing_2",
+                "body_front_aggressive",
+                "body_side_skirts",
+                "body_rear_bumper",
+                "body_hood_vented",
+                "vinyl_race_number",
+            ],
         },
     ),
     (
@@ -283,6 +315,16 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
             },
             title: "Ridge regular",
             paint: 0x2a7fd0,
+            mods: &[
+                "engine_intake_1",
+                "engine_exhaust_1",
+                "drivetrain_lsd_1",
+                "susp_arb_rear",
+                "wheels_turbofan",
+                "body_front_lip",
+                "aero_ducktail",
+                "vinyl_side_slash",
+            ],
         },
         TougeRacer {
             driver: AiDriverDef {
@@ -294,6 +336,21 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
             },
             title: "The Ridge Ghost",
             paint: 0x7a1f1f,
+            mods: &[
+                "engine_intake_2",
+                "engine_exhaust_2",
+                "engine_ecu_2",
+                "susp_coilovers_2",
+                "brakes_pads_1",
+                "weight_carbon_hood",
+                "weight_strip_1",
+                "wheels_forged",
+                "aero_splitter",
+                "aero_diffuser",
+                "body_front_lip",
+                "body_side_skirts",
+                "interior_tint",
+            ],
         },
     ),
     (
@@ -307,6 +364,16 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
             },
             title: "Ashfall regular",
             paint: 0x3fb950,
+            mods: &[
+                "engine_intake_1",
+                "engine_exhaust_1",
+                "susp_springs_1",
+                "brakes_pads_1",
+                "wheels_split_spoke",
+                "aero_splitter",
+                "body_side_skirts",
+                "vinyl_stripes",
+            ],
         },
         TougeRacer {
             driver: AiDriverDef {
@@ -318,6 +385,22 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
             },
             title: "Queen of Ashfall",
             paint: 0x9b59b6,
+            mods: &[
+                "engine_intake_2",
+                "engine_exhaust_2",
+                "engine_ecu_2",
+                "drivetrain_lsd_2",
+                "susp_coilovers_2",
+                "brakes_pads_1",
+                "brakes_kit_1",
+                "wheels_forged",
+                "aero_splitter",
+                "aero_wing_2",
+                "body_front_widebody",
+                "body_side_widebody",
+                "body_rear_widebody",
+                "vinyl_sunset_fade",
+            ],
         },
     ),
     (
@@ -331,6 +414,15 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
             },
             title: "Cedar regular",
             paint: 0xd0a92a,
+            mods: &[
+                "engine_intake_1",
+                "engine_exhaust_1",
+                "susp_springs_1",
+                "wheels_black_steel",
+                "body_mud_flaps",
+                "body_fog_lights",
+                "vinyl_race_number",
+            ],
         },
         TougeRacer {
             driver: AiDriverDef {
@@ -342,6 +434,21 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
             },
             title: "The Cedar Fox",
             paint: 0xe07a1f,
+            mods: &[
+                "engine_intake_2",
+                "engine_exhaust_2",
+                "engine_ecu_2",
+                "drivetrain_lsd_2",
+                "susp_coilovers_2",
+                "brakes_pads_1",
+                "weight_strip_1",
+                "wheels_deep_dish",
+                "aero_splitter",
+                "aero_swan_wing",
+                "body_front_aggressive",
+                "body_side_skirts",
+                "vinyl_shark_mouth",
+            ],
         },
     ),
 ];
@@ -991,6 +1098,8 @@ pub struct OpponentCar {
     pub base_price: u32,
     /// Body colour 0xRRGGBB it raced in ([`TougeRacer::paint`]).
     pub paint: u32,
+    /// Mods it raced with ([`TougeRacer::mods`]).
+    pub mods: Vec<String>,
     /// Its damage when the battle was decided.
     pub damage: wp_economy::DamageSnapshot,
 }
@@ -1083,8 +1192,8 @@ pub fn settle(
                 def_id: setup.racer().driver.car.to_string(),
                 class: opponent.class,
                 base_price: opponent.base_price,
-                // Touge NPCs race stock cars (no mods, no named variant): the same car arrives.
-                mods: Vec::new(),
+                // The same car arrives: its build and paint (touge NPCs have no named variant).
+                mods: opponent.mods.clone(),
                 paint: Some(opponent.paint),
                 damage: opponent.damage.clone(),
             };
@@ -1407,6 +1516,7 @@ mod tests {
                 class: VehicleClass::Sport,
                 base_price: 34_000,
                 paint: 0x2b3a55,
+                mods: Vec::new(),
                 damage: wp_economy::DamageSnapshot::pristine(),
             };
             let (out, _) = settle(
@@ -1452,6 +1562,7 @@ mod tests {
             class: VehicleClass::Exotic,
             base_price: 120_000,
             paint: 0x2b3a55,
+            mods: s.racer().mods.iter().map(|m| m.to_string()).collect(),
             damage: damage.clone(),
         };
         let (out, _) = settle(
@@ -1469,6 +1580,12 @@ mod tests {
         assert_eq!(won.def_id, "lucciola_350");
         assert_eq!(won.damage, damage, "the car arrives exactly as it finished");
         assert_eq!(won.paint, Some(0x2b3a55), "in the colour it raced in");
+        let mut raced = opp.mods.clone();
+        raced.sort();
+        let mut arrived = won.mods.clone();
+        arrived.sort();
+        assert!(!raced.is_empty());
+        assert_eq!(arrived, raced, "with the build it raced with");
         assert!(
             won.purchase_price.is_some_and(|p| p > 0),
             "worth real money"
@@ -1498,6 +1615,7 @@ mod tests {
             class: VehicleClass::Sport,
             base_price: 22_000,
             paint: 0x2b3a55,
+            mods: Vec::new(),
             damage: wp_economy::DamageSnapshot::pristine(),
         };
         let (out, _) = settle(
@@ -1591,6 +1709,7 @@ mod tests {
             class: VehicleClass::Sport,
             base_price: 34_000,
             paint: 0x2b3a55,
+            mods: Vec::new(),
             damage: wp_economy::DamageSnapshot::pristine(),
         };
         // Side bet on a boss: stake back, no purse, no rep.

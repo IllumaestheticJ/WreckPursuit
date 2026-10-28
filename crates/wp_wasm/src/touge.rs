@@ -20,8 +20,9 @@
 //!   the panel offers "Back to garage" as soon as the battle is decided, so a player who won
 //!   at the line and left before the NPC finished got no purse, no rep and no car.
 //!
-//! The NPC races in its roster colour ([`touge::TougeRacer::paint`], `TougeReport::opponent_paint`
-//! for the renderer), and a won pink slip arrives in it.
+//! The NPC races its roster car as built ([`touge::TougeRacer::mods`] on its scenario entity:
+//! physics and look) in its roster colour ([`touge::TougeRacer::paint`]); `TougeReport` gives the
+//! renderer both, and a won pink slip arrives with the same build and paint.
 //!
 //! Touge battles charge no buy-in and pay no picker purse: the stakes are the wager, the
 //! battle's purse (challenger or boss) and rep (`data/events/touge.toml`).
@@ -122,8 +123,10 @@ pub fn touge_scenario(
     let player = slots.last().ok_or("empty grid")?;
     sc.entities = vec![entity("player", car, player.pos, yaw(player))];
     for (d, s) in def.ai.iter().zip(&slots) {
-        sc.entities
-            .push(entity(&crate::race::ai_entity_id(d), d.car, s.pos, yaw(s)));
+        let mut npc = entity(&crate::race::ai_entity_id(d), d.car, s.pos, yaw(s));
+        // The NPC's build: physics and look (simcli spawns the modified car).
+        npc.mods = setup.racer().mods.iter().map(|m| m.to_string()).collect();
+        sc.entities.push(npc);
     }
     sc.validate()?;
     Ok(sc)
@@ -145,6 +148,7 @@ pub struct TougeRun {
     npc_class: VehicleClass,
     npc_base_price: u32,
     npc_paint: u32,
+    npc_mods: Vec<String>,
     wager: Wager,
     placed: bool,
     ticket: Option<WagerTicket>,
@@ -176,6 +180,7 @@ impl TougeRun {
             npc_class,
             npc_base_price,
             npc_paint: setup.racer().paint,
+            npc_mods: setup.racer().mods.iter().map(|m| m.to_string()).collect(),
             wager: take_next_wager(),
             placed: false,
             ticket: None,
@@ -260,6 +265,7 @@ impl TougeRun {
                         class: self.npc_class,
                         base_price: self.npc_base_price,
                         paint: self.npc_paint,
+                        mods: self.npc_mods.clone(),
                         damage: wp_economy::DamageSnapshot {
                             health: summary.health,
                             total_loss: summary.total_loss || v.damage.is_total_loss(),
@@ -305,6 +311,7 @@ impl TougeRun {
                 class: self.npc_class,
                 base_price: self.npc_base_price,
                 paint: self.npc_paint,
+                mods: self.npc_mods.clone(),
                 damage: wp_economy::DamageSnapshot::pristine(),
             },
         };
@@ -339,6 +346,7 @@ impl TougeRun {
             title: s.racer().title,
             opponent_car: s.racer().driver.car,
             opponent_paint: self.npc_paint,
+            opponent_mods: self.npc_mods.clone(),
             direction: s.direction.key(),
             daylight: s.daylight.key(),
             surface: s.surface.key(),
@@ -372,6 +380,9 @@ pub struct TougeReport {
     /// Body colour 0xRRGGBB the NPC car races in (the renderer paints it; a won pink slip
     /// arrives in it).
     pub opponent_paint: u32,
+    /// The NPC car's mods (`TougeRacer::mods`; the renderer's cosmetic look, a won pink slip
+    /// arrives with them).
+    pub opponent_mods: Vec<String>,
     /// `up` / `down`.
     pub direction: &'static str,
     /// `day` / `night`.
