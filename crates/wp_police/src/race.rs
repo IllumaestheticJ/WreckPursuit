@@ -279,10 +279,11 @@ pub struct RouteBlock {
     /// Where, as a fraction of the course length (moved on to the first spot clear of
     /// junctions).
     pub at: f32,
-    /// Open gap at one edge of the road, m (0 = closed; racers ram through the barriers).
+    /// Unused since 2026-10-28 (kept so older tables load): every roadblock seals the road
+    /// but for one [`crate::tools::GAP_W_M`] gap with a breakable barricade.
     #[serde(default)]
     pub gap_m: f32,
-    /// Which edge the gap is on.
+    /// Which edge of the carriageway the gap is on.
     #[serde(default)]
     pub gap_side: GapSide,
     /// Police cars parked in the block (on the closed side).
@@ -324,9 +325,10 @@ pub struct StakeoutSpec {
 pub struct SpikeSpec {
     /// Where, as a fraction of the course length.
     pub at: f32,
-    /// Strip length, m (shorter than the road: the rest stays open).
+    /// Unused since 2026-10-28 (kept so older tables load): every strip covers the whole
+    /// paved road up to its unit's car.
     pub length_m: f32,
-    /// Strip centre this far left (+) or right (−) of the course line (the planned lane), m.
+    /// Unused since 2026-10-28, like `length_m`.
     #[serde(default)]
     pub offset_m: f32,
 }
