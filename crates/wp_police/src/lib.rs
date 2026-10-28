@@ -43,6 +43,7 @@ pub mod dispatch;
 pub mod events;
 pub mod graph;
 pub mod heat;
+pub mod loop_ops;
 pub mod pro;
 pub mod progress;
 pub mod pursuit;
@@ -1156,8 +1157,11 @@ impl PoliceSystem {
     /// The commander's Loop 9 operation for `unit` (`flank`, `speed-trap`, ...), if any
     /// ([`commander`]'s highway operations; `None` outside them).
     pub fn loop_op(&self, unit: UnitId) -> Option<&'static str> {
-        let _ = unit;
-        None
+        self.commander
+            .loop_ops
+            .ops
+            .get(&unit)
+            .map(|o| o.kind.label())
     }
 
     /// The road graph in use.

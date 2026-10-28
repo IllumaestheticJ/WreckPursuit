@@ -31,9 +31,7 @@ use crate::graph::{
 };
 use crate::heat::WantedLevel;
 use crate::radio::{RadioCue, RadioTier};
-use crate::tools::{
-    roadblock_layout, spike_layout, GapPick, Roadblock, SpikeStrip, ToolSite, NODE_CLEARANCE_M,
-};
+use crate::tools::{roadblock_layout, GapPick, Roadblock, SpikeStrip, ToolSite, NODE_CLEARANCE_M};
 use crate::unit::{Assignment, UnitRole, LANE_OFFSET_M};
 use crate::PoliceSystem;
 
@@ -396,6 +394,11 @@ pub struct RaceProfile {
     /// leaves it alone.
     #[serde(default)]
     pub unit_level: Option<u8>,
+    /// The commander runs its highway operations on this race outside the night phase
+    /// (rotation, speed traps, converging, ramp flankers, peel-offs; [`crate::loop_ops`];
+    /// owner 2026-10-28, Loop 9 by day).
+    #[serde(default)]
+    pub dynamic_ops: bool,
 }
 
 /// Optional unlock level overrides for a race (wanted level 1..=5; unset = `presence.toml`).
@@ -739,6 +742,10 @@ pub struct RacePolice {
     pub plan: RacePolicePlan,
     /// Where patrols appear and patrol (profile `patrol_corridor_m`); `None` = city-wide.
     pub corridor: Option<PatrolCorridor>,
+    /// The course.
+    pub course: RaceCourse,
+    /// Ramps and side roads at junctions on the course (the Loop 9 operations).
+    pub ramps: Vec<crate::loop_ops::Ramp>,
 }
 
 /// The roads along a race course that its patrols keep to (see
@@ -889,6 +896,11 @@ impl PoliceSystem {
         let corridor = (profile.patrol_corridor_m > 0.0)
             .then(|| self.patrol_corridor(course, profile.patrol_corridor_m))
             .filter(|c| !c.segments.is_empty());
+        let ramps = if profile.dynamic_ops {
+            self.course_ramps(course)
+        } else {
+            Vec::new()
+        };
         self.race = Some(RacePolice {
             race: race.to_string(),
             profile: profile.clone(),
@@ -896,6 +908,8 @@ impl PoliceSystem {
             stakeouts,
             plan: plan.clone(),
             corridor,
+            course: course.clone(),
+            ramps,
         });
         plan
     }
@@ -1175,7 +1189,7 @@ impl PoliceSystem {
     /// The point `d` m down the road that leaves `node` along `seg`, following the road
     /// through plain (non-junction) nodes: `(point, travel direction there, segment there)`.
     /// `None` when the road ends or reaches another junction first.
-    fn walk_road(
+    pub(crate) fn walk_road(
         &self,
         node: NodeId,
         seg: SegmentId,
@@ -1386,11 +1400,10 @@ impl PoliceSystem {
             sight_m: 0.0,
             ahead_m: s,
         };
-        let sec = self.tool_section(&site, self.z_hint(pos));
+        let (sec, lay) = self.spike_plan(&site, self.z_hint(pos));
         if !sec.spikeable() {
             return None;
         }
-        let lay = spike_layout(&site, &sec);
         let post = lay.post;
         if self.warmed_up && self.in_racer_view_opt(None, post, true) {
             return None;
@@ -1406,6 +1419,7 @@ impl PoliceSystem {
             },
         );
         let mut strip = SpikeStrip::between(id, owner, site, lay.a, lay.b, None, expires);
+        strip.extra = lay.extra;
         strip.scripted = true;
         strip.unit = Some(self.units[i].id);
         strip.post = Some(post);

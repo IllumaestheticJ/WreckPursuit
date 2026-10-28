@@ -472,3 +472,136 @@ fn barricade_breaks_when_hit_at_speed_and_holds_a_crawl() {
         }
     }
 }
+
+/// Half track of the probe car (wheel lines either side of its centre), m.
+const HALF_TRACK_M: f32 = 0.8;
+
+#[test]
+fn spike_strips_cover_the_paving_up_to_their_unit() {
+    use wp_police::section::SectionIndex;
+    use wp_police::tools::UNIT_HALF_W_M;
+    let mut sim = sim();
+    let (world, bounds) = world();
+    // Paving as wp_world builds it (ribbons, sidewalks, junction patches).
+    let paving = SectionIndex::from_city(world.map());
+    let cands = sites(sim.police(), world, *bounds);
+    let mut per: std::collections::BTreeMap<Place, (u32, u32)> = Default::default();
+    let mut placed: Vec<(Place, [f32; 2], [f32; 2], Section, u32)> = Vec::new();
+    for (place, pos, dir) in cands {
+        let sec = sim.police().road_section(pos, dir, 0.0);
+        let e = per.entry(place).or_default();
+        e.0 += 1;
+        if !sec.spikeable() {
+            continue;
+        }
+        e.1 += 1;
+        if placed.iter().filter(|p| p.0 == place).count() >= PER_PLACE
+            || placed
+                .iter()
+                .any(|p| ((p.1[0] - pos[0]).powi(2) + (p.1[1] - pos[1]).powi(2)).sqrt() < 60.0)
+        {
+            continue;
+        }
+        let id = sim.police_mut().place_spikes_at(EntityId(1), pos, dir);
+        placed.push((place, pos, dir, sec, id.0));
+    }
+    for (place, n, ok) in per.values().zip(per.keys()).map(|(v, k)| (k, v.0, v.1)) {
+        eprintln!("{place:?}: {ok} of {n} sample sites take a full-width strip");
+    }
+    for want in [
+        Place::VesperWide,
+        Place::VesperNarrow,
+        Place::Ashpeak,
+        Place::Loop9,
+    ] {
+        let n = placed.iter().filter(|p| p.0 == want).count();
+        assert!(n >= 3, "only {n} {want:?} strips placed");
+    }
+    let police = sim.police();
+    for (place, pos, dir, sec, tool) in &placed {
+        let strip = police
+            .spike_strips()
+            .iter()
+            .find(|s| s.id.0 == *tool)
+            .expect("strip")
+            .clone();
+        let unit = police
+            .units()
+            .iter()
+            .find(|u| Some(u.id) == strip.unit)
+            .expect("a strip never lies without its unit");
+        let right = [dir[1], -dir[0]];
+        let at = |x: f32| [pos[0] + right[0] * x, pos[1] + right[1] * x];
+        let lat = |q: [f32; 2]| (q[0] - pos[0]) * right[0] + (q[1] - pos[1]) * right[1];
+        let car = lat(unit.body.pos);
+        let z = sec.z_m.expect("road height");
+        let what = format!(
+            "{place:?} strip at {pos:?} dir {dir:?} ({:.2}..{:.2}, car {car:.2}, paved {:.2}..{:.2}, stops {:?}..{:?})",
+            lat(strip.a),
+            lat(strip.b),
+            sec.paved_lo,
+            sec.paved_hi,
+            sec.stop_lo,
+            sec.stop_hi
+        );
+        // A car centred anywhere on the paving between the hard stops crosses the strip with a
+        // wheel or runs into the unit's car.
+        // Between the hard stops; where a side has none, within the verge reach of the paved
+        // road (beyond that a car is off-road, which is allowed).
+        let (lo, hi) = (
+            sec.stop_lo
+                .unwrap_or(sec.paved_lo - wp_police::tools::VERGE_REACH_M),
+            sec.stop_hi
+                .unwrap_or(sec.paved_hi + wp_police::tools::VERGE_REACH_M),
+        );
+        let crosses = |x: f32| {
+            let (p0, p1) = (at(x), at(x));
+            let p0 = [p0[0] - dir[0] * 5.0, p0[1] - dir[1] * 5.0];
+            let p1 = [p1[0] + dir[0] * 5.0, p1[1] + dir[1] * 5.0];
+            strip
+                .wheels_crossing(p0, p1, HALF_TRACK_M)
+                .iter()
+                .any(|w| *w)
+        };
+        let mut open = Vec::new();
+        let mut x = lo + 0.3;
+        while x <= hi - 0.3 {
+            let on_paving = paving.paving_at(at(x), z).is_some();
+            let into_car = (x - car).abs() < 2.0 * UNIT_HALF_W_M;
+            if on_paving && !crosses(x) && !into_car {
+                open.push(x);
+            }
+            x += 0.2;
+        }
+        assert!(
+            open.is_empty(),
+            "{what}: a car passes on the paving at {open:?}"
+        );
+        // Shoulders: the strip and its car reach both paved edges.
+        assert!(
+            lat(strip.a) <= sec.paved_lo + 0.05,
+            "{what}: left shoulder open"
+        );
+        assert!(
+            car + UNIT_HALF_W_M >= sec.paved_hi - 0.15,
+            "{what}: right shoulder open"
+        );
+        // Ramming the unit is a way past: with its car shoved aside, a car fits between the
+        // strip's end and the right edge without a wheel on the spikes.
+        let edge = sec
+            .stop_hi
+            .unwrap_or(sec.paved_hi + 2.0)
+            .min(sec.paved_hi + 2.0);
+        let mut x = lat(strip.b) + HALF_TRACK_M + 0.02;
+        let mut through = false;
+        while x + CAR[0] <= edge + 0.25 {
+            through |= !crosses(x);
+            x += 0.05;
+        }
+        assert!(
+            through,
+            "{what}: no way past even with the unit shoved aside"
+        );
+    }
+    eprintln!("{} spike strips probed", placed.len());
+}

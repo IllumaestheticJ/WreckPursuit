@@ -614,21 +614,23 @@ fn police_part(p: &PoliceSystem, player: EntityId, seen: &Seen, out: &mut Vec<f3
         n_tools += 1;
     }
     for sp in p.spike_strips() {
-        let d = [sp.b[0] - sp.a[0], sp.b[1] - sp.a[1]];
-        let len = (d[0] * d[0] + d[1] * d[1]).sqrt().max(1e-3);
-        let mid = [(sp.a[0] + sp.b[0]) * 0.5, (sp.a[1] + sp.b[1]) * 0.5];
-        let Some(intel) = seen.tool(mid) else {
-            continue;
-        };
-        out.extend_from_slice(&[
-            1.0 + intel,
-            mid[0],
-            mid[1],
-            d[0] / len,
-            d[1] / len,
-            len * 0.5,
-        ]);
-        n_tools += 1;
+        for (a, b) in sp.segments() {
+            let d = [b[0] - a[0], b[1] - a[1]];
+            let len = (d[0] * d[0] + d[1] * d[1]).sqrt().max(1e-3);
+            let mid = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
+            let Some(intel) = seen.tool(mid) else {
+                continue;
+            };
+            out.extend_from_slice(&[
+                1.0 + intel,
+                mid[0],
+                mid[1],
+                d[0] / len,
+                d[1] / len,
+                len * 0.5,
+            ]);
+            n_tools += 1;
+        }
     }
     out[h::N_UNITS] = n_units as f32;
     out[h::N_TOOLS] = n_tools as f32;

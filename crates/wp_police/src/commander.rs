@@ -203,6 +203,8 @@ pub struct Commander {
     /// Surge per district (`District::ALL` order): until when.
     pub(crate) surge_until: [Option<SimTime>; 3],
     pub(crate) orders: Vec<CommanderOrder>,
+    /// Loop 9 daytime operations ([`crate::loop_ops`]).
+    pub(crate) loop_ops: crate::loop_ops::LoopOps,
 }
 
 impl Commander {
@@ -222,6 +224,7 @@ impl Commander {
             calls: Vec::new(),
             surge_until: [None; 3],
             orders: Vec::new(),
+            loop_ops: crate::loop_ops::LoopOps::default(),
         }
     }
 }
@@ -357,6 +360,9 @@ impl PoliceSystem {
         let window = self.cfg.commander.calls.window_s;
         self.commander.calls.retain(|c| now.since(c.at) <= window);
         self.commander_budget_update();
+        // A race profile is the commander's operation order; Loop 9 by day it also runs the
+        // highway operations (owner 2026-10-28).
+        self.loop_ops_think(world);
         if !self.commander_active() {
             return;
         }

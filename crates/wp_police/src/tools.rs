@@ -217,8 +217,10 @@ pub const BARRICADE_HALF_H_M: f32 = 0.55;
 pub const BARRICADE_HALF_D_M: f32 = 0.3;
 /// Barricade mass: a timber frame (~30 kg) with sandbags on its feet (~100 kg), kg.
 pub const BARRICADE_MASS_KG: f32 = 132.0;
-/// A spike strip's end lies this far under its unit's car (its inner side), m.
-pub const SPIKE_UNDER_CAR_M: f32 = 0.4;
+/// A spike strip's end lies this far under its unit's car (its inner side), m: covered while
+/// the car stands there, and once the car is rammed aside the paving beyond the strip's end
+/// (about 1.85 m to the edge) is wide enough for a car's wheels to pass the strip.
+pub const SPIKE_UNDER_CAR_M: f32 = 0.15;
 /// Half width of a parked police car, m.
 pub const UNIT_HALF_W_M: f32 = 0.95;
 /// Half length of a parked police car, m.
@@ -349,7 +351,7 @@ pub fn roadblock_layout(
 }
 
 /// A spike strip laid out across a [`crate::section::Section`] (see [`spike_layout`]).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SpikeLayout {
     /// Strip end on the left (the far end from its car), m.
     pub a: [f32; 2],
@@ -359,6 +361,9 @@ pub struct SpikeLayout {
     pub post: [f32; 2],
     /// Parked heading: the racer's travel direction.
     pub heading: [f32; 2],
+    /// More segments over the other paved runs between the stops (see
+    /// [`SpikeStrip::extra`]); filled by the caller, which knows the city's paving.
+    pub extra: Vec<[[f32; 2]; 2]>,
 }
 
 /// Lay a spike strip across `sec` at `site`: from the left end of the paved run (into the
@@ -383,6 +388,7 @@ pub fn spike_layout(site: &ToolSite, sec: &crate::section::Section) -> SpikeLayo
         b: at(end.max(lo + 0.5)),
         post: at(car),
         heading: site.dir,
+        extra: Vec::new(),
     }
 }
 
@@ -412,9 +418,19 @@ pub struct SpikeStrip {
     /// does not count against the AI captain's budget.
     #[serde(default)]
     pub scripted: bool,
+    /// More segments of the same strip, `[a, b]` (owner 2026-10-28): other paved runs across
+    /// the road between the hard stops (a ramp beside the carriageway past an open gore). All
+    /// belong to the same unit and go with it.
+    #[serde(default)]
+    pub extra: Vec<[[f32; 2]; 2]>,
 }
 
 impl SpikeStrip {
+    /// Every segment of the strip, `a`–`b` first.
+    pub fn segments(&self) -> impl Iterator<Item = ([f32; 2], [f32; 2])> + '_ {
+        std::iter::once((self.a, self.b)).chain(self.extra.iter().map(|s| (s[0], s[1])))
+    }
+
     /// Strip across the road at `site`, `length_m` long.
     pub fn across(
         id: ToolId,
@@ -435,6 +451,7 @@ impl SpikeStrip {
             post: None,
             expires,
             scripted: false,
+            extra: Vec::new(),
         }
     }
 
@@ -458,6 +475,7 @@ impl SpikeStrip {
             post: None,
             expires,
             scripted: false,
+            extra: Vec::new(),
         }
     }
 
@@ -474,7 +492,10 @@ impl SpikeStrip {
         let mut hit = [false; 4];
         for (side, sign) in [(0usize, -1.0f32), (1usize, 1.0f32)] {
             let off = scale(right, sign * half_track_m);
-            if segments_intersect(add(p0, off), add(p1, off), self.a, self.b) {
+            if self
+                .segments()
+                .any(|(a, b)| segments_intersect(add(p0, off), add(p1, off), a, b))
+            {
                 hit[side] = true; // front
                 hit[side + 2] = true; // rear
             }

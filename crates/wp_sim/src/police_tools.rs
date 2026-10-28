@@ -400,15 +400,15 @@ impl Sim {
             .collect()
     }
 
-    /// Spike strips on the road.
+    /// Spike strips on the road, one view per segment (a wide road's strip can have several,
+    /// all its unit's).
     pub fn spike_strips(&self) -> Vec<SpikeStripView> {
         self.police
             .spike_strips()
             .iter()
-            .map(|s| SpikeStripView {
-                tool: s.id.0,
-                a: s.a,
-                b: s.b,
+            .flat_map(|s| {
+                s.segments()
+                    .map(move |(a, b)| SpikeStripView { tool: s.id.0, a, b })
             })
             .collect()
     }

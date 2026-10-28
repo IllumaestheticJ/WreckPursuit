@@ -39,7 +39,7 @@ const PASS_OFFSET_M: f32 = 3.7;
 /// A unit's approach is classified when it first comes this close, m.
 const APPROACH_M: f32 = 150.0;
 /// Further than this from the course line is off the course (ramp, side road), m.
-const OFF_COURSE_M: f32 = 18.0;
+const OFF_COURSE_M: f32 = 12.0;
 /// Units after the racer within this count for the trailing share, m.
 const TRAIL_M: f32 = 400.0;
 /// Sample period, s.
@@ -148,6 +148,11 @@ pub struct Variety {
     pub sectors: BTreeMap<&'static str, u32>,
     /// Approaches from off the course (ramps, side roads).
     pub off_course: u32,
+    /// Units sent at the racer, by where they were relative to it then (`ahead`, `behind`,
+    /// `left`, `right`): the directions they converge from.
+    pub commit_sectors: BTreeMap<&'static str, u32>,
+    /// Units sent at the racer from off the course (a ramp or side road).
+    pub commit_off_course: u32,
     /// Approaches in all.
     pub approaches: u32,
     /// Samples of units after the racer within `TRAIL_M`, and of those behind it.
@@ -177,6 +182,10 @@ impl Variety {
             *self.sectors.entry(k).or_default() += v;
         }
         self.off_course += o.off_course;
+        for (k, v) in &o.commit_sectors {
+            *self.commit_sectors.entry(k).or_default() += v;
+        }
+        self.commit_off_course += o.commit_off_course;
         self.approaches += o.approaches;
         self.chase_samples += o.chase_samples;
         self.behind_samples += o.behind_samples;
@@ -351,6 +360,23 @@ pub fn run(mph: f32, seed: u64, run_s: f32, cfg: PoliceConfig) -> Variety {
             if after && !prev && ever_after.contains(&u.id.0) {
                 out.rejoins += 1;
             }
+            let sector = if along.abs() >= lat.abs() {
+                if along >= 0.0 {
+                    "ahead"
+                } else {
+                    "behind"
+                }
+            } else if lat > 0.0 {
+                "left"
+            } else {
+                "right"
+            };
+            if after && !prev {
+                *out.commit_sectors.entry(sector).or_default() += 1;
+                if rc.project(u.body.pos).1 > OFF_COURSE_M {
+                    out.commit_off_course += 1;
+                }
+            }
             if after {
                 ever_after.insert(u.id.0);
                 if dist <= TRAIL_M {
@@ -361,17 +387,6 @@ pub fn run(mph: f32, seed: u64, run_s: f32, cfg: PoliceConfig) -> Variety {
                 }
                 if dist <= APPROACH_M && classified.insert(u.id.0) {
                     out.approaches += 1;
-                    let sector = if along.abs() >= lat.abs() {
-                        if along >= 0.0 {
-                            "ahead"
-                        } else {
-                            "behind"
-                        }
-                    } else if lat > 0.0 {
-                        "left"
-                    } else {
-                        "right"
-                    };
                     *out.sectors.entry(sector).or_default() += 1;
                     if rc.project(u.body.pos).1 > OFF_COURSE_M {
                         out.off_course += 1;
@@ -386,6 +401,13 @@ pub fn run(mph: f32, seed: u64, run_s: f32, cfg: PoliceConfig) -> Variety {
         }
     }
     out.units_engaged = ever_after.len() as u32;
+    if std::env::var("WP_VARIETY_TRACE").is_ok() {
+        eprintln!(
+            "seed {seed}: ramps {} ops {:?}",
+            police.race_police().map_or(0, |r| r.ramps.len()),
+            police.loop_ops_started()
+        );
+    }
     out
 }
 
@@ -397,17 +419,24 @@ fn count_event(e: &SimEvent, out: &mut Variety) {
     }
 }
 
+fn sectors(m: &BTreeMap<&'static str, u32>) -> String {
+    m.iter()
+        .map(|(k, n)| format!("{k} {n}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn line(name: &str, v: &Variety, runs: usize) -> String {
     format!(
-        "| {name} | {} | {} | {} ({}) | {}/{} | {:.0} % | {:.0} % | {} | {} / {} | L{} | {} |",
+        "| {name} | {} | {} | {} ({}) | {}/{} | {} ({}) | {}/{} | {:.0} % | {:.0} % | {} | {} / {} | L{} | {} |",
         runs,
         v.tactics.len(),
+        v.commit_sectors.values().filter(|n| **n > 0).count(),
+        sectors(&v.commit_sectors),
+        v.commit_off_course,
+        v.commit_sectors.values().sum::<u32>(),
         v.sectors_used(),
-        v.sectors
-            .iter()
-            .map(|(k, n)| format!("{k} {n}"))
-            .collect::<Vec<_>>()
-            .join(", "),
+        sectors(&v.sectors),
         v.off_course,
         v.approaches,
         v.trailing_pct(),
@@ -436,9 +465,9 @@ fn loop9_day_variety_table() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(150.0);
     println!(
-        "| mph | runs | distinct tactics | approach sectors | off-course approaches | trailing | patrols moving | rejoins | roadblocks / spikes | max level | tactics |"
+        "| mph | runs | distinct tactics | sent from (sectors) | sent from off the course | within 150 m from (sectors) | off the course within 150 m | trailing | patrols moving | rejoins | roadblocks / spikes | max level | tactics |"
     );
-    println!("|---|---|---|---|---|---|---|---|---|---|---|");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     for mph in [100.0, 140.0] {
         let mut all = Variety::default();
         for seed in 0..seeds() {

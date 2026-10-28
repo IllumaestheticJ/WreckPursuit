@@ -452,6 +452,33 @@ impl SectionIndex {
         best
     }
 
+    /// The paved runs (road or sidewalk, seams bridged) crossed walking from lateral offset
+    /// `lo` to `hi` across the road at `p` (travel direction `dir`, height `z`), as
+    /// `(start, end)` offsets, + right of `dir`, left to right.
+    pub fn paved_runs(
+        &self,
+        p: [f32; 2],
+        dir: [f32; 2],
+        z: f32,
+        lo: f32,
+        hi: f32,
+    ) -> Vec<(f32, f32)> {
+        let dir = normalize(dir);
+        let right = [dir[1], -dir[0]];
+        let mut runs: Vec<(f32, f32)> = Vec::new();
+        let mut x = lo;
+        while x <= hi + 1e-4 {
+            if self.paving_at(add(p, scale(right, x)), z).is_some() {
+                match runs.last_mut() {
+                    Some(r) if x - r.1 <= SEAM_M + 1e-4 => r.1 = x,
+                    _ => runs.push((x, x)),
+                }
+            }
+            x += STEP_M;
+        }
+        runs
+    }
+
     /// Walk across the road at `p` (travel direction `dir`, road height `z`), up to
     /// `reach_m` each way (see [`Section`]).
     pub fn section(&self, p: [f32; 2], dir: [f32; 2], z: f32, reach_m: f32) -> Section {

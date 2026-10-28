@@ -20,8 +20,8 @@ use crate::heat::{PursuitStatus, WantedLevel};
 use crate::section::{Section, SECTION_REACH_M};
 use crate::time::SimTime;
 use crate::tools::{
-    plan_site_where, roadblock_layout, spike_layout, GapPick, Roadblock, SiteRules, SpikeStrip,
-    ToolSite, BLOCK_ALONG_M, VERGE_REACH_M,
+    plan_site_where, roadblock_layout, spike_layout, GapPick, Roadblock, SiteRules, SpikeLayout,
+    SpikeStrip, ToolSite, BLOCK_ALONG_M, VERGE_REACH_M,
 };
 
 /// A roadblock's hard stops must also hold this far before and after its barrier line, m.
@@ -3337,7 +3337,7 @@ impl PoliceSystem {
     /// the level's `backup_radius_m` of legal driving from the racer (only from the racer's
     /// own district below `backup_all_districts_level`) join at once, nearest first, and drive
     /// to its predicted position (`Intercept`). Returns how many joined.
-    fn call_backup(&mut self, racer: EntityId, n: u32) -> u32 {
+    pub(crate) fn call_backup(&mut self, racer: EntityId, n: u32) -> u32 {
         let rc = &self.cfg.presence.reinforcement;
         let rec = &self.racers[&racer];
         let Some(target) = rec.last_known else {
@@ -3435,6 +3435,47 @@ impl PoliceSystem {
             let since = self.now.since(started);
             self.stats.first_backup_delays_s.push(since);
         }
+    }
+
+    /// Move unit `i` to `pos` facing `heading` (the sim moves its car there, briefly a ghost):
+    /// only between two spots no racer can see, like a stuck unit's reset (the Loop 9
+    /// operations' rejoin, [`crate::loop_ops`]).
+    pub(crate) fn relocate_unit(&mut self, i: usize, pos: [f32; 2], heading: [f32; 2]) {
+        let u = &mut self.units[i];
+        u.body.pos = pos;
+        u.body.heading = heading;
+        u.body.speed = 0.0;
+        u.avoid = crate::avoid::AvoidState::default();
+        u.unstick = crate::stuck::UnstickState::default();
+        let (unit, entity) = (u.id, u.entity);
+        self.resets.push(crate::UnitReset {
+            unit,
+            entity,
+            pos,
+            heading,
+            ghost_s: crate::stuck::RESET_GHOST_S,
+        });
+    }
+
+    /// [`Self::ambush_route`] for the Loop 9 operations ([`crate::loop_ops`]).
+    pub(crate) fn ambush_route_for(
+        &self,
+        i: usize,
+        racer: [f32; 2],
+        vel: [f32; 2],
+    ) -> Option<([f32; 2], Track)> {
+        self.ambush_route(i, racer, vel)
+    }
+
+    /// [`Self::start_ambush`] for the Loop 9 operations.
+    pub(crate) fn start_ambush_for(
+        &mut self,
+        i: usize,
+        racer: EntityId,
+        wait: [f32; 2],
+        track: Track,
+    ) {
+        self.start_ambush(i, racer, wait, track);
     }
 
     /// Send unit `i` to wait for `racer` at `wait` along `track`, lights on.
@@ -4063,7 +4104,7 @@ impl PoliceSystem {
         Ok(id)
     }
 
-    fn scenario_site(pos: [f32; 2], dir: [f32; 2]) -> ToolSite {
+    pub(crate) fn scenario_site(pos: [f32; 2], dir: [f32; 2]) -> ToolSite {
         ToolSite {
             segment: crate::graph::SegmentId(0),
             from_node: NodeId(0),
@@ -4139,7 +4180,7 @@ impl PoliceSystem {
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
         let _ = length;
-        let lay = spike_layout(&site, &self.tool_section(&site, 0.0));
+        let (_, lay) = self.spike_plan(&site, 0.0);
         let post = lay.post;
         let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, post, lay.heading);
         self.assign(
@@ -4151,6 +4192,7 @@ impl PoliceSystem {
         );
         let mut strip =
             SpikeStrip::between(id, racer, site, lay.a, lay.b, None, self.now.plus(lifetime));
+        strip.extra = lay.extra;
         strip.unit = Some(self.units[i].id);
         strip.post = Some(post);
         self.lay_spikes(strip);
@@ -4300,10 +4342,11 @@ impl PoliceSystem {
         self.next_tool += 1;
         // Nothing is on the road yet: the strip waits for its car (`SpikeRun`, decided on
         // the next think, which has the world).
-        let lay = spike_layout(&site, &self.tool_section(&site, z));
+        let (_, lay) = self.spike_plan(&site, z);
         let post = lay.post;
         let expires = now.plus(lifetime);
-        let strip = SpikeStrip::between(id, racer, site, lay.a, lay.b, None, expires);
+        let mut strip = SpikeStrip::between(id, racer, site, lay.a, lay.b, None, expires);
+        strip.extra = lay.extra.clone();
         self.spike_runs.push(SpikeRun {
             strip,
             post,
@@ -4314,6 +4357,31 @@ impl PoliceSystem {
         self.stats.spikes += 1;
         self.stats.tool_sight_m.push(site.sight_m);
         Ok(id)
+    }
+
+    /// A spike strip at `site` ([`spike_layout`] across [`Self::tool_section`]) with its extra
+    /// segments: every other paved run across the road between the hard stops (or within
+    /// [`VERGE_REACH_M`] of the paved road where a side has none), so a car crossing the
+    /// verge onto a ramp beside the carriageway still meets spikes.
+    pub(crate) fn spike_plan(&self, site: &ToolSite, z_hint: f32) -> (Section, SpikeLayout) {
+        let sec = self.tool_section(site, z_hint);
+        let mut lay = spike_layout(site, &sec);
+        if let (false, Some(z)) = (self.section.is_empty(), sec.z_m) {
+            let lo = sec.stop_lo.unwrap_or(sec.paved_lo - VERGE_REACH_M);
+            let hi = sec.stop_hi.unwrap_or(sec.paved_hi + VERGE_REACH_M);
+            let right = [site.dir[1], -site.dir[0]];
+            let at = |x: f32| add(site.pos, scale(right, x));
+            for (r0, r1) in self.section.paved_runs(site.pos, site.dir, z, lo, hi) {
+                if r1 >= sec.paved_lo - 0.3 && r0 <= sec.paved_hi + 0.3 {
+                    continue; // the main run
+                }
+                // Into a stop it meets.
+                let a = if r0 - lo <= 0.4 { lo } else { r0 };
+                let b = if hi - r1 <= 0.4 { hi } else { r1 };
+                lay.extra.push([at(a), at(b)]);
+            }
+        }
+        (sec, lay)
     }
 
     /// The road across a roadblock at `site` (its barrier line stands [`BLOCK_ALONG_M`] past
