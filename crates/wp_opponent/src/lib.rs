@@ -60,7 +60,7 @@ pub use field::{
 };
 pub use learned::{LearnedPath, LearnedTable, LearnedTraffic};
 pub use line::{drive_accel, LineParams, RacingLine, SpeedProfile, Usage};
-pub use profile::{DriverParams, DriverProfile};
+pub use profile::{DriverParams, DriverProfile, RiskLevel};
 pub use pursuit::{EventHeat, FixedHeat, NoPolice, PoliceQuery, SimPolice};
 pub use roam::{
     haunt_by_name, haunt_cars, roster_seed, spawn_slots, stock_profile, stock_roster, Haunt,
