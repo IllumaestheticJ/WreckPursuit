@@ -105,9 +105,13 @@ export function plan(screen: WorkshopScreen, tree: ModTreeView, id: string): Pla
   const target = tree.mods.find((m) => m.id === id);
   if (!target) return { steps: [], price: 0, labour: 0, blocked: `unknown mod ${id}` };
   let blocked: string | null = null;
-  const steps = [...missingFor(tree, id), target].map((mod): Step => {
+  const chain = [...missingFor(tree, id), target];
+  // The catalog says "needs <part> fitted first" for a part whose prerequisite is not on the
+  // car (wp_economy `parts_catalog`); the plan fits that prerequisite first, so it does not block.
+  const planned = new Set(chain.map((m) => `needs ${m.name} fitted first`));
+  const steps = chain.map((mod): Step => {
     const entry = screen.catalog.find((c) => c.grade === mod.id) ?? null;
-    if (entry?.reason) blocked ??= `${mod.name}: ${entry.reason}`;
+    if (entry?.reason && !planned.has(entry.reason)) blocked ??= `${mod.name}: ${entry.reason}`;
     if (!entry && mod.group === "cosmetic") blocked ??= `${mod.name} is sold at the paint shop`;
     return { mod, entry, owned: ownedPart(screen, mod, entry) };
   });
