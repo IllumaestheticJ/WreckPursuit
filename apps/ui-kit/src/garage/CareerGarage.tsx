@@ -19,7 +19,7 @@
  */
 import { render, type ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { Badge, Button, ChoiceField, Confirm as ConfirmRow, Delta, isBigSpend, Meter, Modal, Money, Panel, severityColor, Stat, Tabs } from "../ui/kit";
+import { Badge, Button, ChoiceField, Confirm as ConfirmRow, Delta, Meter, Modal, Money, Panel, severityColor, Stat, Tabs } from "../ui/kit";
 import { pct, words } from "../ui/format";
 import type {
   CareerApi,
