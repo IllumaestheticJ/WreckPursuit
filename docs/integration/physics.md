@@ -223,3 +223,45 @@ bumps, I think I'm clipping into the ground". Two causes, both invisible:
 Probes: `wp_sim` examples `loop9_drive` (SAGS=1, CONES=1, FLAT_OUT=cap, CAR=…), `point_probe`,
 `strip_probe`. Re-blessed: simcli goldens (11), tunnel_escape_founders_cut re-seeded 57 → 64,
 lantern s50 tito pace re-locked.
+
+## 2026-10-28: handbrake + held key on the Lindwurm 4T (follow-up to row 173)
+Owner: "on the lindwurm 4T, hitting the handbrake still forces the car to want to countersteer
+despite opposing keyboard press". Repro `examples/hb_cstr.rs` (CAR, DEV, CSTR, KMH, HB_S, PRE_S /
+PRE_KEY, KEY_AT, LAB=w|vr|trans|v2|smart, PLAYER=0): full left + handbrake at 60–80 km/h, then
+left held.
+
+- **Shipped player steering: no pull.** 648 runs (Lindwurm 4T, Rampart 50; keyboard and gamepad;
+  slider 0 / 50 / 100; straight, cornering and flick entries; pulls of 0.3–1.5 s; key pressed at
+  the pull or 0.15–0.4 s later). The wheels stay on the key's side (27–34° at 70 km/h) and never
+  drop more than 1.5° from their peak. Nothing is AWD-specific: the handbrake declutch and the
+  centre coupling change the drive split, not the steering inputs. The rack-compliance lab (tyre
+  aligning moment at the rack, the only physics path that could turn the wheels) is 0 in the
+  shipped set.
+- **Cause: the slide-following steering parts never read the handbrake gate.** Drift Lab W's lab
+  plain set and the testbed's test presets ("drift: spin + VR", "transition: swing rack", "spin
+  model v2") turn on the transition rack, new-side catch, velocity-relative steering, swing /
+  over-rotation racks, drift lock, countersteer limit and old-side cap. Only the self-align was
+  gated (row 173). The testbed re-applies a saved Drift Lab W steering set (`wp.tune.steer.v1`) in
+  **every** session, not only in the lab. With one saved, left + handbrake took the wheels from
+  +27° to −45° (full countersteer) while the handbrake was still pulled, at every slider value
+  including 0, on AWD, RWD and FWD alike (crossings: 198 / 201 / 204 of 216 runs per car). The
+  grip-balance track cap (smart-lock sets) held the wheels near the travel the same way. On the
+  normal steering model (AI, bare rigs) the drift-intent hold came back after the 0.5 s
+  "key into the turn" grace and countersteered against the still-held key (Rampart 50: −38°).
+- **Fix (input side only; no tyre, suspension, contact or drivetrain change).**
+  `PlainSteer::handbrake_turn()` is the key-only rack. The vehicle uses it, and skips the
+  grip-balance track cap, while the steering assists treat the handbrake as held. That gate
+  (`Vehicle::handbrake_assist_hold`) now also covers a handbrake turn after the release: the key
+  held at the pull (`hb_turn_key`, in snapshots) keeps the assists off while it stays held into
+  the turn. Releasing or reversing it ends the turn. While it countersteers (the slide has swung
+  past it), the assists act as before (fast catch). Released keys keep the 0.08 s / 0.5 s graces.
+  The shipped player path is unchanged: its slide parts are already off, and its self-align only
+  acts with the keys released.
+- **After:** 0 crossings in 2,268 runs (shipped, the four lab sets, smart lock, normal model ×
+  three drivetrains × 108 inputs). Remaining drops (≤ 19°) are lock limits only: the
+  countersteer lock shrinking as an old slide closes, or the smart into-turn cap. Also the held
+  key turning into a countersteer once the car swings past it.
+
+Guard: `tests/handbrake_countersteer.rs` (the repro matrix; released keys still align with the
+travel, the counter key still catches). To clear a stale lab set in the testbed: Drift Lab W →
+tune → "steering defaults" (or "reset all to defaults").

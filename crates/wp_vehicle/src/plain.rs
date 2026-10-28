@@ -313,6 +313,33 @@ impl PlainSteer {
         }
     }
 
+    /// The constants for a handbrake turn: the plain key rack only, with every part that steers
+    /// by the slide turned off: the self-alignment, velocity-relative steering, the transition
+    /// rack and new-side catch, the swing and over-rotation racks, the drift lock extension,
+    /// the countersteer limit and the old-side cap. The rack times and the speed-sensitive lock
+    /// stay, so the wheels go where the key puts them at the usual rate.
+    ///
+    /// The vehicle uses this while the steering assists treat the handbrake as held
+    /// ([`crate::drift::handbrake_assist_hold`]). Owner, 2026-10-28: "on the lindwurm 4T,
+    /// hitting the handbrake still forces the car to want to countersteer despite opposing
+    /// keyboard press". The shipped set has none of these parts on, but a lab set does (Drift
+    /// Lab W, its test presets; the testbed re-applies a saved set in every session). With the
+    /// key held left and the handbrake pulled, the transition rack and the velocity-relative
+    /// steering took the wheels from 27° left to 45° right.
+    pub fn handbrake_turn(&self) -> Self {
+        Self {
+            self_align: 0.0,
+            velocity_relative: false,
+            trans_follow: false,
+            swing_rate: 1.0,
+            over_rate: 1.0,
+            drift_lock_extra: 0.0,
+            counter_margin_deg: 0.0,
+            old_side_cap_deg: 0.0,
+            ..*self
+        }
+    }
+
     /// Fraction of the car's full lock available at `speed` (m/s, either direction), 0..=1:
     /// `1 / (1 + s × (v / v_ref)^p)`. Defaults (75 %, 113 km/h, p = 2): 1.00 at 5 km/h, 0.83 at
     /// 60, 0.63 at 100, 0.47 at 140, 0.40 at 160 km/h.

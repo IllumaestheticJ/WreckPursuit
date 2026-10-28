@@ -345,6 +345,10 @@ pub struct Vehicle {
     /// Handbrake hold for the steering assists: [`crate::steering::HANDBRAKE_GRACE_S`] while
     /// the handbrake is pulled, then counting down to 0 after release, s.
     pub(crate) hb_grace: f32,
+    /// Handbrake turn still on after the release, for the steering assists: the side of the
+    /// key held through the turn (±1, + = right), kept while that key stays held into the turn
+    /// with the rear sliding; 0 = none. See [`Vehicle::handbrake_assist_hold`].
+    pub(crate) hb_turn_key: f32,
     /// Engine stalled (manual clutch only, see [`STALL_FRAC`]).
     pub(crate) stalled: bool,
     /// Drift-assist state ([`crate::drift`]).
@@ -495,6 +499,7 @@ impl Vehicle {
             conditions_source: ConditionsSource::World,
             launch: LaunchGuard::default(),
             hb_grace: 0.0,
+            hb_turn_key: 0.0,
             drift: crate::drift::DriftState::default(),
             drift_cmd: crate::drift::DriftCommand::default(),
             slide_gate: crate::steering::SlideGate::default(),
@@ -698,6 +703,7 @@ impl Vehicle {
         self.torque = V3::ZERO;
         self.launch.forget();
         self.hb_grace = 0.0;
+        self.hb_turn_key = 0.0;
         self.drift = crate::drift::DriftState::default();
         self.drift_cmd = crate::drift::DriftCommand::default();
         self.slide_gate = crate::steering::SlideGate::default();
@@ -948,18 +954,30 @@ impl Vehicle {
                 self.chassis.ang_vel.dot(self.chassis.rot * V3::Z),
                 self.def.wheels[0].position_m[1] - self.com_local.y,
             ),
-            handbrake_hold: crate::drift::handbrake_assist_hold(
-                self.hb_grace,
-                false,
-                driver,
-                rear_axle,
-            ),
+            handbrake_hold: self.handbrake_assist_hold(false, driver, rear_axle),
             rear_slip_rate: self.drift.rear_slip_rate,
             tuning: crate::lab_scope::drift(),
             drift: self.drift_cmd,
             slide_gate: self.slide_gate.amount,
             align_travel: self.slide_gate.travel,
         }
+    }
+
+    /// Whether the steering assists treat the handbrake as held this tick:
+    /// [`crate::drift::handbrake_assist_hold`] (pulled, or within its grace after the release),
+    /// or the key held since the handbrake was pulled ([`Vehicle::hb_turn_key`]) still steering
+    /// into the turn. `held` = handbrake pulled, `driver` = steer (+ = right), `rear_axle` =
+    /// rear-axle slip (+ = rear sliding left).
+    ///
+    /// Owner, 2026-10-28 (Lindwurm 4T): the grace for a key into the turn was 0.5 s; past it the
+    /// slide-following steering came back with the key still held into the handbrake turn and
+    /// pulled the wheels to the countersteer side. A handbrake turn is the driver's while they
+    /// hold its key into the turn. Releasing or reversing the key ends it; while the key
+    /// countersteers (the slide has swung past it) the assists act as usual (the fast catch).
+    fn handbrake_assist_hold(&self, held: bool, driver: f32, rear_axle: f32) -> bool {
+        let into_turn = -driver * rear_axle <= 0.0;
+        crate::drift::handbrake_assist_hold(self.hb_grace, held, driver, rear_axle)
+            || (self.hb_turn_key != 0.0 && driver * self.hb_turn_key > 0.0 && into_turn)
     }
 
     /// Front tyres' available friction: lateral peak μ × the mean front grip multiplier from
@@ -1288,8 +1306,7 @@ impl Vehicle {
                     let sp = self.base_split();
                     (sp[2] + sp[3]).clamp(0.0, 1.0)
                 },
-                handbrake_hold: crate::drift::handbrake_assist_hold(
-                    self.hb_grace,
+                handbrake_hold: self.handbrake_assist_hold(
                     input.handbrake > HANDBRAKE_ON,
                     steer_cmd,
                     rear_axle,
@@ -1383,6 +1400,18 @@ impl Vehicle {
             (self.hb_grace - dt).max(0.0)
         };
         let hb_hold = self.hb_grace > 0.0;
+        // Handbrake turn key (see `Vehicle::handbrake_assist_hold`): the key held while the
+        // handbrake is pulled, kept after the release for as long as that key stays held.
+        let key_side = if steer_cmd.abs() > crate::steering::STEER_DEADZONE {
+            steer_cmd.signum()
+        } else {
+            0.0
+        };
+        self.hb_turn_key = if handbrake > HANDBRAKE_ON || key_side == self.hb_turn_key {
+            key_side
+        } else {
+            0.0
+        };
 
         // --- Gearbox ------------------------------------------------------------------------
         self.update_awd_coupling(thr_in, v_fwd, dt);
@@ -1656,6 +1685,13 @@ impl Vehicle {
                 },
                 ..p
             };
+            // Handbrake turn (owner 2026-10-28, the Lindwurm 4T report): with the handbrake
+            // gate on (`SteerInput::handbrake_hold`: pulled, or just released with the key
+            // still into the turn) nothing steers by the slide: the key rack only. The shipped
+            // set is already that; lab sets (transition rack, velocity-relative steering, …)
+            // swung the wheels to full countersteer against the held key.
+            let hb_turn = steer_in.handbrake_hold;
+            let p = if hb_turn { p.handbrake_turn() } else { p };
             // Grip-balance lab: the smart lock replaces the plain speed curve (`None` = plain).
             let full_lock = max_steer * steer_in.ratio_scale;
             // Which way the wheels head: the key's side (key + = right, angle + = left), else
@@ -1732,8 +1768,10 @@ impl Vehicle {
                 _ => a,
             };
             // Grip-balance lab: the track cap (fronts kept at their peak slip).
+            // Not in a handbrake turn: it holds the wheels near the travel, which there is
+            // the countersteer side.
             let a = match crate::lab_scope::grip() {
-                Some(g) if smart.is_some() => g.track_cap(
+                Some(g) if smart.is_some() && !hb_turn => g.track_cap(
                     a,
                     steer_in.front_axle_angle,
                     self.front_peak_slip(),
