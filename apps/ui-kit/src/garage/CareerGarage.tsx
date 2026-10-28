@@ -413,7 +413,7 @@ function ModTree(props: { car: CarView; cash: number; api: CareerApi; run: (f: (
                     </Button>
                   ) : (
                     <Button size="sm" variant="primary" disabled={!m.allowed} onClick={() => install(m)}>
-                      {m.replaces ? "Swap" : "Install"}
+                      {m.replaces || m.removes.length > 0 ? "Swap" : "Install"}
                     </Button>
                   )}
                 </td>
@@ -442,7 +442,11 @@ function ModTree(props: { car: CarView; cash: number; api: CareerApi; run: (f: (
       {/* Sticky: stays in view while the mod list scrolls (garage.css .wp-cg-mods-effect). */}
       <Panel class="wp-cg-mods-effect" title={focus ? (focus.installed ? `Without ${focus.name}` : `With ${focus.name}`) : "Build"} tag={focus ? `T${focus.tier}` : undefined}>
         <StatGrid now={tree.stats} after={focus?.stats_after} />
-        {focus?.replaces && <p class="wp-dim">Replaces {focus.replaces} (refunded at 40 %).</p>}
+        {focus && (focus.replaces || focus.removes.length > 0) && (
+          <p class="wp-dim">
+            Replaces {[focus.replaces, ...focus.removes].filter((id): id is string => !!id).map((id) => tree.mods.find((x) => x.id === id)?.name ?? id).join(", ")} (refunded at 40 %).
+          </p>
+        )}
         {focus && focus.requires.length > 0 && <p class="wp-dim">Needs: {focus.requires.join(", ")}</p>}
         <p class="wp-dim" style={{ fontSize: "0.8em" }}>
           Hover or tap a mod to see what it changes. Durability adds mass; removing a mod refunds 40 %.

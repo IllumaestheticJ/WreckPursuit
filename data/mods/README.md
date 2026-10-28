@@ -7,7 +7,9 @@ from this folder.
 
 `ModDef` fields: `id` (snake_case, unique), `name` (no trademarks), `slot` (UI grouping), `line`
 (mods in one line replace each other), `tier` 1–5, `price`, optional `requires` (satisfied by the
-same line at an equal or higher tier), `class_whitelist`, `modes`, `effects`, `tradeoff`
+same line at an equal or higher tier), optional `supersedes` (mods of other lines whose job this
+one already does: installing it takes them off at resale value and they cannot go on while it is
+fitted; both coilovers supersede `susp_dampers_1`), `class_whitelist`, `modes`, `effects`, `tradeoff`
 (required: what the mod costs you besides money), optional `visuals`.
 
 Effects (externally tagged JSON):

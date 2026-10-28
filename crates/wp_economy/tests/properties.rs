@@ -533,7 +533,7 @@ proptest! {
         for _ in 0..n * 4 {
             let id = &pool[rng.below(pool.len() as u32) as usize];
             if let Ok(plan) = e.catalog.check_install(car.def.class, None, &mods, id) {
-                mods.retain(|m| Some(m) != plan.replaces.as_ref());
+                mods.retain(|m| !plan.removed().any(|r| r == m));
                 mods.push(id.clone());
             }
             if mods.len() >= n { break; }

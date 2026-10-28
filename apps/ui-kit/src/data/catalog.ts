@@ -91,6 +91,8 @@ export interface ModDef {
   tier: number;
   price: number;
   requires?: string[];
+  /** Mods whose job this one already does (coilovers carry their own dampers). */
+  supersedes?: string[];
   class_whitelist?: VehicleClass[];
   modes?: DamageMode[];
   effects: ModEffect[];
@@ -173,5 +175,8 @@ export function modBlocker(
     });
     if (!ok) return `Requires ${r ? r.name : req}`;
   }
+  // A fitted mod that already does this one's job (wp_economy `ModDef::supersedes`).
+  const over = installed.map((id) => MODS[id]).find((m) => m?.supersedes?.includes(mod.id));
+  if (over) return `${over.name} already does its job`;
   return null;
 }

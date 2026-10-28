@@ -247,6 +247,9 @@ default, 500 rep minimum; the car moves with its mods and damage, never its insu
 UG2 parts tree + Wreckfest durability. A mod has a slot, a **line** (tiers of one upgrade
 replace each other, the old part is refunded at 40 %), tier, price, `requires` (satisfied by the
 same line at an equal or higher tier, so upgrading a prerequisite never strands a dependent),
+`supersedes` (coilovers carry their own dampers: installing or workshop-fitting them takes the
+adjustable dampers off at resale value, the dampers are refused while coilovers are on, and
+`Economy::settle_superseded_mods` clears old saves with both at a full refund),
 `class_whitelist`, optional `modes` (nitrous is Arcade only) and effects:
 
 - `Vehicle { param, op, value }` — 33 dotted parameter paths (`engine.torque_scale`,

@@ -480,6 +480,9 @@ pub struct ModOption {
     pub reason: Option<String>,
     /// Same-line mod it replaces.
     pub replaces: Option<String>,
+    /// Installed mods of other lines it takes off because it does their job (coilovers
+    /// replace separate dampers).
+    pub removes: Vec<String>,
     /// Stats with the change applied (install, or remove when installed).
     pub stats_after: Option<StatsView>,
     /// Required mods.
@@ -688,6 +691,10 @@ impl Career {
     /// ([`Economy::settle_abandoned_run`]); the result waits in [`Career::take_abandoned`].
     pub fn load_json(econ: Economy, text: &str) -> Result<Self, String> {
         let mut p = CareerProfile::from_json(text).map_err(|e| e.to_string())?;
+        // A save from before coilovers superseded dampers can hold both: take the dampers off.
+        if let Ok(((), ev)) = econ.settle_superseded_mods(&mut p.account) {
+            p.ledger.extend(ev);
+        }
         for (uid, v) in &p.lattices {
             serde_json::from_str::<FullDamageSnapshot>(v)
                 .map_err(|e| format!("car {uid}: bad lattice damage: {e}"))?;
@@ -1497,14 +1504,14 @@ impl Career {
             if !installed && m.does_nothing_on(&base.def) {
                 continue;
             }
-            let (next, replaces, check) = if installed {
+            let (next, replaces, removes, check) = if installed {
                 let next: Vec<String> = c.mods.iter().filter(|x| **x != m.id).cloned().collect();
                 let check = self
                     .econ
                     .catalog
                     .check_uninstall(c.class, &c.mods, &m.id)
                     .map(|_| None);
-                (next, None, check)
+                (next, None, Vec::new(), check)
             } else {
                 match self
                     .econ
@@ -1515,13 +1522,13 @@ impl Career {
                         let mut next: Vec<String> = c
                             .mods
                             .iter()
-                            .filter(|x| Some(*x) != plan.replaces.as_ref())
+                            .filter(|x| !plan.removed().any(|r| r == *x))
                             .cloned()
                             .collect();
                         next.push(m.id.clone());
-                        (next, plan.replaces.clone(), Ok(plan.replaces))
+                        (next, plan.replaces.clone(), plan.removes, Ok(plan.replaces))
                     }
-                    Err(e) => (Vec::new(), None, Err(e)),
+                    Err(e) => (Vec::new(), None, Vec::new(), Err(e)),
                 }
             };
             let mut reason = check.as_ref().err().map(|e| e.to_string());
@@ -1563,6 +1570,7 @@ impl Career {
                 allowed: reason.is_none(),
                 reason,
                 replaces,
+                removes,
                 stats_after,
                 requires: m.requires.clone(),
             });
