@@ -103,7 +103,8 @@ await ready();
   // A career run spawns the car with it.
   await page.click("#sc-garage");
   await page.waitForSelector(G, { timeout: 10000 });
-  await page.click(`${G} button:has-text("Free drive")`);
+  await page.click(`${G} [data-testid="career-free-roam"]`);
+  await page.click('[data-testid="free-roam-drive"]');
   await page.waitForTimeout(300);
   const run = await page.evaluate(() => ({ active: window.__wp.sim.careerRunActive(), e: window.__wp.sim.scenario().entities[0] }));
   check(run.active && JSON.stringify(run.e.tune) === JSON.stringify(t), `career run: player entity carries the tune (${JSON.stringify(run.e.tune)})`);
@@ -114,7 +115,8 @@ await ready();
   await page.click(`${G} button:text-is("Tune")`);
   await page.click(`[data-testid="tune-page"] button:has-text("Reset to stock")`);
   const reset = await page.evaluate(() => window.__wp.careerApi.view().cars[0].tune);
-  await page.click(`${G} button:has-text("Free drive")`);
+  await page.click(`${G} [data-testid="career-free-roam"]`);
+  await page.click('[data-testid="free-roam-drive"]');
   await page.waitForTimeout(300);
   const stockRun = await page.evaluate(() => window.__wp.sim.scenario().entities[0]);
   check(

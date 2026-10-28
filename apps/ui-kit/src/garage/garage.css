@@ -488,3 +488,9 @@
 .wp-ps-row.is-preview {
   border-color: var(--accent, #3cff8a);
 }
+
+/* Free Roam pop-up: the picked time / weather reads at a glance (filled, not just outlined). */
+.wp-cg-roam .wp-btn[aria-pressed="true"] {
+  background: var(--scan);
+  color: #04110a;
+}
