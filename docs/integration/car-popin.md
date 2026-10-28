@@ -79,6 +79,14 @@ so the extra far cars are low-poly instances.
 - Render cutoff: `e2e/popin_shots.mjs` records every traffic car within the cull distance that
   the LOD director did not draw (`undrawnWithinCull`; `CHECK=1` fails on any). 0 in all 8 shots.
 
+- Existing tests adjusted (`tests/world.rs`): `spawns_respect_sightline_and_active_area` — after
+  teleporting 980 m away the old area must empty *except for cars the new player can see* (it
+  looks straight down the grid avenue; 4 stayed, all in view). `cars_near_the_player_are_physical
+  _with_the_cap_full_elsewhere` (physical-LOD priority) pins `view_radius_m: 0`: with the cap
+  full along a race route, no car spawns on the visible stretch of the player's long straight
+  row, and on that seed none came within 25 m (cars within 150 m: 18.7 vs 20.7; on the row
+  ahead 1.2 vs 1.7).
+
 ## Screenshots (`docs/media/popin/`)
 Free Roam (`?roam=10`), chase camera, 1280×720, gfx high, 6 s per shot; see its README.
 
@@ -131,7 +139,9 @@ where that car can see down the street. Seeds 3/7/9/11 pass, 5/13 do not (before
   removed wherever it is, even in view (0.1 % of despawns in the test drives).
 - The veto knows terrain, buildings, decks, tunnels and structures, not trees, props or other
   cars (conservative: more counts as seen). Session start (`populate`) keeps its 150 m rule.
-- Spots with long clear sightlines and little traffic (Loop 9 has 5–8 cars in reach by day, in
+- Long straight roads with a clear view fill only from hidden side streets and ramps: on a grid
+  row the stretch ahead holds about 30 % fewer cars than with the radius rule (overall density
+  near the player 87–100 %). Spots with long clear sightlines and little traffic (Loop 9 has 5–8 cars in reach by day, in
   both builds) can only fill from hidden ramps and side roads; rural traffic is sparse anyway.
 - No dedicated test drives a roamer rescue (no hook to strand one); it goes through the same
   `World::in_player_view` as the tested paths.
