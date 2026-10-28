@@ -88,6 +88,31 @@
   scrape at 25 m/s still holds. Test `a_hard_angled_hit_breaks_rail_sections_off`.
 - Screenshot script: `apps/testbed-web/e2e/guardrail_shots.mjs`.
 
+## Run-offs past the finish (2026-10-28, owner: "touge tracks need more run off so we can slow down after we finish")
+- `wp_world::touge`: every pass's road runs on `RUN_OFF_M` = 340 m past each finish line (was
+  40 m to a wall). The spec's course is untouched (same samples, profile, banking; start grids
+  and finish POIs at identical positions, so course lengths, race times and AI pacing do not
+  move); `RUN_OFF_EXT_M` = 300 m of straight road is added at each end along the course's end
+  direction, its grade fading to level over 60 m. Edges as on the rest of the pass (rail
+  downhill, cut bank uphill; no drops or aprons). Past the paving: a 45 m flat gravel arrester
+  bed (dirt zone, 16 m between rails) inside one continuous guard rail that flares out from the
+  road's rail line, rounds the end and returns to the bank; the fixed `Fence` wall stands behind
+  it (the old walls across the road ends are gone). New `TougeTrack` fields: `course_from_m`,
+  `course_to_m`, `finish_m`, `start_m`, `traps` (`Trap`). **Distances along the road
+  (`edges`, `Boundary::locate`) now start at the base end of the base run-off** (+300 m vs
+  before for the same spot).
+- Braking (test `run_offs_stop_a_car_from_200_kmh_dry_and_wet`, both ends of all four passes):
+  200 km/h at the line, 0.5 s reaction, grade integrated along the run-off: μ 0.9 dry ≈ 203 m,
+  μ 0.55 wet (≈ 0.6 of dry; street/sport/all-terrain `WetAsphalt` ratios 0.62–0.72) ≈ 314 m, of
+  340 m paved, the 45 m bed beyond.
+- Race side: the judged course still ends at the finish POI (`finish_back_m: 0`); the AI's
+  run-off leg (`entrants::run_off_route`, 60 m) now lies on paved run-off instead of running
+  into the end wall; the battle is decided at the first finish, so `TougeBattle::observe` never
+  totals a car in the run-off, and the run-off and bed are inside the corridor anyway (test
+  `run_offs_lie_beyond_the_finish_and_inside_the_corridor`). No traffic or police on a pass.
+- Touched outside my crates: none (`wp_wasm::touge_tests::longest` now picks edge stretches on
+  the course as raced, not in a run-off).
+
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
@@ -115,6 +140,7 @@
   there is no gravel-trap drag beyond the dirt tyre model.
 - The Ashpeak open-world touge (Crowfoot Pass Road) is a city road and keeps the city's road
   furniture; it is not built by `wp_world::touge`.
+- The arrester beds are dirt zones (dirt tyre model only, no extra gravel drag).
 - Greybox meshes are generated files; regenerate with `gen-city --preset touge` after editing
   a spec.
 

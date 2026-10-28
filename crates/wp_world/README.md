@@ -435,14 +435,30 @@ there are no solid walls along it.
   `wp_race::touge::Boundary`.
 - **Forest:** pine trees (`DecorKind::PineTree`) on slopes under ~44°, patchy, clear of the
   road by 15 m, density from the spec's `forest` (0–1), at most `MAX_TREES`.
-- **Ends:** `DecorKind::Fence` walls across both ends of the road.
+- **Run-offs (2026-10-28, owner: "more run off so we can slow down after we finish"):** the
+  road runs on `RUN_OFF_M` (340 m) past each finish line: the spec's course is kept exactly
+  (`TougeTrack::course_from_m` / `course_to_m`) and `RUN_OFF_EXT_M` (300 m) of straight road is
+  added at each end along its end direction, the end grade fading to level over 60 m, unbanked.
+  The run-off gets the same edges as the rest of the pass (rail downhill, cut bank uphill; no
+  drops or aprons, the spec's `drops` and bends are in course distances). Track distances
+  (`edges`, `finish_m`, `start_m`) are from the base end of the base run-off.
+- **Ends:** past the paving at each end a 45 m (`TRAP_M`) flat **gravel arrester bed**
+  (`TougeTrack::traps`, dirt zone), 16 m between its rails: the downhill rail line flares out
+  to it, rounds its end and comes back to the cut bank on the other side as one continuous
+  rail; a `DecorKind::Fence` wall stands behind the rounded end. No trees in it.
 - **POIs:** `<name> base start`, `<name> summit finish`, `<name> summit start`,
-  `<name> base finish` (60 m / 40 m in from the ends) for uphill and downhill courses.
+  `<name> base finish` (60 m / 40 m in from the course's ends, as before the run-offs) for
+  uphill and downhill courses.
 - Tests (`touge::tests`): every pass parses and validates; long and steep, rails over half the
   downhill side, banks over half the uphill side, runoff and every spec drop built, never a fall
   on both sides at once, dirt zones; hairpins have runoff outside; open drops never on the outside of a bend; the road never
   comes near itself; terrain stays under the paving out to its edges, falls ≥ 4 m behind ≥ 80 % of rail, rises behind ≥ 80 %
-  of bank, rail verges level, ≥ 8 m drops; rails face the road; generation is deterministic.
+  of bank, rail verges level, ≥ 8 m drops; rails face the road (the arrester beds' rails their
+  bed); the course as raced is the spec's course (POIs where they were); from 200 km/h at
+  either finish line a car stops on the paved run-off after 0.5 s reaction at μ 0.9 (≈ 203 m)
+  and μ 0.55 wet (≈ 314 m of 340 m); every run-off is sealed on both sides (rail or rising
+  bank, never a drop) and ends in a level, railed gravel bed with a wall behind it;
+  generation is deterministic.
 
 ## Traffic AI
 
