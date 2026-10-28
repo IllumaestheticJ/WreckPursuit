@@ -202,6 +202,8 @@ export class SceneView {
   private debugGrid!: THREE.GridHelper;
   /** Axis hint at the sim origin (hidden in the workshop). */
   private originAxes!: THREE.AxesHelper;
+  /** A car lot visit is shown (setLot). */
+  private lotOn = false;
   /** The flat world's ground plane (hidden inside the garage workshop). */
   private flatGround!: THREE.Mesh;
   private workshopOn = false;
@@ -288,7 +290,7 @@ export class SceneView {
     for (const [id, obj] of this.cities) obj.visible = id === cityId;
     this.cityShown = cityId;
     // The debug grid sits on the road surface and flickers through it; hide it in the city.
-    this.debugGrid.visible = !cityId && !this.workshopOn;
+    this.debugGrid.visible = !cityId && !this.workshopOn && !this.lotOn;
     if (!cityId || this.cities.has(cityId)) return;
     const holder = new THREE.Group();
     this.cities.set(cityId, holder);
@@ -355,8 +357,15 @@ export class SceneView {
   setWorkshop(on: boolean): void {
     this.workshopOn = on;
     this.flatGround.visible = !on;
-    this.debugGrid.visible = !on && !this.cityShown;
-    this.originAxes.visible = !on;
+    this.debugGrid.visible = !on && !this.cityShown && !this.lotOn;
+    this.originAxes.visible = !on && !this.lotOn;
+  }
+
+  /** Car lot visit: hide the origin axes and the 10 m debug grid (the lot has its own paving). */
+  setLot(on: boolean): void {
+    this.lotOn = on;
+    this.originAxes.visible = !on && !this.workshopOn;
+    this.debugGrid.visible = !on && !this.workshopOn && !this.cityShown;
   }
 
   groundZ(x: number, y: number, nearZ?: number): number | null {

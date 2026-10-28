@@ -62,6 +62,7 @@ import { ModShop } from "./ui/modShop";
 import { WorkshopMode } from "./workshop/mode";
 import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
 import { LotVisitView } from "../../ui-kit/src/garage/LotVisit";
+import { LotDressing } from "./render/lot_dressing";
 import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
 import { RaceView, racesForMap, type BetPick, type BetStatus, type RaceFrame } from "./ui/race";
@@ -399,6 +400,28 @@ async function main(): Promise<void> {
   lotEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
   overlay.appendChild(lotEl);
   const lotView = new LotVisitView(lotEl);
+  const lotDressing = new LotDressing();
+  scene.world.add(lotDressing.root);
+  /** On a lot only the lot overlay shows (no driving HUD, debug panels or debug layers), like
+   * the workshop; off restores them. */
+  const setLotMode = (on: boolean) => {
+    if (!on && !lotView.open) return;
+    if (!on) lotView.hide();
+    layers.hold(on ? DEBUG_LAYERS : []);
+    document.body.classList.toggle("wp-lot", on);
+    if (on) requestAnimationFrame(frameLotCar);
+    else rig.camera.clearViewOffset();
+  };
+  /** On a wide screen the lot panel covers the left of the view: shift the picture so the
+   * picked car sits in the middle of what is left. */
+  const frameLotCar = () => {
+    const panel = lotEl.querySelector(".wp-cg-lot")?.getBoundingClientRect();
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    if (!lotView.open || !panel || w < 700) return rig.camera.clearViewOffset();
+    rig.camera.setViewOffset(w, h, -Math.round(panel.right / 2), 0, w, h);
+  };
+  window.addEventListener("resize", () => lotView.open && frameLotCar());
   const visitLot = (lotId: string) => {
     app.scenarioFile = null;
     app.scenario = null;
@@ -424,6 +447,7 @@ async function main(): Promise<void> {
     }
     const own = sim.careerView().cars.find((c) => c.active)?.paint;
     if (visit.own_car !== null && own != null) app.views.get(visit.own_car)?.setPaint(own);
+    setLotMode(true);
     lotView.show({
       stock: () => sim.careerLot(lotId),
       view: () => sim.careerView(),
@@ -507,7 +531,7 @@ async function main(): Promise<void> {
   /** Garage: ends a career run in progress (its result goes into the career), pauses. */
   /** `at`: the shop the car pulled into (the Repair panel starts on it). */
   const openGarage = (message: string | null = null, at: string | null = null) => {
-    lotView.hide();
+    setLotMode(false);
     careerPicker = null;
     workshop.close();
     crash.reset();
@@ -783,7 +807,12 @@ async function main(): Promise<void> {
     app.focus = app.player;
     applyCareerLook();
     const sc = sim.scenario();
-    scene.setBarriers(sc.barriers ?? []);
+    // A car lot visit draws its fences, sign and buildings as themselves (render/lot_dressing.ts).
+    const lotHere = sc.name.startsWith("lot_") ? sim.lotVisit() : null;
+    const lotInfo = lotHere ? sim.careerLot(lotHere.lot).lot : null;
+    scene.setBarriers(lotInfo ? [] : (sc.barriers ?? []));
+    lotDressing.set(lotInfo ? { kind: lotInfo.kind, name: lotInfo.name, tier: lotInfo.tier, barriers: sc.barriers ?? [] } : null);
+    scene.setLot(!!lotInfo);
     if (sc.name === DRIFT_LAB_W) driftLabW.car = sc.entities?.[0]?.car ?? DRIFT_LAB_W_CAR;
     // Every session: the tune panel's saved debug overrides (none = the shipped handling) and
     // raw keys; the test pad (?drift=w) also gets its course and the reference assists.
@@ -807,7 +836,7 @@ async function main(): Promise<void> {
     rig.setMode(rig.mode, app.views.get(app.focus)?.root);
     resetRace(sc, ids);
     // Any other session leaves the lot.
-    if (lotView.open && !sim.lotVisit()) lotView.hide();
+    if (lotView.open && !sim.lotVisit()) setLotMode(false);
   };
 
   /** Race sessions (scenario `race_<id>`): driver names, the course, the HUD. */
@@ -1755,7 +1784,7 @@ async function main(): Promise<void> {
   /** Something else owns the screen or the Esc key right now. */
   // Photo mode takes Esc (and gamepad Start) to leave itself, so no pause menu meanwhile.
   // An open "are you sure?" row (garage, lot, workshop) takes Esc as Cancel.
-  const canOpenMenu = () => !document.querySelector(".wp-confirm") && !photo.active && !menu?.isOpen && !map.isOpen && !controls.isOpen && !garage.open && !workshop.active && !runEnd.open && !raceView.cards && !isReplay();
+  const canOpenMenu = () => !document.querySelector(".wp-confirm") && !photo.active && !menu?.isOpen && !map.isOpen && !controls.isOpen && !garage.open && !lotView.open && !workshop.active && !runEnd.open && !raceView.cards && !isReplay();
   /**
    * Pause menu "are you sure?" lines: what leaving the running session now would lose, or null
    * when nothing would (free drive, the test pad, a finished race, a replay).
@@ -1931,7 +1960,7 @@ async function main(): Promise<void> {
 
     // Touch controls: hidden under menus / full-screen panels (they sit above #overlay), only
     // map + pause while paused or with the full map open.
-    touch?.setCovered(!!menu?.isOpen || controls.isOpen || garage.open || workshop.active || runEnd.open || !!raceView.cards);
+    touch?.setCovered(!!menu?.isOpen || controls.isOpen || garage.open || lotView.open || workshop.active || runEnd.open || !!raceView.cards);
     touch?.setDriving(!replay && !app.paused && !map.isOpen && !app.bench);
     const { input, source, edges } = readInput(dt);
     // Photo mode reads the pad itself (sticks fly, B / Start leave): no game actions meanwhile.
