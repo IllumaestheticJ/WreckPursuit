@@ -355,11 +355,23 @@ impl PoliceSystem {
                 roadblock_s: left(self.captain.roadblock_ready),
                 spikes_s: left(self.captain.spikes_ready),
                 helo_s: left(self.captain.helo_ready),
+                // Max: the tools table within the commander's budget.
                 roadblocks: [
                     self.roadblocks.len() as u32,
-                    self.cfg.tools.roadblock.max_active,
+                    self.cfg
+                        .tools
+                        .roadblock
+                        .max_active
+                        .min(self.commander.budget.roadblocks),
                 ],
-                spikes: [self.spikes.len() as u32, self.cfg.tools.spikes.max_active],
+                spikes: [
+                    self.spikes.len() as u32,
+                    self.cfg
+                        .tools
+                        .spikes
+                        .max_active
+                        .min(self.commander.budget.spikes),
+                ],
             },
         }
     }

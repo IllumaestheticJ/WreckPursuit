@@ -498,6 +498,9 @@ impl PoliceSystem {
             // report per racer; later calls update the position. Only once the racer has
             // built up `call_min_heat` (owner 2026-10-23: investigations far less sensitive).
             let district = self.graph.district_at(at);
+            // Every call is intel for the commander (repeat calls escalate, a district full of
+            // calls gets extra patrols).
+            self.commander_note_call(racer, at, district, camera);
             if let Some(inc) = self
                 .incidents
                 .iter_mut()
@@ -1825,6 +1828,7 @@ impl PoliceSystem {
         self.maintain_stuck(world);
         self.maintain_progress(world);
         self.maintain_resets(world);
+        self.commander_think(world);
         self.maintain_pool(world);
         self.dispatch_incidents(world);
         self.update_responses();
@@ -2244,7 +2248,7 @@ impl PoliceSystem {
         self.pending.push(PoliceEvent::UnitDespawned { unit: id });
     }
 
-    fn ground_units_alive(&self) -> u32 {
+    pub(crate) fn ground_units_alive(&self) -> u32 {
         self.units
             .iter()
             .filter(|u| u.kind == UnitKind::Car && u.role != UnitRole::Player)
@@ -2269,9 +2273,18 @@ impl PoliceSystem {
         self.retire_off_corridor(world);
         self.retire_outdated(world);
         for d in District::ALL {
-            let target = self.cfg.presence.patrols.get(d).get(self.phase);
+            let table = self.cfg.presence.patrols.get(d).get(self.phase);
+            // The commander's surge patrols (calls piling up in the district) come on top,
+            // within its ground budget.
+            let surge = self.commander_surge(d);
+            let target = table + surge;
             let alive = self.pool_count(d);
-            if alive < target && self.ground_units_alive() < self.cfg.presence.max_ground_units {
+            let room = if alive < table {
+                self.ground_units_alive() < self.cfg.presence.max_ground_units
+            } else {
+                self.ground_units_alive() < self.unit_cap()
+            };
+            if alive < target && room {
                 self.spawn_pool_unit(world, d);
             } else if alive > target {
                 // Retire one idle pool unit nobody can see.
@@ -2582,7 +2595,13 @@ impl PoliceSystem {
             .max()
             .unwrap_or(0);
         let by_level = self.cfg.presence.response.max_units_by_level;
-        by_level[level.min(by_level.len() - 1)].min(self.cfg.presence.max_ground_units)
+        let cap = by_level[level.min(by_level.len() - 1)].min(self.cfg.presence.max_ground_units);
+        if self.commander_active() {
+            // The commander's budget (time of day, wanted level, bounty).
+            cap.min(self.commander.budget.ground_units)
+        } else {
+            cap
+        }
     }
 
     /// Whether any racer can see `p`, or is closer than `response.never_closer_m`. Seeing
@@ -2792,7 +2811,7 @@ impl PoliceSystem {
     }
 
     /// Note a ground unit that appeared after the session start (stats: pop-in audit).
-    fn record_spawn(&mut self, world: &dyn WorldQuery, i: usize) {
+    pub(crate) fn record_spawn(&mut self, world: &dyn WorldQuery, i: usize) {
         if !self.warmed_up {
             return;
         }
@@ -3159,8 +3178,9 @@ impl PoliceSystem {
             .count() as u32
     }
 
-    /// Stand down AI units that have been on `racer` for `far_release_s` and are still farther
-    /// than `far_m` from it (they despawn once out of sight).
+    /// Stand down AI units (interceptors and pursuers, patrols included) that have been on
+    /// `racer` for `far_release_s` and are still farther than `far_m` from it: they despawn
+    /// once out of sight, freeing their slot in the commander's budget.
     fn release_far_units(&mut self, racer: EntityId) {
         let Some(p) = self.search_centre(racer) else {
             return;
@@ -3174,10 +3194,20 @@ impl PoliceSystem {
             let u = &self.units[i];
             if u.kind == UnitKind::Car
                 && u.player.is_none()
-                && matches!(u.assignment, Assignment::Intercept { target, .. } if target == racer)
+                // Owner 2026-10-27 (commander): a pursuer left that far behind is no longer
+                // in the chase either; stood down, a responder / reinforcement drives off and
+                // despawns out of sight (`cleanup_units`), handing its slot back to the
+                // commander's ground budget.
+                && matches!(u.assignment, Assignment::Intercept { target, .. } | Assignment::Pursue { target } if target == racer)
                 && now.since(u.assigned) > wait
                 && dist(u.body.pos, p) > far
             {
+                // A patrol car too is out of the chase for good: it leaves like a responder
+                // (despawns out of sight) and the pool refills its district out of sight.
+                if matches!(self.units[i].role, UnitRole::Pool(_)) {
+                    self.units[i].role = UnitRole::Responder;
+                }
+                self.stats.far_stand_downs += 1;
                 self.assign(i, Assignment::Idle);
             }
         }
@@ -3731,7 +3761,14 @@ impl PoliceSystem {
             .filter(|u| u.kind == UnitKind::Helicopter && !u.wrecked)
             .count()
             + self.helo_requests.len();
-        if active as u32 >= self.cfg.presence.helicopter.count.get(self.phase) {
+        let budget = self
+            .cfg
+            .presence
+            .helicopter
+            .count
+            .get(self.phase)
+            .min(self.commander.budget.helicopters);
+        if active as u32 >= budget {
             return Err(CaptainError::Budget);
         }
         self.captain.helo_ready = now.plus(self.cfg.tools.helo_request_cooldown_s);
@@ -3965,7 +4002,9 @@ impl PoliceSystem {
                 remaining_s: self.captain.roadblock_ready.since(now),
             });
         }
-        if self.roadblocks.iter().filter(|r| !r.scripted).count() as u32 >= rb.max_active {
+        if self.roadblocks.iter().filter(|r| !r.scripted).count() as u32
+            >= rb.max_active.min(self.commander.budget.roadblocks)
+        {
             return Err(CaptainError::Budget);
         }
         let (p, v) = self.racer_motion(racer).ok_or(CaptainError::NotPursued)?;
@@ -4207,7 +4246,7 @@ impl PoliceSystem {
             });
         }
         let active = self.spikes.iter().filter(|s| !s.scripted).count() + self.spike_runs.len();
-        if active as u32 >= sc.max_active {
+        if active as u32 >= sc.max_active.min(self.commander.budget.spikes) {
             return Err(CaptainError::Budget);
         }
         let (p, v) = self.racer_motion(racer).ok_or(CaptainError::NotPursued)?;
