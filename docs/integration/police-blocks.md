@@ -36,7 +36,7 @@ the edges (as before).
   0.25 m into each (`STOP_OVERLAP_M`). Neighbouring boxes overlap by 0.1 m
   (`BARRIER_OVERLAP_M`); box lengths are stretched to fill each run exactly.
 - **One gap, `GAP_W_M` = 2.6 m** clear (the widest cars are ~2.0 m across: ~0.3 m each side),
-  on the carriageway: left edge, middle or right edge (AI captain: random; race profiles: their
+  on the carriageway: left edge, middle or right edge (AI captain: by tool id in turn, no RNG draw; race profiles: their
   `gap_side`; scenario `roadblock_at`: right edge).
 - **The barricade**: a wooden sawhorse box over the gap (`Roadblock::barricade`: collider, gap
   ends, width), 2.8 m long, 1.1 m tall.

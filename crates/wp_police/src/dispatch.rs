@@ -4053,7 +4053,9 @@ impl PoliceSystem {
         let site = plan_site_where(&self.graph, p, v, &rules, road.map(|r| r.0), &sealable)
             .map_err(CaptainError::Site)?;
         let n = rb.units[0] + self.rng.below(rb.units[1] - rb.units[0] + 1);
-        let gap = [GapPick::Left, GapPick::Centre, GapPick::Right][self.rng.below(3) as usize];
+        // The gap side varies block to block (by tool id: no draw on the police RNG, so the
+        // rest of the police's decisions stay as they were).
+        let gap = [GapPick::Right, GapPick::Left, GapPick::Centre][(self.next_tool % 3) as usize];
         let sec = self
             .block_section(&site, z)
             .unwrap_or_else(|| self.tool_section(&site, z));
