@@ -251,6 +251,7 @@ impl Vehicle {
         w.fs(&self.slide_gate.to_array());
         w.f(self.key_steer);
         w.f(self.hb_held_s);
+        w.f(self.hb_turn_key);
         w.fs(&self.plain_state());
         w.fs(&self.nitrous.to_array());
         VehicleSnapshot { bytes: w.0 }
@@ -369,6 +370,7 @@ impl Vehicle {
         }
         let key_steer = r.f()?;
         let hb_held_s = r.f()?;
+        let hb_turn_key = r.f()?;
         let mut plain = [0.0f32; Vehicle::PLAIN_STATE_LEN];
         for p in &mut plain {
             *p = r.f()?;
@@ -424,6 +426,7 @@ impl Vehicle {
         self.slide_gate = crate::steering::SlideGate::from_array(gate);
         self.key_steer = key_steer;
         self.hb_held_s = hb_held_s;
+        self.hb_turn_key = hb_turn_key;
         self.set_plain_state(plain);
         self.nitrous = crate::nitrous::Nitrous::from_array(nitrous);
         Ok(())
