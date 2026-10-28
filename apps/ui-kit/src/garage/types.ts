@@ -541,6 +541,12 @@ export interface WorkshopApi {
   mechanic(slot: string, source: MechanicSource, sellOld: boolean): MechanicResult;
   /** The paint shop (colours, vinyls, cosmetic parts); absent where there is none. */
   paintShop?: PaintShopApi;
+  /** The car's mod tree: requirements of every mod, and the bolt-on upgrades (mods that are
+   * not parts) the workshop sells. Absent: only part grades are sold. */
+  mods?(): ModTreeView;
+  /** Put a bolt-on upgrade (`mod_id`) on the car / take it off (40 % back). */
+  install?(modId: string): WorkshopScreen;
+  uninstall?(modId: string): WorkshopScreen;
 }
 
 /** Where the part the mechanic fits comes from. */
