@@ -294,6 +294,10 @@ pub enum PlaceKind {
     Garage,
     /// A safehouse: end the night safely (the run is saved) or work on the car.
     Safehouse,
+    /// A car lot: walk the rows and buy (`career_visit_lot`).
+    Lot,
+    /// One of the player's own garages: the workshop, the garage, or end the night.
+    Home,
 }
 
 /// An open career place visit (JSON for the testbed's place panel; `place_json`): the car
@@ -307,6 +311,8 @@ pub struct PlaceVisit {
     pub kind: PlaceKind,
     /// Place name.
     pub name: String,
+    /// Lot or home garage id (`None` for shops and safehouses, which go by name).
+    pub id: Option<String>,
     /// Legit or crooked (garages only).
     pub shop: Option<ShopKind>,
     /// The car's wanted level (heat left over without a pursuit).
@@ -334,4 +340,183 @@ pub struct PlaceStatus {
     pub visit: Option<PlaceVisit>,
     /// Inside a safehouse while chased, if so.
     pub laying_low: Option<LayingLow>,
+}
+
+// ----- drive-to places: car lots and the player's own garages ---------------------------------
+//
+// Owner, 2026-10-27: dealers, garages and workshops can only be reached by driving to them (the
+// menus only set a map waypoint), and the player has three garages of their own, unlocked at 0,
+// 2 000 and 5 000 rep, that career runs start from. The road network has no POIs for either, so
+// both stand at fixed anchors of the combined world (`ashpeak`) snapped onto the nearest lane
+// when a session loads ([`snap_to_lane`]); `spawn_tests::drive_to_places_stand_on_roads_apart`
+// checks the anchors against the generated world.
+
+/// Radius around a car lot or home garage that counts as inside, m (as every POI).
+pub const PLACE_RADIUS_M: f32 = 15.0;
+
+/// Where a car lot (`data/economy/lots.toml` id) stands in the combined world.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WorldLot {
+    /// Lot id.
+    pub lot: &'static str,
+    /// Anchor `[x, y]`, m; the lot's ring sits on the lane nearest it.
+    pub anchor: [f32; 2],
+    /// Spawn city id the lot belongs to ([`crate::scenario::SPAWNS`]).
+    pub city: &'static str,
+}
+
+/// Every car lot of the combined world: each in a zone of its kind of district where the city
+/// has one (Port Vesper has most; Ashpeak City the prestige dealer, Harnell the scrapyard).
+pub const WORLD_LOTS: [WorldLot; 7] = [
+    WorldLot {
+        lot: "budget_motors",
+        anchor: [-1025.0, 115.0],
+        city: "port_vesper",
+    },
+    WorldLot {
+        lot: "harbourline_auto",
+        anchor: [50.0, -535.0],
+        city: "port_vesper",
+    },
+    WorldLot {
+        lot: "meridian_prestige",
+        anchor: [-700.0, 4650.0],
+        city: "ashpeak_city",
+    },
+    WorldLot {
+        lot: "lucky_lou_used",
+        anchor: [-700.0, -975.0],
+        city: "port_vesper",
+    },
+    WorldLot {
+        lot: "certified_preowned",
+        anchor: [0.0, 660.0],
+        city: "port_vesper",
+    },
+    WorldLot {
+        lot: "dockside_salvage",
+        anchor: [1000.0, -975.0],
+        city: "port_vesper",
+    },
+    WorldLot {
+        lot: "ridgeback_scrap",
+        anchor: [-3150.0, 300.0],
+        city: "harnell_crossing",
+    },
+];
+
+/// Where one of the player's own garages (`career.toml [[home_garages]]` id) stands.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HomeSpot {
+    /// Home garage id.
+    pub id: &'static str,
+    /// Anchor `[x, y]`, m; the garage's ring (and the spawn) sits on the lane nearest it.
+    pub anchor: [f32; 2],
+    /// Spawn city id it is in.
+    pub city: &'static str,
+}
+
+/// The player's garages: one per spawn city, in unlock order.
+pub const HOME_GARAGES: [HomeSpot; 3] = [
+    HomeSpot {
+        id: "vesper_lockup",
+        anchor: [0.0, 225.0],
+        city: "port_vesper",
+    },
+    HomeSpot {
+        id: "spire_loft",
+        anchor: [190.0, 4650.0],
+        city: "ashpeak_city",
+    },
+    HomeSpot {
+        id: "harnell_barn",
+        anchor: [-3300.0, 150.0],
+        city: "harnell_crossing",
+    },
+];
+
+/// Home garage `id`'s spot, if there is one.
+pub fn home_spot(id: &str) -> Option<&'static HomeSpot> {
+    HOME_GARAGES.iter().find(|h| h.id == id)
+}
+
+/// The home garage whose anchor is (within 1 m of) `xy`: the career puts the player there to
+/// start a run from that garage ([`crate::session::Session::new`] then spawns on its lane).
+pub fn home_at_anchor(xy: [f32; 2]) -> Option<&'static HomeSpot> {
+    HOME_GARAGES
+        .iter()
+        .find(|h| (h.anchor[0] - xy[0]).hypot(h.anchor[1] - xy[1]) < 1.0)
+}
+
+/// The point of the drivable lane nearest `anchor` and the lane's facing (yaw, rad).
+pub fn snap_to_lane(world: &World, anchor: [f32; 2]) -> Option<([f32; 3], f32)> {
+    let map = world.map();
+    let (seg, s) = wp_world::routes::nearest_lane(map, [anchor[0], anchor[1], 0.0], None)?;
+    let (pos, tan) = map.seg(seg).point_at(s);
+    Some((pos, wp_world::geom::yaw_of(tan)))
+}
+
+/// Kind of drive-to place on the map (`places_json`; the waypoint picker uses the same names).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum MapPlaceKind {
+    /// A repair shop ([`GarageSite`]).
+    Garage,
+    /// A safehouse.
+    Safehouse,
+    /// A car lot (dealership, used lot, junkyard).
+    Lot,
+    /// One of the player's own garages.
+    Home,
+}
+
+/// A car lot or home garage in a career session.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PlaceSite {
+    /// Lot or home garage id.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Position (on the lane), m.
+    pub pos: [f32; 3],
+    /// Facing along the lane, rad.
+    pub heading_rad: f32,
+    /// Radius that counts as inside, m.
+    pub radius_m: f32,
+}
+
+impl PlaceSite {
+    /// The point `[x, y]` is inside the place's radius.
+    pub fn contains(&self, xy: [f32; 2]) -> bool {
+        (xy[0] - self.pos[0]).hypot(xy[1] - self.pos[1]) <= self.radius_m
+    }
+
+    /// `(id, name)` placed at `anchor` in `world` (`None`: the world has no lanes).
+    pub fn at(world: &World, id: &str, name: &str, anchor: [f32; 2]) -> Option<Self> {
+        let (pos, heading_rad) = snap_to_lane(world, anchor)?;
+        Some(Self {
+            id: id.to_string(),
+            name: name.to_string(),
+            pos,
+            heading_rad,
+            radius_m: PLACE_RADIUS_M,
+        })
+    }
+}
+
+/// One entry of `places_json()`: every drive-to place of the session, for the map markers and
+/// the waypoint (the menus name a place; its position comes from here).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MapPlace {
+    /// Kind.
+    pub kind: MapPlaceKind,
+    /// Lot / home id, else the name.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Position, m.
+    pub pos: [f32; 3],
+    /// Radius that counts as inside, m.
+    pub radius_m: f32,
+    /// Repair shops: legit or crooked.
+    pub shop: Option<ShopKind>,
 }

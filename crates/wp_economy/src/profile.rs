@@ -145,6 +145,10 @@ pub struct CareerProfile {
     /// Lot cars bought on the current day (so a bought car leaves the lot until it restocks).
     #[serde(default)]
     pub lot_sales: LotSales,
+    /// The home garage career runs start from (`career.toml [[home_garages]]` id); `None` =
+    /// the first one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home: Option<String>,
 }
 
 /// Lot spaces sold on one in-game day (`wp_economy::lots`); stale days count as empty.
@@ -188,6 +192,7 @@ impl Economy {
             lattices: BTreeMap::new(),
             run_in_pursuit: None,
             lot_sales: LotSales::default(),
+            home: None,
         }
     }
 

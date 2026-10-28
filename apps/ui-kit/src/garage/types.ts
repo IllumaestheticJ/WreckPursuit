@@ -136,6 +136,8 @@ export interface LotSummary {
   classes: string[];
   in_stock: number;
   from_price: number | null;
+  /** City the lot stands in (empty: not on the map). */
+  city_label?: string;
 }
 
 /** `career::ListingView`: junkyards hide `condition`, `runs`, `tired_parts` (`null`). */
@@ -287,6 +289,8 @@ export interface CareerView {
   /** The world's repair shops (`career::ShopView`, `garage_visit::WORLD_SHOPS`). Older hosts
    * send none: the Repair panel then offers the bare districts. */
   shops?: ShopSite[];
+  /** The player's own garages, in unlock order (`career::HomeView`); runs start from `selected`. */
+  homes?: HomeGarage[];
   stats: CareerStats;
   progress: CareerProgress;
   captures: number;
@@ -366,6 +370,29 @@ export interface RoamChoice {
 
 /** What the garage screen can do (the testbed implements it over wp_wasm). Every action
  * returns the new view, or throws an Error whose message is shown to the player. */
+/** `career::HomeView`: one of the player's own garages (unlocked at a rep threshold). */
+export interface HomeGarage {
+  id: string;
+  name: string;
+  city: string;
+  city_label: string;
+  unlocked: boolean;
+  needed_rep: number;
+  selected: boolean;
+}
+
+/** Kind of drive-to place (`wp_wasm::garage_visit::PlaceKind`). */
+export type PlaceKind = "Garage" | "Safehouse" | "Lot" | "Home";
+
+/** Where the player is while the career screen is open: the place they pulled into (its kind,
+ * lot / home id or shop name, and name). Garage work needs one (owner 2026-10-27: dealers,
+ * garages and workshops have to be driven to). */
+export interface CareerPlace {
+  kind: PlaceKind;
+  id: string;
+  name: string;
+}
+
 export interface CareerApi {
   view(): CareerView;
   mods(uid: number): ModTreeView;
@@ -411,6 +438,15 @@ export interface CareerApi {
   /** Spawn city id of the main menu's "Spawn in" (optional): the Repair panel starts on that
    * city's shop when the garage is opened from the menu. */
   homeCity?(): string;
+  /** Where the player is (optional: hosts without it treat every place as reached, the old
+   * menu behaviour). `null` = not at any place: garage work is closed. */
+  place?(): CareerPlace | null;
+  /** Set the map waypoint to a place (the only way the menu sends the player anywhere). */
+  setWaypoint?(target: CareerPlace): void;
+  /** The waypoint now (to mark it in the lists), or null. */
+  waypoint?(): CareerPlace | null;
+  /** Start career runs from the player's garage `id`. */
+  setHome?(id: string): CareerView;
   close(): void;
 }
 

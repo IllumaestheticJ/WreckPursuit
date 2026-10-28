@@ -86,3 +86,22 @@ Truck = "Unknown"
 Sport = "Unknown"
 Muscle = "Unknown"
 Exotic = "Unknown"
+
+# The player's own garages (owner request 2026-10-27): career runs start from one of them, picked
+# in the career menu. A garage opens for good the first time rep reaches its tier (Unknown 0,
+# Known 2 000, Respected 5 000); where each one stands in the world is wp_wasm's
+# `garage_visit::HOME_GARAGES`, by id. First = open from the start, then in unlock order.
+[[home_garages]]
+id = "vesper_lockup"
+name = "Dockside Lock-up"
+tier = "Unknown"
+
+[[home_garages]]
+id = "spire_loft"
+name = "Spire Basement Garage"
+tier = "Known"
+
+[[home_garages]]
+id = "harnell_barn"
+name = "Harnell Barn"
+tier = "Respected"
