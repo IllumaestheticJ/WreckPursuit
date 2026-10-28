@@ -64,7 +64,7 @@ fn race_scenarios_name_the_race_and_put_the_player_last() {
     assert!(race_for_scenario(&auto.name).unwrap().1);
     // The picker advertises a purse and a buy-in for every race.
     let car = simcli::data::load_car(crate::data::mem_data(), CAR).unwrap();
-    let cards = race_cards(Some(&car), DamageMode::Arcade);
+    let cards = race_cards(Some(&car), DamageMode::Arcade, 0);
     assert_eq!(cards.len(), wp_race::catalog::races().len());
     for c in &cards {
         assert!(
@@ -399,7 +399,7 @@ fn bets_on_yourself_settle_through_the_career_economy() {
 #[test]
 fn picker_cards_carry_form_and_odds() {
     let car = simcli::data::load_car(crate::data::mem_data(), CAR).unwrap();
-    for c in race_cards(Some(&car), DamageMode::Arcade) {
+    for c in race_cards(Some(&car), DamageMode::Arcade, 0) {
         assert!(c
             .drivers
             .iter()
@@ -413,4 +413,121 @@ fn picker_cards_carry_form_and_odds() {
             .all(|o| o.odds >= 1.05 && o.label.contains("player")));
     }
     assert_eq!(crate::race::regular_cards().len(), 12);
+}
+
+/// Mean class index of `def`'s field.
+fn field_mean(def: &wp_race::catalog::RaceDef) -> f32 {
+    let ks: Vec<f32> = def
+        .ai
+        .iter()
+        .map(|d| crate::race::car_class(d.car).unwrap() as f32)
+        .collect();
+    ks.iter().sum::<f32>() / ks.len() as f32
+}
+
+/// Owner, 2026-10-27: "have the cars scale with both reputation and the car the user is
+/// bringing (if im bringing an exotic, so should they)". With the real class indices.
+#[test]
+fn picker_fields_scale_with_the_players_car_and_rep() {
+    let load = |id: &str| simcli::data::load_car(crate::data::mem_data(), id).unwrap();
+    let def = wp_race::catalog::race("loop9_circuit").unwrap();
+    let field = |car: &str, rep: i64| crate::race::scaled_field(&def, &load(car), rep);
+    let show = |d: &wp_race::catalog::RaceDef| d.ai.iter().map(|a| a.car).collect::<Vec<_>>();
+    // Bring an exotic, face exotics.
+    let exotic = field("fulmine_v10", 0);
+    for d in &exotic.ai {
+        assert_eq!(
+            load(d.car).def.class,
+            wp_contracts::VehicleClass::Exotic,
+            "{} in a {} against a Fulmine: {:?}",
+            d.name,
+            d.car,
+            show(&exotic)
+        );
+    }
+    // A hatchback faces nothing of the sort.
+    let hatch = field("vireo_xs", 0);
+    for d in &hatch.ai {
+        assert_ne!(
+            load(d.car).def.class,
+            wp_contracts::VehicleClass::Exotic,
+            "{:?}",
+            show(&hatch)
+        );
+    }
+    // Same car, more rep: a faster field; a legend meets fast cars whatever they bring.
+    let mut last = 0.0;
+    for rep in [0, 500, 2_000, 5_000, 10_000, 20_000] {
+        let m = field_mean(&field("kestrel_ts", rep));
+        assert!(m >= last, "rep {rep}: field mean {m} < {last}");
+        last = m;
+    }
+    assert!(
+        field_mean(&field("kestrel_ts", 20_000)) > field_mean(&field("kestrel_ts", 0)) + 100.0,
+        "{:?} vs {:?}",
+        show(&field("kestrel_ts", 20_000)),
+        show(&field("kestrel_ts", 0))
+    );
+    assert!(field_mean(&field("junkyard_beater", 20_000)) >= 550.0);
+    // The drivers, their profiles and the grid order are the catalog's.
+    for (a, b) in def.ai.iter().zip(&exotic.ai) {
+        assert_eq!((a.id, a.profile), (b.id, b.profile));
+    }
+}
+
+/// The scenario carries the scaled field and the race reads it back from the scenario, so the
+/// results, the book and a replay name the cars that actually raced.
+#[test]
+fn a_scaled_field_round_trips_through_the_scenario() {
+    let car = simcli::data::load_car(crate::data::mem_data(), "ombra_v12").unwrap();
+    let def = wp_race::catalog::race("loop9_circuit").unwrap();
+    let scaled = crate::race::scaled_field(&def, &car, 0);
+    let sc = race_scenario(&scaled, "ombra_v12", DamageMode::Arcade, false).unwrap();
+    for (d, e) in scaled.ai.iter().zip(&sc.entities[1..]) {
+        assert_eq!(d.car, e.car);
+    }
+    let back = crate::race::field_of_scenario(&def, &sc);
+    assert_eq!(back.ai, scaled.ai);
+    let mut plain = race_scenario(&def, "ombra_v12", DamageMode::Arcade, false).unwrap();
+    crate::race::apply_field(&mut plain, &scaled);
+    assert_eq!(plain.entities, sc.entities);
+}
+
+/// Owner, 2026-10-27: "have the reputation points scale accordingly as well". The picker card
+/// shows the rep scale; tougher fields earn more.
+#[test]
+fn tougher_fields_advertise_more_rep() {
+    let card = |car: &str, rep: i64| {
+        let c = simcli::data::load_car(crate::data::mem_data(), car).unwrap();
+        race_cards(Some(&c), DamageMode::Arcade, rep)
+            .into_iter()
+            .find(|r| r.id == "loop9_circuit")
+            .unwrap()
+    };
+    let hatch = card("vireo_xs", 0);
+    let exotic = card("fulmine_v10", 0);
+    let legend = card("kestrel_ts", 20_000);
+    let rookie = card("kestrel_ts", 0);
+    assert!(
+        exotic.rep_scale > hatch.rep_scale + 0.4,
+        "{} vs {}",
+        exotic.rep_scale,
+        hatch.rep_scale
+    );
+    assert!(
+        legend.rep_scale > rookie.rep_scale,
+        "{} vs {}",
+        legend.rep_scale,
+        rookie.rep_scale
+    );
+    // The card lists the cars the race will start with.
+    let cars: Vec<&str> = exotic.drivers.iter().map(|d| d.car).collect();
+    let def = wp_race::catalog::race("loop9_circuit").unwrap();
+    let fulmine = simcli::data::load_car(crate::data::mem_data(), "fulmine_v10").unwrap();
+    let want: Vec<&str> = crate::race::scaled_field(&def, &fulmine, 0)
+        .ai
+        .iter()
+        .map(|d| d.car)
+        .collect();
+    assert_eq!(cars, want);
 }

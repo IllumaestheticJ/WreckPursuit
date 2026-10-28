@@ -11,11 +11,18 @@
 //!   and the battle is decided for the other car at once;
 //! - otherwise decides from the judge (`wp_race::touge::judge_result`): first across the line
 //!   wins, a DNF loses, both ended as stuck by the judge is a draw (stakes refunded, no rep);
-//! - captures the NPC's damage the tick its race ends (finish, DNF or breach): that is the car
-//!   a won pink slip brings home, lattice included;
+//! - captures the NPC's car (damage, lattice, paint) the tick the battle is decided, or
+//!   earlier if its race ends first (finish, DNF or breach): that is the car a won pink slip
+//!   brings home;
 //! - takes the wager chosen in the menu ([`set_next_wager`]) on the player's account at the
-//!   first tick and settles it once the battle is decided (a won pink slip waits for the
-//!   NPC's race to end, to bring its car home as it finished).
+//!   first tick and settles all of it (bet, purse, rep, pink slip) the tick the battle is
+//!   decided. It used to wait for the NPC's race to end before settling a won pink slip, and
+//!   the panel offers "Back to garage" as soon as the battle is decided, so a player who won
+//!   at the line and left before the NPC finished got no purse, no rep and no car.
+//!
+//! The NPC races its roster car as built ([`touge::TougeRacer::mods`] on its scenario entity:
+//! physics and look) in its roster colour ([`touge::TougeRacer::paint`]); `TougeReport` gives the
+//! renderer both, and a won pink slip arrives with the same build and paint.
 //!
 //! Touge battles charge no buy-in and pay no picker purse: the stakes are the wager, the
 //! battle's purse (challenger or boss) and rep (`data/events/touge.toml`).
@@ -31,8 +38,8 @@ use wp_contracts::{
 use wp_economy::{CarUid, Economy, PlayerAccount};
 use wp_race::live::LiveRace;
 use wp_race::touge::{
-    self, BattleOutcome, BattleResult, OpponentCar, Surface, TougeBattle, TougeSettlement,
-    TougeSetup, TougeTable, Wager, WagerMenu, WagerTicket,
+    self, BattleOutcome, OpponentCar, Surface, TougeBattle, TougeSettlement, TougeSetup,
+    TougeTable, Wager, WagerMenu, WagerTicket,
 };
 use wp_sim::Sim;
 
@@ -116,8 +123,10 @@ pub fn touge_scenario(
     let player = slots.last().ok_or("empty grid")?;
     sc.entities = vec![entity("player", car, player.pos, yaw(player))];
     for (d, s) in def.ai.iter().zip(&slots) {
-        sc.entities
-            .push(entity(&crate::race::ai_entity_id(d), d.car, s.pos, yaw(s)));
+        let mut npc = entity(&crate::race::ai_entity_id(d), d.car, s.pos, yaw(s));
+        // The NPC's build: physics and look (simcli spawns the modified car).
+        npc.mods = setup.racer().mods.iter().map(|m| m.to_string()).collect();
+        sc.entities.push(npc);
     }
     sc.validate()?;
     Ok(sc)
@@ -138,6 +147,8 @@ pub struct TougeRun {
     npc: EntityId,
     npc_class: VehicleClass,
     npc_base_price: u32,
+    npc_paint: u32,
+    npc_mods: Vec<String>,
     wager: Wager,
     placed: bool,
     ticket: Option<WagerTicket>,
@@ -168,6 +179,8 @@ impl TougeRun {
             npc,
             npc_class,
             npc_base_price,
+            npc_paint: setup.racer().paint,
+            npc_mods: setup.racer().mods.iter().map(|m| m.to_string()).collect(),
             wager: take_next_wager(),
             placed: false,
             ticket: None,
@@ -183,6 +196,12 @@ impl TougeRun {
     /// The battle (setup, road corridor, decision).
     pub fn battle(&self) -> &TougeBattle {
         &self.battle
+    }
+
+    /// Tests: the battle, to decide it by hand.
+    #[cfg(test)]
+    pub(crate) fn battle_mut(&mut self) -> &mut TougeBattle {
+        &mut self.battle
     }
 
     /// Decided (the race is over for the player, whatever the judge still shows).
@@ -212,8 +231,8 @@ impl TougeRun {
         }
     }
 
-    /// After judging: keep the NPC's damage the tick its race ends, and decide from the judge
-    /// when nobody went off the mountain.
+    /// After judging: decide from the judge when nobody went off the mountain, then keep the
+    /// NPC's car as it is the tick the battle is decided (or its race ends, if that is first).
     pub fn after_judge(
         &mut self,
         sim: &Sim,
@@ -229,8 +248,12 @@ impl TougeRun {
                 .unwrap_or(RacerStatus::Running)
         };
         let (me, npc) = (live.player(), self.npc);
-        let npc_done = status(npc) != RacerStatus::Running
-            || self.battle.outcome().and_then(|o| o.totaled) == Some(npc);
+        if self.battle.outcome().is_none() {
+            if let Some(result) = touge::judge_result(status(me), status(npc)) {
+                self.battle.decide_as(sim.tick(), result);
+            }
+        }
+        let npc_done = status(npc) != RacerStatus::Running || self.battle.outcome().is_some();
         if npc_done && self.npc_finish.is_none() {
             self.npc_finish = sim.vehicles().iter().find(|v| v.id == npc).map(|v| {
                 let summary = v.damage.summary();
@@ -241,6 +264,8 @@ impl TougeRun {
                     car: OpponentCar {
                         class: self.npc_class,
                         base_price: self.npc_base_price,
+                        paint: self.npc_paint,
+                        mods: self.npc_mods.clone(),
                         damage: wp_economy::DamageSnapshot {
                             health: summary.health,
                             total_loss: summary.total_loss || v.damage.is_total_loss(),
@@ -254,15 +279,10 @@ impl TougeRun {
                 }
             });
         }
-        if self.battle.outcome().is_none() {
-            if let Some(result) = touge::judge_result(status(me), status(npc)) {
-                self.battle.decide_as(sim.tick(), result);
-            }
-        }
     }
 
-    /// Economy, once per tick after judging: take the wager at the first chance, settle once
-    /// the battle is decided (a won pink slip also waits for the NPC's race to end).
+    /// Economy, once per tick after judging: take the wager at the first chance, settle all
+    /// of it the tick the battle is decided (see the module docs).
     pub fn tick_economy(&mut self, run: Option<&mut PlayerRun>) {
         let Some(run) = run else {
             return;
@@ -283,17 +303,17 @@ impl TougeRun {
         let (Some(outcome), Some(ticket)) = (self.battle.outcome(), &self.ticket) else {
             return;
         };
-        // Only a won pink slip needs the NPC car as it finished (its race may run on for
-        // minutes after the player is out); everything else settles at once.
-        let wins_car = ticket.wager == Wager::PinkSlip && outcome.result == BattleResult::Won;
-        let npc_car = match (&self.npc_finish, wins_car) {
-            (Some(f), _) => f.car.clone(),
-            (None, false) => OpponentCar {
+        // `after_judge` keeps the NPC car the tick the battle is decided; only an NPC car
+        // missing from the sim (never expected) falls back to a pristine one.
+        let npc_car = match &self.npc_finish {
+            Some(f) => f.car.clone(),
+            None => OpponentCar {
                 class: self.npc_class,
                 base_price: self.npc_base_price,
+                paint: self.npc_paint,
+                mods: self.npc_mods.clone(),
                 damage: wp_economy::DamageSnapshot::pristine(),
             },
-            (None, true) => return,
         };
         match run.touge_settle(&self.table, ticket, outcome, &npc_car) {
             Ok((out, lines)) => {
@@ -325,6 +345,8 @@ impl TougeRun {
             opponent: s.racer().driver.name,
             title: s.racer().title,
             opponent_car: s.racer().driver.car,
+            opponent_paint: self.npc_paint,
+            opponent_mods: self.npc_mods.clone(),
             direction: s.direction.key(),
             daylight: s.daylight.key(),
             surface: s.surface.key(),
@@ -355,6 +377,12 @@ pub struct TougeReport {
     pub title: &'static str,
     /// NPC car id.
     pub opponent_car: &'static str,
+    /// Body colour 0xRRGGBB the NPC car races in (the renderer paints it; a won pink slip
+    /// arrives in it).
+    pub opponent_paint: u32,
+    /// The NPC car's mods (`TougeRacer::mods`; the renderer's cosmetic look, a won pink slip
+    /// arrives with them).
+    pub opponent_mods: Vec<String>,
     /// `up` / `down`.
     pub direction: &'static str,
     /// `day` / `night`.

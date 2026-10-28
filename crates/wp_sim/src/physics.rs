@@ -141,6 +141,29 @@ pub fn resting_prop_groups() -> InteractionGroups {
     )
 }
 
+/// Collision group of the water barrels at blunt barrier ends (`wp_world::barrier_ends`).
+/// Barrels never touch each other: a car runs into them one at a time and shoves each along
+/// (a crushing cushion). Touching, a row of rigid barrels backed by the concrete end stopped a
+/// car as dead as the bare end did.
+pub const BARREL_GROUP: Group = Group::GROUP_4;
+
+/// Collision group of the barrier and rail meshes ([`BARRIER_USER_DATA`]).
+pub const BARRIER_GROUP: Group = Group::GROUP_5;
+
+/// Interaction groups of a water barrel: everything but other barrels and the barriers, and
+/// while it rests (`resting`) not the terrain either. A barrel pressed against the concrete
+/// end it guards was as hard as the concrete; this way the car shoves the whole cushion along
+/// (through the barrier end if it must) and meets the concrete slowed by the barrels' mass.
+pub fn barrel_groups(resting: bool) -> InteractionGroups {
+    let mut filter = Group::ALL
+        .difference(BARREL_GROUP)
+        .difference(BARRIER_GROUP);
+    if resting {
+        filter = filter.difference(TERRAIN_GROUP);
+    }
+    InteractionGroups::new(BARREL_GROUP, filter, InteractionTestMode::And)
+}
+
 /// A full copy of the Rapier state. `PhysicsPipeline` only holds per-step scratch buffers and
 /// counters, so the copy gets a fresh one (stepping it gives the same results).
 impl Clone for PhysicsWorld {
@@ -432,19 +455,35 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     // Guard rails along decks: 0.3 m wide, 0.9 m tall on each paved edge, one smooth mesh per
     // chained run of rail segments (row 164: no seams for a scraping car to catch).
     for run in chain_segments(&wp_world::surface::deck_rails(net)) {
-        added.extend(barrier_colliders(&run, 0.0, RAIL_HALF_W_M, RAIL_HEIGHT_M));
+        added.extend(barrier_colliders(
+            &run,
+            None,
+            0.0,
+            RAIL_HALF_W_M,
+            RAIL_HEIGHT_M,
+        ));
         out.rails += run.len() - 1;
     }
     // Median barriers between divided-highway carriageways: 0.5 m wide, 0.81 m tall concrete,
-    // one smooth mesh per barrier line.
-    // And along the outer edges of highways and ramps (row 160; open at ramp tapers, gores
-    // and rest-stop ramps, on decks and in covered spans).
-    for line in wp_world::surface::median_barriers(net)
-        .into_iter()
-        .chain(wp_world::surface::edge_barriers(map))
-    {
+    // one smooth mesh per barrier line, sloping down to the road at every free end
+    // (`median_barrier_profiles`: a car meeting an end rides up it instead of stopping dead).
+    for profile in wp_world::surface::median_barrier_profiles(net) {
+        let (line, frac): (Vec<[f32; 3]>, Vec<f32>) = profile.into_iter().unzip();
         added.extend(barrier_colliders(
             &line,
+            Some(&frac),
+            0.0,
+            BARRIER_HALF_W_M,
+            BARRIER_HEIGHT_M,
+        ));
+        out.barriers += line.len() - 1;
+    }
+    // And along the outer edges of highways and ramps (row 160; open at ramp tapers, gores
+    // and rest-stop ramps, on decks and in covered spans).
+    for line in wp_world::surface::edge_barriers(map) {
+        added.extend(barrier_colliders(
+            &line,
+            None,
             0.0,
             BARRIER_HALF_W_M,
             BARRIER_HEIGHT_M,
@@ -454,18 +493,32 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     // And just outside the back edge of every sidewalk without a lot behind it (decks and
     // their approaches: the ground falls away there).
     for run in chain_segments(&walks.bare_backs) {
-        added.extend(barrier_colliders(&run, 0.15, RAIL_HALF_W_M, RAIL_HEIGHT_M));
+        added.extend(barrier_colliders(
+            &run,
+            None,
+            0.15,
+            RAIL_HALF_W_M,
+            RAIL_HEIGHT_M,
+        ));
         out.rails += run.len() - 1;
     }
 
     // Covered roads: a wall box along each side (inner face at the span's half width, from
-    // below the banked road edge up to the ceiling) and the roof deck, per centreline segment.
+    // below the banked road edge up to the ceiling) and a ceiling slab per centreline segment,
+    // under one smooth roof-deck mesh over the deck's full width (per-segment boxes leave
+    // wedge gaps at the outside of bends and steps between segments on a grade).
     for span in &net.covered {
         let shape = wp_world::covered::CoverShape::new(span);
         let c = &span.centre;
-        let deck_half = shape.deck_half_width();
         let wall = wp_world::covered::WALL_M;
         let roof = wp_world::covered::ROOF_M;
+        // The slab spans the carved ground under the deck; the backfill carries the deck's
+        // outer part.
+        let slab_half = span.half_width_m + wall + wp_world::covered::BACKFILL_START_M;
+        if let Some(col) = deck_top_collider(&shape) {
+            added.push(col);
+            out.tunnel_boxes += 1;
+        }
         for k in 0..c.len().saturating_sub(1) {
             let (a, b) = (c[k], c[k + 1]);
             let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
@@ -500,8 +553,14 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
                 added.push(col);
                 out.tunnel_boxes += 1;
             }
-            let roof_mid = Vector::new(mid[0], mid[1], mid[2] + span.clearance_m + roof * 0.5);
-            let col = ColliderBuilder::cuboid(deck_half, len * 0.5 + 0.05, roof * 0.5 + slope)
+            // Ceiling slab: from the ceiling (less the grade) to half way up the deck, under
+            // the deck mesh.
+            let (r0, r1) = (
+                mid[2] + span.clearance_m - slope,
+                mid[2] + span.clearance_m + roof * 0.5,
+            );
+            let roof_mid = Vector::new(mid[0], mid[1], (r0 + r1) * 0.5);
+            let col = ColliderBuilder::cuboid(slab_half, len * 0.5 + 0.05, (r1 - r0) * 0.5)
                 .position(Pose::from_parts(roof_mid, rot))
                 .friction(0.6)
                 .build();
@@ -521,6 +580,35 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     }
 
     Some((added, out))
+}
+
+/// The top of a covered span's roof deck as one smooth triangle mesh (terrain group): a ribbon
+/// over the deck's full width ([`wp_world::covered::CoverShape::deck_half_width`]) at the deck
+/// top, the surface the greybox draws. `None` for a degenerate span.
+fn deck_top_collider(shape: &wp_world::covered::CoverShape) -> Option<Collider> {
+    let span = &shape.span;
+    let deck = shape.deck_half_width();
+    let top = span.clearance_m + wp_world::covered::ROOF_M;
+    let lift = |line: Vec<[f32; 3]>| -> Vec<Vector> {
+        line.iter()
+            .map(|p| Vector::new(p[0], p[1], p[2] + top))
+            .collect()
+    };
+    let left = lift(wp_world::geom::offset_polyline(&span.centre, -deck));
+    let right = lift(wp_world::geom::offset_polyline(&span.centre, deck));
+    let n = left.len().min(right.len()) as u32;
+    if n < 2 {
+        return None;
+    }
+    let mut verts = left[..n as usize].to_vec();
+    verts.extend_from_slice(&right[..n as usize]);
+    let idx: Vec<[u32; 3]> = (0..n - 1)
+        // Wound counter-clockwise seen from above (the oriented mesh faces up).
+        .flat_map(|k| [[k, n + k + 1, k + 1], [k, n + k, n + k + 1]])
+        .collect();
+    ColliderBuilder::trimesh_with_flags(verts, idx, TriMeshFlags::FIX_INTERNAL_EDGES)
+        .ok()
+        .map(|b| b.friction(0.6).collision_groups(terrain_groups()).build())
 }
 
 /// Static collider of one piece of street / yard furniture (the same footprint as
@@ -621,15 +709,24 @@ fn chain_segments(segs: &[([f32; 3], [f32; 3])]) -> Vec<Vec<[f32; 3]>> {
 ///   the contact normal up there and roll a scraping car onto the barrier.
 ///
 /// Deck guard rails, sidewalk bare-back rails and median barriers. Empty for a degenerate line.
-fn barrier_colliders(line: &[[f32; 3]], right: f32, half_w: f32, height: f32) -> Vec<Collider> {
-    // Drop repeated points, then a unit direction per segment.
+fn barrier_colliders(
+    line: &[[f32; 3]],
+    frac: Option<&[f32]>,
+    right: f32,
+    half_w: f32,
+    height: f32,
+) -> Vec<Collider> {
+    // Drop repeated points, then a unit direction per segment. `frac` (one per line point, the
+    // fraction of `height` standing there; `None` = full height) follows the kept points.
     let mut pts: Vec<[f32; 3]> = Vec::with_capacity(line.len());
-    for &p in line {
+    let mut heights: Vec<f32> = Vec::with_capacity(line.len());
+    for (k, &p) in line.iter().enumerate() {
         if pts
             .last()
             .is_none_or(|q: &[f32; 3]| len2(p[0] - q[0], p[1] - q[1]) >= 0.05)
         {
             pts.push(p);
+            heights.push(height * frac.and_then(|f| f.get(k)).copied().unwrap_or(1.0));
         }
     }
     if pts.len() < 2 {
@@ -667,9 +764,9 @@ fn barrier_colliders(line: &[[f32; 3]], right: f32, half_w: f32, height: f32) ->
     // top, right top, right foot.
     let ring = |inset: f32, drop: f32| -> Vec<Vector> {
         let mut v = Vec::with_capacity(n * 4);
-        for (p, (c, m, scale)) in pts.iter().zip(&sections) {
+        for ((p, (c, m, scale)), h) in pts.iter().zip(&sections).zip(&heights) {
             let w = (half_w - inset) * scale;
-            let (z0, z1) = (p[2] - BARRIER_FOOT_M, p[2] + height - drop);
+            let (z0, z1) = (p[2] - BARRIER_FOOT_M, p[2] + h - drop);
             let (l, r) = (
                 [c[0] - m[0] * w, c[1] - m[1] * w],
                 [c[0] + m[0] * w, c[1] + m[1] * w],
@@ -710,6 +807,11 @@ fn barrier_colliders(line: &[[f32; 3]], right: f32, half_w: f32, height: f32) ->
             b.friction(BARRIER_FRICTION)
                 .restitution(0.0)
                 .user_data(BARRIER_USER_DATA)
+                .collision_groups(InteractionGroups::new(
+                    BARRIER_GROUP,
+                    Group::ALL,
+                    InteractionTestMode::And,
+                ))
                 .build(),
         ),
         Err(e) => {
@@ -775,9 +877,19 @@ fn mesh_tile_colliders(
             }
             idx.push(out_tri);
         }
-        match ColliderBuilder::trimesh(verts, idx) {
+        match ColliderBuilder::trimesh_with_flags(
+            verts.clone(),
+            idx.clone(),
+            TriMeshFlags::MERGE_DUPLICATE_VERTICES | TriMeshFlags::FIX_INTERNAL_EDGES,
+        ) {
             Ok(b) => out.push(b.collision_groups(groups).build()),
-            Err(e) => eprintln!("city ground trimesh failed: {e:?}"),
+            Err(e) => {
+                eprintln!("city ground trimesh flags failed: {e:?}");
+                match ColliderBuilder::trimesh(verts, idx) {
+                    Ok(b) => out.push(b.collision_groups(groups).build()),
+                    Err(e) => eprintln!("city ground trimesh failed: {e:?}"),
+                }
+            }
         }
     }
     out

@@ -205,3 +205,21 @@ the normal steering model has always kept its countersteer off under the handbra
 `hb_hold`). A countersteer key pressed mid-turn already reaches its side in 0.08 s (row 171).
 Guard: `tests/key_reversal.rs::the_handbrake_turn_is_the_drivers`.
 
+
+## 2026-10-27: Loop 9 "random object" stops (city ground + median barrier ends)
+Owner: "I hit a random object on loop 9 that completely stopped me ... right after one of the
+bumps, I think I'm clipping into the ground". Two causes, both invisible:
+- **Ghost seams in the city ground.** The road and sidewalk trimesh tiles (`mesh_tile_colliders`)
+  were built without `TriMeshFlags::FIX_INTERNAL_EDGES`. A heavy car bottoming out in a sag (Loop 9
+  west at about (-1531, 254), before the Route 40 bridge) scraped its chassis across triangle
+  seams and got horizontal contact normals: ironside_440 77 → 18 m/s in one tick. With the flag
+  (plus `MERGE_DUPLICATE_VERTICES`) every one of the 37 cars rides through, scraping vertically
+  (ironside 77 → 67 m/s). Oriented faces have one side effect: a car pressed into a deck's
+  underside is pushed up through it (the grid city's diverge-ramp wedge, roam.md bug D).
+- **Blunt median barrier ends at crossover gaps.** Each 30 m crossover cut left a full-height,
+  square, undrawn barrier end facing traffic. `wp_world::surface::median_barrier_profiles` now
+  slopes every free end down over 12 m (`BARRIER_TERMINAL_M`, tip at 6 %); physics and the
+  greybox both build from it, and the greybox draws end caps.
+Probes: `wp_sim` examples `loop9_drive` (SAGS=1, CONES=1, FLAT_OUT=cap, CAR=…), `point_probe`,
+`strip_probe`. Re-blessed: simcli goldens (11), tunnel_escape_founders_cut re-seeded 57 → 64,
+lantern s50 tito pace re-locked.

@@ -49,7 +49,10 @@
 - **World (D)**: the procedural grid's highway diverge ramps at about (±15, ±305) run under
   the mainline's paved ribbon (ramp z ≈ 2.3 m, mainline edge z ≈ 3.7 m right above the ramp
   centreline): any physical car taking them wedges at y ≈ 310. Roamers get rescued, but the
-  ramp needs fixing. Seen in every seed of `sweep_roam`.
+  ramp needs fixing. Seen in every seed of `sweep_roam`. Since 2026-10-27 the city road
+  trimeshes fix internal edges (oriented faces), so a car wedged under the mainline's edge is
+  pushed up through it and lands beside the highway (up to ~30 m on, often stuck) instead of
+  wedging; `roamers_keep_driving_through_city_traffic` exempts that landing ground too.
 
 ## Contract change requests
 None.

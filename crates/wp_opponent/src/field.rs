@@ -782,6 +782,12 @@ const WIDE_JUNCTION_CLEAR_M: f32 = 30.0;
 const JUNCTION_ARM_LOOK_M: f32 = 60.0;
 /// Margin over my own time through a junction before a civilian heading to it gets there, s.
 const JUNCTION_GAP_S: f32 = 1.5;
+/// Room a pass on the opposing lanes needs beyond where an oncoming car will have got to, m
+/// (× [`DriverParams::oncoming_margin_scale`]).
+const ONCOMING_PASS_ROOM_M: f32 = 30.0;
+/// A pass tucks back in when something coming the other way in its lane is this close in
+/// time, s (× [`DriverParams::oncoming_margin_scale`]).
+const ONCOMING_ABORT_S: f32 = 3.5;
 /// With [`RaceConfig::ram_traffic`]: the most a racer will be closing on a non-racer when it
 /// hits it, m/s (it brakes only so as not to arrive faster than this; 15 m/s = 54 km/h). A
 /// hard tag that punts a civilian out of the way, not a suicide run into a stopped queue.
@@ -1820,7 +1826,17 @@ impl Field {
     /// Plan (or re-plan) racer `k`'s flight route away from `police_at`. Keeps the old route
     /// when no new one plans; parks when there is none at all.
     fn start_flight(&mut self, k: usize, world: &World, police_at: &[V2]) {
-        let flight = plan_flight(world, &self.racers[k], &self.config, police_at);
+        // Height of the road the racer is on (the corridor it drives knows it): a flight from
+        // a bridge, a ramp or the Ashpeak hills must start on that road, not on whatever lane is
+        // nearest at sea level.
+        let z = {
+            let r = &self.racers[k];
+            let c = r.flight.as_ref().map_or(&self.corridor, |f| &f.corridor);
+            world
+                .map()
+                .ground_height(r.pos, Some(c.sample(r.hint as isize).pos[2]))
+        };
+        let flight = plan_flight(world, &self.racers[k], z, &self.config, police_at);
         let r = &mut self.racers[k];
         r.replan_s = 0.0;
         match flight {
@@ -2185,7 +2201,13 @@ fn decide_racer(
         }
         let clearing_line = finished_dead_end && !r.line_cleared;
         r.wide_on = match wide {
-            Some((wl, wp)) if !fleeing && !finished_or_dq && r.flight.is_none() => {
+            // Only drivers bold enough to cut across the other side (risk).
+            Some((wl, wp))
+                if !fleeing
+                    && !finished_or_dq
+                    && r.flight.is_none()
+                    && r.params.whole_road_line =>
+            {
                 let a_brk = wp.a_brake.max(3.0);
                 let horizon = (v * v / (2.0 * a_brk) + 1.5 * v + 30.0).min(250.0);
                 let may_start = matches!(r.tactic, Tactic::Follow);
@@ -2286,7 +2308,7 @@ fn decide_racer(
             });
         let may_use_opposing = corridor.opposing == OpposingLanes::ForOvertaking
             && !done_racing
-            && (ram || p.traffic_risk >= 0.5 || parked_ahead || crawler_ahead || standing_ahead);
+            && (ram || p.opposing_passes || parked_ahead || crawler_ahead || standing_ahead);
         // The next junction (within 120 m) has nobody coming to it: a pass on the opposing side
         // may go into it (risk check, as for the whole-road line).
         // (The cars queued in my own lane ahead are the ones being passed, not traffic coming
@@ -2323,7 +2345,12 @@ fn decide_racer(
                     let d = j as f32 * CORRIDOR_STEP_M + 20.0;
                     let a = (r.cap.accel_mps2 * p.usage.accel).max(1.0);
                     let t_clear = (-v + (v * v + 2.0 * a * d).sqrt()) / a + 0.5;
-                    junction_arms_empty(geom::xy(corridor.sample(i0 + j).pos), &others, t_clear)
+                    junction_arms_empty(
+                        geom::xy(corridor.sample(i0 + j).pos),
+                        &others,
+                        t_clear,
+                        JUNCTION_GAP_S * p.oncoming_margin_scale,
+                    )
                 })
         };
         // Passing keeps the pre-G edge room: a pass is brief and planned with its own
@@ -2598,7 +2625,8 @@ fn decide_racer(
                                 q.ds > 0.0
                                     && q.o.v_s < -1.0
                                     && (q.o.n - r.n_goal).abs() < hw + q.o.half_w + 1.0
-                                    && q.gap / (v + -q.o.v_s).max(1.0) < 3.5
+                                    && q.gap / (v + -q.o.v_s).max(1.0)
+                                        < ONCOMING_ABORT_S * p.oncoming_margin_scale
                             });
                             let stale = r.tactic_ticks as f32 * dt > 15.0;
                             // Held well below my pace by some other car (one in the lane I
@@ -4127,7 +4155,8 @@ fn wide_line_clear(
             if let Some(j) = (-back..=back).find(|&j| corridor.sample(i + j).junction) {
                 let at = geom::xy(corridor.sample(i + j).pos);
                 let t_clear = (x + j as f32 * CORRIDOR_STEP_M + 20.0) / v;
-                if !junction_arms_empty(at, civs, t_clear) {
+                let gap_s = JUNCTION_GAP_S * r.params.oncoming_margin_scale;
+                if !junction_arms_empty(at, civs, t_clear, gap_s) {
                     return false;
                 }
                 // Anything else (police, parked or physical cars) standing at it.
@@ -4142,7 +4171,7 @@ fn wide_line_clear(
             for (o, ds) in &others {
                 // Where it will be when I get here (oncoming cars close the distance).
                 let ds_then = ds + o.v_s * t;
-                let margin = 6.0 + 0.25 * (v - o.v_s).max(0.0);
+                let margin = (6.0 + 0.25 * (v - o.v_s).max(0.0)) * r.params.oncoming_margin_scale;
                 if (ds_then - x).abs() < hl + o.half_len + margin
                     && (o.n - n_w).abs() < hw + o.half_w + 0.8
                 {
@@ -4159,8 +4188,8 @@ fn wide_line_clear(
 /// `t_clear` s to reach it and get clear: a gap check, not "nobody about" (busy downtown junctions
 /// are never empty). A civilian inside the box (within 12 m) closes it; one standing further out
 /// is waiting at its line and does not; one heading to it closes it if it arrives within
-/// `t_clear` + [`JUNCTION_GAP_S`].
-fn junction_arms_empty(at: V2, civs: &[Civ], t_clear: f32) -> bool {
+/// `t_clear` + `gap_s` ([`JUNCTION_GAP_S`] scaled by the driver's risk).
+fn junction_arms_empty(at: V2, civs: &[Civ], t_clear: f32, gap_s: f32) -> bool {
     !civs.iter().any(|c| {
         let to = geom::sub(at, c.pos);
         let d = geom::len(to);
@@ -4171,7 +4200,7 @@ fn junction_arms_empty(at: V2, civs: &[Civ], t_clear: f32) -> bool {
             return true;
         }
         let speed = geom::len(c.vel);
-        speed >= 0.5 && geom::dot(c.vel, to) > 0.0 && d / speed < t_clear + JUNCTION_GAP_S
+        speed >= 0.5 && geom::dot(c.vel, to) > 0.0 && d / speed < t_clear + gap_s
     })
 }
 
@@ -4391,7 +4420,11 @@ fn plan_pass(
             }
             // Oncoming traffic in that lane: it covers the distance too. A car standing in
             // it anywhere along the pass closes it as well (I would end up nose to nose).
-            let oncoming = q.o.v_s < -1.0 && q.ds < pass_dist + (-q.o.v_s) * t_clear + 30.0;
+            let oncoming = q.o.v_s < -1.0
+                && q.ds
+                    < pass_dist
+                        + (-q.o.v_s) * t_clear
+                        + ONCOMING_PASS_ROOM_M * r.params.oncoming_margin_scale;
             let standing =
                 q.o.v_s.abs() < 1.0 && q.ds < if o.parked { beside } else { pass_dist + 10.0 };
             if q.ds > 0.0 && (oncoming || standing) {
@@ -4447,7 +4480,12 @@ fn plan_split(
     let hw = 0.5 * r.cap.width_m;
     let hl = 0.5 * r.cap.length_m;
     let risk = r.params.traffic_risk.clamp(SPLIT_MIN_RISK, 1.0);
-    if r.profile.skill < SPLIT_MIN_SKILL || o.v_s < 1.0 || o.parked || o.out_of_race {
+    if r.profile.skill < SPLIT_MIN_SKILL
+        || !r.params.lane_splits
+        || o.v_s < 1.0
+        || o.parked
+        || o.out_of_race
+    {
         return None;
     }
     for q in rel {
@@ -4499,7 +4537,11 @@ fn plan_split(
                 return true;
             }
             let beyond = target.ds.max(q.ds) + 2.0 * hl + 6.0;
-            let oncoming = w.o.v_s < -1.0 && w.ds < pass_dist + (-w.o.v_s) * t_clear + 30.0;
+            let oncoming = w.o.v_s < -1.0
+                && w.ds
+                    < pass_dist
+                        + (-w.o.v_s) * t_clear
+                        + ONCOMING_PASS_ROOM_M * r.params.oncoming_margin_scale;
             let standing = w.o.v_s.abs() < 1.0 && w.ds < pass_dist + 10.0;
             if w.ds > 0.0 && (w.ds < beyond || oncoming || standing) {
                 return false;
@@ -4514,8 +4556,15 @@ fn plan_split(
 }
 
 /// Plan a flight route to the POI that is farthest from the known police (from the racer
-/// itself when no police position is known), at least 150 m away.
-fn plan_flight(world: &World, r: &Racer, config: &RaceConfig, police_at: &[V2]) -> Option<Flight> {
+/// itself when no police position is known), at least 150 m away, starting on the road at
+/// height `z`.
+fn plan_flight(
+    world: &World,
+    r: &Racer,
+    z: f32,
+    config: &RaceConfig,
+    police_at: &[V2],
+) -> Option<Flight> {
     let pois = &world.network().pois;
     let here = r.pos;
     let threat: Vec<V2> = if police_at.is_empty() {
@@ -4537,7 +4586,7 @@ fn plan_flight(world: &World, r: &Racer, config: &RaceConfig, police_at: &[V2]) 
         .collect();
     order.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
     let corridor = order.iter().find_map(|&(_, i)| {
-        let route = world.plan_route([here[0], here[1], 0.0], Some(r.fwd), pois[i].pos)?;
+        let route = world.plan_route_via([here[0], here[1], z], Some(r.fwd), &[], pois[i].pos)?;
         if route.polyline.len() < 2 {
             return None;
         }
@@ -4759,6 +4808,9 @@ mod tests {
         assert!(split_case(0.9, 0.8, 25.0, 2.3, 0.0).is_none());
         assert!(split_case(0.9, 0.3, 19.0, 2.3, 0.0).is_none());
         assert!(split_case(0.9, 0.3, 17.9, 2.3, 0.0).is_some());
+        // A cautious driver (risk under `LANE_SPLIT_RISK`, skilled enough not to count as
+        // wild) does not go between at all.
+        assert!(split_case(0.9, 0.1, 17.9, 2.3, 0.0).is_none());
         // One of them drifting toward the gap.
         assert!(split_case(0.9, 0.8, 18.0, 2.3, 0.5).is_none());
         assert!(split_case(0.9, 0.8, 18.0, 2.3, -0.5).is_some());

@@ -192,8 +192,11 @@ pub struct RacePayout {
     pub purse: i64,
     /// Clean-race bonus paid.
     pub clean_bonus: i64,
-    /// Rep change.
+    /// Rep change (field bonus included).
     pub rep: i64,
+    /// Of `rep`, what the field's strength added (`wp_race::field::rep_scale`; negative when
+    /// the field was slower than the player's car).
+    pub field_rep: i64,
     /// Bounty gained (winning while wanted).
     pub bounty: i64,
     /// High-stakes purse bonus for the career's bounty (`Economy::bounty_purse_bonus`).
@@ -755,6 +758,7 @@ impl PlayerRun {
             purse: pay.purse,
             clean_bonus: pay.clean_bonus,
             rep: pay.rep,
+            field_rep: 0,
             bounty: pay.bounty as i64,
             bounty_bonus: 0,
             cash_after: self.acct.cash,

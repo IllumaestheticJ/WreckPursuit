@@ -1806,8 +1806,12 @@ fn road_band(map: &CityMap, t: &Heightfield) -> Vec<bool> {
             }
         }
     };
-    // Within 1.5 m of the fine ground: not a deck above it, not a tunnel under it.
-    let at_grade = |p: V3| (p[2] - t.height_at(geom::xy(p))).abs() <= 1.5;
+    // Within 1.5 m of the fine ground: not a deck above it, not a tunnel under it (inside a
+    // covered span the ground under the deck is carved to the road, but it is the tunnel's
+    // ground: [`cover_band`]).
+    let at_grade = |p: V3| {
+        (p[2] - t.height_at(geom::xy(p))).abs() <= 1.5 && map.covers.covered_at(p).is_none()
+    };
     for s in &net.surfaces {
         let side = if s.highway { 0.3 } else { beside };
         let r = s.left_m.max(s.right_m) + side + margin;
@@ -1836,6 +1840,31 @@ fn road_band(map: &CityMap, t: &Heightfield) -> Vec<bool> {
         }
     }
     keep
+}
+
+/// The fine-grid vertices of `t` over a covered span's deck or within one drawn cell past its
+/// side edges ([`crate::covered::CoverShape::over_deck`]): the tube's carve and the backfill
+/// up to the deck. Drawn and collided at the fine resolution: on the coarse grid the
+/// backfill's rise from the carve to the deck top (one fine cell diagonal) would either poke
+/// into the tube or leave the ground metres below the deck edge (playtest: "massive drop on
+/// the side of the Loop 9 tunnel").
+fn cover_band(map: &CityMap, t: &Heightfield) -> Vec<bool> {
+    let mut band = vec![false; t.z.len()];
+    let margin = drawn_spacing(map, t);
+    for sh in &map.covers.shapes {
+        let r = sh.deck_half_width() + margin;
+        let (lo, hi) = (sh.bounds[0], sh.bounds[1]);
+        let cell = |x: f32, o: f32, n: u32| (((x - o) / t.cell_m).max(0.0) as u32).min(n - 1);
+        for j in cell(lo[1] - r, t.origin[1], t.ny)..=cell(hi[1] + r, t.origin[1], t.ny) {
+            for i in cell(lo[0] - r, t.origin[0], t.nx)..=cell(hi[0] + r, t.origin[0], t.nx) {
+                let n = (j * t.nx + i) as usize;
+                if !band[n] && sh.over_deck(t.vertex_pos(i, j), margin) {
+                    band[n] = true;
+                }
+            }
+        }
+    }
+    band
 }
 
 /// Drawn ground vertex spacing for `t`: the smallest whole multiple of its cell that is at
@@ -1872,7 +1901,8 @@ pub const DRAWN_BAND_TOLERANCE_M: f32 = 0.25;
 /// The terrain mesh the greybox draws: the coarse [`drawn_terrain`] grid, with every coarse cell
 /// where the solid road-band ground stands more than [`DRAWN_BAND_TOLERANCE_M`] above it drawn
 /// from the fine grid instead (playtest row 172: solid shelves up to 15 m above the drawn ground
-/// beside roads on steep slopes). See [`drawn_terrain_mesh`].
+/// beside roads on steep slopes), and every cell over a tunnel deck ([`cover_band`]). See
+/// [`drawn_terrain_mesh`].
 #[derive(Debug, Clone)]
 pub struct DrawnTerrain {
     /// The coarse grid ([`drawn_terrain`]).
@@ -1924,6 +1954,7 @@ pub fn drawn_terrain_mesh(map: &CityMap) -> Option<DrawnTerrain> {
     // Solid ground above the coarse surface at every fine vertex.
     let rise =
         |fi: u32, fj: u32| solid.at(fi, fj) - coarse.height_on_triangles(t.vertex_pos(fi, fj));
+    let cover = cover_band(map, t);
     let mut refined = vec![false; (cw * ch) as usize];
     if !flat {
         for j in 0..ch {
@@ -1933,7 +1964,9 @@ pub fn drawn_terrain_mesh(map: &CityMap) -> Option<DrawnTerrain> {
                     continue;
                 }
                 let high = (j * k..=(j + 1) * k).any(|fj| {
-                    (i * k..=(i + 1) * k).any(|fi| rise(fi, fj) > DRAWN_BAND_TOLERANCE_M)
+                    (i * k..=(i + 1) * k).any(|fi| {
+                        cover[(fj * t.nx + fi) as usize] || rise(fi, fj) > DRAWN_BAND_TOLERANCE_M
+                    })
                 });
                 refined[(j * cw + i) as usize] = high;
             }
@@ -1961,7 +1994,8 @@ pub fn drawn_terrain_mesh(map: &CityMap) -> Option<DrawnTerrain> {
                 .collect();
             let all_refined = !cells.is_empty() && cells.iter().all(|(ci, cj)| is_ref(*ci, *cj));
             let c = coarse.height_on_triangles(p);
-            fine.z[(fj * t.nx + fi) as usize] = if all_refined && rise(fi, fj) > 0.0 {
+            let n = (fj * t.nx + fi) as usize;
+            fine.z[n] = if all_refined && (rise(fi, fj) > 0.0 || cover[n]) {
                 solid.at(fi, fj) - 0.05
             } else {
                 c
@@ -1979,8 +2013,9 @@ pub fn drawn_terrain_mesh(map: &CityMap) -> Option<DrawnTerrain> {
 /// The terrain physics collides with, on the fine grid of `net.terrain` (`None` without
 /// terrain): the surface the greybox draws ([`drawn_terrain`]), except in the road band
 /// (at-grade roads, junctions and bends: paved width + sidewalk + lot + skirt + half a cell),
-/// which keeps the fine heights the sidewalks, lots and skirts are laid on. Drawn and solid
-/// ground agree everywhere else, so there is no hillside the player can hit but not see; the
+/// which keeps the fine heights the sidewalks, lots and skirts are laid on, and over tunnel decks
+/// ([`cover_band`], also drawn at the fine resolution). Drawn and solid ground agree everywhere
+/// else, so there is no hillside the player can hit but not see; the
 /// fine grid samples the coarse triangles exactly (same diagonal), so the two surfaces are
 /// identical off the roads. A flat field (e.g. a grid city's ground under a viaduct) is
 /// returned as it is: there is no hidden ground to remove, only the drawn mesh's 5 cm offset,
@@ -1992,11 +2027,12 @@ pub fn collision_terrain(map: &CityMap) -> Option<Heightfield> {
     }
     let keep = road_band(map, t);
     let drawn = t.coarse_under(drawn_spacing(map, t), &keep);
+    let cover = cover_band(map, t);
     let mut out = t.clone();
     for j in 0..t.ny {
         for i in 0..t.nx {
             let n = (j * t.nx + i) as usize;
-            if !keep[n] {
+            if !keep[n] && !cover[n] {
                 out.z[n] = drawn.height_on_triangles(t.vertex_pos(i, j));
             }
         }
@@ -2044,6 +2080,84 @@ pub fn median_barriers(net: &RoadNetwork) -> Vec<Vec<V3>> {
     median_barrier_lines(net)
         .into_iter()
         .flat_map(|line| crate::crossover::cut_line(&line, &points))
+        .collect()
+}
+
+/// Length of the sloped terminal at each free end of a median barrier, m. Over it the barrier
+/// rises from [`BARRIER_TIP_FRACTION`] of its height at the tip to full height, so a car that
+/// meets an end head-on (the far side of a crossover opening, a fan gore) rides up the slope
+/// instead of stopping dead against a 0.8 m concrete face (owner 2026-10-27: "right after one
+/// of the bumps ... completely stopped", 77 m/s to 13 m/s in one tick at Loop 9's crossovers).
+pub const BARRIER_TERMINAL_M: f32 = 12.0;
+/// Height of a terminal's tip, as a fraction of the full barrier height.
+pub const BARRIER_TIP_FRACTION: f32 = 0.06;
+/// Spacing of the points laid along a terminal, m.
+const TERMINAL_STEP_M: f32 = 1.0;
+/// Two barrier ends closer than this continue each other (no terminal between them), m.
+const JOINED_END_M: f32 = 0.5;
+
+/// [`median_barriers`] with their sloped ends: per point, its position and the fraction of the
+/// full barrier height standing there (1 everywhere but the [`BARRIER_TERMINAL_M`] at a free
+/// end, where extra points every [`TERMINAL_STEP_M`] carry the slope). An end that meets
+/// another barrier line's end continues it and gets no terminal. Physics and the greybox both
+/// build from this.
+pub fn median_barrier_profiles(net: &RoadNetwork) -> Vec<Vec<(V3, f32)>> {
+    let lines = median_barriers(net);
+    let ends: Vec<V2> = lines
+        .iter()
+        .flat_map(|l| [geom::xy(l[0]), geom::xy(l[l.len() - 1])])
+        .collect();
+    let free = |k: usize| {
+        ends.iter()
+            .enumerate()
+            .all(|(j, e)| j == k || geom::dist(*e, ends[k]) >= JOINED_END_M)
+    };
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| with_terminals(l, free(2 * i), free(2 * i + 1)))
+        .collect()
+}
+
+/// `line` with height fractions, sloped over [`BARRIER_TERMINAL_M`] at its start and / or end
+/// (at most half its length each).
+fn with_terminals(line: &[V3], at_start: bool, at_end: bool) -> Vec<(V3, f32)> {
+    let cum = geom::cumulative(line);
+    let len = cum[cum.len() - 1];
+    let t = BARRIER_TERMINAL_M.min(0.5 * len);
+    if t <= 0.0 || (!at_start && !at_end) {
+        return line.iter().map(|p| (*p, 1.0)).collect();
+    }
+    let frac = |s: f32| {
+        let mut f = 1.0f32;
+        if at_start {
+            f = f.min(BARRIER_TIP_FRACTION + (1.0 - BARRIER_TIP_FRACTION) * (s / t).min(1.0));
+        }
+        if at_end {
+            let d = len - s;
+            f = f.min(BARRIER_TIP_FRACTION + (1.0 - BARRIER_TIP_FRACTION) * (d / t).min(1.0));
+        }
+        f
+    };
+    let mut ss: Vec<f32> = cum.clone();
+    let steps = (t / TERMINAL_STEP_M).ceil() as usize;
+    for k in 1..=steps {
+        let d = (k as f32 * TERMINAL_STEP_M).min(t);
+        if at_start {
+            ss.push(d);
+        }
+        if at_end {
+            ss.push(len - d);
+        }
+    }
+    ss.sort_by(|a, b| a.total_cmp(b));
+    ss.dedup_by(|a, b| (*a - *b).abs() < 0.05);
+    // Dedup keeps the first of near-equal arc lengths: the line still ends at its end.
+    if let Some(last) = ss.last_mut() {
+        *last = len;
+    }
+    ss.iter()
+        .map(|&s| (geom::point_at(line, &cum, s).0, frac(s)))
         .collect()
 }
 
@@ -2115,9 +2229,16 @@ pub const BARRIER_HALF_WIDTH_M: f32 = 0.25;
 pub const JUNCTION_BARRIER_GAP_M: f32 = 2.0;
 
 /// An [`edge_barriers`] line stops this far along the edge before and after any other paving
-/// meeting it (a ramp's taper and gore, a junction), m: a car merging off a ramp drifts
-/// across the taper for up to ~60 m and must not meet the barrier's end there (row 162).
+/// meeting it (a ramp's taper and gore), m: a car merging off a ramp drifts across the taper
+/// for up to ~60 m and must not meet the barrier's end there (row 162). Not at a junction: the
+/// barrier runs up to [`JUNCTION_BARRIER_GAP_M`] outside its paving.
 pub const GORE_BARRIER_GAP_M: f32 = 40.0;
+
+/// An [`edge_barriers`] piece left shorter than this between two openings is dropped, m: a
+/// lone stub of wall between a gore and a junction only catches cars (owner 2026-10-27: "the
+/// ends of the highway the barriers are totally wonky"). Kept where it carries a bridge
+/// deck's guard rail ([`deck_rails`]) or a covered span's wall on.
+pub const MIN_EDGE_BARRIER_M: f32 = 30.0;
 
 /// No [`edge_barriers`] line runs closer than this to a median barrier's centre line, m: the
 /// median already walls that edge.
@@ -2142,19 +2263,37 @@ pub fn edge_barriers(map: &CityMap) -> Vec<Vec<V3>> {
         .iter()
         .map(crate::covered::CoverShape::new)
         .collect();
-    // Junction paving (a ramp's terminal on a street): the barrier ends before it, so turning
-    // paths stay clear (row 162). Freeway merges (radius 0) stay open through the paving test.
+    // Junction paving (a ramp's terminal on a street, a freeway's at-grade end): the barrier
+    // ends JUNCTION_BARRIER_GAP_M before the junction's patch, so turning paths (all on the
+    // patch) stay clear (row 162). Freeway merges (radius 0) stay open through the paving
+    // test. The patch, not its paved radius: that circle reaches well up the sides of a
+    // wide carriageway end (Route 7 at Uptown Connector), and the barrier stopped ~30 m short.
     let radii = junction_paved_radii(net);
+    let patches_all = node_patches(map);
+    let patched: Vec<u32> = patches_all
+        .iter()
+        .filter(|p| !p.mesh.indices.is_empty())
+        .map(|p| p.node)
+        .collect();
+    // Junctions without a patch: their paved circle.
     let junctions: Vec<(V3, f32)> = net
         .intersections
         .iter()
         .zip(&radii)
-        .filter(|(_, r)| **r > 0.0)
+        .filter(|(ix, r)| **r > 0.0 && !patched.contains(&ix.node))
         .map(|(ix, r)| (net.nodes[ix.node as usize].pos, r + JUNCTION_BARRIER_GAP_M))
         .collect();
-    // And off every node patch's paving (a freeway merge's taper connectors: no road surface
-    // there, so `inside_other_paving` does not see it).
-    let patches: Vec<(V2, V2, TriMesh)> = node_patches(map)
+    // Every node patch's paving: a freeway merge's taper connectors (no road surface there,
+    // so `inside_other_paving` does not see it) and a split between highways (link and ramp
+    // leaving a carriageway end) open like a gore; a junction with a street (a ramp terminal,
+    // a freeway's at-grade end) like the junction. `true` marks the latter.
+    let terminal = |p: &NodePatch| {
+        !p.highway
+            && net.nodes[p.node as usize]
+                .intersection
+                .is_some_and(|ix| radii[ix as usize] > 0.0)
+    };
+    let patches: Vec<(V2, V2, TriMesh, bool)> = patches_all
         .into_iter()
         .filter(|p| !p.mesh.indices.is_empty())
         .map(|p| {
@@ -2163,13 +2302,15 @@ pub fn edge_barriers(map: &CityMap) -> Vec<Vec<V3>> {
                 lo = [lo[0].min(q[0]), lo[1].min(q[1])];
                 hi = [hi[0].max(q[0]), hi[1].max(q[1])];
             }
-            (lo, hi, p.mesh)
+            let junction = terminal(&p);
+            (lo, hi, p.mesh, junction)
         })
         .collect();
-    let on_patch = |p: V3| {
+    let on_patch = |p: V3, junction: bool| {
         let q = geom::xy(p);
-        patches.iter().any(|(lo, hi, m)| {
-            q[0] >= lo[0] - 0.5
+        patches.iter().any(|(lo, hi, m, j)| {
+            *j == junction
+                && q[0] >= lo[0] - 0.5
                 && q[0] <= hi[0] + 0.5
                 && q[1] >= lo[1] - 0.5
                 && q[1] <= hi[1] + 0.5
@@ -2180,8 +2321,11 @@ pub fn edge_barriers(map: &CityMap) -> Vec<Vec<V3>> {
                 })
         })
     };
+    let g = JUNCTION_BARRIER_GAP_M;
     let at_junction = |p: V3| {
-        on_patch(p)
+        [[0.0, 0.0], [g, 0.0], [-g, 0.0], [0.0, g], [0.0, -g]]
+            .iter()
+            .any(|d| on_patch([p[0] + d[0], p[1] + d[1], p[2]], true))
             || junctions.iter().any(|(c, r)| {
                 geom::dist(geom::xy(p), geom::xy(*c)) < *r && (p[2] - c[2]).abs() < 3.0
             })
@@ -2221,6 +2365,17 @@ pub fn edge_barriers(map: &CityMap) -> Vec<Vec<V3>> {
             })
         })
     };
+    // Bridge-deck guard-rail ends (also on the next surface piece): a short piece carrying a
+    // deck rail on at grade is kept (it closes the edge between the rail and the next opening).
+    let rail_ends: Vec<V3> = deck_rails(net)
+        .into_iter()
+        .flat_map(|(a, b)| [a, b])
+        .collect();
+    let meets_rail = |p: V3| {
+        rail_ends
+            .iter()
+            .any(|q| geom::dist(geom::xy(p), geom::xy(*q)) < 8.0 && (p[2] - q[2]).abs() < 2.0)
+    };
     let mut out = Vec::new();
     for (si, s) in net.surfaces.iter().enumerate() {
         if !s.highway || s.centre.len() < 2 {
@@ -2235,47 +2390,108 @@ pub fn edge_barriers(map: &CityMap) -> Vec<Vec<V3>> {
         };
         for (side, edge) in sides {
             let line = geom::offset_polyline(edge, side * BARRIER_HALF_WIDTH_M);
-            // Openings for other paving (ramp tapers, gores, junctions), widened by
-            // GORE_BARRIER_GAP_M along the edge each way: a merging car still drifting across
-            // the taper meets no blunt barrier end (row 162).
-            let open: Vec<bool> = (0..edge.len())
+            // Openings for other paving (ramp tapers, gores), widened by GORE_BARRIER_GAP_M
+            // along the edge each way: a merging car still drifting across the taper meets no
+            // blunt barrier end (row 162). A junction only opens its own paving (plus
+            // JUNCTION_BARRIER_GAP_M): widening that too left the last ~40 m before every
+            // at-grade highway end bare, or a stub of wall standing alone short of it.
+            let gore: Vec<bool> = (0..edge.len())
                 .map(|k| {
                     let p = edge[k];
                     let q = [line[k][0], line[k][1], p[2]];
                     inside_other_paving(net, si, p)
                         || inside_other_paving(net, si, q)
-                        || at_junction(q)
+                        || on_patch(q, false)
                 })
                 .collect();
             let ecum = geom::cumulative(edge);
-            let opened: Vec<f32> = (0..edge.len())
-                .filter(|k| open[*k])
+            let gores: Vec<f32> = (0..edge.len())
+                .filter(|k| gore[*k])
                 .map(|k| ecum[k])
                 .collect();
-            let keep: Vec<bool> = (0..edge.len())
-                .map(|k| {
-                    let p = edge[k];
-                    !is_elevated(s, k, &ground, 1.5)
-                        && !beside_median([line[k][0], line[k][1], p[2]])
-                        && !covers.iter().any(|c| c.contains([p[0], p[1], p[2] + 1.0]))
-                        && !opened
-                            .iter()
-                            .any(|o| (ecum[k] - o).abs() <= GORE_BARRIER_GAP_M)
-                })
-                .collect();
-            let mut run: Vec<V3> = Vec::new();
-            for k in 0..edge.len() {
-                if keep[k] {
-                    run.push([line[k][0], line[k][1], edge[k][2]]);
-                } else {
-                    if run.len() >= 2 {
-                        out.push(std::mem::take(&mut run));
-                    }
-                    run.clear();
+            // Bridge deck segments (both ends elevated: the ones `deck_rails` rails).
+            let n = edge.len();
+            let elevated: Vec<bool> = (0..n).map(|k| is_elevated(s, k, &ground, 1.5)).collect();
+            let deck: Vec<bool> = (0..n - 1).map(|k| elevated[k] && elevated[k + 1]).collect();
+            // The edge in steps of at most EDGE_STEP_M (surface vertices can be ~10 m apart):
+            // the barrier picks up where a deck's rails end and stops just short of a
+            // junction's patch, not a whole vertex step away from either.
+            const EDGE_STEP_M: f32 = 2.0;
+            let lerp = |a: V3, b: V3, t: f32| {
+                [
+                    a[0] + (b[0] - a[0]) * t,
+                    a[1] + (b[1] - a[1]) * t,
+                    a[2] + (b[2] - a[2]) * t,
+                ]
+            };
+            // (edge point, barrier line point, distance along the edge, on a deck, a vertex)
+            let mut samples: Vec<(V3, V3, f32, bool, bool)> = Vec::new();
+            for k in 0..n - 1 {
+                let steps = ((ecum[k + 1] - ecum[k]) / EDGE_STEP_M).ceil().max(1.0) as usize;
+                for j in 0..steps {
+                    let t = j as f32 / steps as f32;
+                    // At a vertex: on a deck only if both segments either side are.
+                    let on_deck = if j > 0 {
+                        deck[k]
+                    } else {
+                        deck[k] && (k == 0 || deck[k - 1])
+                    };
+                    samples.push((
+                        lerp(edge[k], edge[k + 1], t),
+                        lerp(line[k], line[k + 1], t),
+                        ecum[k] + t * (ecum[k + 1] - ecum[k]),
+                        on_deck,
+                        j == 0,
+                    ));
                 }
             }
-            if run.len() >= 2 {
-                out.push(run);
+            samples.push((edge[n - 1], line[n - 1], ecum[n - 1], deck[n - 2], true));
+            // Walled already: a bridge deck (its guard rails) or a covered span (its walls).
+            let walled: Vec<bool> = samples
+                .iter()
+                .map(|(p, _, _, on_deck, _)| {
+                    *on_deck || covers.iter().any(|c| c.contains([p[0], p[1], p[2] + 1.0]))
+                })
+                .collect();
+            let keep: Vec<bool> = samples
+                .iter()
+                .zip(&walled)
+                .map(|((p, q, along, _, _), w)| {
+                    let q = [q[0], q[1], p[2]];
+                    !w && !beside_median(q)
+                        && !at_junction(q)
+                        && !gores
+                            .iter()
+                            .any(|o| (along - o).abs() <= GORE_BARRIER_GAP_M)
+                })
+                .collect();
+            // Runs of kept samples, through the surface's own vertices (plus the two ends):
+            // no more collider segments than the edge has.
+            let mut run: Vec<V3> = Vec::new();
+            let mut start = 0;
+            for k in 0..=samples.len() {
+                if k < samples.len() && keep[k] {
+                    if run.is_empty() {
+                        start = k;
+                    }
+                    let (p, q, _, _, vertex) = samples[k];
+                    let last = k + 1 == samples.len() || !keep[k + 1];
+                    if vertex || run.is_empty() || last {
+                        run.push([q[0], q[1], p[2]]);
+                    }
+                    continue;
+                }
+                let run = std::mem::take(&mut run);
+                // A short piece is kept where it carries a deck rail or tunnel wall on.
+                let carries_on = (start > 0 && walled[start - 1])
+                    || (k < samples.len() && walled[k])
+                    || run.first().is_some_and(|p| meets_rail(*p))
+                    || run.last().is_some_and(|p| meets_rail(*p));
+                if run.len() >= 2
+                    && (*geom::cumulative(&run).last().unwrap() >= MIN_EDGE_BARRIER_M || carries_on)
+                {
+                    out.push(run);
+                }
             }
         }
     }

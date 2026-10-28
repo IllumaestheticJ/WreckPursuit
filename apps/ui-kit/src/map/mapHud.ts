@@ -205,6 +205,25 @@ export class MapHud {
   /** Host overlay on both maps (markers, route, flags); `null` clears it. Drawn from the next
    * `frame()` (the full map redraws at once while open). */
   setExtras(extras: MapExtras | null): void {
+    this.hostExtras = extras;
+    this.applyExtras();
+  }
+
+  /** A second host overlay under `setExtras`' (the career's drive-to places and waypoint): its
+   * markers and flags are drawn first, its route only while `setExtras` has none. */
+  setPlaceExtras(extras: MapExtras | null): void {
+    this.placeExtras = extras;
+    this.applyExtras();
+  }
+
+  private hostExtras: MapExtras | null = null;
+  private placeExtras: MapExtras | null = null;
+
+  private applyExtras(): void {
+    const a = this.placeExtras;
+    const b = this.hostExtras;
+    const extras: MapExtras | null =
+      a && b ? { markers: [...a.markers, ...b.markers], flags: [...a.flags, ...b.flags], route: b.route && b.route.length > 1 ? b.route : a.route } : (b ?? a);
     this.mini.extras = extras;
     this.full.extras = extras;
     if (this.openFlag) this.full.draw(this.frameData, performance.now());

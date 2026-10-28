@@ -387,6 +387,13 @@ pub struct RaceProfile {
     /// tactic switched off in [`RaceTactics`] stays off.
     #[serde(default)]
     pub unlocks: RaceUnlocks,
+    /// Police cars for this race are picked from the heat-keyed fleet as if the racers were at
+    /// least this wanted level (1..=5; 5 = only the top-tier models, from the patrols on the
+    /// grid onwards). Unset = the race's single standard police car. The sim applies it
+    /// (`Scenario::police_unit_level`, `Sim::set_police_fleet_floor`); [`RaceProfile::apply`]
+    /// leaves it alone.
+    #[serde(default)]
+    pub unit_level: Option<u8>,
 }
 
 /// Optional unlock level overrides for a race (wanted level 1..=5; unset = `presence.toml`).
@@ -411,11 +418,19 @@ pub struct RaceUnlocks {
     /// Rolling blocks.
     #[serde(default)]
     pub rolling_block_level: Option<u8>,
+    /// Rear rams and side slams (`pursuit.toml` `rear_ram_level` and `flank_level`).
+    #[serde(default)]
+    pub ram_level: Option<u8>,
+    /// Hard rams (`pursuit.toml` `hard_ram_level`).
+    #[serde(default)]
+    pub hard_ram_level: Option<u8>,
 }
 
 impl RaceUnlocks {
-    fn levels(&self) -> [Option<u8>; 6] {
+    fn levels(&self) -> [Option<u8>; 8] {
         [
+            self.ram_level,
+            self.hard_ram_level,
             self.roadblock_level,
             self.spikes_level,
             self.helicopter_level,
@@ -445,6 +460,14 @@ impl RaceProfile {
             if let Some(v) = v {
                 *lvl = v;
             }
+        }
+        let chase = &mut cfg.pursuit.chase;
+        if let Some(v) = o.ram_level {
+            chase.rear_ram_level = v;
+            chase.flank_level = v;
+        }
+        if let Some(v) = o.hard_ram_level {
+            chase.hard_ram_level = v;
         }
         if let Some(n) = self.helicopters {
             let c = &mut cfg.presence.helicopter.count;
@@ -524,6 +547,9 @@ impl RaceProfile {
             .any(|l| !(1..=5).contains(l))
         {
             return Err(format!("{id}: unlock levels must be 1..=5"));
+        }
+        if self.unit_level.is_some_and(|l| !(1..=5).contains(&l)) {
+            return Err(format!("{id}: unit_level must be 1..=5"));
         }
         let tools = !self.route_blocks.is_empty()
             || !self.side_blocks.is_empty()
@@ -1553,8 +1579,24 @@ mod tests {
         let u = &cfg.presence.unlocks;
         assert!(u.roadblock_level <= 2 && u.spikes_level <= 3);
         assert!(cfg.presence.max_ground_units > PoliceConfig::builtin().presence.max_ground_units);
-        // Backup doubled.
-        assert_eq!(cfg.presence.reinforcement.units_per_level[1], 8);
+        // Backup x2.5.
+        assert_eq!(cfg.presence.reinforcement.units_per_level[1], 10);
+        // Owner 2026-10-26, "the hardest cops": top-tier cars only, and rams from the first
+        // wanted level, with no race asking for more.
+        assert_eq!(day.unit_level, Some(5));
+        let chase = &cfg.pursuit.chase;
+        assert_eq!(chase.rear_ram_level, 1);
+        assert_eq!(chase.flank_level, 1);
+        assert!(chase.hard_ram_level <= 2);
+        assert!(chase.pit_max_kmh.iter().all(|v| *v >= 220.0));
+        for (id, other) in &p.profiles {
+            if id != "loop9_day" {
+                assert!(
+                    other.unit_level.unwrap_or(0) <= 5 && other.backup_scale <= day.backup_scale,
+                    "{id} has more backup"
+                );
+            }
+        }
     }
 
     #[test]

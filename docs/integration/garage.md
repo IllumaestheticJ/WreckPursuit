@@ -290,3 +290,24 @@ Workshop operations run on a button press, not per frame.
   `apps/testbed-web/src/workshop/mode.ts`): 28 swatches + a custom colour, previewed on the car
   before paying; Finish / Vinyls / Body / Wheels / Cabin & bay list the cosmetic mods with
   Preview (adds only) and Fit / Swap / Remove. `e2e/paint_shop.mjs` covers it.
+
+## Buying upgrades in the workshop; no Mods screen (2026-10-27)
+
+- Owner asks: pick and buy upgrade parts inside the garage after highlighting the part; remove
+  the career garage's Mods screen ("it makes adding mods too easy"); a part locked behind
+  another part stays clickable and offers to buy both together.
+- The part card of the selected slot lists its upgrades with prices: the slot's part grades
+  (Buy into the inventory / Fit for me) and the bolt-on upgrades of its group (mods that are
+  not parts and not cosmetic: pads, ABS, radar, final drive, weight strip...; Install / Swap /
+  Remove). Hovering a part on the car shows "upgrades from $X". The catalog lists the bolt-ons
+  per group too. Logic in `apps/ui-kit/src/garage/upgrades.ts` (+ `upgrades.test.ts`).
+- A mod with unmet `requires` shows "needs X first" and offers "Buy both" (parts into the
+  inventory, bolt-ons put on) and "Fit both for me" (mechanic fits each part in order, bolt-ons
+  installed between). Steps are separate purchases: a refusal halfway keeps what was bought and
+  says so. Parts of the right grade already in the inventory are used instead of bought.
+- `WorkshopApi` gained optional `mods()` / `install(id)` / `uninstall(id)` (wired in
+  `workshop/mode.ts` to `career_mods_json` / `career_install_mod` / `career_uninstall_mod`).
+- The career garage Cars tab has no Mods button; `ModTree` is gone. The testbed's dev
+  free-drive "mods" button (`ui/modShop.ts`, non-career sandbox) stays as a debug tool.
+- `e2e/workshop_buy.mjs` covers it; `e2e/mechanic.mjs` opens the catalog with "Full catalog".
+- Gap: no wasm-side "requires" on the parts catalog; the UI reads it from the mod tree.

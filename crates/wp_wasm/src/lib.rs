@@ -30,7 +30,7 @@
 //! | drift lab B (lead) | `drift_tuning_json()`, `drift_tuning_defaults_json()`, `drift_tuning_set(json)`, `drift_readout(entity)` — see [`drift_lab`] |
 //! | mods | `mod_catalog_json(car)`, `build_visuals_json(car, mods)`, `entity_visuals_json(entity)` — see [`mod_visuals`]; install with `EntitySpec::mods` in the scenario |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)`, `debug_place(entity, x, y, yaw, speed)` — see [`run`] |
-//! | garages (lead) | `garages_json()`, `garage_visit_json()`, `garage_repair()`, `garage_leave()`; career places `safehouses_json()`, `place_json()`, `place_leave()` — see [`garage_visit`] |
+//! | garages (lead) | `garages_json()`, `garage_visit_json()`, `garage_repair()`, `garage_leave()`; career places `safehouses_json()`, `place_json()`, `place_leave()`, `places_json()`, `gps_route()` — see [`garage_visit`] |
 //! | audio (13) | `audio_library()`, `audio_frame(listener, events_json, focus)`, `audio_set_siren`, `audio_set_scanner_tier`, `audio_radio`, `audio_reset()` — see [`audio`] |
 
 #![warn(missing_docs)]
@@ -915,6 +915,20 @@ pub fn police_status(entity: u32) -> Result<String, JsValue> {
     })
 }
 
+/// The police commander's state as JSON (`wp_police::commander::CommanderView`): budget by time
+/// of day / wanted level / bounty, what is out, reckless-driver calls, district surges and its
+/// latest deployment orders (where it sent units). `null` when the police system is not stepped
+/// in this session.
+#[wasm_bindgen]
+pub fn police_commander() -> Result<String, JsValue> {
+    get(|s| {
+        if !s.sim().systems().police {
+            return "null".to_string();
+        }
+        json(&s.sim().police().commander())
+    })
+}
+
 /// Police units that are not sim vehicles (internally driven cars, helicopters), 8 floats
 /// each: `[x, y, z, yaw, speed_mps, flags, unit_id, model]` (flags 1 helicopter, 2 pursuing,
 /// 4 Ashpeak County unit: county livery, see [`police::Agencies`];
@@ -1039,7 +1053,17 @@ fn parse_mode(mode: &str) -> Result<DamageMode, String> {
 pub fn race_list(car: &str, mode: &str) -> Result<String, JsValue> {
     let mode = parse_mode(mode).map_err(err)?;
     let car = simcli::data::load_car(data::mem_data(), car).ok();
-    Ok(json(&race::race_cards(car.as_ref(), mode)))
+    Ok(json(&race::race_cards(car.as_ref(), mode, player_rep())))
+}
+
+/// The player's rep for scaling a picker race's field outside a career run: the live
+/// session's account, else the loaded career's, else 0.
+fn player_rep() -> i64 {
+    let live = with_session_opt(|s| Ok::<_, ()>(s.and_then(|s| s.run().map(|r| r.account().rep))))
+        .ok()
+        .flatten();
+    live.or_else(|| career::career_account().map(|a| a.rep))
+        .unwrap_or(0)
 }
 
 /// Scenario JSON of race `id` for `career_start_run` (the career garage's "Street races",
@@ -1111,6 +1135,11 @@ pub fn race_start_on(
         map.to_string()
     };
     let city = race::race_city(&def, &current);
+    // The field brings cars to match the player's car and rep (owner, 2026-10-27).
+    let def = match simcli::data::load_car(data::mem_data(), car) {
+        Ok(loaded) => race::scaled_field(&def, &loaded, player_rep()),
+        Err(_) => def,
+    };
     let mut sc = race::race_scenario_in(&def, car, parse_mode(mode).map_err(err)?, autopilot, city)
         .map_err(err)?;
     if !tune_json.is_empty() {
@@ -1367,6 +1396,21 @@ pub fn garage_leave() -> Result<(), JsValue> {
 #[wasm_bindgen]
 pub fn safehouses_json() -> Result<String, JsValue> {
     get(|s| json(&s.safehouses()))
+}
+
+/// Every drive-to place of the session as JSON ([`garage_visit::MapPlace`] array: repair
+/// shops, and in career runs safehouses, car lots and the player's garages), for the map
+/// markers and the waypoint.
+#[wasm_bindgen]
+pub fn places_json() -> Result<String, JsValue> {
+    get(|s| json(&s.map_places()))
+}
+
+/// The GPS line from the player's car to `(x, y)`: flat `[x0, y0, x1, y1, …]` along the lanes
+/// (empty without a route).
+#[wasm_bindgen]
+pub fn gps_route(x: f32, y: f32) -> Result<Vec<f32>, JsValue> {
+    get(|s| s.gps_route([x, y]).into_iter().flatten().collect())
 }
 
 /// Career places as JSON ([`garage_visit::PlaceStatus`]): the open garage / safehouse visit

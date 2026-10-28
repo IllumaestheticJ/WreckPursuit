@@ -136,14 +136,14 @@ await shot("mechanic_done.png");
 
 // Mechanic from the catalog: an upgrade fitted in one click, old part kept this time.
 await page.locator('[data-testid="ws-old-keep"]').click();
-await button("Catalog / upgrades").click();
+await button("Full catalog").click();
 await page.locator('[data-testid="ws-catalog-sort"]').selectOption("price");
 const prices = await page.evaluate(() =>
-  [...document.querySelectorAll('[data-testid="ws-catrow"][data-kind="radiator"] .wp-mono')].map((e) => e.textContent),
+  [...document.querySelectorAll('[data-testid="ws-catalog"] [data-testid="ws-catrow"][data-kind="radiator"] .wp-mono')].map((e) => e.textContent),
 );
 check(prices.length > 0, `catalog sorted by price (${prices.join(", ")})`);
 await shot("mechanic_catalog.png");
-await page.locator('[data-testid="ws-catrow"][data-grade="cooling_radiator_1"] [data-testid="ws-cat-mechanic"]').click();
+await page.locator('[data-testid="ws-catalog"] [data-testid="ws-catrow"][data-grade="cooling_radiator_1"] [data-testid="ws-cat-mechanic"]').click();
 await placed();
 await settle();
 s = await screen();

@@ -83,8 +83,8 @@ pub use profile::{
     AbandonedRun, CareerProfile, CareerStats, CarryOver, LotSales, ProfileError, RunEnd,
 };
 pub use progression::{
-    career_note, BetTicket, BetVenue, CareerProgress, CareerState, Credits, Feature,
-    ProgressUpdate, ProgressionRules, RepTier,
+    career_note, BetTicket, BetVenue, CareerProgress, CareerState, Credits, Feature, HomeGarageDef,
+    HomeGarageView, ProgressUpdate, ProgressionRules, RepTier,
 };
 pub use pursuit::{PoliceSignal, PursuitEnd, PursuitResolution, PursuitSettlement, PursuitTracker};
 pub use repair::{

@@ -334,12 +334,15 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
 
 - **Covered roads** (backlog B04, `RoadNetwork::covered`): the **Hollins Tunnel** — Loop 9
   through the northern shoulder of Hollins Heights, 391 m, road profile unchanged (it already
-  ran in a cut), ground backfilled over the roof on the hill side — and **Founders Cut** — the
+  ran in a cut), buried: ground backfilled level with the deck and a 1 in 3 embankment down
+  to the natural ground beyond it (its north side is below the roof) — and **Founders Cut** — the
   Uptown Connector dropped 7 m below the lowest natural ground into a 250 m covered trench
   (an internal profile anchor; ramps ≈ 5 %), ground backfilled level with the plaza deck.
   Inner half width = paved half width + 3.5 m (sidewalk roads) / 1.5 m; ceiling 6.5 m
-  (highway) / 6 m; 0.6 m walls; 0.8 m deck reaching 8.5 m past each wall over the carved
-  shoulder. No buildings on the decks. Route POIs `"<name> entry"`, `"<name> lay-by"`
+  (highway) / 6 m; 0.6 m walls; 0.8 m deck reaching 24 m past each wall (the first 12 m over
+  the carved shoulder, the rest over backfill level with it; `covered::DECK_OVERHANG_M`,
+  `BACKFILL_START_M`), its ground drawn and collided at the terrain's own resolution
+  (`surface::collision_terrain`) so it meets the deck edge flush. No buildings in the trench. Route POIs `"<name> entry"`, `"<name> lay-by"`
   (mid-tunnel kerb lane), `"<name> exit"`.
 - **Line of sight** (`CityMap::line_of_sight`): blocked from outside a span into it and back;
   two points inside the same span see each other along a line that stays inside; outside
@@ -443,14 +446,30 @@ there are no solid walls along it.
   `wp_race::touge::Boundary`.
 - **Forest:** pine trees (`DecorKind::PineTree`) on slopes under ~44°, patchy, clear of the
   road by 15 m, density from the spec's `forest` (0–1), at most `MAX_TREES`.
-- **Ends:** `DecorKind::Fence` walls across both ends of the road.
+- **Run-offs (2026-10-28, owner: "more run off so we can slow down after we finish"):** the
+  road runs on `RUN_OFF_M` (340 m) past each finish line: the spec's course is kept exactly
+  (`TougeTrack::course_from_m` / `course_to_m`) and `RUN_OFF_EXT_M` (300 m) of straight road is
+  added at each end along its end direction, the end grade fading to level over 60 m, unbanked.
+  The run-off gets the same edges as the rest of the pass (rail downhill, cut bank uphill; no
+  drops or aprons, the spec's `drops` and bends are in course distances). Track distances
+  (`edges`, `finish_m`, `start_m`) are from the base end of the base run-off.
+- **Ends:** past the paving at each end a 45 m (`TRAP_M`) flat **gravel arrester bed**
+  (`TougeTrack::traps`, dirt zone), 16 m between its rails: the downhill rail line flares out
+  to it, rounds its end and comes back to the cut bank on the other side as one continuous
+  rail; a `DecorKind::Fence` wall stands behind the rounded end. No trees in it.
 - **POIs:** `<name> base start`, `<name> summit finish`, `<name> summit start`,
-  `<name> base finish` (60 m / 40 m in from the ends) for uphill and downhill courses.
+  `<name> base finish` (60 m / 40 m in from the course's ends, as before the run-offs) for
+  uphill and downhill courses.
 - Tests (`touge::tests`): every pass parses and validates; long and steep, rails over half the
   downhill side, banks over half the uphill side, runoff and every spec drop built, never a fall
   on both sides at once, dirt zones; hairpins have runoff outside; open drops never on the outside of a bend; the road never
   comes near itself; terrain stays under the paving out to its edges, falls ≥ 4 m behind ≥ 80 % of rail, rises behind ≥ 80 %
-  of bank, rail verges level, ≥ 8 m drops; rails face the road; generation is deterministic.
+  of bank, rail verges level, ≥ 8 m drops; rails face the road (the arrester beds' rails their
+  bed); the course as raced is the spec's course (POIs where they were); from 200 km/h at
+  either finish line a car stops on the paved run-off after 0.5 s reaction at μ 0.9 (≈ 203 m)
+  and μ 0.55 wet (≈ 314 m of 340 m); every run-off is sealed on both sides (rail or rising
+  bank, never a drop) and ends in a level, railed gravel bed with a wall behind it;
+  generation is deterministic.
 
 ## Traffic AI
 
@@ -691,6 +710,28 @@ polygon's vertices in order and closes the loop), checkpoints at every turn and 
 (gate width = carriageway), `closure_for_route` (closes both directions of every road on the
 route and puts 3 cones across every side-street stop line). `World::set_active_routes` makes
 routes LOD/spawn focus areas and applies closures.
+
+**Lane changes in routes** (owner 2026-10-27, "make sure the street racer routing makes
+sense", full-map pass): `plan_route_via` (AI street racer routes: challenges, Loop 9
+laps, street roam legs, flights from the police) may move to a neighbouring lane of the same road and
+direction (`Lane::left`/`right`) part way along a lane: `routes::lane_change_at` puts the
+change as early as the lane allows (`LANE_CHANGE_M` = 40 m after joining it, never within 10 m
+of either lane's end) and the search charges 2.5 s for it. A route's `segs` then hold `X, B`
+with B beside X; `routes::route_spans` gives the arc range driven on each segment (the AI
+corridor reads routes the same way) and the polyline eases across over the last 40 m of X.
+`plan_route` and `plan_circuit` stay lane-locked (`shortest_path`): scripted scenario drivers,
+the retired picker races and the Loop 9 courses (police tables, goldens, learned rows) are laid
+out on those lanes. Audit with `cargo run --release -p wp_world --example route_audit -- 300`
+(random street racer A → B pairs over the whole combined world vs an oracle that changes lanes
+anywhere; `ROUTE=ax,ay,hx,hy,bx,by` prints one route road by road). 300 pairs:
+
+| | ≥ 1.5× the quickest time | unplannable | worst |
+|---|---|---|---|
+| before (lane-locked, the street roam legs' exact finish lane) | 33 % | 9 of 150 | 21.5 km for a 0.9 km trip (Wharf St → Seawall Blvd) |
+| before (lane-locked, finish = the road: challenges) | 16 % | 3 of 150 | 16 km for 2.6 km |
+| after (`plan_route_via`, all street racer routes) | 0.7 % | 0 | 10.9 km for 2.4 km (a one-way Route 12 ramp) |
+
+Tests: `tests/route_lanes.rs`.
 
 **Determinism**: no wall clock, no `f64`, `BTreeMap`/`Vec` only, a single seeded
 `wp_math::Rng` used in a fixed order, polynomial `atan`/`sin_cos`, IEEE `sqrt` only. Time is

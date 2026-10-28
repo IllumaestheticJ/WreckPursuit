@@ -121,6 +121,9 @@ pub struct StatsView {
     pub bracket: String,
     /// Mass, kg.
     pub mass_kg: f32,
+    /// Peak engine power, mechanical horsepower (from the full-throttle torque curve, mods
+    /// applied).
+    pub power_hp: f32,
     /// Estimated 0–100 km/h, s.
     pub est_0_100_s: f32,
     /// Estimated top speed, km/h.
@@ -248,6 +251,9 @@ pub struct LotSummary {
     pub in_stock: usize,
     /// Cheapest car on the lot today.
     pub from_price: Option<Money>,
+    /// Name of the city the lot stands in ([`crate::garage_visit::WORLD_LOTS`]; empty when it
+    /// is not on the map).
+    pub city_label: String,
 }
 
 /// One car on a lot today. Junkyard cars hide what cannot be seen (`condition`, `runs`,
@@ -385,6 +391,25 @@ pub struct InformantView {
     pub heat_reduction: f32,
 }
 
+/// One of the player's own garages on the career screen (`CareerView::homes`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct HomeView {
+    /// Garage id (`career.toml [[home_garages]]`).
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Spawn city id it stands in.
+    pub city: String,
+    /// That city's name.
+    pub city_label: String,
+    /// Open to the player.
+    pub unlocked: bool,
+    /// Rep that opens it.
+    pub needed_rep: i64,
+    /// Career runs start here.
+    pub selected: bool,
+}
+
 /// The whole garage screen.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CareerView {
@@ -438,6 +463,8 @@ pub struct CareerView {
     pub districts: Vec<DistrictView>,
     /// The world's repair shops ([`crate::garage_visit::WORLD_SHOPS`]), in POI order.
     pub shops: Vec<ShopView>,
+    /// The player's own garages, in unlock order (runs start from the `selected` one).
+    pub homes: Vec<HomeView>,
     /// Career counters.
     pub stats: wp_economy::CareerStats,
     /// Rep tier, next tier, unlocked features and classes, bet limits.
@@ -477,6 +504,9 @@ pub struct ModOption {
     pub reason: Option<String>,
     /// Same-line mod it replaces.
     pub replaces: Option<String>,
+    /// Installed mods of other lines it takes off because it does their job (coilovers
+    /// replace separate dampers).
+    pub removes: Vec<String>,
     /// Stats with the change applied (install, or remove when installed).
     pub stats_after: Option<StatsView>,
     /// Required mods.
@@ -579,11 +609,15 @@ fn vehicle_tune(t: wp_economy::CarTune) -> wp_vehicle::CarTune {
     }
 }
 
+/// Mechanical horsepower per kW (1 hp = 745.7 W).
+const HP_PER_KW: f32 = 1.341_022;
+
 fn stats_of(p: &wp_economy::Preview) -> StatsView {
     StatsView {
         class_index: p.class_index,
         bracket: p.bracket.clone(),
         mass_kg: p.mass_kg,
+        power_hp: p.metrics.peak_power_kw * HP_PER_KW,
         est_0_100_s: p.est_0_100_s,
         top_speed_kmh: p.est_top_speed_mps * 3.6,
         lateral_g: p.metrics.lateral_grip_g,
@@ -681,6 +715,10 @@ impl Career {
     /// ([`Economy::settle_abandoned_run`]); the result waits in [`Career::take_abandoned`].
     pub fn load_json(econ: Economy, text: &str) -> Result<Self, String> {
         let mut p = CareerProfile::from_json(text).map_err(|e| e.to_string())?;
+        // A save from before coilovers superseded dampers can hold both: take the dampers off.
+        if let Ok(((), ev)) = econ.settle_superseded_mods(&mut p.account) {
+            p.ledger.extend(ev);
+        }
         for (uid, v) in &p.lattices {
             serde_json::from_str::<FullDamageSnapshot>(v)
                 .map_err(|e| format!("car {uid}: bad lattice damage: {e}"))?;
@@ -827,7 +865,8 @@ impl Career {
             .and_then(|uid| self.profile.account.car(uid))
             .and_then(|car| self.loaded_car(car).ok());
         let bounty = self.profile.account.bounty;
-        let mut cards = crate::race::race_cards(car.as_ref(), self.mode());
+        let rep = self.profile.account.rep;
+        let mut cards = crate::race::race_cards(car.as_ref(), self.mode(), rep);
         for c in &mut cards {
             use wp_contracts::Legality;
             let Some(legality) = [
@@ -1113,6 +1152,11 @@ impl Career {
             classes: lot.classes.clone(),
             in_stock: open.len(),
             from_price: open.iter().map(|l| l.price).min(),
+            city_label: crate::garage_visit::WORLD_LOTS
+                .iter()
+                .find(|w| w.lot == lot.id)
+                .and_then(|w| crate::scenario::spawn(w.city))
+                .map_or(String::new(), |s| s.label.to_string()),
         })
     }
 
@@ -1323,6 +1367,59 @@ impl Career {
         Ok(Some(model.save_full()))
     }
 
+    /// The home garage runs start from: the chosen one while it is unlocked, else the
+    /// highest unlocked (the first is open from the start).
+    pub fn home_id(&self) -> String {
+        let acct = &self.profile.account;
+        if let Some(h) = &self.profile.home {
+            if self.econ.home_unlocked(acct, h) {
+                return h.clone();
+            }
+        }
+        self.econ
+            .unlocked_homes(acct)
+            .last()
+            .map(|h| h.id.clone())
+            .unwrap_or_default()
+    }
+
+    /// Start career runs from home garage `id` (it must be unlocked).
+    pub fn set_home(&mut self, id: &str) -> Result<(), String> {
+        let acct = &self.profile.account;
+        let Some(def) = self.econ.progression.home_garage(id) else {
+            return Err(format!("no garage {id}"));
+        };
+        if !self.econ.home_unlocked(acct, id) {
+            let rep = self.econ.progression.tier_def(def.tier).min_rep;
+            return Err(format!("{} opens at {rep} rep", def.name));
+        }
+        self.profile.home = Some(id.to_string());
+        Ok(())
+    }
+
+    /// The player's garages for the career screen, in unlock order.
+    fn home_views(&self) -> Vec<HomeView> {
+        let selected = self.home_id();
+        self.econ
+            .career_progress(&self.profile.account)
+            .home_garages
+            .into_iter()
+            .map(|h| {
+                let city = crate::garage_visit::home_spot(&h.id).map_or("", |s| s.city);
+                HomeView {
+                    selected: h.id == selected,
+                    city: city.to_string(),
+                    city_label: crate::scenario::spawn(city)
+                        .map_or(String::new(), |s| s.label.to_string()),
+                    id: h.id,
+                    name: h.name,
+                    unlocked: h.unlocked,
+                    needed_rep: h.needed_rep,
+                }
+            })
+            .collect()
+    }
+
     /// Why the active car cannot start a run (`None` = it can).
     pub fn start_blocker(&self) -> Option<String> {
         if self.run.is_some() {
@@ -1362,6 +1459,7 @@ impl Career {
     pub fn view(&mut self) -> CareerView {
         self.dealer();
         let lots = self.lots();
+        let homes = self.home_views();
         let p = &self.profile;
         let a = &p.account;
         let floor = &self.econ.market.floor_car;
@@ -1453,6 +1551,7 @@ impl Career {
                         .unwrap_or(1.0),
                 })
                 .collect(),
+            homes,
             stats: p.stats.clone(),
             progress: self.econ.career_progress(a),
             captures: a.heat_history.captures,
@@ -1490,14 +1589,14 @@ impl Career {
             if !installed && m.does_nothing_on(&base.def) {
                 continue;
             }
-            let (next, replaces, check) = if installed {
+            let (next, replaces, removes, check) = if installed {
                 let next: Vec<String> = c.mods.iter().filter(|x| **x != m.id).cloned().collect();
                 let check = self
                     .econ
                     .catalog
                     .check_uninstall(c.class, &c.mods, &m.id)
                     .map(|_| None);
-                (next, None, check)
+                (next, None, Vec::new(), check)
             } else {
                 match self
                     .econ
@@ -1508,13 +1607,13 @@ impl Career {
                         let mut next: Vec<String> = c
                             .mods
                             .iter()
-                            .filter(|x| Some(*x) != plan.replaces.as_ref())
+                            .filter(|x| !plan.removed().any(|r| r == *x))
                             .cloned()
                             .collect();
                         next.push(m.id.clone());
-                        (next, plan.replaces.clone(), Ok(plan.replaces))
+                        (next, plan.replaces.clone(), plan.removes, Ok(plan.replaces))
                     }
-                    Err(e) => (Vec::new(), None, Err(e)),
+                    Err(e) => (Vec::new(), None, Vec::new(), Err(e)),
                 }
             };
             let mut reason = check.as_ref().err().map(|e| e.to_string());
@@ -1556,6 +1655,7 @@ impl Career {
                 allowed: reason.is_none(),
                 reason,
                 replaces,
+                removes,
                 stats_after,
                 requires: m.requires.clone(),
             });
@@ -1748,8 +1848,16 @@ impl Career {
                 .and_then(|g| self.econ.catalog.get(g))
                 .is_none_or(|m| !m.does_nothing_on(&base.def))
         });
+        let stock_power_hp = self.stats_for(&car.def_id, &[])?.power_hp;
+        // A build the preview refuses still opens in the workshop; it shows stock power.
+        let power_hp = self
+            .econ
+            .car_preview(&base.def, &base.lattice, car, Some(self.mode()))
+            .map_or(stock_power_hp, |p| p.metrics.peak_power_kw * HP_PER_KW);
         Ok(WorkshopScreen {
             view: self.econ.workshop(a, uid, self.mode()).map_err(e2s)?,
+            power_hp,
+            stock_power_hp,
             catalog,
             cash: a.cash,
             def_id: car.def_id.clone(),
@@ -2142,6 +2250,26 @@ impl Career {
         let acct = &self.profile.account;
         let uid = acct.active_car.expect("start_blocker checked");
         let heat = self.profile.carry.heat;
+        let mut sc = sc;
+        // A picker race's field brings cars to match the career car as it is (mods included)
+        // and the career's rep (owner, 2026-10-27); a touge battle keeps its opponent.
+        if let Some((def, _)) = crate::race::race_for_scenario(&sc.name) {
+            let car = self.loaded_car(acct.try_car(uid).map_err(e2s)?)?;
+            let def = crate::race::scaled_field(&def, &car, acct.rep);
+            crate::race::apply_field(&mut sc, &def);
+        }
+        // Night runs and free drives in the combined world start from the player's chosen
+        // garage (owner 2026-10-27: spawn points are a career choice). Races stand on their grid.
+        let in_world = sc.city == simcli::scenario::CitySpec::ashpeak()
+            && crate::race::race_for_scenario(&sc.name).is_none();
+        if in_world {
+            if let (Some(spot), Some(e)) = (
+                crate::garage_visit::home_spot(&self.home_id()),
+                sc.entities.first_mut(),
+            ) {
+                e.pos = [spot.anchor[0], spot.anchor[1], 0.0];
+            }
+        }
         let (mut session, player) = self.car_session(uid, sc, heat)?;
         let acct = &self.profile.account;
         let run = if session.run().is_some() {
@@ -2159,6 +2287,19 @@ impl Career {
             None
         };
         session.begin_career(run)?;
+        let lots: Vec<(String, String)> = self
+            .econ
+            .lots
+            .lots
+            .iter()
+            .map(|l| (l.id.clone(), l.name.clone()))
+            .collect();
+        let homes: Vec<(String, String)> = self
+            .econ
+            .unlocked_homes(&self.profile.account)
+            .map(|h| (h.id.clone(), h.name.clone()))
+            .collect();
+        session.set_career_places(&lots, &homes);
         // A picker race the career cannot pay the buy-in for does not start (owner report
         // 2026-10-26: 651 cash still raced Loop 9 day). The account is untouched.
         if let Some(why) = session.race().and_then(|r| r.entry_refused()) {
@@ -2380,6 +2521,10 @@ pub struct WorkshopScreen {
     /// Slots, missing parts, upgrades, inventory.
     #[serde(flatten)]
     pub view: wp_economy::WorkshopView,
+    /// Peak engine power as the car drives now (fitted parts and mods, worn parts), hp.
+    pub power_hp: f32,
+    /// Peak engine power of the stock car, hp.
+    pub stock_power_hp: f32,
     /// Parts catalog for the car.
     pub catalog: Vec<wp_economy::CatalogEntry>,
     /// Cash on hand.
@@ -2596,6 +2741,16 @@ pub fn career_sell_car(uid: u32) -> Result<String, JsValue> {
 pub fn career_set_active(uid: u32) -> Result<String, JsValue> {
     with_career(|c| {
         c.set_active(CarUid(uid))?;
+        view_json(c)
+    })
+}
+
+/// Start career runs from the player's garage `id` (unlocked ones only; see
+/// [`Career::set_home`]). Returns the view JSON.
+#[wasm_bindgen]
+pub fn career_set_home(id: &str) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.set_home(id)?;
         view_json(c)
     })
 }

@@ -77,6 +77,31 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   past a Loop 9 night patrol: 5.0 s → 0.8 s to a pursuit. Measured in
   `tests/loop9_night_detection.rs`, numbers in `docs/integration/police-loop9-night.md`.
 
+### Police commander (`commander.rs`, owner 2026-10-27)
+A background "desk" that decides how many police the city may put out and where, and reacts
+to dispatch intel. Tables: `data/police/commander.toml`; view: `PoliceSystem::commander()`
+(`CommanderView`, wasm `police_commander()`).
+- **Budget** (every think): each resource is `base[phase] + per_level[highest wanted level] +
+  min(bounty / bounty_step, bounty_max)`, bounty being the highest of any racer that is wanted
+  or was called in (career bounty carried in counts). Day affords the most. It caps ground
+  units (`unit_cap`: responders, backup, surge patrols), captain roadblocks, spike strips and
+  helicopters out at once, always within `presence.toml` / `tools.toml`'s own limits and never
+  unlocking a tool before `[unlocks]`. Night shipped: 5 + level units, no roadblock below
+  1500 bounty, no helicopter below 2500, no extra call units for a nobody.
+- **Calls**: every unwitnessed reckless-driver report is logged (reports < `min_gap_s` apart
+  are one call). From `escalate_calls` calls on one driver inside `window_s`, up to
+  `extra_units` more responders join the open call (idle units within the district's response
+  radius, else spawned out of sight ahead of the driver), so units converge from several sides.
+  `surge_calls` calls in one district put `surge_units` extra patrols there (spawned out of
+  sight by the pool) until `surge_hold_s` after its last call. One radio line per order.
+- **Out of the chase** (owner 2026-10-27): an interceptor *or pursuer* still farther than the
+  level's backup radius + `far_margin_m` from its racer `far_release_s` after joining is stood
+  down; responders / backup and (now) patrol cars among them despawn out of every racer's sight
+  and the pool refills the district out of sight, so the slot goes back to the budget
+  (`stats().far_stand_downs`).
+- **Races**: the race's profile (`races.toml`) is the operation order; the commander neither
+  cuts it nor adds call units or surges (Loop 9 day stays the dragnet, touge stays police-free).
+
 ### Presence & dispatch (`dispatch.rs`)
 - Pool units per district per phase from `presence.toml [patrols.*]`. Shortfalls are spawned
   (after the session start, out of every racer's sight); surplus idle units retire once out of

@@ -38,7 +38,59 @@ impl Default for DriverProfile {
     }
 }
 
+/// Traffic risk ([`DriverParams::traffic_risk`]) at or above which a driver overtakes on the
+/// opposing lanes of an open road whenever the pass checks find them clear; below it only round
+/// a parked, standing or crawling car (or anything, when unafraid of traffic in a race).
+pub const OPPOSING_PASS_RISK: f32 = 0.5;
+/// Traffic risk at or above which a driver takes the whole-road line, the racing line across
+/// the opposing lanes of an open road while they are clear.
+pub const WHOLE_ROAD_LINE_RISK: f32 = 0.3;
+/// Traffic risk at or above which a skilled driver goes between two cars (lane-splitting).
+pub const LANE_SPLIT_RISK: f32 = 0.25;
+
+/// How much risk a driver takes on the road, by [`DriverProfile::risk`] (shown on menus;
+/// the numbers behind each step are in [`DriverParams`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum RiskLevel {
+    /// risk < 0.25: keeps to its own side and lanes, stops for reds.
+    Cautious,
+    /// 0.25..0.5: cuts clear corners across the other side and splits lanes; stops for reds
+    /// below 0.35.
+    Measured,
+    /// 0.5..0.75: overtakes into oncoming lanes, runs reds when nobody is heading in.
+    Bold,
+    /// risk ≥ 0.75: takes the tightest oncoming gaps and flees the police late.
+    Reckless,
+}
+
+impl RiskLevel {
+    /// The level of a `risk` knob value.
+    pub fn of(risk: f32) -> Self {
+        match risk {
+            r if r < 0.25 => Self::Cautious,
+            r if r < 0.5 => Self::Measured,
+            r if r < 0.75 => Self::Bold,
+            _ => Self::Reckless,
+        }
+    }
+
+    /// Display name.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Cautious => "Cautious",
+            Self::Measured => "Measured",
+            Self::Bold => "Bold",
+            Self::Reckless => "Reckless",
+        }
+    }
+}
+
 impl DriverProfile {
+    /// How much risk this driver takes ([`RiskLevel`] of `risk`).
+    pub fn risk_level(&self) -> RiskLevel {
+        RiskLevel::of(self.clamped().risk)
+    }
+
     /// Profile with every knob clamped to 0..=1.
     pub fn clamped(self) -> Self {
         let c = |x: f32| x.clamp(0.0, 1.0);
@@ -76,6 +128,10 @@ impl DriverProfile {
             traffic_risk,
             civilian_margin_m: lerp(1.0, 0.6, traffic_risk),
             civilian_headway_s: lerp(1.6, 0.9, traffic_risk),
+            opposing_passes: traffic_risk >= OPPOSING_PASS_RISK,
+            whole_road_line: traffic_risk >= WHOLE_ROAD_LINE_RISK,
+            lane_splits: traffic_risk >= LANE_SPLIT_RISK,
+            oncoming_margin_scale: lerp(1.6, 0.55, traffic_risk).min(1.0),
             flee_wanted_level: 1 + (3.0 * p.risk + 0.5) as u8,
             perception_ahead_m: lerp(60.0, 130.0, p.awareness),
             mirror_range_m: lerp(12.0, 45.0, p.awareness),
@@ -121,6 +177,21 @@ pub struct DriverParams {
     pub civilian_margin_m: f32,
     /// Time gap to civilians ahead, s (traffic risk).
     pub civilian_headway_s: f32,
+    /// Overtakes on the opposing lanes of an open road (traffic risk ≥
+    /// [`OPPOSING_PASS_RISK`]); otherwise only round parked, standing or crawling cars.
+    pub opposing_passes: bool,
+    /// Takes the whole-road line across clear opposing lanes (traffic risk ≥
+    /// [`WHOLE_ROAD_LINE_RISK`]).
+    pub whole_road_line: bool,
+    /// Goes between two cars when skilled enough (traffic risk ≥ [`LANE_SPLIT_RISK`]).
+    pub lane_splits: bool,
+    /// Scale on every clearance to oncoming traffic while out on the opposing lanes: the room
+    /// a pass needs ahead of an oncoming car, the time gap that makes a pass tuck back in, the
+    /// whole-road line's margin and the gap to cars heading for a junction crossed on the
+    /// opposing side (traffic risk: 1.0, the clearances as tuned, up to traffic risk 0.57,
+    /// then down to 0.55 at 1.0). Never wider than tuned: wider clearances left downtown fields
+    /// queueing behind traffic (Lantern Row pace gate).
+    pub oncoming_margin_scale: f32,
     /// Wanted level at which the driver abandons the race and runs (risk).
     pub flee_wanted_level: u8,
     /// Range ahead in which cars and civilians are noticed, m (awareness).
@@ -168,5 +239,45 @@ mod tests {
         .params();
         assert_eq!(careful.flee_wanted_level, 1);
         assert_eq!(reckless.flee_wanted_level, 4);
+    }
+
+    #[test]
+    fn risk_decides_how_close_to_oncoming_traffic() {
+        let at = |risk: f32| {
+            DriverProfile {
+                skill: 0.9,
+                risk,
+                ..Default::default()
+            }
+            .params()
+        };
+        let (cautious, measured, bold, reckless) = (at(0.1), at(0.35), at(0.6), at(0.9));
+        assert!(!cautious.opposing_passes && !cautious.whole_road_line && !cautious.lane_splits);
+        assert!(measured.lane_splits);
+        assert!(measured.whole_road_line && !measured.opposing_passes);
+        assert!(bold.opposing_passes);
+        // Clearances only tighten with risk: cautious and measured drivers keep the tuned ones.
+        assert_eq!(cautious.oncoming_margin_scale, 1.0);
+        assert_eq!(measured.oncoming_margin_scale, 1.0);
+        assert!(bold.oncoming_margin_scale < 1.0);
+        assert!(bold.oncoming_margin_scale > reckless.oncoming_margin_scale);
+        assert!(reckless.oncoming_margin_scale < 0.7);
+        // A beginner drives wild whatever the knob says.
+        let rookie = DriverProfile {
+            skill: 0.1,
+            risk: 0.1,
+            ..Default::default()
+        }
+        .params();
+        assert!(rookie.opposing_passes);
+    }
+
+    #[test]
+    fn risk_levels_step_through_the_knob() {
+        assert_eq!(RiskLevel::of(0.0), RiskLevel::Cautious);
+        assert_eq!(RiskLevel::of(0.3), RiskLevel::Measured);
+        assert_eq!(RiskLevel::of(0.5), RiskLevel::Bold);
+        assert_eq!(RiskLevel::of(1.0), RiskLevel::Reckless);
+        assert_eq!(RiskLevel::Bold.label(), "Bold");
     }
 }

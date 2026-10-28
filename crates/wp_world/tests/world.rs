@@ -1081,9 +1081,12 @@ fn routes_between_pois_and_circuits() {
     for c in r.checkpoints.windows(2) {
         assert!(c[1].distance_m > c[0].distance_m);
     }
-    // Lane-legal: every consecutive pair is connected.
+    // Lane-legal: every consecutive pair is connected, or a lane change on one road.
     for s in r.segs.windows(2) {
-        assert!(w.map().seg(s[0]).next.contains(&s[1]));
+        assert!(
+            w.map().seg(s[0]).next.contains(&s[1])
+                || wp_world::routes::is_lane_change(w.map(), s[0], s[1])
+        );
     }
     // Circuit around four core blocks.
     let c = w

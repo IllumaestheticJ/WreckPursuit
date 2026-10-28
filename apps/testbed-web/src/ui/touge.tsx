@@ -74,6 +74,10 @@ export interface TougeReport {
   opponent: string;
   title: string;
   opponent_car: string;
+  /** Body colour 0xRRGGBB the NPC car races in (a won pink slip arrives in it). */
+  opponent_paint: number;
+  /** The NPC car's mods (its build; a won pink slip arrives with them). */
+  opponent_mods: string[];
   direction: string;
   daylight: string;
   surface: string;

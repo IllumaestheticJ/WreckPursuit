@@ -120,24 +120,31 @@ impl Economy {
     }
 
     /// Body price the resale value starts from: what was paid for the car
-    /// ([`OwnedCar::purchase_price`]). Cars from old saves (no recorded price) use the lowest
-    /// price the player could have paid: the floor car's price for the floor model, else the
-    /// cheapest dealer condition.
+    /// ([`OwnedCar::purchase_price`]). Cars from old saves (no recorded price) use the model's
+    /// [`Economy::market_basis`].
     pub fn resale_basis(&self, car: &OwnedCar) -> Money {
         if let Some(paid) = car.purchase_price {
             return paid.max(0);
         }
+        self.market_basis(&car.def_id, car.class, car.base_price)
+    }
+
+    /// The lowest price the player could have paid for a car of this model: the floor car's
+    /// price for the floor model, else the cheapest dealer condition. Resale basis of cars with
+    /// no recorded price and of cars won in a pink slip (`Economy::take_pink_slip_car`), so
+    /// selling either always returns less than the dealer would charge for the same model.
+    pub fn market_basis(&self, def_id: &str, class: VehicleClass, base_price: u32) -> Money {
         let spec = CarSpec {
-            def_id: car.def_id.clone(),
-            class: car.class,
-            base_price: car.base_price,
+            def_id: def_id.to_string(),
+            class,
+            base_price,
         };
         let dealer = Condition::ALL
             .iter()
             .map(|c| self.market_price(&spec, *c))
             .min()
             .unwrap_or(0);
-        if car.def_id == self.market.floor_car.def_id {
+        if def_id == self.market.floor_car.def_id {
             dealer.min(self.market.floor_car.price)
         } else {
             dealer
@@ -350,7 +357,7 @@ impl Economy {
             .check_install(c.class, Some(mode), &c.mods, mod_id)?;
         let m = self.catalog.try_get(mod_id)?;
         transact(acct, |tx| {
-            if let Some(old) = &plan.replaces {
+            for old in plan.removed() {
                 self.remove_mod_in(tx, car, old)?;
             }
             tx.spend(
@@ -386,14 +393,39 @@ impl Economy {
         transact(acct, |tx| self.remove_mod_in(tx, car, mod_id))
     }
 
+    /// What taking `mod_id` off a car refunds (its resale value).
+    pub(crate) fn mod_refund(&self, mod_id: &str) -> Result<Money, EconomyError> {
+        let m = self.catalog.try_get(mod_id)?;
+        Ok(money(self.market.mod_resale_frac * m.price as f32))
+    }
+
+    /// Saves made before a mod superseded another (coilovers carry their own dampers) can
+    /// hold both. Take the superseded mods off every car and refund their full price: the
+    /// player bought them under the old rules. Run on load.
+    pub fn settle_superseded_mods(&self, acct: &mut PlayerAccount) -> EconResult<()> {
+        transact(acct, |tx| {
+            let cars: Vec<CarUid> = tx.acct.garage.iter().map(|c| c.uid).collect();
+            for car in cars {
+                let gone = self.catalog.superseded_in(&tx.car_mut(car)?.mods);
+                for id in gone {
+                    let price = self.catalog.try_get(&id)?.price as Money;
+                    let c = tx.car_mut(car)?;
+                    c.mods.retain(|x| *x != id);
+                    self.sync_parts_with_mods(c);
+                    tx.credit(price, EventReason::ModRemoved { mod_id: id }, Some(car));
+                }
+            }
+            Ok(())
+        })
+    }
+
     fn remove_mod_in(
         &self,
         tx: &mut crate::ledger::Txn,
         car: CarUid,
         mod_id: &str,
     ) -> Result<(), EconomyError> {
-        let m = self.catalog.try_get(mod_id)?;
-        let refund = money(self.market.mod_resale_frac * m.price as f32);
+        let refund = self.mod_refund(mod_id)?;
         let c = tx.car_mut(car)?;
         c.mods.retain(|x| x != mod_id);
         self.sync_parts_with_mods(c);

@@ -1,6 +1,7 @@
 # The city's street-racing regulars (wp_race::roster). Every named AI racer in the race picker
 # and in scheduled night meets comes from this list, so the same faces keep showing up with
-# the same car, temperament and track record.
+# the same car, temperament and track record (picker races may put a regular in another car
+# to match the player's car and rep: wp_race::field).
 #
 # id          stable key (save files, bets, scenario entity `ai_<first name>` in the picker)
 # name        display name; nickname is shown in quotes in menus

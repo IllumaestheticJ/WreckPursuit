@@ -30,8 +30,8 @@ use crate::crash_replay::{
 };
 use crate::data::mem_data;
 use crate::garage_visit::{
-    GarageOffer, GarageRepairReport, GarageSite, LayingLow, PlaceKind, PlaceStatus, PlaceVisit,
-    SafehouseSite, GARAGE_ENTER_SPEED_MPS,
+    GarageOffer, GarageRepairReport, GarageSite, LayingLow, MapPlace, MapPlaceKind, PlaceKind,
+    PlaceSite, PlaceStatus, PlaceVisit, SafehouseSite, GARAGE_ENTER_SPEED_MPS,
 };
 use crate::race::RaceRun;
 use crate::race_spots::MeetSpots;
@@ -143,6 +143,10 @@ pub struct Session {
     safehouses: Vec<SafehouseSite>,
     /// The open career place visit (garage or safehouse; the player's car is held).
     place: Option<PlaceVisit>,
+    /// Car lots on the map (career runs in the combined world; [`Session::set_career_places`]).
+    lots: Vec<PlaceSite>,
+    /// The player's unlocked home garages on the map (career runs in the combined world).
+    homes: Vec<PlaceSite>,
     playback: Option<Playback>,
     mode: DamageMode,
     live_end_hash: Option<u64>,
@@ -253,11 +257,13 @@ impl Session {
         // A picker race: judged next to the sim, live and in playback (not scripted menu runs).
         let race = match crate::race::race_for_scenario(&sc.name) {
             Some((def, autopilot)) if !scripted => Some(RaceRun::new(
-                &def,
+                // The field as the scenario spawned it (scaled to the player at the start).
+                &crate::race::field_of_scenario(&def, &sc),
                 autopilot,
                 &mut sim,
                 &ids,
                 &cars,
+                &modded,
                 &sc,
                 run.as_mut(),
             )?),
@@ -299,6 +305,8 @@ impl Session {
             visit_seq: 0,
             safehouses,
             place: None,
+            lots: Vec::new(),
+            homes: Vec::new(),
             script_end: if scripted { sc.ticks() } else { 0 },
             mode: sc.mode,
             sc,
@@ -355,7 +363,13 @@ impl Session {
                 // The player's scenario position picks the grid (a spawn choice, see
                 // `scenario::SPAWNS`; the origin = the city's first grid).
                 if let Some(e) = sc.entities.first_mut() {
-                    if let Some(p) = crate::scenario::spawn_grid(world.network(), e.pos) {
+                    // A career run from one of the player's garages starts on its lane.
+                    let home = crate::garage_visit::home_at_anchor([e.pos[0], e.pos[1]])
+                        .and_then(|h| crate::garage_visit::snap_to_lane(&world, h.anchor));
+                    if let Some((pos, yaw)) = home {
+                        e.pos = pos;
+                        e.yaw = yaw;
+                    } else if let Some(p) = crate::scenario::spawn_grid(world.network(), e.pos) {
                         e.pos = p.pos;
                         e.yaw = p.heading_rad;
                     }
@@ -618,6 +632,12 @@ impl Session {
     /// The picker race attached to this session, if any.
     pub fn race(&self) -> Option<&RaceRun> {
         self.race.as_ref()
+    }
+
+    /// Tests: the picker race, mutable.
+    #[cfg(test)]
+    pub(crate) fn race_mut(&mut self) -> Option<&mut RaceRun> {
+        self.race.as_mut()
     }
 
     /// The free-roam street racers attached to this session, if any.
@@ -1190,6 +1210,126 @@ impl Session {
         &self.safehouses
     }
 
+    /// Car lots on the map (career runs in the combined world only; empty otherwise).
+    pub fn lots(&self) -> &[PlaceSite] {
+        if self.race.is_some() || !self.career {
+            return &[];
+        }
+        &self.lots
+    }
+
+    /// The player's unlocked garages on the map (career runs in the combined world only).
+    pub fn homes(&self) -> &[PlaceSite] {
+        if self.race.is_some() || !self.career {
+            return &[];
+        }
+        &self.homes
+    }
+
+    /// Career runs in the combined world: put the car lots `lots` and the player's garages
+    /// `homes` (each `(id, name)`) on the map at their fixed spots
+    /// ([`crate::garage_visit::WORLD_LOTS`], [`crate::garage_visit::HOME_GARAGES`]). Ids without
+    /// a spot are skipped; other cities get none. A run that starts inside one of the homes
+    /// opens its visit at once (the player starts in their garage).
+    pub fn set_career_places(&mut self, lots: &[(String, String)], homes: &[(String, String)]) {
+        if self.sc.city != CitySpec::ashpeak() {
+            return;
+        }
+        let world = self.sim.world();
+        self.lots = lots
+            .iter()
+            .filter_map(|(id, name)| {
+                let spot = crate::garage_visit::WORLD_LOTS
+                    .iter()
+                    .find(|l| l.lot == id)?;
+                PlaceSite::at(world, id, name, spot.anchor)
+            })
+            .collect();
+        self.homes = homes
+            .iter()
+            .filter_map(|(id, name)| {
+                let spot = crate::garage_visit::home_spot(id)?;
+                PlaceSite::at(world, id, name, spot.anchor)
+            })
+            .collect();
+        let start = self
+            .run
+            .as_ref()
+            .and_then(|r| self.vehicle(r.player()))
+            .map(|v| v.vehicle.state().pos);
+        if let Some(p) = start {
+            if self.homes.iter().any(|h| h.contains([p[0], p[1]])) {
+                self.garage_armed = true;
+            }
+        }
+    }
+
+    /// Every drive-to place of the session (repair shops, and in career runs safehouses, car
+    /// lots and the player's garages), for the map and the waypoint.
+    pub fn map_places(&self) -> Vec<MapPlace> {
+        let mut out: Vec<MapPlace> = self
+            .garages()
+            .iter()
+            .map(|g| MapPlace {
+                kind: MapPlaceKind::Garage,
+                id: g.name.clone(),
+                name: g.name.clone(),
+                pos: g.pos,
+                radius_m: g.radius_m,
+                shop: Some(g.kind),
+            })
+            .collect();
+        out.extend(self.safehouses().iter().map(|h| MapPlace {
+            kind: MapPlaceKind::Safehouse,
+            id: h.name.clone(),
+            name: h.name.clone(),
+            pos: h.pos,
+            radius_m: h.radius_m,
+            shop: None,
+        }));
+        for (kind, list) in [
+            (MapPlaceKind::Lot, self.lots()),
+            (MapPlaceKind::Home, self.homes()),
+        ] {
+            out.extend(list.iter().map(|p| MapPlace {
+                kind,
+                id: p.id.clone(),
+                name: p.name.clone(),
+                pos: p.pos,
+                radius_m: p.radius_m,
+                shop: None,
+            }));
+        }
+        out
+    }
+
+    /// A drivable route from the player's car to `to` (`[x, y]`), as the lane centreline's
+    /// `[x, y]` points (the map's GPS line); empty without a city, a player or a route.
+    pub fn gps_route(&self, to: [f32; 2]) -> Vec<[f32; 2]> {
+        let Some(player) = self.entities().first().copied() else {
+            return Vec::new();
+        };
+        let Some(st) = self.vehicle(player).map(|v| v.vehicle.state()) else {
+            return Vec::new();
+        };
+        if self.sc.city == CitySpec::Flat {
+            return Vec::new();
+        }
+        // The chassis' forward (+Y) direction in the ground plane (as `street::yaw_of_rot`).
+        let q = st.rot;
+        let fwd = [
+            2.0 * (q[0] * q[1] - q[3] * q[2]),
+            1.0 - 2.0 * (q[0] * q[0] + q[2] * q[2]),
+        ];
+        let len = fwd[0].hypot(fwd[1]);
+        let heading = (len > 1e-3).then(|| [fwd[0] / len, fwd[1] / len]);
+        self.sim
+            .world()
+            .plan_route(st.pos, heading, [to[0], to[1], st.pos[2]])
+            .map(|r| r.polyline.iter().map(|p| [p[0], p[1]]).collect())
+            .unwrap_or_default()
+    }
+
     /// Career places: the open garage / safehouse visit, and the safehouse dwell while chased.
     pub fn place(&self) -> PlaceStatus {
         let mut status = PlaceStatus {
@@ -1267,14 +1407,18 @@ impl Session {
         let xy = [st.pos[0], st.pos[1]];
         let wanted = police.map_or(wp_contracts::WantedLevel::None, |r| r.level);
         let found = if let Some(g) = self.garages.iter().find(|g| g.contains(xy)) {
-            Some((PlaceKind::Garage, g.name.clone(), Some(g.kind)))
+            Some((PlaceKind::Garage, g.name.clone(), None, Some(g.kind)))
+        } else if let Some(h) = self.homes.iter().find(|h| h.contains(xy)) {
+            Some((PlaceKind::Home, h.name.clone(), Some(h.id.clone()), None))
+        } else if let Some(l) = self.lots.iter().find(|l| l.contains(xy)) {
+            Some((PlaceKind::Lot, l.name.clone(), Some(l.id.clone()), None))
         } else {
             self.safehouses
                 .iter()
                 .find(|h| h.contains(xy))
-                .map(|h| (PlaceKind::Safehouse, h.name.clone(), None))
+                .map(|h| (PlaceKind::Safehouse, h.name.clone(), None, None))
         };
-        let Some((kind, name, shop)) = found else {
+        let Some((kind, name, id, shop)) = found else {
             self.garage_armed = true;
             return;
         };
@@ -1288,6 +1432,7 @@ impl Session {
             seq: self.visit_seq,
             kind,
             name,
+            id,
             shop,
             wanted,
         });
@@ -2177,6 +2322,8 @@ impl Session {
             visit_seq: 0,
             safehouses: Vec::new(),
             place: None,
+            lots: Vec::new(),
+            homes: Vec::new(),
             sc: self.sc.clone(),
             scripted: self.scripted,
             script_end: self.script_end,

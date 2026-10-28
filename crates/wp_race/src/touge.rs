@@ -240,6 +240,14 @@ pub struct TougeRacer {
     pub driver: AiDriverDef,
     /// Title shown under the name (`King of the Crown`).
     pub title: &'static str,
+    /// Body colour 0xRRGGBB the NPC's car races in (the renderer paints it with this), and the
+    /// colour a won pink slip arrives in.
+    pub paint: u32,
+    /// The NPC's build (`data/mods` ids): installed on its car in the race (physics and look,
+    /// scenario `EntitySpec::mods`) and on the car a won pink slip brings home. Fixed per racer:
+    /// challengers moderately built, bosses heavily. Every mod is legal for the car's class
+    /// (`tests::touge_builds_are_legal_and_visible`).
+    pub mods: &'static [&'static str],
 }
 
 /// The pass's two NPCs, in [`MAPS`] order: `(challenger, boss)`. Their `id`s (`touge_<first
@@ -255,6 +263,16 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.72, 0.35, 0.85, 0.35, 0.85),
             },
             title: "Crown regular",
+            paint: 0xd8d8d2,
+            mods: &[
+                "engine_intake_1",
+                "engine_exhaust_1",
+                "susp_springs_1",
+                "wheels_mesh",
+                "body_front_lip",
+                "body_side_skirts",
+                "vinyl_pinstripe",
+            ],
         },
         TougeRacer {
             driver: AiDriverDef {
@@ -265,6 +283,25 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.9, 0.7, 0.9, 0.55, 0.8),
             },
             title: "King of the Crown",
+            paint: 0x1e1e22,
+            mods: &[
+                "engine_intake_2",
+                "engine_exhaust_2",
+                "engine_ecu_2",
+                "susp_coilovers_2",
+                "susp_arb_front",
+                "brakes_pads_1",
+                "brakes_kit_1",
+                "drivetrain_lsd_1",
+                "wheels_forged",
+                "aero_splitter",
+                "aero_wing_2",
+                "body_front_aggressive",
+                "body_side_skirts",
+                "body_rear_bumper",
+                "body_hood_vented",
+                "vinyl_race_number",
+            ],
         },
     ),
     (
@@ -277,6 +314,17 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.74, 0.5, 0.7, 0.45, 0.75),
             },
             title: "Ridge regular",
+            paint: 0x2a7fd0,
+            mods: &[
+                "engine_intake_1",
+                "engine_exhaust_1",
+                "drivetrain_lsd_1",
+                "susp_arb_rear",
+                "wheels_turbofan",
+                "body_front_lip",
+                "aero_ducktail",
+                "vinyl_side_slash",
+            ],
         },
         TougeRacer {
             driver: AiDriverDef {
@@ -287,6 +335,22 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.92, 0.6, 0.85, 0.75, 0.75),
             },
             title: "The Ridge Ghost",
+            paint: 0x7a1f1f,
+            mods: &[
+                "engine_intake_2",
+                "engine_exhaust_2",
+                "engine_ecu_2",
+                "susp_coilovers_2",
+                "brakes_pads_1",
+                "weight_carbon_hood",
+                "weight_strip_1",
+                "wheels_forged",
+                "aero_splitter",
+                "aero_diffuser",
+                "body_front_lip",
+                "body_side_skirts",
+                "interior_tint",
+            ],
         },
     ),
     (
@@ -299,6 +363,17 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.75, 0.65, 0.6, 0.6, 0.65),
             },
             title: "Ashfall regular",
+            paint: 0x3fb950,
+            mods: &[
+                "engine_intake_1",
+                "engine_exhaust_1",
+                "susp_springs_1",
+                "brakes_pads_1",
+                "wheels_split_spoke",
+                "aero_splitter",
+                "body_side_skirts",
+                "vinyl_stripes",
+            ],
         },
         TougeRacer {
             driver: AiDriverDef {
@@ -309,6 +384,23 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.9, 0.55, 0.92, 0.5, 0.9),
             },
             title: "Queen of Ashfall",
+            paint: 0x9b59b6,
+            mods: &[
+                "engine_intake_2",
+                "engine_exhaust_2",
+                "engine_ecu_2",
+                "drivetrain_lsd_2",
+                "susp_coilovers_2",
+                "brakes_pads_1",
+                "brakes_kit_1",
+                "wheels_forged",
+                "aero_splitter",
+                "aero_wing_2",
+                "body_front_widebody",
+                "body_side_widebody",
+                "body_rear_widebody",
+                "vinyl_sunset_fade",
+            ],
         },
     ),
     (
@@ -321,6 +413,16 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.73, 0.4, 0.8, 0.4, 0.8),
             },
             title: "Cedar regular",
+            paint: 0xd0a92a,
+            mods: &[
+                "engine_intake_1",
+                "engine_exhaust_1",
+                "susp_springs_1",
+                "wheels_black_steel",
+                "body_mud_flaps",
+                "body_fog_lights",
+                "vinyl_race_number",
+            ],
         },
         TougeRacer {
             driver: AiDriverDef {
@@ -331,6 +433,22 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.93, 0.75, 0.95, 0.45, 0.85),
             },
             title: "The Cedar Fox",
+            paint: 0xe07a1f,
+            mods: &[
+                "engine_intake_2",
+                "engine_exhaust_2",
+                "engine_ecu_2",
+                "drivetrain_lsd_2",
+                "susp_coilovers_2",
+                "brakes_pads_1",
+                "weight_strip_1",
+                "wheels_deep_dish",
+                "aero_splitter",
+                "aero_swan_wing",
+                "body_front_aggressive",
+                "body_side_skirts",
+                "vinyl_shark_mouth",
+            ],
         },
     ),
 ];
@@ -475,7 +593,7 @@ impl TougeSetup {
                 finish_back_m: 0.0,
             },
             length_hint_m: m.length_hint_m,
-            ai: std::slice::from_ref(&self.racer().driver),
+            ai: vec![self.racer().driver],
             seed: self.seed(),
             prior_meets: 0,
             // Touge lays out its own single-file grid ([`plan_course`]); no picker override.
@@ -978,6 +1096,10 @@ pub struct OpponentCar {
     pub class: VehicleClass,
     /// Base price.
     pub base_price: u32,
+    /// Body colour 0xRRGGBB it raced in ([`TougeRacer::paint`]).
+    pub paint: u32,
+    /// Mods it raced with ([`TougeRacer::mods`]).
+    pub mods: Vec<String>,
     /// Its damage when the battle was decided.
     pub damage: wp_economy::DamageSnapshot,
 }
@@ -1070,7 +1192,9 @@ pub fn settle(
                 def_id: setup.racer().driver.car.to_string(),
                 class: opponent.class,
                 base_price: opponent.base_price,
-                mods: Vec::new(),
+                // The same car arrives: its build and paint (touge NPCs have no named variant).
+                mods: opponent.mods.clone(),
+                paint: Some(opponent.paint),
                 damage: opponent.damage.clone(),
             };
             let (uid, ev) = econ.take_pink_slip_car(&mut work, car)?;
@@ -1198,7 +1322,11 @@ mod tests {
         let b = Boundary::from_world(&w).unwrap();
         let s = &w.network().surfaces[0];
         // On the first straight, with no other leg of the road within the corridor.
-        let (p, d) = geom::point_at(&s.centre, &geom::cumulative(&s.centre), 120.0);
+        let (p, d) = geom::point_at(
+            &s.centre,
+            &geom::cumulative(&s.centre),
+            wp_world::touge::RUN_OFF_EXT_M + 120.0,
+        );
         let r = geom::right_of(d);
         let at = |lat: f32, dz: f32| [p[0] + r[0] * lat, p[1] + r[1] * lat, p[2] + dz];
         assert_eq!(b.check(at(0.0, 0.5)), None);
@@ -1228,8 +1356,10 @@ mod tests {
         let b = Boundary::from_world(&w).unwrap();
         let s = &w.network().surfaces[0];
         let cum = geom::cumulative(&s.centre);
-        let (upper, _) = geom::point_at(&s.centre, &cum, 850.0);
-        let (lower_s, _) = b.locate(upper, Some(560.0));
+        // (Distances along the spec's course, from the end of the base run-off.)
+        let c0 = wp_world::touge::RUN_OFF_EXT_M;
+        let (upper, _) = geom::point_at(&s.centre, &cum, c0 + 850.0);
+        let (lower_s, _) = b.locate(upper, Some(c0 + 560.0));
         let (lower, _) = geom::point_at(&s.centre, &cum, lower_s);
         assert!(geom::dist(geom::xy(upper), geom::xy(lower)) < 40.0);
         assert!(upper[2] - lower[2] > 10.0, "{} vs {}", upper[2], lower[2]);
@@ -1238,12 +1368,12 @@ mod tests {
         assert_eq!(b.check(landed), None);
         // ...but a car tracked on the upper leg that lands there fell off the mountain.
         assert_eq!(
-            b.check_near(landed, Some(850.0)).0,
+            b.check_near(landed, Some(c0 + 850.0)).0,
             Some(BreachKind::OffTheEdge)
         );
         // Tracking follows a car along its own leg.
-        let (_, s1) = b.check_near([upper[0], upper[1], upper[2] + 0.5], Some(845.0));
-        assert!((s1 - 850.0).abs() < 1.0, "{s1}");
+        let (_, s1) = b.check_near([upper[0], upper[1], upper[2] + 0.5], Some(c0 + 845.0));
+        assert!((s1 - c0 - 850.0).abs() < 1.0, "{s1}");
     }
 
     #[test]
@@ -1268,6 +1398,69 @@ mod tests {
         assert_eq!(b.observe(12, &[(me, far)]), None);
         b.decide(20, false);
         assert_eq!(b.outcome(), Some(&o));
+    }
+
+    #[test]
+    fn run_offs_lie_beyond_the_finish_and_inside_the_corridor() {
+        // Owner 2026-10-28: room to slow down after the finish. The road runs on
+        // `wp_world::touge::RUN_OFF_M` past each finish line into a gravel bed: the judged
+        // course still ends at the finish POI (the run-off is not raced), the AI's run-off leg
+        // past the line lies on it, and a car anywhere on it or in the bed is still on the
+        // mountain (no breach: no total loss).
+        use wp_world::touge::{RUN_OFF_M, TRAP_HALF_W_M, TRAP_M};
+        for (map, m) in MAPS.iter().enumerate() {
+            let w = world(m.id);
+            let b = Boundary::from_world(&w).unwrap();
+            let track = wp_world::touge::generate_builtin(m.id).unwrap().track;
+            let s = &w.network().surfaces[0];
+            let cum = geom::cumulative(&s.centre);
+            for d in [Direction::Uphill, Direction::Downhill] {
+                let up = d == Direction::Uphill;
+                let def = setup(map, d, Opponent::Boss).race_def();
+                let race = plan_course(&w, &def).unwrap();
+                let gate = race.course.gates.last().unwrap();
+                let (s_fin, _) = b.locate(gate.pos, None);
+                let line = track.finish_m[usize::from(up)];
+                assert!(
+                    (s_fin - line).abs() < 2.0,
+                    "{} {d:?}: finish at {s_fin}",
+                    m.id
+                );
+                // Beyond the line, along the direction of travel.
+                let past = |x: f32| if up { s_fin + x } else { s_fin - x };
+                let ai = crate::entrants::run_off_route(&w, &race.route).unwrap();
+                let (s_ai, _) = b.locate(*ai.polyline.last().unwrap(), None);
+                let ran_on = (s_ai - s_fin) * if up { 1.0 } else { -1.0 };
+                assert!(
+                    ran_on > 0.5 * crate::entrants::AI_RUN_OFF_M && ran_on < RUN_OFF_M - 100.0,
+                    "{} {d:?}: AI run-off ends {ran_on} m past the line",
+                    m.id
+                );
+                // The whole paved run-off, across both lanes: still racing.
+                let mut x = 0.0;
+                while x <= RUN_OFF_M - 1.0 {
+                    let (p, dir) = geom::point_at(&s.centre, &cum, past(x));
+                    for lat in [-(b.half_width_m - 0.8), 0.0, b.half_width_m - 0.8] {
+                        let q = geom::add(geom::xy(p), geom::scale(geom::right_of(dir), lat));
+                        let pos = [q[0], q[1], p[2] + 0.5];
+                        assert_eq!(b.check(pos), None, "{} {d:?}: {x} m past the line", m.id);
+                    }
+                    x += 5.0;
+                }
+                // ... and the gravel bed at its end.
+                let trap = &track.traps[usize::from(up)];
+                for a in [3.0, 15.0, 30.0, TRAP_M - 4.0] {
+                    for l in [-(TRAP_HALF_W_M - 2.0), 0.0, TRAP_HALF_W_M - 2.0] {
+                        if a > TRAP_M - 6.0 && l != 0.0 {
+                            continue; // the rounded end
+                        }
+                        let q = trap.world(a, l);
+                        let pos = [q[0], q[1], trap.floor_z + 0.5];
+                        assert_eq!(b.check(pos), None, "{} {d:?}: bed ({a}, {l})", m.id);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -1308,6 +1501,7 @@ mod tests {
                     def_id: "kestrel_ts".into(),
                     class: VehicleClass::Sport,
                     base_price: 22_000,
+                    paint: None,
                     mods: Vec::new(),
                     damage: wp_economy::DamageSnapshot::pristine(),
                 },
@@ -1390,6 +1584,8 @@ mod tests {
             let opp = OpponentCar {
                 class: VehicleClass::Sport,
                 base_price: 34_000,
+                paint: 0x2b3a55,
+                mods: Vec::new(),
                 damage: wp_economy::DamageSnapshot::pristine(),
             };
             let (out, _) = settle(
@@ -1434,6 +1630,8 @@ mod tests {
         let opp = OpponentCar {
             class: VehicleClass::Exotic,
             base_price: 120_000,
+            paint: 0x2b3a55,
+            mods: s.racer().mods.iter().map(|m| m.to_string()).collect(),
             damage: damage.clone(),
         };
         let (out, _) = settle(
@@ -1450,6 +1648,22 @@ mod tests {
         let won = acct.car(uid).unwrap();
         assert_eq!(won.def_id, "lucciola_350");
         assert_eq!(won.damage, damage, "the car arrives exactly as it finished");
+        assert_eq!(won.paint, Some(0x2b3a55), "in the colour it raced in");
+        let mut raced = opp.mods.clone();
+        raced.sort();
+        let mut arrived = won.mods.clone();
+        arrived.sort();
+        assert!(!raced.is_empty());
+        assert_eq!(arrived, raced, "with the build it raced with");
+        assert!(
+            won.purchase_price.is_some_and(|p| p > 0),
+            "worth real money"
+        );
+        assert_eq!(
+            out.purse,
+            table.for_opponent(s.opponent).purse,
+            "a won pink slip pays the purse too"
+        );
         assert!(acct.car(car).is_some(), "the player keeps their own car");
     }
 
@@ -1469,6 +1683,8 @@ mod tests {
         let opp = OpponentCar {
             class: VehicleClass::Sport,
             base_price: 22_000,
+            paint: 0x2b3a55,
+            mods: Vec::new(),
             damage: wp_economy::DamageSnapshot::pristine(),
         };
         let (out, _) = settle(
@@ -1561,6 +1777,8 @@ mod tests {
         let opp = OpponentCar {
             class: VehicleClass::Sport,
             base_price: 34_000,
+            paint: 0x2b3a55,
+            mods: Vec::new(),
             damage: wp_economy::DamageSnapshot::pristine(),
         };
         // Side bet on a boss: stake back, no purse, no rep.

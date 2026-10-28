@@ -26,6 +26,10 @@ pub enum PropKind {
     /// slides along it, breaks away as a light body when a car hits it square enough
     /// ([`PropKind::breakaway_mps`]).
     GuardRail,
+    /// A water-filled crash barrel in front of a blunt barrier end
+    /// ([`crate::barrier_ends`]): light enough to be shoved aside, so a run of them slows a car
+    /// instead of stopping it dead.
+    WaterBarrel,
 }
 
 /// Closing speed (towards the rail, along its normal) above which a guard rail section breaks
@@ -35,11 +39,12 @@ pub const GUARD_RAIL_BREAK_MPS: f32 = 5.0;
 impl PropKind {
     /// For props anchored to the ground: the closing speed (m/s, along the prop's local X
     /// axis, i.e. square into its face) a mover needs before the prop is let loose. `None` for
-    /// props that turn loose whenever something comes near (parked cars, cones, K-rails).
+    /// props that turn loose whenever something comes near (parked cars, cones, K-rails, water
+    /// barrels).
     pub fn breakaway_mps(self) -> Option<f32> {
         match self {
             PropKind::GuardRail => Some(GUARD_RAIL_BREAK_MPS),
-            PropKind::ParkedCar | PropKind::Cone | PropKind::KRail => None,
+            PropKind::ParkedCar | PropKind::Cone | PropKind::KRail | PropKind::WaterBarrel => None,
         }
     }
 }

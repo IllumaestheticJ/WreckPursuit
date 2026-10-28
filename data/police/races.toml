@@ -25,7 +25,11 @@
 #   helicopters   helicopters up at once in this race (any time of day)
 #   max_ground_units  ground unit cap for this race
 #   [x.unlocks]   wanted level (1-5) at which roadblock / spikes / helicopter / pit / boxin /
-#                 rolling_block tactics unlock in this race (a tactic switched off stays off)
+#                 rolling_block / ram (rear rams, side slams) / hard_ram tactics unlock in this
+#                 race (a tactic switched off stays off)
+#   unit_level    police cars come from the five-model fleet (Warden, Cruiser, Bastion,
+#                 Wolfhound, Vigil) picked as if the racers were at least this wanted level
+#                 (5 = only the Wolfhound and Vigil). Leave out for the standard Cruiser.
 #
 # Physics is the same for every race and both damage modes: these tables only decide where the
 # police are and what they may do (owner rule 2026-10-20).
@@ -115,32 +119,40 @@ trigger_m = 120.0
 # One lap of Loop 9 at 2 pm (wp_race::catalog loop9_day). Owner brief 2026-10-24: "much heavier
 # police presence, with helicopters, road blocks, etc". Every patrol in town works the loop
 # (on the highway, racing direction, never on the streets off it); two helicopters up from the
-# first wanted level; the captain's roadblocks from level 2 and spikes from 3; two scripted
-# roadblocks across the loop with one lane open, a spike strip over the outer half of the road,
-# the on-ramps sealed and six units waiting on the shoulders. PIT and rams at highway speed.
+# first wanted level; two scripted roadblocks across the loop with one lane open, a spike strip
+# over the outer half of the road, the on-ramps sealed and six units waiting on the shoulders.
+# Owner 2026-10-26 ("loop 9 day should also have the hardest cops"): the hardest response in the
+# game. Every car is a top-tier interceptor (unit_level 5: Wolfhound and Vigil only, the grid's
+# patrols included), three helicopters, the most backup (x2.5) and units (40), the captain's
+# roadblocks from the first wanted level and spikes from 2, rams and side slams from 1 and hard
+# rams from 2, PITs at highway speed at every level, and a second spike strip on the inner half.
 [loop9_day]
 name = "Daylight dragnet"
-summary = "Every unit in the city on the loop: two helicopters, roadblocks and spikes across the highway, ramps sealed, units on every shoulder."
+summary = "The hardest cops in the city: top-tier interceptors only, three helicopters, roadblocks and spikes across the highway, ramps sealed, units on every shoulder."
 # Owner 2026-10-23 cut day patrols 13 -> 5 city-wide (PR #64); the dragnet keeps its old count:
 # 2.5 x 13 = 33 before, 6.5 x 5 = 34 now (Core 3 -> 20, Suburb 1 -> 7, Industrial 1 -> 7).
 presence = 6.5
-backup_scale = 2.0
+backup_scale = 2.5
 tool_lifetime_s = 600.0
 recognise_on_sight = true
 patrol_corridor_m = 60.0
-helicopters = 2
-max_ground_units = 36
+helicopters = 3
+max_ground_units = 40
+unit_level = 5
 
 [loop9_day.unlocks]
 helicopter_level = 1
-roadblock_level = 2
-spikes_level = 3
+roadblock_level = 1
+spikes_level = 2
 pit_level = 1
-rolling_block_level = 2
+boxin_level = 1
+rolling_block_level = 1
+ram_level = 1
+hard_ram_level = 2
 
 [loop9_day.speed]
-pit_max_kmh = [180.0, 200.0, 220.0, 220.0, 220.0]
-speed_margin = 0.35
+pit_max_kmh = [220.0, 220.0, 220.0, 220.0, 220.0]
+speed_margin = 0.4
 
 [[loop9_day.route_blocks]]
 at = 0.35
@@ -158,6 +170,11 @@ units = 2
 at = 0.55
 length_m = 4.0
 offset_m = -2.5
+
+[[loop9_day.spikes]]
+at = 0.85
+length_m = 4.0
+offset_m = 2.5
 
 [[loop9_day.side_blocks]]
 from = 0.1

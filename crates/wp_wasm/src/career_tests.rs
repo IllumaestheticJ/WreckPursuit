@@ -1157,7 +1157,7 @@ fn a_picker_race_the_career_cannot_afford_is_refused() {
         crate::race::race_scenario_in(&def, "ignored", DamageMode::Arcade, false, def.city.id())
             .unwrap();
     let car = c.loaded_car(c.profile().account.car(uid).unwrap()).unwrap();
-    let fee = crate::race::race_cards(Some(&car), DamageMode::Arcade)
+    let fee = crate::race::race_cards(Some(&car), DamageMode::Arcade, 0)
         .into_iter()
         .find(|r| r.id == "loop9_day")
         .unwrap()
@@ -1193,7 +1193,7 @@ fn the_career_picker_prices_the_modded_car_like_the_run() {
         }
     }
     let stock = simcli::data::load_car(crate::data::mem_data(), "kestrel_ts").unwrap();
-    let stock_cards = crate::race::race_cards(Some(&stock), DamageMode::Arcade);
+    let stock_cards = crate::race::race_cards(Some(&stock), DamageMode::Arcade, 0);
     for card in c.race_cards() {
         let def = wp_race::catalog::race(card.id).unwrap();
         let sc = crate::race::race_scenario_in(
@@ -1328,4 +1328,61 @@ fn the_career_bounty_is_carried_into_the_chase() {
     let carry = s.sim().police().config().heat.bounty.career_carry;
     assert!((s.sim().police().bounty(id) - 3_000.0 * carry).abs() < 1e-3);
     c.finish_run(&mut s).unwrap();
+}
+
+#[test]
+fn every_car_has_a_horsepower_and_an_engine_mod_raises_it() {
+    let (mut c, uid) = career_with("kestrel_ts", 200_000, DamageMode::Arcade);
+    for d in c.dealer().to_vec() {
+        assert!(
+            (40.0..=2000.0).contains(&d.stats.power_hp),
+            "{}: {} hp",
+            d.def_id,
+            d.stats.power_hp
+        );
+    }
+    // A used car may have worn engine parts: never more than stock.
+    let w0 = c.workshop(uid).unwrap();
+    assert!(
+        w0.power_hp <= w0.stock_power_hp + 0.5,
+        "{} vs {}",
+        w0.power_hp,
+        w0.stock_power_hp
+    );
+    let before = c.view().cars[0].stats.clone().unwrap().power_hp;
+    c.install_mod(uid, "engine_intake_1").unwrap();
+    let after = c.view().cars[0].stats.clone().unwrap().power_hp;
+    assert!(after > before, "intake: {before} -> {after} hp");
+    let w = c.workshop(uid).unwrap();
+    assert!(
+        w.power_hp > w0.power_hp + 0.5,
+        "{} -> {} hp",
+        w0.power_hp,
+        w.power_hp
+    );
+    assert_eq!(w.stock_power_hp, w0.stock_power_hp);
+}
+
+/// Owner, 2026-10-27: the field brings cars to match the career car and rep. A career run of
+/// a picker race spawns the field scaled to the active car, whatever the scenario said.
+#[test]
+fn a_career_race_field_matches_the_career_car() {
+    let (mut c, _) = career_with("fulmine_v10", 5_000_000, DamageMode::Arcade);
+    let def = wp_race::catalog::race("loop9_circuit").unwrap();
+    let sc =
+        crate::race::race_scenario_in(&def, "ignored", DamageMode::Arcade, false, def.city.id())
+            .unwrap();
+    let s = c.start_run(sc).unwrap();
+    let field = &s.scenario().entities[1..];
+    assert_eq!(field.len(), def.ai.len());
+    for e in field {
+        let car = simcli::data::load_car(crate::data::mem_data(), &e.car).unwrap();
+        assert_eq!(
+            car.def.class,
+            wp_contracts::VehicleClass::Exotic,
+            "{} in a {} against the career's Fulmine",
+            e.id,
+            e.car
+        );
+    }
 }

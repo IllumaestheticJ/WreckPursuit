@@ -394,4 +394,71 @@ mod tests {
             bad.first()
         );
     }
+
+    #[test]
+    fn freeway_ends_are_walled_up_to_the_junction() {
+        // Where a freeway ends at grade on a street, its outer edges' barriers stopped 40 m
+        // short of the junction (or left a lone stub of wall there): owner 2026-10-27, "the
+        // ends of the highway the barriers are totally wonky".
+        let (net, _) = city();
+        let map = crate::CityMap::new(net.clone());
+        // Concrete barriers, or a bridge deck's guard rails where the end is up on one.
+        let mut barriers: Vec<V3> = crate::surface::edge_barriers(&map).concat();
+        barriers.extend(
+            crate::surface::deck_rails(net)
+                .into_iter()
+                .flat_map(|(a, b)| [a, b]),
+        );
+        let radii = crate::surface::junction_paved_radii(net);
+        let carriageway = |road: u32| {
+            net.surfaces.iter().any(|s| s.road == road && s.highway)
+                && net
+                    .lanes
+                    .iter()
+                    .filter(|l| l.road == road && l.kind.drivable())
+                    .count()
+                    >= 3
+        };
+        let mut ends = 0;
+        for (ix, r) in net.intersections.iter().zip(&radii) {
+            let node = ix.node;
+            let roads: Vec<u32> = net
+                .lanes
+                .iter()
+                .filter(|l| l.from_node == node || l.to_node == node)
+                .map(|l| l.road)
+                .collect();
+            let street = roads
+                .iter()
+                .any(|&rd| !net.surfaces.iter().any(|s| s.road == rd && s.highway));
+            if *r <= 0.0 || !street {
+                continue;
+            }
+            let c = net.nodes[node as usize].pos;
+            for s in net
+                .surfaces
+                .iter()
+                .filter(|s| roads.contains(&s.road) && carriageway(s.road))
+            {
+                ends += 1;
+                let (_, right) = crate::surface::surface_edges(s);
+                let line = geom::offset_polyline(&right, crate::surface::BARRIER_HALF_WIDTH_M);
+                let reach = r + crate::surface::JUNCTION_BARRIER_GAP_M + 10.0;
+                let walled = line
+                    .iter()
+                    .filter(|q| geom::dist(geom::xy(**q), geom::xy(c)) < reach)
+                    .any(|q| {
+                        barriers
+                            .iter()
+                            .any(|b| geom::dist(geom::xy(*b), geom::xy(*q)) < 1.0)
+                    });
+                assert!(
+                    walled,
+                    "road {} outer edge bare before the junction at {c:?}",
+                    s.road
+                );
+            }
+        }
+        assert!(ends >= 4, "only {ends} at-grade freeway ends");
+    }
 }
