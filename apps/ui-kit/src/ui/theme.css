@@ -298,6 +298,11 @@
   border-color: var(--scan);
   color: #04120a;
 }
+.wp-btn--primary .wp-kbd {
+  color: inherit;
+  border-color: currentColor;
+  opacity: 0.7;
+}
 .wp-btn--primary:hover:not(:disabled) {
   background: #fff;
   border-color: #fff;
