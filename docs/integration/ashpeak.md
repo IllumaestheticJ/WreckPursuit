@@ -56,6 +56,24 @@ Eight new race goldens in `apps/simcli/golden/` (`race_ashpeak_downtown_checkpoi
 - Regression tests in `vesper::ashpeak::tests`: no opposing lanes overlap, no median barrier
   on a lane, no building on a lane. Greyboxes regenerated (`vesper_v2` unchanged).
 
+## Fixes 2026-10-27 (owner: "the ends of the highway the barriers are totally wonky")
+- **Edge barriers at at-grade ends.** `surface::edge_barriers` widened every opening by
+  `GORE_BARRIER_GAP_M` (40 m), junctions included, and measured junctions by their paved
+  circle, which reaches far up a wide carriageway end. So the last 40–70 m before every
+  freeway end on a street (Route 7 at Northline Parkway and Uptown Connector, Route 12 at
+  Northline and Lantern Way) was unwalled, with a lone ~20 m stub of wall between the ramp
+  taper and the end. Now a junction with a street opens only its node patch plus
+  `JUNCTION_BARRIER_GAP_M`; ramp tapers, gores and highway-to-highway splits keep the 40 m.
+- **Deck ends.** The barrier was cut on a whole surface-vertex step (up to ~10 m) where a
+  bridge deck's rails end. The edge is now sampled every 2 m and the barrier starts where the
+  rail stops (output lines still only have the surface's own vertices plus the run ends).
+- **Stubs.** A piece shorter than `MIN_EDGE_BARRIER_M` (30 m) between two openings is
+  dropped, unless it carries a deck rail or tunnel wall on.
+- **Median.** `divided::FAN_M` 140 → 60 m (the carriageways only move in 1.5 m), so the
+  median barrier runs to ~30 m from the junction instead of ~100 m.
+- Test `vesper::ashpeak::tests::freeway_ends_are_walled_up_to_the_junction`. Greyboxes
+  regenerated (both cities).
+
 ## Known gaps
 - Harnell Flats farmland uses `DistrictId::Suburb` (no farm district in the contract).
 - The greybox (`data/city/ashpeak.greybox.glb`) is about 25 MB.
