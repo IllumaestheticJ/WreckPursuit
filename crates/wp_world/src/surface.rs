@@ -2047,6 +2047,84 @@ pub fn median_barriers(net: &RoadNetwork) -> Vec<Vec<V3>> {
         .collect()
 }
 
+/// Length of the sloped terminal at each free end of a median barrier, m. Over it the barrier
+/// rises from [`BARRIER_TIP_FRACTION`] of its height at the tip to full height, so a car that
+/// meets an end head-on (the far side of a crossover opening, a fan gore) rides up the slope
+/// instead of stopping dead against a 0.8 m concrete face (owner 2026-10-27: "right after one
+/// of the bumps ... completely stopped", 77 m/s to 13 m/s in one tick at Loop 9's crossovers).
+pub const BARRIER_TERMINAL_M: f32 = 12.0;
+/// Height of a terminal's tip, as a fraction of the full barrier height.
+pub const BARRIER_TIP_FRACTION: f32 = 0.06;
+/// Spacing of the points laid along a terminal, m.
+const TERMINAL_STEP_M: f32 = 1.0;
+/// Two barrier ends closer than this continue each other (no terminal between them), m.
+const JOINED_END_M: f32 = 0.5;
+
+/// [`median_barriers`] with their sloped ends: per point, its position and the fraction of the
+/// full barrier height standing there (1 everywhere but the [`BARRIER_TERMINAL_M`] at a free
+/// end, where extra points every [`TERMINAL_STEP_M`] carry the slope). An end that meets
+/// another barrier line's end continues it and gets no terminal. Physics and the greybox both
+/// build from this.
+pub fn median_barrier_profiles(net: &RoadNetwork) -> Vec<Vec<(V3, f32)>> {
+    let lines = median_barriers(net);
+    let ends: Vec<V2> = lines
+        .iter()
+        .flat_map(|l| [geom::xy(l[0]), geom::xy(l[l.len() - 1])])
+        .collect();
+    let free = |k: usize| {
+        ends.iter()
+            .enumerate()
+            .all(|(j, e)| j == k || geom::dist(*e, ends[k]) >= JOINED_END_M)
+    };
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| with_terminals(l, free(2 * i), free(2 * i + 1)))
+        .collect()
+}
+
+/// `line` with height fractions, sloped over [`BARRIER_TERMINAL_M`] at its start and / or end
+/// (at most half its length each).
+fn with_terminals(line: &[V3], at_start: bool, at_end: bool) -> Vec<(V3, f32)> {
+    let cum = geom::cumulative(line);
+    let len = cum[cum.len() - 1];
+    let t = BARRIER_TERMINAL_M.min(0.5 * len);
+    if t <= 0.0 || (!at_start && !at_end) {
+        return line.iter().map(|p| (*p, 1.0)).collect();
+    }
+    let frac = |s: f32| {
+        let mut f = 1.0f32;
+        if at_start {
+            f = f.min(BARRIER_TIP_FRACTION + (1.0 - BARRIER_TIP_FRACTION) * (s / t).min(1.0));
+        }
+        if at_end {
+            let d = len - s;
+            f = f.min(BARRIER_TIP_FRACTION + (1.0 - BARRIER_TIP_FRACTION) * (d / t).min(1.0));
+        }
+        f
+    };
+    let mut ss: Vec<f32> = cum.clone();
+    let steps = (t / TERMINAL_STEP_M).ceil() as usize;
+    for k in 1..=steps {
+        let d = (k as f32 * TERMINAL_STEP_M).min(t);
+        if at_start {
+            ss.push(d);
+        }
+        if at_end {
+            ss.push(len - d);
+        }
+    }
+    ss.sort_by(|a, b| a.total_cmp(b));
+    ss.dedup_by(|a, b| (*a - *b).abs() < 0.05);
+    // Dedup keeps the first of near-equal arc lengths: the line still ends at its end.
+    if let Some(last) = ss.last_mut() {
+        *last = len;
+    }
+    ss.iter()
+        .map(|&s| (geom::point_at(line, &cum, s).0, frac(s)))
+        .collect()
+}
+
 /// The median lines themselves: the left paved edge of every surface flagged
 /// [`RoadSurface::median_barrier`], without the crossover openings (where the median runs,
 /// whether or not a barrier stands on it). The edge is left out where it lies on another
