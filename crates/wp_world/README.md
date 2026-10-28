@@ -326,12 +326,15 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
 
 - **Covered roads** (backlog B04, `RoadNetwork::covered`): the **Hollins Tunnel** — Loop 9
   through the northern shoulder of Hollins Heights, 391 m, road profile unchanged (it already
-  ran in a cut), ground backfilled over the roof on the hill side — and **Founders Cut** — the
+  ran in a cut), buried: ground backfilled level with the deck and a 1 in 3 embankment down
+  to the natural ground beyond it (its north side is below the roof) — and **Founders Cut** — the
   Uptown Connector dropped 7 m below the lowest natural ground into a 250 m covered trench
   (an internal profile anchor; ramps ≈ 5 %), ground backfilled level with the plaza deck.
   Inner half width = paved half width + 3.5 m (sidewalk roads) / 1.5 m; ceiling 6.5 m
-  (highway) / 6 m; 0.6 m walls; 0.8 m deck reaching 8.5 m past each wall over the carved
-  shoulder. No buildings on the decks. Route POIs `"<name> entry"`, `"<name> lay-by"`
+  (highway) / 6 m; 0.6 m walls; 0.8 m deck reaching 24 m past each wall (the first 12 m over
+  the carved shoulder, the rest over backfill level with it; `covered::DECK_OVERHANG_M`,
+  `BACKFILL_START_M`), its ground drawn and collided at the terrain's own resolution
+  (`surface::collision_terrain`) so it meets the deck edge flush. No buildings in the trench. Route POIs `"<name> entry"`, `"<name> lay-by"`
   (mid-tunnel kerb lane), `"<name> exit"`.
 - **Line of sight** (`CityMap::line_of_sight`): blocked from outside a span into it and back;
   two points inside the same span see each other along a line that stays inside; outside
@@ -673,6 +676,28 @@ polygon's vertices in order and closes the loop), checkpoints at every turn and 
 (gate width = carriageway), `closure_for_route` (closes both directions of every road on the
 route and puts 3 cones across every side-street stop line). `World::set_active_routes` makes
 routes LOD/spawn focus areas and applies closures.
+
+**Lane changes in routes** (owner 2026-10-27, "make sure the street racer routing makes
+sense", full-map pass): `plan_route_via` (AI street racer routes: challenges, Loop 9
+laps, street roam legs, flights from the police) may move to a neighbouring lane of the same road and
+direction (`Lane::left`/`right`) part way along a lane: `routes::lane_change_at` puts the
+change as early as the lane allows (`LANE_CHANGE_M` = 40 m after joining it, never within 10 m
+of either lane's end) and the search charges 2.5 s for it. A route's `segs` then hold `X, B`
+with B beside X; `routes::route_spans` gives the arc range driven on each segment (the AI
+corridor reads routes the same way) and the polyline eases across over the last 40 m of X.
+`plan_route` and `plan_circuit` stay lane-locked (`shortest_path`): scripted scenario drivers,
+the retired picker races and the Loop 9 courses (police tables, goldens, learned rows) are laid
+out on those lanes. Audit with `cargo run --release -p wp_world --example route_audit -- 300`
+(random street racer A → B pairs over the whole combined world vs an oracle that changes lanes
+anywhere; `ROUTE=ax,ay,hx,hy,bx,by` prints one route road by road). 300 pairs:
+
+| | ≥ 1.5× the quickest time | unplannable | worst |
+|---|---|---|---|
+| before (lane-locked, the street roam legs' exact finish lane) | 33 % | 9 of 150 | 21.5 km for a 0.9 km trip (Wharf St → Seawall Blvd) |
+| before (lane-locked, finish = the road: challenges) | 16 % | 3 of 150 | 16 km for 2.6 km |
+| after (`plan_route_via`, all street racer routes) | 0.7 % | 0 | 10.9 km for 2.4 km (a one-way Route 12 ramp) |
+
+Tests: `tests/route_lanes.rs`.
 
 **Determinism**: no wall clock, no `f64`, `BTreeMap`/`Vec` only, a single seeded
 `wp_math::Rng` used in a fixed order, polynomial `atan`/`sin_cos`, IEEE `sqrt` only. Time is

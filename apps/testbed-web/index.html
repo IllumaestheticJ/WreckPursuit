@@ -10,6 +10,8 @@
       #overlay { position: fixed; inset: 0; pointer-events: none; }
       /* Garage workshop: only its own overlay over the 3D bay (src/workshop). */
       body.wp-workshop #overlay > :not(#ui-workshop) { display: none !important; }
+      /* Car lot visit: only the lot overlay over the 3D lot (ui-kit LotVisit). */
+      body.wp-lot #overlay > :not(#ui-lot) { display: none !important; }
       .panel { background: rgba(0, 0, 0, 0.6); padding: 6px 8px; border-radius: 4px; pointer-events: auto; }
       .hidden { display: none !important; }
       .left-col { position: absolute; top: 8px; left: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }

@@ -263,11 +263,45 @@ the procedural grid's highway diverge ramps (a world geometry snag, reported in
 | `civilian_margin_m` | 1.0 → 0.6 m (at speed; 0.4 m creeping) | risk |
 | `civilian_headway_s` | 1.6 → 0.9 s | risk |
 | `flee_wanted_level` | 1 → 4 | risk |
-| uses opposing lanes to pass (open roads) | risk ≥ 0.5 | risk |
+| `opposing_passes`: overtakes on the opposing lanes (open roads) | traffic risk ≥ 0.5 | risk |
+| `whole_road_line`: racing line across clear opposing lanes | traffic risk ≥ 0.3 | risk |
+| `lane_splits`: goes between two cars (skill ≥ 0.75 too) | traffic risk ≥ 0.25 | risk |
+| `oncoming_margin_scale` | 1.0 (the tuned clearances) to traffic risk 0.57, then → 0.55 | risk |
 | stops for red lights (open roads) | risk < 0.35 | risk |
 | `perception_ahead_m` | 60 → 130 m, never under 1.3× the braking distance + 30 m | awareness |
 | `mirror_range_m` | 12 → 45 m | awareness |
 | junction watch radius | 25 → 45 m | awareness |
+
+### Risk level (owner 2026-10-27: "a risk level opponents are willing to take for things like oncoming traffic")
+Every opponent's `DriverProfile::risk` (per racer: `data/events/racers.toml`; street racers:
+their level's risk + the name's temperament, `wp_wasm::street::racer_risk`) now sets how they
+deal with oncoming traffic and gaps, through *traffic risk* = `max(risk, 0.7·(1 − skill))`
+(a beginner drives wild whatever the knob says). `RiskLevel::of(risk)` names the steps for
+menus (the street challenge card shows it):
+
+| Level | risk | On an open road |
+|---|---|---|
+| Cautious | < 0.25 | Own side only (except round parked / standing / crawling cars), no lane-splitting, stops for reds |
+| Measured | 0.25–0.5 | Cuts clear corners across the other side (whole-road line), splits lanes, stops for reds below 0.35 |
+| Bold | 0.5–0.75 | Overtakes into the oncoming lanes, oncoming clearances 1.0–0.8×, runs reds when nobody is heading in |
+| Reckless | ≥ 0.75 | Tightest oncoming gaps (down to 0.55×), flees the police latest |
+
+`oncoming_margin_scale` multiplies all four oncoming-traffic clearances (never above 1.0:
+wider ones for careful drivers left the downtown Lantern Row pace field queueing behind
+traffic, 1 of 4 finishing): the room a pass
+needs past where an oncoming car will be (`ONCOMING_PASS_ROOM_M` 30 m), the time gap that
+aborts a pass (`ONCOMING_ABORT_S` 3.5 s), the whole-road line's margin (6 m + 0.25 s of
+closing speed) and the gap to cars heading for a junction crossed on the other side
+(`JUNCTION_GAP_S` 1.5 s). In a race with `ram_traffic` (unafraid of traffic, the race
+default) the opposing lanes stay open to everyone for passing non-racers; risk still sets the
+clearances to what comes the other way.
+
+**Lane changes.** Since the same PR, `wp_world::routes::plan_route_via` routes (street
+challenges, roam legs, flights) may change lanes part way along a lane (`routes::route_spans`); the corridor eases its centre across over the last
+`routes::LANE_CHANGE_M` (40 m) of the lane left, extents shifting with it so the road's edges
+do not move (`corridor::tests::a_lane_change_eases_across_and_keeps_the_road_edges`). Fleeing
+racers plan their flight from the road under them (it used to start at z = 0 and could snap to
+a lane under a bridge or anywhere in the Ashpeak hills).
 
 Field-level: `RaceConfig { laps, decision_ticks (4 = 60 Hz), allow_abandon,
 civilian_contact_dq, cooldown_speed_mps, seed, line: LineParams, corridor: CorridorOptions,

@@ -463,6 +463,8 @@ export const sim = {
   /** Tracking helicopters: [x, y, z, aimX, aimY, aimZ, coneHalfAngle, flags (1 visual)] each. */
   policeHelicopters: (): Float32Array => wasm.police_helicopters(),
   policeStatus: (entity: number): PoliceStatus | null => JSON.parse(wasm.police_status(entity)),
+  /** Police commander (`wp_police::commander::CommanderView`): budget, calls, surges and deployment orders; `null` without police. */
+  policeCommander: (): unknown => JSON.parse(wasm.police_commander()),
   /** Static city map for the UI kit's minimap / full map (`wp_wasm::map`); `null` on the flat world. Once per city. */
   mapStaticJson: (): string => wasm.map_static_json(),
   /** Per-frame map data for `player` (units, tools, search zone; layout in ui-kit `src/map/data.ts`). */
@@ -574,6 +576,16 @@ export const sim = {
   place: (): PlaceStatus => JSON.parse(wasm.place_json()),
   /** "Back on the road" from the open career place visit. */
   placeLeave: (): void => wasm.place_leave(),
+  /** Every drive-to place of the session (shops; in career runs also safehouses, car lots and the
+   * player's garages): map markers and waypoint positions. Fetch once per session. */
+  places: (): MapPlace[] => JSON.parse(wasm.places_json()),
+  /** GPS line from the player's car to (x, y) along the lanes, as [x, y] points (empty: none). */
+  gpsRoute: (x: number, y: number): [number, number][] => {
+    const f = wasm.gps_route(x, y);
+    const out: [number, number][] = [];
+    for (let i = 0; i + 1 < f.length; i += 2) out.push([f[i], f[i + 1]]);
+    return out;
+  },
   /** The open garage visit (the car stopped inside a garage), or null. */
   garageVisit: (): GarageOffer | null => JSON.parse(wasm.garage_visit_json()),
   /** "Repair" in the open visit: pays the shop, repairs the car, releases the brakes. Throws if refused. */
@@ -627,6 +639,8 @@ export const sim = {
   careerFloorCar: (): CareerView => JSON.parse(wasm.career_floor_car()),
   careerSell: (uid: number): CareerView => JSON.parse(wasm.career_sell_car(uid)),
   careerSetActive: (uid: number): CareerView => JSON.parse(wasm.career_set_active(uid)),
+  /** Start career runs from the player's garage `id` (unlocked only). */
+  careerSetHome: (id: string): CareerView => JSON.parse(wasm.career_set_home(id)),
   careerInstall: (uid: number, modId: string): CareerView => JSON.parse(wasm.career_install_mod(uid, modId)),
   careerUninstall: (uid: number, modId: string): CareerView => JSON.parse(wasm.career_uninstall_mod(uid, modId)),
   /** Paint shop: respray a career car in 0xRRGGBB (pays `CarView.respray_fee`). */
@@ -746,10 +760,14 @@ export interface StreetRacer {
   shift: "AllDay" | "Night" | "Loop";
   wins: number;
   losses: number;
+  /** Risk they take racing, 0..1 (oncoming lanes, traffic gaps, red lights). */
+  risk: number;
+  /** Its name: Cautious, Measured, Bold or Reckless. */
+  risk_level: string;
 }
 
 /** Open challenge (`wp_wasm::street::Offer`). */
-export interface StreetOffer extends Omit<StreetRacer, "mode" | "shift"> {
+export interface StreetOffer extends Omit<StreetRacer, "mode" | "shift" | "risk"> {
   bet_min: number;
   bet_max: number;
   cash: number;
@@ -841,8 +859,8 @@ import type { TougeCard, TougeChoice, TougeReport, Wager, WagerMenu } from "../u
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
 import type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
-export type { PlaceStatus, PlaceVisit, SafehouseSite } from "../ui/placeVisit";
-import type { PlaceStatus, SafehouseSite } from "../ui/placeVisit";
+export type { MapPlace, PlaceStatus, PlaceVisit, SafehouseSite } from "../ui/placeVisit";
+import type { MapPlace, PlaceStatus, SafehouseSite } from "../ui/placeVisit";
 
 /** `simcli::car_stats::CarStatsTable` (data/stats/cars.json): bars are 0–1 on fixed scales. */
 export interface CarStatsTable {

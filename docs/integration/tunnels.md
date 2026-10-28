@@ -40,19 +40,29 @@ the fog/rain cap in `wp_weather`'s adapter (which wraps the world query).
 
 | Span | Road | Length | Profile | Inner half width / ceiling |
 |---|---|---|---|---|
-| **Hollins Tunnel** (`Tunnel`) | Loop 9, through the northern shoulder of Hollins Heights, (−720, 1377) → (−1110, 1399), climbing 41 → 57.5 m | 391 m | unchanged (Loop 9 already ran in a cut there); ground backfilled over the roof on the hill side | 12.6 m / 6.5 m |
+| **Hollins Tunnel** (`Tunnel`) | Loop 9, through the northern shoulder of Hollins Heights, (−720, 1377) → (−1110, 1399), climbing 41 → 57.5 m | 391 m | unchanged (Loop 9 already ran in a cut there); buried: backfill level with the deck, then a 1 in 3 embankment (the north side's ground is below the roof) | 12.6 m / 6.5 m |
 | **Founders Cut** (`CoveredTrench`) | Uptown Connector, (418, 1005) → (413, 1255) | 250 m | dropped 7 m below the lowest natural ground (road at 16.2–16.5 m; internal profile anchor, ≈ 5 % ramps inside the 8 % arterial cap) under a plaza deck at ≈ 23 m; ground backfilled level with the deck | 10.5 m / 6 m |
 
-Terrain: the normal carve leaves the road and its 7.5 m shoulder at road level (so the ground
-never enters the tube); beyond `inner wall + 0.6 m wall + 8.5 m - 1 m` the ground is raised to
-`min(natural, deck top)` out to 45 m. The 0.8 m roof deck reaches 8.5 m past each wall, over
-that shoulder. Buildings whose lots fall on a deck or in a trench are dropped (3346 → 3312).
+Terrain: the normal carve leaves the road and its shoulder at road level (so the ground
+never enters the tube); from `BACKFILL_START_M` (12 m, more than one 8 m cell diagonal) past
+the outer wall face the ground is raised to the deck top (or the natural ground if higher),
+and past the deck edge (and beside the approaches, past the portals) it falls at
+`BACKFILL_SLOPE` (1 in 3) to the natural ground, staying a cell diagonal clear of other roads'
+paving. The 0.8 m roof deck reaches `DECK_OVERHANG_M` (24 m) past each wall, so the backfilled
+ground meets its edge flush. The ground over a deck (`surface::cover_band`) is drawn and
+collided at the terrain's own resolution and the covered road is not part of the road band
+(the 10/16 m drawn grid's under-the-roads minimum dragged the ground beside the deck down to
+road level). Owner playtest 2026-10-27, "massive drop on the side of the Loop 9 tunnel": the
+Hollins Tunnel deck stood 7-9 m proud of the ground along its whole north side, with a 5 m
+trench on the hill side. Buildings whose lots fall in a trench are dropped.
 Route POIs (race grid kind) per tunnel: `"<name> entry"` (before the first portal, forward
 direction), `"<name> lay-by"` (forward kerb lane mid-tunnel), `"<name> exit"`.
 
 **Physics — `wp_sim::physics::city_ground_colliders`** (shared with `wp_vehicle::rig` client
 prediction, so a predicted car hits the same walls): per centreline segment, a 0.6 m wall box
-each side (from 1 m under the road to the ceiling) and the roof deck box.
+each side (from 1 m under the road to the ceiling) and a ceiling slab box, under one smooth
+roof-deck triangle mesh over the deck's full width (per-segment deck boxes left wedge gaps on
+the outside of the Hollins Tunnel's bend).
 `CityColliders::tunnel_boxes` = 249 on Port Vesper v2.
 
 **Police — `wp_police`.** No tunnel-specific code: sightlines come from the world. One fix was

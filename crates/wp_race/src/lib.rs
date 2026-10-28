@@ -20,6 +20,7 @@
 //! | [`entrants`] | AI entrants: `wp_opponent` racers driven in a judged race |
 //! | [`police`] | race signals → `wp_police` input events (hot meets call in a patrol) |
 //! | [`cargo`] | Delivery cargo applied to the car's mass, CG and inertia |
+//! | [`field`] | picker race fields scaled to the player: cars by rep tier and the player's car class, rep by field strength |
 //! | [`catalog`] | the browser's race picker: courses on Port Vesper, Ashpeak County and the grid city, named AI drivers |
 //! | [`spots`] | honk-to-start meet spots at each race's start, horn edge trigger |
 //! | [`live`] | a picker race run next to a live `wp_sim` loop: judge, AI, meet heat, standings with gaps |
@@ -43,6 +44,7 @@ pub mod crew;
 pub mod data;
 pub mod entrants;
 pub mod error;
+pub mod field;
 pub mod judge;
 pub mod kind;
 pub mod live;

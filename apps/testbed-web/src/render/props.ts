@@ -56,6 +56,10 @@ const KRAIL_GLOW = 0x16140f;
 /** Galvanised steel guard rail (touge passes) and its faint glow so the rail line reads at night. */
 const GUARD_RAIL_RGB = 0xc4c9cc;
 const GUARD_RAIL_GLOW = 0x121416;
+/** Water-filled crash barrel (highway barrier ends, `wp_world::barrier_ends`): safety yellow,
+ * with a glow so the cushion reads at night. */
+const BARREL_RGB = 0xf2c418;
+const BARREL_GLOW = 0x2a2000;
 
 /**
  * Unit guard rail section in its collider box ([-0.5, 0.5]³, base at z = -0.5): a W-beam on the
@@ -288,11 +292,13 @@ export class PropView {
   private coneCount = 0;
   private krailCount = 0;
   private guardRailCount = 0;
+  private barrelCount = 0;
   private proxyFit: Fit | null = null;
   private full: { car: InstancedCar; fit: Fit } | null = null;
   private cones: THREE.InstancedMesh | null = null;
   private krails: THREE.InstancedMesh | null = null;
   private guardRails: THREE.InstancedMesh | null = null;
+  private barrels: THREE.InstancedMesh | null = null;
   private farGeo: THREE.BufferGeometry | null = null;
   private proxyGeo: ReturnType<typeof proxyGeoms> | null = null;
   private mats: FleetMaterials | null = null;
@@ -311,6 +317,7 @@ export class PropView {
   private readonly coneMat = new THREE.MeshStandardMaterial({ color: CONE_RGB, emissive: CONE_GLOW, flatShading: true, roughness: 0.7 });
   private readonly krailMat = new THREE.MeshStandardMaterial({ color: KRAIL_RGB, emissive: KRAIL_GLOW, flatShading: true, roughness: 0.95 });
   private readonly guardRailMat = new THREE.MeshStandardMaterial({ color: GUARD_RAIL_RGB, emissive: GUARD_RAIL_GLOW, flatShading: true, metalness: 0.6, roughness: 0.45 });
+  private readonly barrelMat = new THREE.MeshStandardMaterial({ color: BARREL_RGB, emissive: BARREL_GLOW, flatShading: true, roughness: 0.6 });
   /** Art-style version the props were built for, and the session inputs to rebuild them. */
   private styleVersion = -1;
   private lastSet: { list: Float32Array; models: SessionModels; mats: FleetMaterials } | null = null;
@@ -373,6 +380,10 @@ export class PropView {
         this.slot[i] = this.guardRailCount++;
         continue;
       }
+      if (this.kind[i] === PROP_KIND.waterBarrel) {
+        this.slot[i] = this.barrelCount++;
+        continue;
+      }
       this.parkedCount++;
       if (firstCar < 0) firstCar = i;
       const key = `${Math.floor(this.pose[i * 7] / CHUNK_M)},${Math.floor(this.pose[i * 7 + 1] / CHUNK_M)}`;
@@ -419,6 +430,13 @@ export class PropView {
       this.guardRails = new THREE.InstancedMesh(guardRailGeometry(), this.guardRailMat, this.guardRailCount);
       this.guardRails.frustumCulled = false;
       this.group.add(this.guardRails);
+    }
+    if (this.barrelCount > 0) {
+      const geo = new THREE.CylinderGeometry(1, 1, 1, 12, 1);
+      geo.rotateX(Math.PI / 2); // cylinder axis +Y → sim up +Z
+      this.barrels = new THREE.InstancedMesh(geo, this.barrelMat, this.barrelCount);
+      this.barrels.frustumCulled = false;
+      this.group.add(this.barrels);
     }
     for (let i = 0; i < n; i++) this.writeInstance(i);
     this.flush();
@@ -516,6 +534,17 @@ export class PropView {
       this.s.set(this.half[i * 3] * 2, this.half[i * 3 + 1] * 2, this.half[i * 3 + 2] * 2);
       this.guardRails.setMatrixAt(this.slot[i], this.m.compose(this.p, this.q, this.s));
       this.guardRails.instanceMatrix.needsUpdate = true;
+      return;
+    }
+    if (this.kind[i] === PROP_KIND.waterBarrel) {
+      if (!this.barrels) return;
+      const o = i * 7;
+      this.p.set(this.pose[o], this.pose[o + 1], this.pose[o + 2]);
+      this.q.set(this.pose[o + 3], this.pose[o + 4], this.pose[o + 5], this.pose[o + 6]);
+      // Unit cylinder (radius 1, height 1) → the barrel's collider box.
+      this.s.set(this.half[i * 3], this.half[i * 3 + 1], this.half[i * 3 + 2] * 2);
+      this.barrels.setMatrixAt(this.slot[i], this.m.compose(this.p, this.q, this.s));
+      this.barrels.instanceMatrix.needsUpdate = true;
       return;
     }
     const ch = this.chunks[this.chunkOf[i]];
@@ -743,6 +772,7 @@ export class PropView {
     if (this.kind[i] === PROP_KIND.cone) return this.cones ? { mesh: this.cones, slot: this.slot[i], fit: null } : null;
     if (this.kind[i] === PROP_KIND.krail) return this.krails ? { mesh: this.krails, slot: this.slot[i], fit: null } : null;
     if (this.kind[i] === PROP_KIND.guardRail) return this.guardRails ? { mesh: this.guardRails, slot: this.slot[i], fit: null } : null;
+    if (this.kind[i] === PROP_KIND.waterBarrel) return this.barrels ? { mesh: this.barrels, slot: this.slot[i], fit: null } : null;
     if (this.fullSlot[i] >= 0 && this.full) return { mesh: this.full.car.paint, slot: this.fullSlot[i], fit: this.full.fit };
     const ch = this.chunks[this.chunkOf[i]];
     if (!ch) return null;
@@ -881,11 +911,17 @@ export class PropView {
       this.guardRails.geometry.dispose();
       this.guardRails = null;
     }
+    if (this.barrels) {
+      this.barrels.removeFromParent();
+      this.barrels.geometry.dispose();
+      this.barrels = null;
+    }
     this.n = 0;
     this.parkedCount = 0;
     this.coneCount = 0;
     this.krailCount = 0;
     this.guardRailCount = 0;
+    this.barrelCount = 0;
     this.fullProps = [];
     this.trafficModel = null;
     this.repicks = 0;

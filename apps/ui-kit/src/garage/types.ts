@@ -27,6 +27,8 @@ export interface StatsView {
   class_index: number;
   bracket: string;
   mass_kg: number;
+  /** Peak engine power, mechanical hp (mods applied). */
+  power_hp: number;
   est_0_100_s: number;
   top_speed_kmh: number;
   lateral_g: number;
@@ -134,6 +136,8 @@ export interface LotSummary {
   classes: string[];
   in_stock: number;
   from_price: number | null;
+  /** City the lot stands in (empty: not on the map). */
+  city_label?: string;
 }
 
 /** `career::ListingView`: junkyards hide `condition`, `runs`, `tired_parts` (`null`). */
@@ -285,6 +289,8 @@ export interface CareerView {
   /** The world's repair shops (`career::ShopView`, `garage_visit::WORLD_SHOPS`). Older hosts
    * send none: the Repair panel then offers the bare districts. */
   shops?: ShopSite[];
+  /** The player's own garages, in unlock order (`career::HomeView`); runs start from `selected`. */
+  homes?: HomeGarage[];
   stats: CareerStats;
   progress: CareerProgress;
   captures: number;
@@ -306,6 +312,8 @@ export interface ModOption {
   allowed: boolean;
   reason: string | null;
   replaces: string | null;
+  /** Installed mods of other lines it takes off because it does their job (coilovers replace dampers). */
+  removes: string[];
   stats_after: StatsView | null;
   requires: string[];
 }
@@ -349,8 +357,42 @@ export interface RunClose {
 /** Which run the garage starts. */
 export type RunKind = "free" | "chase";
 
+/** Free Roam's time of day (owner 2026-10-27: one Free Roam button with a Day / Night,
+ * Clear / Rain / Fog pop-up replaces night run, rainy night and free drive). */
+export type RoamTime = "day" | "night";
+/** Free Roam's weather. */
+export type RoamWeather = "clear" | "rain" | "fog";
+/** What the Free Roam pop-up picked. */
+export interface RoamChoice {
+  time: RoamTime;
+  weather: RoamWeather;
+}
+
 /** What the garage screen can do (the testbed implements it over wp_wasm). Every action
  * returns the new view, or throws an Error whose message is shown to the player. */
+/** `career::HomeView`: one of the player's own garages (unlocked at a rep threshold). */
+export interface HomeGarage {
+  id: string;
+  name: string;
+  city: string;
+  city_label: string;
+  unlocked: boolean;
+  needed_rep: number;
+  selected: boolean;
+}
+
+/** Kind of drive-to place (`wp_wasm::garage_visit::PlaceKind`). */
+export type PlaceKind = "Garage" | "Safehouse" | "Lot" | "Home";
+
+/** Where the player is while the career screen is open: the place they pulled into (its kind,
+ * lot / home id or shop name, and name). Garage work needs one (owner 2026-10-27: dealers,
+ * garages and workshops have to be driven to). */
+export interface CareerPlace {
+  kind: PlaceKind;
+  id: string;
+  name: string;
+}
+
 export interface CareerApi {
   view(): CareerView;
   mods(uid: number): ModTreeView;
@@ -382,7 +424,9 @@ export interface CareerApi {
   newCareer(mode: DamageMode): CareerView;
   exportSave(): void;
   importSave(text: string): CareerView;
-  startRun(kind: RunKind): void;
+  /** Start a run with the active car. `roam`: Free Roam's time and weather (a free drive in
+   * the city with traffic and police). */
+  startRun(kind: RunKind, roam?: RoamChoice): void;
   /** Open the street-race picker as a career run (buy-in, purse, bets and rep on the career;
    * back to the garage after). Optional: hosts without races hide the button (row 167). */
   races?(): void;
@@ -394,6 +438,15 @@ export interface CareerApi {
   /** Spawn city id of the main menu's "Spawn in" (optional): the Repair panel starts on that
    * city's shop when the garage is opened from the menu. */
   homeCity?(): string;
+  /** Where the player is (optional: hosts without it treat every place as reached, the old
+   * menu behaviour). `null` = not at any place: garage work is closed. */
+  place?(): CareerPlace | null;
+  /** Set the map waypoint to a place (the only way the menu sends the player anywhere). */
+  setWaypoint?(target: CareerPlace): void;
+  /** The waypoint now (to mark it in the lists), or null. */
+  waypoint?(): CareerPlace | null;
+  /** Start career runs from the player's garage `id`. */
+  setHome?(id: string): CareerView;
   close(): void;
 }
 
@@ -492,6 +545,8 @@ export interface CatalogEntry {
   reason: string | null;
   /** What the mechanic charges to fit it (the whole set for a set). */
   install_fee: number;
+  /** Names of installed mods fitting it takes off because it does their job (coilovers replace dampers). */
+  replaces?: string[];
 }
 
 /** `career_workshop_json` (`WorkshopScreen`). */
@@ -506,6 +561,10 @@ export interface WorkshopScreen {
   stands: StandView[];
   /** Engine torque left after worn parts (1 = nothing lost). */
   torque_factor: number;
+  /** Peak engine power as the car drives now (parts, mods, wear), hp. */
+  power_hp: number;
+  /** Peak engine power of the stock car, hp. */
+  stock_power_hp: number;
   catalog: CatalogEntry[];
   cash: number;
   def_id: string;
@@ -531,6 +590,12 @@ export interface WorkshopApi {
   mechanic(slot: string, source: MechanicSource, sellOld: boolean): MechanicResult;
   /** The paint shop (colours, vinyls, cosmetic parts); absent where there is none. */
   paintShop?: PaintShopApi;
+  /** The car's mod tree: requirements of every mod, and the bolt-on upgrades (mods that are
+   * not parts) the workshop sells. Absent: only part grades are sold. */
+  mods?(): ModTreeView;
+  /** Put a bolt-on upgrade (`mod_id`) on the car / take it off (40 % back). */
+  install?(modId: string): WorkshopScreen;
+  uninstall?(modId: string): WorkshopScreen;
 }
 
 /** Where the part the mechanic fits comes from. */

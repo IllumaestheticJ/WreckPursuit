@@ -464,3 +464,42 @@ dodge spikes". Design, results and how to re-train: `crates/wp_opponent/README.m
 - Measured (race_picker, release): highway seeds 1-7 + test seed 45 of 48 finish, winners
   400-427 s (main: 3-6 finishers per seed, winners 427-454 s); night seeds 1-4 24 of 24 finish;
   day seeds 1-8 15 of 48 finish (main 16 of 48), losses are police captures.
+
+### Full-map routing pass + risk level (owner, 2026-10-27)
+"Can you do a FULL pass of the map, make sure the street racer routing makes sense - including
+adding a risk level opponents are willing to take for things like oncoming traffic, etc."
+- **Audit** (`cargo run --release -p wp_world --example route_audit -- 300`): 300 random
+  street-racer A → B pairs over the whole combined world, each planned as a roam leg
+  (`plan_route`) and as a challenge (`plan_route_via`), against an oracle search that changes
+  lanes anywhere. Before: 33 % of roam legs and 16 % of challenge routes took ≥ 1.5× the
+  quickest time, 12 of 300 did not plan, the worst was 21.5 km for 0.9 km (Wharf Street →
+  Seawall Boulevard, round the Route 7 interchanges). Cause: the planner never changed lanes,
+  so a racer in the left lane needing a right turn or an exit went round the block, or round a
+  freeway. Destinations snapped to the lane pointing back the way the racer came did the same.
+- **Fix (wp_world, minimal cross-crate change):** `plan_route_via`'s search may move to a
+  neighbouring lane of the same road (`routes::lane_change_at`, 40 m, 2.5 s each);
+  `routes::route_spans` is how a route's segments are driven, used by `build_route` and
+  `wp_opponent::corridor`. `plan_route` and `plan_circuit` keep the lane-locked
+  `shortest_path`: with lane changes in `plan_route`, scripted simcli drivers moved into the
+  kerb lane where civilians pull over for sirens (siren scenarios stalled at 44 % progress)
+  and the pursuit / tunnel-escape goldens and retired races all reshuffled. After: street
+  racer routes 0.7 % ≥ 1.5× the quickest, nothing unplannable; the worst is a finish on a
+  one-way Route 12 ramp.
+- Street roamers (`wp_wasm::street`) and flights from the police plan with `plan_route_via` (the destination stands for its road). Fleeing racers plan from
+  the road height under them (was z = 0: on bridges and
+  in the hills the start snapped to whatever lane was nearest in plan).
+- **Risk level:** `DriverParams::{opposing_passes, whole_road_line, lane_splits,
+  oncoming_margin_scale}` from traffic risk, `RiskLevel` (Cautious / Measured / Bold /
+  Reckless) for menus; see the README's *Risk level*. Street racers get a per-name temperament
+  on top of their level's risk (`wp_wasm::street::TEMPERAMENT`, `racer_risk`), shown on the
+  challenge card and the honk hint.
+- Not changed: `wp_opponent::roam` legs keep `plan_route` (lane-locked). With lane changes
+  the 6-seed `sweep_roam` had more rescues (28 vs 17, most at the grid's known broken highway
+  diverge ramps, which the new routes use more) and 5 roamer contacts vs 1; worth revisiting
+  once those ramps are fixed.
+- Behaviour change to watch: drivers whose traffic risk is under 0.3 no longer take the
+  whole-road line, under 0.25 no longer split lanes, and above 0.57 the oncoming clearances
+  tighten (down to 0.55× at 1.0). A first cut also widened them for careful drivers (1.6× at
+  0); that broke `opponent_pace` Lantern Row s50 (3 of 4 finishers, the field queued behind
+  traffic), so the scale is capped at 1.0. Street roamers drive corridors
+  with no opposing lanes, so their cruising is unchanged.

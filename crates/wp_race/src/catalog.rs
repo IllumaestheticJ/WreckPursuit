@@ -181,7 +181,7 @@ pub struct RaceDef {
     /// Planned course length, m (for the picker, checked against the planner in tests).
     pub length_hint_m: f32,
     /// The AI field, pole first. The player starts behind them.
-    pub ai: &'static [AiDriverDef],
+    pub ai: Vec<AiDriverDef>,
     /// Scenario / event seed (AI noise, traffic, police).
     pub seed: u64,
     /// Grid layout override (`None` = the race kind's layout, single file where it does not
@@ -202,30 +202,36 @@ pub struct RaceDef {
 const LOOP9_RACES: [&str; 3] = ["loop9_circuit", "loop9_day", "loop9_ashpeak_highway"];
 
 /// A regular's profile sharpened for the Loop 9 races (owner, 2026-10-26: "make the loop 9
-/// opponents more aggressive and smarter across the board"). Every driver moves up, each
-/// keeping their own character relative to the others:
+/// opponents more aggressive and smarter across the board"; again 2026-10-27: "make the
+/// opponents more aggressive across the board"). Every driver moves up, each keeping their own
+/// character relative to the others:
 /// - `skill` +0.15 (to 0.95 at most): more of the car's grip and braking used, braking at the
 ///   point instead of early, a nearer, sharper look-ahead, quicker pedal work;
-/// - `aggression` +0.3, at least 0.75: shorter following gap, tighter passing margin,
+/// - `aggression` +0.4, at least 0.85: shorter following gap, tighter passing margin,
 ///   less patience behind a slower car, side by side for longer into a braking zone, and a
 ///   defensive move when attacked;
 /// - `consistency` +0.15 (to 0.95 at most): fewer braking and line errors, less rattled by a
 ///   car close behind;
+/// - `risk` +[`SHARPENED_RISK`] (to 0.9 at most): every regular further along the
+///   [`wp_opponent::RiskLevel`] ladder for oncoming traffic, gaps and red lights (Mara up to
+///   Bold, Vic to Reckless; Juno and Tito stay Measured, Dez Reckless). A full +0.3 with the rest (2026-10-26) lost
+///   the day race most of its finishers to civilian hits and police stops, so it moves less;
 /// - `awareness` +0.15, at least 0.85: traffic, spike strips and rivals noticed further out.
 ///
-/// `risk` stays each driver's own: raised with the rest, the day race (heavy police, traffic)
-/// lost most of its finishers to civilian hits and police stops. Who rams the police is
-/// unchanged too (aggression + risk), apart from the higher aggression.
+/// Who rams the police follows (aggression + risk).
 pub fn sharpened(p: DriverProfile) -> DriverProfile {
     DriverProfile {
         skill: (p.skill + 0.15).min(0.95).max(p.skill),
-        aggression: (p.aggression + 0.3).max(0.75),
+        aggression: (p.aggression + 0.4).max(0.85),
         consistency: (p.consistency + 0.15).min(0.95),
-        risk: p.risk,
+        risk: (p.risk + SHARPENED_RISK).min(0.9).max(p.risk),
         awareness: (p.awareness + 0.15).max(0.85),
     }
     .clamped()
 }
+
+/// How much more risk a regular takes in the Loop 9 races ([`sharpened`]).
+pub const SHARPENED_RISK: f32 = 0.1;
 
 impl RaceDef {
     /// How regular `d` drives in this race: their own profile, [`sharpened`] in the Loop 9
@@ -260,6 +266,12 @@ impl RaceDef {
                 Legality::IllegalDaytime => PolicePresence::Max,
             }),
         }
+    }
+
+    /// Wanted level the race's police cars are picked at, at least (`Scenario::police_unit_level`,
+    /// the profile's `unit_level`); `None` = the single standard police car.
+    pub fn police_unit_level(&self) -> Option<u8> {
+        self.police_profile().and_then(|p| p.unit_level)
     }
 
     /// This race's police profile (`data/police/races.toml`, keyed by the race id): how the
@@ -490,7 +502,7 @@ pub fn races() -> Vec<RaceDef> {
             traffic_density: 2.0,
             course: CourseSpec::Circuit { polygon: LOOP9 },
             length_hint_m: 10142.0,
-            ai: &[VIC, MARA, DEZ, JUNO, TITO],
+            ai: vec![VIC, MARA, DEZ, JUNO, TITO],
             seed: 9,
             prior_meets: 2,
             finish_window_s: None,
@@ -513,7 +525,7 @@ pub fn races() -> Vec<RaceDef> {
             traffic_density: 0.5,
             course: CourseSpec::Circuit { polygon: LOOP9_DAY },
             length_hint_m: 10142.0,
-            ai: &[VIC, MARA, DEZ, JUNO, TITO],
+            ai: vec![VIC, MARA, DEZ, JUNO, TITO],
             seed: 19,
             prior_meets: 2,
             finish_window_s: Some(150.0),
@@ -535,7 +547,7 @@ pub fn races() -> Vec<RaceDef> {
             },
             length_hint_m: 17924.0,
             // The Loop 9 field and the Ashpeak County regulars together (owner, 2026-10-24).
-            ai: &[VIC, MARA, DEZ, JUNO, TITO],
+            ai: vec![VIC, MARA, DEZ, JUNO, TITO],
             seed: 29,
             prior_meets: 0,
             // ~7.5 min for the winner: the field spreads over minutes, not the circuit kind's
@@ -576,7 +588,7 @@ pub fn retired_races() -> Vec<RaceDef> {
             // 796 m since the PR #38 port (the Hollins Ascent grid moved east across the
             // Hollins Gorge Bridge); 941 m before.
             length_hint_m: 796.0,
-            ai: &[MARA, VIC, JUNO],
+            ai: vec![MARA, VIC, JUNO],
             seed: 16,
             prior_meets: 0,
             finish_window_s: None,
@@ -601,7 +613,7 @@ pub fn retired_races() -> Vec<RaceDef> {
                 finish: [300.0, -150.0, 0.0],
             },
             length_hint_m: 665.0,
-            ai: &[JUNO, DEZ, TITO],
+            ai: vec![JUNO, DEZ, TITO],
             seed: 31,
             prior_meets: 2,
             finish_window_s: None,
@@ -624,7 +636,7 @@ pub fn retired_races() -> Vec<RaceDef> {
             // 1113 m (was 747): main's grid moved the "Highway sprint" grid to y = -713, at the
             // south end of the divided viaduct (lead/main-sync).
             length_hint_m: 1113.0,
-            ai: &[VIC, JUNO, TITO],
+            ai: vec![VIC, JUNO, TITO],
             seed: 7,
             prior_meets: 0,
             finish_window_s: None,
@@ -648,7 +660,7 @@ pub fn retired_races() -> Vec<RaceDef> {
                 finish_back_m: 0.0,
             },
             length_hint_m: 3543.0,
-            ai: &[MARA, VIC, JUNO],
+            ai: vec![MARA, VIC, JUNO],
             seed: 41,
             prior_meets: 0,
             finish_window_s: None,
@@ -671,7 +683,7 @@ pub fn retired_races() -> Vec<RaceDef> {
                 finish: [-590.0, 3760.0, 0.0],
             },
             length_hint_m: 2892.0,
-            ai: &[MARA, JUNO, DEZ],
+            ai: vec![MARA, JUNO, DEZ],
             seed: 42,
             prior_meets: 0,
             finish_window_s: None,
@@ -696,7 +708,7 @@ pub fn retired_races() -> Vec<RaceDef> {
             // 3978 m before the county's own random stream (ashpeak de-dup, 2026-10-24) moved
             // the farm section roads.
             length_hint_m: 4295.0,
-            ai: &[DEZ, TITO, VIC],
+            ai: vec![DEZ, TITO, VIC],
             seed: 43,
             prior_meets: 0,
             finish_window_s: None,
@@ -723,7 +735,7 @@ pub fn retired_races() -> Vec<RaceDef> {
                 finish: [-498.0, 4680.0, 0.0],
             },
             length_hint_m: 1254.0,
-            ai: &[JUNO, DEZ, TITO],
+            ai: vec![JUNO, DEZ, TITO],
             seed: 44,
             prior_meets: 2,
             finish_window_s: None,
@@ -746,7 +758,7 @@ pub fn retired_races() -> Vec<RaceDef> {
                 finish: [545.0, 5000.0, 0.0],
             },
             length_hint_m: 3461.0,
-            ai: &[VIC, MARA, DEZ, JUNO],
+            ai: vec![VIC, MARA, DEZ, JUNO],
             seed: 45,
             prior_meets: 0,
             finish_window_s: None,
@@ -769,7 +781,7 @@ pub fn retired_races() -> Vec<RaceDef> {
                 finish: [-2690.0, 3450.0, 0.0],
             },
             length_hint_m: 2193.0,
-            ai: &[MARA, VIC, TITO],
+            ai: vec![MARA, VIC, TITO],
             seed: 46,
             prior_meets: 0,
             finish_window_s: None,
@@ -792,7 +804,7 @@ pub fn retired_races() -> Vec<RaceDef> {
                 distance_m: 415.0,
             },
             length_hint_m: 400.0,
-            ai: &[VIC],
+            ai: vec![VIC],
             seed: 47,
             prior_meets: 0,
             finish_window_s: None,
@@ -812,7 +824,7 @@ pub fn retired_races() -> Vec<RaceDef> {
                 polygon: METRO_CIRCUIT,
             },
             length_hint_m: 4182.0,
-            ai: &[VIC, MARA, DEZ, JUNO, TITO],
+            ai: vec![VIC, MARA, DEZ, JUNO, TITO],
             seed: 48,
             prior_meets: 2,
             // Two laps of the downtown grid at night take the field 300-440 s; lights,
@@ -839,7 +851,7 @@ pub fn retired_races() -> Vec<RaceDef> {
                 finish_back_m: 0.0,
             },
             length_hint_m: 737.0,
-            ai: &[SOL, VIC, RAFI],
+            ai: vec![SOL, VIC, RAFI],
             seed: 41,
             prior_meets: 0,
             finish_window_s: None,
@@ -862,7 +874,7 @@ pub fn retired_races() -> Vec<RaceDef> {
             },
             // 1267 m on lead/round12's map (1323 on main's, PR #47).
             length_hint_m: 1267.0,
-            ai: &[NINA, AUGUSTO, DEZ, VIC],
+            ai: vec![NINA, AUGUSTO, DEZ, VIC],
             seed: 52,
             prior_meets: 0,
             finish_window_s: None,
@@ -884,7 +896,7 @@ pub fn retired_races() -> Vec<RaceDef> {
                 finish_back_m: 0.0,
             },
             length_hint_m: 1353.0,
-            ai: &[KAITO, MARA, BEX],
+            ai: vec![KAITO, MARA, BEX],
             seed: 23,
             prior_meets: 0,
             finish_window_s: None,
@@ -908,7 +920,7 @@ pub fn retired_races() -> Vec<RaceDef> {
             // 2304 m on lead/round12's map: its off-ramp route to Sal's runs longer than on
             // main's (1623 m, PR #47).
             length_hint_m: 2304.0,
-            ai: &[JUNO, LUPE, RAFI, TITO],
+            ai: vec![JUNO, LUPE, RAFI, TITO],
             seed: 8,
             prior_meets: 0,
             finish_window_s: None,
@@ -930,7 +942,7 @@ pub fn retired_races() -> Vec<RaceDef> {
                 finish_back_m: 0.0,
             },
             length_hint_m: 1037.0,
-            ai: &[BEX, LUPE, DEZ],
+            ai: vec![BEX, LUPE, DEZ],
             seed: 12,
             prior_meets: 0,
             finish_window_s: None,
@@ -1399,7 +1411,7 @@ mod tests {
         let roster = Roster::embedded();
         let all: Vec<RaceDef> = races().into_iter().chain(retired_races()).collect();
         for r in all.iter().cloned() {
-            for d in r.ai {
+            for d in &r.ai {
                 let n = roster
                     .get(d.id)
                     .unwrap_or_else(|| panic!("{}: {} not in racers.toml", r.id, d.id));
@@ -1437,7 +1449,7 @@ mod tests {
             assert_eq!(m.entrants.len(), r.entrants());
             assert_eq!(m.entrants.last().unwrap().key, PLAYER_KEY);
             assert_eq!(roster_key_of(&r, "You"), Some(PLAYER_KEY));
-            for d in r.ai {
+            for d in &r.ai {
                 assert_eq!(roster_key_of(&r, d.name), Some(d.id));
             }
         }

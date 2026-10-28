@@ -6,6 +6,8 @@
 // Every storage call is wrapped: private windows, quota errors and disabled storage must never
 // break the game (the career then simply lives for this page only).
 
+import type { RoamChoice } from "./types";
+
 /** Current storage key. Bump the suffix only if the storage layout itself changes. */
 export const CAREER_KEY = "wp.career.v1";
 /** Where a save that failed to load is kept (so it is not lost when a new career starts). */
@@ -93,4 +95,30 @@ export function pickTextFile(): Promise<string> {
     };
     input.click();
   });
+}
+
+/** Where the Free Roam pop-up remembers its last choice. */
+export const ROAM_KEY = "wp.freeRoam.v1";
+
+/** The last Free Roam choice (night, clear by default; unreadable values fall back). */
+export function loadRoamChoice(): RoamChoice {
+  let saved: Partial<RoamChoice> = {};
+  try {
+    saved = JSON.parse(storage()?.getItem(ROAM_KEY) ?? "{}") as Partial<RoamChoice>;
+  } catch {
+    /* storage unavailable or unreadable */
+  }
+  return {
+    time: saved.time === "day" ? "day" : "night",
+    weather: saved.weather === "rain" || saved.weather === "fog" ? saved.weather : "clear",
+  };
+}
+
+/** Remember the Free Roam choice for next time. */
+export function saveRoamChoice(c: RoamChoice): void {
+  try {
+    storage()?.setItem(ROAM_KEY, JSON.stringify(c));
+  } catch {
+    /* ignore */
+  }
 }

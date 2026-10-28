@@ -23,6 +23,7 @@
 
 #![warn(missing_docs)]
 
+pub mod barrier_ends;
 pub mod builder;
 pub mod car_park;
 pub mod clock;
@@ -186,9 +187,11 @@ impl World {
         } else {
             Vec::new()
         };
-        // Cones at the median crossovers (after every parked car: `set_parked_cars` keeps
-        // them, in order).
-        parked.extend(crossover::cones(&map.net));
+        // Cones at the median crossovers and water barrels in front of every blunt barrier
+        // end facing highway traffic (`barrier_ends`; the cones stand beyond the barrels),
+        // after every parked car: `set_parked_cars` keeps them, in order.
+        parked.extend(barrier_ends::make_room(&map, crossover::cones(&map.net)));
+        parked.extend(barrier_ends::water_barrels(&map));
         let n_lanes = map.n_lanes();
         let obstacles = std::sync::Arc::new(obstacles::ObstacleIndex::new(&map.net));
         Self {
@@ -499,8 +502,8 @@ impl World {
         &self.obstacles
     }
 
-    /// Static colliders: parked cars, other fixed props (median crossover cones, touge
-    /// K-rails) and route-closure cones.
+    /// Static colliders: parked cars, other fixed props (median crossover cones, water barrels
+    /// at barrier ends, touge guard rails) and route-closure cones.
     pub fn static_props(&self) -> impl Iterator<Item = &StaticProp> + '_ {
         self.parked.iter().chain(self.cones.iter())
     }
@@ -520,6 +523,13 @@ impl World {
             .collect();
         self.parked = cars;
         self.parked.extend(others);
+    }
+
+    /// Keep only the props (parked list: parked cars, crossover cones, water barrels, touge
+    /// rails) `keep` accepts, in order. Scenario setup and probes (a barrier end without its
+    /// barrels), before the world is handed to the sim.
+    pub fn retain_props(&mut self, keep: impl FnMut(&StaticProp) -> bool) {
+        self.parked.retain(keep);
     }
 
     /// Active routes.
@@ -561,7 +571,8 @@ impl World {
         routes::plan_route_between_pois(&self.map, start_poi, finish_poi)
     }
 
-    /// Plan a lane-legal route between two points.
+    /// Plan a lane-legal route between two points, keeping to its lanes
+    /// ([`routes::plan_route`]; AI racers use [`World::plan_route_via`], which changes lanes).
     pub fn plan_route(
         &self,
         start: [f32; 3],

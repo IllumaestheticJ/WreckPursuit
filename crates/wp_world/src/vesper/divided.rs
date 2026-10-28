@@ -16,8 +16,12 @@
 use super::*;
 
 /// Length over which the carriageways close up (lanes meeting on the line) towards a
-/// [`FreewayEnd::Fan`] end node, m.
-pub(super) const FAN_M: f32 = 140.0;
+/// [`FreewayEnd::Fan`] end node, m. Each moves in by only the median shoulder (1.5 m), so a
+/// short fan is still gentle; the median barrier stops where the two closing carriageways'
+/// paving starts to overlap, so a long fan left ~100 m of undivided road before the junction
+/// with the barrier's end standing out in the middle (owner 2026-10-27: "the ends of the
+/// highway the barriers are totally wonky").
+pub(super) const FAN_M: f32 = 60.0;
 /// Length of a link beside a carriageway from its gore (taper + parallel lane), m.
 pub(super) const LINK_PARALLEL_M: f32 = 70.0;
 /// Taper length of a link leaving or joining a split carriageway end, m.

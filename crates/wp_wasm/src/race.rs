@@ -31,6 +31,7 @@ use wp_economy::BetVenue;
 use wp_opponent::{CarCapability, SimPolice, VehicleObs};
 use wp_race::betting::{BetWallet, BettingRules, Book, Odds, Outcome, Selection, Settlement};
 use wp_race::catalog::{self, RaceDef};
+use wp_race::field;
 use wp_race::live::{LiveEntrant, LiveRace, Standing};
 use wp_race::roster::{Placing, Roster, RosterState, PLAYER_KEY};
 use wp_race::{RaceData, RacerResult, RacerSample, RacerStatus};
@@ -55,6 +56,76 @@ pub fn race_for_scenario(name: &str) -> Option<(RaceDef, bool)> {
     match name.strip_suffix(AUTOPILOT_SUFFIX) {
         Some(base) => catalog::race_for_scenario(base).map(|d| (d, true)),
         None => catalog::race_for_scenario(name).map(|d| (d, false)),
+    }
+}
+
+thread_local! {
+    /// Class index per stock car id ([`car_class`]).
+    static CAR_CLASS: std::cell::RefCell<BTreeMap<String, Option<u16>>> =
+        const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+/// The `wp_economy` class index of stock car `id` (`None` when it does not load), cached.
+pub fn car_class(id: &str) -> Option<u16> {
+    if let Some(k) = CAR_CLASS.with(|c| c.borrow().get(id).copied()) {
+        return k;
+    }
+    let k = simcli::data::load_car(mem_data(), id)
+        .ok()
+        .map(|c| crate::garage::with_economy(|e| e.class_index(&c.def)));
+    CAR_CLASS.with(|c| c.borrow_mut().insert(id.to_string(), k));
+    k
+}
+
+/// Race `def` with its field scaled to a player of `rep` in `player` (mods included): the
+/// regulars' cars aimed at the player's car and rep tier ([`wp_race::field`]). A touge battle
+/// keeps its opponent's car.
+pub fn scaled_field(def: &RaceDef, player: &LoadedCar, rep: i64) -> RaceDef {
+    if matches!(def.city, catalog::RaceCity::Touge(_)) {
+        return def.clone();
+    }
+    let (player_class, tier) = crate::garage::with_economy(|e| {
+        (e.class_index(&player.def), e.progression.tier_for_rep(rep))
+    });
+    let target = field::target_class(tier, player_class);
+    field::with_cars(def, &field::field_cars(def, target, car_class))
+}
+
+/// `def` with the cars scenario `sc` spawned for its field (the `ai_<name>` entities): what
+/// the race was started with ([`scaled_field`]), so the results, the betting book and a
+/// replay name the cars actually on the grid. A car id outside [`field::FIELD_CARS`] and the
+/// field's own cars keeps the catalog's.
+pub fn field_of_scenario(def: &RaceDef, sc: &Scenario) -> RaceDef {
+    let cars: Vec<&'static str> = def
+        .ai
+        .iter()
+        .map(|d| {
+            let id = ai_entity_id(d);
+            let car = sc
+                .entities
+                .iter()
+                .find(|e| e.id == id)
+                .map(|e| e.car.as_str());
+            car.and_then(|c| {
+                field::FIELD_CARS
+                    .iter()
+                    .chain(def.ai.iter().map(|a| &a.car))
+                    .find(|k| **k == c)
+                    .copied()
+            })
+            .unwrap_or(d.car)
+        })
+        .collect();
+    field::with_cars(def, &cars)
+}
+
+/// Put `def`'s field cars on scenario `sc`'s AI entities (`ai_<name>`).
+pub fn apply_field(sc: &mut Scenario, def: &RaceDef) {
+    for d in &def.ai {
+        let id = ai_entity_id(d);
+        if let Some(e) = sc.entities.iter_mut().find(|e| e.id == id) {
+            e.car = d.car.to_string();
+        }
     }
 }
 
@@ -110,6 +181,7 @@ pub fn race_scenario_in(
     // AI cars drive with the AI assist profile; the testbed applies the player's own preset.
     sc.assists = simcli::scenario::AssistSpec::Ai;
     sc.police_presence = Some(def.police_presence());
+    sc.police_unit_level = def.police_unit_level();
     sc.traffic_density = Some(def.traffic_density);
     let world = simcli::data::load_world(mem_data(), &sc.city, world_config(&sc))
         .map_err(|e| e.to_string())?
@@ -284,6 +356,9 @@ pub struct RaceCard {
     pub bounty_locked: bool,
     /// Purse bonus the career's bounty earns here, fraction of the purse (career lists only).
     pub bounty_bonus: f32,
+    /// Rep a result here earns, times the stake table's: the field's strength against the
+    /// player's car ([`wp_race::field::rep_scale`]; 1 without a car).
+    pub rep_scale: f32,
 }
 
 /// One bet the player may place on themselves (`race_list`, `race_bet`).
@@ -331,6 +406,18 @@ fn player_car_adjust(
         .map(|c| econ.class_index(&c.def))
         .collect();
     rules.rating.car_adjust(econ.class_index(&car.def), &field)
+}
+
+/// How much the rep of a result in race `def` is scaled for the player in `car`: the field's
+/// class indices against the car's ([`field::rep_scale`]).
+fn field_rep_scale(econ: &wp_economy::Economy, def: &RaceDef, car: &LoadedCar) -> f32 {
+    let field: Vec<u16> = def
+        .ai
+        .iter()
+        .filter_map(|d| simcli::data::load_car(mem_data(), d.car).ok())
+        .map(|c| econ.class_index(&c.def))
+        .collect();
+    field::rep_scale(&field, econ.class_index(&car.def))
 }
 
 /// The betting book for race `def` with the player in `car`, priced from the browser's roster
@@ -408,13 +495,18 @@ impl BetWallet for RunWallet<'_> {
 }
 
 /// The picker for a player in `car` (stakes depend on the car's class bracket).
-pub fn race_cards(car: Option<&LoadedCar>, mode: DamageMode) -> Vec<RaceCard> {
+pub fn race_cards(car: Option<&LoadedCar>, mode: DamageMode, rep: i64) -> Vec<RaceCard> {
     let data = RaceData::embedded();
     let roster = Roster::embedded();
+    // Each field scaled to the player's car and rep, as the race will start it.
+    let defs: Vec<RaceDef> = catalog::races()
+        .iter()
+        .map(|d| car.map_or_else(|| d.clone(), |c| scaled_field(d, c, rep)))
+        .collect();
     crate::garage::with_economy(|econ| {
-        catalog::races()
-            .iter()
+        defs.iter()
             .map(|d| {
+                let rep_scale = car.map_or(1.0, |c| field_rep_scale(econ, d, c));
                 let profile = d.police_profile();
                 let (purse, entry_fee) = car.map_or((0, 0), |c| {
                     let r = advertised(econ, &data, d, c, d.length_hint_m, mode);
@@ -465,6 +557,7 @@ pub fn race_cards(car: Option<&LoadedCar>, mode: DamageMode) -> Vec<RaceCard> {
                     bounty_needed: 0,
                     bounty_locked: false,
                     bounty_bonus: 0.0,
+                    rep_scale,
                 }
             })
             .collect()
@@ -477,6 +570,9 @@ fn phase_of(def: &RaceDef) -> wp_contracts::DayPhase {
 
 /// Ledger note of the adjustment that brings the economy's price to the advertised stake.
 pub const STAKE_NOTE: &str = "race stake (advertised purse / buy-in)";
+
+/// Ledger label of the rep a race's field strength adds or takes ([`field::rep_scale`]).
+pub const FIELD_REP_NOTE: &str = "race field strength";
 
 /// Ledger note of a high-stakes race's purse bonus for the career's bounty.
 pub const BOUNTY_BONUS_NOTE: &str = "high-stakes bounty bonus";
@@ -605,6 +701,8 @@ pub struct RaceRun {
     /// `(purse_scale, entry_scale)` of the advertised stake ([`wp_race::bridge::EconomyRace`]):
     /// the economy prices the race, these bring it to what the lobby advertised.
     stake_scale: (f32, f32),
+    /// Rep earned here is scaled by the field's strength ([`field::rep_scale`]).
+    rep_scale: f32,
     entry: Option<(i64, Vec<LedgerLine>)>,
     payout: Option<RacePayout>,
     economy_error: Option<String>,
@@ -700,7 +798,14 @@ impl RaceRun {
         let player_car = &cars[&sc.entities[0].car];
         let length = live.race().route.length_m;
         let data = RaceData::embedded();
-        let (setup, adv) = crate::garage::with_economy(|econ| {
+        let (setup, adv, rep_scale) = crate::garage::with_economy(|econ| {
+            // The field as spawned against the player's car as driven (mods included).
+            let field: Vec<u16> = sc.entities[1..]
+                .iter()
+                .filter_map(|e| cars.get(&e.car))
+                .map(|c| econ.class_index(&c.def))
+                .collect();
+            let rep_scale = field::rep_scale(&field, econ.class_index(&player_car.def));
             let setup = econ.race_setup(
                 def.kind,
                 def.legality,
@@ -710,7 +815,7 @@ impl RaceRun {
                 sc.mode,
             );
             let adv = advertised(econ, &data, def, player_car, length, sc.mode);
-            (setup, adv)
+            (setup, adv, rep_scale)
         });
         let touge = match touge_setup {
             Some(t) => {
@@ -739,6 +844,7 @@ impl RaceRun {
                 (adv.purse, adv.entry_fee)
             },
             stake_scale: (adv.purse_scale, adv.entry_scale),
+            rep_scale,
             entry: None,
             payout: None,
             economy_error: None,
@@ -1076,6 +1182,13 @@ impl RaceRun {
                         }
                         Err(e) => self.economy_error = Some(format!("bounty bonus: {e}")),
                     }
+                }
+                // A tougher field earns more rep, a slower one less (owner, 2026-10-27).
+                let rep = field::scaled_rep(p.rep, self.rep_scale);
+                if rep != p.rep {
+                    run.award_rep(rep - p.rep, FIELD_REP_NOTE);
+                    p.field_rep = rep - p.rep;
+                    p.rep = rep;
                 }
                 self.payout = Some(p);
             }

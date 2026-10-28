@@ -982,6 +982,16 @@ pub struct PoliceConfig {
     pub tools: ToolsFile,
     /// `radio.toml` (radio pacing; optional in a tables directory, built-in when missing).
     pub radio: crate::radio::RadioConfig,
+    /// `commander.toml` (the police commander's budget and call reactions; optional in a
+    /// tables directory, built-in when missing).
+    #[serde(default = "builtin_commander")]
+    pub commander: crate::commander::CommanderConfig,
+}
+
+/// The built-in `commander.toml`.
+pub fn builtin_commander() -> crate::commander::CommanderConfig {
+    parse_one("commander.toml", BUILTIN_COMMANDER)
+        .expect("data/police/commander.toml compiled into wp_police must be valid")
 }
 
 /// Error loading police tables.
@@ -1003,6 +1013,7 @@ const BUILTIN_PRESENCE: &str = include_str!("../../../data/police/presence.toml"
 const BUILTIN_PURSUIT: &str = include_str!("../../../data/police/pursuit.toml");
 const BUILTIN_TOOLS: &str = include_str!("../../../data/police/tools.toml");
 const BUILTIN_RADIO: &str = include_str!("../../../data/police/radio.toml");
+const BUILTIN_COMMANDER: &str = include_str!("../../../data/police/commander.toml");
 
 fn parse_one<T: for<'de> Deserialize<'de>>(name: &str, text: &str) -> Result<T, ConfigError> {
     toml::from_str(text).map_err(|e| ConfigError::Parse(name.to_string(), e))
@@ -1058,13 +1069,14 @@ impl PoliceConfig {
             pursuit: parse_one("pursuit.toml", pursuit)?,
             tools: parse_one("tools.toml", tools)?,
             radio: parse_one("radio.toml", radio)?,
+            commander: parse_one("commander.toml", BUILTIN_COMMANDER)?,
         };
         cfg.validate()?;
         Ok(cfg)
     }
 
     /// Load from a directory containing `heat.toml`, `presence.toml`, `pursuit.toml`, `tools.toml`
-    /// and optionally `radio.toml` (the built-in one when missing).
+    /// and optionally `radio.toml` and `commander.toml` (the built-in ones when missing).
     pub fn load(dir: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let dir = dir.as_ref();
         let read = |name: &str| {
@@ -1076,13 +1088,17 @@ impl PoliceConfig {
         } else {
             BUILTIN_RADIO.to_string()
         };
-        Self::parse_with_radio(
+        let mut cfg = Self::parse_with_radio(
             &read("heat.toml")?,
             &read("presence.toml")?,
             &read("pursuit.toml")?,
             &read("tools.toml")?,
             &radio,
-        )
+        )?;
+        if dir.join("commander.toml").exists() {
+            cfg.commander = parse_one("commander.toml", &read("commander.toml")?)?;
+        }
+        Ok(cfg)
     }
 
     /// The tables in `data/police/` as compiled into the crate (used by the browser build and

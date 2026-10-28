@@ -198,6 +198,23 @@ pub struct ProgressionRules {
     pub unlock_rep: BTreeMap<Feature, i64>,
     /// Lowest tier at which the dealer sells each class (missing = never for sale).
     pub class_unlocks: BTreeMap<VehicleClass, RepTier>,
+    /// The player's own garages, in unlock order (`[[home_garages]]`).
+    #[serde(default)]
+    pub home_garages: Vec<HomeGarageDef>,
+}
+
+/// One of the player's own garages (`career.toml [[home_garages]]`): where career runs start
+/// from, once unlocked. Unlocked for good the first time the account's rep reaches `tier`
+/// (by the peak tier, so a bad night never locks a garage again).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HomeGarageDef {
+    /// Stable id (saves and the browser store it).
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Tier that unlocks it.
+    pub tier: RepTier,
 }
 
 impl ProgressionRules {
@@ -256,6 +273,28 @@ impl ProgressionRules {
                 ));
             }
         }
+        if let Some(first) = self.home_garages.first() {
+            if first.tier != RepTier::Unknown {
+                return Err(invalid(
+                    "career.home_garages",
+                    "the first garage must be open from the start (Unknown)",
+                ));
+            }
+        }
+        for (i, h) in self.home_garages.iter().enumerate() {
+            if self.home_garages[..i].iter().any(|o| o.id == h.id) {
+                return Err(invalid(
+                    "career.home_garages",
+                    format!("duplicate id {}", h.id),
+                ));
+            }
+        }
+        if self.home_garages.windows(2).any(|w| w[1].tier < w[0].tier) {
+            return Err(invalid(
+                "career.home_garages",
+                "garages must be listed in unlock order",
+            ));
+        }
         for c in crate::data::ALL_CLASSES {
             let police = matches!(
                 c,
@@ -298,6 +337,11 @@ impl ProgressionRules {
             .get(&feature)
             .copied()
             .unwrap_or_else(|| self.tier_def(self.feature_tier(feature)).min_rep)
+    }
+
+    /// The home garage `id`, if there is one.
+    pub fn home_garage(&self, id: &str) -> Option<&HomeGarageDef> {
+        self.home_garages.iter().find(|h| h.id == id)
     }
 
     /// Lowest tier at which the dealer sells a class (`None` = never for sale).
@@ -387,6 +431,21 @@ pub struct ClassView {
     pub needs: RepTier,
 }
 
+/// One of the player's own garages and whether it is open.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HomeGarageView {
+    /// Garage id.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Unlocked (the account has reached `needs` at some point).
+    pub unlocked: bool,
+    /// Tier that unlocks it.
+    pub needs: RepTier,
+    /// Rep that unlocks it (that tier's start).
+    pub needed_rep: i64,
+}
+
 /// Everything a career screen shows about progression.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CareerProgress {
@@ -415,6 +474,8 @@ pub struct CareerProgress {
     /// Largest street-racer challenge stake now (cash on hand; the racer's level range applies
     /// on top).
     pub max_bet_street: Money,
+    /// The player's own garages, in unlock order.
+    pub home_garages: Vec<HomeGarageView>,
 }
 
 /// A stake taken by [`Economy::place_bet`]; hand it back to [`Economy::settle_bet`].
@@ -733,6 +794,37 @@ impl Economy {
             max_bet_city: self.max_bet(acct, BetVenue::City),
             max_bet_touge: self.max_bet(acct, BetVenue::Touge),
             max_bet_street: self.max_bet(acct, BetVenue::Street),
+            home_garages: rules
+                .home_garages
+                .iter()
+                .map(|h| HomeGarageView {
+                    id: h.id.clone(),
+                    name: h.name.clone(),
+                    unlocked: self.home_unlocked(acct, &h.id),
+                    needs: h.tier,
+                    needed_rep: rules.tier_def(h.tier).min_rep,
+                })
+                .collect(),
         }
+    }
+
+    /// Home garage `id` is open to this account: its tier has been reached at some point
+    /// (peak tier, or the current one before the peak is recorded). Unknown ids are closed.
+    pub fn home_unlocked(&self, acct: &PlayerAccount, id: &str) -> bool {
+        let reached = acct.career.peak_tier.max(self.rep_tier(acct));
+        self.progression
+            .home_garage(id)
+            .is_some_and(|h| reached >= h.tier)
+    }
+
+    /// The open home garages, in unlock order.
+    pub fn unlocked_homes<'a>(
+        &'a self,
+        acct: &'a PlayerAccount,
+    ) -> impl Iterator<Item = &'a HomeGarageDef> + 'a {
+        self.progression
+            .home_garages
+            .iter()
+            .filter(move |h| self.home_unlocked(acct, &h.id))
     }
 }

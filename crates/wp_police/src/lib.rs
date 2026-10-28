@@ -22,6 +22,8 @@
 //! - [`walls`]: static feelers against building footprints and tunnel walls.
 //! - [`tools`]: roadblocks, spike strips, radar detector and scanner queries.
 //! - [`captain`]: captain commands, validation and the captain view.
+//! - [`commander`]: the background police commander: resource budget by time of day, wanted
+//!   level and bounty; reacts to reckless-driver calls with extra units and patrol surges.
 //! - [`race`]: race-specific police profiles (`data/police/races.toml`): doctrine and
 //!   pre-scripted roadblocks, spike strips and stakeouts per race.
 //! - [`radio`]: radio pacing (one transmission at a time, gaps by wanted level).
@@ -35,6 +37,7 @@ pub mod avoid;
 pub mod captain;
 pub mod chatter;
 pub mod city;
+pub mod commander;
 pub mod config;
 pub mod dispatch;
 pub mod events;
@@ -291,6 +294,13 @@ pub struct PoliceStats {
     pub first_backup_delays_s: Vec<f32>,
     /// Units that ever pursued.
     pub units_engaged: u32,
+    /// Deployment orders the commander gave ([`commander`]: extra units on calls, surges).
+    #[serde(default)]
+    pub commander_orders: u32,
+    /// Units stood down as too far from their racer to be in the chase (they despawn out of
+    /// sight).
+    #[serde(default)]
+    pub far_stand_downs: u32,
     /// Units total-lost without racer contact.
     pub self_wrecks: u32,
     /// Units total-lost after racer contact.
@@ -505,6 +515,9 @@ pub struct PoliceSystem {
     pub(crate) think_accum: f32,
     pub(crate) phase: DayPhase,
     pub(crate) warmed_up: bool,
+    /// Units whose car is below the current wanted level ([`PoliceSystem::set_outdated_units`]),
+    /// sorted: retired out of sight so their replacements come in the upgraded cars.
+    pub(crate) outdated: Vec<UnitId>,
     pub(crate) racers: BTreeMap<EntityId, RacerRecord>,
     pub(crate) obs: BTreeMap<EntityId, RacerObs>,
     pub(crate) recognition_s: BTreeMap<EntityId, f32>,
@@ -563,6 +576,8 @@ pub struct PoliceSystem {
     /// Unit-to-unit callouts (row 79): observer state, never read by the simulation.
     pub(crate) chatter: chatter::Chatter,
     pub(crate) captain: CaptainState,
+    /// The background police commander (budget and call reactions, [`commander`]).
+    pub(crate) commander: commander::Commander,
     pub(crate) stats: PoliceStats,
     pub(crate) contact_cooldown: BTreeMap<(UnitId, EntityId), SimTime>,
     /// Racer–unit contact episodes (assault detection).
@@ -726,6 +741,7 @@ impl PoliceSystem {
             think_accum: 0.0,
             phase: DayPhase::Day,
             warmed_up: false,
+            outdated: Vec::new(),
             racers: BTreeMap::new(),
             last_ambush: BTreeMap::new(),
             first_backup: BTreeMap::new(),
@@ -766,6 +782,7 @@ impl PoliceSystem {
                 spikes_ready: SimTime::ZERO,
                 helo_ready: SimTime::ZERO,
             },
+            commander: commander::Commander::new(),
             stats: PoliceStats::default(),
             contact_cooldown: BTreeMap::new(),
             contact_episodes: BTreeMap::new(),
@@ -1454,6 +1471,18 @@ impl PoliceSystem {
             &self.cfg.pursuit.avoid,
             dt,
         )
+    }
+
+    /// Units whose car model is below the racers' wanted level (`wp_sim` decides from its
+    /// heat-keyed fleet). The dispatcher retires one of them per tick once nobody can see it
+    /// and it is at least `response.despawn_min_m` from every racer, unless it holds a
+    /// roadblock or a spike strip; patrols, responders and backup then refill as usual, so
+    /// the cars on the road follow the wanted level without popping in view. Empty = nothing
+    /// to retire (the default).
+    pub fn set_outdated_units(&mut self, units: &[UnitId]) {
+        self.outdated.clear();
+        self.outdated.extend_from_slice(units);
+        self.outdated.sort_unstable();
     }
 
     /// Bind a unit to the vehicle entity `wp_sim` spawned for it, with that car's steering

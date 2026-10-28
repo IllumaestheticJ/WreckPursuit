@@ -536,6 +536,11 @@ pub struct ModDef {
     /// Required mods (satisfied by same line, equal or higher tier).
     #[serde(default)]
     pub requires: Vec<String>,
+    /// Mods whose job this one already does (coilovers carry their own dampers). Installing
+    /// it removes them (refunded at resale value), and they cannot be installed while it is
+    /// fitted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supersedes: Vec<String>,
     /// Classes allowed (empty = all).
     #[serde(default)]
     pub class_whitelist: Vec<VehicleClass>,
@@ -776,6 +781,16 @@ pub struct ModCatalog {
 pub struct InstallPlan {
     /// Mod of the same line that will be replaced (and refunded at resale value).
     pub replaces: Option<String>,
+    /// Installed mods of other lines the new mod supersedes (see [`ModDef::supersedes`]);
+    /// removed and refunded at resale value.
+    pub removes: Vec<String>,
+}
+
+impl InstallPlan {
+    /// Every installed mod the install takes off: the same-line mod, then superseded ones.
+    pub fn removed(&self) -> impl Iterator<Item = &String> {
+        self.replaces.iter().chain(&self.removes)
+    }
 }
 
 impl ModCatalog {
@@ -800,6 +815,17 @@ impl ModCatalog {
                 };
                 if req.line == m.line {
                     return Err(invalid(&w, format!("requires {r:?} from its own line")));
+                }
+            }
+            for s in &m.supersedes {
+                let Some(o) = cat.mods.get(s) else {
+                    return Err(invalid(&w, format!("supersedes unknown mod {s:?}")));
+                };
+                if o.line == m.line {
+                    return Err(invalid(&w, format!("supersedes {s:?} from its own line")));
+                }
+                if o.supersedes.contains(&m.id) || m.requires.contains(s) {
+                    return Err(invalid(&w, format!("supersedes {s:?} both ways")));
                 }
             }
             if let Some(o) = cat
@@ -881,6 +907,20 @@ impl ModCatalog {
             .any(|m| m.line == req.line && m.tier >= req.tier)
     }
 
+    /// The mods in `ids` that another mod in `ids` supersedes (a save made before the rule,
+    /// or a workshop fit that just completed a superseding set).
+    pub fn superseded_in(&self, ids: &[String]) -> Vec<String> {
+        ids.iter()
+            .filter(|id| {
+                ids.iter().any(|o| {
+                    self.get(o)
+                        .is_some_and(|m| m.supersedes.iter().any(|s| s == *id))
+                })
+            })
+            .cloned()
+            .collect()
+    }
+
     fn resolve<'a>(&'a self, ids: &[String]) -> Result<Vec<&'a ModDef>, EconomyError> {
         ids.iter().map(|id| self.try_get(id)).collect()
     }
@@ -906,6 +946,17 @@ impl ModCatalog {
                 return Err(EconomyError::ModNotAllowed {
                     mod_id: m.id.clone(),
                     reason: format!("another mod of line {:?} is already installed", m.line),
+                });
+            }
+        }
+        for m in &mods {
+            if let Some(s) = mods.iter().find(|s| m.supersedes.contains(&s.id)) {
+                return Err(EconomyError::ModNotAllowed {
+                    mod_id: s.id.clone(),
+                    reason: format!(
+                        "{} already does its job; they cannot be fitted together",
+                        m.name
+                    ),
                 });
             }
         }
@@ -957,19 +1008,25 @@ impl ModCatalog {
             .iter()
             .find(|c| c.line == m.line)
             .map(|c| c.id.clone());
+        let removes: Vec<String> = installed
+            .iter()
+            .filter(|i| m.supersedes.contains(i) && Some(*i) != replaces.as_ref())
+            .cloned()
+            .collect();
+        let plan = InstallPlan { replaces, removes };
         let mut next: Vec<String> = installed
             .iter()
-            .filter(|i| Some(*i) != replaces.as_ref())
+            .filter(|i| !plan.removed().any(|r| r == *i))
             .cloned()
             .collect();
         next.push(mod_id.to_string());
         match self.validate_set(class, &next) {
-            Ok(_) => Ok(InstallPlan { replaces }),
+            Ok(_) => Ok(plan),
             Err(EconomyError::MissingRequirement {
                 mod_id: dependent,
                 requires,
             }) if dependent != mod_id => Err(EconomyError::RequiredBy {
-                mod_id: replaces.unwrap_or(requires),
+                mod_id: plan.replaces.unwrap_or(requires),
                 dependent,
             }),
             Err(e) => Err(e),

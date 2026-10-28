@@ -28,6 +28,8 @@ describe("catalog", () => {
     expect(modBlocker(MODS.engine_ecu_2, ["engine_intake_1"], "Sport", "Arcade")).toBeNull();
     // A higher tier of the same line satisfies the requirement.
     expect(modBlocker(MODS.engine_ecu_2, ["engine_intake_2"], "Sport", "Arcade")).toBeNull();
+    expect(modBlocker(MODS.susp_dampers_1, ["susp_coilovers_3"], "Sport", "Arcade")).toMatch(/Race Coilovers/);
+    expect(modBlocker(MODS.susp_dampers_1, ["susp_springs_1"], "Sport", "Arcade")).toBeNull();
     const arcadeOnly = Object.values(MODS).find((m) => m.modes?.length === 1 && m.modes[0] === "Arcade");
     if (arcadeOnly) expect(modBlocker(arcadeOnly, MODS[arcadeOnly.requires?.[0] ?? ""] ? arcadeOnly.requires! : [], "Sport", "Simulation")).toMatch(/mode/);
   });

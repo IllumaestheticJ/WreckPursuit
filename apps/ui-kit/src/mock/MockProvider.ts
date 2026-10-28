@@ -651,7 +651,9 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
         if (car.mods.includes(mod.id)) return;
         const blocker = modBlocker(mod, car.mods, car.class, s.settings.damageMode);
         if (blocker) return notice(blocker);
-        const replaced = car.mods.filter((id) => MODS[id]?.line === mod.line && MODS[id]?.slot === mod.slot);
+        const replaced = car.mods.filter(
+          (id) => (MODS[id]?.line === mod.line && MODS[id]?.slot === mod.slot) || mod.supersedes?.includes(id),
+        );
         const refund = Math.round(0.4 * modsPrice(replaced));
         const cost = mod.price - refund;
         const blocked = canSpend(s, cost);
