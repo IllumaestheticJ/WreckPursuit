@@ -328,6 +328,7 @@ debug coupe = 559 (B). Monotone in power and in lower mass (property-tested).
 | `starting_cash`, `floor_car`, `class_bands`, `condition`, resale fractions | market.toml | always a way back onto the street; a new player affords a beater and a few runs |
 | `bounty.escape_cash` | stakes.toml | an escape is fast money; a bust in a real car costs more than the escape pays |
 | `career.heat_carry_*` | consequences.toml | the police remember last night, but a night off cools them |
+| `tow.callout`, `tow.per_km`, `tow.route_factor` | prices.toml | tow service (`tow.rs`): next-door ≈ 200, cross-map ≈ 900 (a fifth of the starting cash); the nearest shop always tows, on account (debt) |
 
 ### Prices against the car roster
 

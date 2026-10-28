@@ -29,8 +29,9 @@ menu)". Same day: "spawn points can only be done from career mode".
   - safehouse: workshop;
   - car lot: sell to the dealer, walk that lot;
   - anywhere: insurance, pound, informants, bounty, picking the active car, the street beater.
-  - A car that cannot be driven is towed: its repairs are open anywhere (priced at a shop of the
-    garage's city). With no drivable car, lots offer "Taxi" (the old visit).
+  - A car that cannot be driven is worked on where it sits (since 2026-10-28, see
+    `tow-service.md`): off a repair shop it gets "Tow to …" (the tow service), at the shop it was
+    towed to its repairs open. With no drivable car, lots offer "Taxi" (the old visit).
   - Everything else shows "Waypoint" (Car lots tab, new Garages tab: own garages with
     "Spawn here", repair shops). The waypoint is a flag on the map plus a gold GPS line
     (`gps_route`, refreshed every 1.5 s; `apps/testbed-web/src/ui/waypoint.ts`); pulling into

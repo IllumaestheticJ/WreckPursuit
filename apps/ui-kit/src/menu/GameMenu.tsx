@@ -50,6 +50,11 @@ export interface GameMenuHost {
   garage(): void;
   /** Show "Garage" in the pause menu (e.g. only when a career exists). Default: always. */
   canGarage?(): boolean;
+  /** Pause → Call a tow truck (career runs): the menu has already closed; the host shows the
+   * tow destinations. Leave out to hide the item. */
+  tow?(): void;
+  /** Show "Call a tow truck" now (e.g. only during a career run). Default: when `tow` is set. */
+  canTow?(): boolean;
   /** Pause → Quit to main menu: end the run (the main menu is shown next). */
   quitToMain(): void;
   /**
@@ -468,6 +473,8 @@ export class GameMenu {
       body = (
         <PauseScreen
           garage={h.canGarage ? h.canGarage() : true}
+          tow={h.tow ? () => this.act(() => h.tow!()) : null}
+          canTow={h.tow ? (h.canTow ? h.canTow() : true) : false}
           resume={() => this.close()}
           restart={() => this.confirm("restart", "gm-restart", () => this.act(() => h.restart()))}
           openGarage={() => this.confirm("garage", "gm-garage", () => this.act(() => h.garage()))}
@@ -646,6 +653,8 @@ function Keys() {
 
 function PauseScreen(props: {
   garage: boolean;
+  tow: (() => void) | null;
+  canTow: boolean;
   resume: () => void;
   restart: () => void;
   openGarage: () => void;
@@ -659,6 +668,7 @@ function PauseScreen(props: {
       <nav class="wp-gm-list" aria-label="Pause menu">
         <Item id="gm-resume" label="Resume" primary onClick={props.resume} />
         <Item id="gm-restart" label="Restart" onClick={props.restart} />
+        {props.tow && props.canTow && <Item id="gm-tow" label="Call a tow truck" hint="Career: tow the car to a repair shop or your garage (ends the run)" onClick={props.tow} />}
         {props.garage && <Item id="gm-garage" label="Garage" hint="Career: ends the current career run" onClick={props.openGarage} />}
         <Item id="gm-settings" label="Settings" onClick={props.settings} />
         <Item id="gm-controls" label="Controls" onClick={props.controls} />

@@ -116,6 +116,18 @@ BrakeRR = 1.0
 Exhaust = 1.0
 Lights = 0.5
 
+# Tow service (career "Call a tow truck", garage "Tow to …"; wp_economy::tow): price =
+# callout + per_km × road km, road km = straight-line distance × route_factor, rounded to
+# 100 m. Feel target (early career, 4 500 starting cash): a local tow
+# (~1 km) about 280, a cross-map tow (Harnell → Ashpeak, ~7.5 road km) about 900. A player
+# who cannot pay is still towed to the nearest repair shop; the shortfall becomes debt.
+# (The per-class `towing` charge below is the old demo's flat wreck charge; career runs
+# leave the wreck on the road for the tow service instead.)
+[tow]
+callout = 150
+per_km = 100
+route_factor = 1.3
+
 # reference_value: typical car value in the class (parts scale with value / this).
 [class.Beater]
 reference_value = 4000

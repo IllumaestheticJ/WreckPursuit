@@ -1386,3 +1386,266 @@ fn a_career_race_field_matches_the_career_car() {
         );
     }
 }
+
+// ----- the tow service (crate::tow) ------------------------------------------------------------
+
+/// Dent the player's car and write it off (a total loss).
+fn wreck(s: &mut Session) {
+    crash(s, 60.0);
+    let id = player(s);
+    s.debug_sim_mut()
+        .unwrap()
+        .damage_mut(id)
+        .unwrap()
+        .declare_total_loss();
+    s.run_ticks(2);
+    assert!(player_damage(s).summary().total_loss);
+}
+
+/// A Simulation career whose car was wrecked on a free drive and left on the road.
+fn career_with_wreck(cash: i64) -> (Career, CarUid) {
+    let (mut c, uid) = career_with("kestrel_ts", 30_000, DamageMode::Simulation);
+    let mut s = c
+        .start_run(free_drive("ignored", DamageMode::Simulation, false))
+        .unwrap();
+    s.run_ticks(10);
+    wreck(&mut s);
+    let close = c.finish_run(&mut s).unwrap();
+    assert_eq!(close.end, RunEnd::Wrecked);
+    c.profile_mut().account.cash = cash;
+    (c, uid)
+}
+
+fn dest<'a>(o: &'a crate::tow::TowOffer, name: &str) -> &'a crate::tow::TowDestination {
+    o.destinations
+        .iter()
+        .find(|d| d.place.name == name || d.place.id == name)
+        .unwrap_or_else(|| panic!("no {name} in {o:?}"))
+}
+
+#[test]
+fn a_wreck_is_left_on_the_road_and_towed_to_the_nearest_shop() {
+    let (mut c, uid) = career_with_wreck(20_000);
+    // The career run did not charge the old flat towing: the wreck waits on the road.
+    assert!(!c
+        .profile()
+        .ledger
+        .iter()
+        .any(|e| matches!(e.reason, wp_economy::EventReason::Towing)));
+    let spot = c.car_spot(uid);
+    assert!(matches!(spot, wp_economy::CarSpot::Road { .. }), "{spot:?}");
+    assert_eq!(c.view().cars[0].spot.as_ref().unwrap().kind, "Road");
+    let lattice = c.lattice(uid).unwrap();
+
+    let offer = c.tow_offer(uid, None).unwrap();
+    assert_eq!(offer.refused, None);
+    assert_eq!(offer.need, Some(crate::tow::TowNeed::Wrecked));
+    assert!(!offer.ends_run);
+    let nearest = offer.destinations[0].clone();
+    assert!(nearest.nearest && nearest.place.kind == crate::garage_visit::PlaceKind::Garage);
+    let econ = econ();
+    assert_eq!(nearest.price, econ.tow_price(nearest.metres));
+
+    let cash = c.profile().account.cash;
+    let r = c.tow(uid, "Garage", &nearest.place.id, None).unwrap();
+    // Charged, one ledger line naming the shop and the distance.
+    assert_eq!(r.price, nearest.price);
+    assert_eq!(c.profile().account.cash, cash - r.price);
+    let last = c.profile().ledger.last().unwrap();
+    assert_eq!(
+        last.reason,
+        wp_economy::EventReason::Tow {
+            to: nearest.place.name.clone(),
+            metres: nearest.metres
+        }
+    );
+    assert_eq!(last.cash_delta, -r.price);
+    assert_eq!(r.ledger.len(), 1);
+    // The car is at the shop, damage intact, and the player is there too.
+    assert_eq!(
+        c.car_spot(uid),
+        wp_economy::CarSpot::Shop {
+            name: nearest.place.id.clone()
+        }
+    );
+    assert_eq!(c.place(), Some(&nearest.place));
+    assert_eq!(c.lattice(uid).unwrap(), lattice, "the tow keeps the damage");
+    assert!(c.profile().account.car(uid).unwrap().damage.total_loss);
+    let v = c.view();
+    assert_eq!(v.cars[0].spot.as_ref().unwrap().kind, "Garage");
+    // From the shop the other shops and garages remain, not the shop itself.
+    let again = c.tow_offer(uid, None).unwrap();
+    assert!(again
+        .destinations
+        .iter()
+        .all(|d| d.place.id != nearest.place.id));
+    // The save keeps where the car is.
+    let back = Career::load_json(econ, &c.save_json()).unwrap();
+    assert_eq!(back.car_spot(uid), c.car_spot(uid));
+    // Repaired there, it drives again; the next run drives it off from home.
+    c.repair(uid, &ShopRequest::parse("").unwrap()).unwrap();
+    assert!(c.start_blocker().is_none());
+    let _s = c
+        .start_run(free_drive("x", DamageMode::Simulation, false))
+        .unwrap();
+    assert!(c.place().is_none());
+    assert!(!c.profile().car_spots.contains_key(&uid.0));
+}
+
+#[test]
+fn every_destination_kind_has_its_price_and_arrives_there() {
+    // Another shop (not the nearest), then one of the player's garages.
+    let (mut c, uid) = career_with_wreck(50_000);
+    let offer = c.tow_offer(uid, None).unwrap();
+    let far = offer
+        .destinations
+        .iter()
+        .filter(|d| d.place.kind == crate::garage_visit::PlaceKind::Garage && !d.nearest)
+        .max_by_key(|d| d.metres)
+        .unwrap()
+        .clone();
+    assert!(
+        far.price > offer.destinations[0].price,
+        "farther costs more"
+    );
+    let r = c.tow(uid, "Garage", &far.place.id, None).unwrap();
+    assert_eq!(r.price, far.price);
+    assert_eq!(c.place().unwrap().name, far.place.name);
+    assert_eq!(
+        c.car_spot(uid),
+        wp_economy::CarSpot::Shop {
+            name: far.place.id.clone()
+        }
+    );
+
+    let offer = c.tow_offer(uid, None).unwrap();
+    let home = dest(&offer, "vesper_lockup").clone();
+    assert_eq!(home.place.kind, crate::garage_visit::PlaceKind::Home);
+    let cash = c.profile().account.cash;
+    let r = c.tow(uid, "Home", "vesper_lockup", None).unwrap();
+    assert_eq!(c.profile().account.cash, cash - home.price);
+    assert_eq!(r.place.kind, crate::garage_visit::PlaceKind::Home);
+    assert_eq!(
+        c.car_spot(uid),
+        wp_economy::CarSpot::Home {
+            id: "vesper_lockup".into()
+        }
+    );
+    assert_eq!(c.view().cars[0].spot.as_ref().unwrap().kind, "Home");
+    // A garage that is not unlocked is no destination.
+    let offer = c.tow_offer(uid, None).unwrap();
+    assert!(offer
+        .destinations
+        .iter()
+        .all(|d| d.place.id != "spire_loft"));
+    assert!(c.tow(uid, "Home", "spire_loft", None).is_err());
+}
+
+#[test]
+fn broke_the_nearest_shop_still_tows_and_the_shortfall_is_debt() {
+    let (mut c, uid) = career_with_wreck(40);
+    let offer = c.tow_offer(uid, None).unwrap();
+    assert!(offer.destinations[0].nearest && offer.destinations[0].available);
+    assert!(offer.destinations[1..].iter().all(|d| !d.available));
+    let other = offer.destinations[1].place.clone();
+    let before = c.profile().clone();
+    let err = c
+        .tow(uid, &format!("{:?}", other.kind), &other.id, None)
+        .unwrap_err();
+    assert!(err.contains("Not enough cash"), "{err}");
+    assert_eq!(c.profile(), &before, "a refused tow changes nothing");
+    let r = c
+        .tow(uid, "Garage", &offer.destinations[0].place.id, None)
+        .unwrap();
+    assert_eq!(r.cash_after, 40 - r.price);
+    assert!(r.cash_after < 0);
+    let v = c.view();
+    assert_eq!(v.debt, r.price - 40);
+    // Not stuck: the economy-floor beater is free in debt.
+    assert!(v.floor_car.is_some_and(|(_, price)| price == 0));
+}
+
+#[test]
+fn no_tow_while_wanted_unless_the_car_is_totaled_and_never_from_the_pound() {
+    let (mut c, uid) = career_with_wreck(20_000);
+    // Totaled: towed even with heat carried over.
+    c.profile_mut().carry.heat = 40.0;
+    let offer = c.tow_offer(uid, None).unwrap();
+    assert_eq!(offer.refused, None);
+    // Engine dead only (not totaled), and wanted: refused.
+    {
+        let car = c.profile_mut().account.car_mut(uid).unwrap();
+        car.damage.total_loss = false;
+        car.damage.handling.engine_dead = true;
+    }
+    let offer = c.tow_offer(uid, None).unwrap();
+    assert_eq!(offer.refused.as_deref(), Some(crate::tow::POLICE_REFUSAL));
+    assert!(offer.destinations.is_empty());
+    assert_eq!(
+        c.tow(uid, "Garage", "Gantry Garage", None).unwrap_err(),
+        crate::tow::POLICE_REFUSAL
+    );
+    // Heat gone: towed.
+    c.profile_mut().carry.heat = 0.0;
+    assert_eq!(c.tow_offer(uid, None).unwrap().refused, None);
+    // In the pound: the impound's business.
+    c.profile_mut().account.car_mut(uid).unwrap().location = CarLocation::Impound {
+        since_day: 0,
+        level: wp_contracts::WantedLevel::L2,
+    };
+    let offer = c.tow_offer(uid, None).unwrap();
+    assert_eq!(offer.refused.as_deref(), Some(crate::tow::POUND_REFUSAL));
+    assert!(c.tow(uid, "Garage", "Gantry Garage", None).is_err());
+}
+
+#[test]
+fn a_tow_called_in_a_run_ends_it_and_the_car_arrives_with_its_damage() {
+    let (mut c, uid) = career_with("kestrel_ts", 40_000, DamageMode::Simulation);
+    let cash0 = c.profile().account.cash;
+    let mut s = c
+        .start_run(free_drive("ignored", DamageMode::Simulation, false))
+        .unwrap();
+    s.run_ticks(10);
+    // Asked for with a car that drives: offered, no need.
+    let offer = c.tow_offer(uid, Some(&s)).unwrap();
+    assert!(offer.ends_run && offer.refused.is_none() && offer.need.is_none());
+    wreck(&mut s);
+    assert_eq!(c.tow_need(&s), Some(crate::tow::TowNeed::Wrecked));
+    let offer = c.tow_offer(uid, Some(&s)).unwrap();
+    assert_eq!(offer.need, Some(crate::tow::TowNeed::Wrecked));
+    let lattice = player_damage(&s).save_full();
+    let to = offer.destinations[0].clone();
+    let day = c.profile().account.day;
+    let r = c.tow(uid, "Garage", &to.place.id, Some(&mut s)).unwrap();
+    // The run is over (one night), the tow is on the career's ledger.
+    assert!(!c.run_active());
+    assert!(!s.is_career());
+    assert_eq!(c.profile().account.day, day + 1);
+    let close = r.run.expect("the run it ended");
+    assert_eq!(close.end, RunEnd::Wrecked);
+    assert!(close
+        .ledger
+        .iter()
+        .any(|l| l.reason == "Tow" && l.cash_delta == -to.price));
+    assert_eq!(c.profile().account.cash, cash0 - to.price);
+    // At the shop with its damage; the player is there.
+    assert_eq!(
+        c.car_spot(uid),
+        wp_economy::CarSpot::Shop {
+            name: to.place.id.clone()
+        }
+    );
+    assert_eq!(c.place(), Some(&to.place));
+    assert_eq!(c.lattice(uid).unwrap(), Some(lattice));
+}
+
+#[test]
+fn a_chased_player_cannot_call_a_tow() {
+    let (mut c, uid) = career_with("kestrel_ts", 25_000, DamageMode::Arcade);
+    let mut s = career_chase_parked(&mut c, 30.0);
+    s.run_ticks(5);
+    let offer = c.tow_offer(uid, Some(&s)).unwrap();
+    assert_eq!(offer.refused.as_deref(), Some(crate::tow::POLICE_REFUSAL));
+    assert!(c.tow(uid, "Garage", "Gantry Garage", Some(&mut s)).is_err());
+    assert!(c.run_active(), "a refused tow leaves the run going");
+}
