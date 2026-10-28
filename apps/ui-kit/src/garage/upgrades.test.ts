@@ -112,6 +112,14 @@ describe("workshop upgrades", () => {
     expect(plan(s, t, "wing").blocked).toContain("splitter");
   });
 
+  it("does not block on the catalog's needs-fitted-first note for a prerequisite in the plan", () => {
+    const t = tree([mod("kit", { requires: ["pads"] }), mod("pads")]);
+    const s = screen([entry("kit", { reason: "needs pads fitted first" })]);
+    expect(plan(s, t, "kit").blocked).toBeNull();
+    const other = screen([entry("kit", { reason: "needs wing fitted first" })]);
+    expect(plan(other, t, "kit").blocked).toContain("wing");
+  });
+
   it("keeps cosmetics and part grades out of the bolt-on list", () => {
     const t = tree([mod("pads", { slot: "Brakes" }), mod("tint", { group: "cosmetic" }), mod("kit")]);
     const bolts = boltOns(t, [entry("kit")]);
