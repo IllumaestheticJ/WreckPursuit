@@ -222,6 +222,4 @@ None.
   until they arrive).
 - Ashpeak's open country roads mostly cannot take a roadblock (no hard edge within 12 m);
   spike strips go there instead (off-road round them is allowed).
-- `smoke_city_opt_out` fails on `lead/batch-1028` already (`props` 73, expects 172; same hash
-  before and after this branch): not changed here.
 - The trailing share is still around half at 100–140 mph (see above).
