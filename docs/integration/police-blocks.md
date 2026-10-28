@@ -141,13 +141,13 @@ points round the lap). Every 0.5 s every ground unit is sampled:
 | | mph | tactics | sent from | sent from off the course | sent from behind | trailing | patrols moving | rejoins |
 |---|---|---|---|---|---|---|---|---|
 | before (`lead/batch-1028`) | 100 | 8 | ahead 46, behind 39, left 6, right 1 | 8 / 92 (9 %) | 42 % | 66 % | 93 % | 0 |
-| **after** | 100 | **13** | ahead 53, behind 24, left 7, right 1 | **27 / 85 (32 %)** | **28 %** | **59 %** | 79 % | **8** |
+| **after** | 100 | **14** | ahead 52, behind 25, left 6, right 1 | **28 / 84 (33 %)** | **30 %** | **51 %** | 78 % | **7** |
 | before | 140 | 6 | ahead 67, behind 62, left 9, right 1 | 14 / 139 (10 %) | 45 % | 53 % | 92 % | 0 |
-| **after** | 140 | **12** | ahead 85, behind 24, left 17, right 1 | **61 / 127 (48 %)** | **19 %** | **47 %** | 77 % | **41** |
+| **after** | 140 | **13** | ahead 95, behind 22, left 16, right 1 | **64 / 134 (48 %)** | **16 %** | **50 %** | 79 % | **44** |
 
 Tactics before: `Pit Ram RollingBlock Shadow ambush intercept roadblock spikes`; after, in
 addition: `converge flank peel-off rejoin rotate speed-trap`. Roadblocks / spikes placed
-(captain + scripted, 4 runs): 13 / 26 and 16 / 27 (before 14 / 26 and 15 / 26). "Patrols
+(captain + scripted, 4 runs): 13 / 26 and 16 / 26 (before 14 / 26 and 15 / 26). "Patrols
 moving" drops because peeled-off units dropping back now count as not after the racer. Trailing
 stays high at these speeds because the racer is faster than every police car: any unit it
 passes ends up behind it.
