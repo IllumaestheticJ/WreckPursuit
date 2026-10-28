@@ -110,7 +110,21 @@ Free Roam frame times per shot are in `docs/media/popin/*_summary.json` (gfx hig
 SwiftShader, not comparable across runs).
 
 ## Goldens
-GOLDENS_PLACEHOLDER
+`main` 7fa64d8a passes all 131 simcli goldens; on this branch 25 moved, hash only (spawn and
+despawn spots; no physics), re-blessed in one `[bless]` commit:
+`city_blocked_parked_player_{grid,vesper}`, `city_siren_traffic_{no_siren,yields_arcade,yields_sim}`,
+`golden_city_chase` (+ replay), `golden_night_pursuit_escape` (+ replay),
+`jam_pursuit_{grid,vesper}`, `opponent_flee_police`, `opponent_open_roads_traffic`,
+`opponent_pace_city_sprint_s{50,95}`, `opponent_pace_loop9_circuit_s{50,95}`,
+`race_ashpeak_downtown_checkpoint`, `race_ashpeak_metro_circuit`, `race_city_sprint_police`,
+`race_lantern_checkpoint`, `race_loop9_circuit`, `race_loop9_day`,
+`weather_fog_pursuit{,_clear}`, `world_traffic_night_vesper_observer`,
+`world_traffic_soak_vesper_observer`.
+
+One expectation moved: `city_blocked_parked_player_vesper` (a parked "player" car across a
+street; ≥ 1 civilian turn-around in 120 s) saw none on seed 5, since traffic no longer spawns
+where that car can see down the street. Seeds 3/7/9/11 pass, 5/13 do not (before the change seed
+7 had 0 as well); the scenario moved to seed 3 (separate commit, comment in the file).
 
 ## Known gaps
 - A traffic car that reaches the end of a road with no way on (a dead end at the map edge) is
