@@ -1765,15 +1765,21 @@ pub fn police_tool_stride() -> u32 {
 
 /// Police tools on the road, as oriented boxes, 11 floats each:
 /// `[kind, x, y, z, qx, qy, qz, qw, hx, hy, hz]` (centre, orientation, half extents; box local
-/// +X across the road). `kind` 0 = roadblock barrier, a physics body whose pose changes when
-/// it is hit; 1 = spike strip, lying flat on the road (local +X along the strip).
+/// +X across the road). `kind` 0 = roadblock barrier (a fixed physics box); 1 = spike strip,
+/// lying flat on the road (local +X along the strip); 2 = the wooden sawhorse barricade in a
+/// roadblock's gap (local +X across the gap); 3 = a loose piece of a smashed barricade (a
+/// physics body whose pose changes as it tumbles).
 #[wasm_bindgen]
 pub fn police_tools() -> Result<Vec<f32>, JsValue> {
     get(|s| {
         let sim = s.sim();
         let mut out = Vec::new();
         for b in sim.roadblock_barriers() {
-            out.push(0.0);
+            out.push(match b.part {
+                wp_sim::ToolPart::Barrier => 0.0,
+                wp_sim::ToolPart::Barricade => 2.0,
+                wp_sim::ToolPart::Piece => 3.0,
+            });
             out.extend_from_slice(&b.pos);
             out.extend_from_slice(&b.rot);
             out.extend_from_slice(&b.half_extents_m);

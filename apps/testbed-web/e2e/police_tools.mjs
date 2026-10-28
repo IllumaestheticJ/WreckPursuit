@@ -44,19 +44,22 @@ const untilTick = (t) => page.waitForFunction((t) => window.__wp.sim.worldInfo()
 await page.goto(URL);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 60000 });
 
-// Roadblock: barriers exist before the hit and are pushed by it.
+// Roadblock (owner 2026-10-28): solid barriers kerb to kerb, one gap with a wooden barricade;
+// the car hits the solid part and the block holds.
 await page.evaluate(() => window.__wp.runScenario("golden/roadblock.ron", 0));
 await page.evaluate(() => window.__wp.setCamera("chase"));
 await untilTick(240 * 1.8);
 const before = await page.evaluate(() => Array.from(window.__wp.sim.policeTools()));
-check(before.length >= 11 && before[0] === 0, `roadblock barriers drawn (${before.length / 11} boxes)`);
+const kinds = (recs) => { const k = []; for (let o = 0; o < recs.length; o += 11) k.push(recs[o]); return k; };
+check(kinds(before).filter((k) => k === 0).length >= 2, `roadblock barriers drawn (${before.length / 11} boxes)`);
+check(kinds(before).filter((k) => k === 2).length === 1, "one barricade in the gap");
 await shot("police_roadblock_before.png");
 await untilTick(240 * 3.4);
 const after = await page.evaluate(() => Array.from(window.__wp.sim.policeTools()));
 let moved = 0;
 for (let o = 0; o < Math.min(before.length, after.length); o += 11)
-  moved = Math.max(moved, Math.hypot(after[o + 1] - before[o + 1], after[o + 2] - before[o + 2]));
-check(moved > 0.3, `a barrier was shoved ${moved.toFixed(2)} m by the car`);
+  if (before[o] === 0) moved = Math.max(moved, Math.hypot(after[o + 1] - before[o + 1], after[o + 2] - before[o + 2]));
+check(moved < 0.01, `the block held (barriers moved ${moved.toFixed(3)} m)`);
 await shot("police_roadblock_hit.png");
 await page.waitForFunction(() => window.__wp.sim.scenarioResult()?.done === true, null, { timeout: 120000 });
 let res = await page.evaluate(() => window.__wp.sim.scenarioResult());

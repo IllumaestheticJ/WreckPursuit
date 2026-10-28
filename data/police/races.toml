@@ -139,6 +139,9 @@ patrol_corridor_m = 60.0
 helicopters = 3
 max_ground_units = 40
 unit_level = 5
+# Owner 2026-10-28: the commander's highway operations by day (patrol rotation, speed traps,
+# converging on calls, flankers down on-ramps, peel-offs; wp_police::loop_ops).
+dynamic_ops = true
 
 [loop9_day.unlocks]
 helicopter_level = 1

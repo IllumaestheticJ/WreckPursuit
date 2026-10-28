@@ -43,12 +43,14 @@ pub mod dispatch;
 pub mod events;
 pub mod graph;
 pub mod heat;
+pub mod loop_ops;
 pub mod pro;
 pub mod progress;
 pub mod pursuit;
 pub mod race;
 pub mod radio;
 pub mod scenario;
+pub mod section;
 pub mod stuck;
 pub mod time;
 pub mod tools;
@@ -599,6 +601,9 @@ pub struct PoliceSystem {
     /// Building footprints and tunnel walls (static feelers, [`walls`]). Never changes after
     /// construction; shared so clones stay cheap.
     pub(crate) walls: std::sync::Arc<walls::WallIndex>,
+    /// Paving and hard stops across the roads (roadblock and spike layout, [`section`]).
+    /// Never changes after construction; shared so clones stay cheap.
+    pub(crate) section: std::sync::Arc<section::SectionIndex>,
     /// Static feelers on (default); off only for before/after measurements.
     pub(crate) feelers: bool,
     /// Covered roads (tunnels): a racer lost inside one is searched for at its portals.
@@ -693,6 +698,7 @@ impl PoliceSystem {
             });
         }
         p.set_walls(walls::WallIndex::new(segs));
+        p.section = std::sync::Arc::new(section::SectionIndex::from_city(world.map()));
         // The real paved geometry: the road graph's polylines follow a lane.
         p.room = pro::RoadRoom::from_city(world.map(), &p.cfg.pursuit.pro);
         p
@@ -794,6 +800,7 @@ impl PoliceSystem {
             props: stuck::PropIndex::default(),
             unstick_recovery: true,
             walls: std::sync::Arc::new(walls::WallIndex::default()),
+            section: std::sync::Arc::new(section::SectionIndex::default()),
             feelers: true,
             covers: Vec::new(),
             resets: Vec::new(),
@@ -1145,6 +1152,16 @@ impl PoliceSystem {
     /// Open incidents.
     pub fn incidents(&self) -> &[Incident] {
         &self.incidents
+    }
+
+    /// The commander's Loop 9 operation for `unit` (`flank`, `speed-trap`, ...), if any
+    /// ([`commander`]'s highway operations; `None` outside them).
+    pub fn loop_op(&self, unit: UnitId) -> Option<&'static str> {
+        self.commander
+            .loop_ops
+            .ops
+            .get(&unit)
+            .map(|o| o.kind.label())
     }
 
     /// The road graph in use.

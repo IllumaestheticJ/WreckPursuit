@@ -417,19 +417,39 @@ police cars) with `set_obstacles` each tick. Headless, units see the racers and 
   within 15 m of an intersection, and with approach sight distance ≥ `min_sight_m` (120 m).
   Sight distance is the minimum over **every** legal approach, so a site just after a turn-in
   point is a blind corner.
-- **Roadblock**: 2–3 parked units plus barrier `StaticCollider`s with mass. Never on a highway
-  when the level is above `highway_max_level`.
-- **Spike strip**: a line collider. Wheels that cross it deflate linearly over `deflate_s` (5 s)
-  → `tire_puncture(entity)` for `HandlingEffects::tire_puncture`.
+- **Road cross-sections** (`section.rs`, owner 2026-10-28): `SectionIndex::from_city` holds the
+  city's paving (road ribbons, sidewalks, junction/bend patches) and hard stops (building walls,
+  tunnel walls, concrete barriers incl. the taller part of their sloped ends, guard rails), all
+  with heights. `section(p, dir, z)` walks across the road: paved run, carriageway, first stop
+  each side, any far carriageway (no median barrier) in between.
+- **Roadblock** (`tools::roadblock_layout`): one barrier line from the left hard stop to the
+  right one (into each by 0.25 m), boxes overlapping by 0.1 m, broken only by one
+  `GAP_W_M` = 2.6 m gap on the carriageway (left edge, middle or right edge) holding a wooden
+  sawhorse `Barricade` (`Roadblock::barricade`). Cars park nose to tail behind the line, never
+  behind the gap. Placed only where it can seal the road (`block_section`: stops on both
+  sides within `VERGE_REACH_M` = 12 m of the paving, at the line and 0.8 m either side, no far
+  carriageway between them); `wp_sim` makes barriers fixed and breaks the barricade at 8 m/s.
+  Never on a highway when the level is above `highway_max_level`.
+- **Spike strip** (`tools::spike_layout` + `PoliceSystem::spike_plan`): across every lane,
+  shoulder and sidewalk of the paved run, from the left edge (or into the stop there) to
+  `SPIKE_UNDER_CAR_M` = 0.15 m under its unit's car, parked on the right edge; extra segments
+  (`SpikeStrip::extra`, same unit) over any other paved run between the stops (a ramp past an
+  open gore). The ways past: off the paving where there is no wall, or ramming the car aside
+  (that opens ~1.85 m of paving, enough for a car's wheels). Wheels that cross it deflate
+  linearly over `deflate_s` → `tire_puncture(entity)` for `HandlingEffects::tire_puncture`.
 - **Radar detector** `radar(pos, tier)`: units in Patrol/Pursue state within `radar_range_m[tier]`.
 - **Scanner** `scanner(tier, since: Option<SimTime>)`: radio lines delayed by `scanner_delay_s[tier]` (10/6/3 s).
 
 ### Race profiles (`race.rs`)
 Each picker race has its own police (`data/police/races.toml`, keyed by race id):
 `RaceProfile::apply` switches tactics off (unlock level 6) and overrides chase speeds;
-`PoliceSystem::start_race` places scripted roadblocks across the course (with a gap) and on the
-side roads off it, spike strips over part of the course, and stakeout units that join or start a
-chase when a racer passes. Scripted tools outlive a racer's pursuit and do not use the AI
+`PoliceSystem::start_race` places scripted roadblocks across the course (sealed but for the
+barricaded gap, on the profile's `gap_side`; `gap_m` no longer applies) and on the side roads
+off it, full-width spike strips (`length_m` / `offset_m` no longer apply), and stakeout units
+that join or start a chase when a racer passes. A profile with `dynamic_ops` (Loop 9 by day)
+also gets the commander's highway operations (`loop_ops.rs`): patrol rotation over the ramp
+junctions, speed traps ahead, converging on calls, flankers down on-ramps ahead, peel-offs that
+rejoin down a ramp ahead, all scaling with the wanted level. Scripted tools outlive a racer's pursuit and do not use the AI
 captain's budget. Styles: Lantern "Downtown lockdown", Loop 9 "Highway interceptors"
 (pursuit only), Hollins "Summit trap", Grid "Speed trap" (see `docs/integration/police.md`).
 In a race with a patrol corridor (the Loop 9 races) every spike car, scripted or the AI

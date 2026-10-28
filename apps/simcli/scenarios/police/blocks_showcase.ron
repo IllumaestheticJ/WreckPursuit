@@ -1,0 +1,31 @@
+// Owner 2026-10-28: roadblocks and spike strips completely block the road. Two roadblocks and
+// two spike strips on Port Vesper's wide roads, placed directly (`roadblock_at` / `spikes_at`:
+// the police's own layout, no dispatch AI): a downtown street (buildings 26 m apart) and Loop 9
+// (barrier to barrier), each sealed but for one barricaded gap at the right edge; strips across
+// a downtown street and Loop 9's south straight, each ending under its unit's car. The car is
+// parked out of the way. Used by the e2e screenshots (`e2e/police_blocks_shots.mjs`).
+(
+    name: "police_blocks_showcase",
+    seed: 28,
+    city: preset(name: "vesper_v2", seed: 1),
+    time_of_day_h: 14.0,
+    time_ratio: 0.0,
+    traffic_density: 0.0,
+    assists: ai,
+    police_orders: [
+        (t_s: 0.0, order: roadblock_at(target: "car", pos: (50.0, -250.0), dir: (1.0, 0.0))),
+        (t_s: 0.0, order: roadblock_at(target: "car", pos: (-292.2, 1366.6), dir: (-0.999, -0.045))),
+        (t_s: 0.0, order: spikes_at(target: "car", pos: (200.0, -300.0), dir: (0.0, -1.0))),
+        (t_s: 0.0, order: spikes_at(target: "car", pos: (805.0, -1041.8), dir: (0.999, 0.05))),
+    ],
+    entities: [
+        (id: "car", car: "debug_sedan", pos: (20.0, -250.0, 0.0), yaw: -1.5708, speed_mps: 0.0),
+    ],
+    duration_s: 3.0,
+    expect: [
+        world_metric(name: "roadblock_barriers_max", min: 8.0, max: 60.0),
+        world_metric(name: "spike_strips_max", min: 2.0, max: 6.0),
+        world_metric(name: "barricades_broken", min: 0.0, max: 0.0),
+        world_metric(name: "barrier_displaced_max_m", min: 0.0, max: 0.01),
+    ],
+)

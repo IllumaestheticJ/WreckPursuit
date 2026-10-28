@@ -1,0 +1,24 @@
+// Golden "feel" case: smashing through a roadblock's barricade (owner 2026-10-28). The same
+// roadblock as `golden_roadblock` (40 m ahead, solid kerb to kerb but for one 2.6 m gap at the
+// right edge, centred 3.4 m right of the road line); the sedan at 56 km/h (15.56 m/s, above
+// the 8 m/s break speed) is lined up on the gap. It smashes the wooden sawhorse (it breaks into
+// loose timber), drives on past the block, and pays for it with a little damage and speed.
+(
+    name: "golden_roadblock_barricade",
+    seed: 110,
+    mode: Simulation,
+    assists: ai,
+    police_orders: [(t_s: 0.0, order: roadblock_at(target: "car", pos: (0.0, 40.0), dir: (0.0, 1.0)))],
+    entities: [
+        (id: "car", car: "debug_sedan", pos: (3.4, 0.0, 0.0), speed_mps: 15.56, driver: cruise(target_mps: 15.56, until_s: 6.0)),
+    ],
+    duration_s: 6.0,
+    hash_every: 24,
+    expect: [
+        world_metric(name: "barricades_broken", min: 1.0, max: 1.0),
+        world_metric(name: "barrier_displaced_max_m", min: 0.0, max: 0.01),
+        event_count(event: "Contact", entity: "car", min: 1, max: 100000),
+        metric(entity: "car", name: "final_health", min: 0.5, max: 0.999),
+        metric(entity: "car", name: "distance_m", min: 60.0, max: 120.0),
+    ],
+)
