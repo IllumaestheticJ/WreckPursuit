@@ -20,8 +20,8 @@ use wp_world::network::{
 };
 use wp_world::residential;
 use wp_world::surface::{
-    edge_barriers, inside_other_paving, is_elevated, lane_bank, median_barriers, node_patches,
-    sidewalk_mesh, surface_edges, surface_ribbon, TriMesh,
+    edge_barriers, inside_other_paving, is_elevated, lane_bank, median_barrier_profiles,
+    median_barriers, node_patches, sidewalk_mesh, surface_edges, surface_ribbon, TriMesh,
 };
 use wp_world::terrain::Heightfield;
 
@@ -394,20 +394,21 @@ fn wall_mesh(p: &mut Prim, line: &[V3]) {
 }
 
 /// Jersey-profile barrier along `line` (road height at the barrier's foot).
-fn barrier_mesh(p: &mut Prim, line: &[V3]) {
+fn barrier_mesh(p: &mut Prim, line: &[(V3, f32)]) {
     let n = line.len();
     if n < 2 {
         return;
     }
-    // Cross-section points per line point: left side bottom → top, then right side.
+    // Cross-section points per line point: left side bottom → top, then right side; heights
+    // scaled by the point's height fraction (the sloped terminals at free ends).
     let sections: Vec<Vec<V3>> = (0..n)
         .map(|k| {
-            let a = geom::xy(line[k.saturating_sub(1)]);
-            let b = geom::xy(line[(k + 1).min(n - 1)]);
+            let a = geom::xy(line[k.saturating_sub(1)].0);
+            let b = geom::xy(line[(k + 1).min(n - 1)].0);
             let r = geom::right_of(geom::normalize(geom::sub(b, a)));
-            let c = line[k];
+            let (c, f) = line[k];
             let at = |side: f32, w: f32, h: f32| {
-                [c[0] + r[0] * side * w, c[1] + r[1] * side * w, c[2] + h]
+                [c[0] + r[0] * side * w, c[1] + r[1] * side * w, c[2] + h * f]
             };
             BARRIER_PROFILE
                 .iter()
@@ -438,6 +439,14 @@ fn barrier_mesh(p: &mut Prim, line: &[V3]) {
             s1[m - 1],
             [0.0, 0.0, 1.0],
         );
+    }
+    // End faces (both windings: a cap is seen from outside whichever way the line runs), so
+    // an end is drawn where physics has one.
+    for s in [&sections[0], &sections[n - 1]] {
+        for j in 0..m - 1 {
+            p.quad(s[j], s[j + 1], s[m + j + 1], s[m + j], [0.0, 0.0, 1.0]);
+            p.quad(s[m + j], s[m + j + 1], s[j + 1], s[j], [0.0, 0.0, 1.0]);
+        }
     }
 }
 
@@ -820,8 +829,8 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     }
     // Median barriers.
     let barriers = median_barriers(net);
-    for line in &barriers {
-        barrier_mesh(&mut barrier, line);
+    for profile in &median_barrier_profiles(net) {
+        barrier_mesh(&mut barrier, profile);
     }
     // Outer highway edges (not in the parapet index below: they stop where decks start).
     for line in &edge_barriers(map) {

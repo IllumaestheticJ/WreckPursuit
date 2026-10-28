@@ -432,19 +432,35 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     // Guard rails along decks: 0.3 m wide, 0.9 m tall on each paved edge, one smooth mesh per
     // chained run of rail segments (row 164: no seams for a scraping car to catch).
     for run in chain_segments(&wp_world::surface::deck_rails(net)) {
-        added.extend(barrier_colliders(&run, 0.0, RAIL_HALF_W_M, RAIL_HEIGHT_M));
+        added.extend(barrier_colliders(
+            &run,
+            None,
+            0.0,
+            RAIL_HALF_W_M,
+            RAIL_HEIGHT_M,
+        ));
         out.rails += run.len() - 1;
     }
     // Median barriers between divided-highway carriageways: 0.5 m wide, 0.81 m tall concrete,
-    // one smooth mesh per barrier line.
-    // And along the outer edges of highways and ramps (row 160; open at ramp tapers, gores
-    // and rest-stop ramps, on decks and in covered spans).
-    for line in wp_world::surface::median_barriers(net)
-        .into_iter()
-        .chain(wp_world::surface::edge_barriers(map))
-    {
+    // one smooth mesh per barrier line, sloping down to the road at every free end
+    // (`median_barrier_profiles`: a car meeting an end rides up it instead of stopping dead).
+    for profile in wp_world::surface::median_barrier_profiles(net) {
+        let (line, frac): (Vec<[f32; 3]>, Vec<f32>) = profile.into_iter().unzip();
         added.extend(barrier_colliders(
             &line,
+            Some(&frac),
+            0.0,
+            BARRIER_HALF_W_M,
+            BARRIER_HEIGHT_M,
+        ));
+        out.barriers += line.len() - 1;
+    }
+    // And along the outer edges of highways and ramps (row 160; open at ramp tapers, gores
+    // and rest-stop ramps, on decks and in covered spans).
+    for line in wp_world::surface::edge_barriers(map) {
+        added.extend(barrier_colliders(
+            &line,
+            None,
             0.0,
             BARRIER_HALF_W_M,
             BARRIER_HEIGHT_M,
@@ -454,7 +470,13 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     // And just outside the back edge of every sidewalk without a lot behind it (decks and
     // their approaches: the ground falls away there).
     for run in chain_segments(&walks.bare_backs) {
-        added.extend(barrier_colliders(&run, 0.15, RAIL_HALF_W_M, RAIL_HEIGHT_M));
+        added.extend(barrier_colliders(
+            &run,
+            None,
+            0.15,
+            RAIL_HALF_W_M,
+            RAIL_HEIGHT_M,
+        ));
         out.rails += run.len() - 1;
     }
 
@@ -621,15 +643,24 @@ fn chain_segments(segs: &[([f32; 3], [f32; 3])]) -> Vec<Vec<[f32; 3]>> {
 ///   the contact normal up there and roll a scraping car onto the barrier.
 ///
 /// Deck guard rails, sidewalk bare-back rails and median barriers. Empty for a degenerate line.
-fn barrier_colliders(line: &[[f32; 3]], right: f32, half_w: f32, height: f32) -> Vec<Collider> {
-    // Drop repeated points, then a unit direction per segment.
+fn barrier_colliders(
+    line: &[[f32; 3]],
+    frac: Option<&[f32]>,
+    right: f32,
+    half_w: f32,
+    height: f32,
+) -> Vec<Collider> {
+    // Drop repeated points, then a unit direction per segment. `frac` (one per line point, the
+    // fraction of `height` standing there; `None` = full height) follows the kept points.
     let mut pts: Vec<[f32; 3]> = Vec::with_capacity(line.len());
-    for &p in line {
+    let mut heights: Vec<f32> = Vec::with_capacity(line.len());
+    for (k, &p) in line.iter().enumerate() {
         if pts
             .last()
             .is_none_or(|q: &[f32; 3]| len2(p[0] - q[0], p[1] - q[1]) >= 0.05)
         {
             pts.push(p);
+            heights.push(height * frac.and_then(|f| f.get(k)).copied().unwrap_or(1.0));
         }
     }
     if pts.len() < 2 {
@@ -667,9 +698,9 @@ fn barrier_colliders(line: &[[f32; 3]], right: f32, half_w: f32, height: f32) ->
     // top, right top, right foot.
     let ring = |inset: f32, drop: f32| -> Vec<Vector> {
         let mut v = Vec::with_capacity(n * 4);
-        for (p, (c, m, scale)) in pts.iter().zip(&sections) {
+        for ((p, (c, m, scale)), h) in pts.iter().zip(&sections).zip(&heights) {
             let w = (half_w - inset) * scale;
-            let (z0, z1) = (p[2] - BARRIER_FOOT_M, p[2] + height - drop);
+            let (z0, z1) = (p[2] - BARRIER_FOOT_M, p[2] + h - drop);
             let (l, r) = (
                 [c[0] - m[0] * w, c[1] - m[1] * w],
                 [c[0] + m[0] * w, c[1] + m[1] * w],
@@ -775,9 +806,19 @@ fn mesh_tile_colliders(
             }
             idx.push(out_tri);
         }
-        match ColliderBuilder::trimesh(verts, idx) {
+        match ColliderBuilder::trimesh_with_flags(
+            verts.clone(),
+            idx.clone(),
+            TriMeshFlags::MERGE_DUPLICATE_VERTICES | TriMeshFlags::FIX_INTERNAL_EDGES,
+        ) {
             Ok(b) => out.push(b.collision_groups(groups).build()),
-            Err(e) => eprintln!("city ground trimesh failed: {e:?}"),
+            Err(e) => {
+                eprintln!("city ground trimesh flags failed: {e:?}");
+                match ColliderBuilder::trimesh(verts, idx) {
+                    Ok(b) => out.push(b.collision_groups(groups).build()),
+                    Err(e) => eprintln!("city ground trimesh failed: {e:?}"),
+                }
+            }
         }
     }
     out

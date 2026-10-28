@@ -33,6 +33,9 @@
 // Re-locked 2026-10-26 (nitrous follow-up on main b6d6d57c: AI racers burn ahead while the
 // player seat is within 40 m): the front pair (juno 40.5, dez 53.6) pulls clear and the back
 // pair queues behind downtown traffic again, tito 65.4 s, player 71.3 s. The rule on today's time.
+// Re-locked 2026-10-27 (Loop 9 ghost-edge fix: road trimeshes built with FIX_INTERNAL_EDGES, no
+// sideways snag on triangle seams): tito 65.4 -> 53.1 s, by the rule (-15 % .. +20 %). The
+// other three are in range and keep their locks.
 (
     name: "opponent_pace_lantern_checkpoint_s50",
     seed: 31,
@@ -100,7 +103,7 @@
         metric(name: "best_ratio", min: 0.97, max: 1.19),
         metric(name: "race_time_s", entity: "ai_juno", min: 35.0, max: 49.4),
         metric(name: "race_time_s", entity: "ai_dez", min: 38.5, max: 54.4),
-        metric(name: "race_time_s", entity: "ai_tito", min: 55.6, max: 78.4),
+        metric(name: "race_time_s", entity: "ai_tito", min: 45.1, max: 63.7),
         metric(name: "race_time_s", entity: "player", min: 60.6, max: 85.6),
     ],
 )
