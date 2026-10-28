@@ -656,7 +656,7 @@ await page.keyboard.press("KeyM");
   await tctx.close();
 }
 
-// Row 169: street bets follow the career. Main menu → Free drive with the career box ticked
+// Row 169: street bets follow the career. Free drive with the career box ticked
 // (and a career car) is a career run: the bet slip says "Career cash". Career box off: quick
 // play, and the slip says the bet is practice cash. (Settlement on the career account:
 // wp_wasm street_bets_settle_on_the_career.)
@@ -666,31 +666,38 @@ for (const [careerBox, buyCar] of [[true, true], [false, true], [true, false]]) 
   const label = !careerBox ? "career off" : buyCar ? "career on" : "career on, no car";
   const cp = await context.newPage();
   watch(cp);
-  await cp.goto(`${URL}?city=${CITY}&menu=1`);
+  // The main menu lost its Free drive (#125: runs start from the career garage). With the
+  // career box ticked and a career car the drive is the garage's career run in the city
+  // (`careerApi.startRun`); otherwise the race picker's city free drive (quick play).
+  await cp.goto(`${URL}?city=${CITY}`);
   await cp.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 120000 });
   await cp.evaluate((on) => {
     const wp = window.__wp;
     wp.careerApi.newCareer("Arcade");
     if (on[1]) wp.careerApi.buy("junkyard_beater", "Worn");
     document.getElementById("career").checked = on[0];
+    if (on[0] && on[1]) wp.careerApi.startRun("free", null);
+    else wp.raceView.actions.freeDrive();
   }, [careerBox, buyCar]);
-  await cp.click("#gm-play-free");
   await cp.waitForFunction(() => window.__wp.sim.streetStatus() !== null, null, { timeout: 60000 }).catch(() => {});
+  // A career run starts parked in the home garage (#127): drive out of its place card first.
+  if (careerBox && buyCar) await cp.click('[data-testid="place-leave"]', { timeout: 10000 }).catch(() => {});
   await wait(cp, 1500);
   const st0 = await status(cp);
   const active = await cp.evaluate(() => window.__wp.sim.careerRunActive());
   const career = careerBox && buyCar;
-  check(active === career && st0?.career === career, `${label}: menu Free drive is ${career ? "a career run" : "quick play"} (career run ${active}, street career ${st0?.career})`);
+  check(active === career && st0?.career === career, `${label}: the free drive is ${career ? "a career run" : "quick play"} (career run ${active}, street career ${st0?.career})`);
   const target = st0?.roster.find((r) => r.mode !== "OffDuty");
   const hornKey = await cp.evaluate(() => window.__wp.bindings().keys.horn[0]);
   if (target) {
-    await cp.keyboard.down(hornKey);
+    // A challenge takes the horn's rising edge: honk afresh once behind the racer.
     for (let i = 0; i < 40; i++) {
       await placeBehind(cp, target.entity);
+      await cp.keyboard.down(hornKey);
       await wait(cp, 250);
+      await cp.keyboard.up(hornKey);
       if ((await status(cp))?.offer) break;
     }
-    await cp.keyboard.up(hornKey);
   }
   await cp.waitForSelector('[data-testid="st-wallet"]', { timeout: 20000 }).catch(() => {});
   const wallet = await cp.evaluate(() => {
