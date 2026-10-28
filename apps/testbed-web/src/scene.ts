@@ -185,6 +185,11 @@ export class SceneView {
   /** Roadblock barriers (police_tools()), pooled; see updatePoliceTools(). */
   private readonly tools = new THREE.Group();
   private readonly toolPool: { barrier: THREE.Group; body: THREE.Mesh; bulb: THREE.Mesh; lamp: THREE.MeshStandardMaterial }[] = [];
+  /** Roadblock gap barricades (wooden sawhorses) and loose pieces of smashed ones, pooled. */
+  private readonly barricadePool: { obj: THREE.Group; boards: THREE.Group; legs: THREE.Group; lamp: THREE.MeshStandardMaterial }[] = [];
+  private readonly piecePool: THREE.Mesh[] = [];
+  /** Barricades drawn last frame (automation). */
+  barricadesShown = 0;
   /** Light-bar glow multiplier for the police helicopters (art style). */
   policeGlow = 1;
   /** Replaces renderer.render in render() (art style post stack); null = plain render. The
@@ -428,7 +433,15 @@ export class SceneView {
    */
   updatePoliceTools(tools: Float32Array, timeS: number): void {
     const barriers: number[] = [];
-    for (let o = 0; o < tools.length; o += TOOL_STRIDE) if (tools[o + TL.kind] === TOOL_KIND.barrier) barriers.push(o);
+    const barricades: number[] = [];
+    const pieces: number[] = [];
+    for (let o = 0; o < tools.length; o += TOOL_STRIDE) {
+      const k = tools[o + TL.kind];
+      if (k === TOOL_KIND.barrier) barriers.push(o);
+      else if (k === TOOL_KIND.barricade) barricades.push(o);
+      else if (k === TOOL_KIND.piece) pieces.push(o);
+    }
+    this.updateBarricades(tools, barricades, pieces, timeS);
     while (this.toolPool.length < barriers.length) {
       const barrier = new THREE.Group();
       const white = new THREE.MeshStandardMaterial({ color: 0xf2f2f2 });
@@ -458,6 +471,91 @@ export class SceneView {
       t.body.scale.set(2 * hx, 2 * hy, 2 * hz);
       t.bulb.position.set(0, 0, hz + 0.09);
       t.lamp.emissive.setHex(flash ? 0xffaa00 : 0x000000);
+    });
+  }
+
+  /**
+   * The wooden sawhorse barricade in a roadblock's gap (owner 2026-10-28): a low-poly timber
+   * frame in the art style's flat shading: an orange-and-white striped top board, a plain
+   * lower rail, an A-frame leg at each end and a flashing amber lamp on top. Local +X runs
+   * across the gap (the record's half extents: hx across, hz up). Smashed, it falls into loose
+   * timber pieces (kind 3 records, plain wood boxes that follow their physics bodies).
+   */
+  private updateBarricades(tools: Float32Array, barricades: number[], pieces: number[], timeS: number): void {
+    const wood = () => new THREE.MeshStandardMaterial({ color: 0x9a6b3c, roughness: 0.9, flatShading: true });
+    while (this.barricadePool.length < barricades.length) {
+      const obj = new THREE.Group();
+      const boards = new THREE.Group();
+      const legs = new THREE.Group();
+      const orange = new THREE.MeshStandardMaterial({ color: 0xf26a10, roughness: 0.7, flatShading: true });
+      const white = new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.7, flatShading: true });
+      // Top board: 8 diagonal-looking stripes (alternating blocks) on a unit-long board, scaled in x.
+      const top = new THREE.Group();
+      for (let k = 0; k < 8; k++) {
+        const stripe = new THREE.Mesh(new THREE.BoxGeometry(1 / 8 + 0.002, 0.05, 0.26), k % 2 ? white : orange);
+        stripe.position.set(-0.5 + (k + 0.5) / 8, 0, 0);
+        top.add(stripe);
+      }
+      top.name = "top";
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(1, 0.05, 0.14), wood());
+      rail.name = "rail";
+      boards.add(top, rail);
+      // A-frame legs: two splayed timbers along the road at each end, plus a cross brace.
+      for (const end of [-1, 1]) {
+        const leg = new THREE.Group();
+        leg.name = end < 0 ? "legL" : "legR";
+        for (const lean of [-1, 1]) {
+          const t = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 1.15), wood());
+          t.rotation.x = lean * 0.38;
+          t.position.set(0, lean * 0.2, 0);
+          leg.add(t);
+        }
+        const brace = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.5, 0.06), wood());
+        brace.position.set(0, 0, -0.2);
+        leg.add(brace);
+        legs.add(leg);
+      }
+      const lamp = new THREE.MeshStandardMaterial({ color: 0x664400, emissive: 0x000000, flatShading: true });
+      const bulb = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.12, 8).rotateX(Math.PI / 2), lamp);
+      bulb.name = "bulb";
+      obj.add(boards, legs, bulb);
+      this.tools.add(obj);
+      this.barricadePool.push({ obj, boards, legs, lamp });
+    }
+    const flash = timeS % 0.8 < 0.4;
+    this.barricadePool.forEach((b, i) => {
+      b.obj.visible = i < barricades.length;
+      if (!b.obj.visible) return;
+      const o = barricades[i];
+      b.obj.position.set(tools[o + TL.x], tools[o + TL.y], tools[o + TL.z]);
+      b.obj.quaternion.set(tools[o + TL.qx], tools[o + TL.qy], tools[o + TL.qz], tools[o + TL.qw]);
+      const hx = tools[o + TL.hx];
+      const hz = tools[o + TL.hz];
+      const len = 2 * hx - 0.1;
+      const top = b.boards.getObjectByName("top")!;
+      top.scale.set(len, 1, 1);
+      top.position.set(0, 0, hz * 0.6);
+      const rail = b.boards.getObjectByName("rail")!;
+      rail.scale.set(len * 0.95, 1, 1);
+      rail.position.set(0, 0, -hz * 0.1);
+      b.legs.getObjectByName("legL")!.position.set(-hx + 0.18, 0, -hz * 0.05);
+      b.legs.getObjectByName("legR")!.position.set(hx - 0.18, 0, -hz * 0.05);
+      b.obj.getObjectByName("bulb")!.position.set(hx - 0.25, 0, hz * 0.6 + 0.19);
+      b.lamp.emissive.setHex(flash ? 0xffaa00 : 0x000000);
+    });
+    this.barricadesShown = barricades.length;
+    while (this.piecePool.length < pieces.length) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), wood());
+      this.tools.add(m);
+      this.piecePool.push(m);
+    }
+    this.piecePool.forEach((m, i) => {
+      m.visible = i < pieces.length;
+      if (!m.visible) return;
+      const o = pieces[i];
+      m.position.set(tools[o + TL.x], tools[o + TL.y], tools[o + TL.z]);
+      m.quaternion.set(tools[o + TL.qx], tools[o + TL.qy], tools[o + TL.qz], tools[o + TL.qw]);
+      m.scale.set(2 * tools[o + TL.hx], 2 * tools[o + TL.hy], 2 * tools[o + TL.hz]);
     });
   }
 

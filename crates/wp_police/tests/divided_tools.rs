@@ -196,11 +196,13 @@ fn spikes_stay_on_the_racers_carriageway(name: &str, world: &World) -> usize {
             strip.a,
             strip.b
         );
-        // Spans the carriageway: covers the racer's line and is no wider than its lanes.
+        // Spans the carriageway: covers the racer's line, every lane and (owner 2026-10-28)
+        // the shoulders up to its car (which may stand in the outer lane where no shoulder is
+        // known), but never more than a carriageway with its shoulders.
         let width = sseg.lanes_fwd as f32 * sseg.lane_width_m;
         let len = dist(strip.a, strip.b);
         assert!(
-            len >= width - 0.5 && len <= width + 1.0,
+            len >= width - 0.5 - 2.0 * wp_police::tools::UNIT_HALF_W_M && len <= width + 8.0,
             "{name}: strip {len:.1} m on a {width:.1} m carriageway"
         );
         let (ra, rb) = (

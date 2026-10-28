@@ -830,8 +830,11 @@ pub struct WorldSummary {
     pub roadblock_barriers_max: u32,
     /// Most spike strips on the road at once.
     pub spike_strips_max: u32,
-    /// Farthest any roadblock barrier was pushed from where it was placed, m (shows a hit).
+    /// Farthest any roadblock barrier was pushed from where it was placed, m (barriers are
+    /// fixed since 2026-10-28: 0 shows the block held).
     pub barrier_displaced_max_m: f32,
+    /// Roadblock barricades smashed (`Sim::barricades_broken`).
+    pub barricades_broken: u32,
     /// Parked cars hit hard enough to dent (promoted to a damage lattice).
     pub parked_dented: u32,
     /// Deepest dent on any parked car at the end (`DamageModel::structural_crush_m`, as the
@@ -872,6 +875,7 @@ impl WorldSummary {
             "roadblock_barriers_max" => self.roadblock_barriers_max as f32,
             "spike_strips_max" => self.spike_strips_max as f32,
             "barrier_displaced_max_m" => self.barrier_displaced_max_m,
+            "barricades_broken" => self.barricades_broken as f32,
             "parked_dented" => self.parked_dented as f32,
             "parked_crush_max_m" => self.parked_crush_max_m,
             "parked_health_min" => self.parked_health_min,
@@ -883,7 +887,7 @@ impl WorldSummary {
     }
 
     /// Every metric name [`WorldSummary::metric`] accepts.
-    pub const METRICS: [&'static str; 27] = [
+    pub const METRICS: [&'static str; 28] = [
         "traffic_agents_final",
         "traffic_agents_min",
         "traffic_moving_frac_final",
@@ -905,6 +909,7 @@ impl WorldSummary {
         "roadblock_barriers_max",
         "spike_strips_max",
         "barrier_displaced_max_m",
+        "barricades_broken",
         "parked_dented",
         "parked_crush_max_m",
         "parked_health_min",
@@ -942,7 +947,11 @@ fn moving_frac(world: &wp_world::World) -> f32 {
 
 impl WorldTracker {
     fn police_tools(&mut self, sim: &Sim) {
-        let barriers = sim.roadblock_barriers();
+        let barriers: Vec<_> = sim
+            .roadblock_barriers()
+            .into_iter()
+            .filter(|b| b.part == wp_sim::ToolPart::Barrier)
+            .collect();
         self.barriers_max = self.barriers_max.max(barriers.len() as u32);
         self.spikes_max = self.spikes_max.max(sim.spike_strips().len() as u32);
         let mut index: BTreeMap<u32, u32> = BTreeMap::new();
@@ -1015,6 +1024,7 @@ impl WorldTracker {
             roadblock_barriers_max: self.barriers_max,
             spike_strips_max: self.spikes_max,
             barrier_displaced_max_m: self.barrier_displaced_max,
+            barricades_broken: sim.barricades_broken(),
             parked_dented: sim.parked_wrecks().len() as u32,
             parked_crush_max_m: sim
                 .parked_wrecks()
