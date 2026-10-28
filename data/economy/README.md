@@ -6,7 +6,7 @@ in `crates/wp_economy/README.md` ("Tuning levers").
 
 | File | What |
 |---|---|
-| `prices.toml` | repair parts by region / component, class scaling, labour, districts, shops, towing, scrap, insurance |
+| `prices.toml` | repair parts by region / component, class scaling, labour, districts, shops, towing, the tow service (`[tow]`: call-out, per km, road factor), scrap, insurance |
 | `stakes.toml` | purses, buy-ins, rep, day-phase / class / wanted / mode multipliers, debt, pink slips, bounties, informants |
 | `consequences.toml` | fines, bail, rep loss, impound, Arcade vs Simulation capture rules, cop XP and ranks |
 | `market.toml` | starting cash, dealer price bands, resale, economy-floor car, class index, tire grip |

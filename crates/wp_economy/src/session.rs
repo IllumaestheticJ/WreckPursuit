@@ -72,6 +72,15 @@ pub struct SessionConfig {
     pub repair: RepairPolicy,
     /// Day phase at the start of the run (see [`EconomySession::set_day_phase`]).
     pub phase: DayPhase,
+    /// An uncaptured total loss is towed (and charged the class towing) automatically. Career
+    /// runs turn it off: the wreck stays on the road for the tow service ([`crate::tow`]);
+    /// cars marked with [`EconomySession::mark_towed`] are still charged.
+    #[serde(default = "yes")]
+    pub auto_tow: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl SessionConfig {
@@ -83,6 +92,7 @@ impl SessionConfig {
             shop: ShopContext::legit_default(),
             repair: RepairPolicy::PayIfAffordable,
             phase: DayPhase::Night,
+            auto_tow: true,
         }
     }
 }
@@ -336,7 +346,8 @@ impl EconomySession {
                 r.wanted_during_session |= self.ever_wanted.contains(&v);
                 r.total_loss |= self.total_loss.contains(&v);
                 let captured = self.is_captured(v);
-                r.towed |= self.towed.contains(&v) || (r.total_loss && !captured);
+                r.towed |=
+                    self.towed.contains(&v) || (self.config.auto_tow && r.total_loss && !captured);
             }
             if r.towed {
                 towed_cars.insert(r.car);

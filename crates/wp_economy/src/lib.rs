@@ -32,6 +32,7 @@
 //! - [`career`] — scripted multi-night career simulation used for tuning.
 //! - [`visuals`] — what a build looks like: the parts its mods bolt on, for the renderer.
 //! - [`progression`] — rep tiers, feature / dealer unlocks, betting limits, tier rewards.
+//! - [`tow`] — the tow service: call-out + per-km price, the nearest shop on account (debt).
 
 #![warn(missing_docs)]
 
@@ -55,6 +56,7 @@ pub mod session;
 #[cfg(feature = "native")]
 pub mod sqlite;
 pub mod touge;
+pub mod tow;
 pub mod tune;
 pub mod visuals;
 
@@ -80,7 +82,7 @@ pub use parts::{
 };
 pub use payouts::{PinkSlipConsent, RaceResult, RaceSettlement, RaceSetup, RaceType};
 pub use profile::{
-    AbandonedRun, CareerProfile, CareerStats, CarryOver, LotSales, ProfileError, RunEnd,
+    AbandonedRun, CarSpot, CareerProfile, CareerStats, CarryOver, LotSales, ProfileError, RunEnd,
 };
 pub use progression::{
     career_note, BetTicket, BetVenue, CareerProgress, CareerState, Credits, Feature, HomeGarageDef,
@@ -96,6 +98,7 @@ pub use session::{
     SessionConfig,
 };
 pub use touge::WonCar;
+pub use tow::TowJob;
 pub use tune::CarTune;
 pub use visuals::{BuildVisuals, PartKind, PartVisual, VisualPart, WheelVisual};
 pub use wp_contracts::{AccountId, WantedLevel};

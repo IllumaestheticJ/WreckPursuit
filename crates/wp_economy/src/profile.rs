@@ -149,6 +149,31 @@ pub struct CareerProfile {
     /// the first one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<String>,
+    /// Where cars that are not simply "at home" sit, by car uid ([`CarSpot`]): a wreck left
+    /// out on the road, or a car the tow service took to a shop or garage. A car with no entry
+    /// is in the career's home garage. Runs start from home, so a run clears its car's entry.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub car_spots: BTreeMap<u32, CarSpot>,
+}
+
+/// Where a career car sits between runs, when not at home ([`CareerProfile::car_spots`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum CarSpot {
+    /// Left where it stopped (a wreck on the road), world `[x, y]` in m.
+    Road {
+        /// Position, m.
+        pos: [f32; 2],
+    },
+    /// At a repair shop (towed there), by the shop's name.
+    Shop {
+        /// Shop name.
+        name: String,
+    },
+    /// At one of the player's own garages (towed there), by home garage id.
+    Home {
+        /// Home garage id (`career.toml [[home_garages]]`).
+        id: String,
+    },
 }
 
 /// Lot spaces sold on one in-game day (`wp_economy::lots`); stale days count as empty.
@@ -193,6 +218,7 @@ impl Economy {
             run_in_pursuit: None,
             lot_sales: LotSales::default(),
             home: None,
+            car_spots: BTreeMap::new(),
         }
     }
 
@@ -303,6 +329,15 @@ impl Economy {
         }
         let owned: Vec<u32> = p.account.garage.iter().map(|c| c.uid.0).collect();
         p.lattices.retain(|uid, _| owned.contains(uid));
+        // A car in the pound is the pound's; a sold or lost car is nowhere.
+        let free: Vec<u32> = p
+            .account
+            .garage
+            .iter()
+            .filter(|c| c.location == crate::ledger::CarLocation::Garage)
+            .map(|c| c.uid.0)
+            .collect();
+        p.car_spots.retain(|uid, _| free.contains(uid));
     }
 }
 
