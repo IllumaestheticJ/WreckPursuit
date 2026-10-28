@@ -732,6 +732,11 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
           <span>
             CASH <Money value={screen.cash} tone />
           </span>
+          <span title={`stock: ${Math.round(screen.stock_power_hp)} hp`} data-testid="ws-power">
+            POWER <b class={screen.power_hp > screen.stock_power_hp + 0.5 ? "wp-ok" : screen.power_hp < screen.stock_power_hp - 0.5 ? "wp-warn" : undefined}>
+              {Math.round(screen.power_hp)} hp
+            </b>
+          </span>
           {screen.torque_factor < 0.995 && (
             <Badge tone="warn" title="worn engine parts: replace them to get the power back">
               engine worn: −{Math.round((1 - screen.torque_factor) * 100)}% torque

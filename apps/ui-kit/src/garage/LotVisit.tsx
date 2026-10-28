@@ -47,6 +47,7 @@ function Detail({ car, kind }: { car: ListingView; kind: LotKind }) {
         />
         <Stat label="Runs" value={car.runs === null ? "?" : car.runs ? "yes" : "no"} tone={car.runs === false ? "danger" : undefined} />
         {car.est_repairs !== null && car.est_repairs > 0 && <Stat label="Est. repairs" value={<Money value={car.est_repairs} />} tone="warn" />}
+        {car.stats && <Stat label="Power" value={`${Math.round(car.stats.power_hp)} hp`} />}
         {car.stats && <Stat label="PI" value={`${car.stats.class_index} ${car.stats.bracket}`} />}
       </div>
       {car.mods.length > 0 && (
@@ -162,6 +163,7 @@ function LotScreen({ api }: { api: LotVisitApi }) {
               </div>
               <div class="wp-row" style={{ gap: "0.3em", flexWrap: "wrap" }}>
                 <span class="wp-dim wp-mono">{words(c.class)}</span>
+                {c.stats && <span class="wp-mono">{Math.round(c.stats.power_hp)} hp</span>}
                 {c.rare && <Badge tone="info">rare</Badge>}
                 {c.sold && <Badge>sold</Badge>}
                 {c.locked && <Badge tone="dim">needs {c.unlock_tier}</Badge>}

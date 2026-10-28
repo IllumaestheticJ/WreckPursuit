@@ -121,6 +121,9 @@ pub struct StatsView {
     pub bracket: String,
     /// Mass, kg.
     pub mass_kg: f32,
+    /// Peak engine power, mechanical horsepower (from the full-throttle torque curve, mods
+    /// applied).
+    pub power_hp: f32,
     /// Estimated 0–100 km/h, s.
     pub est_0_100_s: f32,
     /// Estimated top speed, km/h.
@@ -579,11 +582,15 @@ fn vehicle_tune(t: wp_economy::CarTune) -> wp_vehicle::CarTune {
     }
 }
 
+/// Mechanical horsepower per kW (1 hp = 745.7 W).
+const HP_PER_KW: f32 = 1.341_022;
+
 fn stats_of(p: &wp_economy::Preview) -> StatsView {
     StatsView {
         class_index: p.class_index,
         bracket: p.bracket.clone(),
         mass_kg: p.mass_kg,
+        power_hp: p.metrics.peak_power_kw * HP_PER_KW,
         est_0_100_s: p.est_0_100_s,
         top_speed_kmh: p.est_top_speed_mps * 3.6,
         lateral_g: p.metrics.lateral_grip_g,
@@ -1748,8 +1755,16 @@ impl Career {
                 .and_then(|g| self.econ.catalog.get(g))
                 .is_none_or(|m| !m.does_nothing_on(&base.def))
         });
+        let stock_power_hp = self.stats_for(&car.def_id, &[])?.power_hp;
+        // A build the preview refuses still opens in the workshop; it shows stock power.
+        let power_hp = self
+            .econ
+            .car_preview(&base.def, &base.lattice, car, Some(self.mode()))
+            .map_or(stock_power_hp, |p| p.metrics.peak_power_kw * HP_PER_KW);
         Ok(WorkshopScreen {
             view: self.econ.workshop(a, uid, self.mode()).map_err(e2s)?,
+            power_hp,
+            stock_power_hp,
             catalog,
             cash: a.cash,
             def_id: car.def_id.clone(),
@@ -2380,6 +2395,10 @@ pub struct WorkshopScreen {
     /// Slots, missing parts, upgrades, inventory.
     #[serde(flatten)]
     pub view: wp_economy::WorkshopView,
+    /// Peak engine power as the car drives now (fitted parts and mods, worn parts), hp.
+    pub power_hp: f32,
+    /// Peak engine power of the stock car, hp.
+    pub stock_power_hp: f32,
     /// Parts catalog for the car.
     pub catalog: Vec<wp_economy::CatalogEntry>,
     /// Cash on hand.
