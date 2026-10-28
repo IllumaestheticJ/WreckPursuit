@@ -1039,7 +1039,17 @@ fn parse_mode(mode: &str) -> Result<DamageMode, String> {
 pub fn race_list(car: &str, mode: &str) -> Result<String, JsValue> {
     let mode = parse_mode(mode).map_err(err)?;
     let car = simcli::data::load_car(data::mem_data(), car).ok();
-    Ok(json(&race::race_cards(car.as_ref(), mode)))
+    Ok(json(&race::race_cards(car.as_ref(), mode, player_rep())))
+}
+
+/// The player's rep for scaling a picker race's field outside a career run: the live
+/// session's account, else the loaded career's, else 0.
+fn player_rep() -> i64 {
+    let live = with_session_opt(|s| Ok::<_, ()>(s.and_then(|s| s.run().map(|r| r.account().rep))))
+        .ok()
+        .flatten();
+    live.or_else(|| career::career_account().map(|a| a.rep))
+        .unwrap_or(0)
 }
 
 /// Scenario JSON of race `id` for `career_start_run` (the career garage's "Street races",
@@ -1111,6 +1121,11 @@ pub fn race_start_on(
         map.to_string()
     };
     let city = race::race_city(&def, &current);
+    // The field brings cars to match the player's car and rep (owner, 2026-10-27).
+    let def = match simcli::data::load_car(data::mem_data(), car) {
+        Ok(loaded) => race::scaled_field(&def, &loaded, player_rep()),
+        Err(_) => def,
+    };
     let mut sc = race::race_scenario_in(&def, car, parse_mode(mode).map_err(err)?, autopilot, city)
         .map_err(err)?;
     if !tune_json.is_empty() {

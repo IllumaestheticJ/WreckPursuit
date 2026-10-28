@@ -255,6 +255,11 @@ pub struct Level {
 /// The four levels, in order (owner, 2026-10-22: the slowest level, Rookie, was dropped; the
 /// others keep their numbers 2..=5, so `level` in every JSON is still the table's `level`).
 ///
+/// Racing aggression and risk were raised across the board on 2026-10-27 (owner: "make the
+/// opponents more aggressive across the board"; Street 0.4/0.35 → 0.6/0.5 up to Legend
+/// 0.8/0.8 → 0.92/0.85): with each name's [`TEMPERAMENT`] most racers are now Bold or
+/// Reckless, and only the calmest names at the lower levels stay Measured.
+///
 /// The car pools climb with the level and do not overlap (class index, `wp_economy`, at
 /// 2026-10-24: Street 330-460, Pro 465-500, Elite 569-674, Legend 682-858), so a higher-level
 /// racer brings a faster car as well as a better driver (owner request 2026-10-24).
@@ -265,9 +270,9 @@ pub const LEVELS: [Level; 4] = [
         colour: "#2f81f7",
         cars: &["ironside_440", "kestrel_ts", "shiro_turbo"],
         skill: 0.45,
-        aggression: 0.4,
+        aggression: 0.6,
         consistency: 0.55,
-        risk: 0.35,
+        risk: 0.5,
         cruise_mps: 12.0,
         bet_min: 250,
         bet_max: 1_200,
@@ -286,9 +291,9 @@ pub const LEVELS: [Level; 4] = [
             "sperber_32",
         ],
         skill: 0.65,
-        aggression: 0.55,
+        aggression: 0.72,
         consistency: 0.7,
-        risk: 0.5,
+        risk: 0.6,
         cruise_mps: 12.5,
         bet_min: 500,
         bet_max: 2_500,
@@ -301,9 +306,9 @@ pub const LEVELS: [Level; 4] = [
         colour: "#f0883e",
         cars: &["rampart_50", "lucciola_350", "kagero_hx"],
         skill: 0.82,
-        aggression: 0.7,
+        aggression: 0.84,
         consistency: 0.85,
-        risk: 0.65,
+        risk: 0.72,
         cruise_mps: 13.0,
         bet_min: 1_000,
         bet_max: 5_000,
@@ -316,9 +321,9 @@ pub const LEVELS: [Level; 4] = [
         colour: "#f85149",
         cars: &["merlo_20t", "fulmine_v10", "ostwind_6t", "ombra_v12"],
         skill: 0.97,
-        aggression: 0.8,
+        aggression: 0.92,
         consistency: 0.95,
-        risk: 0.8,
+        risk: 0.85,
         cruise_mps: 13.3,
         bet_min: 2_000,
         bet_max: 10_000,
