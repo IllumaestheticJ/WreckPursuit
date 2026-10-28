@@ -1322,7 +1322,11 @@ mod tests {
         let b = Boundary::from_world(&w).unwrap();
         let s = &w.network().surfaces[0];
         // On the first straight, with no other leg of the road within the corridor.
-        let (p, d) = geom::point_at(&s.centre, &geom::cumulative(&s.centre), 120.0);
+        let (p, d) = geom::point_at(
+            &s.centre,
+            &geom::cumulative(&s.centre),
+            wp_world::touge::RUN_OFF_EXT_M + 120.0,
+        );
         let r = geom::right_of(d);
         let at = |lat: f32, dz: f32| [p[0] + r[0] * lat, p[1] + r[1] * lat, p[2] + dz];
         assert_eq!(b.check(at(0.0, 0.5)), None);
@@ -1352,8 +1356,10 @@ mod tests {
         let b = Boundary::from_world(&w).unwrap();
         let s = &w.network().surfaces[0];
         let cum = geom::cumulative(&s.centre);
-        let (upper, _) = geom::point_at(&s.centre, &cum, 850.0);
-        let (lower_s, _) = b.locate(upper, Some(560.0));
+        // (Distances along the spec's course, from the end of the base run-off.)
+        let c0 = wp_world::touge::RUN_OFF_EXT_M;
+        let (upper, _) = geom::point_at(&s.centre, &cum, c0 + 850.0);
+        let (lower_s, _) = b.locate(upper, Some(c0 + 560.0));
         let (lower, _) = geom::point_at(&s.centre, &cum, lower_s);
         assert!(geom::dist(geom::xy(upper), geom::xy(lower)) < 40.0);
         assert!(upper[2] - lower[2] > 10.0, "{} vs {}", upper[2], lower[2]);
@@ -1362,12 +1368,12 @@ mod tests {
         assert_eq!(b.check(landed), None);
         // ...but a car tracked on the upper leg that lands there fell off the mountain.
         assert_eq!(
-            b.check_near(landed, Some(850.0)).0,
+            b.check_near(landed, Some(c0 + 850.0)).0,
             Some(BreachKind::OffTheEdge)
         );
         // Tracking follows a car along its own leg.
-        let (_, s1) = b.check_near([upper[0], upper[1], upper[2] + 0.5], Some(845.0));
-        assert!((s1 - 850.0).abs() < 1.0, "{s1}");
+        let (_, s1) = b.check_near([upper[0], upper[1], upper[2] + 0.5], Some(c0 + 845.0));
+        assert!((s1 - c0 - 850.0).abs() < 1.0, "{s1}");
     }
 
     #[test]
@@ -1392,6 +1398,69 @@ mod tests {
         assert_eq!(b.observe(12, &[(me, far)]), None);
         b.decide(20, false);
         assert_eq!(b.outcome(), Some(&o));
+    }
+
+    #[test]
+    fn run_offs_lie_beyond_the_finish_and_inside_the_corridor() {
+        // Owner 2026-10-28: room to slow down after the finish. The road runs on
+        // `wp_world::touge::RUN_OFF_M` past each finish line into a gravel bed: the judged
+        // course still ends at the finish POI (the run-off is not raced), the AI's run-off leg
+        // past the line lies on it, and a car anywhere on it or in the bed is still on the
+        // mountain (no breach: no total loss).
+        use wp_world::touge::{RUN_OFF_M, TRAP_HALF_W_M, TRAP_M};
+        for (map, m) in MAPS.iter().enumerate() {
+            let w = world(m.id);
+            let b = Boundary::from_world(&w).unwrap();
+            let track = wp_world::touge::generate_builtin(m.id).unwrap().track;
+            let s = &w.network().surfaces[0];
+            let cum = geom::cumulative(&s.centre);
+            for d in [Direction::Uphill, Direction::Downhill] {
+                let up = d == Direction::Uphill;
+                let def = setup(map, d, Opponent::Boss).race_def();
+                let race = plan_course(&w, &def).unwrap();
+                let gate = race.course.gates.last().unwrap();
+                let (s_fin, _) = b.locate(gate.pos, None);
+                let line = track.finish_m[usize::from(up)];
+                assert!(
+                    (s_fin - line).abs() < 2.0,
+                    "{} {d:?}: finish at {s_fin}",
+                    m.id
+                );
+                // Beyond the line, along the direction of travel.
+                let past = |x: f32| if up { s_fin + x } else { s_fin - x };
+                let ai = crate::entrants::run_off_route(&w, &race.route).unwrap();
+                let (s_ai, _) = b.locate(*ai.polyline.last().unwrap(), None);
+                let ran_on = (s_ai - s_fin) * if up { 1.0 } else { -1.0 };
+                assert!(
+                    ran_on > 0.5 * crate::entrants::AI_RUN_OFF_M && ran_on < RUN_OFF_M - 100.0,
+                    "{} {d:?}: AI run-off ends {ran_on} m past the line",
+                    m.id
+                );
+                // The whole paved run-off, across both lanes: still racing.
+                let mut x = 0.0;
+                while x <= RUN_OFF_M - 1.0 {
+                    let (p, dir) = geom::point_at(&s.centre, &cum, past(x));
+                    for lat in [-(b.half_width_m - 0.8), 0.0, b.half_width_m - 0.8] {
+                        let q = geom::add(geom::xy(p), geom::scale(geom::right_of(dir), lat));
+                        let pos = [q[0], q[1], p[2] + 0.5];
+                        assert_eq!(b.check(pos), None, "{} {d:?}: {x} m past the line", m.id);
+                    }
+                    x += 5.0;
+                }
+                // ... and the gravel bed at its end.
+                let trap = &track.traps[usize::from(up)];
+                for a in [3.0, 15.0, 30.0, TRAP_M - 4.0] {
+                    for l in [-(TRAP_HALF_W_M - 2.0), 0.0, TRAP_HALF_W_M - 2.0] {
+                        if a > TRAP_M - 6.0 && l != 0.0 {
+                            continue; // the rounded end
+                        }
+                        let q = trap.world(a, l);
+                        let pos = [q[0], q[1], trap.floor_z + 0.5];
+                        assert_eq!(b.check(pos), None, "{} {d:?}: bed ({a}, {l})", m.id);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
