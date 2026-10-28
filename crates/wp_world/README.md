@@ -326,12 +326,15 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
 
 - **Covered roads** (backlog B04, `RoadNetwork::covered`): the **Hollins Tunnel** — Loop 9
   through the northern shoulder of Hollins Heights, 391 m, road profile unchanged (it already
-  ran in a cut), ground backfilled over the roof on the hill side — and **Founders Cut** — the
+  ran in a cut), buried: ground backfilled level with the deck and a 1 in 3 embankment down
+  to the natural ground beyond it (its north side is below the roof) — and **Founders Cut** — the
   Uptown Connector dropped 7 m below the lowest natural ground into a 250 m covered trench
   (an internal profile anchor; ramps ≈ 5 %), ground backfilled level with the plaza deck.
   Inner half width = paved half width + 3.5 m (sidewalk roads) / 1.5 m; ceiling 6.5 m
-  (highway) / 6 m; 0.6 m walls; 0.8 m deck reaching 8.5 m past each wall over the carved
-  shoulder. No buildings on the decks. Route POIs `"<name> entry"`, `"<name> lay-by"`
+  (highway) / 6 m; 0.6 m walls; 0.8 m deck reaching 24 m past each wall (the first 12 m over
+  the carved shoulder, the rest over backfill level with it; `covered::DECK_OVERHANG_M`,
+  `BACKFILL_START_M`), its ground drawn and collided at the terrain's own resolution
+  (`surface::collision_terrain`) so it meets the deck edge flush. No buildings in the trench. Route POIs `"<name> entry"`, `"<name> lay-by"`
   (mid-tunnel kerb lane), `"<name> exit"`.
 - **Line of sight** (`CityMap::line_of_sight`): blocked from outside a span into it and back;
   two points inside the same span see each other along a line that stays inside; outside

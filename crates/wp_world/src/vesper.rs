@@ -42,7 +42,7 @@ use std::collections::BTreeMap;
 use wp_math::Rng;
 
 use crate::builder::{self, BuildOptions, Built, ControlHint, NodeSpec, RoadClass, RoadSpec};
-use crate::covered::{CoverShape, DECK_OVERHANG_M, ROOF_M, WALL_M};
+use crate::covered::{CoverShape, BACKFILL_SLOPE, BACKFILL_START_M, ROOF_M, WALL_M};
 use crate::density::default_density_base;
 use crate::geom::{self, Obb, V2, V3};
 use crate::network::*;
@@ -2410,34 +2410,94 @@ fn loop_cover(built: &Built, ring: &Ring, c: &CoverPlan) -> Option<CoveredSpan> 
     })
 }
 
-/// Fill the ground back over a covered span: beyond the carved shoulder each side, up to the
-/// roof deck (or the natural ground, if lower). Inside the walls and under the deck overhang
-/// the carve stays, so the terrain never reaches into the tube.
-fn backfill_covers(hf: &mut Heightfield, nat: &Natural, spans: &[CoveredSpan]) {
+/// Fill the ground back over a covered span (cut-and-cover): from [`BACKFILL_START_M`] past
+/// the outer wall face up to the roof deck's top, and beyond the deck edge (and beside the
+/// approaches, past the portals) an embankment at [`BACKFILL_SLOPE`] down to the natural
+/// ground. Ground is only ever raised. Inside the walls, under the inner part of the deck
+/// overhang and on the approach roads the carve stays, so the terrain never reaches into the
+/// tube or over the road. Without the embankment a tunnel whose natural ground is lower than
+/// its roof on one side (the Hollins Tunnel's north side) stood out as a box with a sheer
+/// 8–15 m drop off the deck edge. Near other roads (a junction past a portal) the fill stays
+/// a cell diagonal clear of their paving and then rises from below them at the same slope.
+fn backfill_covers(
+    hf: &mut Heightfield,
+    nat: &Natural,
+    spans: &[CoveredSpan],
+    surfaces: &[RoadSurface],
+) {
     for span in spans {
         let shape = CoverShape::new(span);
-        let inner = span.half_width_m + WALL_M + DECK_OVERHANG_M - 1.0;
-        let reach = span.half_width_m + 45.0;
+        let inner = span.half_width_m + WALL_M + BACKFILL_START_M;
+        let deck = shape.deck_half_width();
+        let len = shape.length();
+        let pad = 60.0;
         let (lo, hi) = (shape.bounds[0], shape.bounds[1]);
         let cell = hf.cell_m;
-        let i0 = (((lo[0] - 45.0 - hf.origin[0]) / cell).floor().max(0.0)) as u32;
-        let j0 = (((lo[1] - 45.0 - hf.origin[1]) / cell).floor().max(0.0)) as u32;
-        let i1 = ((((hi[0] + 45.0 - hf.origin[0]) / cell).ceil()) as u32).min(hf.nx - 1);
-        let j1 = ((((hi[1] + 45.0 - hf.origin[1]) / cell).ceil()) as u32).min(hf.ny - 1);
+        // Paved segments near the span other than the covered road and its approaches
+        // (both ends inside the tube's corridor, extended past the portals): (a, b, half
+        // width, lowest centre height).
+        let reach = deck + pad;
+        let others: Vec<(V2, V2, f32, f32)> = surfaces
+            .iter()
+            .flat_map(|sf| {
+                let half = sf.left_m.max(sf.right_m);
+                sf.centre.windows(2).filter_map(move |w| {
+                    let (a, b) = (geom::xy(w[0]), geom::xy(w[1]));
+                    let near = [a, b].iter().any(|p| {
+                        p[0] > lo[0] - reach
+                            && p[1] > lo[1] - reach
+                            && p[0] < hi[0] + reach
+                            && p[1] < hi[1] + reach
+                    });
+                    near.then_some((a, b, half, w[0][2].min(w[1][2])))
+                })
+            })
+            .filter(|(a, b, _, _)| {
+                ![*a, *b]
+                    .iter()
+                    .all(|p| shape.locate(*p).lateral.abs() <= span.half_width_m)
+            })
+            .collect();
+        let clear = cell * std::f32::consts::SQRT_2 + 0.5;
+        let road_cap = |p: V2| -> f32 {
+            others
+                .iter()
+                .map(|(a, b, half, z)| {
+                    let d = geom::point_segment_distance(p, *a, *b) - half;
+                    if d < clear {
+                        f32::NEG_INFINITY
+                    } else {
+                        z - 0.5 + (d - clear) * BACKFILL_SLOPE
+                    }
+                })
+                .fold(f32::INFINITY, f32::min)
+        };
+        let i0 = (((lo[0] - pad - hf.origin[0]) / cell).floor().max(0.0)) as u32;
+        let j0 = (((lo[1] - pad - hf.origin[1]) / cell).floor().max(0.0)) as u32;
+        let i1 = ((((hi[0] + pad - hf.origin[0]) / cell).ceil()) as u32).min(hf.nx - 1);
+        let j1 = ((((hi[1] + pad - hf.origin[1]) / cell).ceil()) as u32).min(hf.ny - 1);
         for j in j0..=j1 {
             for i in i0..=i1 {
                 let p = hf.vertex_pos(i, j);
                 let q = shape.locate(p);
-                if q.s < 0.0 || q.s > shape.length() {
-                    continue;
-                }
                 let lat = q.lateral.abs();
-                if lat < inner || lat > reach {
+                if lat < inner {
                     continue;
                 }
+                // Distance outside the deck's footprint (past its edge and/or a portal).
+                let out_s = (-q.s).max(q.s - len).max(0.0);
+                let out_lat = (lat - deck).max(0.0);
+                let out = (out_s * out_s + out_lat * out_lat).sqrt();
                 let roof_top = q.road_z + span.clearance_m + ROOF_M;
+                // Just under the deck top (the slab draws over it), then the embankment.
+                let bank = roof_top - 0.1 - out * BACKFILL_SLOPE;
+                let fill = if out > 0.0 {
+                    bank
+                } else {
+                    nat.z(p).min(roof_top).max(bank)
+                };
+                let fill = fill.min(road_cap(p));
                 let v = (j * hf.nx + i) as usize;
-                let fill = nat.z(p).min(roof_top);
                 if fill > hf.z[v] {
                     hf.z[v] = (fill * 1000.0).round() / 1000.0;
                 }
@@ -2446,10 +2506,11 @@ fn backfill_covers(hf: &mut Heightfield, nat: &Natural, spans: &[CoveredSpan]) {
     }
 }
 
-/// Whether a building footprint would stand in a covered span's trench (inside the deck).
+/// Whether a building footprint would stand in a covered span's trench (the carved ground
+/// under the deck, inside the backfill).
 fn in_cover_corridor(shapes: &[CoverShape], fp: &[V2]) -> bool {
     shapes.iter().any(|sh| {
-        let r = sh.span.half_width_m + WALL_M + DECK_OVERHANG_M + 1.0;
+        let r = sh.span.half_width_m + WALL_M + BACKFILL_START_M + 1.0;
         let mut c = [0.0f32; 2];
         for q in fp {
             c = [c[0] + q[0] / fp.len() as f32, c[1] + q[1] / fp.len() as f32];
@@ -4971,7 +5032,7 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
     };
     carve(&mut hf, &built, &g.nodes, &deck);
     let covered = covered_spans(&g, &built, &ring, &loop_drafts, &remap, &divided);
-    backfill_covers(&mut hf, &g.nat, &covered);
+    backfill_covers(&mut hf, &g.nat, &covered, &built.surfaces);
     // Bridges and waterways (the Hollins Tunnel is a covered span).
     let mut features = CityFeatures {
         bridges: find_bridges(&built, &infos, &g.nat),
