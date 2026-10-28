@@ -693,9 +693,18 @@ fn heat_for_level(level: WantedLevel) -> f32 {
 }
 
 impl Career {
-    /// A new career in `mode` (starting cash, no car yet).
+    /// A new career in `mode` (starting cash, no car yet) with the fixed lot stock seed
+    /// (`wp_economy::DEFAULT_STOCK_SEED`; native tests). The browser uses
+    /// [`Career::new_seeded`].
     pub fn new(econ: Economy, mode: DamageMode) -> Self {
         let profile = econ.new_career(PLAYER_ACCOUNT, mode);
+        Self::from_profile(econ, profile)
+    }
+
+    /// A new career in `mode` whose car lots roll from `stock_seed`
+    /// (`CareerProfile::stock_seed`), picked by the host when the career is created.
+    pub fn new_seeded(econ: Economy, mode: DamageMode, stock_seed: u32) -> Self {
+        let profile = econ.new_career_seeded(PLAYER_ACCOUNT, mode, stock_seed);
         Self::from_profile(econ, profile)
     }
 
@@ -1120,17 +1129,20 @@ impl Career {
             .collect()
     }
 
-    /// Today's stock of `lot_id` with whether each car was sold today.
+    /// Today's stock of `lot_id` in this career (its `stock_seed`) with whether each car was
+    /// sold today. Every lot screen, the lot visit and [`Career::buy_listing`] go through here,
+    /// so they all see the same cars.
     pub fn lot_stock(&mut self, lot_id: &str) -> Result<Vec<(Listing, bool)>, String> {
         if self.econ.lot(lot_id).is_none() {
             return Err(format!("no lot {lot_id:?}"));
         }
         let roster = self.roster();
         let day = self.profile.account.day;
+        let seed = self.profile.stock_seed;
         let sales = &self.profile.lot_sales;
         Ok(self
             .econ
-            .lot_stock(lot_id, day, &roster)
+            .lot_stock(seed, lot_id, day, &roster)
             .into_iter()
             .map(|l| {
                 let sold = sales.is_sold(day, lot_id, l.slot);
@@ -2565,26 +2577,33 @@ pub(crate) fn end_active_run() -> Result<Option<RunClose>, JsValue> {
 }
 
 /// Start a new career (`mode` = `"Arcade"` | `"Simulation"`), replacing any current one.
-/// Returns the garage view JSON ([`CareerView`]).
+/// `stock_seed` is the career's car-lot stock seed, picked by the host (the testbed draws it
+/// with `crypto.getRandomValues`; Rust never reads OS randomness). Returns the garage view
+/// JSON ([`CareerView`]).
 #[wasm_bindgen]
-pub fn career_new(mode: &str) -> Result<String, JsValue> {
+pub fn career_new(mode: &str, stock_seed: u32) -> Result<String, JsValue> {
     let mode = crate::data::parse_mode(mode).map_err(crate::err)?;
     detach_session();
     let econ = crate::garage::with_economy(|e| e.clone());
-    CAREER.with(|c| *c.borrow_mut() = Some(Career::new(econ, mode)));
+    CAREER.with(|c| *c.borrow_mut() = Some(Career::new_seeded(econ, mode, stock_seed)));
     with_career(view_json)
 }
 
 /// Start a new career like [`career_new`] but with `starting_cash` instead of the market's
 /// (owner request 2026-10-21: preview / demo builds start with $150 000 so every feature can be
 /// tested). The economy tables are unchanged; only this career's opening balance differs.
+/// `stock_seed` as in [`career_new`].
 #[wasm_bindgen]
-pub fn career_new_with_cash(mode: &str, starting_cash: f64) -> Result<String, JsValue> {
+pub fn career_new_with_cash(
+    mode: &str,
+    starting_cash: f64,
+    stock_seed: u32,
+) -> Result<String, JsValue> {
     let mode = crate::data::parse_mode(mode).map_err(crate::err)?;
     detach_session();
     let mut econ = crate::garage::with_economy(|e| e.clone());
     econ.market.starting_cash = starting_cash.max(0.0).round() as wp_economy::Money;
-    let career = Career::new(econ, mode);
+    let career = Career::new_seeded(econ, mode, stock_seed);
     // Keep the shared tables for later runs: only the opening balance came from the override.
     let econ = crate::garage::with_economy(|e| e.clone());
     CAREER.with(|c| *c.borrow_mut() = Some(Career::from_profile(econ, career.profile)));

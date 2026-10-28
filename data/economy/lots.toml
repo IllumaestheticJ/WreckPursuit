@@ -1,6 +1,8 @@
 # Car lots: dealerships, used car lots and junkyards (wp_economy::lots). Owned by workstream 08.
 #
-# Every lot restocks each in-game day from a seeded roll of (lot id, day): `slots` parking
+# Every lot restocks each in-game day from a seeded roll of (career stock seed, lot id, day), so
+# each career sees its own cars and the same day of one career always shows the same ones
+# (`CareerProfile::stock_seed`, picked by the host at career creation): `slots` parking
 # spaces, each filled with chance `fill_chance` by a roster model the lot carries (class in
 # `classes`, base price in [`min_base_price`, `max_base_price`]). Dealerships show each model at
 # most once, so on a given day some models are simply not on the floor.

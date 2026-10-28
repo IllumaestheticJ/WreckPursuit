@@ -80,7 +80,8 @@ pub use parts::{
 };
 pub use payouts::{PinkSlipConsent, RaceResult, RaceSettlement, RaceSetup, RaceType};
 pub use profile::{
-    AbandonedRun, CareerProfile, CareerStats, CarryOver, LotSales, ProfileError, RunEnd,
+    legacy_stock_seed, AbandonedRun, CareerProfile, CareerStats, CarryOver, LotSales, ProfileError,
+    RunEnd, DEFAULT_STOCK_SEED,
 };
 pub use progression::{
     career_note, BetTicket, BetVenue, CareerProgress, CareerState, Credits, Feature, HomeGarageDef,

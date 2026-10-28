@@ -2,9 +2,13 @@
 //! stock, buying a listed car, and tyres (worn by driving, replaced on their own: a repair
 //! never fits tyres).
 //!
-//! **Stock** is a pure function of (lot, in-game day, roster): [`Economy::lot_stock`] seeds a
-//! [`wp_math::Rng`] from the lot id and the day, so every lot restocks each day, the same day
-//! always shows the same cars, and not every model a lot carries is on the floor every day.
+//! **Stock** is a pure function of (career stock seed, lot, in-game day, roster):
+//! [`Economy::lot_stock`] seeds a [`wp_math::Rng`] from the career's
+//! [`crate::CareerProfile::stock_seed`], the lot id and the day. So every career has its own
+//! stock ("random per career by the day"), every lot restocks each day, the same day of the
+//! same career always shows the same cars (reloading or reopening a lot never rerolls), and
+//! not every model a lot carries is on the floor every day. Everything a listing rolls (the
+//! model, used-car wear, junkyard faults, rare variants, paint) comes from that one stream.
 //!
 //! - Dealerships sell brand new cars (each model at most once a day).
 //! - Used lots sell running cars with wear in the lot's condition band: dented panels, tired
@@ -271,9 +275,18 @@ impl Economy {
         self.lots.lots.iter().find(|l| l.id == id)
     }
 
-    /// The lot's stock on `day`, by slot. `roster` is every model the market sells (order
-    /// does not matter; police classes are ignored). Deterministic in (lot, day, roster).
-    pub fn lot_stock(&self, lot_id: &str, day: u32, roster: &[CarSpec]) -> Vec<Listing> {
+    /// The lot's stock on `day` for the career with `stock_seed`
+    /// ([`crate::CareerProfile::stock_seed`]), by slot. `roster` is every model the market
+    /// sells (order does not matter; police classes are ignored). Deterministic in
+    /// (stock seed, lot, day, roster): a purchase names a listing by (lot, day, slot) and finds
+    /// the same car by calling this again with the same career's seed.
+    pub fn lot_stock(
+        &self,
+        stock_seed: u32,
+        lot_id: &str,
+        day: u32,
+        roster: &[CarSpec],
+    ) -> Vec<Listing> {
         let Some(lot) = self.lot(lot_id) else {
             return Vec::new();
         };
@@ -297,6 +310,7 @@ impl Economy {
             })
             .collect();
         let mut h = StateHasher::new();
+        h.write_u32(stock_seed);
         h.write_bytes(lot.id.as_bytes());
         h.write_u32(day);
         let mut rng = Rng::new(h.finish() ^ STOCK_SALT);
@@ -331,7 +345,19 @@ impl Economy {
             };
             let Some(spec) = spec else { continue };
             used.insert(spec.def_id.as_str());
-            out.push(self.roll_listing(lot, slot, spec, rare, &mut slot_rng));
+            let mut l = self.roll_listing(lot, slot, spec, rare, &mut slot_rng);
+            // A lot never sells a car for less than the economy pays back for it straight
+            // away (a rare variant's mods are refunded at resale): no buy-and-flip profit.
+            // Resale grows with the price paid but by less than it (`dealer_buy_frac` < 1), so
+            // this settles within a few rounds.
+            for _ in 0..64 {
+                let resale = self.sale_price(&Self::listing_car(&l));
+                if l.price >= resale {
+                    break;
+                }
+                l.price = (resale + 49) / 50 * 50;
+            }
+            out.push(l);
         }
         out
     }
@@ -438,19 +464,8 @@ impl Economy {
         }
     }
 
-    /// Buy a listed car: pays the asking price and adds the car with the listing's mods and
-    /// tyres (`purchase_price` = the asking price). The damage system applies
-    /// [`Listing::wear`] to the car's lattice afterwards; until it does, the car's health is
-    /// the listing's condition and a non-running car reads as having a dead engine.
-    pub fn buy_listing(&self, acct: &mut PlayerAccount, listing: &Listing) -> EconResult<CarUid> {
-        if matches!(
-            listing.class,
-            VehicleClass::PoliceCruiser | VehicleClass::PoliceInterceptor | VehicleClass::PoliceSuv
-        ) {
-            return Err(EconomyError::InvalidInput(
-                "police vehicles are not for sale".into(),
-            ));
-        }
+    /// The car a listing becomes once bought (uid assigned by the account).
+    fn listing_car(listing: &Listing) -> OwnedCar {
         let mut mods = listing.mods.clone();
         mods.sort();
         let mut damage = DamageSnapshot {
@@ -458,7 +473,7 @@ impl Economy {
             ..DamageSnapshot::pristine()
         };
         damage.handling.engine_dead = !listing.runs;
-        let car = OwnedCar {
+        OwnedCar {
             uid: CarUid(0),
             def_id: listing.def_id.clone(),
             class: listing.class,
@@ -473,7 +488,23 @@ impl Economy {
             tires: listing.tires,
             variant_name: listing.variant_name.clone(),
             paint: Some(listing.paint),
-        };
+        }
+    }
+
+    /// Buy a listed car: pays the asking price and adds the car with the listing's mods and
+    /// tyres (`purchase_price` = the asking price). The damage system applies
+    /// [`Listing::wear`] to the car's lattice afterwards; until it does, the car's health is
+    /// the listing's condition and a non-running car reads as having a dead engine.
+    pub fn buy_listing(&self, acct: &mut PlayerAccount, listing: &Listing) -> EconResult<CarUid> {
+        if matches!(
+            listing.class,
+            VehicleClass::PoliceCruiser | VehicleClass::PoliceInterceptor | VehicleClass::PoliceSuv
+        ) {
+            return Err(EconomyError::InvalidInput(
+                "police vehicles are not for sale".into(),
+            ));
+        }
+        let car = Self::listing_car(listing);
         transact(acct, |tx| {
             tx.spend(
                 listing.price,
@@ -643,6 +674,9 @@ pub const TIRES_NOTE: &str = "tires replaced: ";
 mod tests {
     use super::*;
 
+    /// The fixed seed of careers built without a host seed.
+    const S: u32 = crate::DEFAULT_STOCK_SEED;
+
     fn roster() -> Vec<CarSpec> {
         [
             ("junkyard_beater", VehicleClass::Beater, 3000),
@@ -669,21 +703,98 @@ mod tests {
     fn stock_is_deterministic_and_changes_by_day() {
         let e = Economy::embedded();
         let r = roster();
-        for lot in &e.lots.lots {
-            assert_eq!(e.lot_stock(&lot.id, 3, &r), e.lot_stock(&lot.id, 3, &r));
+        // Same career, same day: the same cars (reopening a lot never rerolls).
+        for seed in [S, 0xDEAD_BEEF] {
+            for lot in &e.lots.lots {
+                assert_eq!(
+                    e.lot_stock(seed, &lot.id, 3, &r),
+                    e.lot_stock(seed, &lot.id, 3, &r)
+                );
+            }
         }
-        let days: Vec<Vec<String>> = (0..10)
-            .map(|d| {
-                e.lot_stock("harbourline_auto", d, &r)
-                    .into_iter()
-                    .map(|l| l.def_id)
-                    .collect()
-            })
-            .collect();
+        // Same career, next day: a restock.
+        for seed in [S, 0xDEAD_BEEF] {
+            for lot in &e.lots.lots {
+                let changed = (0..10).any(|d| {
+                    e.lot_stock(seed, &lot.id, d, &r) != e.lot_stock(seed, &lot.id, d + 1, &r)
+                });
+                assert!(changed, "{} never restocks", lot.id);
+            }
+            let days: Vec<Vec<String>> = (0..10)
+                .map(|d| {
+                    e.lot_stock(seed, "harbourline_auto", d, &r)
+                        .into_iter()
+                        .map(|l| l.def_id)
+                        .collect()
+                })
+                .collect();
+            assert!(
+                days.iter().any(|d| *d != days[0]),
+                "stock never changes: {days:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn careers_with_different_seeds_see_different_stock() {
+        let e = Economy::embedded();
+        let r = roster();
+        let seeds = [S, 1, 2, 0x1234_5678, 0xDEAD_BEEF, u32::MAX];
+        let mut pairs = 0;
+        let mut differ = 0;
+        for day in 0..5 {
+            for lot in &e.lots.lots {
+                for (i, a) in seeds.iter().enumerate() {
+                    for b in &seeds[i + 1..] {
+                        pairs += 1;
+                        if e.lot_stock(*a, &lot.id, day, &r) != e.lot_stock(*b, &lot.id, day, &r) {
+                            differ += 1;
+                        }
+                    }
+                }
+            }
+        }
+        // Wear, prices and paint are rolled too, so nearly every pair differs; ask for most.
         assert!(
-            days.iter().any(|d| *d != days[0]),
-            "stock never changes: {days:?}"
+            differ * 10 >= pairs * 8,
+            "only {differ} of {pairs} (career, career, lot, day) pairs differ"
         );
+    }
+
+    #[test]
+    fn no_lot_car_resells_for_more_than_it_costs() {
+        let e = Economy::embedded();
+        let r = roster();
+        for seed in [S, 7, 0xDEAD_BEEF, 0x1234_5678] {
+            for d in 0..200 {
+                for lot in &e.lots.lots {
+                    for l in e.lot_stock(seed, &lot.id, d, &r) {
+                        let resale = e.sale_price(&Economy::listing_car(&l));
+                        assert!(resale <= l.price, "{l:?} resells for {resale}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_career_keeps_the_stock_guarantees() {
+        let e = Economy::embedded();
+        let r = roster();
+        for seed in [S, 7, 0xDEAD_BEEF] {
+            for d in 0..30 {
+                for lot in &e.lots.lots {
+                    let s = e.lot_stock(seed, &lot.id, d, &r);
+                    assert!(s.len() <= lot.slots as usize);
+                    let slots: BTreeSet<_> = s.iter().map(|l| l.slot).collect();
+                    assert_eq!(slots.len(), s.len(), "a slot holds one car");
+                    if lot.kind == LotKind::Dealership {
+                        let ids: BTreeSet<_> = s.iter().map(|l| &l.def_id).collect();
+                        assert_eq!(ids.len(), s.len(), "{} doubled a model", lot.id);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -698,7 +809,7 @@ mod tests {
             })
             .count();
         let short = (0..20)
-            .filter(|d| e.lot_stock("budget_motors", *d, &r).len() < carried)
+            .filter(|d| e.lot_stock(S, "budget_motors", *d, &r).len() < carried)
             .count();
         assert!(short > 0);
     }
@@ -711,7 +822,7 @@ mod tests {
         let mut saw_rare = false;
         for d in 0..60 {
             for lot in &e.lots.lots {
-                for l in e.lot_stock(&lot.id, d, &r) {
+                for l in e.lot_stock(S, &lot.id, d, &r) {
                     assert!(lot.classes.contains(&l.class));
                     match lot.kind {
                         LotKind::Dealership => {
@@ -747,7 +858,7 @@ mod tests {
         let e = Economy::embedded();
         let r = roster();
         for d in 0..30 {
-            let s = e.lot_stock("harbourline_auto", d, &r);
+            let s = e.lot_stock(S, "harbourline_auto", d, &r);
             let ids: BTreeSet<_> = s.iter().map(|l| &l.def_id).collect();
             assert_eq!(ids.len(), s.len());
         }
@@ -757,10 +868,10 @@ mod tests {
     fn buying_a_listing_pays_and_keeps_tyres_and_mods() {
         let e = Economy::embedded();
         let r = roster();
-        let l = (0..200)
-            .flat_map(|d| e.lot_stock("dockside_salvage", d, &r))
+        let l = (0..1000)
+            .flat_map(|d| e.lot_stock(S, "dockside_salvage", d, &r))
             .find(|l| l.variant.is_some() && !l.mods.is_empty())
-            .expect("a rare variant with mods turns up within 200 days");
+            .expect("a rare variant with mods turns up within 1000 days");
         let (mut a, _) = e.open_account(wp_contracts::PlayerId(1));
         a.cash = 1_000_000;
         let (uid, ev) = e.buy_listing(&mut a, &l).unwrap();
