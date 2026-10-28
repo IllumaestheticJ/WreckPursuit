@@ -240,6 +240,9 @@ pub struct TougeRacer {
     pub driver: AiDriverDef,
     /// Title shown under the name (`King of the Crown`).
     pub title: &'static str,
+    /// Body colour 0xRRGGBB the NPC's car races in (the renderer paints it with this), and the
+    /// colour a won pink slip arrives in.
+    pub paint: u32,
 }
 
 /// The pass's two NPCs, in [`MAPS`] order: `(challenger, boss)`. Their `id`s (`touge_<first
@@ -255,6 +258,7 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.72, 0.35, 0.85, 0.35, 0.85),
             },
             title: "Crown regular",
+            paint: 0xd8d8d2,
         },
         TougeRacer {
             driver: AiDriverDef {
@@ -265,6 +269,7 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.9, 0.7, 0.9, 0.55, 0.8),
             },
             title: "King of the Crown",
+            paint: 0x1e1e22,
         },
     ),
     (
@@ -277,6 +282,7 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.74, 0.5, 0.7, 0.45, 0.75),
             },
             title: "Ridge regular",
+            paint: 0x2a7fd0,
         },
         TougeRacer {
             driver: AiDriverDef {
@@ -287,6 +293,7 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.92, 0.6, 0.85, 0.75, 0.75),
             },
             title: "The Ridge Ghost",
+            paint: 0x7a1f1f,
         },
     ),
     (
@@ -299,6 +306,7 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.75, 0.65, 0.6, 0.6, 0.65),
             },
             title: "Ashfall regular",
+            paint: 0x3fb950,
         },
         TougeRacer {
             driver: AiDriverDef {
@@ -309,6 +317,7 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.9, 0.55, 0.92, 0.5, 0.9),
             },
             title: "Queen of Ashfall",
+            paint: 0x9b59b6,
         },
     ),
     (
@@ -321,6 +330,7 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.73, 0.4, 0.8, 0.4, 0.8),
             },
             title: "Cedar regular",
+            paint: 0xd0a92a,
         },
         TougeRacer {
             driver: AiDriverDef {
@@ -331,6 +341,7 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
                 profile: profile(0.93, 0.75, 0.95, 0.45, 0.85),
             },
             title: "The Cedar Fox",
+            paint: 0xe07a1f,
         },
     ),
 ];
@@ -978,6 +989,8 @@ pub struct OpponentCar {
     pub class: VehicleClass,
     /// Base price.
     pub base_price: u32,
+    /// Body colour 0xRRGGBB it raced in ([`TougeRacer::paint`]).
+    pub paint: u32,
     /// Its damage when the battle was decided.
     pub damage: wp_economy::DamageSnapshot,
 }
@@ -1070,7 +1083,9 @@ pub fn settle(
                 def_id: setup.racer().driver.car.to_string(),
                 class: opponent.class,
                 base_price: opponent.base_price,
+                // Touge NPCs race stock cars (no mods, no named variant): the same car arrives.
                 mods: Vec::new(),
+                paint: Some(opponent.paint),
                 damage: opponent.damage.clone(),
             };
             let (uid, ev) = econ.take_pink_slip_car(&mut work, car)?;
@@ -1308,6 +1323,7 @@ mod tests {
                     def_id: "kestrel_ts".into(),
                     class: VehicleClass::Sport,
                     base_price: 22_000,
+                    paint: None,
                     mods: Vec::new(),
                     damage: wp_economy::DamageSnapshot::pristine(),
                 },
@@ -1390,6 +1406,7 @@ mod tests {
             let opp = OpponentCar {
                 class: VehicleClass::Sport,
                 base_price: 34_000,
+                paint: 0x2b3a55,
                 damage: wp_economy::DamageSnapshot::pristine(),
             };
             let (out, _) = settle(
@@ -1434,6 +1451,7 @@ mod tests {
         let opp = OpponentCar {
             class: VehicleClass::Exotic,
             base_price: 120_000,
+            paint: 0x2b3a55,
             damage: damage.clone(),
         };
         let (out, _) = settle(
@@ -1450,6 +1468,16 @@ mod tests {
         let won = acct.car(uid).unwrap();
         assert_eq!(won.def_id, "lucciola_350");
         assert_eq!(won.damage, damage, "the car arrives exactly as it finished");
+        assert_eq!(won.paint, Some(0x2b3a55), "in the colour it raced in");
+        assert!(
+            won.purchase_price.is_some_and(|p| p > 0),
+            "worth real money"
+        );
+        assert_eq!(
+            out.purse,
+            table.for_opponent(s.opponent).purse,
+            "a won pink slip pays the purse too"
+        );
         assert!(acct.car(car).is_some(), "the player keeps their own car");
     }
 
@@ -1469,6 +1497,7 @@ mod tests {
         let opp = OpponentCar {
             class: VehicleClass::Sport,
             base_price: 22_000,
+            paint: 0x2b3a55,
             damage: wp_economy::DamageSnapshot::pristine(),
         };
         let (out, _) = settle(
@@ -1561,6 +1590,7 @@ mod tests {
         let opp = OpponentCar {
             class: VehicleClass::Sport,
             base_price: 34_000,
+            paint: 0x2b3a55,
             damage: wp_economy::DamageSnapshot::pristine(),
         };
         // Side bet on a boss: stake back, no purse, no rep.

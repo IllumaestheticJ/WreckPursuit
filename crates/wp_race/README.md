@@ -249,7 +249,9 @@ traffic, no police). Every pass has a fixed challenger and boss (`ROSTER`).
 - **Settlement (`settle`):** side bet via `settle_bet` (challenger 2.0×, boss 2.5×), the win
   purse (challenger 3 500, boss 12 000) via `award_credits`, rep via `award_rep` (`boss:<map>` / `touge:<map>`; −100 extra for going off the
   mountain), and pink slips: the winner takes the loser's car **exactly as it finished**
-  (`Economy::take_pink_slip_car` with the NPC's damage snapshot; `lose_pink_slip_car`).
+  (`Economy::take_pink_slip_car` with the NPC's damage snapshot and roster paint
+  `TougeRacer::paint`, valued at the model's market basis; `lose_pink_slip_car`). A won pink
+  slip pays the purse as well.
 
 ## Tests
 
