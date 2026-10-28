@@ -119,6 +119,7 @@
 | Generate one pass (debug build) | cloud container | ≈ 0.1 s | — | load time |
 | Generate one pass, 2026-10-24 overhaul (debug build, 3 m terrain + forest) | cloud container | ≈ 0.4 s | — | load time |
 | Greybox `.glb` per pass, 2026-10-24 (3 m terrain drawn at full resolution, pines) | — | 3.8–8.3 MB (was 0.4–0.7) | — | download |
+| Greybox `.glb` per pass, 2026-10-28 run-offs (terrain box grows with 2 × 300 m of road) | — | 5.1–11.3 MB (was 3.8–8.3) | — | download |
 
 ## Known gaps
 - The opponent car won by pink slip arrives with its economy damage snapshot and its full
