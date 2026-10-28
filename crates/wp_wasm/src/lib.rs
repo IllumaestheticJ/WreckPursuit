@@ -915,6 +915,20 @@ pub fn police_status(entity: u32) -> Result<String, JsValue> {
     })
 }
 
+/// The police commander's state as JSON (`wp_police::commander::CommanderView`): budget by time
+/// of day / wanted level / bounty, what is out, reckless-driver calls, district surges and its
+/// latest deployment orders (where it sent units). `null` when the police system is not stepped
+/// in this session.
+#[wasm_bindgen]
+pub fn police_commander() -> Result<String, JsValue> {
+    get(|s| {
+        if !s.sim().systems().police {
+            return "null".to_string();
+        }
+        json(&s.sim().police().commander())
+    })
+}
+
 /// Police units that are not sim vehicles (internally driven cars, helicopters), 8 floats
 /// each: `[x, y, z, yaw, speed_mps, flags, unit_id, model]` (flags 1 helicopter, 2 pursuing,
 /// 4 Ashpeak County unit: county livery, see [`police::Agencies`];

@@ -463,6 +463,8 @@ export const sim = {
   /** Tracking helicopters: [x, y, z, aimX, aimY, aimZ, coneHalfAngle, flags (1 visual)] each. */
   policeHelicopters: (): Float32Array => wasm.police_helicopters(),
   policeStatus: (entity: number): PoliceStatus | null => JSON.parse(wasm.police_status(entity)),
+  /** Police commander (`wp_police::commander::CommanderView`): budget, calls, surges and deployment orders; `null` without police. */
+  policeCommander: (): unknown => JSON.parse(wasm.police_commander()),
   /** Static city map for the UI kit's minimap / full map (`wp_wasm::map`); `null` on the flat world. Once per city. */
   mapStaticJson: (): string => wasm.map_static_json(),
   /** Per-frame map data for `player` (units, tools, search zone; layout in ui-kit `src/map/data.ts`). */

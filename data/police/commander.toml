@@ -1,0 +1,81 @@
+# Police commander (wp_police::commander): the background "desk" that decides how many police
+# the city may put out and where, and reacts to what dispatch hears (reckless-driver calls).
+#
+# Owner 2026-10-27: "a police commander AI in the background that tells the environment how
+# many and where to deploy cops to catch racers, reacting to information from dispatch
+# (reckless driver calls). The commander is limited in resources by driver bounty, wanted
+# level and time of day, with daytime the most resources."
+#
+# Every resource below is an allotment:
+#   amount = base[phase] + per_level[highest wanted level L0..L5]
+#            + floor(bounty / bounty_step), the bounty part at most bounty_max
+# "bounty" is the highest police bounty (career bounty carried in included) of any racer that
+# is wanted or was called in within [calls] window_s. bounty_step = 0 switches the bounty
+# part off. The commander never goes past the hard limits elsewhere (presence.toml
+# max_units_by_level / max_ground_units / helicopter.count, tools.toml max_active) and never
+# unlocks a tool earlier than presence.toml [unlocks]; it only decides how much of that the
+# city can afford right now.
+#
+# Races: a race's own police profile (races.toml) is the commander's operation order. While a
+# race is policed the commander does not cut it (Loop 9 day stays the dragnet, touge stays
+# police-free) and sends no extra call units or surges of its own.
+
+enabled = true
+
+# Ground units (patrols included) the city may have out at once.
+[ground_units]
+base = { dawn = 8, day = 14, dusk = 8, night = 5 }
+per_level = [0, 2, 4, 6, 9, 12]
+bounty_step = 1000.0
+bounty_max = 6
+
+# Captain roadblocks out at once (a race's scripted ones don't count). Night: none for a
+# small-time driver; a 1500+ bounty gets one.
+[roadblocks]
+base = { dawn = 1, day = 1, dusk = 1, night = 0 }
+per_level = [0, 0, 0, 0, 0, 0]
+bounty_step = 1500.0
+bounty_max = 1
+
+# Spike strips out at once (strips on their way count).
+[spikes]
+base = { dawn = 1, day = 2, dusk = 1, night = 1 }
+per_level = [0, 0, 0, 0, 0, 0]
+bounty_step = 3000.0
+bounty_max = 1
+
+# Helicopters up at once. Night: the air unit is only put up for a 2500+ bounty.
+[helicopters]
+base = { dawn = 1, day = 1, dusk = 1, night = 0 }
+per_level = [0, 0, 0, 0, 0, 0]
+bounty_step = 2500.0
+bounty_max = 1
+
+# Reckless-driver calls (dispatch intel).
+[calls]
+# Calls are remembered this long, s.
+window_s = 120.0
+# Reports about one driver closer together than this are the same call, s (wp_world raises a
+# speeding report every few seconds while a car keeps speeding).
+min_gap_s = 10.0
+# From this many calls on one driver inside the window, the commander adds units to the call
+# so they converge on the driver's predicted path from several sides.
+escalate_calls = 2
+# This many calls inside the window from one district put extra patrols there.
+surge_calls = 3
+# A surge holds this long after the district's last call, s.
+surge_hold_s = 180.0
+
+# Extra units on a call that escalated (on top of the one dispatch sends).
+[calls.extra_units]
+base = { dawn = 1, day = 1, dusk = 1, night = 0 }
+per_level = [0, 0, 0, 0, 0, 0]
+bounty_step = 2000.0
+bounty_max = 1
+
+# Extra patrols in a district with a surge of calls.
+[calls.surge_units]
+base = { dawn = 1, day = 2, dusk = 1, night = 0 }
+per_level = [0, 0, 0, 0, 0, 0]
+bounty_step = 4000.0
+bounty_max = 1
