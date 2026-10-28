@@ -1046,6 +1046,41 @@ fn decimate(points: &[[f32; 3]]) -> Vec<[f32; 2]> {
     out
 }
 
+/// Synthetic entity ids of the parked cars shown to a street race's AI ([`parked_obs`]):
+/// `PARKED_OBS_BASE + prop index`, far above any sim entity id and below
+/// `wp_contracts::WORLD_ENTITY`.
+const PARKED_OBS_BASE: u32 = 0xF000_0000;
+/// Parked cars within this distance of the racer are shown to its race AI, m (its look-ahead
+/// at full speed plus a margin).
+const PARKED_OBS_RANGE_M: f32 = 150.0;
+
+/// The world's parked cars within [`PARKED_OBS_RANGE_M`] of `near`, as standing vehicles for
+/// the race AI (lead/car-popin). The field only sees sim vehicles and civilians; without these
+/// a racer that ran wide towards the kerb at speed had nothing telling it a parked car stood
+/// there (Mara, night challenge on the grid: back from the opposing lane at 35 m/s, 1.3 m past
+/// her line into the parking lane, head-on into a parked car, out of the race). Beside the
+/// lane they are not in the racer's path and change nothing.
+fn parked_obs(sim: &Sim, near: [f32; 2], out: &mut Vec<VehicleObs>) {
+    for (i, p) in sim.world().static_props().enumerate() {
+        if p.kind != wp_world::props::PropKind::ParkedCar
+            || dist(geom::xy(p.pos), near) > PARKED_OBS_RANGE_M
+        {
+            continue;
+        }
+        let (sn, cs) = wp_math::sin_cos(0.5 * p.yaw);
+        out.push(VehicleObs {
+            entity: EntityId(PARKED_OBS_BASE + i as u32),
+            state: wp_contracts::VehicleState {
+                pos: [p.pos[0], p.pos[1], p.pos[2] - p.half_extents[2]],
+                rot: [0.0, 0.0, sn, cs],
+                ..Default::default()
+            },
+            effects: wp_contracts::HandlingEffects::NEUTRAL,
+            size_m: [2.0 * p.half_extents[0], 2.0 * p.half_extents[1]],
+        });
+    }
+}
+
 fn obs(sim: &Sim) -> Vec<VehicleObs> {
     sim.vehicles()
         .iter()
@@ -1817,9 +1852,13 @@ impl StreetRacers {
             if tick < race.go_tick {
                 out.inputs.push((e, stopped()));
             } else {
+                let mut race_obs = obs.clone();
+                if let Some(p) = xy_of(sim, e) {
+                    parked_obs(sim, p, &mut race_obs);
+                }
                 out.inputs.extend_from_slice(race.field.tick(
                     sim.world(),
-                    &obs,
+                    &race_obs,
                     &self.events,
                     &police,
                 ));
@@ -3365,6 +3404,36 @@ mod tests {
                 simcli::data::load_car(mem_data(), car).unwrap_or_else(|e| panic!("{car}: {e}"));
             }
         }
+    }
+
+    #[test]
+    fn race_ai_sees_the_parked_cars_near_the_racer() {
+        let s = Session::new(free_drive("debug_sedan", DamageMode::Arcade, true), false).unwrap();
+        let world = s.sim().world();
+        let (i, car) = world
+            .static_props()
+            .enumerate()
+            .find(|(_, p)| p.kind == wp_world::PropKind::ParkedCar)
+            .expect("the city has parked cars");
+        let at = geom::xy(car.pos);
+        let mut obs = Vec::new();
+        parked_obs(s.sim(), at, &mut obs);
+        let o = obs
+            .iter()
+            .find(|o| o.entity == EntityId(PARKED_OBS_BASE + i as u32))
+            .expect("the parked car is shown");
+        assert_eq!(geom::xy(o.state.pos), at);
+        assert_eq!(o.state.speed_mps, 0.0);
+        assert_eq!(
+            o.size_m,
+            [2.0 * car.half_extents[0], 2.0 * car.half_extents[1]]
+        );
+        // Only parked cars, only near, never a sim entity's id.
+        for o in &obs {
+            assert!(o.entity.0 >= PARKED_OBS_BASE && o.entity != wp_contracts::WORLD_ENTITY);
+            assert!(dist(geom::xy(o.state.pos), at) <= PARKED_OBS_RANGE_M);
+        }
+        assert!(s.sim().vehicles().iter().all(|v| v.id.0 < PARKED_OBS_BASE));
     }
 
     #[test]
