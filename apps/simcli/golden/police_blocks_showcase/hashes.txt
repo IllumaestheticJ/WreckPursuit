@@ -1,0 +1,4 @@
+# simcli hashes scenario=police_blocks_showcase systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
+240 6c13f1b7d7927577
+480 73f03c01aaf38c87
+720 6c0ff6282fa4445f
