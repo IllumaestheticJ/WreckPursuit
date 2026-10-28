@@ -133,8 +133,9 @@ pub struct OwnedCar {
     /// Body price actually paid for the car (the dealer price in the condition it was bought
     /// in, or what the floor car cost; mods excluded, `0` for a car that was given away).
     /// Resale and salvage are valued from it, so selling a car never returns more than was
-    /// paid for it ([`crate::Economy::resale_basis`]). `None` only for cars from career saves
-    /// older than profile version 2, which are valued as the cheapest dealer price of the model.
+    /// paid for it ([`crate::Economy::resale_basis`]). A car won in a pink slip records the
+    /// model's [`crate::Economy::market_basis`]. `None` only for cars from career saves older
+    /// than profile version 2, which are valued the same way.
     #[serde(default)]
     pub purchase_price: Option<Money>,
     /// The free tune ([`crate::Economy::set_tune`]); stock unless the player changed it.

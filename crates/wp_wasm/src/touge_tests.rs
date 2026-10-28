@@ -316,3 +316,215 @@ fn a_career_touge_win_pays_the_career_and_the_pass_has_no_police() {
         "the carried heat waits for the city"
     );
 }
+
+/// Owner report: "pink slip races have no winnings" and "pink slip cars change color when i get
+/// them". A career pink slip won at the line, with the NPC still racing, settles that tick (it
+/// used to wait for the NPC to finish, and "Back to garage" closed the run first with nothing
+/// paid): the purse and the NPC's car land on the career, the car in the colour it raced in and
+/// worth real money.
+#[test]
+fn a_career_pink_slip_won_at_the_line_pays_the_purse_and_brings_the_car_in_its_colours() {
+    use wp_economy::{Condition, Economy};
+    let econ: Economy = crate::garage::with_economy(|e| e.clone());
+    let mut c = crate::career::Career::new(econ, DamageMode::Arcade);
+    c.profile_mut().account.cash = 50_000;
+    c.profile_mut().account.rep = 1_000_000;
+    let uid = c.buy_car(CAR, Condition::Used).unwrap();
+    c.set_active(uid).unwrap();
+    c.profile_mut().account.rep = rep_for(Feature::PinkSlips).max(rep_for(Feature::BossRaces));
+    let st = setup("touge_ashfall_grade", "up", "boss");
+    let paint = st.racer().paint;
+    set_next_wager(Wager::PinkSlip);
+    let sc = touge_scenario(&st, CAR, DamageMode::Arcade, false).unwrap();
+    let mut s = c.start_run(sc).unwrap();
+    let seq = s.run().unwrap().account().next_event_seq;
+    s.run_ticks(240 * 2);
+    let r = s.race().unwrap().touge().unwrap().report();
+    assert!(r.wager_taken, "{:?}", r.wager_error);
+    assert_eq!(r.opponent_paint, paint);
+    // The player takes the line; the NPC is still on the mountain.
+    let tick = s.tick();
+    s.race_mut()
+        .unwrap()
+        .touge_mut()
+        .unwrap()
+        .battle_mut()
+        .decide_as(tick, BattleResult::Won);
+    s.run_ticks(1);
+    let npc_running = s
+        .race()
+        .unwrap()
+        .live()
+        .judge()
+        .results()
+        .iter()
+        .any(|x| x.racer == NPC && x.status == wp_contracts::RacerStatus::Running);
+    assert!(npc_running, "the NPC is still racing");
+    let r = s.race().unwrap().touge().unwrap().report();
+    assert_eq!(r.settle_error, None);
+    let out = r
+        .settlement
+        .expect("settled the tick the battle was decided");
+    let purse = wp_race::touge::TougeTable::embedded().boss.purse;
+    assert!(purse > 0);
+    assert_eq!(out.purse, purse, "a won pink slip pays the boss purse");
+    let won = out.car_won.expect("the NPC car is won");
+    // "Back to garage" right away.
+    c.finish_run(&mut s).unwrap();
+    let on_career: Vec<i64> = c
+        .profile()
+        .ledger
+        .iter()
+        .filter(|e| e.seq >= seq)
+        .map(|e| e.cash_delta)
+        .collect();
+    assert!(
+        on_career.contains(&purse),
+        "the purse is on the career ledger: {on_career:?}"
+    );
+    let car = c.profile().account.car(won).expect("won car in the garage");
+    assert_eq!(car.def_id, "lindwurm_4t");
+    assert_eq!(car.paint, Some(paint), "in the colour it raced in");
+    let mut raced: Vec<String> = st.racer().mods.iter().map(|m| m.to_string()).collect();
+    raced.sort();
+    let mut arrived = car.mods.clone();
+    arrived.sort();
+    assert_eq!(arrived, raced, "with the build it raced with");
+    let view = c.view();
+    let v = view.cars.iter().find(|v| v.uid == won.0).unwrap();
+    assert_eq!(v.paint, paint, "the garage draws it in that colour");
+    assert!(v.sale_price > 1_000, "worth real money: {}", v.sale_price);
+}
+
+/// Every touge NPC (both roster slots of every pass), challenger first.
+fn roster() -> Vec<(&'static wp_race::touge::TougeRacer, bool)> {
+    wp_race::touge::ROSTER
+        .iter()
+        .flat_map(|(c, b)| [(c, false), (b, true)])
+        .collect()
+}
+
+/// Owner: "touge opponents cars are also all unmodified". Every NPC races a build that is
+/// legal on its car (class whitelist, requirements, one mod per line, works in both damage
+/// modes, changes something on that car) with at least one exterior mod (drawn: a cosmetic
+/// effect or bolt-on parts) and one performance mod (a mechanical slot that changes the car).
+/// Bosses are built harder than challengers.
+#[test]
+fn touge_builds_are_legal_and_visible() {
+    use wp_economy::mods::{ModEffect, ModSlot};
+    for (r, boss) in roster() {
+        let car = crate::data::load_car(r.driver.car).unwrap();
+        let ids: Vec<String> = r.mods.iter().map(|m| m.to_string()).collect();
+        crate::garage::with_economy(|e| {
+            let set = e
+                .catalog
+                .validate_set(car.def.class, &ids)
+                .unwrap_or_else(|err| panic!("{}: {err}", r.driver.id));
+            for m in &set {
+                assert!(m.allows_class(car.def.class), "{} {}", r.driver.id, m.id);
+                assert!(!m.does_nothing_on(&car.def), "{} {}", r.driver.id, m.id);
+                for mode in [DamageMode::Arcade, DamageMode::Simulation] {
+                    assert!(m.allows_mode(mode), "{} {} {mode:?}", r.driver.id, m.id);
+                }
+            }
+            let exterior = set.iter().filter(|m| {
+                !m.visuals.is_empty()
+                    || m.effects
+                        .iter()
+                        .any(|e| matches!(e, ModEffect::Cosmetic { .. }))
+            });
+            let performance = set.iter().filter(|m| {
+                matches!(
+                    m.slot,
+                    ModSlot::Engine
+                        | ModSlot::ForcedInduction
+                        | ModSlot::Drivetrain
+                        | ModSlot::Suspension
+                        | ModSlot::Brakes
+                        | ModSlot::Tires
+                        | ModSlot::Weight
+                ) && m
+                    .effects
+                    .iter()
+                    .any(|e| matches!(e, ModEffect::Vehicle { .. }))
+            });
+            let (ext, perf) = (exterior.count(), performance.count());
+            assert!(
+                ext >= 1 && perf >= 1,
+                "{}: {ext} exterior, {perf} performance",
+                r.driver.id
+            );
+            if boss {
+                assert!(set.len() >= 12, "{}: a boss is heavily built", r.driver.id);
+            } else {
+                assert!(
+                    (5..=9).contains(&set.len()),
+                    "{}: moderate build",
+                    r.driver.id
+                );
+            }
+        });
+    }
+}
+
+/// The NPC drives its build: the scenario entity carries the mods and the sim spawned the
+/// modified car (more power than stock).
+#[test]
+fn the_touge_npc_races_its_build() {
+    let st = setup("touge_hollow_crown", "down", "boss");
+    let s = battle(&st, false, Wager::None, None);
+    let want: Vec<String> = st.racer().mods.iter().map(|m| m.to_string()).collect();
+    assert_eq!(s.entity_mods(NPC), want.as_slice());
+    let stock = crate::data::load_car(st.racer().driver.car).unwrap();
+    let raced = s.car(NPC).unwrap();
+    let peak = |c: &wp_contracts::LoadedCar| {
+        c.def
+            .engine
+            .torque_curve_nm
+            .iter()
+            .map(|p| p.1)
+            .fold(0.0f32, f32::max)
+    };
+    assert!(
+        peak(raced) > peak(&stock),
+        "the build's engine mods are on the car in the race"
+    );
+    let r = s.race().unwrap().touge().unwrap().report();
+    assert_eq!(r.opponent_mods, want);
+}
+
+/// How much a build gains (0-100, top speed, skidpad), stock vs built, per NPC. Keeps the
+/// field fair on a mountain pass, where grip decides: no build may take more than a fifth off
+/// the car's 0-100 or add more than 6 % skidpad grip (the bosses race on their stock-compound
+/// tyres; semi-slicks added ~18 %). Prints the table (`--nocapture`) for the integration notes.
+#[test]
+fn touge_builds_stay_beatable() {
+    for (r, boss) in roster() {
+        let ids: Vec<String> = r.mods.iter().map(|m| m.to_string()).collect();
+        let stock = crate::build_stats::build_stats(r.driver.car, &[], None).unwrap();
+        let built = crate::build_stats::build_stats(r.driver.car, &ids, None).unwrap();
+        let (a0, a1) = (stock.zero_to_100_s.unwrap(), built.zero_to_100_s.unwrap());
+        println!(
+            "{:12} {:5} {:13} 0-100 {:.2}->{:.2} s ({:+.0}%)  top {:.0}->{:.0} km/h  grip {:.2}->{:.2} g",
+            r.driver.id,
+            if boss { "boss" } else { "chal" },
+            r.driver.car,
+            a0,
+            a1,
+            100.0 * (a1 / a0 - 1.0),
+            stock.top_speed_kmh,
+            built.top_speed_kmh,
+            stock.cornering_g,
+            built.cornering_g
+        );
+        assert!(a1 <= a0 * 1.01, "{}: a build is not slower", r.driver.id);
+        assert!(a1 >= a0 * 0.8, "{}: 0-100 {a0} -> {a1}", r.driver.id);
+        assert!(
+            built.cornering_g <= stock.cornering_g * 1.06,
+            "{}: grip {} -> {}",
+            r.driver.id,
+            stock.cornering_g,
+            built.cornering_g
+        );
+    }
+}
