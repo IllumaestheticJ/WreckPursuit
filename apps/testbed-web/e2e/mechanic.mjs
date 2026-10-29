@@ -149,6 +149,11 @@ await settle();
 s = await screen();
 check((await slot("radiator")).fitted?.grade === "cooling_radiator_1", "the mechanic fitted the catalog radiator");
 check(s.inventory.some((p) => p.part.kind === "radiator"), "the old radiator was kept in the inventory");
+// The catalog stays open after "Fit for me" (owner 2026-10-29): the row is greyed, on the car.
+const catRow = page.locator('[data-testid="ws-catalog"] [data-testid="ws-catrow"][data-grade="cooling_radiator_1"]').first();
+check(await page.locator('[data-testid="ws-catalog"]').isVisible(), "the catalog stays open after Fit for me");
+check((await catRow.getAttribute("data-owned")) === "fitted" && (await catRow.locator('[data-testid="ws-cat-mechanic"]').isDisabled()), "the fitted radiator is greyed out in it");
+await page.locator('[data-testid="ws-catalog"] button', { hasText: "Close" }).click();
 
 // Inventory sorts.
 await page.locator('[data-testid="ws-inventory-sort"]').selectOption("value");

@@ -116,6 +116,8 @@ await placed();
 let s = await screen();
 check(s.slots.find((x) => x.id === radiator)?.fitted?.grade === "cooling_radiator_1", "Fit for me on the card fitted the radiator");
 check(s.cash < cash0, `and charged for it ($${cash0} → $${s.cash})`);
+check((await row("cooling_radiator_1").getAttribute("data-owned")) === "fitted", "the card greys the fitted radiator out (on the car)");
+check(await row("cooling_radiator_1").locator('[data-testid="ws-cat-mechanic"]').isDisabled(), "and its Fit for me is disabled");
 
 // 3. Brake kit needs brake pads (a bolt-on): clickable, buys both, fitted in order.
 const brakeKind = await kindOf("brakes_kit_2");
