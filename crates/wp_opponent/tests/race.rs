@@ -546,7 +546,11 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
                     _ => None,
                 });
                 let pulling_over = booked_s.is_some_and(|t| end_s - t.max(last_still_s[k]) < 35.0);
-                let limit = if pulling_over { 8.0 } else { 1.0 };
+                // Settled means below 1.5 m/s, not 1.0: the field counts pull-over time only
+                // above 1.0 m/s (`PULL_OVER_ROLLING_MPS`), so a car that has just hit its hard
+                // limit is still braking through 1.0 (2026-10-29, light roadblock barriers:
+                // racer 1 booked at 103 s, 1.01 m/s at the last tick).
+                let limit = if pulling_over { 8.0 } else { 1.5 };
                 assert!(
                     speeds[k].abs() < limit,
                     "busted {:?} (at {booked_s:?} s) still moving {:.1} m/s: {info}",
