@@ -1007,6 +1007,8 @@ interface Frame {
 }
 
 interface Debris {
+  /** Sim entity of the car it came off. */
+  entity: number;
   obj: THREE.Group;
   vel: THREE.Vector3;
   spin: THREE.Vector3;
@@ -1058,6 +1060,99 @@ export function clearDebris(): void {
 /** Number of visual debris pieces (tests / HUD). */
 export function debrisCount(): number {
   return debris.length;
+}
+
+/**
+ * Geometry of one detached part as debris: its skinned positions `pos` at the moment it came
+ * off, with crease-split normals (built from the rest pose `rest`, like the car's smooth
+ * batches) and its UVs. The normals matter: the paint and livery materials are smooth shaded,
+ * and a mesh without a normal attribute reads a zero normal, which lights to NaN (black in
+ * greybox, a white bloom halo in low-poly dark: "parts falling off are glowing").
+ */
+export function debrisGeometry(rest: Float32Array, pos: Float32Array, index: ArrayLike<number>, uv: ArrayLike<number>): THREE.BufferGeometry {
+  const c = buildCrease(rest, index);
+  const nr = c.map.length;
+  const position = new Float32Array(nr * 3);
+  const normal = new Float32Array(nr * 3);
+  const uvR = new Float32Array(nr * 2);
+  updateCrease(c, pos, c.index, position, normal);
+  for (let r = 0; r < nr; r++) {
+    uvR[r * 2] = uv[c.map[r] * 2] ?? 0;
+    uvR[r * 2 + 1] = uv[c.map[r] * 2 + 1] ?? 0;
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.BufferAttribute(position, 3));
+  geom.setAttribute("normal", new THREE.BufferAttribute(normal, 3));
+  geom.setAttribute("uv", new THREE.BufferAttribute(uvR, 2));
+  geom.setIndex(new THREE.BufferAttribute(c.index, 1));
+  return geom;
+}
+
+/**
+ * Material a detached part is drawn with as debris. Body parts keep the material they were
+ * drawn with on the car (paint, livery, trim …: same colour and lighting). Lamp lenses and the
+ * other glow slots (light bar, amber beacons, indicators, underglow) belong to the car's live
+ * light state, so a lens lying in the road would keep glowing with the car's headlights: they
+ * take the dark broken-lamp material instead.
+ */
+export function debrisMaterial(kind: string, key: string, drawn: THREE.Material, brokenLamp: THREE.Material): THREE.Material {
+  return kind === "light" || UNSTYLED(key) ? brokenLamp : drawn;
+}
+
+/** One mesh of a visual debris piece, as `debrisAudit` reports it (e2e/debris_glow.mjs). */
+export interface DebrisMeshInfo {
+  /** Sim entity of the car it came off. */
+  vehicle: number;
+  /** Mesh part name (`bumper_front`, `headlight_l` …). */
+  name: string;
+  /** Mesh part kind (`panel`, `light`, `glass` …). */
+  kind: string;
+  /** Position of the debris piece in the world group (sim coordinates, m). */
+  at: [number, number, number];
+  /** The mesh has a `normal` attribute with no zero-length normal. */
+  normals: boolean;
+  /** Material is flat shaded (normals come from screen-space derivatives instead). */
+  flat: boolean;
+  /** Emissive colour × intensity, max channel (0 = does not glow). */
+  emissive: number;
+  /** Material is the broken-lamp material (dark lens). */
+  brokenLamp: boolean;
+  /** Material is lit (not MeshBasicMaterial and the like). */
+  lit: boolean;
+}
+
+/** Every mesh of the live debris pieces with its shading inputs (tests: debris must shade
+ * like the panel it came from and never glow). */
+export function debrisAudit(): DebrisMeshInfo[] {
+  const out: DebrisMeshInfo[] = [];
+  for (const d of debris) {
+    const p = d.obj.position;
+    for (const c of d.obj.children) {
+      if (!(c instanceof THREE.Mesh)) continue;
+      const mat = c.material as THREE.Material;
+      const std = mat instanceof THREE.MeshStandardMaterial ? mat : null;
+      const n = c.geometry.getAttribute("normal") as THREE.BufferAttribute | undefined;
+      let normals = !!n;
+      if (n) {
+        for (let i = 0; i < n.count && normals; i++) {
+          const x = n.getX(i), y = n.getY(i), z = n.getZ(i);
+          normals = x * x + y * y + z * z > 1e-6;
+        }
+      }
+      out.push({
+        vehicle: d.entity,
+        name: c.name,
+        kind: String(c.userData.kind ?? ""),
+        at: [p.x, p.y, p.z],
+        normals,
+        flat: std?.flatShading ?? false,
+        emissive: std ? Math.max(std.emissive.r, std.emissive.g, std.emissive.b) * std.emissiveIntensity : 0,
+        brokenLamp: mat === shared().brokenLamp,
+        lit: !!std,
+      });
+    }
+  }
+  return out;
 }
 
 /** Mesh parts that are indicator lenses (`indicator_front_l`, `indicator_rear_r`,
@@ -1954,11 +2049,13 @@ export class PanelBody {
     let count = 0;
     for (const p of this.parts) {
       if (p.region !== region || p.hidden) continue;
-      const geom = new THREE.BufferGeometry();
-      geom.setAttribute("position", new THREE.BufferAttribute(p.pos.slice(), 3));
-      geom.setAttribute("uv", p.own ? (p.mesh.geometry.getAttribute("uv") as THREE.BufferAttribute) : new THREE.BufferAttribute(dataOf(p.def).uv, 2));
-      geom.setIndex(p.def.indices);
-      const m = new THREE.Mesh(geom, p.mesh.material);
+      const uv = p.own ? (p.mesh.geometry.getAttribute("uv").array as Float32Array) : dataOf(p.def).uv;
+      const geom = debrisGeometry(p.rest, p.pos, p.def.indices, uv);
+      // The batch's material for batched parts (re-materialed parts, a car's own copies).
+      const drawn = (p.batch ? p.batch.mesh.material : p.mesh.material) as THREE.Material;
+      const m = new THREE.Mesh(geom, debrisMaterial(p.def.kind, p.key, drawn, this.brokenLamp));
+      m.name = p.def.name;
+      m.userData.kind = p.def.kind;
       m.frustumCulled = false;
       group.add(m);
       for (let i = 0; i < p.pos.length; i += 3) {
@@ -1980,7 +2077,7 @@ export class PanelBody {
     const vel = worldVel.clone().addScaledVector(out, 1.5);
     vel.z += 1.2;
     const s = (region % 5) - 2;
-    debris.push({ obj: group, vel, spin: new THREE.Vector3(1.5 + s * 0.4, -1.0 + s * 0.3, 0.8 - s * 0.2), age: 0 });
+    debris.push({ entity: this.entity, obj: group, vel, spin: new THREE.Vector3(1.5 + s * 0.4, -1.0 + s * 0.3, 0.8 - s * 0.2), age: 0 });
     while (debris.length > MAX_DEBRIS) debris.shift()?.obj.removeFromParent();
   }
 

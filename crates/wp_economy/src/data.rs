@@ -158,6 +158,20 @@ pub struct PriceTables {
     pub scrap: ScrapPricing,
     /// Insurance tiers keyed by id.
     pub insurance: BTreeMap<String, InsuranceTier>,
+    /// The tow service ([`crate::tow`]).
+    pub tow: TowPricing,
+}
+
+/// Tow service prices (`prices.toml [tow]`): `callout + per_km × road km`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TowPricing {
+    /// Flat call-out fee.
+    pub callout: Money,
+    /// Charge per road kilometre.
+    pub per_km: Money,
+    /// Road distance = straight-line distance × this (streets are not straight; >= 1).
+    pub route_factor: f32,
 }
 
 fn one() -> f32 {
@@ -891,6 +905,12 @@ impl Economy {
             &ALL_COMPONENTS,
         )?;
         require_keys("prices.class", &p.class, &ALL_CLASSES)?;
+        if p.tow.callout < 0 || p.tow.per_km < 0 {
+            return Err(invalid("prices.tow", "callout and per_km must be >= 0"));
+        }
+        if !(p.tow.route_factor.is_finite() && p.tow.route_factor >= 1.0) {
+            return Err(invalid("prices.tow.route_factor", "must be >= 1"));
+        }
         for (c, cp) in &p.class {
             let w = format!("prices.class.{c:?}");
             require_positive(&w, cp.reference_value)?;

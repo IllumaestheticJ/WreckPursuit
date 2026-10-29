@@ -43,7 +43,7 @@ import { ControlsPanel } from "./ui/controls";
 import { DEBUG_LAYERS, layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
-import { clearDebris, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
+import { clearDebris, debrisAudit, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
 import { LodDirector, metaIndicators } from "./render/lod";
 import { PoliceToolsView } from "./render/police_tools";
 import { PropView } from "./render/props";
@@ -62,6 +62,7 @@ import { ModShop } from "./ui/modShop";
 import { WorkshopMode } from "./workshop/mode";
 import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
 import { LotVisitView } from "../../ui-kit/src/garage/LotVisit";
+import { TowPickerView, TowPromptView, towDoneLine } from "../../ui-kit/src/garage/Tow";
 import { LotDressing } from "./render/lot_dressing";
 import { downloadText, keepUnreadable, loadCareerText, pickTextFile, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
 import type { CareerApi, CareerPlace, CareerView, RoamChoice, RunKind } from "../../ui-kit/src/garage/types";
@@ -128,11 +129,23 @@ function spikeRoadZ(tools: Float32Array, x: number, y: number): number | undefin
   }
   return undefined;
 }
+/**
+ * A fresh career's car-lot stock seed (owner request 2026-10-28: lot stock is "random per career
+ * by the day"). Drawn here, in the host, because the Rust economy never reads OS randomness; the
+ * save keeps it, so the same day of the same career always shows the same cars.
+ */
+function newCareerStockSeed(): number {
+  const a = new Uint32Array(1);
+  crypto.getRandomValues(a);
+  return a[0];
+}
+
 function newCareer(mode: string): CareerView {
+  const seed = newCareerStockSeed();
   const p = params.get("cash");
-  if (p === "market") return sim.careerNew(mode);
+  if (p === "market") return sim.careerNew(mode, seed);
   const n = p === null ? DEMO_CASH : Number(p);
-  return sim.careerNewWithCash(mode, Number.isFinite(n) && n >= 0 ? n : DEMO_CASH);
+  return sim.careerNewWithCash(mode, Number.isFinite(n) && n >= 0 ? n : DEMO_CASH, seed);
 }
 
 interface AppState {
@@ -284,6 +297,7 @@ async function main(): Promise<void> {
     onOpen: () => ui.setBill(true),
     onClose: () => ui.setBill(false),
     garage: () => (sim.careerRunActive() ? () => openGarage() : null),
+    tow: () => (sim.careerRunActive() ? () => callTow() : null),
   });
   const weather = new WeatherView(scene.scene, scene.renderer, overlay);
   weather.rainFraction = scene.quality.rainFraction;
@@ -400,6 +414,15 @@ async function main(): Promise<void> {
     setWaypoint: (t) => waypoint.set(t),
     waypoint: () => waypoint.target,
     setHome: (id) => act(() => sim.careerSetHome(id)),
+    // Tow service (owner 2026-10-28): the one garage action that is not drive-to. The player
+    // is then at the destination, so its repairs and workshop open.
+    towOffer: (uid) => sim.careerTowOffer(uid),
+    tow: (uid, to) =>
+      act(() => {
+        const r = sim.careerTow(uid, to.kind, to.id);
+        careerPlace = r.place;
+        return sim.careerView();
+      }),
     close: () => {
       garage.hide();
       app.paused = false;
@@ -560,6 +583,55 @@ async function main(): Promise<void> {
     runEnd.reset();
     app.paused = true;
     garage.show(message, at);
+  };
+  // Tow service in a run (owner 2026-10-28): "Call a tow truck" from the pause menu, the tow
+  // key, the wreck panel, or the prompt when the car cannot be driven on. Picking a destination
+  // ends the run; the garage opens at that place.
+  const towEl = document.createElement("div");
+  towEl.id = "ui-tow";
+  towEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  overlay.appendChild(towEl);
+  const towPicker = new TowPickerView(towEl);
+  const towPromptEl = document.createElement("div");
+  towPromptEl.id = "ui-tow-prompt";
+  towPromptEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  overlay.appendChild(towPromptEl);
+  const towPrompt = new TowPromptView(towPromptEl);
+  let towPollAt = 0;
+  let towNeed: ReturnType<typeof sim.careerTowNeed> = null;
+  const towKey = () => {
+    const k = getBindings().keys.tow[0];
+    return k ? keyName(k) : "";
+  };
+  const callTow = () => {
+    if (!sim.careerRunActive() || garage.open || towPicker.open || isReplay()) return;
+    const uid = sim.careerView().active_car;
+    if (uid === null) return;
+    let offer;
+    try {
+      offer = sim.careerTowOffer(uid);
+    } catch (e) {
+      hud.note(String(e).replace(/^(Error: )?wp_wasm: /, ""));
+      return;
+    }
+    const wasPaused = app.paused;
+    app.paused = true;
+    setInputBlocked(true);
+    const close = () => {
+      towPicker.hide();
+      setInputBlocked(false);
+      app.paused = wasPaused;
+    };
+    towPicker.show(
+      offer,
+      (d) => {
+        const r = sim.careerTow(uid, d.place.kind, d.place.id);
+        close();
+        towPrompt.update(null, "", () => {});
+        openGarage(towDoneLine(r.place, r.metres, r.price, r.cash_after), r.place.kind === "Garage" ? r.place.name : null, r.place);
+      },
+      close,
+    );
   };
   let careerSavedSeq = -1;
   let careerSavedAt = 0;
@@ -1704,6 +1776,9 @@ async function main(): Promise<void> {
       case "repairBill":
         ui.toggleBill();
         break;
+      case "tow":
+        callTow();
+        break;
       case "replayCrash":
         crash.action();
         break;
@@ -1833,7 +1908,7 @@ async function main(): Promise<void> {
   /** Something else owns the screen or the Esc key right now. */
   // Photo mode takes Esc (and gamepad Start) to leave itself, so no pause menu meanwhile.
   // An open "are you sure?" row (garage, lot, workshop) takes Esc as Cancel.
-  const canOpenMenu = () => !document.querySelector(".wp-confirm") && !photo.active && !menu?.isOpen && !map.isOpen && !controls.isOpen && !garage.open && !lotView.open && !workshop.active && !runEnd.open && !raceView.cards && !isReplay();
+  const canOpenMenu = () => !towPicker.open && !document.querySelector(".wp-confirm") && !photo.active && !menu?.isOpen && !map.isOpen && !controls.isOpen && !garage.open && !lotView.open && !workshop.active && !runEnd.open && !raceView.cards && !isReplay();
   /**
    * Pause menu "are you sure?" lines: what leaving the running session now would lose, or null
    * when nothing would (free drive, the test pad, a finished race, a replay).
@@ -1891,6 +1966,8 @@ async function main(): Promise<void> {
       },
       restart: () => restartRun(),
       garage: () => openGarage(),
+      tow: () => callTow(),
+      canTow: () => sim.careerRunActive(),
       confirmText: leaveText,
       quitToMain: () => {
         if (sim.careerRunActive()) sim.careerEndRun();
@@ -2147,6 +2224,12 @@ async function main(): Promise<void> {
         placeView.update(place, now);
         if (place?.visit) waypoint.arrived(place.visit.kind, place.visit.id ?? place.visit.name);
         if (sim.careerRunActive()) waypoint.frame(now);
+        // "Call a tow truck" prompt: polled twice a second (flipped / stuck need sim time).
+        if (now - towPollAt > 500) {
+          towPollAt = now;
+          towNeed = sim.careerRunActive() && !garage.open ? sim.careerTowNeed() : null;
+        }
+        towPrompt.update(towPicker.open || app.paused ? null : towNeed, towKey(), () => callTow());
       }
       // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
       if (!replay && sim.careerRunActive()) {
@@ -2449,6 +2532,9 @@ async function main(): Promise<void> {
     activeDevice,
     /** Instant crash replay director (`crash.phase`, `crash.last`, `crash.accept()`). */
     crash,
+    /** Tow service pop-up (`towPicker.open`) and "Call a tow truck" (pause menu / tow key). */
+    towPicker,
+    callTow,
     /** Settings hook (pause menu): play crash replays without asking. */
     setAutoCrashReplay,
     bindings: getBindings,
@@ -2528,6 +2614,9 @@ async function main(): Promise<void> {
     meshTimings,
     /** Crash effects: `fx.stats()`, `fx.setQuality("low" | "med" | "high")` (render/fx). */
     fx,
+    /** Detached-panel debris (render/panels.ts): `debris()` lists every debris mesh with its
+     * shading inputs (normals, emissive, broken lamp; e2e/debris_glow.mjs). */
+    debris: debrisAudit,
     /** Turn signals (e2e/signals.mjs): `probe(true)` records each traffic car's flags and lit
      * lamps per frame into `rows()` (render/lod.ts IndicatorRow); `stalk` is the player's
      * cosmetic stalk, `player()` its lit lamps and `playerLenses()` its mesh's indicator lenses. */

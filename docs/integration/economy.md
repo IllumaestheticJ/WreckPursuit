@@ -584,3 +584,23 @@ none of my round 12b commits): the same tests fail there — `simcli goldens_mat
 diverge: city, golden chase/escape, panels, police sideswipe, race picks, weather),
 `wp_race race_picker::grid_highway_sprint`, `wp_sim sidewalk::vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`,
 and both `wp_wasm` race tests. They are not caused by the economy changes.
+
+## Lead helper (2026-10-28) — car-lot stock is random per career by the day
+Owner request: dealer / lot stock should be "random per career by the day".
+- `CareerProfile::stock_seed` (u32, save **version 3**). `Economy::lot_stock(stock_seed, lot,
+  day, roster)` hashes (seed, lot id, day); every per-lot-per-day roll (model, used wear,
+  junkyard faults, rare variants, paint) comes from that stream. Same career + same day = same
+  cars; next day restocks; other careers see other cars.
+- New careers: the host picks the seed (`Economy::new_career_seeded`; wp_wasm
+  `Career::new_seeded`, `career_new(mode, stock_seed)`, `career_new_with_cash(mode, cash,
+  stock_seed)`; the testbed draws it with `crypto.getRandomValues` in `main.ts`). The economy
+  never reads a clock or OS randomness. `new_career` / `Career::new` use the fixed
+  `DEFAULT_STOCK_SEED` (tests, simcli, goldens).
+- Old saves (v1/v2): `migrate` 2 → 3 sets `stock_seed = legacy_stock_seed(save)`, a hash of the
+  whole save JSON with sorted keys (stable for the same file, distinct across careers, never 0;
+  all browser careers share one player id, so the id alone would not do). It also drops that
+  day's `lot_sales`, which named slots of the unseeded stock.
+- Found on the way: some junkyard rare variants resold for more than their yard price (their
+  mods are refunded at `mod_resale_frac`). `lot_stock` now raises any listing's price to at least
+  its immediate `sale_price` (rounded up to 50); `no_lot_car_resells_for_more_than_it_costs`
+  checks it over 4 seeds × 200 days.

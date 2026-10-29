@@ -253,3 +253,59 @@ fn lot_cars_have_no_rep_gate() {
     c.buy_listing(&lot, l.slot).unwrap();
     assert!(c.profile().account.cash < cash, "the car still costs money");
 }
+
+/// Every lot's listings today, by lot id.
+fn all_stock(c: &mut Career) -> Vec<Vec<Listing>> {
+    let ids: Vec<String> = c.economy().lots.lots.iter().map(|l| l.id.clone()).collect();
+    ids.iter()
+        .map(|id| {
+            c.lot_stock(id)
+                .unwrap()
+                .into_iter()
+                .map(|(l, _)| l)
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn each_career_has_its_own_stock_by_the_day() {
+    let mut a = Career::new_seeded(econ(), DamageMode::Arcade, 0x1111_2222);
+    let mut b = Career::new_seeded(econ(), DamageMode::Arcade, 0x3333_4444);
+    assert_eq!(a.profile().account.day, b.profile().account.day);
+    let sa = all_stock(&mut a);
+    let sb = all_stock(&mut b);
+    let differ = sa.iter().zip(&sb).filter(|(x, y)| x != y).count();
+    assert!(
+        differ * 2 >= sa.len(),
+        "only {differ} of {} lots differ between careers",
+        sa.len()
+    );
+    // Same career, same day: the same cars; next day: a restock.
+    assert_eq!(all_stock(&mut a), sa);
+    a.profile_mut().account.day += 1;
+    assert_ne!(all_stock(&mut a), sa);
+}
+
+#[test]
+fn a_purchase_after_reload_buys_the_listed_car() {
+    let mut c = Career::new_seeded(econ(), DamageMode::Arcade, 0x00C0_FFEE);
+    c.profile_mut().account.cash = 5_000_000;
+    c.profile_mut().account.rep = 20_000;
+    let (lot, l) = find(&mut c, LotKind::UsedLot, |_| true);
+    let shown = c.lot_view(&lot).unwrap();
+    // Save and load (as the browser does on every reopen / export + import).
+    let mut c = Career::load_json(econ(), &c.save_json()).unwrap();
+    assert_eq!(c.profile().stock_seed, 0x00C0_FFEE);
+    assert_eq!(
+        c.lot_view(&lot).unwrap().cars,
+        shown.cars,
+        "reload never rerolls"
+    );
+    let uid = c.buy_listing(&lot, l.slot).unwrap();
+    let car = c.profile().account.car(uid).unwrap();
+    assert_eq!(car.def_id, l.def_id);
+    assert_eq!(car.purchase_price, Some(l.price));
+    assert_eq!(car.paint, Some(l.paint));
+    assert_eq!(car.tires, l.tires);
+}

@@ -26,7 +26,7 @@
 //! | parked-car damage (lead) | `parked_wrecks()` per frame, `parked_wreck_stride()`, `parked_entity_base()`, `parked_wreck_shattered(entity)`; a wreck's entity works with the `lattice_*` / `vehicle_info` calls — see [`props`] |
 //! | map (16) | `map_static_json()` once per city, `map_dynamic(player)` per frame — see [`map`] |
 //! | weather (lead) | `weather_choices()`, `scenario_with_weather(json, choice)`, `scenario_weather_choice(json)`, `night_run_rain_json(car, mode, city_id)`, `weather_info()`, `weather_grid_meta()`, `weather_grid()`, `weather_spray()` — see [`weather`] |
-//! | career (G) | `career_new(mode)`, `career_load_json`, `career_save_json`, `career_view_json`, `career_mods_json(uid)`, `career_start_run(scenario_json)`, `career_end_run`, `career_run_active`, `career_buy_car`, `career_floor_car`, `career_sell_car`, `career_set_active`, `career_install_mod`, `career_uninstall_mod`, `career_respray`, `career_quote_json`, `career_repair`, `career_release`, `career_insure`, `career_next_night` — see [`career`] |
+//! | career (G) | `career_new(mode, stock_seed)`, `career_load_json`, `career_save_json`, `career_view_json`, `career_mods_json(uid)`, `career_start_run(scenario_json)`, `career_end_run`, `career_run_active`, `career_buy_car`, `career_floor_car`, `career_sell_car`, `career_set_active`, `career_install_mod`, `career_uninstall_mod`, `career_respray`, `career_quote_json`, `career_repair`, `career_release`, `career_insure`, `career_next_night` — see [`career`] |
 //! | drift lab B (lead) | `drift_tuning_json()`, `drift_tuning_defaults_json()`, `drift_tuning_set(json)`, `drift_readout(entity)` — see [`drift_lab`] |
 //! | mods | `mod_catalog_json(car)`, `build_visuals_json(car, mods)`, `entity_visuals_json(entity)` — see [`mod_visuals`]; install with `EntitySpec::mods` in the scenario |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)`, `debug_place(entity, x, y, yaw, speed)` — see [`run`] |
@@ -66,6 +66,7 @@ pub mod siren_cue;
 pub mod street;
 pub mod street_odds;
 pub mod touge;
+pub mod tow;
 pub mod weather;
 
 #[cfg(test)]
@@ -1610,6 +1611,34 @@ pub fn debug_set_heat(entity: u32, heat: f32) -> Result<(), JsValue> {
         s.debug_sim_mut()?
             .police_mut()
             .set_heat(EntityId(entity), heat);
+        Ok(())
+    })
+}
+
+/// Debug / e2e: wreck `entity`'s car: the dents of a 60 km/h frontal barrier hit
+/// (`wp_damage::barrier::run_barrier`), then written off (`DamageModel::declare_total_loss`).
+/// Changes the run and is **not** recorded in replays.
+#[wasm_bindgen]
+pub fn debug_total_loss(entity: u32) -> Result<(), JsValue> {
+    with(|s| {
+        let id = EntityId(entity);
+        let car = s.car(id).ok_or("unknown vehicle")?.clone();
+        let mode = s.sim().mode_table().clone();
+        let (m, _) = wp_damage::barrier::run_barrier(
+            &car,
+            &mode,
+            wp_damage::barrier::ImpactKind::Frontal,
+            60.0,
+            0.0,
+            0.3,
+            1,
+        );
+        let dm = s
+            .debug_sim_mut()?
+            .damage_mut(id)
+            .map_err(|e| e.to_string())?;
+        dm.restore_full(&m.save_full()).map_err(|e| e.to_string())?;
+        dm.declare_total_loss();
         Ok(())
     })
 }

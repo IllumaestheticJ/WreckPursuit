@@ -480,6 +480,15 @@ pub enum EventReason {
     BountyGained,
     /// Towing charge (wrecked or undrivable car).
     Towing,
+    /// The tow service took the car to `to` (a repair shop or one of the player's garages),
+    /// `metres` by road ([`crate::tow`]). A penalty: a tow to the nearest repair shop happens
+    /// even when the player cannot pay (debt). Contract form: `Towing` (same kind code 35).
+    Tow {
+        /// Where the car was taken (shop or garage name).
+        to: String,
+        /// Road distance, m.
+        metres: u32,
+    },
     /// Car moved to the pound.
     CarImpounded,
     /// Car retrieved from the pound.
@@ -598,7 +607,7 @@ impl EventReason {
             CaptureRepLoss { .. } => 32,
             BountyCleared => 33,
             BountyGained => 34,
-            Towing => 35,
+            Towing | Tow { .. } => 35,
             CarImpounded => 36,
             ImpoundRetrieved { .. } => 37,
             CarAuctioned { .. } => 38,
@@ -625,7 +634,10 @@ impl EventReason {
     pub fn is_penalty(&self) -> bool {
         matches!(
             self,
-            EventReason::Fine { .. } | EventReason::Bail | EventReason::Towing
+            EventReason::Fine { .. }
+                | EventReason::Bail
+                | EventReason::Towing
+                | EventReason::Tow { .. }
         )
     }
 }
@@ -752,7 +764,7 @@ impl EventReason {
             R::CaptureRepLoss { level } => C::CaptureRepLoss { level },
             R::BountyCleared => C::BountyCleared,
             R::BountyGained => C::BountyGained,
-            R::Towing => C::Towing,
+            R::Towing | R::Tow { .. } => C::Towing,
             R::CarImpounded => C::CarImpounded,
             R::ImpoundRetrieved { days } => C::ImpoundRetrieved { days },
             R::CarAuctioned { def_id } => C::CarAuctioned { def_id },

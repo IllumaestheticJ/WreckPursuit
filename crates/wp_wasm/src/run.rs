@@ -51,7 +51,8 @@ pub enum RunOutcome {
     Captured,
     /// Wrecked while wanted: captured with the car a total loss. The run is over.
     CapturedTotalLoss,
-    /// Wrecked with nobody chasing: towed home. The run is over.
+    /// Wrecked with nobody chasing: towed home (career runs: left on the road for the tow
+    /// service). The run is over.
     TotalLoss,
 }
 
@@ -234,6 +235,9 @@ pub struct PlayerRun {
     report: Option<RunReport>,
     seq: u32,
     over: bool,
+    /// A wreck nobody chases is towed home and charged the class towing (the demo). Career
+    /// runs leave it on the road for the tow service (`crate::tow`).
+    auto_tow: bool,
 }
 
 impl PlayerRun {
@@ -290,9 +294,10 @@ impl PlayerRun {
                 uid
             }
         };
-        Self::bound(econ, acct, ledger, player, uid, mode, seed)
+        Self::bound(econ, acct, ledger, player, uid, mode, seed, true)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn bound(
         econ: Economy,
         mut acct: PlayerAccount,
@@ -301,10 +306,12 @@ impl PlayerRun {
         uid: CarUid,
         mode: DamageMode,
         seed: u64,
+        auto_tow: bool,
     ) -> Self {
         acct.active_car = Some(uid);
         let mut config = SessionConfig::new(mode);
         config.repair = RepairPolicy::QuoteOnly;
+        config.auto_tow = auto_tow;
         let mut session = EconomySession::new(config);
         session.bind(player, acct.player, uid);
         Self {
@@ -320,6 +327,7 @@ impl PlayerRun {
             report: None,
             seq: 0,
             over: false,
+            auto_tow,
         }
     }
 
@@ -338,7 +346,9 @@ impl PlayerRun {
         if car.location != CarLocation::Garage {
             return Err(format!("car {} is not in the garage", uid.0));
         }
-        Ok(Self::bound(econ, acct, ledger, player, uid, mode, seed))
+        Ok(Self::bound(
+            econ, acct, ledger, player, uid, mode, seed, false,
+        ))
     }
 
     /// The player's car was wanted at some point in this run (insurance will not pay for
@@ -419,6 +429,17 @@ impl PlayerRun {
         }
     }
 
+    /// Charge a tow of the run's car on the run's account (`wp_economy::Economy::tow_car`),
+    /// before the run is handed back (`crate::career`'s `tow`). Nothing changes on an error.
+    pub fn tow(&mut self, job: &wp_economy::TowJob) -> Result<(i64, Vec<EconomyEvent>), String> {
+        let (price, ev) = self
+            .econ
+            .tow_car(&mut self.acct, self.car, job)
+            .map_err(|e| e.to_string())?;
+        self.ledger.extend(ev.iter().cloned());
+        Ok((price, ev))
+    }
+
     /// The latest settlement, if any.
     pub fn report(&self) -> Option<&RunReport> {
         self.report.as_ref()
@@ -489,7 +510,8 @@ impl PlayerRun {
         outcome: RunOutcome,
         damage: Option<(&dyn DamageSim, &ModeTable)>,
     ) -> Result<&RunReport, String> {
-        let report = self.damage_report(damage, outcome == RunOutcome::TotalLoss)?;
+        let report =
+            self.damage_report(damage, self.auto_tow && outcome == RunOutcome::TotalLoss)?;
         let (health, total_loss) = (report.health, report.total_loss);
         let level = self.session.wanted_level(self.player);
         let r = self

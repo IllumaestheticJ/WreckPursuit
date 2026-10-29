@@ -923,6 +923,12 @@ impl Session {
         self.run.as_mut()
     }
 
+    /// The run, mutably (the career tow charges its account before the run ends; outside the
+    /// sim, not in the replay log).
+    pub fn run_mut(&mut self) -> Option<&mut PlayerRun> {
+        self.run.as_mut()
+    }
+
     /// Take the run (its account carries over to the next session).
     pub fn take_run(&mut self) -> Option<PlayerRun> {
         self.close_race_bets();

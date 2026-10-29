@@ -44,7 +44,7 @@ const LEGIT_SHOPS: [&str; 3] = [
 /// ([`crate::scenario::SPAWNS`] id) it belongs to. The garage screen has no world loaded, so
 /// this is a fixed table; `spawn_tests::world_shops_match_the_generated_world` checks it against
 /// [`sites`] of the generated world (nearest spawn grid = the city).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WorldShop {
     /// Shop name (the `Garage` POI's name).
     pub name: &'static str,
@@ -54,6 +54,8 @@ pub struct WorldShop {
     pub kind: ShopKind,
     /// Spawn city id (`port_vesper`, `ashpeak_city`, `harnell_crossing`).
     pub city: &'static str,
+    /// Where the shop's POI stands `[x, y]`, m (tow distances; checked against the world).
+    pub pos: [f32; 2],
 }
 
 /// Every repair shop of the combined world, in POI order.
@@ -63,30 +65,35 @@ pub const WORLD_SHOPS: [WorldShop; 5] = [
         district: DistrictId::Core,
         kind: ShopKind::Legit,
         city: "port_vesper",
+        pos: [193.25, -100.0],
     },
     WorldShop {
         name: "Sal's Paint & Panel",
         district: DistrictId::Suburb,
         kind: ShopKind::Crooked,
         city: "port_vesper",
+        pos: [-897.88, -5.29],
     },
     WorldShop {
         name: "Gantry Garage",
         district: DistrictId::Port,
         kind: ShopKind::Crooked,
         city: "port_vesper",
+        pos: [700.0, -919.75],
     },
     WorldShop {
         name: "Spire Auto Body",
         district: DistrictId::Core,
         kind: ShopKind::Legit,
         city: "ashpeak_city",
+        pos: [-450.0, 4798.25],
     },
     WorldShop {
         name: "Harnell Feed & Tractor",
         district: DistrictId::Suburb,
         kind: ShopKind::Legit,
         city: "harnell_crossing",
+        pos: [-3696.49, 165.76],
     },
 ];
 
