@@ -469,7 +469,11 @@ export class MapHud {
     row("Spike strip", (c, s) => drawTool(c, { kind: "spikes", x: 0, y: 0, dir: [1, 0], halfLenM: s * 0.4, intel: false }, toolM(s), 1.6, pal));
     row("Roadblock (scanner)", (c, s) => drawToolIcon(c, "roadblock", s / 2, s / 2, s * 0.3, pal));
     row("Spike strip (scanner)", (c, s) => drawToolIcon(c, "spikes", s / 2, s / 2, s * 0.3, pal));
-    row("Garage", (c, s) => drawPoi(c, "Garage", s / 2, s / 2, s * 0.32, pal));
+    row("Repair shop", (c, s) => drawPoi(c, "Garage", s / 2, s / 2, s * 0.32, pal));
+    row("Dealership (new cars)", (c, s) => drawPoi(c, "Dealership", s / 2, s / 2, s * 0.32, pal));
+    row("Used-car lot", (c, s) => drawPoi(c, "UsedLot", s / 2, s / 2, s * 0.32, pal));
+    row("Junkyard", (c, s) => drawPoi(c, "Junkyard", s / 2, s / 2, s * 0.32, pal));
+    row("Your garage", (c, s) => drawPoi(c, "Home", s / 2, s / 2, s * 0.32, pal));
     row("Safehouse", (c, s) => drawPoi(c, "Safehouse", s / 2, s / 2, s * 0.32, pal));
     row("Police station", (c, s) => drawPoi(c, "PoliceStation", s / 2, s / 2, s * 0.32, pal));
     row("Race start", (c, s) => drawPoi(c, "RaceStartGrid", s / 2, s / 2, s * 0.32, pal));

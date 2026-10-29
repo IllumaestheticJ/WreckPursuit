@@ -29,6 +29,10 @@ export interface MapZone {
 }
 
 /** Point of interest. */
+/** Map icon kinds (`drawPoi`): the city's POI kinds plus the career's drive-to places that are
+ * not POIs (car lots by kind, the player's garages), drawn from host markers. */
+export type MapIcon = MapPoi["kind"] | "Dealership" | "UsedLot" | "Junkyard" | "Home";
+
 export interface MapPoi {
   kind: "Safehouse" | "Garage" | "PoliceStation" | "Helipad" | "RaceStartGrid" | "RestStop" | "Crossover";
   name: string;

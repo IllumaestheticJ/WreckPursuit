@@ -239,7 +239,7 @@ export class FullMapRenderer {
       for (const mk of ex.markers) {
         const [sx, sy] = worldToFull(v, mk.x, mk.y);
         if (sx < -20 || sy < -20 || sx > w + 20 || sy > h + 20) continue;
-        drawMarker(ctx, mk, sx, sy, 8 * dpr);
+        drawMarker(ctx, mk, sx, sy, 8 * dpr, pal);
         markers++;
       }
       for (const fl of ex.flags) {

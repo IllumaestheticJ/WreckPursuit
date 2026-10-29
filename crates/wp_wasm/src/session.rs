@@ -1291,6 +1291,7 @@ impl Session {
                 pos: g.pos,
                 radius_m: g.radius_m,
                 shop: Some(g.kind),
+                icon: "Garage",
             })
             .collect();
         out.extend(self.safehouses().iter().map(|h| MapPlace {
@@ -1300,6 +1301,7 @@ impl Session {
             pos: h.pos,
             radius_m: h.radius_m,
             shop: None,
+            icon: "Safehouse",
         }));
         for (kind, list) in [
             (MapPlaceKind::Lot, self.lots()),
@@ -1312,6 +1314,10 @@ impl Session {
                 pos: p.pos,
                 radius_m: p.radius_m,
                 shop: None,
+                icon: match kind {
+                    MapPlaceKind::Lot => crate::garage_visit::lot_icon(&p.id),
+                    _ => "Home",
+                },
             }));
         }
         out
@@ -1324,6 +1330,16 @@ impl Session {
             return None;
         }
         crate::garage_visit::snap_to_lane(self.sim.world(), at).map(|(p, _)| p)
+    }
+
+    /// The landmark buildings' layouts of the session's city ([`wp_world::places::plan`]):
+    /// where the renderer writes sign text and hangs string flags. Empty without a city or
+    /// for cities without places.
+    pub fn place_layouts(&self) -> Vec<wp_world::places::PlaceLayout> {
+        if self.sc.city == CitySpec::Flat {
+            return Vec::new();
+        }
+        wp_world::places::plan(self.sim.world().map())
     }
 
     /// A drivable route from the player's car to `to` (`[x, y]`), as the lane centreline's

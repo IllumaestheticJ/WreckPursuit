@@ -418,6 +418,35 @@ pub enum BuildingKind {
     Landmark,
     /// Building under construction (open frame, scaffolding colours).
     Construction,
+    /// Car dealership showroom (landmark places, [`crate::places`]; appended, so files
+    /// without it read as before).
+    Showroom,
+    /// Repair workshop with roll-up bay doors ([`crate::places`]).
+    Workshop,
+    /// Civic building: a police station ([`crate::places`]).
+    Civic,
+    /// Corrugated-steel lock-up or warehouse unit (home lock-up, safehouse;
+    /// [`crate::places`]).
+    LockUp,
+    /// Small sales cabin or yard office (used-car lot, junkyard; [`crate::places`]).
+    Kiosk,
+    /// The player's barn (Harnell Barn; drawn like a farm barn, [`crate::places`]).
+    HomeBarn,
+}
+
+impl BuildingKind {
+    /// A landmark place's building ([`crate::places`]): drawn and placed by that module.
+    pub fn is_place(self) -> bool {
+        matches!(
+            self,
+            Self::Showroom
+                | Self::Workshop
+                | Self::Civic
+                | Self::LockUp
+                | Self::Kiosk
+                | Self::HomeBarn
+        )
+    }
 }
 
 /// Roof shape over a building's walls.
@@ -637,7 +666,55 @@ pub enum StructureKind {
     Landmark,
     /// Steel truss member over a bridge deck.
     Truss,
+    /// Part of a landmark place (dealership, workshop, police station, ...;
+    /// [`crate::places`]). Appended, so files without it read as before.
+    Place(PlacePart),
 }
+
+/// What a [`StructureKind::Place`] piece is drawn as (`city-import` gives each its own
+/// material; the `*_light` ones glow).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum PlacePart {
+    /// Dark metal: posts, poles, frames, lifts, crane, roof slabs over open bays.
+    Frame,
+    /// Lit showroom glazing / lit windows (emissive).
+    Glass,
+    /// Dark (unlit) window band.
+    Window,
+    /// Sign panel (emissive; the testbed writes the text on it).
+    Sign,
+    /// Warm white lamp (emissive).
+    Lamp,
+    /// Blue police lamp (emissive).
+    BlueLamp,
+    /// Red half of a light bar (emissive).
+    RedLamp,
+    /// Closed roll-up door.
+    Door,
+    /// Barn door.
+    BarnDoor,
+    /// Lit interior of an open bay (emissive).
+    BayLight,
+    /// Dark ramp floor / mouth.
+    Dark,
+    /// Corrugated yard fence.
+    Fence,
+    /// Crushed wreck in a scrap pile.
+    Wreck,
+    /// Display or parked car body, by paint index (0..[`PLACE_CAR_PAINTS`]).
+    CarBody(u8),
+    /// Car cabin glass.
+    CarGlass,
+    /// Tyre / wheel.
+    Wheel,
+    /// Flag cloth, by colour index (0..[`PLACE_FLAG_COLOURS`]).
+    Flag(u8),
+}
+
+/// Paints of [`PlacePart::CarBody`] (the last is police white).
+pub const PLACE_CAR_PAINTS: u8 = 7;
+/// Colours of [`PlacePart::Flag`].
+pub const PLACE_FLAG_COLOURS: u8 = 4;
 
 /// A solid vertical prism from `z0_m` to `z1_m` over a convex footprint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
