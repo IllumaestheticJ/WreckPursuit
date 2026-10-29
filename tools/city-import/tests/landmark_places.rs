@@ -239,6 +239,27 @@ fn check(name: &str, map: &CityMap) {
         }
     }
 
+    // Every other named landmark already stands as geometry (structures, or a landmark
+    // building at its spot; bridges and tunnels are roads), so none needs a building.
+    for lm in &net.features.landmarks {
+        use wp_world::network::{BuildingKind, LandmarkKind};
+        let road = matches!(lm.kind, LandmarkKind::Bridge | LandmarkKind::Tunnel);
+        let building = net.buildings.iter().any(|b| {
+            b.kind == BuildingKind::Landmark && dist_to(geom::xy(lm.pos), &b.footprint) < 60.0
+        });
+        println!(
+            "  landmark {:28} {:?}: {} structures, landmark building {building}",
+            lm.name,
+            lm.kind,
+            lm.structures.len()
+        );
+        assert!(
+            road || building || !lm.structures.is_empty(),
+            "{name}: landmark {} has no geometry",
+            lm.name
+        );
+    }
+
     // Drawn in their own materials.
     let mats: Vec<String> = build_greybox(map).into_iter().map(|p| p.material).collect();
     let styles: Vec<PlaceStyle> = layouts.iter().map(|(l, _, _)| l.style).collect();
