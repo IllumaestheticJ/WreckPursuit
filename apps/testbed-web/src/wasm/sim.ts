@@ -99,6 +99,10 @@ export interface VehicleInfo {
   /** wp_world agent id of promoted traffic (null / absent otherwise and on older builds): the
    * same id as `traffic_agents()` `agent_id`, so the car keeps its instanced twin's paint. */
   traffic_agent?: number | null;
+  /** Body colour 0xRRGGBB the scenario entity carries (a career car's paint, a lot listing's
+   * factory colour; `wp_economy::OwnedCar::body_paint`): drawn in every art style. Absent /
+   * null = the renderer's default for the entity. */
+  paint?: number | null;
 }
 
 /** TCS / ABS level (contract `TcsLevel` / `AbsLevel`). The sim also accepts a legacy bool

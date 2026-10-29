@@ -1352,8 +1352,10 @@ export class PanelBody {
    * Art style (render/style.ts): low-poly dark takes paint, glass, trim, tire, rim and interior
    * colours from the palette and makes every part matte; greybox restores the values above.
    * Head/tail lamps are the VehicleView's shared materials and are styled there.
+   * `ownPaint`: `paint` is the car's own colour (VehicleView `setPaint` / the session's entity paint),
+   * drawn in greybox too.
    */
-  applyStyle(lowpoly: boolean, paint: THREE.Color): void {
+  applyStyle(lowpoly: boolean, paint: THREE.Color, ownPaint = false): void {
     const lp: Partial<Record<string, number>> = {
       glass: PALETTE.glass,
       trim: PALETTE.trim,
@@ -1366,7 +1368,9 @@ export class PanelBody {
       if (!g || !(m instanceof THREE.MeshStandardMaterial)) continue;
       // Shared materials are styled by every car alike (same values), env included.
       applyCarEnv(m, !lowpoly);
-      if (k === "paint") m.color.copy(this.liveryBase ?? (lowpoly ? paint : g.color));
+      // The car's own paint (career / lot car, respray, paint-shop preview) in every style;
+      // otherwise greybox keeps the mesh's factory colour.
+      if (k === "paint") m.color.copy(this.liveryBase ?? (lowpoly || ownPaint ? paint : g.color));
       else m.color.copy(lowpoly && lp[k] !== undefined ? tmpStyle.setHex(lp[k]) : g.color);
       // Bought carbon keeps its gloss in low-poly too, so it never reads as a matte black lid.
       const gloss = k === "carbonWeave";

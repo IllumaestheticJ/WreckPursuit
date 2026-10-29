@@ -24,6 +24,7 @@
     "e2e:race": "node e2e/race.mjs",
     "e2e:touge": "node e2e/touge.mjs",
     "e2e:lot": "node e2e/lot_visit.mjs",
+    "e2e:paint-match": "node e2e/paint_match.mjs",
     "e2e:confirm": "node e2e/confirm.mjs",
     "e2e:tune": "node e2e/tune.mjs",
     "e2e:race-spots": "node e2e/race_spots.mjs",

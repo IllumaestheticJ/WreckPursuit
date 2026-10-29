@@ -184,14 +184,18 @@ impl Career {
         sc.police_cars = false;
         sc.barriers = lot_fixtures(lot.kind, lot.slots);
         sc.entities.clear();
+        // Every car carries the colour it is drawn in: the player's own (the same as in the
+        // garage and on the road) and each listing's factory paint.
         if let Some(c) = &own {
-            sc.entities
-                .push(entity("player", &c.def_id, [0.0, 4.0, 0.0], 0.0));
+            let mut e = entity("player", &c.def_id, [0.0, 4.0, 0.0], 0.0);
+            e.paint = Some(c.body_paint());
+            sc.entities.push(e);
         }
         for l in &stock {
             let (pos, yaw) = space_pose(l.slot);
-            sc.entities
-                .push(entity(&format!("space_{}", l.slot), &l.def_id, pos, yaw));
+            let mut e = entity(&format!("space_{}", l.slot), &l.def_id, pos, yaw);
+            e.paint = Some(l.paint);
+            sc.entities.push(e);
         }
         if sc.entities.is_empty() {
             // An empty lot still needs one entity for the session; park a beater by the gate.

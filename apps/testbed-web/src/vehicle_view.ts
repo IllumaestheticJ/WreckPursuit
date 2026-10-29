@@ -241,8 +241,16 @@ export class VehicleView {
     this.unitId = this.info.police_unit ?? entity;
     this.county = police && countySkin(this.info.police_county === true);
     if (this.county) colour = COUNTY_PAINT;
-    this.greyPaint = new THREE.Color(colour);
     this.background = this.info.kind === "Police" || this.info.kind === "Traffic";
+    // The colour the session carries for this car (a career car's paint, a lot listing's
+    // factory colour): its own paint from the first frame, in every art style, and again in
+    // every later view of it (crash replay, saved replay), so it never falls back to the
+    // per-entity default.
+    if (this.info.paint != null && !this.background) {
+      colour = this.info.paint;
+      this.ownPaint = true;
+    }
+    this.greyPaint = new THREE.Color(colour);
 
     // forceSinglePass: transparent + DoubleSide would re-resolve the program twice per frame.
     const bodyMat = new THREE.MeshStandardMaterial({ color: colour, transparent: true, opacity: 1, side: THREE.DoubleSide, forceSinglePass: true });
@@ -337,7 +345,8 @@ export class VehicleView {
     // Per-panel mesh: its wheel parts spin with the wheel groups above.
     // Traffic / police keep the livery the fleet drew them in (no factory paint tint).
     this.panels = new PanelBody(entity, this.info.car_id, colour, { left: this.headMat, right: this.headMatR }, this.tailMat, {
-      keepPaint: this.background,
+      // Own paint wins over the model's factory tint too.
+      keepPaint: this.background || this.ownPaint,
       indicators: this.indLens,
     });
     this.root.add(this.panels.root);
@@ -345,6 +354,9 @@ export class VehicleView {
     const build = this.background ? null : sim.entityVisuals(entity);
     this.build = build && (build.parts.length > 0 || build.mods.length > 0) ? build : null;
     this.panels.whenReady(() => {
+      // Restyle once the mesh is in: its factory tint must not stand over the car's own paint
+      // (a setPaint before the mesh loaded).
+      this.styleVersion = -1;
       // Mod parts first, so their wheel pieces are parented with the stock ones below.
       if (this.build) {
         this.fitted = fitBuild(this.panels, this.build, this.info.wheels);
@@ -837,7 +849,7 @@ export class VehicleView {
     bodyMat.color.copy(paint);
     bodyMat.flatShading = lowpoly;
     bodyMat.needsUpdate = true;
-    this.panels.applyStyle(lowpoly, paint);
+    this.panels.applyStyle(lowpoly, paint, this.ownPaint);
     this.proxyPaint.color.copy(paint);
     this.proxyPaint.roughness = lowpoly ? 1 : 0.55;
     this.proxyPaint.metalness = lowpoly ? 0 : 0.25;

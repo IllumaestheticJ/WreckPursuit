@@ -114,6 +114,7 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
                 assists: Some(assists),
                 player_steering: None,
                 tune: Default::default(),
+                paint: None,
                 driver: Default::default(),
                 inputs: random_inputs(&mut rng, cfg.case_seconds, kind > 0),
             });

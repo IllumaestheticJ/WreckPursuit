@@ -171,7 +171,8 @@ pub struct CarView {
     /// A rare variant (bought as one from a lot).
     pub rare: bool,
     /// Body colour 0xRRGGBB: the paint it was sold or resprayed in, else a fixed factory colour
-    /// picked by uid ([`car_paint`]), so the car looks the same in every view and session.
+    /// picked by uid ([`car_paint`]); the same colour its sessions carry, so the car looks the
+    /// same in every view and session.
     pub paint: u32,
     /// What a respray at the paint shop costs.
     pub respray_fee: Money,
@@ -2467,6 +2468,9 @@ impl Career {
             .ok_or("the scenario has no player entity")?;
         first.car = car.def_id.clone();
         first.tune = vehicle_tune(car.tune);
+        // The colour every view of this car draws (garage bay, workshop, Free Roam, races):
+        // the session carries it, so the renderer never falls back to a per-entity default.
+        first.paint = Some(car_paint(&car));
         // No heat on the flat lot or a touge pass (no police there; the carried heat waits
         // for the next city run).
         let touge = crate::touge::setup_for_scenario(&sc.name).is_some();
@@ -3354,11 +3358,9 @@ pub(crate) fn set_career(career: Option<Career>) {
     CAREER.with(|c| *c.borrow_mut() = career);
 }
 
-/// A career car's body colour: its own paint, or (cars bought before paint was saved, dealer
-/// and floor cars) a factory colour fixed by its uid, never by the view or the session.
+/// A career car's body colour: [`wp_economy::OwnedCar::body_paint`] (its own paint, or a
+/// factory colour fixed by its uid). The garage view and every session of the car
+/// (`Career::car_session` sets the player entity's `paint`) use this one function.
 pub fn car_paint(c: &wp_economy::OwnedCar) -> u32 {
-    c.paint.unwrap_or_else(|| {
-        let n = wp_economy::FACTORY_PAINTS.len();
-        wp_economy::FACTORY_PAINTS[c.uid.0 as usize % n]
-    })
+    c.body_paint()
 }
