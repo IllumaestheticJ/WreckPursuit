@@ -265,13 +265,20 @@ pub struct Level {
 ///
 /// The car pools climb with the level and do not overlap (class index, `wp_economy`, at
 /// 2026-10-24: Street 330-460, Pro 465-500, Elite 569-674, Legend 682-858), so a higher-level
-/// racer brings a faster car as well as a better driver (owner request 2026-10-24).
+/// racer brings a faster car as well as a better driver (owner request 2026-10-24). The R34
+/// Skylines joined on 2026-10-29: the 25GT (329) in Street, the 25GT-T and both GT-Rs
+/// (476-492) in Pro.
 pub const LEVELS: [Level; 4] = [
     Level {
         level: 2,
         name: "Street",
         colour: "#2f81f7",
-        cars: &["ironside_440", "kestrel_ts", "shiro_turbo"],
+        cars: &[
+            "ironside_440",
+            "kestrel_ts",
+            "shiro_turbo",
+            "nissan_skyline_r34_25gt",
+        ],
         skill: 0.45,
         aggression: 0.6,
         consistency: 0.55,
@@ -292,6 +299,9 @@ pub const LEVELS: [Level; 4] = [
             "talus_20t",
             "hakone_gt",
             "sperber_32",
+            "nissan_skyline_r34_25gt_t",
+            "nissan_skyline_r34_gtr",
+            "nissan_skyline_r34_gtr_vspec2",
         ],
         skill: 0.65,
         aggression: 0.72,
