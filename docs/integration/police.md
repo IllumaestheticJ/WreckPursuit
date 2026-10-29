@@ -2049,3 +2049,17 @@ Branch `lead/police-bridge-los`. Police perception and the LOS query only (physi
 - `wp_world/tests/bridge_los.rs`: every Port Vesper and Ashpeak crossing, cop ↔ car both ways;
   a helicopter straight above the hidden car does not see it, and a car on the deck is seen from
   the air. Also `deck_occluders` ⊇ `deck_slabs` and is wider where the deck has sidewalks.
+
+**Scenarios and goldens.**
+- `scenarios/response_night_suburb.ron` was re-measured. The grid viaduct now hides what is
+  under it along its whole length, so more violations go unseen and become calls: 25 s reached
+  0.6 → 0.47, mean time to a unit 31.8 → 36.0 s. New bounds 0.45 / 38 s (the old ones sat exactly
+  on the old measurement). Separate commit.
+- Re-blessed (`[bless]` commit): `jam_pursuit_grid`, `jam_pursuit_vesper`,
+  `race_city_sprint_police`, `weather_fog_pursuit`, `weather_fog_pursuit_clear`. Police state
+  moved (kinematic units' `alt_m` is hashed, sightlines changed). No other golden moved.
+- **Open for the lead:** `jam_pursuit_vesper` fails `traffic_max_stop_s ≤ 46` (62.9 s).
+  Traffic agent 7 stands at a give-way line (`Wait::Line`, seg 822, about (-408, 397)) in the
+  diverged chase. It reproduces with the old deck list, so it is the changed police behaviour
+  sending the chase another way, not the occluders. Same class as the row 84 gap-acceptance case
+  in that scenario's notes. The bound is unchanged.
