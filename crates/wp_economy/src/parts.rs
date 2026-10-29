@@ -616,8 +616,11 @@ pub struct CatalogEntry {
     pub price: Money,
     /// Parts one purchase brings (4 for a set of wheels bought as an upgrade).
     pub count: u32,
-    /// `None` = can be bought for this car, else why not.
+    /// `None` = can be bought for this car, else why not (class, mode).
     pub reason: Option<String>,
+    /// Name of a mod that must be fitted before this grade can go on (it can still be
+    /// bought, or bought and fitted together with what it needs); `None` = nothing missing.
+    pub needs: Option<String>,
     /// What the mechanic charges to fit what one purchase brings (every slot of a set).
     pub install_fee: Money,
     /// Names of installed mods that fitting this grade takes off because it does their job
@@ -1369,10 +1372,32 @@ impl Economy {
         car: CarUid,
         slot: &str,
     ) -> EconResult<u32> {
+        self.remove_part_with(acct, car, slot, true)
+    }
+
+    /// [`Economy::remove_part`]; `check_reqs` false skips the mod-requirement check (a
+    /// mechanic swap takes a part off to fit its replacement: only the finished car is
+    /// checked, so a Race ECU that needs an intake does not stop the intake being upgraded).
+    fn remove_part_with(
+        &self,
+        acct: &mut PlayerAccount,
+        car: CarUid,
+        slot: &str,
+        check_reqs: bool,
+    ) -> EconResult<u32> {
         let c = self.workshop_car(acct, car)?;
         let s = self.try_slot(slot)?;
         let parts = self.car_parts(c);
-        self.check_remove(c, &parts, s)?;
+        if check_reqs {
+            self.check_remove(c, &parts, s)?;
+        } else if parts.fitted(&s.id).is_none() {
+            return Err(refuse(&s.id, "nothing fitted"));
+        } else {
+            let blockers = self.blockers(&parts, s);
+            if !blockers.is_empty() {
+                return Err(refuse(&s.id, self.blocker_reason(&blockers)));
+            }
+        }
         let fitted = parts.fitted(slot).cloned().expect("checked");
         let condition = self.slot_condition(c, s);
         let value = self.new_part_value(c, s, fitted.grade.as_deref());
@@ -1609,7 +1634,7 @@ impl Economy {
         sell_old: bool,
         mode: DamageMode,
     ) -> EconResult<MechanicJob> {
-        self.workshop_car(acct, car)?;
+        let mods_before = self.workshop_car(acct, car)?.mods.clone();
         let s = self.try_slot(slot)?;
         let mut a = acct.clone();
         let mut events = Vec::new();
@@ -1639,12 +1664,12 @@ impl Economy {
             let way = self.in_the_way(&self.car_parts(a.try_car(car)?), ts);
             let mut off = Vec::new();
             for b in &way {
-                let (uid, ev) = self.remove_part(&mut a, car, b)?;
+                let (uid, ev) = self.remove_part_with(&mut a, car, b, false)?;
                 events.extend(ev);
                 off.push((b.clone(), uid));
             }
             if self.car_parts(a.try_car(car)?).fitted(t).is_some() {
-                let (uid, ev) = self.remove_part(&mut a, car, t)?;
+                let (uid, ev) = self.remove_part_with(&mut a, car, t, false)?;
                 events.extend(ev);
                 olds.push(uid);
             }
@@ -1657,6 +1682,11 @@ impl Economy {
                 job.restore.extend(fit.restore);
             }
             job.touched += way.len() as u32 + 1;
+        }
+        // The swap is checked as a whole: the finished car must keep every requirement it met.
+        {
+            let done = a.try_car(car)?;
+            self.check_mods(done, slot, &mods_before, &done.mods)?;
         }
         let r = self.parts.mechanic;
         job.fee = (r.call_out + r.per_part * job.touched) as Money;
@@ -1821,6 +1851,7 @@ impl Economy {
                     price: self.new_part_value(c, s, None),
                     count: 1,
                     reason: None,
+                    needs: None,
                     install_fee: one_fee,
                     replaces: Vec::new(),
                 });
@@ -1837,11 +1868,14 @@ impl Economy {
                 } else if !m.allows_mode(mode) {
                     Some(format!("not available in {mode:?} mode"))
                 } else {
-                    // It could be bought but not fitted (the swan-neck wing before a splitter).
-                    self.catalog
-                        .missing_requirement(&c.mods, &m.id)
-                        .map(|r| format!("needs {} fitted first", r.name))
+                    None
                 };
+                // It can be bought, but fitted only after this (the swan-neck wing before a
+                // splitter). Not a `reason`: the workshop offers both together.
+                let needs = self
+                    .catalog
+                    .missing_requirement(&c.mods, &m.id)
+                    .map(|r| r.name.clone());
                 out.push(CatalogEntry {
                     kind: s.kind().to_string(),
                     slot_name: slot_name.clone(),
@@ -1852,6 +1886,7 @@ impl Economy {
                     price: m.price as Money,
                     count,
                     reason,
+                    needs,
                     install_fee: if count > 1 { set_fee } else { one_fee },
                     replaces: c
                         .mods
