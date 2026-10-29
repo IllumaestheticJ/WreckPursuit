@@ -1423,6 +1423,34 @@ fn dest<'a>(o: &'a crate::tow::TowOffer, name: &str) -> &'a crate::tow::TowDesti
         .unwrap_or_else(|| panic!("no {name} in {o:?}"))
 }
 
+/// Owner, 2026-10-29: "i should be able to tow from garage/career menu". A car that can be
+/// driven, sitting at home, can be towed from the career screen too (to a shop or another
+/// garage), charged like any tow, and arrives there.
+#[test]
+fn a_drivable_car_at_home_can_be_towed_from_the_career_screen() {
+    let (mut c, uid) = career_with("kestrel_ts", 30_000, DamageMode::Arcade);
+    assert!(c.view().cars[0].drivable);
+    let offer = c.tow_offer(uid, None).unwrap();
+    assert_eq!(offer.refused, None, "{offer:?}");
+    assert_eq!(offer.need, None);
+    assert!(!offer.ends_run);
+    let shop = offer
+        .destinations
+        .iter()
+        .find(|d| d.place.kind == crate::garage_visit::PlaceKind::Garage && d.available)
+        .cloned()
+        .expect("a repair shop on offer");
+    let cash = c.profile().account.cash;
+    let r = c.tow(uid, "Garage", &shop.place.id, None).unwrap();
+    assert_eq!(c.profile().account.cash, cash - r.price);
+    assert_eq!(
+        c.car_spot(uid),
+        wp_economy::CarSpot::Shop {
+            name: shop.place.id.clone()
+        }
+    );
+}
+
 #[test]
 fn a_wreck_is_left_on_the_road_and_towed_to_the_nearest_shop() {
     let (mut c, uid) = career_with_wreck(20_000);

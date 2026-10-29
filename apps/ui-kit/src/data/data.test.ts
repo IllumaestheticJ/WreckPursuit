@@ -61,8 +61,9 @@ describe("estimator port", () => {
 
   it("protection adds mass and durability", () => {
     const p = previewBuild(CARS.shiro_turbo, ["prot_bumper_front"]);
-    expect(p.def.mass_kg).toBeCloseTo(CARS.shiro_turbo.mass_kg + 20, 3);
-    expect(p.durability.FrontBumper).toBeCloseTo(1.8);
+    // data/mods/protection.json: +24 kg bumper +10 kg front frame; bumper ×2.4.
+    expect(p.def.mass_kg).toBeCloseTo(CARS.shiro_turbo.mass_kg + 34, 3);
+    expect(p.durability.FrontBumper).toBeCloseTo(2.4);
   });
 });
 

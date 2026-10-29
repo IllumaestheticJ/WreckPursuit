@@ -1,7 +1,7 @@
 /**
  * The tow service (owner 2026-10-28: "tow broken cars to repair shops"): the destination list
  * with the price of each (`TowOffer` from wp_wasm's `career_tow_offer_json`). Used by the career
- * garage ("Tow to …" for a car that cannot be driven and is not at a shop) and by the testbed's
+ * garage ("Tow to …" for any car not in the pound; open at once for one that cannot be driven) and by the testbed's
  * in-run "Call a tow truck" pop-up (`TowPickerView`).
  *
  * The nearest repair shop is always on offer: without the cash the tow still happens and the
