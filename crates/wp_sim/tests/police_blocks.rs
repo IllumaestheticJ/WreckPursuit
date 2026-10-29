@@ -4,7 +4,9 @@
 //! and probed: a car-width box is swept 3 m through the barrier line at every lateral offset from
 //! the left hard stop to the right one. It must be stopped everywhere, and with the barricade
 //! taken out of the query only inside the one marked gap. The hard stops themselves must be real
-//! world geometry (a wall, barrier or rail). A second test smashes a barricade.
+//! world geometry (a wall, barrier or rail). A second test smashes a barricade; a third shoves a
+//! barrier section aside (owner 2026-10-29: the barriers are light water-filled plastic, "easy
+//! to push").
 
 use std::sync::OnceLock;
 
@@ -480,6 +482,123 @@ fn barricade_breaks_when_hit_at_speed_and_holds_a_crawl() {
             );
         }
     }
+}
+
+/// The light sections are laid overlapping each other, the barricade, kerbs and the walls or
+/// rails they meet. Nobody touching them, they must stand where they were put (no explosion of
+/// overlapping dynamic boxes, no creep): at every sampled site across the three places.
+#[test]
+fn untouched_barriers_stand_still() {
+    let mut sim = sim();
+    let (placed, _) = place_blocks(&mut sim);
+    assert!(placed.len() > 20, "only {} blocks", placed.len());
+    let poses = |s: &Sim| -> Vec<(u32, [f32; 3])> {
+        s.roadblock_barriers()
+            .iter()
+            .filter(|b| b.part == ToolPart::Barrier)
+            .map(|b| (b.tool, b.pos))
+            .collect()
+    };
+    let start = poses(&sim);
+    for _ in 0..(240 * 5) {
+        sim.step_fixed();
+    }
+    let end = poses(&sim);
+    assert_eq!(start.len(), end.len());
+    let worst = start
+        .iter()
+        .zip(&end)
+        .map(|((t, a), (_, b))| {
+            let d = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+            (d, *t)
+        })
+        .fold((0.0f32, 0u32), |m, x| if x.0 > m.0 { x } else { m });
+    eprintln!(
+        "{} sections, worst drift {:.3} m (tool {})",
+        start.len(),
+        worst.0,
+        worst.1
+    );
+    for ((t, a), (_, b)) in start.iter().zip(&end) {
+        let d = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+        if d > 0.05 {
+            let p = placed.iter().find(|p| p.tool == *t).map(|p| p.place);
+            eprintln!("DRIFT tool {t} {p:?} {a:?} -> {b:?}");
+        }
+    }
+    assert!(
+        worst.0 < 0.05,
+        "a section moved {:.3} m on its own (tool {})",
+        worst.0,
+        worst.1
+    );
+}
+
+#[test]
+fn a_car_shoves_a_light_barrier_aside() {
+    let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
+    let mut sim = Sim::new(SimConfig {
+        seed: 3,
+        mode,
+        time_of_day: TimeOfDay::from_hours(12.0),
+        time_ratio: 0.0,
+    });
+    let car = load_car(data("cars/debug_sedan.json")).unwrap();
+    // The flat world's block: the gap is right of the line, so x = -2 meets barrier sections.
+    let id = sim
+        .police_mut()
+        .place_roadblock_at(EntityId(1), [0.0, 40.0], [0.0, 1.0]);
+    let e = sim.spawn_vehicle(&car, [-2.0, 0.0, 0.6], 0.0).unwrap();
+    sim.place_vehicle(e, [-2.0, 0.0, 0.6], 0.0, 16.0).unwrap();
+    sim.set_input(
+        e,
+        VehicleInput {
+            throttle: 0.6,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let barriers = |s: &Sim| -> Vec<[f32; 3]> {
+        s.roadblock_barriers()
+            .iter()
+            .filter(|b| b.tool == id.0 && b.part == ToolPart::Barrier)
+            .map(|b| b.pos)
+            .collect()
+    };
+    let mut start: Vec<[f32; 3]> = Vec::new();
+    for _ in 0..(240.0 * 8.0) as usize {
+        sim.step_fixed();
+        if start.is_empty() {
+            start = barriers(&sim);
+        }
+    }
+    assert!(!start.is_empty(), "no barriers made");
+    let moved = barriers(&sim)
+        .iter()
+        .zip(&start)
+        .map(|(a, b)| ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt())
+        .fold(0.0f32, f32::max);
+    let st = sim
+        .vehicle_states()
+        .into_iter()
+        .find(|(v, _)| *v == e)
+        .unwrap()
+        .1;
+    eprintln!(
+        "barrier moved {moved:.1} m, car y {:.1} health {:.3}",
+        st.pos[1], st.health
+    );
+    assert!(moved > 1.0, "the barrier hardly moved: {moved:.2} m");
+    assert!(
+        st.pos[1] > 50.0,
+        "the car did not get through: y = {}",
+        st.pos[1]
+    );
+    assert!(
+        st.health > 0.6,
+        "a plastic barrier wrecked the car: {:.3}",
+        st.health
+    );
 }
 
 /// Half track of the probe car (wheel lines either side of its centre), m.

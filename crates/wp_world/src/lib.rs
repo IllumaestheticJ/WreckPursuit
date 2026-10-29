@@ -15,6 +15,8 @@
 //! - [`covered`]: tunnels and covered roads (line of sight in and out is blocked).
 //! - [`progression`]: career time budget — day free roam / night racing shifts, activity
 //!   time costs (garage, repairs), dusk/dawn transitions driving the [`clock`].
+//! - [`places`]: landmark buildings for the drive-to places (dealers, shops, police
+//!   stations, home garages, safehouses).
 //! - [`density`], [`signals`], [`clock`], [`violations`], [`routes`], [`props`].
 //!
 //! [`World`] composes them. The sim loop calls [`World::set_tracked_vehicles`] (players,
@@ -38,6 +40,7 @@ pub mod map;
 pub mod markings;
 pub mod network;
 pub mod obstacles;
+pub mod places;
 pub mod procgen;
 pub mod progression;
 pub mod props;

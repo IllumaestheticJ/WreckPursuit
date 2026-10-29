@@ -25,11 +25,12 @@ const PICK_CLEAR_M = 30;
 /** A road pin is reached (and cleared) this close, m. */
 const ROAD_ARRIVE_M = 20;
 
-/** Map dot colour and letter for the places the kit's map does not draw itself (it has its own
- * garage and safehouse symbols): car lots pink, the player's garages white, as their 3D rings. */
-function dot(p: MapPlace): Pick<MapMarker, "colour" | "label"> | null {
-  if (p.kind === "Lot") return { colour: "#ff7ac8", label: "$" };
-  if (p.kind === "Home") return { colour: "#f2f2f2", label: "H" };
+/** Map icon for the places the kit's map does not draw itself (it has its own repair shop,
+ * safehouse and police symbols): car lots as a showroom car, a car with a price tag or a wreck
+ * stack by kind, the player's garages as a garage door (`drawPoi`). */
+function dot(p: MapPlace): Pick<MapMarker, "colour" | "label" | "icon"> | null {
+  if (p.kind === "Lot") return { colour: "#ff7ac8", icon: p.icon === "UsedLot" || p.icon === "Junkyard" ? p.icon : "Dealership" };
+  if (p.kind === "Home") return { colour: "#f2f2f2", icon: "Home" };
   return null;
 }
 

@@ -1222,7 +1222,8 @@ pub fn race_result_json() -> Result<String, JsValue> {
 
 // ----- street racers (src/street.rs) -------------------------------------------------------
 
-/// Add the NPC street racers (8 by day, 13 at night, [`street::ROSTER`]) to live free-drive /
+/// Add the NPC street racers (8 by day, 13 at night, [`street::ROSTER`]; twice that on the full
+/// world map, [`street::FULL_MAP_ROSTER`]) to live free-drive /
 /// night-run city sessions started after this call (default on). They are scenario entities (`street_<level>_<name>`, after the
 /// player in `entities()`), so recordings and replays carry them.
 #[wasm_bindgen]
@@ -1412,6 +1413,14 @@ pub fn safehouses_json() -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn places_json() -> Result<String, JsValue> {
     get(|s| json(&s.map_places()))
+}
+
+/// The landmark buildings of the session's city as JSON ([`wp_world::places::PlaceLayout`]
+/// array: id, name, style, ring, plot frame, sign faces with their text, string flags), for
+/// the renderer's sign text and bunting. `[]` without a city or for cities without places.
+#[wasm_bindgen]
+pub fn place_layouts_json() -> Result<String, JsValue> {
+    get(|s| json(&s.place_layouts()))
 }
 
 /// The GPS line from the player's car to `(x, y)`: flat `[x0, y0, x1, y1, …]` along the lanes

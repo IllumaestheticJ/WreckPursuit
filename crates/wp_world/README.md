@@ -414,6 +414,29 @@ so what you see is what you drive on (`tools/city-import/tests/surface_match.rs`
 - Street racers lapping Loop 9 park in a free bay at the end of a lap and back out when they
   leave (`wp_wasm::street`).
 
+### Landmark places (`places`, owner request 2026-10-29)
+- Every drive-to place gets a building that reads from the road: repair shops (`Garage` POIs:
+  workshop, three roll-up bays, the middle one open and lit with a car on a lift), police
+  stations (civic block, portico, "POLICE" signs, flagpole, blue lamp, cruisers), safehouses
+  (an unmarked warehouse door), car lots (`places::DRIVE_TO_SPOTS`: dealership showroom with
+  display cars, flags and a pylon sign; used-car lot with rows of cars, cabin, string flags and
+  a price board; junkyard with a fence, wreck stacks, crane and office) and the player's
+  garages (Dockside Lock-up units, the Spire tower over a lit ramp portal, Harnell Barn).
+- `places::add_place_buildings` runs last in Port Vesper v2 / Ashpeak generation: per place it
+  tries both sides of the ring's road and offsets along it (`OFFSETS_M`) for a plot clear of
+  every road, sidewalk, junction, car park, water and protected building (landmarks, farms,
+  silos, structures), no steeper than 2.5 m, and pushes the pieces back until none is inside
+  the 15 m ring; it then clears the generic buildings and decor on the plot. Ashpeak keeps
+  Port Vesper's own pieces where the plot is identical (they ship once in the shared part).
+- Solid pieces are `Building`s (`BuildingKind::{Showroom, Workshop, Civic, LockUp, Kiosk,
+  HomeBarn}`) and `Structure`s of kind `StructureKind::Place(PlacePart)` (appended enum
+  variants: no format change), so `wp_sim` collides with them like any building. Sign text and
+  string flags are not geometry: `places::plan(map)` recomputes the layouts from the finished
+  map for the renderer (`wp_wasm` `place_layouts_json`).
+- Tests: `tools/city-import/tests/landmark_places.rs` (every place laid out, building within
+  45 m of its ring, nothing on a lane / sidewalk / junction / ring, colliders) and
+  `wp_wasm` `spawn_tests::every_drive_to_place_has_its_building_by_its_ring`.
+
 ## Touge passes (`touge::generate`, `World::touge`, `gen-city --preset touge`)
 Four mountain roads for one-on-one touge battles, specs in `data/touge/<id>.json` (embedded):
 Hollow Crown Pass (≈ 2.8 km, 280 m climb), Mistral Ridge (≈ 3.0 km, 200 m), Ashfall Grade
@@ -633,10 +656,15 @@ relative) within 10 s; collision = box overlap with a civilian. Emitted as
 extruded from the ground to `height_m`; a sight line is blocked if any part of it inside a
 footprint is below the roof (checked at both ends of the inside span — height is linear along
 the line). Buildings are indexed in the 32 m grid and only cells the line crosses (2D DDA) are
-tested. With terrain the ground occludes, and so do **bridge decks** with at least 3 m under
-them (`surface::deck_slabs`, the deck as a thin plane over its paved width, also gridded): from
-the air the road under an overpass is hidden, which is how a racer breaks a helicopter's sight
-on Port Vesper (police P9). Other road surfaces, parked cars and traffic do not occlude.
+tested. With terrain the ground occludes, and so do **bridge decks** with room for a car under
+them (`surface::deck_occluders`, also gridded): every deck stretch with 3 m under it somewhere,
+taken whole from abutment to abutment (each piece with an end more than 0.5 m over the terrain),
+as thin planes over the paving, the deck's sidewalks and a 0.5 m edge (rail / barrier; also
+closes the seam between a divided highway's twin decks). From the air and from the deck the road
+under an overpass is hidden, and from under it the deck, which is how a racer breaks police
+sight on Port Vesper and Ashpeak (police P9; `tests/bridge_los.rs`). `surface::deck_slabs`
+(pieces with 3 m under both ends, paved width only) stays for the police stakeouts. Other road
+surfaces, parked cars and traffic do not occlude.
 
 **Leader query** (`leader`, for police units and AI racers): `find_leader(own_pos,
 centreline, obstacles, skip, params)` samples the caller's path ahead (any path type — a

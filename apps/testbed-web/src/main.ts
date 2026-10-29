@@ -65,6 +65,7 @@ import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
 import { LotVisitView } from "../../ui-kit/src/garage/LotVisit";
 import { TowPickerView, TowPromptView, towDoneLine } from "../../ui-kit/src/garage/Tow";
 import { LotDressing } from "./render/lot_dressing";
+import { PlaceSigns } from "./render/place_signs";
 import { downloadText, keepUnreadable, loadCareerText, pickTextFile, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
 import type { CareerApi, CareerPlace, CareerView, RoamChoice, RunKind } from "../../ui-kit/src/garage/types";
 import { RaceView, racesForMap, type BetPick, type BetStatus, type RaceFrame } from "./ui/race";
@@ -448,6 +449,9 @@ async function main(): Promise<void> {
   const lotView = new LotVisitView(lotEl);
   const lotDressing = new LotDressing();
   scene.world.add(lotDressing.root);
+  // Landmark buildings' sign text and string flags (the buildings are greybox geometry).
+  const placeSigns = new PlaceSigns();
+  scene.world.add(placeSigns.root);
   /** On a lot only the lot overlay shows (no driving HUD, debug panels or debug layers), like
    * the workshop; off restores them. */
   const setLotMode = (on: boolean) => {
@@ -935,6 +939,7 @@ async function main(): Promise<void> {
     driftLabW.setActive(sc.name === DRIFT_LAB_W);
     const places = sim.places();
     scene.setGarages(sim.garages(), sim.safehouses(), places);
+    placeSigns.set(lotInfo ? [] : sim.placeLayouts());
     waypoint.reset(sim.careerRunActive() ? places : []);
     const city = sim.worldInfo()[W.city] > 0.5;
     const cityId = city ? sim.cityId() : "";
@@ -2537,6 +2542,7 @@ async function main(): Promise<void> {
 
   // Automation hook (Playwright e2e, docs screenshots).
   (window as unknown as { __wp: unknown }).__wp = {
+    placeSigns,
     sim,
     app,
     scene,

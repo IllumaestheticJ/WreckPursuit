@@ -704,6 +704,8 @@ fn street_perf() {
         ("procedural_12x12", 23.0),
         ("vesper_v2", 12.0),
         ("vesper_v2", 23.0),
+        ("ashpeak", 12.0),
+        ("ashpeak", 23.0),
     ] {
         if std::env::var("PERF_ONLY").is_ok_and(|o| o != format!("{city}:{hour}")) {
             continue;
@@ -1392,4 +1394,75 @@ fn street_bets_settle_on_the_career() {
         .ledger
         .iter()
         .any(|e| e.seq >= start_seq && e.cash_delta == paid));
+}
+
+/// Owner 2026-10-29 ("need twice as much roaming racers on the full map"): the full world
+/// map (Port Vesper + Ashpeak County) spawns twice the roster, 16 by day and 26 at night (Loop
+/// 9 keeps its four), apart from the player and each other, spread over both cities: Port
+/// Vesper's share stays about what Port Vesper alone has (8 by day, 13 at night) and Ashpeak
+/// County gets its own.
+#[test]
+fn full_map_spawns_twice_the_racers_spread_over_both_cities() {
+    let full = &street::FULL_MAP_ROSTER;
+    assert_eq!(full.len(), 2 * ROSTER.len());
+    assert_eq!(
+        &full[..ROSTER.len()],
+        &ROSTER[..],
+        "the first half is the city roster"
+    );
+    let day = full.iter().filter(|r| r.1 == Shift::AllDay).count();
+    assert_eq!(day, 16);
+    for l in &street::LEVELS {
+        let n = full
+            .iter()
+            .filter(|r| r.1 == Shift::AllDay && r.0 == l.level)
+            .count();
+        assert_eq!(n, 4, "four per level by day");
+    }
+    assert_eq!(full.iter().filter(|r| r.1 == Shift::Loop).count(), 4);
+    // Port Vesper's footprint inside the combined map (same coordinates).
+    let pv = wp_world::vesper::generate(&wp_world::vesper::VesperConfig::default());
+    let in_vesper = |p: [f32; 3]| {
+        p[0] >= pv.bounds_min[0]
+            && p[0] <= pv.bounds_max[0]
+            && p[1] >= pv.bounds_min[1]
+            && p[1] <= pv.bounds_max[1]
+    };
+    for (hour, out) in [(12.0, 16), (23.0, 26)] {
+        let mut sc = crate::scenario::free_drive_in(
+            "debug_sedan",
+            DamageMode::Arcade,
+            crate::scenario::city_spec(wp_world::ashpeak::CITY_ID),
+        );
+        sc.time_of_day_h = hour;
+        let s = Session::new(sc, false).unwrap();
+        assert_eq!(s.street().unwrap().entities().len(), 26);
+        let ids = on_duty(&s);
+        assert_eq!(ids.len(), out, "{hour}h on duty");
+        let mut pts = vec![state(&s, PLAYER).pos];
+        pts.extend(ids.iter().map(|e| state(&s, *e).pos));
+        let mut closest = f32::INFINITY;
+        for i in 0..pts.len() {
+            for j in i + 1..pts.len() {
+                closest = closest.min(dist2(pts[i], pts[j]));
+            }
+        }
+        assert!(closest >= street::SPAWN_SPACING_M - 0.01, "{closest} m");
+        let vesper = pts[1..].iter().filter(|p| in_vesper(**p)).count();
+        let county = ids.len() - vesper;
+        eprintln!(
+            "ashpeak {hour}h: {} on duty, {vesper} in Port Vesper, {county} in Ashpeak County, \
+             closest pair {closest:.0} m",
+            ids.len()
+        );
+        let alone = if hour > 20.0 { 13 } else { 8 };
+        assert!(
+            vesper <= alone + 3,
+            "{hour}h: {vesper} racers crowd Port Vesper"
+        );
+        assert!(
+            county >= ids.len() / 4,
+            "{hour}h: only {county} in the county"
+        );
+    }
 }

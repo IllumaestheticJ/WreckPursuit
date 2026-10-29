@@ -1992,3 +1992,120 @@ Owner: "the start levels aren't correctly reflecting the upgraded cop cars", the
 - `pick_police_model` is unchanged; Loop 9 day's `unit_level = 5` floor still applies on top.
 
 **Tests.** `wp_sim::police_link::tests::cars_follow_the_wanted_level` (low-tier patrols at L0, heat 95: at least one retired, every new unit a Wolfhound/Vigil; fails with `retire_outdated` switched off). `wp_wasm::lod::tests::session_models_list_traffic_and_police_once` updated. All `scenarios/race/pick_*.ron` regenerated (`police_fleet: true`) and their goldens re-blessed.
+
+## Owner bug (lead, 2026-10-29): "cops are seeing me from under the bridge"
+
+Branch `lead/police-bridge-los`. Police perception and the LOS query only (physics untouched).
+
+**Root cause.** Two problems. The main one was in the deck occluder (`wp_world`):
+- `CityMap::line_of_sight` only counted deck pieces with ≥ 3 m clearance at **both** ends
+  (`surface::deck_slabs`), over the **paved** width only. The deck's ends (abutment pieces with
+  0.5–3 m under them) and its sidewalks were see-through. A cop 15–60 m back on the bridge
+  looking down at a car parked under it had a sightline that crossed the deck there, slipped
+  under it and reached the car. Probe on every grade separation (cops on the upper road ±60 m,
+  cars across the lower road): 256 of 1512 Port Vesper sightlines and 374 of 3672 Ashpeak ones
+  went through the deck. Now 0.
+- The lead's first look (fixed 1.3 m eyes in `sees`) was only partly right. The main unit sight
+  (`update_observations`), the helicopter, blatant speeding, responders, ambush joins and stakeouts
+  already used `sees_at` with real heights. The fixed-height paths were the **traffic
+  cameras** (`camera_sees`) and the **nearby units at an assault** (`on_assault`). Also, a
+  **kinematic unit** (no body yet: vehicle cap, or no police car model) kept `alt_m = 0` for its
+  whole life, and a player cop unit had `alt_m = 0` until its first sync. On a deck or on the hills
+  their eyes sat at 1.3 m, under the deck or underground.
+
+**Changes.**
+- `wp_world::surface::deck_occluders` (new; `CityMap` uses it for LOS and `CityMap::decks()`):
+  every deck stretch that has room for a car under it somewhere (≥ `DECK_COVER_CLEARANCE_M`),
+  covered whole from abutment to abutment. A stretch is a run of pieces with an end more than
+  `DECK_OCCLUDER_MIN_GAP_M` = 0.5 m over the terrain. Each piece covers the paving, the deck's
+  sidewalks and `DECK_OCCLUDER_EDGE_M` = 0.5 m of edge (rail or barrier; this also closes the
+  seam between a divided highway's twin decks on Ashpeak). Pieces: Port Vesper 431 → 703,
+  Ashpeak 885 → 1407. Roads lying on the ground never count.
+  `deck_slabs` is unchanged and still feeds the race stakeouts (`PoliceSystem::set_decks` in
+  `for_world` now calls it directly), so stakeout placement does not move.
+  `surface::deck_clearance` is factored out of `is_elevated` (same result).
+- `wp_police`: `camera_sees(world, p, pz)` looks from 1.3 m above the road under the camera
+  (`camera_z`, from `ground_height` in `for_world`) to the racer's eye height. `on_assault` nearby
+  units use `sees_at`. Kinematic ground units take their height from the road they drive along
+  (`kinematic_alt` = `SectionIndex::road_z` along the heading, nearest the last height, +0.5 m).
+  This is set at spawn and on every internal drive step. Flat cities have no section index, so
+  their units stay at z = 0. `add_player_unit` takes `pos[2]`. `eye_height_at` also follows the
+  car below z = 0 (identical for z ≥ 0).
+- Not changed (not detection): `sees` (fixed height) is still used for reinforcement spawn
+  concealment (`reinforcement_node`) and the scenario audits. On hilly cities those checks run
+  underground, so they are too lenient. Possible follow-up.
+
+**Tests.**
+- `wp_police::bridge_sight_tests` (Port Vesper v2, units bound and synced like `wp_sim`):
+  - `deck_blocks_sight_both_ways_at_every_port_vesper_crossing`: about 2.8k sightlines, cop on
+    the bridge ↔ car under it; also out from under at the first overpass;
+  - `cop_on_the_bridge_does_not_see_a_car_parked_under_it`;
+  - `cop_under_the_deck_does_not_see_a_car_on_the_bridge`;
+  - both of those then check that the cop sees the car once it is 80 m out along the lower road;
+  - `kinematic_units_take_their_height_from_the_road_they_drive`;
+  - `hiding_under_the_deck_lets_heat_decay`: heat 30, a cop on the bridge 30 m back looking at
+    the racer, 20 s: never recognised and heat decays. Control in the open: seen.
+  - The first three and the heat test fail with the old deck list.
+- `wp_world/tests/bridge_los.rs`: every Port Vesper and Ashpeak crossing, cop ↔ car both ways;
+  a helicopter straight above the hidden car does not see it, and a car on the deck is seen from
+  the air. Also `deck_occluders` ⊇ `deck_slabs` and is wider where the deck has sidewalks.
+
+**Scenarios and goldens.**
+- `scenarios/response_night_suburb.ron` was re-measured. The grid viaduct now hides what is
+  under it along its whole length, so more violations go unseen and become calls: 25 s reached
+  0.6 → 0.47, mean time to a unit 31.8 → 36.0 s. New bounds 0.45 / 38 s (the old ones sat exactly
+  on the old measurement). Separate commit.
+- Re-blessed (`[bless]` commit): `jam_pursuit_grid`, `jam_pursuit_vesper`,
+  `race_city_sprint_police`, `weather_fog_pursuit`, `weather_fog_pursuit_clear`. Police state
+  moved (kinematic units' `alt_m` is hashed, sightlines changed). No other golden moved.
+- **Open for the lead:** `jam_pursuit_vesper` fails `traffic_max_stop_s ≤ 46` (62.9 s).
+  Traffic agent 7 stands at a give-way line (`Wait::Line`, seg 822, about (-408, 397)) in the
+  diverged chase. It reproduces with the old deck list, so it is the changed police behaviour
+  sending the chase another way, not the occluders. Same class as the row 84 gap-acceptance case
+  in that scenario's notes. The bound is unchanged.
+
+### Follow-up (lead, 2026-10-29): `city_sprint_pulls_in_police` saw no pursuit
+
+After `deck_occluders` and the camera mast (8263a68f), `wp_race`'s `city_sprint_pulls_in_police`
+failed: every entrant ended at heat 8.7 and nothing witnessed the speeding. The race runs up the
+procedural 7×7 grid's divided viaduct (northbound carriageway, x ≈ 60-69, y -437 → -230).
+
+**Instrumented** (every unit → racer sightline in range, its view cone and `sees_at`, and the deck
+piece that blocked it):
+- **The start (physically right).** The only patrol that saw the field before (old deck list)
+  was a unit on the y ≈ -112 row west of the highway, ~300 m away. Its sightline crossed the
+  *southbound* carriageway where that climbs through eye height: the piece at y -300..-310 is
+  1.0-1.5 m over the ground. `deck_slabs` (≥ 3 m clearance) left it out, so the sightline went
+  through the ramp. A road at eye height is a wall; the new list is right to block it.
+- **On the viaduct (a bug).** After the finish the racers drive on along the deck in plain view of
+  patrols north-east and north-west of it, yet `sees_at` said no: `eye_height_at(z)` was
+  `1.3 + (z - 1).max(0) + z.min(0)`. A vehicle's position is its chassis origin, which sits on the
+  road (contract chassis space; `wp_sim` reports `VehicleState::pos`, z = 0.00 on flat ground,
+  7.90 on the 7.9 m deck). So on any road more than 1 m up the eye / target point was only 0.3 m
+  over the road, and the racer's own deck edge hid it from every observer below. Not the ramps,
+  the sidewalk/edge widening, the twin-deck seam or unit heights (physical units sync road-level
+  z; none drives the viaduct in this run).
+
+**Fix (`wp_police`, perception only).**
+- `eye_height_at(z) = EYE_HEIGHT_M + z` everywhere (unchanged on flat ground at z = 0 and below 0).
+- `kinematic_alt` returns the road height (dropped `KINEMATIC_CHASSIS_Z_M` = 0.5: a synced unit's
+  position is on the road too, so kinematic units' eyes sat 0.5 m higher than physical ones').
+- `bridge_sight_tests` place cars at the road height (was road + 0.5 m) and gain
+  `a_car_on_the_grid_viaduct_shows_over_its_deck_edge_and_hides_under_it`: 7 ground ↔ deck
+  sightlines from the race run seen both ways (all hidden with the old eye height), and a car
+  on the row under the viaduct hidden from 126 cop spots on both decks, both ways.
+  All owner-bug tests (`bridge_sight_tests`, `wp_world/tests/bridge_los.rs`) still pass.
+
+**Scenarios.**
+- `race/city_sprint_police.ron`: passes again at seed 12; the pursuit now starts after the finish
+  (racer 1, 19.4 s) from a patrol west of the viaduct whose sightline clears the near deck's edge
+  by millimetres. Seed 12, dy 0: starting heat 8.25-9.5 passes both runs (8.0 fails the report
+  run; from ~9.55 the report alone reaches L1, which is not this test's story), 8.25 → 9.0.
+  Thinner than before: dy ±5/±10 and seeds 1-11, 13-16 fail the report run (seed 7 passes at
+  9.5). Nothing watches the start any more; moving the race or a patrol so the start is in view
+  would make it robust again (open for the lead).
+- `police/tunnel_escape_founders_cut{,_control}.ron`: seed 64's main run became a capture
+  (137.6 s). Seeds 50-72: escape story on 8 of 23, control captured on all 8; re-seeded 64 → 60.
+- `jam/pursuit_jam_vesper.ron`: 47.7 s stop (kinematic civilian Obstructed behind a standing
+  civilian for ~34 s, no go-around); bound 46 → 48 s, wp_world follow-up as in its notes.
+- Goldens re-blessed in a separate `[bless]` commit (list there).

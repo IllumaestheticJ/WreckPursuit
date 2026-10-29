@@ -3,7 +3,7 @@
 // later. `apps/simcli/tests/scenarios.rs::fog_delays_the_pursuit` compares the two files.
 (
     name: "weather_fog_pursuit",
-    seed: 108,
+    seed: 111,
     city: procedural(seed: 1, blocks_x: 12, blocks_y: 12, block_m: 110.0),
     time_of_day_h: 12.0,
     time_ratio: 1.0,
@@ -30,6 +30,7 @@
         // Re-aimed 2026-10-23 (wp_police row 158): the racer is wanted from the start, so no
         // session-start patrol may be placed in its view; the patrol that recognises it now
         // drives into view later. Measured 11.70 s (clear twin: 7.00 s).
+        // Re-aimed 2026-10-29: seed 111 with the clear twin (bridge sightlines); measured 11.50 s.
         pursuit_started_before(t_s: 14.0),
     ],
 )

@@ -4,7 +4,7 @@
  * road cache, police glyphs, tools, POI icons. Everything here draws in screen pixels unless a
  * function says it takes a world matrix.
  */
-import type { MapFrame, MapPoi, MapRacer, MapStatic, MapTool, MapUnit } from "./data";
+import type { MapFrame, MapIcon, MapRacer, MapStatic, MapTool, MapUnit } from "./data";
 import { unitBlinks } from "./data";
 import { apply, type Mat } from "./projection";
 
@@ -453,19 +453,84 @@ function line(ctx: Ctx, a: [number, number], b: [number, number]): void {
   ctx.stroke();
 }
 
-/** POI icon at `(x, y)` screen px, size `s`. */
-export function drawPoi(ctx: Ctx, kind: MapPoi["kind"], x: number, y: number, s: number, pal: MapPalette): void {
+/** Lot / home icon colours (not police red / blue, not the scanner green). */
+export const PLACE_ICON_COLOUR = {
+  Dealership: "#e0408a",
+  UsedLot: "#f2c21b",
+  Junkyard: "#a0643a",
+  Home: "#f2f2f2",
+} as const;
+
+/** A side-on car silhouette centred at the origin, `w` px long, in `colour`. */
+function carShape(ctx: Ctx, w: number, colour: string): void {
+  const h = w * 0.22;
+  ctx.fillStyle = colour;
+  ctx.beginPath();
+  // body
+  ctx.rect(-w / 2, -h * 0.2, w, h);
+  // cabin (trapezoid)
+  ctx.moveTo(-w * 0.26, -h * 0.2);
+  ctx.lineTo(-w * 0.14, -h * 1.05);
+  ctx.lineTo(w * 0.18, -h * 1.05);
+  ctx.lineTo(w * 0.32, -h * 0.2);
+  ctx.closePath();
+  ctx.fill();
+  // wheels
+  for (const u of [-0.28, 0.28]) {
+    ctx.beginPath();
+    ctx.arc(u * w, h * 0.85, h * 0.55, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/** A rounded square of half-size `r` in `fill` with the current outline. */
+function tile(ctx: Ctx, r: number, fill: string): void {
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.roundRect(-r, -r, r * 2, r * 2, r * 0.3);
+  ctx.fill();
+  ctx.stroke();
+}
+
+/** A five-pointed star of outer radius `r`. */
+function star(ctx: Ctx, r: number, colour: string): void {
+  ctx.fillStyle = colour;
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    const rr = i % 2 === 0 ? r : r * 0.45;
+    if (i === 0) ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+    else ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+/** POI / place icon at `(x, y)` screen px, size `s`: a wrench for repair shops, a badge for
+ * police stations, a car under a showroom roof for dealers, a car with a price tag for used-car
+ * lots, stacked wrecks for junkyards and a garage door for the player's garages. */
+export function drawPoi(ctx: Ctx, kind: MapIcon, x: number, y: number, s: number, pal: MapPalette): void {
   ctx.save();
   ctx.translate(x, y);
   ctx.lineWidth = Math.max(1, s * 0.14);
   ctx.strokeStyle = "#000";
   switch (kind) {
-    case "Garage":
-      ctx.fillStyle = pal.warn;
-      ctx.fillRect(-s * 0.6, -s * 0.6, s * 1.2, s * 1.2);
-      ctx.strokeRect(-s * 0.6, -s * 0.6, s * 1.2, s * 1.2);
-      glyph(ctx, "G", s, "#000");
+    case "Garage": {
+      // Repair shop: a wrench on an amber tile.
+      tile(ctx, s * 0.68, pal.warn);
+      ctx.lineCap = "round";
+      ctx.lineWidth = Math.max(1.5, s * 0.26);
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.36, s * 0.36);
+      ctx.lineTo(s * 0.1, -s * 0.1);
+      ctx.stroke();
+      // The open jaw: a ring with its gap to the top right.
+      ctx.lineWidth = Math.max(1.2, s * 0.2);
+      ctx.beginPath();
+      ctx.arc(s * 0.2, -s * 0.2, s * 0.24, Math.PI * 0.05, Math.PI * 1.45);
+      ctx.stroke();
       break;
+    }
     case "Safehouse":
       ctx.fillStyle = pal.scan;
       ctx.beginPath();
@@ -479,18 +544,85 @@ export function drawPoi(ctx: Ctx, kind: MapPoi["kind"], x: number, y: number, s:
       ctx.stroke();
       break;
     case "PoliceStation":
+      // Police station: a blue shield badge with a white star.
       ctx.fillStyle = pal.policeB;
       ctx.beginPath();
-      ctx.moveTo(-s * 0.65, -s * 0.65);
-      ctx.lineTo(s * 0.65, -s * 0.65);
-      ctx.lineTo(s * 0.65, s * 0.1);
-      ctx.lineTo(0, s * 0.75);
-      ctx.lineTo(-s * 0.65, s * 0.1);
+      ctx.moveTo(-s * 0.68, -s * 0.62);
+      ctx.quadraticCurveTo(0, -s * 0.9, s * 0.68, -s * 0.62);
+      ctx.lineTo(s * 0.68, s * 0.05);
+      ctx.quadraticCurveTo(s * 0.6, s * 0.55, 0, s * 0.85);
+      ctx.quadraticCurveTo(-s * 0.6, s * 0.55, -s * 0.68, s * 0.05);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      glyph(ctx, "P", s * 0.9, "#fff");
+      star(ctx, s * 0.42, "#fff");
       break;
+    case "Dealership":
+      // Dealership: a car under a showroom roof on a pink tile.
+      tile(ctx, s * 0.72, PLACE_ICON_COLOUR.Dealership);
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = Math.max(1, s * 0.12);
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.55, -s * 0.12);
+      ctx.lineTo(0, -s * 0.55);
+      ctx.lineTo(s * 0.55, -s * 0.12);
+      ctx.stroke();
+      ctx.translate(0, s * 0.2);
+      carShape(ctx, s * 1.0, "#fff");
+      break;
+    case "UsedLot":
+      // Used-car lot: a car with a price tag on a yellow tile.
+      tile(ctx, s * 0.72, PLACE_ICON_COLOUR.UsedLot);
+      ctx.translate(0, s * 0.12);
+      carShape(ctx, s * 1.1, "#000");
+      ctx.fillStyle = "#000";
+      ctx.font = `bold ${Math.round(s * 0.5)}px ui-monospace, Menlo, Consolas, monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("$", s * 0.38, -s * 0.5);
+      break;
+    case "Junkyard": {
+      // Junkyard: a stack of crushed cars on a rust tile.
+      tile(ctx, s * 0.72, PLACE_ICON_COLOUR.Junkyard);
+      ctx.fillStyle = "#1a120c";
+      const w = s * 1.0;
+      const h = s * 0.24;
+      ctx.save();
+      ctx.rotate(-0.12);
+      ctx.fillRect(-w / 2, s * 0.18, w, h);
+      ctx.restore();
+      ctx.save();
+      ctx.rotate(0.1);
+      ctx.fillRect(-w * 0.45, -s * 0.12, w * 0.9, h);
+      ctx.restore();
+      ctx.fillRect(-w * 0.38, -s * 0.42, w * 0.76, h);
+      break;
+    }
+    case "Home": {
+      // The player's garage: a roll-up garage door under a roof.
+      ctx.fillStyle = PLACE_ICON_COLOUR.Home;
+      ctx.beginPath();
+      ctx.moveTo(0, -s * 0.8);
+      ctx.lineTo(s * 0.75, -s * 0.2);
+      ctx.lineTo(s * 0.75, s * 0.7);
+      ctx.lineTo(-s * 0.75, s * 0.7);
+      ctx.lineTo(-s * 0.75, -s * 0.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#3a3f48";
+      ctx.fillRect(-s * 0.5, -s * 0.12, s, s * 0.82);
+      ctx.strokeStyle = PLACE_ICON_COLOUR.Home;
+      ctx.lineWidth = Math.max(1, s * 0.09);
+      for (let i = 1; i <= 3; i++) {
+        const yy = -s * 0.12 + (i * s * 0.82) / 4;
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.5, yy);
+        ctx.lineTo(s * 0.5, yy);
+        ctx.stroke();
+      }
+      break;
+    }
     case "Helipad":
       ctx.strokeStyle = pal.policeB;
       ctx.beginPath();

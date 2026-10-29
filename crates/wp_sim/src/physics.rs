@@ -164,6 +164,26 @@ pub fn barrel_groups(resting: bool) -> InteractionGroups {
     InteractionGroups::new(BARREL_GROUP, filter, InteractionTestMode::And)
 }
 
+/// Collision group of police roadblock bodies (barrier sections, the barricade and its pieces,
+/// `police_tools`). The sections are laid overlapping each other, the barricade, kerbs and the
+/// rails they meet (no seam a wheel could find); as light dynamic bodies they would shove each
+/// other apart, so they ignore each other, the barrier and rail meshes and the sidewalks, and
+/// stand on the road.
+pub const ROADBLOCK_GROUP: Group = Group::GROUP_6;
+
+/// Interaction groups of a roadblock body: everything but other roadblock bodies, the barrier
+/// and rail meshes and the sidewalks.
+pub fn roadblock_groups() -> InteractionGroups {
+    InteractionGroups::new(
+        ROADBLOCK_GROUP,
+        Group::ALL
+            .difference(ROADBLOCK_GROUP)
+            .difference(BARRIER_GROUP)
+            .difference(SIDEWALK_GROUP),
+        InteractionTestMode::And,
+    )
+}
+
 /// A full copy of the Rapier state. `PhysicsPipeline` only holds per-step scratch buffers and
 /// counters, so the copy gets a fresh one (stepping it gives the same results).
 impl Clone for PhysicsWorld {

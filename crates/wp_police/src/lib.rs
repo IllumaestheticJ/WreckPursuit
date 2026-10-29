@@ -86,13 +86,23 @@ use graph::xy;
 use tools::Puncture;
 use unit::UnitBody;
 
+/// A traffic camera's lens height above the highest road at its spot, m: cameras sit on poles
+/// and gantries over the road (on a viaduct, over the deck), so they see along the road they
+/// watch and not under a deck beside or below them.
+pub(crate) const CAMERA_MAST_M: f32 = 6.0;
+
 /// Height of a driver's eyes / a car's roof for line-of-sight queries, m.
 pub const EYE_HEIGHT_M: f32 = 1.3;
 
-/// Eye (or sightline target) height for a vehicle whose chassis is at height `z`, m:
-/// [`EYE_HEIGHT_M`] on flat ground, following the car up on terrain.
+/// Eye (or sightline target) height for a vehicle whose position is at height `z`, m:
+/// [`EYE_HEIGHT_M`] above it everywhere, on flat ground, on terrain, on bridge decks and down
+/// in cuttings. A vehicle's position is its chassis origin, which sits on the road under it
+/// (contract chassis space: the ground-plane projection of the reference point), so `z` is the
+/// road height. (Was `EYE_HEIGHT_M + (z - 1).max(0) + z.min(0)`, a dead band for z in 0..1 m
+/// that put the eye only 0.3 m above any road higher than 1 m: a car on a viaduct deck hid
+/// behind its own deck's edge from every observer below it.)
 pub(crate) fn eye_height_at(z: f32) -> f32 {
-    EYE_HEIGHT_M + (z - 1.0).max(0.0)
+    EYE_HEIGHT_M + z
 }
 
 /// What the police system sees of a racer each tick.
@@ -604,6 +614,9 @@ pub struct PoliceSystem {
     /// Paving and hard stops across the roads (roadblock and spike layout, [`section`]).
     /// Never changes after construction; shared so clones stay cheap.
     pub(crate) section: std::sync::Arc<section::SectionIndex>,
+    /// Road height under each traffic camera, in `graph.pois_of(PoiKind::Camera)` order, m
+    /// ([`PoliceSystem::for_world`]; empty = z 0, flat cities).
+    pub(crate) camera_z: std::sync::Arc<Vec<f32>>,
     /// Static feelers on (default); off only for before/after measurements.
     pub(crate) feelers: bool,
     /// Covered roads (tunnels): a racer lost inside one is searched for at its portals.
@@ -640,10 +653,10 @@ impl PoliceSystem {
     pub fn for_world(cfg: PoliceConfig, world: &wp_world::World, setup: PoliceSetup) -> Self {
         let mut p = Self::with_city(cfg, RoadGraph::from_city(world.map()), setup);
         chatter::attach_world(&mut p, world);
+        // The deck pieces with room for a car under them (not the whole decks the map's line
+        // of sight uses: those also cover the low ends and the sidewalks).
         p.set_decks(
-            world
-                .map()
-                .decks()
+            wp_world::surface::deck_slabs(&world.map().net)
                 .iter()
                 .map(|d| race::DeckFoot {
                     a: [d.a[0], d.a[1]],
@@ -699,6 +712,13 @@ impl PoliceSystem {
         }
         p.set_walls(walls::WallIndex::new(segs));
         p.section = std::sync::Arc::new(section::SectionIndex::from_city(world.map()));
+        // Cameras sit at junctions at grade: the lowest road (or terrain) under each.
+        p.camera_z = std::sync::Arc::new(
+            p.graph
+                .pois_of(graph::PoiKind::Camera)
+                .map(|c| world.map().ground_height(c.pos, Some(1.0e4)) + CAMERA_MAST_M)
+                .collect(),
+        );
         // The real paved geometry: the road graph's polylines follow a lane.
         p.room = pro::RoadRoom::from_city(world.map(), &p.cfg.pursuit.pro);
         p
@@ -801,6 +821,7 @@ impl PoliceSystem {
             unstick_recovery: true,
             walls: std::sync::Arc::new(walls::WallIndex::default()),
             section: std::sync::Arc::new(section::SectionIndex::default()),
+            camera_z: std::sync::Arc::new(Vec::new()),
             feelers: true,
             covers: Vec::new(),
             resets: Vec::new(),
@@ -917,8 +938,12 @@ impl PoliceSystem {
         }
     }
 
-    /// Line of sight between two ground points at eye height: the police graph's own occluders
-    /// (procedural test city) and the world's buildings (`WorldQuery::line_of_sight`).
+    /// Line of sight between two ground points at a fixed eye height (z = 0 ground): the
+    /// police graph's own occluders (procedural test city) and the world's buildings
+    /// (`WorldQuery::line_of_sight`). Only right on flat ground: every police **detection**
+    /// path uses [`PoliceSystem::sees_at`] (units, helicopter) or
+    /// [`PoliceSystem::camera_sees`] with real heights, so bridge decks and terrain occlude.
+    /// Left for spawn placement and the scenario audits.
     pub(crate) fn sees(&self, world: &dyn WorldQuery, a: [f32; 2], b: [f32; 2]) -> bool {
         self.graph.line_of_sight(a, b)
             && world.line_of_sight([a[0], a[1], EYE_HEIGHT_M], [b[0], b[1], EYE_HEIGHT_M])
@@ -941,6 +966,19 @@ impl PoliceSystem {
                 [a[0], a[1], eye_height_at(az)],
                 [b[0], b[1], eye_height_at(bz)],
             )
+    }
+
+    /// Height of a kinematically driven ground unit at `pos` heading along `heading`: the road
+    /// it drives along (not one crossing above or below it), nearest its last height `alt_m`.
+    /// That is where a synced unit's position ([`UnitSync::pos`], the chassis origin on the
+    /// road) sits too. `None` without city geometry (flat cities keep z = 0).
+    pub(crate) fn kinematic_alt(
+        &self,
+        pos: [f32; 2],
+        heading: [f32; 2],
+        alt_m: f32,
+    ) -> Option<f32> {
+        self.section.road_z(pos, heading, alt_m)
     }
 
     pub(crate) fn unit_index(&self, id: UnitId) -> Option<usize> {
@@ -1576,6 +1614,9 @@ impl PoliceSystem {
         u.entity = Some(entity);
         u.player = Some(player);
         u.internal = false;
+        // Its real height from the start (on a bridge deck or under one), not z = 0 until the
+        // first `sync_unit`.
+        u.body.alt_m = pos[2];
         self.units.push(u);
         id
     }
@@ -2536,6 +2577,9 @@ fn standstill_hold(v: f32, brake: f32) -> (f32, f32) {
         (STANDSTILL_BRAKE, 1.0)
     }
 }
+
+#[cfg(test)]
+mod bridge_sight_tests;
 
 #[cfg(test)]
 mod tests {
