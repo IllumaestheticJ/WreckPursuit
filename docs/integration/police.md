@@ -1992,3 +1992,60 @@ Owner: "the start levels aren't correctly reflecting the upgraded cop cars", the
 - `pick_police_model` is unchanged; Loop 9 day's `unit_level = 5` floor still applies on top.
 
 **Tests.** `wp_sim::police_link::tests::cars_follow_the_wanted_level` (low-tier patrols at L0, heat 95: at least one retired, every new unit a Wolfhound/Vigil; fails with `retire_outdated` switched off). `wp_wasm::lod::tests::session_models_list_traffic_and_police_once` updated. All `scenarios/race/pick_*.ron` regenerated (`police_fleet: true`) and their goldens re-blessed.
+
+## Owner bug (lead, 2026-10-29): "cops are seeing me from under the bridge"
+
+Branch `lead/police-bridge-los`. Police perception and the LOS query only (physics untouched).
+
+**Root cause.** Two problems. The main one was in the deck occluder (`wp_world`):
+- `CityMap::line_of_sight` only counted deck pieces with ≥ 3 m clearance at **both** ends
+  (`surface::deck_slabs`), over the **paved** width only. The deck's ends (abutment pieces with
+  0.5–3 m under them) and its sidewalks were see-through. A cop 15–60 m back on the bridge
+  looking down at a car parked under it had a sightline that crossed the deck there, slipped
+  under it and reached the car. Probe on every grade separation (cops on the upper road ±60 m,
+  cars across the lower road): 256 of 1512 Port Vesper sightlines and 374 of 3672 Ashpeak ones
+  went through the deck. Now 0.
+- The lead's first look (fixed 1.3 m eyes in `sees`) was only partly right. The main unit sight
+  (`update_observations`), the helicopter, blatant speeding, responders, ambush joins and stakeouts
+  already used `sees_at` with real heights. The fixed-height paths were the **traffic
+  cameras** (`camera_sees`) and the **nearby units at an assault** (`on_assault`). Also, a
+  **kinematic unit** (no body yet: vehicle cap, or no police car model) kept `alt_m = 0` for its
+  whole life, and a player cop unit had `alt_m = 0` until its first sync. On a deck or on the hills
+  their eyes sat at 1.3 m, under the deck or underground.
+
+**Changes.**
+- `wp_world::surface::deck_occluders` (new; `CityMap` uses it for LOS and `CityMap::decks()`):
+  every deck stretch that has room for a car under it somewhere (≥ `DECK_COVER_CLEARANCE_M`),
+  covered whole from abutment to abutment. A stretch is a run of pieces with an end more than
+  `DECK_OCCLUDER_MIN_GAP_M` = 0.5 m over the terrain. Each piece covers the paving, the deck's
+  sidewalks and `DECK_OCCLUDER_EDGE_M` = 0.5 m of edge (rail or barrier; this also closes the
+  seam between a divided highway's twin decks on Ashpeak). Pieces: Port Vesper 431 → 703,
+  Ashpeak 885 → 1407. Roads lying on the ground never count.
+  `deck_slabs` is unchanged and still feeds the race stakeouts (`PoliceSystem::set_decks` in
+  `for_world` now calls it directly), so stakeout placement does not move.
+  `surface::deck_clearance` is factored out of `is_elevated` (same result).
+- `wp_police`: `camera_sees(world, p, pz)` looks from 1.3 m above the road under the camera
+  (`camera_z`, from `ground_height` in `for_world`) to the racer's eye height. `on_assault` nearby
+  units use `sees_at`. Kinematic ground units take their height from the road they drive along
+  (`kinematic_alt` = `SectionIndex::road_z` along the heading, nearest the last height, +0.5 m).
+  This is set at spawn and on every internal drive step. Flat cities have no section index, so
+  their units stay at z = 0. `add_player_unit` takes `pos[2]`. `eye_height_at` also follows the
+  car below z = 0 (identical for z ≥ 0).
+- Not changed (not detection): `sees` (fixed height) is still used for reinforcement spawn
+  concealment (`reinforcement_node`) and the scenario audits. On hilly cities those checks run
+  underground, so they are too lenient. Possible follow-up.
+
+**Tests.**
+- `wp_police::bridge_sight_tests` (Port Vesper v2, units bound and synced like `wp_sim`):
+  - `deck_blocks_sight_both_ways_at_every_port_vesper_crossing`: about 2.8k sightlines, cop on
+    the bridge ↔ car under it; also out from under at the first overpass;
+  - `cop_on_the_bridge_does_not_see_a_car_parked_under_it`;
+  - `cop_under_the_deck_does_not_see_a_car_on_the_bridge`;
+  - both of those then check that the cop sees the car once it is 80 m out along the lower road;
+  - `kinematic_units_take_their_height_from_the_road_they_drive`;
+  - `hiding_under_the_deck_lets_heat_decay`: heat 30, a cop on the bridge 30 m back looking at
+    the racer, 20 s: never recognised and heat decays. Control in the open: seen.
+  - The first three and the heat test fail with the old deck list.
+- `wp_world/tests/bridge_los.rs`: every Port Vesper and Ashpeak crossing, cop ↔ car both ways;
+  a helicopter straight above the hidden car does not see it, and a car on the deck is seen from
+  the air. Also `deck_occluders` ⊇ `deck_slabs` and is wider where the deck has sidewalks.

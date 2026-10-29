@@ -492,7 +492,12 @@ The mapping is 1:1, with one segment (or a chain of them on curved roads) per ed
   by it (`RoadEdgeId`).
 - **Classes:** Collector/Local/Alley → Local.
 - **Districts:** Core/Commercial → Core, Residential/Suburb → Suburb, Industrial/Port → Industrial.
-- **Line of sight:** `WorldQuery::line_of_sight`, which uses D's building footprints.
+- **Line of sight:** `WorldQuery::line_of_sight`, which uses D's building footprints, terrain,
+  tunnels and bridge decks, between real 3D points: every detection path (units, roadblock and
+  spike cars, helicopter, traffic cameras, the nearby units of an assault) looks from the
+  observer's height to the racer's (`eye_height_at(chassis z)`; a camera 1.3 m above the road
+  under it; a kinematic unit at the road it drives along, `kinematic_alt`). So a racer under an
+  overpass is hidden from a cop on the deck and vice versa (`bridge_sight_tests`).
 
 `RoadGraph` is only the police index on top: legal routing, predicted paths, approach sight
 distance and nearest road. Tests, scenarios and tools use `city::procedural(&ProcGenConfig)`.

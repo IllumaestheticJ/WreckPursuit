@@ -222,7 +222,7 @@ pub struct CityMap {
     /// Whether covered spans block line of sight (default `true`; `false` is the A/B control
     /// for tunnel scenarios: the geometry stays, only sightlines ignore it).
     pub covered_los: bool,
-    /// Bridge-deck pieces that occlude line of sight ([`crate::surface::deck_slabs`]).
+    /// Bridge-deck pieces that occlude line of sight ([`crate::surface::deck_occluders`]).
     decks: Arc<Vec<crate::surface::DeckSlab>>,
     deck_grid: Arc<Grid>,
     /// Freeway paint derived at build time (dotted taper lines, gore chevrons).
@@ -422,7 +422,7 @@ impl CityMap {
             let (blo, bhi) = bbox2(&b.footprint);
             building_grid.insert_box(blo, bhi, i as u32);
         }
-        let decks = crate::surface::deck_slabs(&net);
+        let decks = crate::surface::deck_occluders(&net);
         let mut deck_grid = Grid::new(lo, hi);
         for (i, d) in decks.iter().enumerate() {
             let pad = d.left_m.max(d.right_m);
@@ -924,8 +924,9 @@ impl CityMap {
     /// cells the segment crosses are tested. With terrain, the ground occludes too (sampled
     /// every 8 m; ends excluded). Covered spans (tunnels) block sightlines in and out of them
     /// ([`crate::covered`]) unless [`CityMap::covered_los`] is off, and bridge decks with room
-    /// for a car under them ([`crate::surface::deck_slabs`]) block too: from the air, the road
-    /// under an overpass is hidden. Structures (canopies, landmarks, bridge trusses) occlude between
+    /// for a car under them block too, whole and both ways ([`crate::surface::deck_occluders`]):
+    /// the road under an overpass is hidden from the air and from the deck, and the deck from
+    /// the road under it. Structures (canopies, landmarks, bridge trusses) occlude between
     /// their bottom and top. Other road surfaces, parked cars and traffic do not occlude.
     pub fn line_of_sight(&self, a: V3, b: V3) -> bool {
         if self.covered_los && self.covers.blocks(a, b) {
@@ -991,7 +992,8 @@ impl CityMap {
         })
     }
 
-    /// Bridge-deck pieces that occlude line of sight (empty without terrain).
+    /// Bridge-deck pieces that occlude line of sight ([`crate::surface::deck_occluders`]; empty
+    /// without terrain).
     pub fn decks(&self) -> &[crate::surface::DeckSlab] {
         &self.decks
     }

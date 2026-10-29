@@ -633,10 +633,15 @@ relative) within 10 s; collision = box overlap with a civilian. Emitted as
 extruded from the ground to `height_m`; a sight line is blocked if any part of it inside a
 footprint is below the roof (checked at both ends of the inside span — height is linear along
 the line). Buildings are indexed in the 32 m grid and only cells the line crosses (2D DDA) are
-tested. With terrain the ground occludes, and so do **bridge decks** with at least 3 m under
-them (`surface::deck_slabs`, the deck as a thin plane over its paved width, also gridded): from
-the air the road under an overpass is hidden, which is how a racer breaks a helicopter's sight
-on Port Vesper (police P9). Other road surfaces, parked cars and traffic do not occlude.
+tested. With terrain the ground occludes, and so do **bridge decks** with room for a car under
+them (`surface::deck_occluders`, also gridded): every deck stretch with 3 m under it somewhere,
+taken whole from abutment to abutment (each piece with an end more than 0.5 m over the terrain),
+as thin planes over the paving, the deck's sidewalks and a 0.5 m edge (rail / barrier; also
+closes the seam between a divided highway's twin decks). From the air and from the deck the road
+under an overpass is hidden, and from under it the deck, which is how a racer breaks police
+sight on Port Vesper and Ashpeak (police P9; `tests/bridge_los.rs`). `surface::deck_slabs`
+(pieces with 3 m under both ends, paved width only) stays for the police stakeouts. Other road
+surfaces, parked cars and traffic do not occlude.
 
 **Leader query** (`leader`, for police units and AI racers): `find_leader(own_pos,
 centreline, obstacles, skip, params)` samples the caller's path ahead (any path type — a

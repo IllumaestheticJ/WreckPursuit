@@ -423,11 +423,11 @@ impl PoliceSystem {
     ) {
         let now = self.now;
         let obs = self.obs.get(&racer).copied().unwrap_or_default();
-        let p = {
+        let (p, pz) = {
             let r = &self.racers[&racer];
-            xy(r.pos)
+            (xy(r.pos), r.pos[2])
         };
-        let camera = self.camera_sees(world, p);
+        let camera = self.camera_sees(world, p, pz);
         let witnessed = obs.witnessed || camera;
         let cfg = self.cfg.heat.clone();
         let rec = self.racers.get_mut(&racer).expect("racer exists");
@@ -1685,6 +1685,7 @@ impl PoliceSystem {
         let a = &cfg.heat.assault;
         let unit = self.units[i].id;
         let p = xy(self.racers[&racer].pos);
+        let pz = self.racers[&racer].pos[2];
         self.stats.assaults += 1;
         let (before, after) = {
             let rec = self.racers.get_mut(&racer).expect("racer exists");
@@ -1729,7 +1730,7 @@ impl PoliceSystem {
                 continue;
             }
             let d = dist(u.body.pos, p);
-            if d <= a.nearby_units_m && self.sees(world, u.body.pos, p) {
+            if d <= a.nearby_units_m && self.sees_at(world, u.body.pos, u.body.alt_m, p, pz) {
                 // Nearby units recognise the racer straight away too.
                 if spotter.is_none() && d < best {
                     best = d;
@@ -1790,10 +1791,22 @@ impl PoliceSystem {
         ));
     }
 
-    pub(crate) fn camera_sees(&self, world: &dyn WorldQuery, p: [f32; 2]) -> bool {
+    /// Whether a traffic camera sees a racer at `p` (chassis height `pz`, m): in a camera's
+    /// radius with line of sight from the camera, [`crate::EYE_HEIGHT_M`] above the road under it
+    /// (`camera_z`), to the racer at its real height, so a bridge deck or the
+    /// terrain between them blocks it.
+    pub(crate) fn camera_sees(&self, world: &dyn WorldQuery, p: [f32; 2], pz: f32) -> bool {
+        let target = [p[0], p[1], crate::eye_height_at(pz)];
         self.graph
             .pois_of(PoiKind::Camera)
-            .any(|c| dist(c.pos, p) <= c.radius_m && self.sees(world, c.pos, p))
+            .enumerate()
+            .any(|(k, c)| {
+                let ground = self.camera_z.get(k).copied().unwrap_or(0.0);
+                dist(c.pos, p) <= c.radius_m
+                    && self.graph.line_of_sight(c.pos, p)
+                    && world
+                        .line_of_sight([c.pos[0], c.pos[1], ground + crate::EYE_HEIGHT_M], target)
+            })
     }
 
     // -----------------------------------------------------------------------------------------
@@ -2114,6 +2127,12 @@ impl PoliceSystem {
         let id = self.alloc_unit_id();
         let mut u = Unit::new(id, kind, role, pos, heading, self.cfg.pursuit.risk.budget);
         u.internal = self.setup.internal_driving;
+        if kind == UnitKind::Car {
+            // On the road it is put on (a deck or the road under it), until `sync_unit`.
+            if let Some(z) = self.kinematic_alt(u.body.pos, u.body.heading, 0.0) {
+                u.body.alt_m = z;
+            }
+        }
         u.assigned = self.now;
         if kind == UnitKind::Car {
             // Later spawns this think step must keep clear of this one too.
