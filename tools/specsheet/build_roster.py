@@ -562,6 +562,24 @@ def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
     if lt["bumper"] == "steel" or lt["hood"] == "steel":
         log.append("Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.")
 
+    # 2b. Optional light panels (car overhaul): aluminium front wings (`fenders`) and a lighter
+    # bonnet (`hood_mass_scale`, e.g. carbon fibre: no carbon material exists, beams stay as
+    # they are and only the detachable bonnet's mass changes).
+    if lt.get("fenders") == "aluminum":
+        fender_regions = {"FrontLeftFender", "FrontRightFender"}
+        n_fender = 0
+        for bm in beams:
+            if bm["material_id"] == "mild_steel" and {reg(bm["a"]), reg(bm["b"])} & fender_regions:
+                bm["material_id"] = "aluminum"
+                n_fender += 1
+        log.append(f"{lt['fenders_why']}: {n_fender} front-wing panel beams mild_steel → aluminum.")
+    if lt.get("hood_mass_scale"):
+        k_hood = lt["hood_mass_scale"]
+        for dt in lat["detachables"]:
+            if dt["region"] == "Hood":
+                dt["mass_kg"] = round(dt["mass_kg"] * k_hood, 2)
+        log.append(f"{lt['hood_why']}: hood detachable mass × {k_hood:.2f}.")
+
     # 3. Ladder frame: continue the rails under the cab as FrameLeft/FrameRight.
     if lt.get("ladder_frame"):
         rail_nodes = [n["id"] for n in nodes if n["region"] == "Cabin" and is_rail_x(n["id"])

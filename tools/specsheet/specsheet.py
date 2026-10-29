@@ -72,6 +72,12 @@ TARGETS = {
     "merlo_20t": dict(t0100=(4.8, 5.6), lat=(1.02, 1.20), brake=(30, 35), why="on-board telemetry of 2010s FWD touring-car racers (semi-slick stand-in for slicks)"),
     "mesquite_pr": dict(t0100=(7.0, 8.5), lat=(0.60, 0.72), brake=(44, 55), why="road tests of 2010s full-size off-road performance pickups on 35-inch all-terrains"),
     "erg_hamada": dict(t0100=(5.5, 7.0), lat=(0.62, 0.80), brake=(42, 50), why="stage telemetry of rally-raid prototypes, tarmac figures on all-terrain rubber"),
+    # Car overhaul (2026-10-29): real cars, ranges ±≈10 % around the real figure (provenance in
+    # each spec sheet). Top speeds are unrestricted (owner default: no 180 km/h limiter).
+    "nissan_skyline_r34_25gt": dict(t0100=(7.2, 8.8), lat=(0.78, 0.90), brake=(38, 44), vmax=(205, 235), why="R34 25GT MT: 0-100 ≈ 8.0 s [E], unrestricted ≈ 220 km/h [E], skidpad ≈ 0.80-0.85 g on 205/55R16 touring tyres [E]"),
+    "nissan_skyline_r34_25gt_t": dict(t0100=(5.6, 6.8), lat=(0.88, 0.98), brake=(35, 40), vmax=(225, 255), why="R34 25GT-T MT: 0-100 ≈ 6.2 s [S?], unrestricted ≈ 245 km/h [R]"),
+    "nissan_skyline_r34_gtr": dict(t0100=(4.6, 5.5), lat=(0.88, 1.02), brake=(34, 38), vmax=(240, 275), why="R34 GT-R: 0-100 4.9-5.2 s in period tests [S6], unrestricted 250-265 km/h [R], skidpad ≈ 0.95 g [E] (no source found: band ±≈7 %)"),
+    "nissan_skyline_r34_gtr_vspec2": dict(t0100=(4.5, 5.4), lat=(0.89, 1.03), brake=(34, 38), vmax=(240, 275), why="R34 GT-R V-Spec II: 0-100 4.9 s, 0-400 m 13.1 s [S6], unrestricted ≈ 250-260 km/h [R]"),
 }
 
 # Barrier matrix (prompt 03). Expected outcome per durability class in Simulation mode; Arcade

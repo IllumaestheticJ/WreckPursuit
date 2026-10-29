@@ -58,6 +58,12 @@ Never hand-edit the generated files; the next build overwrites them.
   every passenger-cell beam section (roll cage, carbon tub, tube spaceframe) with `cell_why`;
   lattice `nose_scale` multiplies the front-rail sections (crash nose / crash boxes) with
   `nose_why`. Each is written into the spec sheet. Era `2020s` = the 2010s HSS cell.
+- Light panels (car overhaul, 2026-10-29): lattice `fenders="aluminum"` (+ `fenders_why`) turns
+  the front-wing panel beams mild_steel → aluminum; `hood_mass_scale` (+ `hood_why`) scales the
+  detachable bonnet's mass (carbon bonnet: no carbon material exists, the beams stay as they are).
+- Real cars (`roster_inputs.py`, end of the file): every number carries a provenance tag in its
+  comment ([S] sourced, [S?] weak, [R] recalled, [E] estimate) and `_scaled(curve, k)` turns a
+  rated torque curve into the real-world one.
 - Engine braking = 10-12 % of peak torque; clutch capacity 1.35-1.6 × peak torque.
 - Stock shift time (`shift_time_s`, owner playtest row 97, 2026-10-20): manual sports 0.42-0.45 s,
   manual economy / hot hatch 0.45-0.50, muscle manual 0.50, light-truck manual 0.65, beater

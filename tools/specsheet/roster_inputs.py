@@ -2518,3 +2518,319 @@ CARS = [
                      cell_scale=1.8, cell_why="Chromoly tubular spaceframe with integral roll cage"),
     ),
 ]
+
+# ====================================================================== real cars (overhaul)
+# Car overhaul (owner decision 2026-10-29): real makes, models and trims, real names
+# (data/cars/README.md "Naming policy"). Every number carries the research provenance tag in
+# its comment or `why`: [S] sourced (period spec tables / road tests, URLs in `sources`),
+# [S?] weak or conflicting sources, [R] recalled from well-known period data, [E] estimate.
+#
+# Owner defaults for this family: engines at REAL-WORLD output, not the 280 PS JDM rating
+# (each engine's `why` gives the rated figure and the factor), and NO 180 km/h limiter.
+
+# ---------------------------------------------------------------- Nissan Skyline R34 family
+
+
+def _scaled(curve, k):
+    """A rated torque curve × `k` (real-world output), rounded to whole N·m."""
+    return [(rpm, int(round(nm * k))) for rpm, nm in curve]
+
+
+# RB25DE NEO, rated 147 kW (200 PS) @ 6000, 255 N·m @ 4000 [S8]; shape [E] on those points.
+RB25DE_CURVE = [(1000, 175), (1500, 195), (2000, 212), (2500, 228), (3000, 240), (3500, 250),
+                (4000, 255), (4500, 252), (5000, 247), (5500, 240), (6000, 234), (6500, 215),
+                (7000, 190)]
+# RB25DET NEO, rated 206 kW (280 PS) @ 6400, 343 N·m @ 3200 [S5]; shape [E] (VCT plateau).
+RB25DET_RATED = [(1000, 170), (1500, 210), (2000, 265), (2500, 320), (3000, 340), (3200, 343),
+                 (3500, 342), (4000, 338), (4500, 330), (5000, 325), (5500, 318), (6000, 312),
+                 (6400, 307), (7000, 270), (7400, 230)]
+RB25DET_REAL_K = 1.05
+# RB26DETT, rated 206 kW (280 PS) @ 6800, 392 N·m @ 4400 [S19][S20]; shape [E] (boost ≈ 3000).
+RB26_RATED = [(1000, 180), (2000, 250), (2500, 300), (3000, 350), (3500, 378), (4000, 388),
+              (4400, 392), (5000, 380), (5500, 362), (6000, 340), (6500, 310), (6800, 290),
+              (7500, 245), (8000, 205), (8200, 188)]
+RB26_REAL_K = 1.12
+
+R34_SOURCES_COMMON = [
+    "Research notes 2026-10-29 (`research_r34.md`, search snippets; Nissan Heritage pages were "
+    "blocked, so official tables are second-hand). Tags: [S] sourced, [S?] weak, [R] recalled, [E] estimate.",
+    "[S3] SAU forum, R34 gearbox / diff ratios: https://sau.com.au/forums/topic/480711-r34-gearbox-diff-ratios",
+    "[S13] Nissan S/R/Z diff & transmission ratio guide: https://thrashgaragenz.com/blogs/news/nissan-s-r-z-chassis-diff-transmission-ratio-guide",
+]
+R34_GT_SOURCES = R34_SOURCES_COMMON + [
+    "[S8] ER34 coupe dimensions / mass / RB25DE output: https://www.encycarpedia.com/nissan/98-skyline-25gt-coupe ; https://221616.com/catalog/nissan/skyline/199805_200208/1501437/",
+    "[S5] 25GT-T (carsales, Hagerty, Nissan Heritage snippet): https://www.carsales.com.au/research/nissan/skyline/2002/25gt-t ; https://www.hagerty.co.uk/articles/nissan-skyline-gt-t/",
+]
+R34_GTR_SOURCES = R34_SOURCES_COMMON + [
+    "[S1] R34 GT-R appraisal (dimensions, 1540 kg): https://supercarnostalgia.com/blog/nissan-r34-skyline-gt-r",
+    "[S2] auto-data.net BNR34 (tracks 1480/1490): https://www.auto-data.net/en/nissan-skyline-gt-r-x-r34-2.6-i-24v-turbo-4wd-280hp-360",
+    "[S4] gtrusablog, R34 GT-R final drive 3.545: https://www.gtrusablog.com/2019/09/nissan-skyline-gt-r-differential-front.html",
+    "[S6] fastestlaps V-Spec II (0-100 4.9 s, 0-400 m 13.1 s): https://fastestlaps.com/models/nissan-skyline-gt-r-v-spec-ii-r34",
+    "[S14] J-Garage BNR34 spec page (masses, tyres): https://j-garage.com/nissan/skyline34spec2.html",
+    "[S19]/[S20] RB26DETT output and real-world dyno reports: https://www.jdmbuysell.com/learn/engines/rb26dett/ ; https://bestcarweb.jp/feature/column/390620?prd=2",
+    "[S21] genuine R34 GT-R wheels 18×9J +30: https://www.nengun.com/nissan/set-of-4-genuine-r34-gt-r-18-inch-aluminum-wheels-1051436",
+    "[S22] R34 GT-R Brembo sizes (324×30 / 300×22): https://www.gtrusablog.com/2018/03/r32-r33-r34-brembo-brakes-brake.html",
+]
+
+# Shared R34 coupe shell (ER34 / BNR34): wheelbase 2665 mm [S8][S1].
+_R34_COMMON = dict(
+    cls="Sport",
+    era="90s",
+    profile="coupe",
+    fuel_l=65,  # [R] 65 L tank on all R34 coupes
+    wheelbase=2.665,
+    inertia_k=(0.80, 0.88, 0.90),
+    area_k=0.84,
+    extra_cda=0.0,
+    align=dict(camber_deg=(-0.8, -1.2), toe_deg=(0.0, 0.15), caster_deg=5.5),
+)
+
+CARS += [
+    # ------------------------------------------------------------------ R34 25GT
+    dict(
+        _R34_COMMON,
+        id="nissan_skyline_r34_25gt",
+        display_name="Nissan Skyline 25GT (R34)",
+        analog_of="Nissan Skyline 25GT coupe (ER34), 1998-2001: RB25DE NEO 2.5 L NA I6, RWD, 5-speed manual",
+        curb_kg=1340.0,  # [S8] 25GT coupe MT
+        front_frac=0.54,  # [E] long-nose FR straight-six; no official split found
+        track_f=1.48,
+        track_r=1.47,  # [S8]
+        body=(1.725, 4.58, 1.34),  # [S8]
+        clearance=0.135,  # [R]
+        front_overhang=0.92,  # [E] from the 4580 mm length and the side view
+        cg=0.47,
+        cg_why="[E] upright 90s coupe with a tall iron-block straight-six; top of the sports band",
+        cd=0.33,  # [E] no published Cd; boxy coupe, no wing
+        lift=(0.08, 0.10),  # [E]
+        engine=dict(
+            desc="RB25DE NEO 2.5 L DOHC 24-valve I6, naturally aspirated, variable intake cam timing",
+            curve=RB25DE_CURVE,
+            idle=700, redline=6800, limit=7000, inertia=0.16, brake_frac=0.11,
+            why=("Rated 147 kW (200 PS) @ 6000 rpm, 255 N·m @ 4000 [S8]. Naturally aspirated "
+                 "engines were not held back by the 280 PS agreement and period dynos match the "
+                 "rating, so the real-world factor is ×1.00. The curve shape is [E], fitted to "
+                 "those two points."),
+        ),
+        trans=dict(
+            desc="FS5W71C 5-speed manual, open R200 rear differential",
+            layout="Rwd",
+            # [S?] SAU ratio table (ER34 RB25DE NEO manual, FS5W71C): 3.592/2.057/1.361/1.000/0.821, R 3.657, 4.363.
+            gears=[3.592, 2.057, 1.361, 1.000, 0.821], final=4.363, reverse=3.657, shift=0.45,
+            diff_f="Open", diff_r="Open", clutch_factor=1.4,
+        ),
+        tires=dict(front="205/55R16", rear="205/55R16", compound="street", unsprung=(20.0, 20.0)),  # [R] 16×6.5J
+        susp=dict(hz=(1.45, 1.60), zeta=0.30, travel=(0.15, 0.16), roll_grad_deg_g=3.0,
+                  roll_front_share=0.56, bump_stop=150000.0, preload=0.02),  # [E]
+        brakes=dict(
+            front=dict(kind="disc", d_mm=280, pistons_mm=[57], pad_mu=0.38),  # [R] vented, 1-pot
+            rear=dict(kind="disc", d_mm=292, pistons_mm=[34], pad_mu=0.38),  # [R]
+            bar=P_MODERN, handbrake_frac=0.9,
+        ),
+        steer=dict(ratio=15.5, turn_circle_m=11.0, ackermann=0.6, rack_speed=1.4),  # [E] ratio; [R] 5.3 m radius
+        price=20000,
+        durability=3,
+        note=("The everyday R34: the same long-bonnet coupe shell and silky straight-six as the "
+              "turbo cars, but naturally aspirated, on narrow 16-inch tyres and an open diff. "
+              "It is no rocket, yet it balances nicely on the throttle and teaches the chassis "
+              "the GT-T and GT-R share. Without the factory 180 km/h limiter it runs on to "
+              "about 220 km/h."),
+        breaks=("90s Nissan HSS unibody with steel bonnet and wings and plastic bumper covers. "
+                "The long straight-six sits well back, so light nose hits stay in the bumper and "
+                "radiator; a hard frontal folds the rails into the engine. Narrow body, two big "
+                "doors: side hits go straight into the B-pillar."),
+        sources=R34_GT_SOURCES + [
+            "[S?] FS5W71C ratios and 4.363 final drive: SAU ratio table (ER34 RB25DE NEO manual), via search snippet",
+        ],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=False),
+    ),
+    # ------------------------------------------------------------------ R34 25GT-T
+    dict(
+        _R34_COMMON,
+        id="nissan_skyline_r34_25gt_t",
+        display_name="Nissan Skyline 25GT-T (R34)",
+        analog_of="Nissan Skyline 25GT-T coupe (ER34), 1998-2001: RB25DET NEO 2.5 L turbo I6, RWD, 5-speed manual, rear LSD",
+        curb_kg=1420.0,  # [S?] MT coupe 1410-1430 (Nissan Heritage 1450 is the AT / sedan)
+        front_frac=0.55,  # [E] turbo + intercooler plumbing ahead of the axle
+        track_f=1.48,
+        track_r=1.47,  # [S8]
+        body=(1.725, 4.58, 1.34),  # [S8] same shell as the 25GT
+        clearance=0.13,  # [R]
+        front_overhang=0.92,
+        cg=0.47,
+        cg_why="[E] same shell as the 25GT; the turbo hardware is high in the bay",
+        cd=0.34,  # [E] pedestal rear wing and lip of the factory aero package
+        lift=(0.07, 0.07),  # [E]
+        engine=dict(
+            desc="RB25DET NEO 2.5 L DOHC 24-valve I6, single ceramic-wheel turbo, intercooled, two-stage boost (≈0.5 bar to 4500 rpm, ≈0.7 bar above)",
+            curve=_scaled(RB25DET_RATED, RB25DET_REAL_K),
+            idle=750, redline=7000, limit=7400, inertia=0.17, brake_frac=0.11,
+            why=("Rated 206 kW (280 PS) @ 6400 rpm, 343 N·m @ 3200 [S5]; real-world factor "
+                 f"×{RB25DET_REAL_K:.2f} (≈216 kW). The RB25DET NEO was close to its 280 PS "
+                 "rating; stock cars read ≈150-165 rwkW on Australian hub dynos [S15] (≈200-"
+                 "215 kW at the crank), so it gets a smaller factor than the RB26DETT. Curve "
+                 "shape [E], fitted to the rated points."),
+        ),
+        trans=dict(
+            desc="FS5R30A 5-speed manual, R200 rear viscous LSD (modelled as a mild clutch LSD)",
+            layout="Rwd",
+            # [S?] SAU ratio post (FS5R30A): 3.214/1.925/1.302/1.000/0.752, R 3.369; 4.111 LSD [S13].
+            gears=[3.214, 1.925, 1.302, 1.000, 0.752], final=4.111, reverse=3.369, shift=0.43,
+            diff_f="Open", diff_r=dict(preload=50.0, power=0.35, coast=0.20), clutch_factor=1.4,
+        ),
+        tires=dict(front="225/45R17", rear="225/45R17", compound="sport", unsprung=(22.0, 22.0)),  # [S16] 17×7.5J
+        susp=dict(hz=(1.55, 1.70), zeta=0.30, travel=(0.15, 0.16), roll_grad_deg_g=2.6,
+                  roll_front_share=0.57, bump_stop=160000.0, preload=0.02),  # [R]/[E]
+        brakes=dict(
+            front=dict(kind="disc", d_mm=296, pistons_mm=[40, 40], pad_mu=0.40),  # [S?] Sumitomo 4-pot
+            rear=dict(kind="disc", d_mm=297, pistons_mm=[38], pad_mu=0.40),  # [R] 2-pot
+            bar=P_MODERN, handbrake_frac=0.9,
+        ),
+        steer=dict(ratio=15.0, turn_circle_m=11.0, ackermann=0.6, rack_speed=1.4),  # [E]
+        price=30000,
+        durability=3,
+        note=("The tuner's R34: GT-R looks from the back seat of a narrower, lighter, "
+              "rear-drive car. The turbo six pulls hard from 3000 rpm and the viscous LSD lets "
+              "it hang the tail out on corner exit, but 280-ish horsepower on 225 tyres means "
+              "wheelspin in first and second. Unrestricted it tops out near 245 km/h."),
+        breaks=("Same 90s HSS shell as the 25GT, plus a front-mount intercooler right behind "
+                "the bumper slot: it is the first casualty of a nose hit and the car limps on "
+                "low boost afterwards. Steel bonnet and wings, plastic bumpers, two long doors."),
+        sources=R34_GT_SOURCES + [
+            "[S15] SAU R34 GT-T tuning guide (boost stages, stock dyno figures): https://www.sau.com.au/forums/topic/282082-nissan-skyline-r34-gtt-modificationtuning-guide",
+            "[S16] GT-T tyre and brake sizes: https://gazoo.com/catalog/maker/NISSAN/SKYLINE/199805/1501421/",
+            "[S17] GT-T test (0-100 ≈ 6.2 s, 0-400 m 14.3 s, weak source): https://protonrakun.blogspot.com/2012/02/nissan-skyline-r34-gt-t.html",
+        ],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=False),
+    ),
+]
+
+# BNR34 GT-R shared data (standard car and V-Spec II differ in mass, aero, suspension, diff).
+_BNR34 = dict(
+    _R34_COMMON,
+    front_frac=0.57,  # [R] period axle loads ≈ 880 / 660 kg; no web source found ([S18?] gives 57/43)
+    track_f=1.48,
+    track_r=1.49,  # [S2]
+    body=(1.785, 4.60, 1.36),  # [S1][S2] wide body
+    front_overhang=0.93,  # [E]
+    cd=0.35,  # [E] no source found (the 0.27 online is the R35)
+    lift=(0.05, 0.08),  # [E] factory "reduced lift" claim
+    align=dict(camber_deg=(-1.0, -1.5), toe_deg=(0.0, 0.15), caster_deg=5.5),
+    engine=dict(
+        desc="RB26DETT 2.6 L DOHC 24-valve I6, twin ceramic-wheel ball-bearing turbos, intercooled, individual throttles",
+        curve=_scaled(RB26_RATED, RB26_REAL_K),
+        idle=900, redline=8000, limit=8200, inertia=0.18, brake_frac=0.11,
+        why=("Rated 206 kW (280 PS) @ 6800 rpm, 392 N·m @ 4400 [S19][S20] under the JDM "
+             f"gentleman's agreement; real-world factor ×{RB26_REAL_K:.2f}: ≈439 N·m @ 4400 and "
+             "≈239 kW @ 6000 rpm (the [E] curve shape already carries 213 kW at 6000 before the factor). "
+             "Stock cars dyno ≈240-250 kW at the crank and ≈200 kW at the wheels [S19?]; ×1.12 "
+             "sits at the conservative end of those reports. Curve shape [E] on the rated points, "
+             "boost from ≈3000 rpm."),
+    ),
+    tires=dict(front="245/40R18", rear="245/40R18", compound="sport", unsprung=(25.0, 25.0)),  # [S14][S21]
+    brakes=dict(
+        front=dict(kind="disc", d_mm=324, pistons_mm=[38, 42], pad_mu=0.42),  # [S22] Brembo 4-pot 324×30
+        rear=dict(kind="disc", d_mm=300, pistons_mm=[38], pad_mu=0.40),  # [S22] Brembo 2-pot 300×22
+        bar=P_MODERN, handbrake_frac=0.8,
+    ),
+    steer=dict(ratio=15.0, turn_circle_m=11.6, ackermann=0.55, rack_speed=1.4),  # [E] ratio; [R] 5.6 m radius
+    durability=3,
+    sources=R34_GTR_SOURCES,
+)
+
+# ATTESA E-TS approximation, shared by both GT-Rs. The real system is rear-drive (0:100) until
+# a hydraulic multi-plate clutch sends up to 50 % to the front when the rears slip. The contract
+# has a fixed split (`Awd`) and a FRONT-primary coupling (`AwdOnDemand`, closes when the fronts
+# out-spin the rears), which cannot express a rear-primary coupling. A fixed 30 % front split is
+# the closest stand-in: ATTESA sits between 0 % (cruising) and 50 % (launch, wheelspin) and runs
+# ≈20-40 % in hard acceleration out of corners. Contract change request in docs/integration/cars.md.
+ATTESA_FRONT = 0.30
+ATTESA_WHY = ("ATTESA E-TS (nominal 0:100, up to 50:50 when the rears slip) approximated as a "
+              f"fixed {ATTESA_FRONT * 100:.0f} % front split: the contract cannot express a "
+              "rear-primary coupling yet (requested in docs/integration/cars.md)")
+
+CARS += [
+    # ------------------------------------------------------------------ R34 GT-R
+    dict(
+        _BNR34,
+        id="nissan_skyline_r34_gtr",
+        display_name="Nissan Skyline GT-R (R34)",
+        analog_of="Nissan Skyline GT-R (BNR34), 1999-2002: RB26DETT 2.6 L twin-turbo I6, ATTESA E-TS AWD, Getrag 6-speed manual",
+        curb_kg=1540.0,  # [S1][S14]
+        clearance=0.135,  # [R]
+        cg=0.47,
+        cg_why="[E] tall iron-block straight-six and the AWD transfer case and front diff under the engine; wide but not low",
+        trans=dict(
+            desc=("Getrag 233 6-speed manual (FS6R92A), " + ATTESA_WHY +
+                  "; open front differential, mechanical 1.5-way rear LSD"),
+            layout=("Awd", ATTESA_FRONT),
+            # [S3] 3.827/2.360/1.685/1.312/1.000/0.793, R 3.240; final drive 3.545 front and rear [S3][S4].
+            gears=[3.827, 2.360, 1.685, 1.312, 1.000, 0.793], final=3.545, reverse=3.240, shift=0.42,
+            diff_f="Open", diff_r=dict(preload=100.0, power=0.45, coast=0.30), clutch_factor=1.4,
+        ),
+        susp=dict(hz=(1.80, 2.00), zeta=0.30, travel=(0.14, 0.15), roll_grad_deg_g=2.2,
+                  roll_front_share=0.54, bump_stop=170000.0, preload=0.02),  # [R]/[E]
+        price=60000,
+        note=("Godzilla. A heavy, wide, all-wheel-drive coupe whose rated 280 PS was a polite "
+              "fiction: the twin-turbo six pulls to 8000 rpm and the ATTESA drivetrain puts it "
+              "all down out of junctions where the rear-drive cars light their tyres. It "
+              "understeers if you arrive too fast, then rotates on the throttle once the rear "
+              "LSD bites. No 180 km/h limiter here: it runs on past 250 km/h."),
+        breaks=("Same 90s HSS shell as the GT-T, but with an aluminium bonnet and aluminium "
+                "front wings that crumple and shed early, a front-mount intercooler and oil "
+                "cooler packed behind a deep bumper, and an expensive AWD driveline under the "
+                "floor. It shrugs off scrapes; a solid frontal takes the cooling pack and the "
+                "front diff with it, and every part is priced like a legend."),
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="aluminum", pushbar=False,
+                     fenders="aluminum",
+                     fenders_why="Aluminium front wings (BNR34, [R]) on top of the aluminium bonnet"),
+    ),
+    # ------------------------------------------------------------------ R34 GT-R V-Spec II
+    dict(
+        _BNR34,
+        id="nissan_skyline_r34_gtr_vspec2",
+        display_name="Nissan Skyline GT-R V-Spec II (R34)",
+        analog_of="Nissan Skyline GT-R V-Spec II (BNR34), 2000-2002: RB26DETT twin-turbo I6, ATTESA E-TS Pro AWD with rear Active LSD, V-Spec aero and suspension, carbon bonnet",
+        curb_kg=1560.0,  # [S14][S12] V-Spec / V-Spec II (the ≈4 kg carbon bonnet saving is inside Nissan's 10 kg rounding)
+        clearance=0.125,  # [R] ≈10 mm lower than the standard car
+        cg=0.46,
+        cg_why="[E] standard GT-R lowered ≈10 mm on V-Spec suspension, carbon bonnet takes a little mass off the top",
+        lift=(0.05, 0.08),  # body as the standard GT-R; the V-Spec aero is in `downforce`
+        downforce=(0.07, 0.07),
+        downforce_why=("[S11] V-Spec aero: deeper front air dam, front underbody undertray and carbon rear "
+                       "diffuser; [E] sized so the net Cl·A is ≈ −0.02 front / +0.01 rear (Nissan's "
+                       "near-zero-lift claim for the V-Spec)"),
+        cd=0.36,  # [E] the deeper air dam adds a little drag
+        trans=dict(
+            desc=("Getrag 233 6-speed manual (FS6R92A), ATTESA E-TS Pro: " + ATTESA_WHY +
+                  "; open front differential, electro-hydraulic rear Active LSD approximated as a "
+                  "stronger clutch LSD (higher preload and power ramp, gentle coast ramp for turn-in)"),
+            layout=("Awd", ATTESA_FRONT),
+            gears=[3.827, 2.360, 1.685, 1.312, 1.000, 0.793], final=3.545, reverse=3.240, shift=0.42,  # [S3][S4]
+            diff_f="Open", diff_r=dict(preload=140.0, power=0.55, coast=0.25), clutch_factor=1.4,
+        ),
+        susp=dict(hz=(1.95, 2.15), zeta=0.31, travel=(0.13, 0.14), roll_grad_deg_g=1.9,
+                  roll_front_share=0.52, bump_stop=180000.0, preload=0.02),  # [S11?] stiffer V-Spec springs/dampers, [E] rates
+        price=68000,
+        note=("The V-Spec II is the GT-R for people who take it to the track: lower and stiffer, "
+              "with the front undertray and carbon diffuser that kill high-speed lift, and the "
+              "Active LSD that pushes the rear into the corner on power. It is a touch heavier "
+              "and draggier than the standard car, but steadier and quicker everywhere that "
+              "turns. The carbon bonnet with its NACA duct is the giveaway."),
+        breaks=("As the standard GT-R, aluminium front wings included, but the bonnet is carbon "
+                "fibre: lighter, and it cracks and flies off rather than folding. The air dam "
+                "and diffuser sit low and are scraped off by kerbs and ramps; the Active LSD "
+                "and its hydraulics make a rear hit costlier."),
+        sources=R34_GTR_SOURCES + [
+            "[S11] V-Spec differences (ATTESA E-TS Pro, Active LSD, aero): https://www.sau.com.au/forums/topic/391784-r34-gtr-vspec-diffferance",
+            "[S12] V-Spec II carbon bonnet / build numbers: https://sau.com.au/forums/topic/32966-m-spec-n1-nur-r34s",
+        ],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="aluminum", pushbar=False,
+                     fenders="aluminum",
+                     fenders_why="Aluminium front wings (BNR34, [R])",
+                     hood_mass_scale=0.55,
+                     hood_why=("Carbon-fibre bonnet (V-Spec II [S12]): no carbon material in "
+                               "data/materials, so the beams stay aluminium; detachable mass × 0.55 "
+                               "(≈4 kg lighter than the aluminium bonnet [S12])")),
+    ),
+]
