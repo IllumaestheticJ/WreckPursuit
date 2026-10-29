@@ -34,8 +34,11 @@ interface BusNodes {
   /** Impact sidechain: a big crash briefly ducks the other buses (owner row 74). */
   side: GainNode;
   duck: GainNode;
-  /** Fixed headroom trim (`MasterMix::bus_gain_db`); its output feeds the master. */
+  /** Fixed headroom trim (`MasterMix::bus_gain_db`). */
   trim: GainNode;
+  /** Open (1) or shut (0) by `setGate`: the game buses go quiet behind a garage screen while
+   * the Ui bus plays on. Its output feeds the master. */
+  gate: GainNode;
 }
 
 /** Buses an impact's sidechain ducks (the impact itself plays on World). */
@@ -163,8 +166,9 @@ export class AudioMixer {
       const duck = ctx.createGain();
       const trim = ctx.createGain();
       trim.gain.value = dbToLin(m.bus_gain_db[b] ?? 0);
-      user.connect(side).connect(duck).connect(trim).connect(this.master);
-      buses[b] = { user, side, duck, trim };
+      const gate = ctx.createGain();
+      user.connect(side).connect(duck).connect(trim).connect(gate).connect(this.master);
+      buses[b] = { user, side, duck, trim, gate };
     }
     this.buses = buses;
     const hp = ctx.createBiquadFilter();
@@ -199,6 +203,11 @@ export class AudioMixer {
 
   setUserGain(bus: Bus, v: number): void {
     this.buses[bus].user.gain.setTargetAtTime(v, this.ctx.currentTime, 0.02);
+  }
+
+  /** Let a bus through to the master (`open`) or fade it out within ~30 ms. */
+  setGate(bus: Bus, open: boolean): void {
+    this.buses[bus].gate.gain.setTargetAtTime(open ? 1 : 0, this.ctx.currentTime, 0.01);
   }
 
   getUserGain(bus: Bus): number {

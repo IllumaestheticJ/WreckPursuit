@@ -19,6 +19,8 @@ import { CurvePlan, renderSiren, sirenStats } from "./siren";
 import { SirenLab } from "./siren_lab";
 import { SirenRack } from "./siren_rack";
 import { AudioMixer, setListener, VoicePool } from "./voices";
+import { GarageSfx, type GarageSound } from "./garage_sfx";
+import { BUSES } from "./types";
 import type { AudioCommand, AudioLibrary, Bus, DirectorStats, EngineVoicing, RadioPriority, SampleStatus, SoundSource } from "./types";
 
 const TEST_LINES: Record<string, string[]> = {
@@ -63,6 +65,15 @@ export class AudioSystem {
   private vel = new THREE.Vector3();
   private muted = false;
   private paused = false;
+  /** Paused behind a garage screen (career garage, workshop): the game buses are shut and the
+   * director waits, but the context runs so garage sounds play on the Ui bus. */
+  private uiOnly = false;
+  /** Garage / workshop sounds (null before the AudioContext starts). */
+  private garage: GarageSfx | null = null;
+  /** The workshop room tone is wanted (applied when the context starts). */
+  private garageAmbience = false;
+  /** Garage sounds asked for, played or not (e2e: the hooks fire even without audio). */
+  readonly garageRequests: Record<string, number> = {};
   /** Photo mode: the mix is faded out while the game is frozen (the mute toggle is kept). */
   private ducked = false;
   private failed = false;
@@ -139,7 +150,7 @@ export class AudioSystem {
   start(): void {
     if (this.failed) return;
     if (this.ctx) {
-      if (this.ctx.state === "suspended" && !this.paused) void this.ctx.resume();
+      if (this.ctx.state === "suspended" && (!this.paused || this.uiOnly)) void this.ctx.resume();
       return;
     }
     try {
@@ -173,6 +184,10 @@ export class AudioSystem {
     this.resetDirector();
     this.restartAmbience();
     this.startEngineSynth();
+    this.garage = new GarageSfx(this.ctx, this.mixer);
+    this.garage.setLevels(s.buses.World, s.ambience);
+    this.garage.setAmbience(this.garageAmbience);
+    if (this.uiOnly) for (const b of BUSES) if (b !== "Ui") this.mixer.setGate(b, false);
     this.panel.setStatus(`${this.ctx.sampleRate} Hz · max ${this.lib.config.max_voices} voices`);
   }
 
@@ -295,7 +310,29 @@ export class AudioSystem {
       this.mixer.setUserGain("Police", v.police);
     }
     this.updateVoiceVolume();
+    this.garage?.setLevels(v.effects, v.ambience);
     if (ambienceChanged) this.restartAmbience();
+  }
+
+  /**
+   * A garage action happened (buying, the mechanic fitting a part, a bolt-on going on or off,
+   * a repair, a respray): play its sound on the Ui bus at the Effects volume. Silent until the
+   * AudioContext runs (first click / key press) and while muted.
+   */
+  garageSound(s: GarageSound): void {
+    this.garageRequests[s] = (this.garageRequests[s] ?? 0) + 1;
+    if (this.ctx?.state === "running") this.safe(() => this.garage?.play(s));
+  }
+
+  /** The workshop's quiet room-tone loop on (workshop open) or off. */
+  setGarageAmbience(on: boolean): void {
+    this.garageAmbience = on;
+    this.safe(() => this.garage?.setAmbience(on));
+  }
+
+  /** Garage sounds played and asked for, and whether the room tone runs (e2e). */
+  garageStats(): { played: Record<string, number>; requested: Record<string, number>; ambience: boolean; uiOnly: boolean } {
+    return { played: { ...(this.garage?.counts ?? {}) }, requested: { ...this.garageRequests }, ambience: this.garage?.ambience ?? false, uiOnly: this.uiOnly };
   }
 
   /**
@@ -362,16 +399,23 @@ export class AudioSystem {
    * Silence everything while the game is paused: suspends the AudioContext (looped engine /
    * siren voices freeze instead of droning on) and pauses scanner TTS. Idempotent, so main.ts
    * calls it every frame with `app.paused`.
+   *
+   * `garageScreen`: the pause is a garage screen (career garage, workshop). The game buses are
+   * shut instead and the director waits, but the context keeps running so the garage sounds
+   * (Ui bus) play.
    */
-  setPaused(p: boolean): void {
-    if (p === this.paused) return;
-    this.paused = p;
-    if (typeof speechSynthesis !== "undefined") {
+  setPaused(p: boolean, garageScreen = false): void {
+    const ui = p && garageScreen;
+    if (p === this.paused && ui === this.uiOnly) return;
+    if (p !== this.paused && typeof speechSynthesis !== "undefined") {
       if (p) speechSynthesis.pause();
       else speechSynthesis.resume();
     }
+    this.paused = p;
+    this.uiOnly = ui;
     if (!this.ctx) return;
-    if (p) void this.ctx.suspend();
+    if (this.mixer) for (const b of BUSES) if (b !== "Ui") this.mixer.setGate(b, !ui);
+    if (p && !ui) void this.ctx.suspend();
     else void this.ctx.resume();
   }
 
@@ -455,6 +499,8 @@ export class AudioSystem {
     if (cameraMode !== undefined) this.cameraMode = cameraMode;
     const ctx = this.ctx;
     if (!ctx || ctx.state !== "running" || !this.pool || !this.mixer || !this.scanner) return;
+    // Behind a garage screen the game is paused: the director waits (its buses are shut).
+    if (this.uiOnly) return;
     // Camera → sim world space (the scene's world group is rotated Z-up → Y-up).
     // Scratch vectors (no allocation per frame).
     const [camPos, pos, fwdW, upW, fwd, up, v] = this.scratch;

@@ -51,6 +51,7 @@ import { CameraRig, CAMERAS, CAMERA_MODES, cameraLabel, type CameraMode } from "
 import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
 import { AudioSystem } from "./audio";
+import type { GarageSound } from "./audio/garage_sfx";
 import { UiOverlay } from "./ui/overlay";
 import { MapOverlay } from "./ui/map";
 import { HudLayout } from "./ui/layout";
@@ -377,6 +378,11 @@ async function main(): Promise<void> {
     persistCareer();
     return v;
   };
+  /** A garage action went through: play its sound (audio/garage_sfx.ts), pass the result on. */
+  const withSound = <T,>(v: T, s: GarageSound | null): T => {
+    if (s) audio.garageSound(s);
+    return v;
+  };
   const careerApi: CareerApi = {
     view: () => sim.careerView(),
     mods: (uid) => sim.careerMods(uid),
@@ -385,10 +391,10 @@ async function main(): Promise<void> {
     floorCar: () => act(() => sim.careerFloorCar()),
     sell: (uid) => act(() => sim.careerSell(uid)),
     setActive: (uid) => act(() => sim.careerSetActive(uid)),
-    install: (uid, id) => act(() => sim.careerInstall(uid, id)),
-    uninstall: (uid, id) => act(() => sim.careerUninstall(uid, id)),
+    install: (uid, id) => withSound(act(() => sim.careerInstall(uid, id)), "install"),
+    uninstall: (uid, id) => withSound(act(() => sim.careerUninstall(uid, id)), "remove"),
     setTune: (uid, tune) => act(() => sim.careerSetTune(uid, tune)),
-    repair: (uid, req) => act(() => sim.careerRepair(uid, req)),
+    repair: (uid, req) => withSound(act(() => sim.careerRepair(uid, req)), req.option === "Scrap" ? null : "repair"),
     release: (uid) => act(() => sim.careerRelease(uid)),
     insure: (uid, tier) => act(() => sim.careerInsure(uid, tier)),
     nextNight: () => act(() => sim.careerNextNight()),
@@ -397,7 +403,7 @@ async function main(): Promise<void> {
     lot: (id) => sim.careerLot(id),
     visitLot: (id) => visitLot(id),
     buyListing: (id, slot) => act(() => sim.careerBuyListing(id, slot)),
-    replaceTires: (uid, wheels) => act(() => sim.careerReplaceTires(uid, wheels)),
+    replaceTires: (uid, wheels) => withSound(act(() => sim.careerReplaceTires(uid, wheels)), "fit"),
     newCareer: (mode) => act(() => newCareer(mode)),
     exportSave: () => downloadText(saveFileName(sim.careerView().day), sim.careerSave()),
     importSave: (text) => act(() => sim.careerLoad(text)),
@@ -531,6 +537,8 @@ async function main(): Promise<void> {
       startCareerRun("free", false, true);
     },
     carName: (defId) => sim.careerView().cars.find((c) => c.def_id === defId)?.name ?? defId,
+    sound: (s) => audio.garageSound(s),
+    ambience: (on) => audio.setGarageAmbience(on),
   });
   /** Open the workshop on career car `uid` (back to the garage with the reason if it cannot). */
   const openWorkshop = (uid: number) => {
@@ -688,7 +696,7 @@ async function main(): Promise<void> {
   garageVisitEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
   overlay.appendChild(garageVisitEl);
   const garageView = new GarageVisitView(garageVisitEl, {
-    repair: () => sim.garageRepair(),
+    repair: () => withSound(sim.garageRepair(), "repair"),
     leave: () => sim.garageLeave(),
   });
   // Career places (row: safehouses and garages do something): stop inside a garage or safehouse
@@ -2336,7 +2344,8 @@ async function main(): Promise<void> {
         rig.mode === "cinematic" ? nearestPolice(focusView) : null,
       );
     prof.lap("camera");
-    audio.setPaused(app.paused);
+    // Behind the career garage or the workshop the game buses go quiet but garage sounds play.
+    audio.setPaused(app.paused, garage.open || workshop.active);
     audio.update(photo.active ? photo.camera : rig.camera, sim.lastEventsJson(), still ? 0 : dt, app.focus, rig.mode);
     prof.lap("audio");
     // Traffic and police after the camera moved: the fleet picks mesh detail by camera distance.
