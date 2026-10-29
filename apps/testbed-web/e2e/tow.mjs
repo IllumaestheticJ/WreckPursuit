@@ -142,6 +142,27 @@ const end = await page.evaluate((u) => ({ car: window.__wp.sim.careerView().cars
 check(end.car.spot?.kind === "Garage" && end.place?.id === offer2.destinations[0].place.id, "Tow to … brings it in and the player is at that shop");
 await shot("08_garage_after_tow_to.png");
 
+// ----- a car that can be driven: "Tow to …" from the career screen too (owner 2026-10-29) ----
+await page.locator("button", { hasText: "Repair all" }).first().click();
+await page.waitForTimeout(300);
+if (await page.locator('[data-testid="career-confirm"] [data-confirm="yes"]').count()) await page.click('[data-testid="career-confirm"] [data-confirm="yes"]');
+await page.waitForTimeout(500);
+const fixedCar = await page.evaluate((u) => window.__wp.sim.careerView().cars.find((c) => c.uid === u), uid);
+check(fixedCar.drivable, "repaired at the shop, the car can be driven again");
+await page.waitForSelector('[data-testid="tow-open"]', { timeout: 10000 });
+check(true, "a drivable car still offers \"Tow to …\" in the garage screen");
+await page.click('[data-testid="tow-open"]');
+await page.waitForSelector('[data-testid="tow-destinations"]', { timeout: 10000 });
+await shot("09_garage_tow_drivable.png");
+const offer3 = await page.evaluate((u) => window.__wp.sim.careerTowOffer(u), uid);
+const pick3 = offer3.destinations.find((d) => d.available && d.place.id !== fixedCar.spot?.id);
+check(!!pick3, "somewhere else to tow it to");
+await page.click(`[data-testid="tow-to-${pick3.place.id}"]`);
+await page.waitForTimeout(500);
+const moved = await page.evaluate((u) => window.__wp.sim.careerView().cars.find((c) => c.uid === u), uid);
+check(moved.spot?.id === pick3.place.id || (pick3.place.kind === "Home" && moved.spot?.kind !== "Garage"), `towed on to ${pick3.place.name}`);
+await shot("10_garage_after_tow_drivable.png");
+
 const real = errors.filter((e) => !/favicon|AudioContext/.test(e));
 check(real.length === 0, `no page errors (${real.slice(0, 3).join(" | ")})`);
 await browser.close();

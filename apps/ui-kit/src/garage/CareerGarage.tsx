@@ -294,11 +294,27 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; at
   );
 }
 
-/** "Tow to …": a car that cannot be driven and is not at a repair shop (a wreck left on the
- * road, a dead car at home). The only garage action that is not drive-to. */
+/** "Tow to …" (owner 2026-10-28/29): the tow service from the career screen, for any car of
+ * the player's that is not in the pound. A car that cannot be driven and is not at a repair shop
+ * (a wreck left on the road, a dead car at home) shows the list at once; any other car keeps it
+ * behind a "Tow to …" button. The only garage action that is not drive-to. */
 function TowPanel(props: { car: CarView; api: CareerApi; access: Access; run: (f: () => CareerView) => void }) {
   const { car, api, access } = props;
-  if (car.location !== "Garage" || !access.tow || !api.towOffer || !api.tow) return null;
+  const [open, setOpen] = useState(false);
+  if (car.location !== "Garage" || !api.towOffer || !api.tow) return null;
+  const where = car.spot?.kind === "Road" ? "out on the road" : car.spot ? `at ${car.spot.name}` : "";
+  if (!access.tow && !open) {
+    return (
+      <Panel title="Tow to …" tag={where}>
+        <div class="wp-row" style={{ alignItems: "center", gap: "0.8em" }}>
+          <span class="wp-dim">Have the tow service take this car to a repair shop or one of your garages.</span>
+          <Button size="sm" testid="tow-open" onClick={() => setOpen(true)}>
+            Tow to …
+          </Button>
+        </div>
+      </Panel>
+    );
+  }
   let offer;
   try {
     offer = api.towOffer(car.uid);
@@ -309,14 +325,22 @@ function TowPanel(props: { car: CarView; api: CareerApi; access: Access; run: (f
       </Panel>
     );
   }
-  const where = car.spot?.kind === "Road" ? "out on the road" : car.spot ? `at ${car.spot.name}` : "";
   return (
     <Panel title="Tow to …" tag={where}>
       <p class="wp-dim" data-testid="tow-why" style={{ marginTop: 0 }}>
-        {offer.need ? `${TOW_NEED[offer.need]} ` : ""}It can't be driven {where}: the tow service brings it to a repair shop or one of your garages.
+        {access.tow
+          ? `${offer.need ? `${TOW_NEED[offer.need]} ` : ""}It can't be driven ${where}: the tow service brings it to a repair shop or one of your garages.`
+          : "The tow service brings it to a repair shop or one of your garages."}
       </p>
-      <TowList offer={offer} onPick={(d) => props.run(() => api.tow!(car.uid, d.place))} />
+      <TowList offer={offer} onPick={(d) => (setOpen(false), props.run(() => api.tow!(car.uid, d.place)))} />
       <TowNotes offer={offer} />
+      {!access.tow && (
+        <div class="wp-row" style={{ justifyContent: "flex-end" }}>
+          <Button size="sm" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+        </div>
+      )}
     </Panel>
   );
 }
