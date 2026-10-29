@@ -76,6 +76,15 @@ car's lattice answers `node_positions(PARKED_ENTITY_BASE + prop)`. A shoved prop
 neighbours like a vehicle. Perf and scenarios: `docs/integration/parked-signals.md`
 (`cargo run --release -p wp_sim --example parked_damage_cost`).
 
+A parked car takes a hit like a stopped traffic car of its model (owner 2026-10-29, "parked
+cars are way heavier than traffic cars"; `parked_mass.rs`): its box weighs the
+`set_parked_car` model's `mass_kg`, slides on `PARKED_CAR_FRICTION` (0.2, rolling along its
+length as a car holding its brakes does), and while it rests upright on the ground its tyres'
+sideways grip (`PARKED_CAR_SIDE_GRIP_MPS2`, 5 m/s², and the matching yaw grip) is taken off its
+sideways speed each tick. Same in both damage modes. Hit at 40 km/h from behind or from the
+side, flat and on Port Vesper's kerbs, the striker's Δv matches within 12% and the shove within
+21% (before: the parked car slid half as far from behind and 50% further from the side).
+
 ## Dormant vehicles (SR-3, lead, 2026-10-22)
 `Sim::set_dormant(id, true)` puts a car out of play to sleep: its chassis becomes a fixed
 Rapier body where it stands (at rest), it gets no tyre / suspension / drivetrain step, no

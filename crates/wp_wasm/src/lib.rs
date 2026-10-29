@@ -1222,7 +1222,8 @@ pub fn race_result_json() -> Result<String, JsValue> {
 
 // ----- street racers (src/street.rs) -------------------------------------------------------
 
-/// Add the NPC street racers (8 by day, 13 at night, [`street::ROSTER`]) to live free-drive /
+/// Add the NPC street racers (8 by day, 13 at night, [`street::ROSTER`]; twice that on the full
+/// world map, [`street::FULL_MAP_ROSTER`]) to live free-drive /
 /// night-run city sessions started after this call (default on). They are scenario entities (`street_<level>_<name>`, after the
 /// player in `entities()`), so recordings and replays carry them.
 #[wasm_bindgen]

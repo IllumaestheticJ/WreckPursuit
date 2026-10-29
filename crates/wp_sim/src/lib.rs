@@ -14,6 +14,7 @@ mod contacts;
 mod crash_mass;
 mod nitrous_link;
 mod parked;
+mod parked_mass;
 mod physics;
 mod police_link;
 mod police_tools;
@@ -556,9 +557,15 @@ impl Sim {
             .bodies
             .insert(RigidBodyBuilder::fixed().pose(pose).build());
         let [hx, hy, hz] = prop.half_extents;
+        // Parked cars slide on their box as a car on its wheels rolls (`parked.rs`).
+        let friction = if prop.kind == wp_world::props::PropKind::ParkedCar {
+            parked::PARKED_CAR_FRICTION
+        } else {
+            0.6
+        };
         let mut col = ColliderBuilder::cuboid(hx, hy, hz)
             .mass(prop.mass_kg.max(1.0))
-            .friction(0.6)
+            .friction(friction)
             .user_data(physics::PROP_USER_BIT)
             .build();
         let barrel = prop.kind == wp_world::props::PropKind::WaterBarrel;
@@ -1501,6 +1508,7 @@ impl Sim {
             .collect();
         self.wake_props();
         self.wake_resting_props();
+        self.parked_side_grip(dt);
         self.update_ghosts();
         self.break_barricades();
         let parked = if sys.damage {
