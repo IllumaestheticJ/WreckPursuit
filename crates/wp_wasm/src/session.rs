@@ -363,10 +363,16 @@ impl Session {
                 // The player's scenario position picks the grid (a spawn choice, see
                 // `scenario::SPAWNS`; the origin = the city's first grid).
                 if let Some(e) = sc.entities.first_mut() {
-                    // A career run from one of the player's garages starts on its lane.
-                    let home = crate::garage_visit::home_at_anchor([e.pos[0], e.pos[1]])
-                        .and_then(|h| crate::garage_visit::snap_to_lane(&world, h.anchor));
-                    if let Some((pos, yaw)) = home {
+                    // A career run from one of the player's garages or a repair shop (where
+                    // the car is) starts on the road by its ring, just outside it.
+                    let start =
+                        crate::garage_visit::start_place_at([e.pos[0], e.pos[1]]).and_then(|p| {
+                            let centre = p.ring_centre(&world)?;
+                            let rings = crate::garage_visit::all_rings(&world);
+                            crate::garage_visit::run_spawn(&world, centre, &rings)
+                                .or_else(|| crate::garage_visit::snap_to_lane(&world, p.anchor()))
+                        });
+                    if let Some((pos, yaw)) = start {
                         e.pos = pos;
                         e.yaw = yaw;
                     } else if let Some(p) = crate::scenario::spawn_grid(world.network(), e.pos) {
@@ -1235,8 +1241,9 @@ impl Session {
     /// Career runs in the combined world: put the car lots `lots` and the player's garages
     /// `homes` (each `(id, name)`) on the map at their fixed spots
     /// ([`crate::garage_visit::WORLD_LOTS`], [`crate::garage_visit::HOME_GARAGES`]). Ids without
-    /// a spot are skipped; other cities get none. A run that starts inside one of the homes
-    /// opens its visit at once (the player starts in their garage).
+    /// a spot are skipped; other cities get none. Runs spawn just outside their place's ring
+    /// ([`crate::garage_visit::run_spawn`]); one that still starts inside a home's ring (no
+    /// lane outside it) opens its visit at once.
     pub fn set_career_places(&mut self, lots: &[(String, String)], homes: &[(String, String)]) {
         if self.sc.city != CitySpec::ashpeak() {
             return;
@@ -1307,6 +1314,15 @@ impl Session {
             }));
         }
         out
+    }
+
+    /// The point of the drivable road nearest `at` (`[x, y]`), `[x, y, z]`: where a map pick drops the
+    /// free-roam waypoint. `None` without a city.
+    pub fn road_point(&self, at: [f32; 2]) -> Option<[f32; 3]> {
+        if self.sc.city == CitySpec::Flat {
+            return None;
+        }
+        crate::garage_visit::snap_to_lane(self.sim.world(), at).map(|(p, _)| p)
     }
 
     /// A drivable route from the player's car to `to` (`[x, y]`), as the lane centreline's

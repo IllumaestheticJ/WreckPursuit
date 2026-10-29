@@ -586,6 +586,11 @@ export const sim = {
     for (let i = 0; i + 1 < f.length; i += 2) out.push([f[i], f[i + 1]]);
     return out;
   },
+  /** The drivable road point nearest (x, y), or null (no city): the free-roam map waypoint. */
+  roadPoint: (x: number, y: number): [number, number, number] | null => {
+    const f = wasm.road_point(x, y);
+    return f.length >= 3 ? [f[0], f[1], f[2]] : null;
+  },
   /** The open garage visit (the car stopped inside a garage), or null. */
   garageVisit: (): GarageOffer | null => JSON.parse(wasm.garage_visit_json()),
   /** "Repair" in the open visit: pays the shop, repairs the car, releases the brakes. Throws if refused. */
@@ -671,6 +676,9 @@ export const sim = {
   careerReplaceTires: (uid: number, wheels: boolean[]): CareerView => JSON.parse(wasm.career_replace_tires(uid, JSON.stringify(wheels))),
   /** Load the lot itself (ends a career run first). Returns entity ids like `init`. */
   careerVisitLot: (lotId: string): number[] => Array.from(wasm.career_visit_lot(lotId)),
+  /** Taxi to the lot (no car needed; the player's car stays where it is). Ends a career run
+   * first. Returns entity ids like `init`. */
+  careerTaxiToLot: (lotId: string): number[] => Array.from(wasm.career_taxi_to_lot(lotId)),
   /** The lot being visited, or null when the session is not a lot visit. */
   lotVisit: (): LotVisit | null => JSON.parse(wasm.lot_visit_json()),
   /** Put a police helicopter on a pursued racer now, offsetM away at altitude. Returns its unit id. */

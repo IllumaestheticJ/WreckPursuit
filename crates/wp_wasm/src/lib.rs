@@ -1414,6 +1414,13 @@ pub fn gps_route(x: f32, y: f32) -> Result<Vec<f32>, JsValue> {
     get(|s| s.gps_route([x, y]).into_iter().flatten().collect())
 }
 
+/// The point of the drivable road nearest `(x, y)` as `[x, y, z]` (empty without a city): where a
+/// map pick drops the free-roam waypoint.
+#[wasm_bindgen]
+pub fn road_point(x: f32, y: f32) -> Result<Vec<f32>, JsValue> {
+    get(|s| s.road_point([x, y]).map_or_else(Vec::new, |p| p.to_vec()))
+}
+
 /// Career places as JSON ([`garage_visit::PlaceStatus`]): the open garage / safehouse visit
 /// (the car stopped inside one with no pursuit on and is held until the testbed ends the run
 /// into the garage or calls `place_leave()`), and the safehouse dwell while chased.

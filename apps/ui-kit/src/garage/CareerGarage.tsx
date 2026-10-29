@@ -18,7 +18,7 @@
  * `access.ts`) and everything else offers "Waypoint", which marks the place on the map.
  */
 import { render, type ComponentChildren } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Badge, Button, ChoiceField, Confirm as ConfirmRow, Delta, Meter, Modal, Money, Panel, severityColor, Stat, Tabs } from "../ui/kit";
 import { pct, words } from "../ui/format";
 import type {
@@ -41,7 +41,7 @@ import type {
   RoamWeather,
 } from "./types";
 import { loadRoamChoice, pickTextFile, saveRoamChoice } from "./store";
-import { type Access, canWalkLot, garageAccess, placeLine } from "./access";
+import { type Access, garageAccess, lotActions, placeLine } from "./access";
 import { TOW_NEED, TowList, TowNotes, towLedgerLabel } from "./Tow";
 import { isStockTune, normalizeTune, STOCK_TUNE, TUNE_SLIDERS, TUNE_STEPS, tuneSummary } from "./tune";
 import "./garage.css";
@@ -622,13 +622,32 @@ function LotsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
                         <Button size="sm" pressed={peek === l.id} onClick={() => setPeek(peek === l.id ? null : l.id)}>
                           List
                         </Button>
-                        {canWalkLot(place, l.id, drivable) || !api.setWaypoint ? (
-                          <Button size="sm" variant="primary" disabled={view.run_active} onClick={() => api.visitLot(l.id)} title={place?.id === l.id || place === undefined ? "walk the rows" : "no car to drive there: take a taxi"}>
-                            {place?.id === l.id || place === undefined ? "Visit" : "Taxi"}
-                          </Button>
-                        ) : (
-                          <WaypointButton api={api} target={{ kind: "Lot", id: l.id, name: l.name }} onSet={() => redraw((n) => n + 1)} />
-                        )}
+                        {(() => {
+                          // Owner 2026-10-29: the taxi is always there, car or no car.
+                          const can = lotActions(place, l.id, drivable);
+                          return (
+                            <>
+                              {can.walk && (
+                                <Button size="sm" variant="primary" disabled={view.run_active} onClick={() => api.visitLot(l.id)} title="walk the rows">
+                                  Visit
+                                </Button>
+                              )}
+                              {can.taxi && (
+                                <Button
+                                  size="sm"
+                                  variant={can.waypoint && api.setWaypoint ? undefined : "primary"}
+                                  disabled={view.run_active}
+                                  testid={`taxi-${l.id}`}
+                                  onClick={() => api.visitLot(l.id, true)}
+                                  title={drivable ? "take a taxi there to browse or buy; your car stays where it is and your next run starts from it" : "take a taxi there to browse or buy"}
+                                >
+                                  Taxi
+                                </Button>
+                              )}
+                              {can.waypoint && api.setWaypoint && <WaypointButton api={api} target={{ kind: "Lot", id: l.id, name: l.name }} onSet={() => redraw((n) => n + 1)} />}
+                            </>
+                          );
+                        })()}
                       </div>
                     </td>
                   </tr>
@@ -660,13 +679,14 @@ function LotsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
   );
 }
 
-/** "Waypoint": marks the place on the map (the career's only way of sending the player there). */
+/** "Waypoint": marks the place on the map (the career's only way of sending the player there);
+ * pressed again it clears the waypoint. */
 function WaypointButton(props: { api: CareerApi; target: CareerPlace; onSet: () => void }) {
   const { api, target } = props;
   const now = api.waypoint?.() ?? null;
   const on = !!now && now.kind === target.kind && now.id === target.id;
   return (
-    <Button size="sm" pressed={on} testid={`waypoint-${target.id}`} onClick={() => (api.setWaypoint?.(target), props.onSet())} title="mark it on the map; drive there and pull in">
+    <Button size="sm" pressed={on} testid={`waypoint-${target.id}`} onClick={() => (api.setWaypoint?.(on ? null : target), props.onSet())} title={on ? "clear the waypoint" : "mark it on the map; drive there and pull in"}>
       {on ? "Waypoint set" : "Waypoint"}
     </Button>
   );
@@ -1014,7 +1034,13 @@ function FreeRoamPicker(props: { onDrive: (c: RoamChoice) => void; onClose: () =
 }
 
 function GarageScreen(props: { api: CareerApi; initial: CareerView; message: string | null; at: string | null }) {
-  const { api } = props;
+  // Every waypoint change (a tab's "Waypoint", the head's "Clear") redraws the head's line.
+  const [, redrawWaypoint] = useState(0);
+  const api = useMemo<CareerApi>(() => {
+    const a = props.api;
+    const set = a.setWaypoint;
+    return set ? { ...a, setWaypoint: (t) => (set(t), redrawWaypoint((n) => n + 1)) } : a;
+  }, [props.api]);
   const [view, setView] = useState<CareerView>(props.initial);
   const [tab, setTab] = useState<Tab>(props.initial.cars.length ? "cars" : "lots");
   const [error, setError] = useState<string | null>(props.message);
@@ -1052,6 +1078,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
   }, []);
   const pound = view.cars.filter((c) => c.impound).length;
   const where = placeLine(api.place ? api.place() : undefined);
+  const mark = api.waypoint?.() ?? null;
   return (
     <div class="wp-screen wp-cg" data-testid="career-garage">
       <header class="wp-head">
@@ -1106,6 +1133,23 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
       {where && (
         <p class="wp-dim" data-testid="career-place">
           {where}
+        </p>
+      )}
+      {(view.start_at || mark) && (
+        <p class="wp-dim wp-row" style={{ gap: "0.5em", flexWrap: "wrap", alignItems: "center" }}>
+          {view.start_at && (
+            <span data-testid="career-start-at" title="Runs start where your car is: the shop or garage it was towed to, else your chosen garage">
+              Next run starts at: <b>{view.start_at.name}</b>
+            </span>
+          )}
+          {mark && api.setWaypoint && (
+            <span data-testid="career-waypoint">
+              {view.start_at && "· "}Waypoint: <b>{mark.name}</b>{" "}
+              <Button size="sm" variant="ghost" testid="career-waypoint-clear" onClick={() => api.setWaypoint?.(null)}>
+                Clear
+              </Button>
+            </span>
+          )}
         </p>
       )}
       {error && (

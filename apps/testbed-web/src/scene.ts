@@ -39,6 +39,30 @@ const LOT_COLOUR = 0xff7ac8;
 const HOME_COLOUR = 0xf2f2f2;
 /** Height of a garage's light beam, m (visible over the greybox blocks). */
 const GARAGE_BEAM_M = 40;
+/** The career waypoint's beam (gold, as the map's route line) and how high it reaches, m. */
+const WAYPOINT_COLOUR = 0xffd23f;
+const WAYPOINT_BEAM_M = 60;
+
+/** The career waypoint's marker: a ground ring and a tall beam, hidden until placed. */
+function waypointMarker(): THREE.Group {
+  const g = new THREE.Group();
+  g.name = "waypoint";
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(3.4, 4, 40),
+    new THREE.MeshBasicMaterial({ color: WAYPOINT_COLOUR, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false, forceSinglePass: true }),
+  );
+  ring.position.z = 0.1;
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.7, 0.7, WAYPOINT_BEAM_M, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: WAYPOINT_COLOUR, transparent: true, opacity: 0.45, depthWrite: false }),
+  );
+  // CylinderGeometry runs along +Y; the world group is +Z up.
+  beam.rotation.x = Math.PI / 2;
+  beam.position.z = WAYPOINT_BEAM_M / 2;
+  g.add(ring, beam);
+  g.visible = false;
+  return g;
+}
 const CONTACT_DOT = new THREE.SphereGeometry(0.08, 8, 6);
 const tmpNormal = new THREE.Vector3();
 const groundRay = new THREE.Raycaster();
@@ -160,6 +184,8 @@ export class SceneView {
   readonly sun: THREE.DirectionalLight;
   private readonly barriers = new THREE.Group();
   private readonly garages = new THREE.Group();
+  /** The career waypoint's beam and ground ring (`setWaypoint`); hidden without a waypoint. */
+  private readonly waypoint = waypointMarker();
   private readonly contacts: ContactMarker[] = [];
   private nextContact = 0;
   /** Contact markers created since the page loaded (for automation). */
@@ -274,7 +300,7 @@ export class SceneView {
     this.originAxes = axes;
     this.sirenLight.visible = false;
     tagFeature(this.signals.group, "signals");
-    this.world.add(axes, this.barriers, this.garages, this.tools, this.intentGroup, this.signals.group, this.markings.group, this.sirenLight);
+    this.world.add(axes, this.barriers, this.garages, this.waypoint,this.tools, this.intentGroup, this.signals.group, this.markings.group, this.sirenLight);
     // One helicopter spotlight exists from the start (hidden) so its two programs are prewarmed,
     // not compiled in the frame the first helicopter switches it on.
     const beam = makeBeam(this.world);
@@ -674,6 +700,13 @@ export class SceneView {
       holder.name = g.name;
       this.garages.add(holder);
     }
+  }
+
+  /** The career waypoint in the world (src/ui/waypoint.ts): a tall gold beam and a ground ring
+   * at `pos` (sim space); null hides it. */
+  setWaypoint(pos: [number, number, number] | null): void {
+    this.waypoint.visible = pos !== null;
+    if (pos) this.waypoint.position.set(...pos);
   }
 
   private newContactMarker(): ContactMarker {

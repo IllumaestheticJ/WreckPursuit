@@ -13,7 +13,8 @@
  * is: at a repair shop the tow took it to, everything of that shop; anywhere else (a wreck left
  * on the road, a dead car at home) it needs the tow service first (`tow`: "Tow to …", owner
  * 2026-10-28). Hosts that do not say where cars sit keep the old rule (a wreck's repairs are
- * open anywhere). With no usable car at all the player takes a taxi to a lot (`visitLot`).
+ * open anywhere). A taxi to any car lot is always open, car or no car (owner 2026-10-29); the
+ * player's car stays where it is, and the next run starts from it (`lotActions`).
  * Insurance, the pound, informants and the bounty are phone calls: open anywhere.
  */
 import type { CareerPlace, CarSpotView, CarView } from "./types";
@@ -66,10 +67,24 @@ export function garageAccess(place: CareerPlace | null | undefined, car: Pick<Ca
   return { ...atPlace(where), tow: car.spot.kind !== "Garage" };
 }
 
-/** The lot visit is open: the player is at that lot, or has no car they can drive there. */
-export function canWalkLot(place: CareerPlace | null | undefined, lotId: string, hasDrivableCar: boolean): boolean {
-  if (place === undefined) return true;
-  return (place?.kind === "Lot" && place.id === lotId) || !hasDrivableCar;
+/** What the career screen offers for one car lot. */
+export interface LotActions {
+  /** "Visit": walk the rows here (the player is at this lot; or the host does not track places). */
+  walk: boolean;
+  /** "Taxi": go there without the car (owner 2026-10-29: always, car or no car; the car stays
+   * where it is and the next run starts from it). */
+  taxi: boolean;
+  /** "Waypoint": mark it on the map to drive there (only with a car that can drive). */
+  waypoint: boolean;
+}
+
+/** What is open for lot `lotId` with the player at `place` (`undefined`: not tracked). Owner
+ * report 2026-10-29 ("i also can't taxi to dealers once i own a car"): the taxi used to be the
+ * fallback for players without a drivable car only; it is now always offered next to the
+ * waypoint. */
+export function lotActions(place: CareerPlace | null | undefined, lotId: string, hasDrivableCar: boolean): LotActions {
+  const here = place === undefined || (place?.kind === "Lot" && place.id === lotId);
+  return { walk: here, taxi: !here, waypoint: !here && hasDrivableCar };
 }
 
 /** One line on where the player is, for the career screen's head. */

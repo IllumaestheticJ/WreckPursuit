@@ -340,8 +340,11 @@ export interface CareerView {
   /** The world's repair shops (`career::ShopView`, `garage_visit::WORLD_SHOPS`). Older hosts
    * send none: the Repair panel then offers the bare districts. */
   shops?: ShopSite[];
-  /** The player's own garages, in unlock order (`career::HomeView`); runs start from `selected`. */
+  /** The player's own garages, in unlock order (`career::HomeView`); `selected` = the chosen one. */
   homes?: HomeGarage[];
+  /** Where the next run starts (`career::Career::start_spot`: where the active car is, else the
+   * chosen garage). Older hosts send none. */
+  start_at?: CarSpotView;
   stats: CareerStats;
   progress: CareerProgress;
   captures: number;
@@ -444,6 +447,16 @@ export interface CareerPlace {
   name: string;
 }
 
+/** What the map waypoint marks: a drive-to place, or (`kind` "Road", Free Roam's city map) a
+ * spot on the road at `pos` (world `[x, y, z]`, m). */
+export interface WaypointTarget {
+  kind: PlaceKind | "Road";
+  id: string;
+  name: string;
+  /** Road spots: where, world `[x, y, z]` m (places take theirs from the session). */
+  pos?: [number, number, number];
+}
+
 export interface CareerApi {
   view(): CareerView;
   mods(uid: number): ModTreeView;
@@ -466,8 +479,9 @@ export interface CareerApi {
   payOffBounty?(): CareerView;
   /** Today's stock of a lot. */
   lot(lotId: string): LotStockView;
-  /** Drive to the lot: leaves the garage and loads the lot itself. */
-  visitLot(lotId: string): void;
+  /** Walk the lot: leaves the garage and loads the lot itself. `taxi`: the player takes a taxi
+   * there (always open, car or no car); their car stays where it is. */
+  visitLot(lotId: string, taxi?: boolean): void;
   /** Buy the car in a lot space. */
   buyListing(lotId: string, slot: number): CareerView;
   /** Replace tyres (FL, FR, RL, RR); repairs never fix tyres. */
@@ -492,10 +506,11 @@ export interface CareerApi {
   /** Where the player is (optional: hosts without it treat every place as reached, the old
    * menu behaviour). `null` = not at any place: garage work is closed. */
   place?(): CareerPlace | null;
-  /** Set the map waypoint to a place (the only way the menu sends the player anywhere). */
-  setWaypoint?(target: CareerPlace): void;
+  /** Set the map waypoint to a place (the only way the menu sends the player anywhere), or a
+   * road spot; null clears it. The same waypoint as Free Roam's city map (M) sets. */
+  setWaypoint?(target: WaypointTarget | null): void;
   /** The waypoint now (to mark it in the lists), or null. */
-  waypoint?(): CareerPlace | null;
+  waypoint?(): WaypointTarget | null;
   /** Start career runs from the player's garage `id`. */
   setHome?(id: string): CareerView;
   /** The tow offer for car `uid` (optional: hosts without the tow service hide "Tow to …"). */

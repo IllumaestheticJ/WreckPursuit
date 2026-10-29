@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canWalkLot, garageAccess, OPEN } from "./access";
+import { garageAccess, lotActions, OPEN } from "./access";
 
 const runs = { drivable: true };
 const wrecked = { drivable: false };
@@ -82,13 +82,16 @@ describe("garageAccess: cars that cannot be driven (tow service)", () => {
   });
 });
 
-describe("canWalkLot", () => {
-  it("is the lot pulled into, or a taxi without a car", () => {
-    const at = { kind: "Lot" as const, id: "budget_motors", name: "Budget Motors" };
-    expect(canWalkLot(at, "budget_motors", true)).toBe(true);
-    expect(canWalkLot(at, "dockside_salvage", true)).toBe(false);
-    expect(canWalkLot(null, "dockside_salvage", true)).toBe(false);
-    expect(canWalkLot(null, "dockside_salvage", false)).toBe(true);
-    expect(canWalkLot(undefined, "dockside_salvage", true)).toBe(true);
+describe("lotActions", () => {
+  const at = { kind: "Lot" as const, id: "budget_motors", name: "Budget Motors" };
+  it("walks the lot pulled into", () => {
+    expect(lotActions(at, "budget_motors", true)).toEqual({ walk: true, taxi: false, waypoint: false });
+    expect(lotActions(undefined, "dockside_salvage", true)).toEqual({ walk: true, taxi: false, waypoint: false });
+  });
+  it("always offers the taxi elsewhere, car or no car (owner 2026-10-29)", () => {
+    expect(lotActions(null, "dockside_salvage", true)).toEqual({ walk: false, taxi: true, waypoint: true });
+    expect(lotActions(at, "dockside_salvage", true)).toEqual({ walk: false, taxi: true, waypoint: true });
+    expect(lotActions({ kind: "Garage", id: "Meridian Motorworks", name: "Meridian Motorworks" }, "dockside_salvage", true).taxi).toBe(true);
+    expect(lotActions(null, "dockside_salvage", false)).toEqual({ walk: false, taxi: true, waypoint: false });
   });
 });

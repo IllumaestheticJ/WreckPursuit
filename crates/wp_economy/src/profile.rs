@@ -166,7 +166,7 @@ pub struct CareerProfile {
     pub stock_seed: u32,
     /// Where cars that are not simply "at home" sit, by car uid ([`CarSpot`]): a wreck left
     /// out on the road, or a car the tow service took to a shop or garage. A car with no entry
-    /// is in the career's home garage. Runs start from home, so a run clears its car's entry.
+    /// is in the career's home garage. A run starts where its car is and clears the entry.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub car_spots: BTreeMap<u32, CarSpot>,
 }

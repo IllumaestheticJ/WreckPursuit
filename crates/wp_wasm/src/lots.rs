@@ -132,8 +132,20 @@ pub fn lot_fixtures(kind: LotKind, slots: u32) -> Vec<simcli::scenario::Barrier>
 
 impl Career {
     /// Build the visit session for `lot_id`: today's unsold stock parked in its spaces with
-    /// its wear and tyres, the active car (if usable) at the gate.
+    /// its wear and tyres, the active car (if usable) at the gate: the player drove in.
     pub fn visit_lot(&mut self, lot_id: &str) -> Result<(Session, LotVisit), String> {
+        self.lot_session(lot_id, false)
+    }
+
+    /// Take a taxi to `lot_id` (owner 2026-10-29: always possible, with or without a car): the
+    /// same visit as [`Career::visit_lot`] without the player's car at the gate. The car stays
+    /// where it is (its spot is untouched), so the next run still starts from the car
+    /// ([`Career::start_spot`]).
+    pub fn taxi_to_lot(&mut self, lot_id: &str) -> Result<(Session, LotVisit), String> {
+        self.lot_session(lot_id, true)
+    }
+
+    fn lot_session(&mut self, lot_id: &str, taxi: bool) -> Result<(Session, LotVisit), String> {
         if self.run_active() {
             return Err("finish the run first (back to the garage)".into());
         }
@@ -152,7 +164,7 @@ impl Career {
         let own = acct
             .active_car
             .and_then(|u| acct.car(u))
-            .filter(|c| c.is_usable())
+            .filter(|c| !taxi && c.is_usable())
             .cloned();
         // The entities are replaced below; free drive supplies the rest of the scenario.
         let mut sc = free_drive_in(
@@ -280,6 +292,17 @@ pub fn career_replace_tires(uid: u32, wheels_json: &str) -> Result<String, JsVal
 pub fn career_visit_lot(lot_id: &str) -> Result<Vec<u32>, JsValue> {
     end_active_run()?;
     let (session, visit) = with_career(|c| c.visit_lot(lot_id))?;
+    let ids = crate::install(session);
+    VISIT.with(|v| *v.borrow_mut() = Some(visit));
+    Ok(ids)
+}
+
+/// Taxi to lot `lot_id` ([`Career::taxi_to_lot`]): like [`career_visit_lot`], without the
+/// player's car (it stays where it is). Open whether or not the player owns a car.
+#[wasm_bindgen]
+pub fn career_taxi_to_lot(lot_id: &str) -> Result<Vec<u32>, JsValue> {
+    end_active_run()?;
+    let (session, visit) = with_career(|c| c.taxi_to_lot(lot_id))?;
     let ids = crate::install(session);
     VISIT.with(|v| *v.borrow_mut() = Some(visit));
     Ok(ids)
