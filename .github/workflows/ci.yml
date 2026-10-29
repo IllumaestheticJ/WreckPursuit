@@ -49,14 +49,12 @@ jobs:
         run: tools/ci/data_coverage.sh
 
   workstream-checks:
-    name: workstream checks (nameplates, economy native store)
+    name: workstream checks (economy native store)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.97.0
       - uses: Swatinem/rust-cache@v2
-      - name: no licensed car names/badges in code, data or docs (09)
-        run: python3 tools/specsheet/nameplate_check.py
       - name: economy with the native SQLite store (08)
         run: cargo test -p wp_economy --features native
 

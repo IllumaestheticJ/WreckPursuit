@@ -11,7 +11,6 @@ Plain Python 3 (standard library only, 3.9+). Nothing here is reachable from the
 | `collect_results.py` | Runs `wp_vehicle`'s metrics example and `damage-barrier --sweep` for every roster car, checks the barrier expectations and writes `validation_results.json`. |
 | `validation_results.json` | Measured sim results (generated; read by `specsheet.py`). |
 | `specsheet.py` | Renders `data/cars/ROSTER.md` (roster table) and `data/cars/VALIDATION.md` from the car JSON and `validation_results.json`. |
-| `nameplate_check.py` | Fails if a real maker/model/badge/trademarked tech name appears in roster files. Denylist stored as hashes. |
 | `smoke_sim.py` | Spawns every roster car in `wp_sim` via `simcli` (scenario format v2) in both damage modes, twice, and checks the state hashes match. |
 | `pursuit_probe.py` | Police pursuit numbers through `simcli`: every car's 0-100 / 0-cap / 80-144 km/h times and a straight-line chase model against the cruiser (`--chase`, with `wp_police`'s speed cap and target margin). |
 | `ram_probe/` (crate `ram-probe`) | `ram-probe [car…]`: repeated rams (frontal / offset by the car, side / rear taken) on **one** damage model in both modes — health after each ram, the ram that drops it below `wp_police`'s disengage health (0.4) and the first total-loss ram. `vmax-trace`: `wp_vehicle`'s top-speed run stopped before the rig's 10 km ground slab ends (the metric's own run falls off the world on slow cars); `collect_results.py` takes Vmax from it. | Barrier checks read the `extreme` rows (contract v0.4.0 renamed the old Simulation to Extreme); "Arcade milder" compares with `sim` (the old Arcade). |
@@ -24,7 +23,6 @@ cargo build --release -p wp_damage --bins -p wp_vehicle --example metrics -p sim
 python3 tools/specsheet/build_roster.py          # cars, spec sheets, lattices
 python3 tools/specsheet/collect_results.py       # sim metrics + barrier sweeps → validation_results.json
 python3 tools/specsheet/specsheet.py             # ROSTER.md + VALIDATION.md
-python3 tools/specsheet/nameplate_check.py       # naming policy
 python3 tools/specsheet/smoke_sim.py             # loads + determinism through the sim
 python3 tools/specsheet/pursuit_probe.py --chase # police cruiser vs every car (acceleration / chase)
 ./target/release/ram-probe sentinel_cruiser      # cruiser durability under repeated rams
@@ -76,15 +74,6 @@ Each car names an *intended* compound (`street`, `sport`, `police_pursuit`, `all
 `street`. The estimator then scales street peak friction by `estimate.COMPOUND_SCALE`
 (sport 1.10, semi-slick 1.22, police pursuit 1.04, all-terrain 0.90, vintage bias-ply 0.85 —
 rule-of-thumb ratios of peak lateral g between tire categories on the same car).
-
-## Nameplate check
-
-`nameplate_check.py` hashes every word, adjacent word pair and de-hyphenated run in the
-roster files and compares with two hashed lists: STRICT (banned everywhere) and NAME
-(ordinary words that are also nameplates — banned only in ids, display names, `analog_of`
-and Markdown headings). To add a word: `python3 tools/specsheet/nameplate_check.py --hash
-"word"` and paste the hash into the right set. Sound-alikes cannot be caught by hashing —
-review new names by hand.
 
 ## Tests
 

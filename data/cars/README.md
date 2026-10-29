@@ -4,18 +4,17 @@ One `VehicleDef` JSON per car: `data/cars/<id>.json` (`id` must equal the file s
 `schemas/vehicle_def.schema.json`. Load + cross-reference check: `wp_contracts::load_car`.
 Roster work is owned by workstream 09; the debug cars belong to the integration lead.
 
-## Naming policy (hard rule)
+## Naming policy
 
-**No licensed names anywhere** — not in ids, `display_name`, `analog_of`, comments, spec sheets,
-liveries or commit messages. That means no manufacturer names, brand names, model names, badges,
-trim designations that are trademarks, or recognisable logos/liveries.
+**Real cars, real names** (owner decision 2026-10-29, car overhaul; replaces the old
+analog-names-only rule and its `nameplate_check.py`). Cars model real-world makes, models and
+trims as accurately as the data allows.
 
-- Use an invented analog name: e.g. `"display_name": "Kestrel GT"` with
-  `"analog_of": "late-90s Japanese FR coupe"`.
-- `analog_of` describes the *archetype* only: era, origin region, layout, body style, engine
-  type/size. Good: `"2010s American V8 muscle coupe, 5.0 L"`. Bad: anything naming a maker/model.
-- If an invented name is too close to a real nameplate (sound-alike, one letter off), rename it.
-- Workstream 09 adds a grep check against a list of real brands/nameplates; keep it passing.
+- `display_name` is the real name including the trim: `"Nissan Skyline GT-R (R34)"`.
+- `id` is `<make>_<model>_<generation>_<trim>` in snake_case: `nissan_skyline_r34_gtr`.
+- `analog_of` names the real car it models and the model year range.
+- Spec sheets cite their sources (manufacturer data, period road tests).
+- The pre-overhaul roster cars keep their invented names until each is replaced.
 
 ## Field guide
 
@@ -112,5 +111,3 @@ There is no `Van`/`Civilian` class yet, so the vans and pickup use `Truck` (requ
 The last three are civilian traffic cars (round 6b): cheap, slow, validated like the rest.
 There is no `Van`/`Civilian` class yet, so the vans and the pickup use `Truck` (requested in
 `docs/integration/cars.md`). The last four were added in round 9.
-
-Naming check: `python3 tools/specsheet/nameplate_check.py` (exit 1 on any hit).

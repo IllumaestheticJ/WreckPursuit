@@ -4,8 +4,7 @@ Every number in `data/cars/<id>.json`, `data/cars/<id>.spec.md` and the hand adj
 `data/lattices/<id>.json` is derived from the entries below by `build_roster.py`. Edit here,
 then run `python3 tools/specsheet/build_roster.py`.
 
-Naming policy: no real makers, models, badges or trademarked tech names anywhere (see
-`data/cars/README.md`). `nameplate_check.py` enforces it.
+Naming policy: `data/cars/README.md` (real names allowed since 2026-10-29).
 
 Units: SI unless the key says otherwise (`_mm`, `_deg`, `_bar`). Tire sizes use the generic
 ISO metric code `width/aspect R rim` (a size, not a brand).

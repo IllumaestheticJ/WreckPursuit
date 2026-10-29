@@ -5,8 +5,7 @@
 Three layers of evidence per car:
 
 1. **Data validity** — every car + lattice loads through `wp_contracts::load_car` and validates
-   against `schemas/` (`cargo test -p wp_contracts`), the nameplate check passes
-   (`python3 tools/specsheet/nameplate_check.py`) and every car runs deterministically through
+   against `schemas/` (`cargo test -p wp_contracts`) and every car runs deterministically through
    `simcli` in both damage modes (`python3 tools/specsheet/smoke_sim.py`).
 2. **Sim vs class target (primary)** — `wp_vehicle`'s metrics (0-100, 100-0, 50 m skidpad, top
    speed) and `wp_damage`'s barrier sweep on the integrated build, collected by

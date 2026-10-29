@@ -9,7 +9,7 @@ How every workstream proves its work with the shared harness (workstream 10). Sh
 |---|---|
 | `ci.yml` → `rust` | `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace` (includes every scenario, golden comparison, fresh-process determinism, the determinism lint audit, schema drift), wasm build of `wp_wasm` |
 | `ci.yml` → `schema` | any `data/**` file failing its JSON Schema or typed loader; files with no schema are reported as warnings |
-| `ci.yml` → `workstream-checks` | a licensed car name/badge in code, data or docs (`tools/specsheet/nameplate_check.py`); `wp_economy` tests with the native SQLite store |
+| `ci.yml` → `workstream-checks` | `wp_economy` tests with the native SQLite store |
 | `ci.yml` → `determinism-lint` | `f64`, libm transcendentals, `HashMap`, wall clock, threads or unseeded RNG in sim crates |
 | `ci.yml` → `determinism` | a scenario whose hashes differ between two in-process runs, a fresh process, or **native vs wasm32** (Node) |
 | `ci.yml` → `goldens` | a scenario whose `hashes.txt` or golden replay differs from `apps/simcli/golden/` (prints first divergent tick, entity, magnitude) |

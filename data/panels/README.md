@@ -32,7 +32,7 @@ Used by the browser testbed (`render/panels.ts` `loadCarMidMesh`, falling back t
 when the file is missing) for the instanced fleet's near tier and the nearest parked cars;
 promoted cars within ~30–40 m, the player and the AI racers draw the full, skinned mesh (their
 own `VehicleView`), so dents and crumple show where they can be seen.
-Analog names only, no badges or trademarks (`tools/specsheet/nameplate_check.py`).
+Naming: `data/cars/README.md`.
 
 ## Panel spec (`<car>.json`)
 

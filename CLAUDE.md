@@ -33,7 +33,7 @@ A physics-driven street-racing game with Wreckfest-style sim-cade handling, semi
 6. Before ending a session: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`, `cargo build --target wasm32-unknown-unknown -p wp_wasm` (if your crate is reachable from it), update `docs/integration/<name>.md`, push.
 7. Do not add dependencies with native-only build steps to any crate reachable from `wp_wasm`. Check with `cargo tree` if unsure.
 8. Performance budgets (per frame @60 Hz, native, release): vehicle sim ≤ 0.15 ms/car, lattice ≤ 0.25 ms/car (24 cars), traffic ≤ 2 ms for 400 agents, police ≤ 0.5 ms. Browser targets are 2× those. Record measurements in your README.
-9. No licensed car names, badges, or trademarked model names anywhere in code, data, or comments. Analog names only (see `data/cars/README.md`).
+9. Real car names are allowed (owner decision 2026-10-29, car overhaul): cars model real-world makes, models and trims as accurately as possible. Naming rules: `data/cars/README.md`.
 10. Prefer boring, legible code over clever code. This is a long-lived project with many parallel contributors.
 
 ## Mode semantics (shared vocabulary)
