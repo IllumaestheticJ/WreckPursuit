@@ -1090,6 +1090,12 @@ impl BodyProfile {
             Some((rh, _)) => rh + mb,
             None => self.y_fd_rear + mb,
         };
+        // A section spec may end the door glass ahead of the lattice door's rear edge (a coupe
+        // whose B-pillar and quarter glass sit over the door's rear end).
+        let rear = match self.spec().and_then(|s| s.anchors.door_glass_rear_y) {
+            Some(y) => clamp_soft(y, rear, self.y_fw - 0.3),
+            None => rear,
+        };
         if self.style.a_sail_layout == SailLayout::ToCorner {
             // To the windshield's lower corner, where the A-pillar lands.
             return (rear, self.y_fw.max(rear + 0.2));

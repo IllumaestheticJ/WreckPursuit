@@ -187,7 +187,7 @@ fn kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         WingKind::Lip => lip(&mut k),
         WingKind::None => {}
     }
-    k.mirrors(0.11, 0.095, None);
+    k.mirrors(0.09, 0.105, None);
 }
 
 /// GT-R wing: a main plane on two raked stalks near the trunk's sides, small end plates and the

@@ -204,6 +204,10 @@ pub struct Anchors {
     /// under the sloping C-pillar behind the door. `None` = the generic placement.
     #[serde(default)]
     pub quarter_glass_y: Option<[f32; 2]>,
+    /// Rear end of the front door glass (y), when it ends ahead of the lattice door's rear edge
+    /// (coupe B-pillar over the door). `None` = at the door's rear edge.
+    #[serde(default)]
+    pub door_glass_rear_y: Option<f32>,
 }
 
 /// Side-view lines of a section spec (`[y, z]`).
@@ -502,6 +506,9 @@ impl SectionSpec {
             }
             if let Some(q) = &mut a.quarter_glass_y {
                 *q = q.map(|y| y + dy);
+            }
+            if let Some(y) = &mut a.door_glass_rear_y {
+                *y += dy;
             }
             for c in [
                 &mut s.lines.sill,

@@ -24,6 +24,8 @@ pub const NEUTRAL_PX: u32 = 8;
 pub const DENSE: f32 = 2.0;
 /// Density factor of the underside and small trim islands.
 pub const SPARSE: f32 = 0.5;
+/// Density factor of the nose and tail frames.
+pub const FACE: f32 = 1.5;
 
 /// Projection of a face (see the module docs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -160,6 +162,8 @@ fn density(key: &IslandKey, parts: &BTreeMap<&str, &MeshPart>) -> f32 {
     match key {
         IslandKey::Wheel => DENSE,
         IslandKey::Frame(View::Bottom) => SPARSE,
+        // Nose and tail carry the most detail (lamps, grilles, plates, badges).
+        IslandKey::Frame(View::Front | View::Rear) => FACE,
         IslandKey::Frame(_) => 1.0,
         IslandKey::Part(name, view) => {
             let p = parts.get(name.as_str());

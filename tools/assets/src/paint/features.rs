@@ -445,13 +445,10 @@ pub mod skyline_r34 {
             return Some(rgb(0.10, 0.30, 0.16));
         }
         let green = rgb(0.06, 0.32, 0.16);
-        if text_at("34", [dx, dz], [0.0, 0.048], 0.030, false) {
+        if text_at("GT 34", [dx, dz], [0.0, 0.046], 0.026, false) {
             return Some(green);
         }
-        if text_at("34-34", [dx, dz], [0.03, -0.018], 0.075, false) {
-            return Some(green);
-        }
-        if text_at("R", [dx, dz], [-0.115, -0.018], 0.040, false) {
+        if text_at("34-34", [dx, dz], [0.0, -0.016], 0.062, false) {
             return Some(green);
         }
         Some(rgb(0.93, 0.93, 0.90))
@@ -502,7 +499,7 @@ pub mod skyline_r34 {
                 });
             }
         }
-        if text_at("SKYLINE", [x, z], [0.0, 0.715], 0.026, false) {
+        if text_at("SKYLINE", [x, z], [0.0, 0.712], 0.040, false) {
             return Some(CHROME);
         }
         // Plate recess and plate on the bumper.
@@ -760,11 +757,13 @@ pub mod skyline_r34 {
                 let k = 0.98 - 0.45 * (d / rr);
                 return rgb(k, k, k * 1.02);
             }
-            // Housing: dark chrome, lighter toward the top, a few lens flutes.
+            // Housing: dark chrome, lighter toward the top, a divider between the units.
             let t = ((z - bottom) / 0.10).clamp(0.0, 1.0);
-            let flute = ((x / 0.02).fract() < 0.12) as i32 as f32;
-            let k = 0.28 + 0.22 * t + 0.06 * flute;
-            return rgb(k, k * 1.01, k * 1.04);
+            if (x - 0.565).abs() < 0.006 {
+                return rgb(0.20, 0.20, 0.22);
+            }
+            let k = 0.30 + 0.20 * t;
+            return rgb(k, k * 1.01, k * 1.05);
         }
         if name.starts_with("indicator_front") {
             let rib = ((c.p[0].abs() / 0.008).fract() < 0.4) as i32 as f32;
@@ -779,7 +778,7 @@ pub mod skyline_r34 {
                 return rgb(0.45, 0.05, 0.06);
             }
             if d > 0.90 {
-                return CHROME;
+                return rgb(0.55, 0.56, 0.58);
             }
             if inner && d < 0.40 {
                 // Clear reverse-lamp centre with a bulb.

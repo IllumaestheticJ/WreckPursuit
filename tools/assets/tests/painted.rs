@@ -127,17 +127,19 @@ fn painted_gaps_lie_on_part_boundaries() {
     let islands: Vec<_> = layout.islands.values().collect();
     let size = layout.size;
     let mask = paint::gap_mask(&tex, &parts, &islands, size);
+    let two = paint::is_two_door(&parts);
+    assert!(two, "the R34 is a coupe");
     let lines = mask.iter().filter(|&&m| m == 2).count();
     assert!(lines > 500, "only {lines} gap texels");
     for (i, &m) in mask.iter().enumerate() {
         if m != 2 {
             continue;
         }
-        let g = paint::gap_group_of(&tex, &parts, &islands, i).unwrap();
+        let g = paint::gap_group_of(&tex, &parts, &islands, i, two).unwrap();
         let n = [i + 1, i + size as usize];
         assert!(
             n.iter()
-                .any(|&j| paint::gap_group_of(&tex, &parts, &islands, j)
+                .any(|&j| paint::gap_group_of(&tex, &parts, &islands, j, two)
                     .is_some_and(|h| h.0 == g.0 && h.1 != g.1)),
             "gap texel {i} is not on a panel boundary"
         );

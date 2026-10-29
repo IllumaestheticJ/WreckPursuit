@@ -221,14 +221,27 @@ pub fn rasterise(layout: &Layout, parts: &[MeshPart]) -> Vec<Texel> {
 }
 
 /// Panel group of a part for gaps: its region for panels and painted sills, `None` for the
-/// cabin body (pillars, roof rails: welded to the roof, no shut line).
-fn gap_group(p: &MeshPart) -> Option<wp_contracts::BodyRegion> {
+/// cabin body (pillars, roof rails: welded to the roof, no shut line). On a 2-door car the side
+/// strip between the door and the quarter (lattice region `*DoorR`) is part of the quarter
+/// panel: no shut line between them.
+fn gap_group(p: &MeshPart, two_door: bool) -> Option<wp_contracts::BodyRegion> {
     use crate::mesh::PartKind;
-    match (p.kind, p.region) {
-        (PartKind::Panel, Some(r)) => Some(r),
-        (PartKind::Body, Some(r)) if r != wp_contracts::BodyRegion::Cabin => Some(r),
-        _ => None,
-    }
+    use wp_contracts::BodyRegion as R;
+    let r = match (p.kind, p.region) {
+        (PartKind::Panel, Some(r)) => r,
+        (PartKind::Body, Some(r)) if r != R::Cabin => r,
+        _ => return None,
+    };
+    Some(match r {
+        R::LeftDoorR if two_door => R::RearLeftQuarter,
+        R::RightDoorR if two_door => R::RearRightQuarter,
+        r => r,
+    })
+}
+
+/// True when the car has no rear doors (no rear door glass part).
+pub fn is_two_door(parts: &[MeshPart]) -> bool {
+    !parts.iter().any(|p| p.name.starts_with("door_rl_glass"))
 }
 
 /// Paint the texture (see the module docs).
@@ -361,7 +374,8 @@ pub fn gap_mask(
     islands: &[&layout::Island],
     size: u32,
 ) -> Vec<u8> {
-    let group = |i: usize| gap_group_of(tex, parts, islands, i);
+    let two_door = is_two_door(parts);
+    let group = |i: usize| gap_group_of(tex, parts, islands, i, two_door);
     let mut line = vec![0u8; tex.len()];
     for y in 0..size - 1 {
         for x in 0..size - 1 {
@@ -390,12 +404,13 @@ pub fn gap_group_of(
     parts: &[MeshPart],
     islands: &[&layout::Island],
     i: usize,
+    two_door: bool,
 ) -> Option<(u32, wp_contracts::BodyRegion)> {
     let t = &tex[i];
     if t.part == 0 || !matches!(islands[t.island as usize].key, IslandKey::Frame(_)) {
         return None;
     }
-    gap_group(&parts[t.part as usize - 1]).map(|g| (t.island, g))
+    gap_group(&parts[t.part as usize - 1], two_door).map(|g| (t.island, g))
 }
 
 /// Grow every island `passes` texels into its padding (copying the nearest painted texel), so
