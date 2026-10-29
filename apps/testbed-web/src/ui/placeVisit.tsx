@@ -46,6 +46,8 @@ export interface MapPlace {
   pos: [number, number, number];
   radius_m: number;
   shop: "Legit" | "Crooked" | null;
+  /** Map icon (`ui-kit` `drawPoi` kind). */
+  icon: "Garage" | "Safehouse" | "Dealership" | "UsedLot" | "Junkyard" | "Home";
 }
 
 /** `wp_wasm::garage_visit::PlaceStatus`. */

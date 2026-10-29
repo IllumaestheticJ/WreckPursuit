@@ -147,7 +147,7 @@ export class MinimapRenderer {
     if (this.map && p) {
       const s = 5.5 * dpr;
       for (const poi of this.map.pois) {
-        if (poi.kind !== "Garage" && poi.kind !== "Safehouse") continue;
+        if (poi.kind !== "Garage" && poi.kind !== "Safehouse" && poi.kind !== "PoliceStation") continue;
         const [sx, sy] = worldToMinimap(view, poi.pos[0], poi.pos[1]);
         if ((sx - R) ** 2 + (sy - R) ** 2 > (inner - s) ** 2) continue;
         drawPoi(ctx, poi.kind, sx, sy, s, pal);
@@ -197,7 +197,7 @@ export class MinimapRenderer {
         for (const mk of ex.markers) {
           const [sx, sy] = worldToMinimap(view, mk.x, mk.y);
           const c = clampToCircle(R, R, inner - ms * 1.3, sx, sy);
-          drawMarker(ctx, mk, c.x, c.y, c.outside ? ms * 0.75 : ms);
+          drawMarker(ctx, mk, c.x, c.y, c.outside ? ms * 0.75 : ms, pal);
           stats.markers++;
         }
         for (const fl of ex.flags) {

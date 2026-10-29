@@ -527,4 +527,18 @@ pub struct MapPlace {
     pub radius_m: f32,
     /// Repair shops: legit or crooked.
     pub shop: Option<ShopKind>,
+    /// Map icon: `Garage` (wrench), `Safehouse`, `Dealership`, `UsedLot`, `Junkyard` (car
+    /// lots by kind) or `Home` (garage door).
+    pub icon: &'static str,
+}
+
+/// Map icon of a car lot (`lot` id): its kind from [`wp_world::places::DRIVE_TO_SPOTS`]
+/// (`Dealership`, `UsedLot`, `Junkyard`; `Dealership` for an unknown id).
+pub fn lot_icon(lot: &str) -> &'static str {
+    use wp_world::places::{PlaceStyle, DRIVE_TO_SPOTS};
+    match DRIVE_TO_SPOTS.iter().find(|s| s.id == lot).map(|s| s.style) {
+        Some(PlaceStyle::UsedLot) => "UsedLot",
+        Some(PlaceStyle::Junkyard) => "Junkyard",
+        _ => "Dealership",
+    }
 }

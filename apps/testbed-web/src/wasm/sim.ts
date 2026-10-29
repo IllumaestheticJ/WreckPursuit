@@ -579,6 +579,9 @@ export const sim = {
   /** Every drive-to place of the session (shops; in career runs also safehouses, car lots and the
    * player's garages): map markers and waypoint positions. Fetch once per session. */
   places: (): MapPlace[] => JSON.parse(wasm.places_json()),
+  /** The city's landmark buildings (`wp_world::places::PlaceLayout`): sign faces and string
+   * flags for the renderer (render/place_signs.ts). Fetch once per session. */
+  placeLayouts: (): PlaceLayout[] => JSON.parse(wasm.place_layouts_json()),
   /** GPS line from the player's car to (x, y) along the lanes, as [x, y] points (empty: none). */
   gpsRoute: (x: number, y: number): [number, number][] => {
     const f = wasm.gps_route(x, y);
@@ -875,6 +878,7 @@ export type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVi
 import type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
 export type { MapPlace, PlaceStatus, PlaceVisit, SafehouseSite } from "../ui/placeVisit";
 import type { MapPlace, PlaceStatus, SafehouseSite } from "../ui/placeVisit";
+import type { PlaceLayout } from "../render/place_signs";
 
 /** `simcli::car_stats::CarStatsTable` (data/stats/cars.json): bars are 0–1 on fixed scales. */
 export interface CarStatsTable {

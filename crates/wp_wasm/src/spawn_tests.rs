@@ -260,3 +260,60 @@ fn career_run_starts_in_the_chosen_garage() {
     assert_eq!(c.home_id(), "spire_loft");
     assert!(c.set_home("atlantis").is_err());
 }
+
+/// Landmark buildings (lead, 2026-10-29): `wp_world::places` uses the same anchors and names
+/// as the career's lots and garages, and every car lot, home garage, repair shop and safehouse
+/// ring of a career session has its building close by (the layout the renderer gets).
+#[test]
+fn every_drive_to_place_has_its_building_by_its_ring() {
+    use crate::garage_visit::{lot_icon, snap_to_lane, HOME_GARAGES, WORLD_LOTS};
+    use wp_world::places::{PlaceStyle, DRIVE_TO_SPOTS, MAX_RING_DISTANCE_M};
+    let econ = crate::garage::with_economy(|e| e.clone());
+    for l in &WORLD_LOTS {
+        let s = DRIVE_TO_SPOTS.iter().find(|s| s.id == l.lot).unwrap();
+        assert_eq!(s.anchor, l.anchor, "{}", l.lot);
+        let lot = econ.lots.lots.iter().find(|x| x.id == l.lot).unwrap();
+        assert_eq!(s.name, lot.name, "{}", l.lot);
+        let want = match lot.kind {
+            wp_economy::LotKind::Dealership => PlaceStyle::Dealership,
+            wp_economy::LotKind::UsedLot => PlaceStyle::UsedLot,
+            wp_economy::LotKind::Junkyard => PlaceStyle::Junkyard,
+        };
+        assert_eq!(s.style, want, "{}", l.lot);
+        assert_eq!(lot_icon(l.lot), format!("{want:?}"));
+    }
+    for h in &HOME_GARAGES {
+        let s = DRIVE_TO_SPOTS.iter().find(|s| s.id == h.id).unwrap();
+        assert_eq!(s.anchor, h.anchor, "{}", h.id);
+    }
+    assert_eq!(DRIVE_TO_SPOTS.len(), WORLD_LOTS.len() + HOME_GARAGES.len());
+
+    let world = ashpeak();
+    let layouts = wp_world::places::plan(world.map());
+    let near = |id: &str, ring: [f32; 3]| {
+        let l = layouts
+            .iter()
+            .find(|l| l.id == id)
+            .unwrap_or_else(|| panic!("{id} has no building"));
+        let d = (l.ring[0] - ring[0]).hypot(l.ring[1] - ring[1]);
+        assert!(d < 0.01, "{id}: layout ring {d} m off the session's ring");
+        let c = l
+            .main
+            .iter()
+            .fold([0.0, 0.0], |s, q| [s[0] + q[0] / 4.0, s[1] + q[1] / 4.0]);
+        let to = (c[0] - ring[0]).hypot(c[1] - ring[1]);
+        assert!(
+            to < MAX_RING_DISTANCE_M + 20.0,
+            "{id}: building {to:.0} m from the ring"
+        );
+    };
+    for s in &DRIVE_TO_SPOTS {
+        near(s.id, snap_to_lane(&world, s.anchor).unwrap().0);
+    }
+    for g in crate::garage_visit::sites(&world) {
+        near(&g.name, g.pos);
+    }
+    for h in crate::garage_visit::safehouse_sites(&world) {
+        near(&h.name, h.pos);
+    }
+}

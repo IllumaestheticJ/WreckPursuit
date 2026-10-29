@@ -414,6 +414,29 @@ so what you see is what you drive on (`tools/city-import/tests/surface_match.rs`
 - Street racers lapping Loop 9 park in a free bay at the end of a lap and back out when they
   leave (`wp_wasm::street`).
 
+### Landmark places (`places`, owner request 2026-10-29)
+- Every drive-to place gets a building that reads from the road: repair shops (`Garage` POIs:
+  workshop, three roll-up bays, the middle one open and lit with a car on a lift), police
+  stations (civic block, portico, "POLICE" signs, flagpole, blue lamp, cruisers), safehouses
+  (an unmarked warehouse door), car lots (`places::DRIVE_TO_SPOTS`: dealership showroom with
+  display cars, flags and a pylon sign; used-car lot with rows of cars, cabin, string flags and
+  a price board; junkyard with a fence, wreck stacks, crane and office) and the player's
+  garages (Dockside Lock-up units, the Spire tower over a lit ramp portal, Harnell Barn).
+- `places::add_place_buildings` runs last in Port Vesper v2 / Ashpeak generation: per place it
+  tries both sides of the ring's road and offsets along it (`OFFSETS_M`) for a plot clear of
+  every road, sidewalk, junction, car park, water and protected building (landmarks, farms,
+  silos, structures), no steeper than 2.5 m, and pushes the pieces back until none is inside
+  the 15 m ring; it then clears the generic buildings and decor on the plot. Ashpeak keeps
+  Port Vesper's own pieces where the plot is identical (they ship once in the shared part).
+- Solid pieces are `Building`s (`BuildingKind::{Showroom, Workshop, Civic, LockUp, Kiosk,
+  HomeBarn}`) and `Structure`s of kind `StructureKind::Place(PlacePart)` (appended enum
+  variants: no format change), so `wp_sim` collides with them like any building. Sign text and
+  string flags are not geometry: `places::plan(map)` recomputes the layouts from the finished
+  map for the renderer (`wp_wasm` `place_layouts_json`).
+- Tests: `tools/city-import/tests/landmark_places.rs` (every place laid out, building within
+  45 m of its ring, nothing on a lane / sidewalk / junction / ring, colliders) and
+  `wp_wasm` `spawn_tests::every_drive_to_place_has_its_building_by_its_ring`.
+
 ## Touge passes (`touge::generate`, `World::touge`, `gen-city --preset touge`)
 Four mountain roads for one-on-one touge battles, specs in `data/touge/<id>.json` (embedded):
 Hollow Crown Pass (≈ 2.8 km, 280 m climb), Mistral Ridge (≈ 3.0 km, 200 m), Ashfall Grade

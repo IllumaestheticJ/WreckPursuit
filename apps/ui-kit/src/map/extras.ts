@@ -5,6 +5,9 @@
  * them, in screen pixels, on top of the kit's own layers.
  */
 
+import type { MapIcon } from "./data";
+import { drawPoi, type MapPalette } from "./draw";
+
 /** Route line colour (gold: not police red / blue, not the scanner green, not a level colour). */
 export const ROUTE_COLOUR = "#ffd23f";
 
@@ -22,6 +25,8 @@ export interface MapMarker {
   label?: string;
   /** Highlighted (racing / challenged): a white ring around the dot. */
   hot?: boolean;
+  /** Draw this map icon (`drawPoi`) instead of a dot (e.g. a car lot's showroom). */
+  icon?: MapIcon;
 }
 
 /** A flag on the map (a race's start / finish). */
@@ -88,7 +93,7 @@ export function drawRoute(ctx: Ctx, pts: [number, number][], width: number): voi
 }
 
 /** A marker dot of radius `s` centred on (x, y) in screen px. */
-export function drawMarker(ctx: Ctx, mk: Pick<MapMarker, "colour" | "label" | "hot">, x: number, y: number, s: number): void {
+export function drawMarker(ctx: Ctx, mk: Pick<MapMarker, "colour" | "label" | "hot" | "icon">, x: number, y: number, s: number, pal?: MapPalette): void {
   ctx.save();
   if (mk.hot) {
     ctx.beginPath();
@@ -96,6 +101,11 @@ export function drawMarker(ctx: Ctx, mk: Pick<MapMarker, "colour" | "label" | "h
     ctx.strokeStyle = "#fff";
     ctx.lineWidth = Math.max(1.5, s * 0.25);
     ctx.stroke();
+  }
+  if (mk.icon && pal) {
+    drawPoi(ctx, mk.icon, x, y, s * 1.05, pal);
+    ctx.restore();
+    return;
   }
   ctx.beginPath();
   ctx.arc(x, y, s, 0, Math.PI * 2);

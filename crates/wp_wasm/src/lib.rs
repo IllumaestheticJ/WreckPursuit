@@ -1407,6 +1407,14 @@ pub fn places_json() -> Result<String, JsValue> {
     get(|s| json(&s.map_places()))
 }
 
+/// The landmark buildings of the session's city as JSON ([`wp_world::places::PlaceLayout`]
+/// array: id, name, style, ring, plot frame, sign faces with their text, string flags), for
+/// the renderer's sign text and bunting. `[]` without a city or for cities without places.
+#[wasm_bindgen]
+pub fn place_layouts_json() -> Result<String, JsValue> {
+    get(|s| json(&s.place_layouts()))
+}
+
 /// The GPS line from the player's car to `(x, y)`: flat `[x0, y0, x1, y1, …]` along the lanes
 /// (empty without a route).
 #[wasm_bindgen]
