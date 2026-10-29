@@ -2770,7 +2770,7 @@ CARS += [
         ),
         susp=dict(hz=(1.80, 2.00), zeta=0.30, travel=(0.14, 0.15), roll_grad_deg_g=2.2,
                   roll_front_share=0.54, bump_stop=170000.0, preload=0.02),  # [R]/[E]
-        price=60000,
+        price=58000,  # [E] ≈1.2 × the Hakone GT; above economy's power-to-weight PI (known outlier, roster_prices.rs)
         note=("Godzilla. A heavy, wide, all-wheel-drive coupe whose rated 280 PS was a polite "
               "fiction: the twin-turbo six pulls to 8000 rpm and the ATTESA drivetrain puts it "
               "all down out of junctions where the rear-drive cars light their tyres. It "
@@ -2811,7 +2811,7 @@ CARS += [
         ),
         susp=dict(hz=(1.95, 2.15), zeta=0.31, travel=(0.13, 0.14), roll_grad_deg_g=1.9,
                   roll_front_share=0.52, bump_stop=180000.0, preload=0.02),  # [S11?] stiffer V-Spec springs/dampers, [E] rates
-        price=68000,
+        price=64000,  # [E] V-Spec II premium ≈ +10 % (new ≈ ¥5.7M vs ¥5.0M); known outlier like the GT-R
         note=("The V-Spec II is the GT-R for people who take it to the track: lower and stiffer, "
               "with the front undertray and carbon diffuser that kill high-speed lift, and the "
               "Active LSD that pushes the rear into the corner on power. It is a touch heavier "

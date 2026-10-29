@@ -4,7 +4,7 @@
 
 | Class | Archetype | Durability | Base price |
 |---|---|---|---|
-| Sport | Nissan Skyline GT-R V-Spec II (BNR34), 2000-2002: RB26DETT twin-turbo I6, ATTESA E-TS Pro AWD with rear Active LSD, V-Spec aero and suspension, carbon bonnet | 3 / 5 | 68,000 |
+| Sport | Nissan Skyline GT-R V-Spec II (BNR34), 2000-2002: RB26DETT twin-turbo I6, ATTESA E-TS Pro AWD with rear Active LSD, V-Spec aero and suspension, carbon bonnet | 3 / 5 | 64,000 |
 
 ## Design note
 

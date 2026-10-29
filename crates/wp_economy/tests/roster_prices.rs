@@ -239,7 +239,16 @@ fn pricier_cars_are_not_slower() {
     // sale): a car that costs 25% more than another must not have a lower class index. Known
     // outliers are listed with the request to 09 in docs/integration/economy.md; drop them from
     // KNOWN once 09 retunes the price (the test then keeps them honest).
-    const KNOWN: &[&str] = &["hakone_gt", "ironside_440", "brigand_400"];
+    // The R34 GT-Rs (car overhaul, 2026-10-29): priced like the real cars (above the Hakone GT),
+    // but the economy PI is power-to-weight + grip only and does not credit their AWD launch
+    // (sim 0-100 5.2 s vs the Hakone's 6.0 s). Request to 08 in docs/integration/cars.md.
+    const KNOWN: &[&str] = &[
+        "hakone_gt",
+        "ironside_440",
+        "brigand_400",
+        "nissan_skyline_r34_gtr",
+        "nissan_skyline_r34_gtr_vspec2",
+    ];
     let e = econ();
     let cars: Vec<_> = roster()
         .into_iter()

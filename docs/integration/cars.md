@@ -18,8 +18,8 @@ provenance tag in `roster_inputs.py` ([S] sourced, [S?] weak, [R] recalled, [E] 
 |---|---|---|---|---|---|---|---|---|---|
 | `nissan_skyline_r34_25gt` | 1391 kg | RB25DE 147 kW / 255 N·m (×1.00) | RWD, open | 8.25 s / ≈8.0 [E] | 219 / ≈220 [E] | 0.81 / 0.80-0.85 [E] | 38.5 m | 8/8 | 20 000 |
 | `nissan_skyline_r34_25gt_t` | 1471 kg | RB25DET 216 kW / 360 N·m (×1.05 on 206 kW rated) | RWD, clutch LSD (viscous) | 6.70 s / ≈6.2 [S?] | 254 / ≈245 [R] | 0.92 / — | 35.5 m | 8/8 | 30 000 |
-| `nissan_skyline_r34_gtr` | 1591 kg | RB26DETT 239 kW / 439 N·m (×1.12 on 206 kW rated) | AWD 30 % front, rear LSD | 5.15 s / 4.9-5.2 [S6] | 252 / 250-265 [R] | 0.92 / ≈0.95 [E] | 35.3 m | 8/8 | 60 000 |
-| `nissan_skyline_r34_gtr_vspec2` | 1611 kg | as GT-R | AWD 30 % front, stronger rear LSD | 5.18 s / 4.9 [S6] | 251 / 250-260 [R] | 0.93 / ≈0.95 [E] | 35.3 m | 8/8 | 68 000 |
+| `nissan_skyline_r34_gtr` | 1591 kg | RB26DETT 239 kW / 439 N·m (×1.12 on 206 kW rated) | AWD 30 % front, rear LSD | 5.15 s / 4.9-5.2 [S6] | 252 / 250-265 [R] | 0.92 / ≈0.95 [E] | 35.3 m | 8/8 | 58 000 |
+| `nissan_skyline_r34_gtr_vspec2` | 1611 kg | as GT-R | AWD 30 % front, stronger rear LSD | 5.18 s / 4.9 [S6] | 251 / 250-260 [R] | 0.93 / ≈0.95 [E] | 35.3 m | 8/8 | 64 000 |
 
 ¼ mile (pursuit_probe): GT-R 13.6 s @ 166 km/h vs 13.1 s real (V-Spec test [S6]).
 Tuning done on inputs only: GT-R roll-stiffness front share 0.60 → 0.54 (V-Spec II 0.58 → 0.52)
@@ -48,6 +48,9 @@ New requests:
 - Data (03): `data/materials/cfrp.json` (carbon panels: stiff, brittle, cracks instead of
   denting) for the V-Spec II bonnet and later carbon parts.
 - Contract (deferred): rear-wheel steer (Super-HICAS) as an optional steering field.
+- Economy (08): both GT-Rs are listed in `roster_prices.rs::pricier_cars_are_not_slower`'s `KNOWN`
+  (PI 492 / 488 vs the 48 000 Hakone's 494): the PI counts power-to-weight and grip but not AWD
+  traction, so the faster-launching GT-R reads as slower. Either credit AWD in the PI or keep them listed.
 
 ## Wave 3 (2026-10-23, owner request) — 4 supercars, 3 race cars, 2 rally-raid / pre-runner
 

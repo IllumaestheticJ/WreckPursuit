@@ -163,7 +163,7 @@
   },
   "aero_downforce_coeffs": [0.07, 0.07],
   "lattice_id": "nissan_skyline_r34_gtr_vspec2",
-  "base_price": 68000,
+  "base_price": 64000,
   "durability_class": 3,
   "fuel_capacity_l": 65.0
 }
