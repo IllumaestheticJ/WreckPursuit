@@ -86,6 +86,11 @@ use graph::xy;
 use tools::Puncture;
 use unit::UnitBody;
 
+/// A traffic camera's lens height above the highest road at its spot, m: cameras sit on poles
+/// and gantries over the road (on a viaduct, over the deck), so they see along the road they
+/// watch and not under a deck beside or below them.
+pub(crate) const CAMERA_MAST_M: f32 = 6.0;
+
 /// Height of a driver's eyes / a car's roof for line-of-sight queries, m.
 pub const EYE_HEIGHT_M: f32 = 1.3;
 
@@ -712,7 +717,7 @@ impl PoliceSystem {
         p.camera_z = std::sync::Arc::new(
             p.graph
                 .pois_of(graph::PoiKind::Camera)
-                .map(|c| world.map().ground_height(c.pos, None))
+                .map(|c| world.map().ground_height(c.pos, Some(1.0e4)) + CAMERA_MAST_M)
                 .collect(),
         );
         // The real paved geometry: the road graph's polylines follow a lane.

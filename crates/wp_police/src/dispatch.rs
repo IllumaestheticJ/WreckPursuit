@@ -1792,20 +1792,19 @@ impl PoliceSystem {
     }
 
     /// Whether a traffic camera sees a racer at `p` (chassis height `pz`, m): in a camera's
-    /// radius with line of sight from the camera, [`crate::EYE_HEIGHT_M`] above the road under it
-    /// (`camera_z`), to the racer at its real height, so a bridge deck or the
-    /// terrain between them blocks it.
+    /// radius with line of sight from the camera's lens (`camera_z`: [`crate::CAMERA_MAST_M`]
+    /// above the highest road at its spot) to the racer at its real height, so a bridge deck or
+    /// the terrain between them blocks it.
     pub(crate) fn camera_sees(&self, world: &dyn WorldQuery, p: [f32; 2], pz: f32) -> bool {
         let target = [p[0], p[1], crate::eye_height_at(pz)];
         self.graph
             .pois_of(PoiKind::Camera)
             .enumerate()
             .any(|(k, c)| {
-                let ground = self.camera_z.get(k).copied().unwrap_or(0.0);
+                let lens = self.camera_z.get(k).copied().unwrap_or(crate::EYE_HEIGHT_M);
                 dist(c.pos, p) <= c.radius_m
                     && self.graph.line_of_sight(c.pos, p)
-                    && world
-                        .line_of_sight([c.pos[0], c.pos[1], ground + crate::EYE_HEIGHT_M], target)
+                    && world.line_of_sight([c.pos[0], c.pos[1], lens], target)
             })
     }
 
