@@ -35,7 +35,7 @@ import type {
   WorkshopApi,
   WorkshopScreen,
 } from "./types";
-import { boltOns, missingFor, plan, planNames, upgradeGroup, type Plan } from "./upgrades";
+import { boltOns, missingFor, onCar, ownedState, plan, planNames, upgradeGroup, type Plan } from "./upgrades";
 import "./garage.css";
 
 /** Camera presets the host knows. */
@@ -118,12 +118,6 @@ function jobLine(what: string, r: MechanicResult): string {
   const old = j.sold > 0 ? `, old part sold for $${j.sold.toLocaleString()}` : j.kept.length > 0 ? `, old part${j.kept.length > 1 ? "s" : ""} in the inventory` : "";
   const bought = j.bought > 0 ? `parts $${j.bought.toLocaleString()} + ` : "";
   return `Mechanic fitted ${what}: ${bought}labour $${j.fee.toLocaleString()} (${j.touched} part${j.touched > 1 ? "s" : ""} handled)${old}.`;
-}
-
-/** Slots that are on the car now: parts inside an assembly only while the assembly is fitted. */
-function onCar(screen: WorkshopScreen): SlotView[] {
-  const fitted = new Set(screen.slots.filter((s) => s.fitted).map((s) => s.id));
-  return screen.slots.filter((s) => !s.parent || fitted.has(s.parent));
 }
 
 /** Shared state between the 3D side and the overlay (selection, hover). */
@@ -301,12 +295,15 @@ interface Shop {
   screen: WorkshopScreen;
   /** The car's mod tree (requirements, bolt-on upgrades); null when it cannot be read. */
   tree: ModTreeView | null;
-  /** Slot on the car the mechanic fits a part of `kind` in: `prefer` if it takes one, else the first. */
-  target(kind: string, prefer?: string | null): SlotView | null;
+  /** Slot on the car the mechanic fits a part of `kind` in: `prefer` if it takes one, else the
+   * first that does not already carry `grade`, else the first. */
+  target(kind: string, prefer?: string | null, grade?: string | null): SlotView | null;
   /** Buy a part into the inventory. */
   buy(c: CatalogEntry): void;
   /** Buy a part and have the mechanic fit it in `slot`. */
   fit(c: CatalogEntry, slot: SlotView): void;
+  /** Have the mechanic fit inventory part `part` in `slot` (labour only). */
+  fitOwned(part: InventoryView, slot: SlotView): void;
   /** Put a bolt-on upgrade on the car / take it off (40 % back). */
   install(m: ModOption): void;
   uninstall(m: ModOption): void;
@@ -316,9 +313,12 @@ interface Shop {
 
 /**
  * One upgrade for sale: a part grade (`entry`) or a bolt-on upgrade (`entry` null). A part
- * that needs another part on first stays clickable and offers both together.
+ * that needs another part on first stays clickable and offers both together. What the player
+ * already has (`ownedState`) is greyed out with its buy buttons disabled: a part on the car, a
+ * bolt-on installed (Remove stays), a part in the inventory (no Buy; the mechanic can still fit
+ * that part). Buying or fitting keeps the window it is in open (owner, 2026-10-29).
  */
-function UpgradeRow(props: { shop: Shop; entry: CatalogEntry | null; mod: ModOption | null; prefer?: string | null; after?: () => void }) {
+function UpgradeRow(props: { shop: Shop; entry: CatalogEntry | null; mod: ModOption | null; prefer?: string | null }) {
   const { shop, entry, mod } = props;
   const cash = shop.screen.cash;
   const [ask, setAsk] = useState<{ text: string; price: number; go: () => void } | null>(null);
@@ -326,7 +326,6 @@ function UpgradeRow(props: { shop: Shop; entry: CatalogEntry | null; mod: ModOpt
   const spend = (_text: string, _price: number, go: () => void) => go();
   /** Only a removal that throws away a lot of money waits for "are you sure?". */
   const loss = (text: string, price: number, go: () => void) => (isBigSpend(price, cash) ? setAsk({ text, price, go }) : go());
-  const done = (f: () => void) => () => (f(), props.after?.());
   const name = entry?.name ?? mod?.name ?? "?";
   const missing = mod && shop.tree ? missingFor(shop.tree, mod.id) : [];
   const p = missing.length && mod && shop.tree ? plan(shop.screen, shop.tree, mod.id) : null;
@@ -335,10 +334,44 @@ function UpgradeRow(props: { shop: Shop; entry: CatalogEntry | null; mod: ModOpt
   const canBuyLoose = !!p && !p.steps.some((s, i) => !s.entry && p.steps.slice(0, i).some((t) => t.entry && !t.owned));
   const slotsFor = p ? p.steps.filter((s) => s.entry).map((s) => shop.target(s.entry!.kind, props.prefer)) : [];
   const noSlot = slotsFor.some((s) => !s);
-  const t = entry ? shop.target(entry.kind, props.prefer) : null;
+  const t = entry ? shop.target(entry.kind, props.prefer, entry.grade) : null;
   const installed = mod?.installed ?? false;
+  const own = ownedState(shop.screen, entry, mod, props.prefer);
+  /** Greyed out: the player has it on the car (an inventory part can still be fitted). */
+  const greyed = own?.state === "fitted" || own?.state === "installed";
   let buttons;
-  if (p) {
+  if (entry && own?.state === "fitted") {
+    buttons = (
+      <>
+        <Button size="sm" testid="ws-up-buy" disabled title={own.title}>
+          Buy
+        </Button>
+        <Button size="sm" testid="ws-cat-mechanic" disabled title={own.title}>
+          Fit for me <Money value={entry.price + entry.install_fee} />
+        </Button>
+      </>
+    );
+  } else if (entry && own?.state === "inventory" && own.part) {
+    const part = own.part;
+    const slot = t;
+    buttons = (
+      <>
+        <Button size="sm" testid="ws-up-buy" disabled title={own.title}>
+          Buy
+        </Button>
+        <Button
+          size="sm"
+          variant="primary"
+          testid="ws-cat-mechanic"
+          disabled={!slot || entry.install_fee > shop.screen.cash}
+          title={slot ? `the mechanic fits the one in your inventory: labour $${entry.install_fee.toLocaleString()}` : "the part it goes in is not on the car"}
+          onClick={() => slot && shop.fitOwned(part, slot)}
+        >
+          Fit mine for me <Money value={entry.install_fee} />
+        </Button>
+      </>
+    );
+  } else if (p) {
     const both = p.steps.length > 2 ? `Buy all ${p.steps.length}` : "Buy both";
     const blocked = p.blocked ?? (noSlot ? "a part it needs has no slot on the car" : null);
     buttons = (
@@ -361,7 +394,7 @@ function UpgradeRow(props: { shop: Shop; entry: CatalogEntry | null; mod: ModOpt
           testid="ws-fit-both"
           disabled={!!blocked || p.price + p.labour > cash}
           title={blocked ?? `bought and fitted in order: ${planNames(p)}${p.labour ? `; labour $${p.labour.toLocaleString()}` : ""}`}
-          onClick={() => spend(`Buy and fit ${planNames(p)}`, p.price + p.labour, done(() => shop.buyPlan(p, true, props.prefer)))}
+          onClick={() => spend(`Buy and fit ${planNames(p)}`, p.price + p.labour, () => shop.buyPlan(p, true, props.prefer))}
         >
           {entry && canBuyLoose ? (p.steps.length > 2 ? `Fit all ${p.steps.length} for me` : "Fit both for me") : p.labour ? `${both}, fitted` : both}{" "}
           <Money value={p.price + p.labour} />
@@ -386,7 +419,7 @@ function UpgradeRow(props: { shop: Shop; entry: CatalogEntry | null; mod: ModOpt
           testid="ws-cat-mechanic"
           disabled={!t || !!entry.reason || entry.price + entry.install_fee > cash}
           title={entry.reason ?? (t ? `bought and fitted by the mechanic: labour $${entry.install_fee.toLocaleString()}` : "the part it goes in is not on the car")}
-          onClick={() => t && spend(`Buy and have the mechanic fit ${name}`, entry.price + entry.install_fee, done(() => shop.fit(entry, t)))}
+          onClick={() => t && spend(`Buy and have the mechanic fit ${name}`, entry.price + entry.install_fee, () => shop.fit(entry, t))}
         >
           Fit for me <Money value={entry.price + entry.install_fee} />
         </Button>
@@ -419,19 +452,33 @@ function UpgradeRow(props: { shop: Shop; entry: CatalogEntry | null; mod: ModOpt
     );
   }
   return (
-    <div class="wp-ws-uprow" data-testid="ws-catrow" data-kind={entry?.kind ?? ""} data-grade={entry?.grade ?? mod?.id ?? ""}>
+    <div
+      class={`wp-ws-uprow${greyed ? " wp-ws-owned" : ""}`}
+      data-testid="ws-catrow"
+      data-kind={entry?.kind ?? ""}
+      data-grade={entry?.grade ?? mod?.id ?? ""}
+      data-owned={own?.state ?? ""}
+    >
       <div class="wp-ws-catrow">
-        <span>
+        <span class={greyed ? "wp-dim" : undefined}>
           {name}
           {entry && entry.count > 1 && <span class="wp-dim"> ×{entry.count}</span>}
           {(entry?.tier ?? mod?.tier ?? 0) > 0 && <span class="wp-dim"> · T{entry?.tier ?? mod?.tier}</span>}
           {entry?.replaces && entry.replaces.length > 0 && (
             <span class="wp-dim" data-testid="ws-cat-replaces"> · replaces {entry.replaces.join(", ")} (refunded at 40 %)</span>
           )}
-          {installed && <span class="wp-ok"> · on the car</span>}
-          {!installed && entry?.grade && shop.screen.inventory.some((x) => x.part.grade === entry.grade) && <span class="wp-dim"> · in the inventory</span>}
+          {own && (
+            <>
+              {" "}
+              <Badge tone={own.state === "inventory" ? "info" : "ok"} title={own.title}>
+                <span data-testid="ws-owned">{own.label}</span>
+              </Badge>
+            </>
+          )}
         </span>
-        <Money value={entry?.price ?? mod?.price ?? 0} />
+        <span class={greyed ? "wp-dim" : undefined}>
+          <Money value={entry?.price ?? mod?.price ?? 0} />
+        </span>
       </div>
       <div class="wp-row wp-ws-upbtns">{buttons}</div>
       {missing.length > 0 && (
@@ -489,6 +536,9 @@ function Catalog(props: {
   kind: string | null;
   /** Slot the catalog was opened for (the mechanic fits there). */
   slot: string | null;
+  /** What the last purchase did / why it failed: shown in the window, which stays open. */
+  notice: string | null;
+  error: string | null;
   onClose: () => void;
 }) {
   const { shop } = props;
@@ -519,6 +569,16 @@ function Catalog(props: {
           </span>
         }
       >
+        {props.error && (
+          <p class="wp-danger wp-ws-notice" data-testid="ws-cat-error">
+            {props.error}
+          </p>
+        )}
+        {props.notice && (
+          <p class="wp-ok wp-ws-notice" data-testid="ws-cat-notice">
+            {props.notice}
+          </p>
+        )}
         <Tabs tabs={groups.map((g) => ({ id: g, label: g }))} value={group} onChange={(g) => (setGroup(g), setKind(null))} />
         <div class="wp-row" style={{ margin: "0.4em 0", justifyContent: "flex-end" }}>
           <SortSelect
@@ -545,7 +605,7 @@ function Catalog(props: {
             <div key={k} class="wp-ws-catgroup">
               <div class="wp-dim wp-mono wp-upper">{entries[0].slot_name}</div>
               {entries.map((c) => (
-                <UpgradeRow key={c.grade ?? "stock"} shop={shop} entry={c} mod={modOf(c.grade)} prefer={props.slot} after={props.onClose} />
+                <UpgradeRow key={c.grade ?? "stock"} shop={shop} entry={c} mod={modOf(c.grade)} prefer={props.slot} />
               ))}
             </div>
           ))}
@@ -839,6 +899,8 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
   const [error, setError] = useState<string | null>(null);
   const [catalog, setCatalog] = useState<{ kind: string | null; slot: string | null } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** The catalog opens without the last job's line (it shows what is bought from it). */
+  const openCatalog = (c: { kind: string | null; slot: string | null }) => (setNotice(null), setCatalog(c));
   const [oldParts, setOldParts] = usePref<OldParts>("oldParts", "keep", OLD_PARTS);
   const [list, setList] = useState(false);
   const [stand, setStand] = useState(false);
@@ -870,16 +932,20 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
     }
   }, [screen]);
   const onCarSlots = onCar(screen);
-  const target = (kind: string, prefer?: string | null) =>
-    onCarSlots.find((s) => s.id === prefer && s.kind === kind) ?? onCarSlots.find((s) => s.kind === kind) ?? null;
+  const target = (kind: string, prefer?: string | null, grade?: string | null) =>
+    onCarSlots.find((s) => s.id === prefer && s.kind === kind) ??
+    (grade ? onCarSlots.find((s) => s.kind === kind && s.fitted?.grade !== grade) : undefined) ??
+    onCarSlots.find((s) => s.kind === kind) ??
+    null;
   const shop: Shop = {
     screen,
     tree,
     target,
-    buy: (c) => run(() => api.buy(c.kind, c.grade)),
+    buy: (c) => act(() => ({ screen: api.buy(c.kind, c.grade), notice: `Bought ${c.count > 1 ? `${c.name} ×${c.count}` : c.name}: in the inventory.` })),
     fit: (c, slot) => hire(slot.id, { buy: c.grade }, c.count > 1 ? `${c.name} ×${c.count}` : c.name),
-    install: (m) => api.install && run(() => api.install!(m.id)),
-    uninstall: (m) => api.uninstall && run(() => api.uninstall!(m.id)),
+    fitOwned: (part, slot) => hire(slot.id, { part: part.part.uid }, part.name),
+    install: (m) => api.install && act(() => ({ screen: api.install!(m.id), notice: `Installed ${m.name}.` })),
+    uninstall: (m) => api.uninstall && act(() => ({ screen: api.uninstall!(m.id), notice: `Removed ${m.name}.` })),
     buyPlan: (p, fit, prefer) => {
       // Step by step, in order: each step is its own purchase, so a refusal halfway keeps what
       // was already bought (the inventory has it) and says so.
@@ -996,7 +1062,7 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
           {lift ? "Lower car" : "Raise car"}
         </Button>
         <div class="wp-dim wp-mono wp-upper">Parts</div>
-        <Button size="sm" onClick={() => setCatalog({ kind: null, slot: null })}>
+        <Button size="sm" onClick={() => openCatalog({ kind: null, slot: null })}>
           Catalog
         </Button>
         <Button size="sm" pressed={list} onClick={() => setList(!list)}>
@@ -1056,7 +1122,7 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
             hire={hire}
             api={api}
             slotName={slotName}
-            openCatalog={(kind) => setCatalog({ kind, slot: slot.id })}
+            openCatalog={(kind) => openCatalog({ kind, slot: slot.id })}
             oldParts={oldParts}
             setOldParts={setOldParts}
             shop={shop}
@@ -1079,7 +1145,7 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
       </aside>
       <InventoryStrip screen={screen} run={run} api={api} host={host} state={state} />
       {catalog && (
-        <Catalog shop={shop} kind={catalog.kind} slot={catalog.slot} onClose={() => setCatalog(null)} />
+        <Catalog shop={shop} kind={catalog.kind} slot={catalog.slot} notice={notice} error={error} onClose={() => setCatalog(null)} />
       )}
       {stand && !catalog && (
         <EngineStand screen={screen} run={run} api={api} state={state} host={host} onClose={() => (setStand(false), state.set({ standSelected: null }))} />

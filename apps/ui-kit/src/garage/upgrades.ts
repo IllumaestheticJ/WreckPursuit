@@ -10,7 +10,7 @@
  *
  * Pure functions over the screens wp_wasm returns, so they are unit tested (upgrades.test.ts).
  */
-import type { CatalogEntry, InventoryView, ModOption, ModTreeView, PartGroup, WorkshopScreen } from "./types";
+import type { CatalogEntry, InventoryView, ModOption, ModTreeView, PartGroup, SlotView, WorkshopScreen } from "./types";
 
 /** Part group a bolt-on upgrade is listed under, by its `ModSlot`. */
 const UPGRADE_GROUP: Record<string, PartGroup> = {
@@ -127,4 +127,72 @@ export function plan(screen: WorkshopScreen, tree: ModTreeView, id: string): Pla
 /** "Brake pads + ABS": the names of a plan's steps. */
 export function planNames(p: Plan): string {
   return p.steps.map((s) => s.mod.name).join(" + ");
+}
+
+/** Slots that are on the car now: parts inside an assembly only while the assembly is fitted. */
+export function onCar(screen: WorkshopScreen): SlotView[] {
+  const fitted = new Set(screen.slots.filter((s) => s.fitted).map((s) => s.id));
+  return screen.slots.filter((s) => !s.parent || fitted.has(s.parent));
+}
+
+/**
+ * The slots on the car a catalog line of `entry` would go in: the slot the row is shown for
+ * (`prefer`) when it takes a single part of that kind, else every slot of the kind (a set,
+ * four brake corners, goes in all of them).
+ */
+function slotsFor(screen: WorkshopScreen, entry: CatalogEntry, prefer?: string | null): SlotView[] {
+  const kind = onCar(screen).filter((s) => s.kind === entry.kind);
+  const here = entry.count <= 1 ? kind.find((s) => s.id === prefer) : undefined;
+  return here ? [here] : kind;
+}
+
+/** What the player already has of an upgrade row (null = nothing: it is for sale as usual). */
+export interface Owned {
+  /**
+   * - `fitted`: the part grade is on the car where it would go (every slot of a set);
+   * - `installed`: the bolt-on upgrade is on the car;
+   * - `inventory`: a part of the grade sits in the inventory. Buying another makes no sense,
+   *   but the mechanic can still fit the one the player has (labour only).
+   */
+  state: "fitted" | "installed" | "inventory";
+  /** Short tag next to the name ("on the car", "in the inventory"). */
+  label: string;
+  /** Tooltip of the tag: what it means for the buttons. */
+  title: string;
+  /** The inventory part (state `inventory`), to fit instead of buying one. */
+  part: InventoryView | null;
+}
+
+/**
+ * Whether the player already has what an upgrade row sells: a part grade (`entry`, with its
+ * mod-tree line `mod`) or a bolt-on upgrade (`entry` null). Rows the player has are greyed out
+ * and their buy buttons disabled; an installed bolt-on keeps its Remove button.
+ *
+ * Stock parts (grade null) are never "owned": buying a new stock part replaces a worn one.
+ * A set (`count` > 1) is never `inventory`: the mechanic fits one inventory part at a time.
+ */
+export function ownedState(screen: WorkshopScreen, entry: CatalogEntry | null, mod: ModOption | null, prefer?: string | null): Owned | null {
+  if (!entry) {
+    return mod?.installed
+      ? { state: "installed", label: "on the car", title: "already installed on this car; Remove takes it off (40 % back)", part: null }
+      : null;
+  }
+  if (entry.grade === null) return null;
+  const slots = slotsFor(screen, entry, prefer);
+  const fitted = slots.length > 0 ? slots.every((s) => s.fitted?.grade === entry.grade) : !!mod?.installed;
+  if (fitted) {
+    return { state: "fitted", label: "on the car", title: `${entry.name} is already fitted${entry.count > 1 ? " on every corner" : ""}: nothing to buy`, part: null };
+  }
+  const loose = screen.inventory.filter((p) => p.part.kind === entry.kind && p.part.grade === entry.grade);
+  if (entry.count <= 1 && loose.length > 0) {
+    // The one that fits where the row would fit it, if any.
+    const part = loose.find((p) => slots.some((s) => p.fits.includes(s.id))) ?? loose[0];
+    return {
+      state: "inventory",
+      label: "owned",
+      title: "you have one in the inventory: fit it yourself, or have the mechanic fit it (labour only)",
+      part,
+    };
+  }
+  return null;
 }

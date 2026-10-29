@@ -22,6 +22,8 @@ import { loadVisuals } from "../render/cosmetics/visuals";
 import { Bay, buildHardware, HARDWARE_SLOTS, layoutOf } from "./hardware";
 import { partHosts } from "./mounts";
 import { pickSlot, REGION_SLOT, slotOfPart, slotsNeeded } from "./slotmap";
+import { withSounds } from "./sfx";
+import type { GarageSound } from "../audio/garage_sfx";
 
 /** What the workshop needs from the testbed. */
 export interface WorkshopDeps {
@@ -42,6 +44,9 @@ export interface WorkshopDeps {
   drive(): void;
   /** Display name of a car model. */
   carName(defId: string): string;
+  /** Garage sounds (audio/garage_sfx.ts): one per workshop action, and the room tone while open. */
+  sound?(s: GarageSound): void;
+  ambience?(on: boolean): void;
 }
 
 /** Camera presets in car space: eye and target (x right, y forward, z up, metres). */
@@ -183,13 +188,15 @@ export class WorkshopMode {
       drive: () => this.deps.drive(),
       carName: this.deps.carName(this.screen.def_id),
     };
-    this.overlay.show(api, host);
+    this.overlay.show(withSounds(api, (s) => this.deps.sound?.(s)), host);
+    this.deps.ambience?.(true);
   }
 
   /** Close the workshop (the caller then shows another screen or starts a run). */
   close(): void {
     if (!this.active) return;
     this.active = false;
+    this.deps.ambience?.(false);
     this.overlay.hide();
     this.room?.dispose();
     this.room = null;
