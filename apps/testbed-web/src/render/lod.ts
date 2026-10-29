@@ -174,8 +174,9 @@ export class LodDirector {
   private cx = 0;
   private cy = 0;
   private cz = 0;
-  /** Instanced traffic past this distance from the camera (m) is not drawn (phones). Police and
-   * sim vehicles are always drawn. */
+  /** Instanced traffic past this distance from the camera (m) is not drawn: the graphics
+   * profile's city draw distance (render/quality.ts `Quality.trafficDrawM`). Police and sim
+   * vehicles are always drawn. */
   trafficDrawM = Infinity;
   /** Promoted traffic / police sim vehicles farther than this from the camera (m) are drawn by
    * the fleet (one instanced draw for all of them, mid-LOD mesh) instead of their own view

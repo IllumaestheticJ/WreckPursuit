@@ -11,12 +11,16 @@
 //         the resolution down while frames stay slow (and back up when they are fast again),
 //         so the game keeps real time (no slow motion) on weak machines.
 //         On a touch device (phone / tablet, src/touch.ts `prefersTouch`) auto = the touch
-//         profile: low, pixel ratio capped at 1, 600 m city / 300 m traffic draw distance,
+//         profile: low, pixel ratio capped at 1, 600 m city (and traffic) draw distance,
 //         mid-LOD car meshes within 120 m, parked-car proxies within 120 m, lamps within 300 m,
 //         promoted traffic / police always drawn by the fleet (only the player and AI racers
 //         keep their full per-panel view), 20 % rain, governor down to 0.3× (target 30 fps).
 // Car LOD on every profile: see VIEW_DRAW_M and CAR_DETAIL below (high: detailed cars within
 // 80 m, mid meshes within 400 m; low: 30 m / 120 m; "Car detail" in the game menu overrides).
+// Instanced traffic is drawn as far as the city on every profile (`Quality.trafficDrawM` =
+// the draw distance; low proxies past `fullLodM`): owner report "cars render in free roam too
+// close" (lead/car-popin) — the low profile cut traffic at 600 m inside its 900 m city, touch at
+// 300 m inside 600 m, so cars the sim keeps out there (wp_world `view_radius_m`) blinked out.
 // MSAA is a WebGL context attribute: changing it needs a reload.
 //
 // Effects quality (`?fx=low|med|high`, else the stored choice `wp.fx`, else low on the low
@@ -93,8 +97,6 @@ interface Profile {
   adaptive: boolean;
   /** Highest effective pixel ratio (after the scale). */
   maxPixelRatio: number;
-  /** Instanced traffic past this distance (m) is not drawn. */
-  trafficM: number;
   /** Full car meshes within this distance (m), proxies beyond (render/fleet.ts, props.ts). */
   fullLodM: number;
   /** Full-mesh parked cars at most (render/props.ts). */
@@ -153,7 +155,7 @@ function carDetailParam(): CarDetail | null {
 }
 
 function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
-  const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity, propProxyM: 300, lampDrawM: Infinity, viewDrawM: VIEW_DRAW_M, signalM: 450, cityDetailM: Infinity, cityTileM: CITY_TILE_M };
+  const common = { maxPixelRatio: 2, fullLodM: 250, propFullMax: 24, propDrawM: Infinity, propProxyM: 300, lampDrawM: Infinity, viewDrawM: VIEW_DRAW_M, signalM: 450, cityDetailM: Infinity, cityTileM: CITY_TILE_M };
   // High: the "far" car detail (a hardware GPU has the draw-call and triangle headroom).
   const high = { ...common, ...CAR_DETAIL.far, antialias: true, backdropBlur: true, rain: 1, scale: 1, minScale: 1, drawM: Infinity, adaptive: false };
   // Low: a weak or no GPU (software rasterizers are vertex / draw-call bound: fewer, cheaper
@@ -169,7 +171,6 @@ function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
     minScale: 0.5,
     drawM: 900,
     adaptive: false,
-    trafficM: 600,
     fullLodM: 120,
     propProxyM: 150,
     lampDrawM: 450,
@@ -183,7 +184,7 @@ function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
   // Touch: 640 m city tiles (render budget, lead/main-sync): with the 600 m draw distance a
   // 320 m tile grid put ~10 tiles of every city material in view (one draw call each); the
   // phone is draw-call bound (budget 300) and has triangle headroom, so fewer, bigger tiles.
-  if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, fullLodM: 100, propProxyM: 120, lampDrawM: 300, viewDrawM: 0, cityTileM: 2 * CITY_TILE_M };
+  if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, fullLodM: 100, propProxyM: 120, lampDrawM: 300, viewDrawM: 0, cityTileM: 2 * CITY_TILE_M };
   // Software GL starts at 0.35× (where the governor always ended up): every governor step
   // resizes the canvas and the post targets, a long hitch under a software rasterizer. Rain at
   // 20 % there (30 % cost ~25 ms a frame, browser-perf.md round 12b).
@@ -203,7 +204,8 @@ export class Quality {
   readonly software: boolean;
   /** Touch device (phone / tablet): the touch profile in auto mode. */
   readonly touch: boolean;
-  /** Instanced traffic draw distance, m (LodDirector.trafficDrawM). */
+  /** Instanced traffic draw distance, m (LodDirector.trafficDrawM): the city draw distance,
+   * so traffic never ends short of the roads it drives on. */
   trafficDrawM: number;
   /** Full car mesh distance, m (Fleet.fullLodM, PropView.fullLodM). */
   fullLodM: number;
@@ -269,7 +271,7 @@ export class Quality {
 
   /** Copy the profile's LOD distances to the public fields. */
   private applyLod(): void {
-    this.trafficDrawM = this.profile.trafficM;
+    this.trafficDrawM = this.profile.drawM;
     this.fullLodM = this.profile.fullLodM;
     this.propFullMax = this.profile.propFullMax;
     this.propDrawM = this.profile.propDrawM;
