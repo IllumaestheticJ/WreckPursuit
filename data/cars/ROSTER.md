@@ -41,6 +41,10 @@
 | Merlo 2.0T | `merlo_20t` | Exotic | FWD | 1238 | 252 | 203 | 4.6 | 248 | 1.18 | 706 | 4 | 100,000 | semi_slick |
 | Mesquite PR | `mesquite_pr` | Truck | RWD | 2758 | 317 | 115 | 8.0 | 211 | 0.71 | 439 | 5 | 32,000 | all_terrain |
 | Erg Hamada | `erg_hamada` | Truck | AWD 50/50 | 2113 | 308 | 146 | 6.0 | 203 | 0.78 | 523 | 5 | 32,000 | all_terrain |
+| Nissan Skyline 25GT (R34) | `nissan_skyline_r34_25gt` | Sport | RWD | 1391 | 147 | 106 | 8.1 | 225 | 0.89 | 473 | 3 | 20,000 | street |
+| Nissan Skyline 25GT-T (R34) | `nissan_skyline_r34_25gt_t` | Sport | RWD | 1471 | 216 | 147 | 6.1 | 265 | 0.99 | 581 | 3 | 30,000 | sport |
+| Nissan Skyline GT-R (R34) | `nissan_skyline_r34_gtr` | Sport | AWD 30/70 | 1591 | 239 | 150 | 5.1 | 266 | 0.98 | 635 | 3 | 60,000 | sport |
+| Nissan Skyline GT-R V-Spec II (R34) | `nissan_skyline_r34_gtr_vspec2` | Sport | AWD 30/70 | 1611 | 239 | 149 | 5.2 | 264 | 0.98 | 631 | 3 | 68,000 | sport |
 | Debug Coupe | `debug_coupe` | Sport | RWD | 1500 | 303 | 202 | 4.9 | 299 | 1.01 | 668 | 3 | 52,000 | sport |
 | Debug Sedan | `debug_sedan` | Compact | FWD | 1400 | 151 | 108 | 7.2 | 241 | 0.87 | 501 | 3 | 18,000 | street |
 

@@ -1,0 +1,169 @@
+{
+  "id": "nissan_skyline_r34_gtr",
+  "display_name": "Nissan Skyline GT-R (R34)",
+  "class": "Sport",
+  "analog_of": "Nissan Skyline GT-R (BNR34), 1999-2002: RB26DETT 2.6 L twin-turbo I6, ATTESA E-TS AWD, Getrag 6-speed manual",
+  "body_size_m": [1.785, 4.6, 1.36],
+  "mass_kg": 1590.8,
+  "front_weight_frac": 0.57,
+  "wheelbase_m": 2.665,
+  "track_front_m": 1.48,
+  "track_rear_m": 1.49,
+  "cg_height_m": 0.47,
+  "inertia_kgm2": [530.0, 2680.0, 2900.0],
+  "drag_cd_a_m2": 0.714,
+  "lift_front": 0.05,
+  "lift_rear": 0.08,
+  "engine": {
+    "torque_curve_nm": [
+      [1000, 202],
+      [2000, 280],
+      [2500, 336],
+      [3000, 392],
+      [3500, 423],
+      [4000, 435],
+      [4400, 439],
+      [5000, 426],
+      [5500, 405],
+      [6000, 381],
+      [6500, 347],
+      [6800, 325],
+      [7500, 274],
+      [8000, 230],
+      [8200, 211]
+    ],
+    "idle_rpm": 900.0,
+    "redline_rpm": 8000.0,
+    "rev_limit_rpm": 8200.0,
+    "inertia_kgm2": 0.18,
+    "engine_brake_nm": 48.0
+  },
+  "drivetrain": {
+    "layout": {
+      "Awd": {
+        "front_split": 0.3
+      }
+    },
+    "gear_ratios": [3.827, 2.36, 1.685, 1.312, 1.0, 0.793],
+    "final_drive": 3.545,
+    "reverse_ratio": 3.24,
+    "diff_front": "Open",
+    "diff_rear": {
+      "Lsd": {
+        "preload_nm": 100.0,
+        "ramp_power": 0.45,
+        "ramp_coast": 0.3
+      }
+    },
+    "clutch_max_nm": 610.0,
+    "shift_time_s": 0.42
+  },
+  "wheels": [
+    {
+      "position_m": [-0.74, 1.333, 0.317],
+      "radius_m": 0.317,
+      "width_m": 0.245,
+      "mass_kg": 25.0,
+      "tire_id": "sport",
+      "steerable": true,
+      "max_steer_rad": 0.558,
+      "ackermann_frac": 0.55,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0,
+      "caster_rad": 0.096
+    },
+    {
+      "position_m": [0.74, 1.333, 0.317],
+      "radius_m": 0.317,
+      "width_m": 0.245,
+      "mass_kg": 25.0,
+      "tire_id": "sport",
+      "steerable": true,
+      "max_steer_rad": 0.558,
+      "ackermann_frac": 0.55,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0,
+      "caster_rad": 0.096
+    },
+    {
+      "position_m": [-0.745, -1.333, 0.317],
+      "radius_m": 0.317,
+      "width_m": 0.245,
+      "mass_kg": 25.0,
+      "tire_id": "sport",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0262,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.745, -1.333, 0.317],
+      "radius_m": 0.317,
+      "width_m": 0.245,
+      "mass_kg": 25.0,
+      "tire_id": "sport",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0262,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 54800.0,
+      "damper_bump_ns_per_m": 3490.0,
+      "damper_rebound_ns_per_m": 6980.0,
+      "travel_m": 0.14,
+      "preload_m": 0.02,
+      "arb_n_per_m": 10000.0,
+      "bump_stop_n_per_m": 170000.0
+    },
+    {
+      "spring_n_per_m": 54800.0,
+      "damper_bump_ns_per_m": 3490.0,
+      "damper_rebound_ns_per_m": 6980.0,
+      "travel_m": 0.14,
+      "preload_m": 0.02,
+      "arb_n_per_m": 10000.0,
+      "bump_stop_n_per_m": 170000.0
+    },
+    {
+      "spring_n_per_m": 50100.0,
+      "damper_bump_ns_per_m": 2870.0,
+      "damper_rebound_ns_per_m": 5730.0,
+      "travel_m": 0.15,
+      "preload_m": 0.02,
+      "arb_n_per_m": 6400.0,
+      "bump_stop_n_per_m": 170000.0
+    },
+    {
+      "spring_n_per_m": 50100.0,
+      "damper_bump_ns_per_m": 2870.0,
+      "damper_rebound_ns_per_m": 5730.0,
+      "travel_m": 0.15,
+      "preload_m": 0.02,
+      "arb_n_per_m": 6400.0,
+      "bump_stop_n_per_m": 170000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 2900.0,
+    "max_torque_rear_nm": 1130.0,
+    "bias_front": 0.534,
+    "handbrake_rear_nm": 1600.0
+  },
+  "steering": {
+    "ratio": 15.0,
+    "rack_speed_rad_per_s": 1.4,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "nissan_skyline_r34_gtr",
+  "base_price": 60000,
+  "durability_class": 3,
+  "fuel_capacity_l": 65.0
+}

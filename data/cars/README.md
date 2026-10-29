@@ -111,3 +111,18 @@ There is no `Van`/`Civilian` class yet, so the vans and pickup use `Truck` (requ
 The last three are civilian traffic cars (round 6b): cheap, slow, validated like the rest.
 There is no `Van`/`Civilian` class yet, so the vans and the pickup use `Truck` (requested in
 `docs/integration/cars.md`). The last four were added in round 9.
+
+Real cars (car overhaul, 2026-10-29; real names per the naming policy above). Same pipeline;
+every spec-sheet number carries a provenance tag ([S] sourced, [S?] weak, [R] recalled,
+[E] estimate) and the sources are listed in the sheet.
+
+| Id | Name | Class | Real car |
+|---|---|---|---|
+| `nissan_skyline_r34_25gt` | Nissan Skyline 25GT (R34) | Sport | ER34 coupe, RB25DE NEO 2.5 NA I6, RWD, 5MT, open diff |
+| `nissan_skyline_r34_25gt_t` | Nissan Skyline 25GT-T (R34) | Sport | ER34 coupe, RB25DET NEO 2.5 turbo I6, RWD, 5MT, viscous LSD |
+| `nissan_skyline_r34_gtr` | Nissan Skyline GT-R (R34) | Sport | BNR34, RB26DETT 2.6 twin-turbo I6, ATTESA E-TS AWD (fixed 30 % front stand-in), Getrag 6MT |
+| `nissan_skyline_r34_gtr_vspec2` | Nissan Skyline GT-R V-Spec II (R34) | Sport | BNR34 V-Spec II: ATTESA E-TS Pro + Active LSD (clutch-LSD stand-in), V-Spec aero/suspension, carbon bonnet |
+
+Engines run at real-world output, not the 280 PS JDM rating (RB26DETT × 1.12, RB25DET × 1.05,
+RB25DE × 1.00; each sheet gives the rated figure and the reasoning), and there is no 180 km/h
+limiter (owner defaults for the overhaul).

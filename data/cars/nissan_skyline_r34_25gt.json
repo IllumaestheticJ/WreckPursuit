@@ -1,0 +1,157 @@
+{
+  "id": "nissan_skyline_r34_25gt",
+  "display_name": "Nissan Skyline 25GT (R34)",
+  "class": "Sport",
+  "analog_of": "Nissan Skyline 25GT coupe (ER34), 1998-2001: RB25DE NEO 2.5 L NA I6, RWD, 5-speed manual",
+  "body_size_m": [1.725, 4.58, 1.34],
+  "mass_kg": 1390.8,
+  "front_weight_frac": 0.54,
+  "wheelbase_m": 2.665,
+  "track_front_m": 1.48,
+  "track_rear_m": 1.47,
+  "cg_height_m": 0.47,
+  "inertia_kgm2": [440.0, 2320.0, 2500.0],
+  "drag_cd_a_m2": 0.641,
+  "lift_front": 0.08,
+  "lift_rear": 0.1,
+  "engine": {
+    "torque_curve_nm": [
+      [1000, 175],
+      [1500, 195],
+      [2000, 212],
+      [2500, 228],
+      [3000, 240],
+      [3500, 250],
+      [4000, 255],
+      [4500, 252],
+      [5000, 247],
+      [5500, 240],
+      [6000, 234],
+      [6500, 215],
+      [7000, 190]
+    ],
+    "idle_rpm": 700.0,
+    "redline_rpm": 6800.0,
+    "rev_limit_rpm": 7000.0,
+    "inertia_kgm2": 0.16,
+    "engine_brake_nm": 28.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [3.592, 2.057, 1.361, 1.0, 0.821],
+    "final_drive": 4.363,
+    "reverse_ratio": 3.657,
+    "diff_front": "Open",
+    "diff_rear": "Open",
+    "clutch_max_nm": 360.0,
+    "shift_time_s": 0.45
+  },
+  "wheels": [
+    {
+      "position_m": [-0.74, 1.333, 0.306],
+      "radius_m": 0.306,
+      "width_m": 0.205,
+      "mass_kg": 20.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.593,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.014,
+      "toe_rad": 0.0,
+      "caster_rad": 0.096
+    },
+    {
+      "position_m": [0.74, 1.333, 0.306],
+      "radius_m": 0.306,
+      "width_m": 0.205,
+      "mass_kg": 20.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.593,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.014,
+      "toe_rad": 0.0,
+      "caster_rad": 0.096
+    },
+    {
+      "position_m": [-0.735, -1.333, 0.306],
+      "radius_m": 0.306,
+      "width_m": 0.205,
+      "mass_kg": 20.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0209,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.735, -1.333, 0.306],
+      "radius_m": 0.306,
+      "width_m": 0.205,
+      "mass_kg": 20.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0209,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 29500.0,
+      "damper_bump_ns_per_m": 2330.0,
+      "damper_rebound_ns_per_m": 4660.0,
+      "travel_m": 0.15,
+      "preload_m": 0.02,
+      "arb_n_per_m": 10000.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 29500.0,
+      "damper_bump_ns_per_m": 2330.0,
+      "damper_rebound_ns_per_m": 4660.0,
+      "travel_m": 0.15,
+      "preload_m": 0.02,
+      "arb_n_per_m": 10000.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 30300.0,
+      "damper_bump_ns_per_m": 2170.0,
+      "damper_rebound_ns_per_m": 4350.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 4600.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 30300.0,
+      "damper_bump_ns_per_m": 2170.0,
+      "damper_rebound_ns_per_m": 4350.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 4600.0,
+      "bump_stop_n_per_m": 150000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 2230.0,
+    "max_torque_rear_nm": 830.0,
+    "bias_front": 0.5,
+    "handbrake_rear_nm": 1440.0
+  },
+  "steering": {
+    "ratio": 15.5,
+    "rack_speed_rad_per_s": 1.4,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "nissan_skyline_r34_25gt",
+  "base_price": 20000,
+  "durability_class": 3,
+  "fuel_capacity_l": 65.0
+}
