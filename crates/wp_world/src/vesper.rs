@@ -5398,6 +5398,8 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
     net.terrain = Some(hf);
     net.covered = covered;
     net.features = features;
+    // Landmark places last: their plots are cut out of what is already there.
+    crate::places::add_place_buildings(&mut net, base.as_ref());
     let report = VesperReport {
         crossings,
         skipped_roads: g.skipped,

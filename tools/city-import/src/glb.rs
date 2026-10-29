@@ -15,7 +15,7 @@ use serde_json::json;
 use wp_world::geom::{self, V2, V3};
 use wp_world::map::CityMap;
 use wp_world::network::{
-    BridgeKind, Building, BuildingKind, DecorKind, DistrictKind, LaneKind, RoadMaterial,
+    BridgeKind, Building, BuildingKind, DecorKind, DistrictKind, LaneKind, PlacePart, RoadMaterial,
     RoadNetwork, StructureKind, SEA_LEVEL_M,
 };
 use wp_world::residential;
@@ -946,7 +946,28 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             bridge.quad(i0, o0, o1, i1, [0.0, 0.0, 1.0]);
         }
     }
-    for b in &net.buildings {
+    // Landmark places (`wp_world::places`): their own materials, made on first use.
+    let mut place: std::collections::BTreeMap<&'static str, Prim> = Default::default();
+    for b in net.buildings.iter().filter(|b| b.kind.is_place()) {
+        let (wm, rm) = match b.kind {
+            BuildingKind::HomeBarn => ("barn", "barn_roof"),
+            k => (place_building_material(k), "place_roof"),
+        };
+        if wm == "barn" {
+            house(&mut barn, &mut barn_roof, b);
+            continue;
+        }
+        let mut w = place
+            .remove(wm)
+            .unwrap_or_else(|| Prim::new(wm, place_colour(wm)));
+        let mut r = place
+            .remove(rm)
+            .unwrap_or_else(|| Prim::new(rm, place_colour(rm)));
+        house(&mut w, &mut r, b);
+        place.insert(wm, w);
+        place.insert(rm, r);
+    }
+    for b in net.buildings.iter().filter(|b| !b.kind.is_place()) {
         let (walls, r) = match b.kind {
             BuildingKind::Garage => (&mut garage, &mut roof),
             BuildingKind::Farm => (&mut barn, &mut barn_roof),
@@ -1009,6 +1030,12 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             StructureKind::Canopy | StructureKind::Pillar => &mut canopy,
             StructureKind::Landmark => &mut landmark,
             StructureKind::Truss => &mut steel,
+            StructureKind::Place(part) => {
+                let m = place_part_material(part);
+                place
+                    .entry(m)
+                    .or_insert_with(|| Prim::new(m, place_colour(m)))
+            }
         };
         prim.solid(&st.footprint, st.z0_m, st.z1_m);
     }
@@ -1050,9 +1077,101 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
         canopy,
         steel,
     ];
+    out.extend(place.into_values());
     out.extend(ground);
     out.retain(|p| !p.indices.is_empty());
     out
+}
+
+/// Wall material of a landmark place building kind ([`BuildingKind::is_place`]).
+fn place_building_material(k: BuildingKind) -> &'static str {
+    match k {
+        BuildingKind::Showroom => "place_showroom",
+        BuildingKind::Workshop => "place_workshop",
+        BuildingKind::Civic => "place_civic",
+        BuildingKind::LockUp => "place_lockup",
+        BuildingKind::Kiosk => "place_kiosk",
+        _ => "place_civic",
+    }
+}
+
+/// Material of a landmark place structure piece (`*_light` glow).
+fn place_part_material(p: PlacePart) -> &'static str {
+    const PAINTS: [&str; 7] = [
+        "place_car_red",
+        "place_car_blue",
+        "place_car_silver",
+        "place_car_yellow",
+        "place_car_green",
+        "place_car_black",
+        "place_car_police",
+    ];
+    const FLAGS: [&str; 4] = [
+        "place_flag_red",
+        "place_flag_white",
+        "place_flag_blue",
+        "place_flag_yellow",
+    ];
+    match p {
+        PlacePart::Frame => "place_frame",
+        PlacePart::Glass => "place_glass_light",
+        PlacePart::Window => "place_window",
+        PlacePart::Sign => "place_sign",
+        PlacePart::Lamp => "place_lamp_light",
+        PlacePart::BlueLamp => "place_blue_light",
+        PlacePart::RedLamp => "place_red_light",
+        PlacePart::Door => "place_door",
+        PlacePart::BarnDoor => "place_barn_door",
+        PlacePart::BayLight => "place_bay_light",
+        PlacePart::Dark => "place_dark",
+        PlacePart::Fence => "place_fence",
+        PlacePart::Wreck => "place_wreck",
+        PlacePart::CarBody(i) => PAINTS[usize::from(i) % PAINTS.len()],
+        PlacePart::CarGlass => "place_car_glass",
+        PlacePart::Wheel => "place_wheel",
+        PlacePart::Flag(i) => FLAGS[usize::from(i) % FLAGS.len()],
+    }
+}
+
+/// Base colour of a landmark place material (the testbed's low-poly palette restyles the
+/// unlit ones; `*_light` glow in this colour).
+fn place_colour(m: &str) -> [f32; 4] {
+    let c = match m {
+        "place_showroom" => [0.20, 0.22, 0.26],
+        "place_workshop" => [0.36, 0.40, 0.46],
+        "place_civic" => [0.62, 0.60, 0.56],
+        "place_lockup" => [0.42, 0.33, 0.27],
+        "place_kiosk" => [0.80, 0.80, 0.76],
+        "place_roof" => [0.22, 0.23, 0.26],
+        "place_frame" => [0.16, 0.17, 0.19],
+        "place_glass_light" => [0.50, 0.74, 0.92],
+        "place_window" => [0.10, 0.14, 0.22],
+        "place_sign" => [0.08, 0.09, 0.12],
+        "place_lamp_light" => [1.0, 0.86, 0.62],
+        "place_blue_light" => [0.15, 0.35, 1.0],
+        "place_red_light" => [1.0, 0.12, 0.10],
+        "place_door" => [0.52, 0.54, 0.56],
+        "place_barn_door" => [0.86, 0.84, 0.78],
+        "place_bay_light" => [1.0, 0.80, 0.52],
+        "place_dark" => [0.05, 0.05, 0.06],
+        "place_fence" => [0.40, 0.42, 0.40],
+        "place_wreck" => [0.38, 0.26, 0.20],
+        "place_car_red" => [0.62, 0.10, 0.10],
+        "place_car_blue" => [0.12, 0.25, 0.55],
+        "place_car_silver" => [0.70, 0.72, 0.75],
+        "place_car_yellow" => [0.85, 0.62, 0.12],
+        "place_car_green" => [0.15, 0.40, 0.25],
+        "place_car_black" => [0.08, 0.08, 0.09],
+        "place_car_police" => [0.88, 0.88, 0.90],
+        "place_car_glass" => [0.07, 0.09, 0.13],
+        "place_wheel" => [0.05, 0.05, 0.05],
+        "place_flag_red" => [0.75, 0.12, 0.12],
+        "place_flag_white" => [0.90, 0.90, 0.88],
+        "place_flag_blue" => [0.12, 0.28, 0.70],
+        "place_flag_yellow" => [0.90, 0.70, 0.15],
+        _ => [0.5, 0.5, 0.5],
+    };
+    [c[0], c[1], c[2], 1.0]
 }
 
 /// Paving per node for its junction patch: gravel or dirt when every road meeting there is

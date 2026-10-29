@@ -116,8 +116,9 @@ mod tests {
             // highway edge barriers (row 160). The base64 preview is 14.05 MB, under the
             // 15 MB preview cap. 12.26 MB with the road-band terrain drawn from the fine grid
             // (row 172); the browser loads the parts (`greybox_parts.rs` keeps each under the
-            // preview cap: vesper_v2.own 7.61 MB), not this monolithic file.
-            shipped.len() < 12_500_000,
+            // preview cap: vesper_v2.own 7.61 MB), not this monolithic file. 12.64 MB with the
+            // landmark place buildings (2026-10-29; shared part 4.83 → 5.00 MB).
+            shipped.len() < 12_750_000,
             "greybox grew to {} bytes",
             shipped.len()
         );
@@ -152,8 +153,8 @@ mod tests {
             "ashpeak.greybox.b64.txt is shipped again: the parts replace it (`just city-ashpeak`)"
         );
         // About four times Port Vesper's area on a 16 m drawn ground (24.9 MB at first; 30.2 MB
-        // with the barrel cushions, buried Loop 9 tunnel and ground seam fixes of 2026-10-28).
-        // The browser loads the county parts (`greybox_parts.rs` keeps each under the cap).
+        // with the barrel cushions, buried Loop 9 tunnel and ground seam fixes of 2026-10-28;
+        // 30.5 MB with the landmark place buildings of 2026-10-29). The browser loads the county parts (`greybox_parts.rs` keeps each under the cap).
         assert!(
             shipped.len() < 32_000_000,
             "ashpeak greybox grew to {} bytes",
