@@ -4,7 +4,7 @@
 
 | Class | Archetype | Durability | Base price |
 |---|---|---|---|
-| Sport | Nissan Skyline GT-R (BNR34), 1999-2002: RB26DETT 2.6 L twin-turbo I6, ATTESA E-TS AWD, Getrag 6-speed manual | 3 / 5 | 60,000 |
+| Sport | Nissan Skyline GT-R (BNR34), 1999-2002: RB26DETT 2.6 L twin-turbo I6, ATTESA E-TS AWD, Getrag 6-speed manual | 3 / 5 | 58,000 |
 
 ## Design note
 
