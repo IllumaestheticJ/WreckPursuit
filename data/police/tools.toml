@@ -9,7 +9,8 @@ max_ahead_m = 700.0
 min_sight_m = 120.0
 units = [2, 3]
 barrier_half_extents_m = [1.2, 0.3, 0.5]
-barrier_mass_kg = 400.0
+# Light water-filled plastic sections that a car shoves aside (owner 2026-10-29).
+barrier_mass_kg = 120.0
 unit_mass_kg = 1700.0
 lifetime_s = 90.0
 # Never on highways when the wanted level is above this.

@@ -453,8 +453,9 @@ export class SceneView {
   }
 
   /**
-   * Draw roadblock barriers from police_tools() as red/white striped boxes with a flashing amber
-   * lamp. Their pose follows the physics body, so they visibly move when hit. Spike strips in
+   * Draw roadblock barriers from police_tools() as orange/white water-filled plastic sections
+   * with a flashing amber lamp. They are light dynamic bodies and their pose follows the
+   * physics body, so they get shoved aside when hit. Spike strips in
    * the same list are skipped: render/police_tools.ts already draws them (from map_dynamic()).
    */
   updatePoliceTools(tools: Float32Array, timeS: number): void {
@@ -470,8 +471,8 @@ export class SceneView {
     this.updateBarricades(tools, barricades, pieces, timeS);
     while (this.toolPool.length < barriers.length) {
       const barrier = new THREE.Group();
-      const white = new THREE.MeshStandardMaterial({ color: 0xf2f2f2 });
-      const red = new THREE.MeshStandardMaterial({ color: 0xd01818 });
+      const white = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.6 });
+      const red = new THREE.MeshStandardMaterial({ color: 0xf26a10, roughness: 0.6 });
       // Unit box scaled to the barrier size; the red bands are its children so they scale too.
       const body = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), white);
       for (let k = 0; k < 5; k += 2) {

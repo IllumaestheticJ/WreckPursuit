@@ -2,8 +2,11 @@
 //!
 //! `wp_police` plans roadblocks and spike strips; this module makes roadblocks solid (owner,
 //! 2026-10-28: "roadblocks completely block the road"). Every barrier of an active roadblock
-//! (`PoliceSystem::roadblocks`) becomes a fixed Rapier box: the barrier line runs from wall to
-//! wall (or barrier to barrier) with overlapping boxes, so no car squeezes through it. Its one
+//! (`PoliceSystem::roadblocks`) becomes a Rapier box: the barrier line runs from wall to
+//! wall (or barrier to barrier) with overlapping boxes, so no car squeezes through it untouched.
+//! The barriers are light water-filled plastic sections (owner, 2026-10-29: "the roadblock
+//! k-rail is completely immovable", answered "light, easy to push"): dynamic bodies of the
+//! configured `barrier_mass_kg` that a car shoves aside, paying in speed and damage. Its one
 //! gap holds a wooden sawhorse barricade, also fixed until a car reaches it at
 //! [`BARRICADE_BREAK_MPS`] or faster: then it breaks into [`BARRICADE_PIECES`] loose timber
 //! pieces (dynamic, together [`wp_police::tools::BARRICADE_MASS_KG`]) that the car smashes
@@ -56,7 +59,7 @@ pub struct ProbeFilter {
 /// What a roadblock body is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolPart {
-    /// Solid barrier (fixed).
+    /// Light plastic barrier section (dynamic: a car shoves it aside).
     Barrier,
     /// The intact wooden barricade in the gap (fixed until broken).
     Barricade,
@@ -178,8 +181,9 @@ impl Sim {
         }
     }
 
-    /// A box body for `b`: fixed for barriers and the intact barricade, dynamic (with `b`'s
-    /// mass) for a loose piece.
+    /// A box body for `b`: fixed for the intact barricade, dynamic (with `b`'s mass) for a
+    /// barrier section or a loose piece. Barriers use continuous collision so a fast car
+    /// cannot pass through a thin light section in one step.
     fn insert_tool_box(
         &mut self,
         b: &wp_police::StaticCollider,
@@ -192,16 +196,19 @@ impl Sim {
             Vector::from_array(b.pos),
             Rotation::from_xyzw(0.0, 0.0, s, c),
         );
-        let builder = if part == ToolPart::Piece {
-            RigidBodyBuilder::dynamic()
-        } else {
-            RigidBodyBuilder::fixed()
+        let builder = match part {
+            ToolPart::Piece => RigidBodyBuilder::dynamic(),
+            ToolPart::Barrier => RigidBodyBuilder::dynamic()
+                .ccd_enabled(true)
+                .linear_damping(0.3)
+                .angular_damping(0.6),
+            ToolPart::Barricade => RigidBodyBuilder::fixed(),
         };
         let body = self.physics.bodies.insert(builder.pose(pose).build());
         let [hx, hy, hz] = b.half_extents_m;
         let col = ColliderBuilder::cuboid(hx, hy, hz)
             .mass(b.mass_kg.max(1.0))
-            .friction(if part == ToolPart::Barrier { 0.7 } else { 0.5 })
+            .friction(0.5)
             .restitution(0.05)
             .build();
         self.physics
