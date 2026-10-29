@@ -5,6 +5,50 @@
 - **Crates / folders owned:** `data/cars/` (roster files); vehicle-models wave 1: multi-model hooks in `wp_sim::{police_link,traffic_link}`, `wp_world::{lib,traffic}`, `wp_wasm`, `apps/simcli/src/run.rs`, `data/lattices/` (roster car files, not the generator), `tools/specsheet/`; round 8: `data/tires/` edits the lead assigned to H (`PaintedLine`, `treaded`)
 - **Contract version built against:** 0.4.0 (wave 3)
 
+## Car overhaul (2026-10-29) — Nissan Skyline R34 family (real names)
+
+Owner decision: real makes, models and trims (`data/cars/README.md` "Naming policy"). Four
+trims of one model, full pipeline (inputs → VehicleDef + spec sheet + lattice, panels, sim
+validation, 8-barrier sweep, smoke-sim determinism in both modes, audio def, menu stats, AI
+capability row). Meshes are the mesh agent's (not generated here). Owner defaults: real-world
+engine output (rated figure listed in each sheet), no 180 km/h limiter. Every input number has a
+provenance tag in `roster_inputs.py` ([S] sourced, [S?] weak, [R] recalled, [E] estimate).
+
+| Id | Mass (sim) | Engine (real-world) | Layout | 0-100 sim / real | Vmax sim / real | Skidpad sim / est. | 100-0 | Barriers | Price |
+|---|---|---|---|---|---|---|---|---|---|
+| `nissan_skyline_r34_25gt` | 1391 kg | RB25DE 147 kW / 255 N·m (×1.00) | RWD, open | 8.25 s / ≈8.0 [E] | 219 / ≈220 [E] | 0.81 / 0.80-0.85 [E] | 38.5 m | 8/8 | 20 000 |
+| `nissan_skyline_r34_25gt_t` | 1471 kg | RB25DET 216 kW / 360 N·m (×1.05 on 206 kW rated) | RWD, clutch LSD (viscous) | 6.70 s / ≈6.2 [S?] | 254 / ≈245 [R] | 0.92 / — | 35.5 m | 8/8 | 30 000 |
+| `nissan_skyline_r34_gtr` | 1591 kg | RB26DETT 239 kW / 439 N·m (×1.12 on 206 kW rated) | AWD 30 % front, rear LSD | 5.15 s / 4.9-5.2 [S6] | 252 / 250-265 [R] | 0.92 / ≈0.95 [E] | 35.3 m | 8/8 | 60 000 |
+| `nissan_skyline_r34_gtr_vspec2` | 1611 kg | as GT-R | AWD 30 % front, stronger rear LSD | 5.18 s / 4.9 [S6] | 251 / 250-260 [R] | 0.93 / ≈0.95 [E] | 35.3 m | 8/8 | 68 000 |
+
+¼ mile (pursuit_probe): GT-R 13.6 s @ 166 km/h vs 13.1 s real (V-Spec test [S6]).
+Tuning done on inputs only: GT-R roll-stiffness front share 0.60 → 0.54 (V-Spec II 0.58 → 0.52)
+for the skidpad. Physics untouched.
+
+Approximations (documented in the spec sheets):
+- **ATTESA E-TS** (rear-primary, up to 50 % front when the rears slip) is a fixed 30 % front
+  `Awd` split: `AwdOnDemand` is front-primary (closes when the *fronts* out-spin the rears), so it
+  cannot express it. Request #11 below.
+- **V-Spec II Active LSD** = clutch LSD with higher preload/power ramp (140 N·m, 0.55 / 0.25).
+- **Aluminium bonnet + front wings** (GT-R): new lattice knob `fenders="aluminum"`.
+  **Carbon bonnet** (V-Spec II): no carbon material, so `hood_mass_scale = 0.55` on the
+  detachable bonnet only (request below).
+- Super-HICAS rear steer is not modelled (no contract field).
+
+Tools changes: `build_roster.py` light-panel knobs (`fenders`, `hood_mass_scale`);
+`specsheet.py` real-figure targets. `validation_results.json`: only the four new entries were
+added (a full `collect_results.py` run also drifts the older cars' numbers on the current build;
+those were left as they were). Same for `data/stats/cars.json` and the capability table: rows
+added for the new ids only.
+
+New requests:
+- Contract #11: rear-primary on-demand AWD (`AwdOnDemand` with a `primary: Rear` flag, or an
+  `AwdRearOnDemand` layout: base split 0 % front, closes on rear-over-front slip, up to 50 %).
+  Then the GT-Rs switch from the fixed 30 % split.
+- Data (03): `data/materials/cfrp.json` (carbon panels: stiff, brittle, cracks instead of
+  denting) for the V-Spec II bonnet and later carbon parts.
+- Contract (deferred): rear-wheel steer (Super-HICAS) as an optional steering field.
+
 ## Wave 3 (2026-10-23, owner request) — 4 supercars, 3 race cars, 2 rally-raid / pre-runner
 
 Owner request: "add 4 more highly detailed supercars, 3 dedicated race cars, and 2 rally raid /
@@ -868,6 +912,7 @@ Decisions are in "Lead feedback" below; status updated here.
 | 8 | `fuel_capacity_l` | applied in v0.2.0; set on all 17 cars |
 | 9 | `VehicleClass::Van` (and/or a `Civilian` flag) — the cargo van and the compact pickup are traffic cars filed as `Truck`; economy/race class brackets and traffic selection should not treat them like the Hauler. | **new (round 6b)** |
 | 10 | `VehicleClass::Race` + `VehicleClass::Offroad` — race cars are filed as `Exotic`, the rally-raid car and pre-runner as `Truck` (wave 3). | **new (wave 3)** |
+| 11 | Rear-primary on-demand AWD (ATTESA E-TS: 0 % front until the rears slip, up to 50 %) — `AwdOnDemand` is front-primary only; the R34 GT-Rs use a fixed 30 % front split meanwhile. | **new (car overhaul, 2026-10-29)** |
 
 Non-contract data request: `data/materials/uhss.json` (03) — 2010s cabins still use gen-lattice's HSS.
 
