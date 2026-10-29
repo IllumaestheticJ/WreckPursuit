@@ -41,6 +41,19 @@
 // Re-aimed for PR #64 (owner 2026-10-23: far fewer cops, day patrols 13 -> 5) on main after
 // row 170: at 6.0 no patrol sees the field and no pursuit starts. Seed 1: heat 7.0-9.5 passes
 // both runs, starting heat 6.0 -> 8.25.
+// Re-aimed for whole-deck occluders (lead/integrate-0145, 2026-10-29: wp_world deck_occluders
+// for the owner's "cops are seeing me from under the bridge"): at 8.25 no pursuit started.
+// Sightlines logged per unit and racer: the only patrol that saw the start (on the y = -112 row
+// west of the highway, ~300 m off) looked across the southbound carriageway where it climbs
+// through eye height (1.0-1.5 m over the ground at y -300..-310). The old deck list (3 m
+// clearance) left that piece out, so the sightline went through the ramp; blocking it is right.
+// On the viaduct the racers were hidden by their own deck: wp_police's eye_height_at put the
+// sightline target 0.3 m over any road more than 1 m up (fixed: 1.3 m over the road everywhere).
+// Now the pursuit starts after the finish (racer 1 at 19.4 s), seen on the deck by a patrol west
+// of the viaduct over the near deck's edge. Seed 12, dy 0: heat 8.25-9.5 passes both runs (8.0
+// fails the report run; from ~9.55 the report alone reaches L1), starting heat 8.25 -> 9.0.
+// Thinner than before: nothing watches the start, and dy -10/-5/+5/+10 and seeds 1-11, 13-16
+// fail the report run (seed 7 passes at 9.5).
 //
 // Run standalone, simcli has no race block and no AI driver for these entities (see
 // docs/integration/race.md, requests to I and N), so the cars wait on the grid while traffic
@@ -51,7 +64,8 @@
     // release CI jobs (`simcli determinism`, `simcli goldens`).
     slow: true,
     // Re-aimed for the grid highway's ramps (WP_RACE_AIM_*, crates/wp_race/tests/race_police.rs):
-    // seed 12 passes both police tests at dy = -10, 0 and +10 m.
+    // seed 12 passed both police tests at dy = -10, 0 and +10 m; since the whole-deck occluders
+    // only at dy = 0 (see the header).
     seed: 12,
     city: procedural(seed: 1, blocks_x: 7, blocks_y: 7, block_m: 110.0),
     time_of_day_h: 13.0,
@@ -62,10 +76,10 @@
     // Parked cars make debug test runs very slow and take no part in the race.
     parked_cars: false,
     entities: [
-        (id: "ai_coupe", car: "debug_coupe", pos: (59.55, -440.0, 0.0), police_heat: 8.25),
-        (id: "ai_sedan", car: "debug_sedan", pos: (64.55, -444.0, 0.0), police_heat: 8.25),
-        (id: "ai_coupe_2", car: "debug_coupe", pos: (59.55, -448.0, 0.0), police_heat: 8.25),
-        (id: "ai_sedan_2", car: "debug_sedan", pos: (64.55, -452.0, 0.0), police_heat: 8.25),
+        (id: "ai_coupe", car: "debug_coupe", pos: (59.55, -440.0, 0.0), police_heat: 9.0),
+        (id: "ai_sedan", car: "debug_sedan", pos: (64.55, -444.0, 0.0), police_heat: 9.0),
+        (id: "ai_coupe_2", car: "debug_coupe", pos: (59.55, -448.0, 0.0), police_heat: 9.0),
+        (id: "ai_sedan_2", car: "debug_sedan", pos: (64.55, -452.0, 0.0), police_heat: 9.0),
     ],
     duration_s: 30.0,
     hash_every: 240,

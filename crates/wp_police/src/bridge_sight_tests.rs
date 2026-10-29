@@ -19,9 +19,6 @@ use crate::{PoliceConfig, PoliceSetup, PoliceSystem, RacerView, UnitId, UnitSync
 
 type V3 = [f32; 3];
 
-/// Chassis position above the road surface (as `wp_sim` reports it), m.
-const CHASSIS_M: f32 = 0.5;
-
 /// A point counts as on the bridge when its road is at least this above the terrain, m (the
 /// bridge's ends too, not only where a car fits under).
 const ON_BRIDGE_M: f32 = 1.5;
@@ -156,7 +153,7 @@ fn sync(p: &mut PoliceSystem, id: UnitId, at: V3, heading: [f32; 2]) {
     p.sync_unit(
         id,
         UnitSync {
-            pos: [at[0], at[1], at[2] + CHASSIS_M],
+            pos: at,
             vel: [0.0; 3],
             heading,
             health: 1.0,
@@ -171,7 +168,7 @@ const RACER: EntityId = EntityId(3);
 fn run(p: &mut PoliceSystem, world: &World, at: V3, secs: f32) -> bool {
     let view = RacerView {
         entity: RACER,
-        pos: [at[0], at[1], at[2] + CHASSIS_M],
+        pos: at,
         vel: [0.0; 3],
     };
     let mut out = Vec::new();
@@ -183,7 +180,7 @@ fn run(p: &mut PoliceSystem, world: &World, at: V3, secs: f32) -> bool {
 
 /// The world's sightline between the eyes of two cars parked at road points `a` and `b`.
 fn eyes_see(world: &World, a: V3, b: V3) -> bool {
-    let eye = |q: V3| [q[0], q[1], crate::eye_height_at(q[2] + CHASSIS_M)];
+    let eye = |q: V3| [q[0], q[1], crate::eye_height_at(q[2])];
     wp_contracts::WorldQuery::line_of_sight(world, eye(a), eye(b))
 }
 
@@ -322,25 +319,20 @@ fn kinematic_units_take_their_height_from_the_road_they_drive() {
     let c = &crossings[0];
     let s = spots(world, c);
     let p = police(world);
-    let chassis = crate::KINEMATIC_CHASSIS_Z_M;
     // Along the upper road at the crossing: the deck; along the lower road: under it.
     let lower_dir = normalize(sub(xy(s.lower_open), c.pos));
     let on_deck = p.kinematic_alt(c.pos, s.upper_dir, 0.0).unwrap();
     let under = p.kinematic_alt(c.pos, lower_dir, 0.0).unwrap();
     assert!(
-        (on_deck - (s.deck[2] + chassis)).abs() < 0.3,
+        (on_deck - s.deck[2]).abs() < 0.3,
         "{on_deck} vs {:?}",
         s.deck
     );
-    assert!(
-        (under - (s.under[2] + chassis)).abs() < 0.3,
-        "{under} vs {:?}",
-        s.under
-    );
+    assert!((under - s.under[2]).abs() < 0.3, "{under} vs {:?}", s.under);
     // A unit spawned on the deck starts there (no body yet), not at z = 0.
     let mut p = police(world);
     let i = p.spawn_unit(UnitKind::Car, UnitRole::Reinforcement, c.pos, s.upper_dir);
-    assert!((p.units[i].body.alt_m - (s.deck[2] + chassis)).abs() < 0.3);
+    assert!((p.units[i].body.alt_m - s.deck[2]).abs() < 0.3);
 }
 
 #[test]
@@ -374,4 +366,69 @@ fn hiding_under_the_deck_lets_heat_decay() {
         "heat {start_heat} -> {}",
         r.heat
     );
+}
+
+/// The procedural 7×7 grid the city race scenarios run on (its highway is a divided viaduct,
+/// deck at ~7.9 m), with no parked cars.
+fn grid() -> &'static World {
+    static CITY: OnceLock<World> = OnceLock::new();
+    CITY.get_or_init(|| {
+        let net = wp_world::procgen::generate(&wp_world::procgen::ProcGenConfig {
+            nx: 7,
+            ny: 7,
+            ..Default::default()
+        });
+        let cfg = WorldConfig {
+            start_time: TimeOfDay::from_hours(13.0),
+            parked_cars: false,
+            ..WorldConfig::default()
+        };
+        World::new(net, cfg)
+    })
+}
+
+#[test]
+fn a_car_on_the_grid_viaduct_shows_over_its_deck_edge_and_hides_under_it() {
+    let world = grid();
+    let deck = |p: [f32; 2]| on_road(world, p, 100.0);
+    let ground = |p: [f32; 2]| on_road(world, p, -100.0);
+    // The northbound carriageway (centre x = 62) is on the deck here, the row under it at grade.
+    let row_y = -110.0;
+    assert!(deck([62.0, row_y])[2] > 7.0);
+    assert!(
+        ground([55.0, row_y])[2].abs() < 0.5,
+        "a street under the viaduct"
+    );
+    // Cars in the northbound carriageway (where race_city_sprint_police's racers drive on after
+    // the finish) against ground cops east of the viaduct along the row under it and in the
+    // streets to the north-east and far north-west (sightlines from that scenario's run). The
+    // car's roof shows over the deck edge. With the eye 0.3 m over the deck (the old
+    // `eye_height_at` dead band) its own deck hid it from every one of these.
+    let seen = [
+        ([120.0, row_y], [66.0, row_y]),
+        ([160.0, row_y], [65.7, row_y - 20.0]),
+        ([98.9, 111.8], [66.6, -25.7]),
+        ([104.2, 111.8], [67.0, -32.6]),
+        ([129.0, 111.8], [62.8, -86.3]),
+        ([-160.4, 157.9], [69.0, -62.0]),
+        ([-113.1, 110.6], [65.0, -3.5]),
+    ];
+    for (cop, car) in seen {
+        let (cop, car) = (ground(cop), deck(car));
+        assert!(eyes_see(world, cop, car), "cop {cop:?} car {car:?}");
+        assert!(eyes_see(world, car, cop), "car {car:?} cop {cop:?}");
+    }
+    // A car on the row right under the deck: hidden from cops anywhere on the viaduct around
+    // it, both carriageways, and it does not see them.
+    for car_x in [50.0, 55.0, 60.0] {
+        let car = ground([car_x, row_y]);
+        for along in [-40.0, -25.0, -12.0, 0.0, 12.0, 25.0, 40.0] {
+            for lane_x in [44.3, 48.0, 51.7, 58.3, 62.0, 65.7] {
+                let cop = deck([lane_x, row_y + along]);
+                assert!(cop[2] > 7.0, "on the viaduct: {cop:?}");
+                assert!(!eyes_see(world, cop, car), "cop {cop:?} car {car:?}");
+                assert!(!eyes_see(world, car, cop), "car {car:?} cop {cop:?}");
+            }
+        }
+    }
 }

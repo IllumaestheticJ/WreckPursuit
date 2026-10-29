@@ -94,17 +94,16 @@ pub(crate) const CAMERA_MAST_M: f32 = 6.0;
 /// Height of a driver's eyes / a car's roof for line-of-sight queries, m.
 pub const EYE_HEIGHT_M: f32 = 1.3;
 
-/// Eye (or sightline target) height for a vehicle whose chassis is at height `z`, m:
-/// [`EYE_HEIGHT_M`] on flat ground, following the car up on terrain and onto bridge decks,
-/// and down into cuttings below z = 0 (an underpass: a fixed 1.3 m there sat above the deck
-/// overhead).
+/// Eye (or sightline target) height for a vehicle whose position is at height `z`, m:
+/// [`EYE_HEIGHT_M`] above it everywhere, on flat ground, on terrain, on bridge decks and down
+/// in cuttings. A vehicle's position is its chassis origin, which sits on the road under it
+/// (contract chassis space: the ground-plane projection of the reference point), so `z` is the
+/// road height. (Was `EYE_HEIGHT_M + (z - 1).max(0) + z.min(0)`, a dead band for z in 0..1 m
+/// that put the eye only 0.3 m above any road higher than 1 m: a car on a viaduct deck hid
+/// behind its own deck's edge from every observer below it.)
 pub(crate) fn eye_height_at(z: f32) -> f32 {
-    EYE_HEIGHT_M + (z - 1.0).max(0.0) + z.min(0.0)
+    EYE_HEIGHT_M + z
 }
-
-/// Chassis height above the road of a ground unit driven kinematically (no body yet), m:
-/// about where a synced unit's chassis position ([`UnitSync::pos`]) sits.
-pub(crate) const KINEMATIC_CHASSIS_Z_M: f32 = 0.5;
 
 /// What the police system sees of a racer each tick.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -969,19 +968,17 @@ impl PoliceSystem {
             )
     }
 
-    /// Chassis height of a kinematically driven ground unit at `pos` heading along `heading`:
-    /// the road it drives along (not one crossing above or below it), nearest its last height
-    /// `alt_m`, plus [`KINEMATIC_CHASSIS_Z_M`]. `None` without city geometry (flat cities keep
-    /// z = 0).
+    /// Height of a kinematically driven ground unit at `pos` heading along `heading`: the road
+    /// it drives along (not one crossing above or below it), nearest its last height `alt_m`.
+    /// That is where a synced unit's position ([`UnitSync::pos`], the chassis origin on the
+    /// road) sits too. `None` without city geometry (flat cities keep z = 0).
     pub(crate) fn kinematic_alt(
         &self,
         pos: [f32; 2],
         heading: [f32; 2],
         alt_m: f32,
     ) -> Option<f32> {
-        self.section
-            .road_z(pos, heading, alt_m - KINEMATIC_CHASSIS_Z_M)
-            .map(|z| z + KINEMATIC_CHASSIS_Z_M)
+        self.section.road_z(pos, heading, alt_m)
     }
 
     pub(crate) fn unit_index(&self, id: UnitId) -> Option<usize> {

@@ -2063,3 +2063,49 @@ Branch `lead/police-bridge-los`. Police perception and the LOS query only (physi
   diverged chase. It reproduces with the old deck list, so it is the changed police behaviour
   sending the chase another way, not the occluders. Same class as the row 84 gap-acceptance case
   in that scenario's notes. The bound is unchanged.
+
+### Follow-up (lead, 2026-10-29): `city_sprint_pulls_in_police` saw no pursuit
+
+After `deck_occluders` and the camera mast (8263a68f), `wp_race`'s `city_sprint_pulls_in_police`
+failed: every entrant ended at heat 8.7 and nothing witnessed the speeding. The race runs up the
+procedural 7×7 grid's divided viaduct (northbound carriageway, x ≈ 60-69, y -437 → -230).
+
+**Instrumented** (every unit → racer sightline in range, its view cone and `sees_at`, and the deck
+piece that blocked it):
+- **The start (physically right).** The only patrol that saw the field before (old deck list)
+  was a unit on the y ≈ -112 row west of the highway, ~300 m away. Its sightline crossed the
+  *southbound* carriageway where that climbs through eye height: the piece at y -300..-310 is
+  1.0-1.5 m over the ground. `deck_slabs` (≥ 3 m clearance) left it out, so the sightline went
+  through the ramp. A road at eye height is a wall; the new list is right to block it.
+- **On the viaduct (a bug).** After the finish the racers drive on along the deck in plain view of
+  patrols north-east and north-west of it, yet `sees_at` said no: `eye_height_at(z)` was
+  `1.3 + (z - 1).max(0) + z.min(0)`. A vehicle's position is its chassis origin, which sits on the
+  road (contract chassis space; `wp_sim` reports `VehicleState::pos`, z = 0.00 on flat ground,
+  7.90 on the 7.9 m deck). So on any road more than 1 m up the eye / target point was only 0.3 m
+  over the road, and the racer's own deck edge hid it from every observer below. Not the ramps,
+  the sidewalk/edge widening, the twin-deck seam or unit heights (physical units sync road-level
+  z; none drives the viaduct in this run).
+
+**Fix (`wp_police`, perception only).**
+- `eye_height_at(z) = EYE_HEIGHT_M + z` everywhere (unchanged on flat ground at z = 0 and below 0).
+- `kinematic_alt` returns the road height (dropped `KINEMATIC_CHASSIS_Z_M` = 0.5: a synced unit's
+  position is on the road too, so kinematic units' eyes sat 0.5 m higher than physical ones').
+- `bridge_sight_tests` place cars at the road height (was road + 0.5 m) and gain
+  `a_car_on_the_grid_viaduct_shows_over_its_deck_edge_and_hides_under_it`: 7 ground ↔ deck
+  sightlines from the race run seen both ways (all hidden with the old eye height), and a car
+  on the row under the viaduct hidden from 126 cop spots on both decks, both ways.
+  All owner-bug tests (`bridge_sight_tests`, `wp_world/tests/bridge_los.rs`) still pass.
+
+**Scenarios.**
+- `race/city_sprint_police.ron`: passes again at seed 12; the pursuit now starts after the finish
+  (racer 1, 19.4 s) from a patrol west of the viaduct whose sightline clears the near deck's edge
+  by millimetres. Seed 12, dy 0: starting heat 8.25-9.5 passes both runs (8.0 fails the report
+  run; from ~9.55 the report alone reaches L1, which is not this test's story), 8.25 → 9.0.
+  Thinner than before: dy ±5/±10 and seeds 1-11, 13-16 fail the report run (seed 7 passes at
+  9.5). Nothing watches the start any more; moving the race or a patrol so the start is in view
+  would make it robust again (open for the lead).
+- `police/tunnel_escape_founders_cut{,_control}.ron`: seed 64's main run became a capture
+  (137.6 s). Seeds 50-72: escape story on 8 of 23, control captured on all 8; re-seeded 64 → 60.
+- `jam/pursuit_jam_vesper.ron`: 47.7 s stop (kinematic civilian Obstructed behind a standing
+  civilian for ~34 s, no go-around); bound 46 → 48 s, wp_world follow-up as in its notes.
+- Goldens re-blessed in a separate `[bless]` commit (list there).
