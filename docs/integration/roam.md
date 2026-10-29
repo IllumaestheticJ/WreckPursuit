@@ -35,6 +35,11 @@
 - `Session` attaches `roam::RoamRun` when it sees `roam_*` entities: inputs logged live (so
   replays and crash replays play them back without the AI), stranded/wrecked roamers (30 s,
   ≥ 150 m from the player) rescued with the replay ops `ResetAt { repair: true }` + `Ghost`.
+  Since lead/car-popin (owner report "cars also render in free roam too close") a roamer is
+  only rescued while the player cannot see it (`wp_world::World::in_player_view`: 320 m all
+  round, chase-camera line of sight within 1000 m), onto the first of 8 candidate slots the
+  player cannot see either (was: any slot ≥ 150 m away, in plain view or not). Street racers'
+  respawns and shift changes (`street.rs`) use the same rule. See `docs/integration/car-popin.md`.
 - Testbed: "free roam" button next to "city chase", `?roam=N` URL parameter.
 
 ## Needs

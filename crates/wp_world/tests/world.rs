@@ -473,11 +473,18 @@ fn spawns_respect_sightline_and_active_area() {
     // terminals and the short crossroads between them (lead/main-sync) keep one driving from
     // permit to permit for up to ~17 s.
     run(&mut w, 20.0, &mut ev);
-    let near_old = w
+    // Only cars the far player can see stay (lead/car-popin: 980 m away, straight down the
+    // grid's avenue, within `view_radius_m`): never despawned in view.
+    let near_old: Vec<[f32; 3]> = w
         .agents()
         .filter(|a| geom::dist(geom::xy(a.pos), [0.0, -330.0]) < 200.0)
-        .count();
-    assert_eq!(near_old, 0);
+        .map(|a| a.pos)
+        .collect();
+    assert!(
+        near_old.iter().all(|p| w.in_player_view(*p)),
+        "cars left out of view: {near_old:?}"
+    );
+    assert!(near_old.len() <= 8, "{} cars left", near_old.len());
     assert!(w
         .agents()
         .any(|a| geom::dist(geom::xy(a.pos), [0.0, 650.0]) < active + 60.0));
@@ -550,6 +557,10 @@ fn cars_near_the_player_are_physical_with_the_cap_full_elsewhere() {
             traffic: TrafficConfig {
                 density_scale: 4.0,
                 max_physical: 4,
+                // Physical LOD priority, not spawning: the radius-only spawn rule keeps cars
+                // spawning on the player's long straight row (with the line-of-sight veto
+                // none came within 25 m on this seed, lead/car-popin).
+                view_radius_m: 0.0,
                 ..Default::default()
             },
             ..Default::default()

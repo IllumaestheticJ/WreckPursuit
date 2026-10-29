@@ -12,3 +12,5 @@ data/city/vesper_v2.road.json
 # Ashpeak's road data is generated in memory too (World::ashpeak); `just city-ashpeak`.
 data/city/ashpeak.road.bin
 data/city/ashpeak.road.json
+# Raw frames of apps/testbed-web/e2e/popin_shots.mjs (composed into docs/media/popin/*.png)
+docs/media/popin/raw/

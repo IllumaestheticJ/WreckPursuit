@@ -212,8 +212,11 @@ const STREET_SEED_SALT: u64 = 0x057E_E7AC;
 const RECHALLENGE_TICKS: u64 = 20 * 240;
 /// A roaming racer standing still this long is stuck (45 s; a red light is far shorter).
 const STUCK_TICKS: u64 = 45 * 240;
-/// Wrecked or stuck racers are repaired and moved only this far from the player, m.
+/// Wrecked or stuck racers are repaired and moved only this far from the player, m, and only
+/// where the player cannot see them go or come out ([`out_of_view`]).
 const RESPAWN_OUT_OF_SIGHT_M: f32 = 150.0;
+/// Tries at a pose the player cannot see before a move waits for a later tick.
+const HIDDEN_POSE_TRIES: usize = 8;
 /// An unanswered offer lapses after this many ticks (2 min).
 const OFFER_TIMEOUT_TICKS: u64 = 120 * 240;
 
@@ -969,6 +972,14 @@ fn field_on(
 }
 
 /// Horizontal position of a vehicle.
+/// Whether a racer at `q` (road height) can appear or vanish there without the player seeing
+/// it: at least [`RESPAWN_OUT_OF_SIGHT_M`] from the player at `p` and out of every player's view
+/// by the traffic rule (`wp_world::World::in_player_view`: 320 m all round, line of sight
+/// within 1000 m; lead/car-popin, owner report "cars render in free roam too close").
+fn out_of_view(sim: &Sim, p: [f32; 2], q: [f32; 3]) -> bool {
+    dist(p, geom::xy(q)) >= RESPAWN_OUT_OF_SIGHT_M && !sim.world().in_player_view(q)
+}
+
 fn xy_of(sim: &Sim, id: EntityId) -> Option<[f32; 2]> {
     sim.vehicles()
         .iter()
@@ -1033,6 +1044,41 @@ fn decimate(points: &[[f32; 3]]) -> Vec<[f32; 2]> {
         }
     }
     out
+}
+
+/// Synthetic entity ids of the parked cars shown to a street race's AI ([`parked_obs`]):
+/// `PARKED_OBS_BASE + prop index`, far above any sim entity id and below
+/// `wp_contracts::WORLD_ENTITY`.
+const PARKED_OBS_BASE: u32 = 0xF000_0000;
+/// Parked cars within this distance of the racer are shown to its race AI, m (its look-ahead
+/// at full speed plus a margin).
+const PARKED_OBS_RANGE_M: f32 = 150.0;
+
+/// The world's parked cars within [`PARKED_OBS_RANGE_M`] of `near`, as standing vehicles for
+/// the race AI (lead/car-popin). The field only sees sim vehicles and civilians; without these
+/// a racer that ran wide towards the kerb at speed had nothing telling it a parked car stood
+/// there (Mara, night challenge on the grid: back from the opposing lane at 35 m/s, 1.3 m past
+/// her line into the parking lane, head-on into a parked car, out of the race). Beside the
+/// lane they are not in the racer's path and change nothing.
+fn parked_obs(sim: &Sim, near: [f32; 2], out: &mut Vec<VehicleObs>) {
+    for (i, p) in sim.world().static_props().enumerate() {
+        if p.kind != wp_world::props::PropKind::ParkedCar
+            || dist(geom::xy(p.pos), near) > PARKED_OBS_RANGE_M
+        {
+            continue;
+        }
+        let (sn, cs) = wp_math::sin_cos(0.5 * p.yaw);
+        out.push(VehicleObs {
+            entity: EntityId(PARKED_OBS_BASE + i as u32),
+            state: wp_contracts::VehicleState {
+                pos: [p.pos[0], p.pos[1], p.pos[2] - p.half_extents[2]],
+                rot: [0.0, 0.0, sn, cs],
+                ..Default::default()
+            },
+            effects: wp_contracts::HandlingEffects::NEUTRAL,
+            size_m: [2.0 * p.half_extents[0], 2.0 * p.half_extents[1]],
+        });
+    }
 }
 
 fn obs(sim: &Sim) -> Vec<VehicleObs> {
@@ -1806,9 +1852,13 @@ impl StreetRacers {
             if tick < race.go_tick {
                 out.inputs.push((e, stopped()));
             } else {
+                let mut race_obs = obs.clone();
+                if let Some(p) = xy_of(sim, e) {
+                    parked_obs(sim, p, &mut race_obs);
+                }
                 out.inputs.extend_from_slice(race.field.tick(
                     sim.world(),
-                    &obs,
+                    &race_obs,
                     &self.events,
                     &police,
                 ));
@@ -1826,11 +1876,16 @@ impl StreetRacers {
     fn shift_change(&mut self, sim: &Sim, player: EntityId, moves: &mut Vec<Move>) {
         let night = is_night(sim);
         let p = xy_of(sim, player).unwrap_or([0.0; 2]);
-        let hidden = |q: Option<[f32; 2]>| q.is_none_or(|q| dist(p, q) >= RESPAWN_OUT_OF_SIGHT_M);
+        let hidden = |e: EntityId| {
+            sim.vehicles()
+                .iter()
+                .find(|v| v.id == e)
+                .is_none_or(|v| out_of_view(sim, p, v.vehicle.state().pos))
+        };
         let Some(k) = self.racers.iter().position(|r| {
             r.shift != Shift::AllDay
                 && ((night && r.mode == RacerMode::OffDuty)
-                    || (!night && r.mode == RacerMode::Roam && hidden(xy_of(sim, r.entity))))
+                    || (!night && r.mode == RacerMode::Roam && hidden(r.entity)))
         }) else {
             return;
         };
@@ -1892,21 +1947,28 @@ impl StreetRacers {
         }
     }
 
-    /// Where racer `k` comes (back) out, out of sight of the player at `p`: Loop 9 for a loop
-    /// racer in a city with it, else a random lane.
+    /// Where racer `k` comes (back) out, out of sight of the player at `p` ([`out_of_view`]):
+    /// Loop 9 for a loop racer in a city with it, else a random lane. `None` when no hidden
+    /// pose turned up in [`HIDDEN_POSE_TRIES`] (the move waits for a later tick).
     fn duty_pose(&mut self, sim: &Sim, k: usize, p: [f32; 2]) -> Option<([f32; 3], f32)> {
         let ring = self.ring.clone().unwrap_or_default();
-        if self.racers[k].shift == Shift::Loop && !ring.is_empty() {
-            loop_lane_pose(&mut self.rng, &ring, &[p], RESPAWN_OUT_OF_SIGHT_M, 0.0)
-        } else {
-            random_lane_pose(
-                sim.world(),
-                &mut self.rng,
-                &[p],
-                RESPAWN_OUT_OF_SIGHT_M,
-                0.0,
-            )
+        for _ in 0..HIDDEN_POSE_TRIES {
+            let pose = if self.racers[k].shift == Shift::Loop && !ring.is_empty() {
+                loop_lane_pose(&mut self.rng, &ring, &[p], RESPAWN_OUT_OF_SIGHT_M, 0.0)
+            } else {
+                random_lane_pose(
+                    sim.world(),
+                    &mut self.rng,
+                    &[p],
+                    RESPAWN_OUT_OF_SIGHT_M,
+                    0.0,
+                )
+            }?;
+            if out_of_view(sim, p, pose.0) {
+                return Some(pose);
+            }
         }
+        None
     }
 
     fn plan_roam(&mut self, sim: &Sim, player: EntityId, k: usize, moves: &mut Vec<Move>) {
@@ -1916,7 +1978,11 @@ impl StreetRacers {
         // route is planned on a later tick, from where the move put it.
         if self.racers[k].respawn {
             let p = xy_of(sim, player).unwrap_or([0.0; 2]);
-            let far = xy_of(sim, e).is_none_or(|q| dist(p, q) >= RESPAWN_OUT_OF_SIGHT_M);
+            let far = sim
+                .vehicles()
+                .iter()
+                .find(|v| v.id == e)
+                .is_none_or(|v| out_of_view(sim, p, v.vehicle.state().pos));
             if far {
                 if let Some((pos, yaw)) = self.duty_pose(sim, k, p) {
                     moves.push(Move {
@@ -3341,6 +3407,36 @@ mod tests {
     }
 
     #[test]
+    fn race_ai_sees_the_parked_cars_near_the_racer() {
+        let s = Session::new(free_drive("debug_sedan", DamageMode::Arcade, true), false).unwrap();
+        let world = s.sim().world();
+        let (i, car) = world
+            .static_props()
+            .enumerate()
+            .find(|(_, p)| p.kind == wp_world::PropKind::ParkedCar)
+            .expect("the city has parked cars");
+        let at = geom::xy(car.pos);
+        let mut obs = Vec::new();
+        parked_obs(s.sim(), at, &mut obs);
+        let o = obs
+            .iter()
+            .find(|o| o.entity == EntityId(PARKED_OBS_BASE + i as u32))
+            .expect("the parked car is shown");
+        assert_eq!(geom::xy(o.state.pos), at);
+        assert_eq!(o.state.speed_mps, 0.0);
+        assert_eq!(
+            o.size_m,
+            [2.0 * car.half_extents[0], 2.0 * car.half_extents[1]]
+        );
+        // Only parked cars, only near, never a sim entity's id.
+        for o in &obs {
+            assert!(o.entity.0 >= PARKED_OBS_BASE && o.entity != wp_contracts::WORLD_ENTITY);
+            assert!(dist(geom::xy(o.state.pos), at) <= PARKED_OBS_RANGE_M);
+        }
+        assert!(s.sim().vehicles().iter().all(|v| v.id.0 < PARKED_OBS_BASE));
+    }
+
+    #[test]
     fn wrecked_or_stuck_racer_is_moved_out_of_sight() {
         let mut s =
             Session::new(free_drive("debug_sedan", DamageMode::Arcade, true), false).unwrap();
@@ -3363,6 +3459,11 @@ mod tests {
         let after = pos(&s, e);
         assert!(dist(geom::xy(before), geom::xy(after)) > 1.0, "moved");
         assert!(dist(geom::xy(after), geom::xy(p)) >= RESPAWN_OUT_OF_SIGHT_M);
+        // Never where the player can see it come out (lead/car-popin).
+        assert!(
+            !s.sim().world().in_player_view(after),
+            "moved into view: {after:?}"
+        );
         assert!(
             s.sim().ghost_ticks(e).unwrap_or(0) > 0,
             "ghosted after the move"

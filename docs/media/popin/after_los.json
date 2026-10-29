@@ -1,0 +1,99 @@
+{
+  "ashpeak_route7_day": {
+    "appeared": [
+      false
+    ],
+    "vanished": []
+  },
+  "ashpeak_route7_night": {
+    "appeared": [],
+    "vanished": []
+  },
+  "vesper_downtown_day": {
+    "appeared": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    "vanished": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "vesper_downtown_night": {
+    "appeared": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    "vanished": [
+      false,
+      false
+    ]
+  }
+}
