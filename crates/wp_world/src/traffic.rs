@@ -1348,6 +1348,15 @@ impl Traffic {
     /// left behind by despawned, re-routed or turned-around cars held crossing traffic for
     /// minutes).
     fn rebuild_reservations(&mut self, map: &CityMap) {
+        // A wreck that never entered the junction will never use its permit: drop it, or every
+        // movement crossing it waits for it until the wreck is removed out of sight (lead/
+        // car-popin, jam_pursuit_vesper: a civilian wrecked at its stop line just after taking
+        // its permit held the crossing street for over 70 s).
+        for a in &mut self.agents {
+            if a.disabled && a.permit != NONE && !map.seg(a.seg).is_connector() {
+                a.permit = NONE;
+            }
+        }
         self.reservations.fill(NONE);
         for a in &self.agents {
             if a.despawn {
@@ -4351,5 +4360,49 @@ mod starve_tests {
         assert_eq!(starved_gap_s(4.5, 1000.0), STARVE_GAP_S);
         // A driver who already takes short gaps keeps their own.
         assert_eq!(starved_gap_s(2.0, 1000.0), 2.0);
+    }
+}
+
+#[cfg(test)]
+mod wreck_permit_tests {
+    use super::*;
+
+    /// A wreck still on its approach lane drops the junction permit it took (it will never use
+    /// it, and every crossing movement would wait for it); a driving car keeps its own.
+    #[test]
+    fn a_wreck_short_of_the_junction_drops_its_permit() {
+        let map = CityMap::new(crate::procgen::generate(
+            &crate::procgen::ProcGenConfig::small(),
+        ));
+        let mut t = Traffic::new(&map, TrafficConfig::default(), 3);
+        let inp = TrafficInputs {
+            tracked: &[],
+            hazards: &[],
+            route_focus: &[],
+            closed: &[],
+        };
+        t.populate(&map, &inp);
+        // Two cars on ordinary lanes whose next segment is a junction connector.
+        let on_lane: Vec<usize> = (0..t.agents.len())
+            .filter(|&i| {
+                let a = &t.agents[i];
+                !map.seg(a.seg).is_connector()
+                    && a.plan[0] != NONE
+                    && map.seg(a.plan[0]).is_connector()
+            })
+            .take(2)
+            .collect();
+        assert_eq!(on_lane.len(), 2, "test map has cars before junctions");
+        let (wreck, driver) = (on_lane[0], on_lane[1]);
+        for &i in &on_lane {
+            t.agents[i].permit = t.agents[i].plan[0];
+        }
+        t.agents[wreck].disabled = true;
+        let (wreck_conn, driver_conn) = (t.agents[wreck].plan[0], t.agents[driver].plan[0]);
+        t.rebuild_reservations(&map);
+        assert_eq!(t.agents[wreck].permit, NONE);
+        assert_ne!(t.reservations[wreck_conn as usize], t.agents[wreck].id);
+        assert_eq!(t.agents[driver].permit, driver_conn);
+        assert_eq!(t.reservations[driver_conn as usize], t.agents[driver].id);
     }
 }
