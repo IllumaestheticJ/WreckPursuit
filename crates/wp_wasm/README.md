@@ -46,6 +46,9 @@ sim per 60 Hz frame at 1 / 8 / 24 cars; 0.27 ms in the 12×12 city with ~190 tra
 `docs/integration/testbed.md`.
 Weather (`weather.rs`): +0.1 ms of sim per frame in heavy rain on the flat world (0.24 vs 0.14 ms,
 1 car, 62 500-cell grid); `weather_info` 0.005 ms, `weather_grid` 0.8 ms (called at 1 Hz).
+Street racers on the full map (`ashpeak`, `FULL_MAP_ROSTER`, 26 cars: 16 out by day, 26 at
+night, owner 2026-10-29), native release, sim ms per 60 Hz frame: noon 6.46 (racers +3.34),
+23:00 4.78 (+3.74), ~0.13-0.14 ms per racer as with 13 (`docs/integration/world-density.md`).
 Street racers (`street.rs`, 13 AI cars: 8 out by day, 13 at night, owner row 152), native
 release, city free drive, sim ms per 60 Hz frame with them (median of 3, 2026-10-22): grid noon
 5.12, grid 23:00 3.02, Vesper noon 7.57, Vesper 23:00 4.69 (before SR-3: 7.40 / 5.07 / 9.41 /

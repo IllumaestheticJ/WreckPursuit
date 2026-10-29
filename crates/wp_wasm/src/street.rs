@@ -1,7 +1,9 @@
 //! Street racers (lead): NPC racers who cruise the city in free roam and race the player from
 //! where they meet (A) to a finish the player picks (B), for a bet.
 //!
-//! - **Roster.** A live free-drive or night-run session in a city gets the [`ROSTER`]: 13
+//! - **Roster.** A live free-drive or night-run session in a city gets the [`ROSTER`] (on the
+//!   full world map, Port Vesper + Ashpeak County, twice as many: [`FULL_MAP_ROSTER`], 16 by
+//!   day and 26 at night, owner 2026-10-29): 13
 //!   racers over the four [`LEVELS`] (2 Street … 5 Legend), each level with its own car pool,
 //!   driver skill and bet range, spawned [`SPAWN_SPACING_M`] apart. By day 8 are out (two per
 //!   level); at night ([`is_night`]) 13, four of them lapping the Loop 9 highway (owner row
@@ -195,6 +197,53 @@ pub const ROSTER: [(u8, Shift); 13] = [
     (5, Shift::Loop),
     (5, Shift::Loop),
 ];
+
+/// The racers a session on the full world map (Port Vesper + Ashpeak County,
+/// `wp_world::ashpeak::CITY_ID`) spawns: twice [`ROSTER`] (owner, 2026-10-29: "need twice as
+/// much roaming racers on the full map"). The first 13 are [`ROSTER`] itself; the other 13
+/// roam the whole map: two more per level all day (16 by day) and five more at night (26 at
+/// night). Loop 9 keeps its four (it is one highway inside Port Vesper; doubling it would
+/// double only Port Vesper's highway, not the county's roads). Racers spawn on lanes picked
+/// uniformly over the map ([`plan_roster`]), so twice the racers on a map with about twice
+/// Port Vesper's lanes keeps each city at about the density Port Vesper alone has.
+pub const FULL_MAP_ROSTER: [(u8, Shift); 26] = [
+    (2, Shift::AllDay),
+    (2, Shift::AllDay),
+    (3, Shift::AllDay),
+    (3, Shift::AllDay),
+    (4, Shift::AllDay),
+    (4, Shift::AllDay),
+    (5, Shift::AllDay),
+    (5, Shift::AllDay),
+    (2, Shift::Night),
+    (3, Shift::Loop),
+    (4, Shift::Loop),
+    (5, Shift::Loop),
+    (5, Shift::Loop),
+    (2, Shift::AllDay),
+    (2, Shift::AllDay),
+    (3, Shift::AllDay),
+    (3, Shift::AllDay),
+    (4, Shift::AllDay),
+    (4, Shift::AllDay),
+    (5, Shift::AllDay),
+    (5, Shift::AllDay),
+    (2, Shift::Night),
+    (3, Shift::Night),
+    (4, Shift::Night),
+    (5, Shift::Night),
+    (3, Shift::Night),
+];
+
+/// The roster of a session in `world`: [`FULL_MAP_ROSTER`] on the full world map
+/// (`wp_world::ashpeak::CITY_ID`), [`ROSTER`] on every other city.
+pub fn roster_for(world: &World) -> &'static [(u8, Shift)] {
+    if world.network().id == wp_world::ashpeak::CITY_ID {
+        &FULL_MAP_ROSTER
+    } else {
+        &ROSTER
+    }
+}
 /// Cruising top speed of a racer lapping Loop 9, m/s (under the speeding threshold of its
 /// 65 mph limit, 29.1 + 2.24 m/s).
 pub const LOOP_CRUISE_MPS: f32 = 27.0;
@@ -335,16 +384,21 @@ pub const LEVELS: [Level; 4] = [
     },
 ];
 
-/// Street names the racers go by.
-const NAMES: [&str; 16] = [
+/// How many [`NAMES`] there were before the full map's roster (the 13-racer [`ROSTER`] draws
+/// from these only).
+const ORIGINAL_NAMES: usize = 16;
+
+/// Street names the racers go by (one per racer: at least [`FULL_MAP_ROSTER`]'s 26).
+const NAMES: [&str; 26] = [
     "Dex", "Mara", "Kito", "Juno", "Rook", "Vega", "Sable", "Ozzy", "Nyx", "Brand", "Lark",
-    "Tamsin", "Cruz", "Pike", "Wren", "Halo",
+    "Tamsin", "Cruz", "Pike", "Wren", "Halo", "Ember", "Flint", "Gage", "Indy", "Jett", "Koda",
+    "Lux", "Moss", "Quill", "Rhea",
 ];
 
 /// Each street name's temperament: added to its level's [`Level::risk`] (clamped to 0..1), so
 /// the same racer always takes the same risks with oncoming traffic, gaps and red lights
 /// (owner, 2026-10-27: a risk level per opponent). Names not listed are 0.
-const TEMPERAMENT: [(&str, f32); 16] = [
+const TEMPERAMENT: [(&str, f32); 26] = [
     ("Dex", 0.2),
     ("Mara", -0.15),
     ("Kito", 0.1),
@@ -361,6 +415,16 @@ const TEMPERAMENT: [(&str, f32); 16] = [
     ("Pike", -0.1),
     ("Wren", -0.3),
     ("Halo", 0.0),
+    ("Ember", 0.2),
+    ("Flint", -0.1),
+    ("Gage", 0.15),
+    ("Indy", -0.2),
+    ("Jett", 0.25),
+    ("Koda", 0.05),
+    ("Lux", -0.15),
+    ("Moss", -0.25),
+    ("Quill", 0.1),
+    ("Rhea", 0.0),
 ];
 
 /// Racer `name`'s risk at level `l` when racing: the level's risk plus their
@@ -441,7 +505,8 @@ pub fn scenario_wants_racers(sc: &Scenario) -> bool {
 }
 
 /// The street racers' scenario entities for a session in `world` with the player at
-/// `player_xy`, starting at night or not: one per [`ROSTER`] entry, on shift on a random
+/// `player_xy`, starting at night or not: one per [`roster_for`] entry ([`ROSTER`], or
+/// [`FULL_MAP_ROSTER`] on the full world map), on shift on a random
 /// through / highway lane (Loop 9 for a loop racer at night; at least [`SPAWN_SPACING_M`]
 /// from the player and from each other; a racer with no such spot left is skipped), off shift
 /// in the lockup out of the city. A car from the level's pool, AI assists, no player steering
@@ -449,11 +514,19 @@ pub fn scenario_wants_racers(sc: &Scenario) -> bool {
 pub fn plan_roster(world: &World, player_xy: [f32; 2], seed: u64, night: bool) -> Vec<EntitySpec> {
     let mut rng = Rng::new(seed ^ STREET_SEED_SALT);
     let mut taken: Vec<[f32; 2]> = vec![player_xy];
-    let mut names: Vec<&str> = NAMES.to_vec();
     let mut out = Vec::new();
     let ring = loop9(world);
-    let lockup = lockup_slots(world);
-    for (k, (lv, shift)) in ROSTER.into_iter().enumerate() {
+    let roster = roster_for(world);
+    // The 13-racer roster draws from the original 16 names, so a city session keeps the
+    // racers (and entity ids) it had before the full map's roster grew the list.
+    let pool = if roster.len() <= ORIGINAL_NAMES {
+        &NAMES[..ORIGINAL_NAMES]
+    } else {
+        &NAMES[..]
+    };
+    let mut names: Vec<&str> = pool.to_vec();
+    let lockup = lockup_slots(world, roster.len());
+    for (k, &(lv, shift)) in roster.iter().enumerate() {
         let l = level(lv);
         let car = l.cars[rng.below(l.cars.len() as u32) as usize];
         let pose = if shift != Shift::AllDay && !night {
@@ -1909,7 +1982,8 @@ impl StreetRacers {
             r.replan_at = tick + 1;
         } else {
             if self.lockup.is_empty() {
-                self.lockup = lockup_slots(sim.world());
+                let n = roster_for(sim.world()).len().max(self.racers.len());
+                self.lockup = lockup_slots(sim.world(), n);
             }
             let (pos, yaw) = self.lockup[k];
             moves.push(Move {
@@ -2794,15 +2868,15 @@ fn loop_lane_pose(
     None
 }
 
-/// One lockup spot per [`ROSTER`] entry, where off-shift racers wait. On a city with terrain:
+/// `n` lockup spots (one per roster entry, [`roster_for`]), where off-shift racers wait. On a city with terrain:
 /// flat terrain inside the heightfield, at least [`LOCKUP_CLEAR_M`] from every road and
 /// building, scanned from the grid's far corner inwards (deterministic; the cars rest on drawn
 /// ground, they never drop onto the safety floor below the city). On a flat city (or when the
 /// terrain has too few such spots) a row past the east edge on the ground slab.
-fn lockup_slots(world: &World) -> Vec<([f32; 3], f32)> {
+fn lockup_slots(world: &World, n: usize) -> Vec<([f32; 3], f32)> {
     let map = world.map();
     let net = world.network();
-    let mut out: Vec<([f32; 3], f32)> = Vec::with_capacity(ROSTER.len());
+    let mut out: Vec<([f32; 3], f32)> = Vec::with_capacity(n);
     if let Some(g) = map.ground.as_ref() {
         // Buildings as circles round their footprints.
         let blds: Vec<([f32; 2], f32)> = net
@@ -2841,7 +2915,7 @@ fn lockup_slots(world: &World) -> Vec<([f32; 3], f32)> {
                 let flat = g.normal_at(q)[2] > 0.995;
                 if flat && out.iter().all(|(p, _)| dist(geom::xy(*p), q) > 15.0) && clear(q) {
                     out.push(([q[0], q[1], g.height_on_triangles(q)], 0.0));
-                    if out.len() == ROSTER.len() {
+                    if out.len() == n {
                         break 'scan;
                     }
                 }
@@ -2850,7 +2924,7 @@ fn lockup_slots(world: &World) -> Vec<([f32; 3], f32)> {
             y -= step;
         }
     }
-    if out.len() < ROSTER.len() {
+    if out.len() < n {
         out.clear();
         let (mut max_x, mut min_y) = (0.0f32, 0.0f32);
         for l in &net.lanes {
@@ -2864,7 +2938,7 @@ fn lockup_slots(world: &World) -> Vec<([f32; 3], f32)> {
             .ground
             .as_ref()
             .map_or(0.0, |g| g.height_on_triangles([x, min_y]));
-        for k in 0..ROSTER.len() {
+        for k in 0..n {
             out.push(([x, min_y + 12.0 * k as f32, z], 0.0));
         }
     }
