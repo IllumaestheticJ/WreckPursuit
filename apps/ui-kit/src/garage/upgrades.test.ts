@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { CatalogEntry, ModOption, ModTreeView, WorkshopScreen } from "./types";
-import { boltOns, missingFor, plan, planNames, upgradeGroup } from "./upgrades";
+import type { CatalogEntry, InventoryView, ModOption, ModTreeView, SlotView, WorkshopScreen } from "./types";
+import { boltOns, missingFor, onCar, ownedState, plan, planNames, upgradeGroup } from "./upgrades";
 
 const mod = (id: string, over: Partial<ModOption> = {}): ModOption => ({
   id,
@@ -119,4 +119,81 @@ describe("workshop upgrades", () => {
     expect(upgradeGroup(bolts[0])).toBe("Brakes");
     expect(upgradeGroup(mod("w", { slot: "Weight" }))).toBe("Interior");
   });
+
+  it("marks a part grade fitted where it would go as on the car (greyed, nothing to buy)", () => {
+    const e = entry("rad_1", { kind: "radiator" });
+    const s = screen([e], { slots: [slot("radiator", "radiator", "rad_1")] });
+    expect(ownedState(s, e, mod("rad_1"), "radiator")?.state).toBe("fitted");
+    expect(ownedState(s, e, mod("rad_1"), null)?.label).toBe("on the car");
+    // A different grade on the car: for sale.
+    const other = screen([e], { slots: [slot("radiator", "radiator", "rad_0")] });
+    expect(ownedState(other, e, mod("rad_1"), "radiator")).toBeNull();
+  });
+
+  it("needs every slot of a set to carry the grade, and the opened slot for a single part", () => {
+    const kit = entry("kit_2", { kind: "brake", count: 4 });
+    const corners = ["fl", "fr", "rl", "rr"];
+    const half = screen([kit], { slots: corners.map((c, i) => slot(c, "brake", i < 2 ? "kit_2" : null)) });
+    expect(ownedState(half, kit, mod("kit_2"), "fl")).toBeNull();
+    const all = screen([kit], { slots: corners.map((c) => slot(c, "brake", "kit_2")) });
+    expect(ownedState(all, kit, mod("kit_2"), "fl")?.state).toBe("fitted");
+    // Single parts of a kind with two slots: the slot the row is shown for decides.
+    const lamp = entry("lamp_1", { kind: "lamp" });
+    const lamps = screen([lamp], { slots: [slot("lamp_l", "lamp", "lamp_1"), slot("lamp_r", "lamp", null)] });
+    expect(ownedState(lamps, lamp, null, "lamp_l")?.state).toBe("fitted");
+    expect(ownedState(lamps, lamp, null, "lamp_r")).toBeNull();
+  });
+
+  it("only counts slots on the car (parts inside a removed assembly are not)", () => {
+    const e = entry("cam_2", { kind: "cam" });
+    const s = screen([e], { slots: [slot("engine", "engine", undefined), { ...slot("cam", "cam", "cam_2"), parent: "engine" }] });
+    expect(onCar(s).map((x) => x.id)).toEqual(["engine"]);
+    // No slot of the kind on the car: the mod tree decides.
+    expect(ownedState(s, e, mod("cam_2"), null)).toBeNull();
+    expect(ownedState(s, e, mod("cam_2", { installed: true }), null)?.state).toBe("fitted");
+  });
+
+  it("marks a part grade in the inventory as owned: no Buy, the mechanic fits that part", () => {
+    const e = entry("rad_1", { kind: "radiator" });
+    const s = screen([e], { slots: [slot("radiator", "radiator", null)], inventory: [loose(7, "radiator", "rad_1", ["radiator"])] });
+    const o = ownedState(s, e, mod("rad_1"), "radiator");
+    expect(o?.state).toBe("inventory");
+    expect(o?.part?.part.uid).toBe(7);
+    // Fitted beats in the inventory; a set is never "in the inventory" (one part at a time).
+    const on = screen([e], { slots: [slot("radiator", "radiator", "rad_1")], inventory: [loose(7, "radiator", "rad_1", [])] });
+    expect(ownedState(on, e, mod("rad_1"), "radiator")?.state).toBe("fitted");
+    const set = entry("tyre_2", { kind: "tyre", count: 4 });
+    const tyres = screen([set], { slots: [slot("t1", "tyre", null)], inventory: [loose(8, "tyre", "tyre_2", ["t1"])] });
+    expect(ownedState(tyres, set, null, "t1")).toBeNull();
+  });
+
+  it("never marks stock parts as owned, and marks installed bolt-ons (Remove stays)", () => {
+    const stock = entry("x", { kind: "radiator", grade: null });
+    const s = screen([stock], { slots: [slot("radiator", "radiator", null)] });
+    expect(ownedState(s, stock, null, "radiator")).toBeNull();
+    expect(ownedState(s, null, mod("pads", { installed: true }))?.state).toBe("installed");
+    expect(ownedState(s, null, mod("pads"))).toBeNull();
+    expect(ownedState(s, null, null)).toBeNull();
+  });
 });
+
+/** A slot on the car; `grade` undefined = empty, null = a stock part. */
+function slot(id: string, kind: string, grade: string | null | undefined): SlotView {
+  return {
+    id,
+    name: id,
+    group: "Engine",
+    kind,
+    parent: null,
+    fitted: grade === undefined ? null : { grade, name: grade ?? "stock", tier: 1, condition: 1 },
+    required: false,
+    blocked_by: [],
+    remove_blocker: null,
+    in_the_way: [],
+    mechanic_fee: 100,
+  };
+}
+
+function loose(uid: number, kind: string, grade: string, fits: string[]): InventoryView {
+  return { part: { uid, kind, grade, model: null, condition: 1, damage: [], value: 0 }, name: grade, fits, stand_fits: [], reason: null, sale_price: 0 };
+}
