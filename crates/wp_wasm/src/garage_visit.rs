@@ -528,3 +528,120 @@ pub struct MapPlace {
     /// Repair shops: legit or crooked.
     pub shop: Option<ShopKind>,
 }
+
+// ----- where a career run starts ---------------------------------------------------------------
+//
+// Owner, 2026-10-29: a run starts where the active car is (the shop the tow took it to, one of
+// the player's garages), on the road by that place's ring, facing along the road and just
+// outside the ring, so the place's panel does not open the moment the run starts.
+
+/// Clearance a run's spawn keeps from every place ring, m (beyond the ring's radius).
+pub const SPAWN_CLEAR_M: f32 = 4.0;
+
+/// Farthest a run's spawn may be from its place, m.
+pub const SPAWN_MAX_M: f32 = 55.0;
+
+/// Distances along the road from the place, m, tried in order (each ahead, then behind).
+const SPAWN_STEPS_M: [f32; 5] = [24.0, 30.0, 38.0, 46.0, 54.0];
+
+/// A place a career run starts from ([`start_place_at`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StartPlace {
+    /// One of the player's garages (its ring sits on the lane nearest its anchor).
+    Home(&'static HomeSpot),
+    /// A repair shop (its ring is centred on the shop's POI).
+    Shop(&'static WorldShop),
+}
+
+impl StartPlace {
+    /// The point the career puts the player's scenario position on to start here
+    /// ([`start_place_at`] finds the place again from it).
+    pub fn anchor(&self) -> [f32; 2] {
+        match self {
+            Self::Home(h) => h.anchor,
+            Self::Shop(s) => s.pos,
+        }
+    }
+
+    /// Where the place's ring is centred in `world`, `[x, y]` m.
+    pub fn ring_centre(&self, world: &World) -> Option<[f32; 2]> {
+        match self {
+            Self::Home(h) => snap_to_lane(world, h.anchor).map(|(p, _)| [p[0], p[1]]),
+            Self::Shop(s) => Some(s.pos),
+        }
+    }
+}
+
+/// The place a career run starts from whose anchor ([`StartPlace::anchor`]) is within 1 m of
+/// `xy`: a home garage ([`HOME_GARAGES`]) or a repair shop ([`WORLD_SHOPS`]). The career puts
+/// the player's scenario position there ([`crate::career::Career::start_run`]);
+/// [`crate::session::Session::new`] then spawns by that place's ring ([`run_spawn`]).
+pub fn start_place_at(xy: [f32; 2]) -> Option<StartPlace> {
+    let near = |p: [f32; 2]| (p[0] - xy[0]).hypot(p[1] - xy[1]) < 1.0;
+    if let Some(h) = HOME_GARAGES.iter().find(|h| near(h.anchor)) {
+        return Some(StartPlace::Home(h));
+    }
+    WORLD_SHOPS
+        .iter()
+        .find(|s| near(s.pos))
+        .map(StartPlace::Shop)
+}
+
+/// Every place ring of `world` a career run can see: repair shops, safehouses, car lots and
+/// the player's garages, as `(centre [x, y], radius m)`.
+pub fn all_rings(world: &World) -> Vec<([f32; 2], f32)> {
+    let mut out: Vec<([f32; 2], f32)> = sites(world)
+        .iter()
+        .map(|g| ([g.pos[0], g.pos[1]], g.radius_m))
+        .collect();
+    out.extend(
+        safehouse_sites(world)
+            .iter()
+            .map(|h| ([h.pos[0], h.pos[1]], h.radius_m)),
+    );
+    let anchors = WORLD_LOTS
+        .iter()
+        .map(|l| l.anchor)
+        .chain(HOME_GARAGES.iter().map(|h| h.anchor));
+    for a in anchors {
+        if let Some((p, _)) = snap_to_lane(world, a) {
+            out.push(([p[0], p[1]], PLACE_RADIUS_M));
+        }
+    }
+    out
+}
+
+/// Where a run that starts at the place whose ring is centred on `centre` spawns: on a drivable
+/// lane by the ring, facing along it (away from the place), outside every ring of `rings`
+/// (`(centre, radius)`, [`all_rings`]) by [`SPAWN_CLEAR_M`], at most [`SPAWN_MAX_M`] from
+/// `centre`. Returns `(pos, yaw)`; `None`: no such lane point (the caller falls back to the
+/// lane at the place).
+pub fn run_spawn(
+    world: &World,
+    centre: [f32; 2],
+    rings: &[([f32; 2], f32)],
+) -> Option<([f32; 3], f32)> {
+    let map = world.map();
+    let (seg, s) = wp_world::routes::nearest_lane(map, [centre[0], centre[1], 0.0], None)?;
+    let (p0, tan) = map.seg(seg).point_at(s);
+    let dist = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).hypot(a[1] - b[1]);
+    let clear = |q: [f32; 2]| rings.iter().all(|(c, r)| dist(q, *c) > r + SPAWN_CLEAR_M);
+    for d in SPAWN_STEPS_M {
+        // Ahead along the lane, then behind the place on a lane running the other way.
+        for sign in [1.0f32, -1.0] {
+            let dir = [tan[0] * sign, tan[1] * sign];
+            let probe = [p0[0] + dir[0] * d, p0[1] + dir[1] * d, 0.0];
+            let Some((seg2, s2)) = wp_world::routes::nearest_lane(map, probe, Some(dir)) else {
+                continue;
+            };
+            let (p, t) = map.seg(seg2).point_at(s2);
+            let q = [p[0], p[1]];
+            let from = dist(q, centre);
+            if from <= PLACE_RADIUS_M + SPAWN_CLEAR_M || from > SPAWN_MAX_M || !clear(q) {
+                continue;
+            }
+            return Some((p, wp_world::geom::yaw_of(t)));
+        }
+    }
+    None
+}

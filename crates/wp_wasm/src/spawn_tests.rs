@@ -202,8 +202,167 @@ fn drive_to_places_stand_on_roads_apart() {
     }
 }
 
-/// A career run starts in the chosen garage: on its lane, with its visit open at once (the
-/// player starts parked in their garage). Car lots and the unlocked garages are on the map.
+/// The player's car starts a run by the place whose ring is centred on `centre`: on a drivable
+/// lane within ~60 m of it, outside its ring, facing along the lane, and stopped there it opens
+/// no place panel.
+fn assert_starts_by(world: &wp_world::World, s: &Session, centre: [f32; 2]) {
+    let st = s.vehicle(EntityId(1)).unwrap().vehicle.state();
+    let at = [st.pos[0], st.pos[1]];
+    let d = (at[0] - centre[0]).hypot(at[1] - centre[1]);
+    assert!(d < 60.0, "{at:?} is {d:.0} m from {centre:?}");
+    assert!(
+        d > crate::garage_visit::PLACE_RADIUS_M,
+        "{at:?} inside the ring at {centre:?} ({d:.1} m)"
+    );
+    let (seg, sl) = wp_world::routes::nearest_lane(world.map(), [at[0], at[1], 0.0], None).unwrap();
+    let (lane, tan) = world.map().seg(seg).point_at(sl);
+    let off = (lane[0] - at[0]).hypot(lane[1] - at[1]);
+    assert!(off < 3.0, "{at:?} is {off:.1} m off the road");
+    // Facing along the road: the chassis' +Y (as `Session::gps_route` reads it) is along the lane.
+    let q = st.rot;
+    let fwd = [
+        2.0 * (q[0] * q[1] - q[3] * q[2]),
+        1.0 - 2.0 * (q[0] * q[0] + q[2] * q[2]),
+    ];
+    let along = (fwd[0] * tan[0] + fwd[1] * tan[1]).abs() / fwd[0].hypot(fwd[1]).max(1e-6);
+    assert!(along > 0.9, "facing {fwd:?} vs lane {tan:?}");
+    for r in crate::garage_visit::all_rings(world) {
+        let d = (at[0] - r.0[0]).hypot(at[1] - r.0[1]);
+        assert!(d > r.1, "{at:?} inside a ring at {:?}", r.0);
+    }
+}
+
+/// A free roam of the career in the combined world (Port Vesper's spawn, standing still).
+fn career_free_roam(c: &mut crate::career::Career) -> Session {
+    let mut sc = with_spawn(
+        free_drive_in(CAR, DamageMode::Arcade, city_spec("ashpeak")),
+        "port_vesper",
+    );
+    sc.entities[0].speed_mps = 0.0;
+    let mut s = c.start_run(sc).unwrap();
+    s.run_ticks(30);
+    s
+}
+
+/// Owner report 2026-10-29: "when im towed to meridian motorworks and continue free roam
+/// there - i dont start there". A tow to a shop puts the car there; the next Free Roam starts
+/// by that shop's ring (on the road, outside the ring), and the career screen says so.
+#[test]
+fn free_roam_starts_at_the_shop_the_car_was_towed_to() {
+    use wp_economy::Condition;
+    crate::session::set_street_racers_enabled(false);
+    let econ = crate::garage::with_economy(|e| e.clone());
+    let mut c = crate::career::Career::new(econ, DamageMode::Arcade);
+    c.profile_mut().account.cash = 60_000;
+    let uid = c.buy_car(CAR, Condition::Used).unwrap();
+    c.set_active(uid).unwrap();
+    assert_eq!(c.view().start_at.id, "vesper_lockup", "no tow yet: home");
+    let shop = "Meridian Motorworks";
+    c.tow(uid, "Garage", shop, None).unwrap();
+    let v = c.view();
+    assert_eq!(
+        (v.start_at.kind, v.start_at.name.as_str()),
+        ("Garage", shop)
+    );
+    let mut s = career_free_roam(&mut c);
+    let world = ashpeak();
+    let site = crate::garage_visit::sites(&world)
+        .into_iter()
+        .find(|g| g.name == shop)
+        .unwrap();
+    assert_starts_by(&world, &s, [site.pos[0], site.pos[1]]);
+    assert!(s.place().visit.is_none(), "the shop's panel waits");
+    // The car drove off: the next run (no tow) starts from home again.
+    c.finish_run(&mut s).unwrap();
+    assert_eq!(c.view().start_at.id, "vesper_lockup");
+}
+
+/// The same for a tow to one of the player's garages that is not the chosen one.
+#[test]
+fn free_roam_starts_at_the_home_garage_the_car_was_towed_to() {
+    use wp_economy::Condition;
+    crate::session::set_street_racers_enabled(false);
+    let econ = crate::garage::with_economy(|e| e.clone());
+    let mut c = crate::career::Career::new(econ, DamageMode::Arcade);
+    c.profile_mut().account.cash = 200_000;
+    c.profile_mut().account.rep = 5_500;
+    let uid = c.buy_car(CAR, Condition::Used).unwrap();
+    c.set_active(uid).unwrap();
+    c.set_home("vesper_lockup").unwrap();
+    c.tow(uid, "Home", "harnell_barn", None).unwrap();
+    let v = c.view();
+    assert_eq!(
+        (v.start_at.kind, v.start_at.id.as_str()),
+        ("Home", "harnell_barn")
+    );
+    let s = career_free_roam(&mut c);
+    let world = ashpeak();
+    let spot = crate::garage_visit::home_spot("harnell_barn").unwrap();
+    let (ring, _) = crate::garage_visit::snap_to_lane(&world, spot.anchor).unwrap();
+    assert_starts_by(&world, &s, [ring[0], ring[1]]);
+    assert!(s.place().visit.is_none(), "the garage's panel waits");
+}
+
+/// Owner report 2026-10-29: "i also can't taxi to dealers once i own a car". A taxi to a lot is
+/// open with a drivable car; the car stays where it is (not at the lot's gate, its spot
+/// untouched), so the next run still starts from the car.
+#[test]
+fn a_taxi_to_a_lot_leaves_the_owned_car_where_it_is() {
+    use wp_economy::Condition;
+    crate::session::set_street_racers_enabled(false);
+    let econ = crate::garage::with_economy(|e| e.clone());
+    let mut c = crate::career::Career::new(econ, DamageMode::Arcade);
+    c.profile_mut().account.cash = 60_000;
+    let uid = c.buy_car(CAR, Condition::Used).unwrap();
+    c.set_active(uid).unwrap();
+    let shop = "Meridian Motorworks";
+    c.tow(uid, "Garage", shop, None).unwrap();
+    let before = c.car_spot(uid);
+    for lot in ["budget_motors", "meridian_prestige", "dockside_salvage"] {
+        let (s, visit) = c.taxi_to_lot(lot).unwrap();
+        assert_eq!(visit.own_car, None, "{lot}: the car did not come along");
+        assert!(!visit.cars.is_empty() || s.entities().len() == 1);
+        assert_eq!(c.car_spot(uid), before, "{lot}: the car stays at the shop");
+    }
+    // Driven in, the car waits at the gate (the old visit).
+    let (_, drove) = c.visit_lot("budget_motors").unwrap();
+    assert!(drove.own_car.is_some());
+    assert_eq!(c.view().start_at.name, shop);
+    let s = career_free_roam(&mut c);
+    let world = ashpeak();
+    let site = crate::garage_visit::sites(&world)
+        .into_iter()
+        .find(|g| g.name == shop)
+        .unwrap();
+    assert_starts_by(&world, &s, [site.pos[0], site.pos[1]]);
+}
+
+/// Every place a run can start from (each repair shop, each of the player's garages) has a
+/// spawn on the road outside every ring, within reach of the place (no fallback into a ring).
+#[test]
+fn every_start_place_has_a_spawn_outside_the_rings() {
+    use crate::garage_visit::{all_rings, run_spawn, StartPlace, HOME_GARAGES, WORLD_SHOPS};
+    let world = ashpeak();
+    let rings = all_rings(&world);
+    let places = WORLD_SHOPS
+        .iter()
+        .map(StartPlace::Shop)
+        .chain(HOME_GARAGES.iter().map(StartPlace::Home));
+    for p in places {
+        let centre = p.ring_centre(&world).unwrap();
+        let (pos, _) = run_spawn(&world, centre, &rings).unwrap_or_else(|| panic!("{p:?}"));
+        let d = (pos[0] - centre[0]).hypot(pos[1] - centre[1]);
+        assert!(d > 15.0 && d < 60.0, "{p:?}: {d:.0} m");
+        assert_eq!(
+            crate::garage_visit::start_place_at(p.anchor()),
+            Some(p),
+            "the anchor finds the place again"
+        );
+    }
+}
+
+/// A career run starts by the chosen garage: on the road just outside its ring. Car lots and
+/// the unlocked garages are on the map.
 #[test]
 fn career_run_starts_in_the_chosen_garage() {
     use wp_economy::Condition;
@@ -231,17 +390,9 @@ fn career_run_starts_in_the_chosen_garage() {
     let world = ashpeak();
     let spot = crate::garage_visit::home_spot("spire_loft").unwrap();
     let (want, _) = crate::garage_visit::snap_to_lane(&world, spot.anchor).unwrap();
-    let at = s.vehicle(EntityId(1)).unwrap().vehicle.state().pos;
-    assert!(
-        (at[0] - want[0]).hypot(at[1] - want[1]) < 5.0,
-        "{at:?} vs {want:?}"
-    );
-    let v = s
-        .place()
-        .visit
-        .expect("the garage's visit opens at the start");
-    assert_eq!(v.kind, crate::garage_visit::PlaceKind::Home);
-    assert_eq!(v.id.as_deref(), Some("spire_loft"));
+    assert_starts_by(&world, &s, [want[0], want[1]]);
+    // Owner 2026-10-29: just outside the ring, so the garage's panel does not pop up at once.
+    assert!(s.place().visit.is_none(), "{:?}", s.place().visit);
     assert_eq!(s.lots().len(), 7);
     let homes: Vec<&str> = s.homes().iter().map(|h| h.id.as_str()).collect();
     assert_eq!(

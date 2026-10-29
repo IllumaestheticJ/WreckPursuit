@@ -2,7 +2,9 @@
 // shops"): a career car is wrecked on a Free Roam run, the "Call a tow truck" prompt shows, the
 // tow key opens the destinations with their prices, the tow to the nearest repair shop ends the
 // run and opens the garage at that shop, where the wreck is repaired; the ledger has the tow
-// line. Then a wreck left on the road gets "Tow to …" in the garage screen.
+// line; the screen says the next run starts there, a taxi to a lot leaves the car there, and the
+// next Free Roam starts by that shop, where the city map (M) sets and clears a road waypoint.
+// Then a wreck left on the road gets "Tow to …" in the garage screen.
 // Usage: node e2e/tow.mjs (needs `npm run wasm` first). SHOTS=dir for screenshots
 // (docs/media/tow/ holds the committed ones).
 import { spawn } from "node:child_process";
@@ -106,6 +108,27 @@ const fixed = await page.evaluate((u) => window.__wp.sim.careerView().cars.find(
 check(fixed.drivable && !fixed.total_loss && fixed.repair_lines.length === 0, "repaired at the destination: it drives again");
 await shot("04_repaired_at_the_shop.png");
 
+// Owner 2026-10-29: the next run starts where the car is, and the screen says so.
+const startAt = await page.locator('[data-testid="career-start-at"]').innerText();
+check(startAt.includes(nearest.place.name), `the screen says "${startAt.trim()}"`);
+
+// Owner 2026-10-29 ("i also can't taxi to dealers once i own a car"): with a drivable car the
+// lots offer a taxi (and the waypoint); the taxi leaves the car where it is.
+await page.click('[data-testid="career-garage"] button[role="tab"]:has-text("Car lots")');
+const lotButtons = await page.evaluate(() => {
+  const row = document.querySelector('[data-testid="career-garage"] tr[data-lot="dockside_salvage"]');
+  return { taxi: !!row?.querySelector('[data-testid="taxi-dockside_salvage"]'), waypoint: !!row?.querySelector('[data-testid="waypoint-dockside_salvage"]') };
+});
+check(lotButtons.taxi && lotButtons.waypoint, "with a drivable car a lot offers Taxi and Waypoint");
+await page.click('[data-testid="taxi-dockside_salvage"]');
+await page.waitForSelector('[data-testid="lot-visit"]', { timeout: 20000 });
+const taxied = await page.evaluate((u) => ({ visit: window.__wp.sim.lotVisit(), car: window.__wp.sim.careerView().cars.find((c) => c.uid === u) }), uid);
+check(taxied.visit?.lot === "dockside_salvage" && taxied.visit.own_car === null, "the taxi goes to the lot without the car");
+check(taxied.car.spot?.kind === "Garage" && taxied.car.spot.id === nearest.place.id, `the car stays at ${nearest.place.name}`);
+await shot("04b_taxi_to_a_lot.png");
+await page.click('[data-testid="lot-visit"] button:has-text("Back to garage")');
+await page.waitForSelector('[data-testid="career-garage"]', { timeout: 10000 });
+
 await page.click('button:has-text("Ledger")');
 await page.waitForTimeout(300);
 const ledgerText = await page.locator('[data-testid="ledger"]').innerText();
@@ -115,6 +138,48 @@ await shot("05_ledger_tow_line.png");
 // ----- a wreck left on the road: "Tow to …" in the garage --------------------------------------
 await page.evaluate(() => window.__wp.careerApi.close());
 await roam();
+// Owner 2026-10-29 ("when im towed to meridian motorworks and continue free roam there - i
+// dont start there"): Free Roam starts by the shop the car was towed to, outside its ring.
+const start = await page.evaluate((name) => {
+  const w = window.__wp;
+  const p = w.app.views.get(w.app.player).root.position;
+  const g = w.sim.garages().find((s) => s.name === name);
+  return { d: g ? Math.hypot(p.x - g.pos[0], p.y - g.pos[1]) : -1, visit: w.sim.place().visit };
+}, nearest.place.name);
+check(start.d > 15 && start.d < 60 && !start.visit, `Free Roam starts ${start.d.toFixed(0)} m from ${nearest.place.name}, outside its ring (no panel)`);
+await shot("05b_free_roam_starts_at_the_shop.png");
+
+// Owner 2026-10-29 ("need to be able to set waypoints in free roam too"): the city map (M)
+// sets one by a click on the road, shows it on both maps and in the world, and clears it.
+await page.keyboard.press("m");
+await page.waitForFunction(() => window.__wp.map.isOpen, null, { timeout: 5000 });
+await page.waitForSelector('[data-testid="map-waypoint"]:not([hidden])', { timeout: 5000 });
+const box = await page.locator('#wp-map-full canvas[aria-label="City map"]').boundingBox();
+await page.mouse.click(box.x + box.width * 0.55, box.y + box.height * 0.5);
+await page.waitForTimeout(300);
+const pinned = await page.evaluate(() => {
+  const w = window.__wp;
+  const beam = w.scene.world.getObjectByName("waypoint");
+  return { target: w.waypoint.target, same: w.careerApi.waypoint() === w.waypoint.target, beam: !!beam?.visible };
+});
+check(pinned.target?.kind === "Road" && pinned.same && pinned.beam, `a map click pins a road waypoint (${pinned.target?.pos?.map((v) => v.toFixed(0)).join(", ")}), in the world too`);
+await shot("05c_free_roam_waypoint.png");
+await page.click('[data-testid="map-waypoint-clear"]');
+const cleared = await page.evaluate(() => ({ t: window.__wp.waypoint.target, beam: !!window.__wp.scene.world.getObjectByName("waypoint")?.visible }));
+check(cleared.t === null && !cleared.beam, "Clear removes the waypoint");
+// A pick on a place icon marks the place (as the career screen's "Waypoint"); again clears it.
+const onIcon = await page.evaluate((name) => {
+  const w = window.__wp;
+  const g = w.sim.garages().find((s) => s.name === name);
+  w.waypoint.pick(g.pos[0] + 5, g.pos[1] - 5);
+  const set = w.careerApi.waypoint();
+  w.waypoint.pick(g.pos[0], g.pos[1]);
+  return { set, after: w.careerApi.waypoint() };
+}, nearest.place.name);
+check(onIcon.set?.kind === "Garage" && onIcon.set.id === nearest.place.name && onIcon.after === null, "a pick on a place icon marks that place; a second pick clears it");
+await page.keyboard.press("m");
+await page.waitForFunction(() => !window.__wp.map.isOpen, null, { timeout: 5000 });
+
 await page.evaluate(() => window.__wp.menu.openPause());
 await page.waitForSelector("#gm-tow", { timeout: 5000 });
 check(true, "the pause menu offers \"Call a tow truck\" in a career run");

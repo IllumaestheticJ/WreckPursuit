@@ -216,6 +216,8 @@ async function main(): Promise<void> {
   const map = new MapOverlay(overlay);
   // Career waypoint (owner 2026-10-27): the menu marks a dealer / garage on the map; drive there.
   const waypoint = new CareerWaypoint(map.hud);
+  // ... and in the world as a gold beam (also a Free Roam map pin, owner 2026-10-29).
+  waypoint.onChange = (at) => scene.setWaypoint(at?.pos ?? null);
   // Street racers (wp_wasm::street; src/ui/street.ts): their dots, the route and the challenge
   // picker live in the city map above; the hint, race panel, countdown and result here.
   const street = new StreetUi(
@@ -401,7 +403,8 @@ async function main(): Promise<void> {
     buyInformant: (tier) => act(() => sim.careerBuyInformant(tier)),
     payOffBounty: () => act(() => sim.careerPayOffBounty()),
     lot: (id) => sim.careerLot(id),
-    visitLot: (id) => visitLot(id),
+    // "Taxi" (owner 2026-10-29: always open, car or no car): the car stays where it is.
+    visitLot: (id, taxi) => visitLot(id, !!taxi),
     buyListing: (id, slot) => act(() => sim.careerBuyListing(id, slot)),
     replaceTires: (uid, wheels) => withSound(act(() => sim.careerReplaceTires(uid, wheels)), "fit"),
     newCareer: (mode) => act(() => newCareer(mode)),
@@ -465,13 +468,15 @@ async function main(): Promise<void> {
     rig.camera.setViewOffset(w, h, -Math.round(panel.right / 2), 0, w, h);
   };
   window.addEventListener("resize", () => lotView.open && frameLotCar());
-  const visitLot = (lotId: string) => {
+  /** Walk lot `lotId`: driven in (the car waits at the gate), or by `taxi` (without the car). */
+  const visitLot = (lotId: string, taxi = false) => {
     app.scenarioFile = null;
     app.scenario = null;
     app.result = null;
     app.bench = null;
     try {
-      sim.careerVisitLot(lotId);
+      if (taxi) sim.careerTaxiToLot(lotId);
+      else sim.careerVisitLot(lotId);
     } catch (e) {
       openGarage(String(e).replace(/^(Error: )?wp_wasm: /, ""));
       return;
@@ -2231,7 +2236,11 @@ async function main(): Promise<void> {
         const place = sim.careerRunActive() ? sim.place() : null;
         placeView.update(place, now);
         if (place?.visit) waypoint.arrived(place.visit.kind, place.visit.id ?? place.visit.name);
-        if (sim.careerRunActive()) waypoint.frame(now);
+        if (sim.careerRunActive()) {
+          let me: [number, number] | null = null;
+          for (let o = 0; o < cur.length; o += STATE_STRIDE) if (cur[o + S.entity] === app.player) me = [cur[o + S.pos], cur[o + S.pos + 1]];
+          waypoint.frame(now, me);
+        }
         // "Call a tow truck" prompt: polled twice a second (flipped / stuck need sim time).
         if (now - towPollAt > 500) {
           towPollAt = now;
@@ -2252,6 +2261,8 @@ async function main(): Promise<void> {
     // Street racers: map dots / picker always; their HUD hides under the menu, photo mode and
     // crash replays.
     street.frame(now, !crash.playing && !photo.active && !menu?.isOpen);
+    // Free Roam waypoints from the city map (M): its picker, unless the street picker has it.
+    waypoint.mapFrame(!replay && sim.careerRunActive(), street.picking);
     {
       const r = street.status?.race ?? null;
       const key = r ? `${r.entity}|${r.start.join(",")}|${r.finish.join(",")}` : "";
@@ -2609,6 +2620,7 @@ async function main(): Promise<void> {
     careerApi,
     openGarage,
     startCareerRun,
+    waypoint,
     persistCareer,
     startRace,
     raceView,

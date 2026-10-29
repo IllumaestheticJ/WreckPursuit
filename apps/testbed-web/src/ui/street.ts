@@ -95,6 +95,12 @@ export class StreetUi {
   /** The next map pick moves B (else it adds a waypoint, once B is set). */
   private moveB = false;
   private offerEntity = -1;
+
+  /** The finish picker has the city map (a challenge is open). */
+  get picking(): boolean {
+    return this.offerEntity >= 0;
+  }
+
   /** This UI opened the full map for the open challenge (and closes it with the challenge). */
   private openedMap = false;
   private resultSeq = 0;

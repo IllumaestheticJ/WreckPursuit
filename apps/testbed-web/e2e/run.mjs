@@ -842,7 +842,7 @@ await shot("night_run_greybox_toggle.png");
   const opened = await page.waitForSelector(G, { timeout: 10000 }).then(() => true).catch(() => false);
   await page.click(`${G} button[role="tab"]:has-text("Car lots")`);
   // Car lots: with no car to drive there, take a taxi to a junkyard (the lot itself loads, its
-  // stock parked in rows), then leave. With a car, lots are drive-to (waypoint only).
+  // stock parked in rows), then leave. (With a car the taxi stays, next to the waypoint: tow.mjs.)
   await page.click(`${G} tr[data-lot="dockside_salvage"] button:has-text("Taxi")`);
   const lot = await page
     .waitForSelector('[data-testid="lot-visit"]', { timeout: 20000 })

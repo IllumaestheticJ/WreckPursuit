@@ -478,8 +478,11 @@ pub struct CareerView {
     pub districts: Vec<DistrictView>,
     /// The world's repair shops ([`crate::garage_visit::WORLD_SHOPS`]), in POI order.
     pub shops: Vec<ShopView>,
-    /// The player's own garages, in unlock order (runs start from the `selected` one).
+    /// The player's own garages, in unlock order (`selected`: the chosen one).
     pub homes: Vec<HomeView>,
+    /// Where the next Free Roam / night run starts ([`Career::start_spot`]: where the active
+    /// car is, else the chosen garage), for "Next run starts at: …".
+    pub start_at: SpotView,
     /// Career counters.
     pub stats: wp_economy::CareerStats,
     /// Rep tier, next tier, unlocked features and classes, bet limits.
@@ -1130,7 +1133,11 @@ impl Career {
     }
 
     fn spot_view(&self, uid: CarUid) -> SpotView {
-        match self.car_spot(uid) {
+        self.spot_view_of(self.car_spot(uid))
+    }
+
+    fn spot_view_of(&self, spot: wp_economy::CarSpot) -> SpotView {
+        match spot {
             wp_economy::CarSpot::Road { .. } => SpotView {
                 kind: "Road",
                 id: "road".into(),
@@ -1166,6 +1173,41 @@ impl Career {
             .get(&uid.0)
             .cloned()
             .unwrap_or_else(|| wp_economy::CarSpot::Home { id: self.home_id() })
+    }
+
+    /// Where the next run in the combined world starts (owner 2026-10-29: where the active car
+    /// is): the active car's spot when it is a repair shop or one of the player's garages, else
+    /// (no active car, or a wreck out on the road) the chosen home garage. Taxis to a car lot
+    /// leave the car where it is, so they do not change this.
+    pub fn start_spot(&self) -> wp_economy::CarSpot {
+        let home = || wp_economy::CarSpot::Home { id: self.home_id() };
+        match self
+            .profile
+            .account
+            .active_car
+            .map(|uid| self.car_spot(uid))
+        {
+            Some(spot @ (wp_economy::CarSpot::Shop { .. } | wp_economy::CarSpot::Home { .. })) => {
+                spot
+            }
+            _ => home(),
+        }
+    }
+
+    /// [`Career::start_spot`] as the world place the session spawns by (`None`: a spot with
+    /// no place in the combined world, e.g. an unknown shop name from an old save; then the
+    /// chosen home garage, and `None` only when that has no spot either).
+    pub fn start_place(&self) -> Option<crate::garage_visit::StartPlace> {
+        use crate::garage_visit::{home_spot, StartPlace, WORLD_SHOPS};
+        let of = |spot: &wp_economy::CarSpot| match spot {
+            wp_economy::CarSpot::Shop { name } => WORLD_SHOPS
+                .iter()
+                .find(|s| s.name == name)
+                .map(StartPlace::Shop),
+            wp_economy::CarSpot::Home { id } => home_spot(id).map(StartPlace::Home),
+            wp_economy::CarSpot::Road { .. } => None,
+        };
+        of(&self.start_spot()).or_else(|| home_spot(&self.home_id()).map(StartPlace::Home))
     }
 
     /// Where the last tow left the player (the place the career screen opens at), until the
@@ -1725,6 +1767,7 @@ impl Career {
         self.dealer();
         let lots = self.lots();
         let homes = self.home_views();
+        let start_at = self.spot_view_of(self.start_spot());
         let p = &self.profile;
         let a = &p.account;
         let floor = &self.econ.market.floor_car;
@@ -1817,6 +1860,7 @@ impl Career {
                 })
                 .collect(),
             homes,
+            start_at,
             stats: p.stats.clone(),
             progress: self.econ.career_progress(a),
             captures: a.heat_history.captures,
@@ -2527,14 +2571,15 @@ impl Career {
         }
         // Night runs and free drives in the combined world start from the player's chosen
         // garage (owner 2026-10-27: spawn points are a career choice). Races stand on their grid.
+        // Owner 2026-10-29: they start where the car is (a shop the tow took it to, one of the
+        // player's garages), else the chosen garage ([`Career::start_place`]); the session
+        // spawns on the road just outside that place's ring.
         let in_world = sc.city == simcli::scenario::CitySpec::ashpeak()
             && crate::race::race_for_scenario(&sc.name).is_none();
         if in_world {
-            if let (Some(spot), Some(e)) = (
-                crate::garage_visit::home_spot(&self.home_id()),
-                sc.entities.first_mut(),
-            ) {
-                e.pos = [spot.anchor[0], spot.anchor[1], 0.0];
+            if let (Some(place), Some(e)) = (self.start_place(), sc.entities.first_mut()) {
+                let a = place.anchor();
+                e.pos = [a[0], a[1], 0.0];
             }
         }
         let (mut session, player) = self.car_session(uid, sc, heat)?;
@@ -2585,8 +2630,8 @@ impl Career {
             car: uid,
             start_seq: acct.next_event_seq,
         });
-        // The car drives off from home (runs spawn there): it is no longer parked anywhere
-        // else, and the player has left the place a tow brought them to.
+        // The car drives off from where it was parked: it is no longer parked anywhere, and
+        // the player has left the place a tow (or a taxi) brought them to.
         self.profile.car_spots.remove(&uid.0);
         self.place = None;
         self.tow_watch = TowWatch::default();
