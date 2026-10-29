@@ -23,7 +23,9 @@ pub mod crumple;
 pub mod lamp;
 pub mod mechanical;
 pub mod mesh;
+pub mod paint;
 pub mod profile;
+pub mod section;
 pub mod skin;
 pub mod style;
 pub mod styles;
@@ -100,6 +102,18 @@ pub fn build_mesh(car: &LoadedCar) -> mesh::CarMesh {
     let mut m = mesh::generate(&car.def, &car.lattice);
     skin::bind_skin(&car.lattice, &mut m);
     m
+}
+
+/// The detail texture (PNG bytes) of a painted car, `None` for every other car (what
+/// `gen-car-mesh` writes to `data/panels/<mesh.detail.file>`).
+pub fn build_detail_png(car: &LoadedCar) -> Option<Vec<u8>> {
+    let style = style::style_for(&car.def);
+    mesh::painted_detail(&car.def, &car.lattice, &style).map(|(_, _, p)| p.png.clone())
+}
+
+/// Path of a mesh's detail texture (`data/panels/<file>`).
+pub fn detail_path(root: &Path, file: &str) -> PathBuf {
+    root.join("data/panels").join(file)
 }
 
 /// The generated mid-LOD mesh for a car (what `gen-car-mesh` writes next to the full one; not

@@ -12,6 +12,7 @@
 
 use wp_contracts::{BodyRegion, LatticeDef, VehicleDef};
 
+use crate::section::{Knobs, SectionSpec};
 use crate::style::{
     ArchShape, BodyStyle, SailLayout, Silhouette, OVERHANG_RANGE, PLAN_SCALE_RANGE,
     SCULPT_DX_RANGE, TUMBLEHOME_M_RANGE,
@@ -393,6 +394,7 @@ impl BodyProfile {
             roof_half,
             nose_run,
         };
+        p.apply_sections(def);
         if p.style.silhouette == Silhouette::Pickup && !trunk_lid && !rear_glass {
             let y0 = p.y_tail + 0.07;
             let y1 = p.y_deck - 0.04;
@@ -402,6 +404,88 @@ impl BodyProfile {
             }
         }
         p
+    }
+
+    // ------------------------------------------------------------------ section spec
+
+    /// The car's section spec ([`BodyStyle::sections`]), if it has one.
+    pub fn spec(&self) -> Option<&SectionSpec> {
+        self.style.sections.as_deref()
+    }
+
+    /// Visual ride offset applied to the spec's heights ([`BodyStyle::ride_dz`]), m.
+    fn spec_dz(&self) -> f32 {
+        self.style.ride_dz.clamp(-0.05, 0.08)
+    }
+
+    /// Section knobs at `y` from the spec's keyframes (all `None` without a spec, so every
+    /// knob falls back to the style's value).
+    fn knobs(&self, y: f32) -> Knobs {
+        self.spec().map_or(Knobs::default(), |s| s.knobs_at(y))
+    }
+
+    /// Take the visual anchors (nose / tail, windshield base, roof, deck start, heights, widths)
+    /// from the section spec. Lattice zone stations (hood front, door hinges and rear edges,
+    /// quarters) stay; the hood rear / trunk front edges move like `cabin_shift_m` does.
+    fn apply_sections(&mut self, def: &VehicleDef) {
+        let Some(spec) = self.style.sections.clone() else {
+            return;
+        };
+        let a = &spec.anchors;
+        let (front_tire, rear_tire) = def.wheels.iter().fold((f32::MIN, f32::MAX), |(f, r), w| {
+            (
+                f.max(w.position_m[1] + w.radius_m),
+                r.min(w.position_m[1] - w.radius_m),
+            )
+        });
+        let oh = |v: f32| v.clamp(OVERHANG_RANGE.0, OVERHANG_RANGE.1);
+        self.y_nose = (a.y_nose + oh(self.style.overhang_trim.0)).max(front_tire + 0.06);
+        self.y_tail = (a.y_tail - oh(self.style.overhang_trim.1)).min(rear_tire - 0.06);
+        self.y_bf = self.y_bf.min(self.y_nose - 0.10);
+        self.y_quarter.1 = self.y_quarter.1.max(self.y_tail + 0.10);
+        let dz = self.spec_dz();
+        self.y_fw = a.y_windshield_base.min(self.y_bf - 0.30);
+        let rz = spec.lines.greenhouse.max_y() + dz - self.style.roof_crown.clamp(0.0, 0.05);
+        let r1 = clamp_soft(a.y_roof_front, self.y_tail + 0.5, self.y_fw - 0.10);
+        let r0 = clamp_soft(a.y_roof_rear, self.y_tail + 0.3, r1 - 0.05);
+        self.y_deck = clamp_soft(a.y_deck, self.y_tail + 0.02, r0 - 0.05);
+        self.roof = (r0, r1, rz, self.roof.3);
+        self.z_floor = spec.lines.sill.min_y() + dz;
+        self.z_door_bottom = a.z_door_bottom.map_or(self.z_door_bottom, |z| z + dz);
+        self.z_bumper_top = (a.z_bumper_top[0] + dz, a.z_bumper_top[1] + dz);
+        let n = 120;
+        self.half_w = (0..=n)
+            .map(|i| {
+                let y = a.y_tail + (a.y_nose - a.y_tail) * i as f32 / n as f32;
+                spec.plan.half_width.eval(y)
+            })
+            .fold(0.3, f32::max);
+        self.roof_half = spec
+            .plan
+            .roof_half_width
+            .max_y()
+            .clamp(0.2, self.half_w - 0.03);
+        self.z_hood = (self.belt(self.y_fw), self.belt(self.y_bf));
+        self.z_nose = self.belt(self.y_nose);
+        self.z_belt = self.belt(0.5 * (self.y_fd_hinge + self.y_fd_rear));
+        self.z_deck = self.belt(self.y_deck);
+        self.nose_run = (0.35
+            + (self.z_hood.1 - self.z_nose).max(0.0)
+                * tan_deg(self.style.nose_rake_deg.clamp(0.0, 60.0)))
+        .clamp(0.10, 1.2);
+    }
+
+    /// Centre-line crown of the top at `y` (hood crown on the hood and deck, roof crown on the
+    /// greenhouse), m: what the spec's centre-line greenhouse curve sits above the loft's top.
+    fn centre_crown(&self, y: f32) -> f32 {
+        let s = &self.style;
+        let tf = smoothstep((self.y_fw - y) / 0.25);
+        let tr = smoothstep((y - self.y_deck) / 0.25);
+        lerp(
+            s.hood_crown.clamp(0.0, 0.05),
+            s.roof_crown.clamp(0.0, 0.05),
+            tf.min(tr),
+        )
     }
 
     // ------------------------------------------------------------------ side view
@@ -428,6 +512,11 @@ impl BodyProfile {
 
     /// Body half width at `y` (rounded in plan view at the ends), before flares/haunches.
     pub fn half_width(&self, y: f32) -> f32 {
+        if let Some(spec) = self.spec() {
+            let w = spec.plan.half_width.eval(y).max(0.2);
+            let ws = w * self.end_bow(y) * self.plan_scale(y);
+            return self.tire_floor(y, ws, f32::MAX).max(0.2);
+        }
         let (n, t) = self.plan_t(y);
         let ni = (0.23 * self.style.nose_plan_round).clamp(0.01, 0.12);
         let ti = (0.23 * self.style.tail_plan_round).clamp(0.01, 0.12);
@@ -440,6 +529,12 @@ impl BodyProfile {
         if ws >= w {
             return ws;
         }
+        self.tire_floor(y, ws, w)
+    }
+
+    /// `ws` kept outside the tire's outer face (+1 cm, at most `cap`) over a wheel, easing out
+    /// over 0.15 m past the arch.
+    fn tire_floor(&self, y: f32, ws: f32, cap: f32) -> f32 {
         // Over a wheel the body stays outside the tire's outer face (+1 cm).
         let floor = self
             .arches
@@ -452,7 +547,7 @@ impl BodyProfile {
                 } else {
                     smoothstep(1.0 - d / 0.15)
                 };
-                lerp(ws, (tx + 0.01).min(w), t)
+                lerp(ws, (tx + 0.01).min(cap), t)
             })
             .fold(ws, f32::max);
         ws.max(floor)
@@ -712,11 +807,21 @@ impl BodyProfile {
         let sill = self.sill(y);
         let belt = self.belt(y).max(sill + 0.12);
         let h = belt - sill;
-        let tuck = s.sill_tuck.clamp(0.01, 0.12).min(0.3 * h);
-        let ch = s.shoulder_round.clamp(0.01, 0.12).min(0.3 * h);
+        let kn = self.knobs(y);
+        let tuck = kn
+            .sill_tuck
+            .unwrap_or(s.sill_tuck)
+            .clamp(0.01, 0.12)
+            .min(0.3 * h);
+        let ch = kn
+            .shoulder_round
+            .unwrap_or(s.shoulder_round)
+            .clamp(0.01, 0.12)
+            .min(0.3 * h);
         let height = self.roof.2.max(belt);
         let zc = clamp_soft(
-            s.crease_z.clamp(0.25, 0.70) * height,
+            kn.crease_z_m
+                .unwrap_or_else(|| s.crease_z.clamp(0.25, 0.70) * height),
             sill + tuck + 0.06,
             belt - ch - 0.06,
         );
@@ -772,6 +877,9 @@ impl BodyProfile {
 
     /// Underside height at `y` (rises toward the ends: approach/departure chamfer).
     pub fn sill(&self, y: f32) -> f32 {
+        if let Some(spec) = self.spec() {
+            return spec.lines.sill.eval(y) + self.spec_dz();
+        }
         let (n, t) = self.plan_t(y);
         self.z_floor + 0.06 * n.max(t)
     }
@@ -802,6 +910,9 @@ impl BodyProfile {
 
     /// Shoulder (top of the side panels) at `y`.
     pub fn belt(&self, y: f32) -> f32 {
+        if let Some(spec) = self.spec() {
+            return spec.lines.belt.eval(y) + self.spec_dz();
+        }
         let base = if y >= self.y_fw {
             self.hood_line(y)
         } else if y >= self.y_quarter.0 {
@@ -851,6 +962,21 @@ impl BodyProfile {
     /// deck, or just above the belt (hood). [`BodyStyle::roof_arc`] blends the greenhouse
     /// toward one smooth arc.
     pub fn top(&self, y: f32) -> f32 {
+        if let Some(spec) = self.spec() {
+            // Hood and deck: the flat top over the belt (crowns added by the ring); the
+            // greenhouse: the spec's centre line less its crown.
+            let flat = self.belt(y) + 0.015;
+            if y >= self.y_fw || y <= self.y_deck {
+                return flat
+                    + if y < self.y_deck {
+                        self.ducktail(y)
+                    } else {
+                        0.0
+                    };
+            }
+            let g = spec.lines.greenhouse.eval(y) + self.spec_dz() - self.centre_crown(y);
+            return g.max(flat);
+        }
         let lin = self.top_straight(y);
         match self.arc_top(y) {
             Some(arc) => {
@@ -1105,9 +1231,14 @@ impl BodyProfile {
         let y = self.y_fw - 0.01;
         let (w, hn) = (self.half_width(y), self.haunch(y));
         let h = (self.belt(y).max(self.sill(y) + 0.12) - self.sill(y)).max(0.0);
-        let ch = s.shoulder_round.clamp(0.01, 0.12).min(0.3 * h);
+        let kn = self.knobs(y);
+        let ch = kn
+            .shoulder_round
+            .unwrap_or(s.shoulder_round)
+            .clamp(0.01, 0.12)
+            .min(0.3 * h);
         let xs = w + hn - 0.5 * ch;
-        let gb = (w + 0.5 * hn - s.glass_inset.clamp(0.04, 0.20))
+        let gb = (w + 0.5 * hn - kn.glass_inset.unwrap_or(s.glass_inset).clamp(0.04, 0.20))
             .max(0.3)
             .min(xs - 0.01)
             .max(0.05);
@@ -1117,6 +1248,10 @@ impl BodyProfile {
 
     /// Greenhouse half width at roof height at `y` (A-pillar plan taper applied).
     pub fn roof_half_w(&self, y: f32) -> f32 {
+        if let Some(spec) = self.spec() {
+            let w = spec.plan.roof_half_width.eval(y);
+            return w.clamp(0.45 * self.roof_half, self.half_w);
+        }
         let taper = tan_deg(self.style.a_pillar_rake_deg.clamp(0.0, 25.0))
             * (y - (self.roof.1 - 0.2)).max(0.0);
         let taper_rear = tan_deg(self.style.c_pillar_rake_deg.clamp(0.0, 25.0))
@@ -1184,6 +1319,11 @@ impl BodyProfile {
 
     /// Fender swell (haunch) at `y`, m.
     pub fn haunch(&self, y: f32) -> f32 {
+        if let Some(spec) = self.spec() {
+            if !spec.plan.haunch.is_empty() {
+                return spec.plan.haunch.eval(y).clamp(0.0, 0.12);
+            }
+        }
         self.arches
             .iter()
             .map(|&(wy, _, r)| {
@@ -1242,15 +1382,25 @@ impl BodyProfile {
         let top = self.top(y).max(belt + 0.015);
         let gh = !self.bed_open(y) && self.has_greenhouse(y);
         let h = belt - sill;
-        let tuck = s.sill_tuck.clamp(0.01, 0.12).min(0.3 * h);
-        let ch = s.shoulder_round.clamp(0.01, 0.12).min(0.3 * h);
+        let kn = self.knobs(y);
+        let tuck = kn
+            .sill_tuck
+            .unwrap_or(s.sill_tuck)
+            .clamp(0.01, 0.12)
+            .min(0.3 * h);
+        let ch = kn
+            .shoulder_round
+            .unwrap_or(s.shoulder_round)
+            .clamp(0.01, 0.12)
+            .min(0.3 * h);
         let height = self.roof.2.max(belt);
         let zc = clamp_soft(
-            s.crease_z.clamp(0.25, 0.70) * height,
+            kn.crease_z_m
+                .unwrap_or_else(|| s.crease_z.clamp(0.25, 0.70) * height),
             sill + tuck + 0.06,
             belt - ch - 0.06,
         );
-        let cd = s.crease_depth.clamp(0.0, 0.03);
+        let cd = kn.crease_depth.unwrap_or(s.crease_depth).clamp(0.0, 0.03);
         let fl = s.flare.clamp(0.0, 0.08) * self.arch_t(y);
         let hn = self.haunch(y);
         let lower = |x: f32, z: f32| RingPt {
@@ -1281,7 +1431,8 @@ impl BodyProfile {
             }
         }
         let xs = w + hn - 0.5 * ch;
-        let gb = (w + 0.5 * hn - s.glass_inset.clamp(0.04, 0.20)).max(0.3);
+        let gb =
+            (w + 0.5 * hn - kn.glass_inset.unwrap_or(s.glass_inset).clamp(0.04, 0.20)).max(0.3);
         // Section shape (phase 3): sill tuck-in, side bulge, side sculpts.
         let ri = s.rocker_in_m.clamp(0.0, 0.08);
         if ri > 0.0 {

@@ -898,6 +898,7 @@ impl Builder {
                 skin_nodes: Vec::new(),
                 skin_weights: Vec::new(),
                 fold: None,
+                duvs: Vec::new(),
             });
         }
         out

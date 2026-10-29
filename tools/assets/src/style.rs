@@ -468,6 +468,15 @@ pub struct BodyStyle {
     /// rear end, m (+ the top line falls toward the rear, independent of the roof edge; the roof
     /// rail band widens). Range −0.03…+0.10. Default 0.
     pub dlo_top_drop_m: f32,
+
+    // --- Painted-car pipeline ---
+    /// Measured section spec of a real car family ([`crate::section::SectionSpec`], already
+    /// fitted to the car with `for_car`): when set, the profile takes the nose / tail, cabin
+    /// stations, side-view lines, plan-view widths and section knobs from it (the lattice still
+    /// fixes the panel zones and hinges) and the loft stations follow its curvature. `None`
+    /// (default) = the knob-driven body above, unchanged. Not serialised.
+    #[serde(skip)]
+    pub sections: Option<std::sync::Arc<crate::section::SectionSpec>>,
 }
 
 /// Allowed range of a [`BodyStyle::plan_width`] scale.
@@ -658,6 +667,7 @@ impl Default for BodyStyle {
             dlo_kink_m: 0.0,
             dlo_kink_len_m: 0.15,
             dlo_top_drop_m: 0.0,
+            sections: None,
         }
     }
 }
@@ -956,6 +966,9 @@ pub struct WheelStyle {
     pub front_camber_deg: f32,
     /// Visual rear camber, degrees (+ = top leans in). Range −1…8.
     pub rear_camber_deg: f32,
+    /// Painted-car pipeline: a plain rim (barrel, flat dished face, cap) whose spokes are
+    /// painted into the detail texture instead of modelled. Default false.
+    pub painted: bool,
 }
 
 impl Default for WheelStyle {
@@ -976,6 +989,7 @@ impl Default for WheelStyle {
             tire_aspect: None,
             front_camber_deg: 0.0,
             rear_camber_deg: 0.0,
+            painted: false,
         }
     }
 }
@@ -1205,6 +1219,10 @@ pub enum Tier {
     Hero,
     /// Traffic: 4k–11k triangles, coarser loft.
     Traffic,
+    /// Painted-car pipeline (real car families from a section spec, detail painted into a
+    /// per-car texture): 4k–30k triangles, curvature-driven loft. No cap pressure: the loft
+    /// spends triangles where the silhouette needs them.
+    Painted,
 }
 
 impl Tier {
@@ -1213,6 +1231,7 @@ impl Tier {
         match self {
             Tier::Hero => (8000, 22000),
             Tier::Traffic => (4000, 11000),
+            Tier::Painted => (4000, 30000),
         }
     }
 }
@@ -1301,9 +1320,17 @@ pub fn class_default(def: &VehicleDef) -> CarStyle {
     }
 }
 
-/// The style of a car: `styles::performance`, then `styles::traffic`, then `styles::police`
-/// (first `Some` wins), else [`class_default`]. Sets [`CarStyle::tier`].
+/// The style of a car: `styles::models` (painted real-car families, [`Tier::Painted`]), then
+/// `styles::performance`, then `styles::traffic`, then `styles::police` (first `Some` wins),
+/// else [`class_default`]. Sets [`CarStyle::tier`].
+///
+/// (`styles::models` was put first by the painted-car pipeline, owner-directed 2026-10-29; the
+/// other modules own none of its ids, so their cars are unchanged.)
 pub fn style_for(def: &VehicleDef) -> CarStyle {
+    if let Some(mut s) = crate::styles::models::style(def) {
+        s.tier = Tier::Painted;
+        return s;
+    }
     if let Some(mut s) = crate::styles::performance::style(def) {
         s.tier = Tier::Hero;
         return s;

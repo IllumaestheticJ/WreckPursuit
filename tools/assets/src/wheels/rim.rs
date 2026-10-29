@@ -653,3 +653,32 @@ pub fn rim(g: &WheelGeom, b: &mut Builder) {
         centre_cap(b, &k, g, cap, cap_plane, &cap_key);
     }
 }
+
+/// Painted-car rim ([`crate::style::WheelStyle::painted`]): the flange and lip, a shallow
+/// concave face disc from the lip to the hub (its spokes, lugs and the dark well between them
+/// are painted into the detail texture) and a short barrel behind the lip. One part
+/// (`wheel_xx_rim`, tintable `rim` slot).
+pub fn painted_rim(g: &WheelGeom, b: &mut Builder) {
+    let l = g.layout;
+    let s = g.outboard;
+    let n = g.lathe_n().max(12);
+    let key = PartKey::wheel(&g.name("rim"), g.index, PartKind::Rim, MaterialSlot::Rim);
+    let dish = (0.35 * (l.rw - l.u_face)).clamp(0.004, 0.02);
+    hub_lathe(
+        b,
+        &key,
+        s,
+        &[
+            [l.r_b, -l.rw + 0.004],
+            [l.r_b, l.u_face.min(l.rw - 0.004)],
+            [l.r_f, l.rw - 0.008],
+            [l.r_f, l.rw],
+            [l.r_li, l.rw],
+            [l.r_b - 0.004, l.u_face],
+            [0.55 * l.r_b, l.u_face - dish],
+            [0.22 * l.r_b, l.u_face - 0.6 * dish],
+            [0.0, l.u_face - 0.3 * dish],
+        ],
+        n,
+    );
+}

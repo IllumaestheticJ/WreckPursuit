@@ -12,6 +12,9 @@ wp_math.workspace = true
 wp_damage.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# Detail-texture PNG (zlib): pure Rust, already in the workspace (wp_wasm). car-assets is a tool,
+# never reachable from wp_wasm.
+miniz_oxide = "0.9"
 
 [[bin]]
 name = "gen-car-mesh"

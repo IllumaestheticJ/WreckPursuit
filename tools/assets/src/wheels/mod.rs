@@ -125,9 +125,13 @@ impl WheelGeom {
 }
 
 /// Tire and rim parts of one wheel (hub space, not skinned).
-pub fn wheel_parts(g: &WheelGeom, _style: &WheelStyle) -> Vec<MeshPart> {
+pub fn wheel_parts(g: &WheelGeom, style: &WheelStyle) -> Vec<MeshPart> {
     let mut b = crate::builder::Builder::new();
     tire::tire(g, &mut b);
-    rim::rim(g, &mut b);
+    if style.painted {
+        rim::painted_rim(g, &mut b);
+    } else {
+        rim::rim(g, &mut b);
+    }
     b.finish()
 }

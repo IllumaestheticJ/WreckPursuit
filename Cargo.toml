@@ -89,6 +89,11 @@ opt-level = 3
 [profile.dev.package.wp_math]
 opt-level = 2
 
+# The painted-car texture painter (AO bake) runs in `cargo test -p car-assets` (painted-car
+# pipeline, 2026-10-29).
+[profile.dev.package.car-assets]
+opt-level = 2
+
 [profile.dev.package.wp_vehicle]
 opt-level = 2
 

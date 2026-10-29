@@ -542,6 +542,64 @@ pub fn table(id: &str) -> Option<CarSpec> {
                 exhaust(Tips::DualOval, 0.045, 0.032, false),
             )
         },
+        // Nissan Skyline R34 (painted-car pipeline): RB inline six, multi-link front and rear.
+        // GT-R: RB26DETT twin turbo + front-mount intercooler, ATTESA AWD, Brembo 4-pot 324 mm /
+        // 2-pot 300 mm, 18" 5×114.3, single tip on the left.
+        "nissan_skyline_r34_gtr" | "nissan_skyline_r34_gtr_vspec2" => CarSpec {
+            cover: Cover::Tint,
+            engine_detail: true,
+            awd: true,
+            ..base(
+                wheel(R::FiveSpoke, 5, 18.0, 5, 114.3, M::Metal),
+                brake(0.324, 0.030, true, Plain, Fixed4, 165.0),
+                brake(0.300, 0.022, true, Plain, Fixed2, 205.0),
+                Engine::Inline6 {
+                    turbos: 2,
+                    itb: false,
+                    fmic: true,
+                },
+                Mount::Longitudinal,
+                Susp::Sla,
+                Susp::Multilink,
+                exhaust(Tips::Single, 0.045, 0.032, false),
+            )
+        },
+        // 25GT-T: RB25DET single turbo + FMIC, 17", 4-pot front; 25GT: RB25DE NA, 16".
+        "nissan_skyline_r34_25gt_t" | "nissan_skyline_r34_25gt" => {
+            let turbo = id == "nissan_skyline_r34_25gt_t";
+            CarSpec {
+                cover: Cover::Silver,
+                engine_detail: true,
+                ..base(
+                    wheel(
+                        R::FiveSpoke,
+                        5,
+                        if turbo { 17.0 } else { 16.0 },
+                        5,
+                        114.3,
+                        M::Metal,
+                    ),
+                    brake(
+                        if turbo { 0.296 } else { 0.280 },
+                        0.026,
+                        true,
+                        Plain,
+                        if turbo { Fixed4 } else { Floating1 },
+                        165.0,
+                    ),
+                    brake(0.297, 0.016, true, Plain, Floating1, 205.0),
+                    Engine::Inline6 {
+                        turbos: u8::from(turbo),
+                        itb: false,
+                        fmic: turbo,
+                    },
+                    Mount::Longitudinal,
+                    Susp::Sla,
+                    Susp::Multilink,
+                    exhaust(Tips::Single, 0.04, 0.03, false),
+                )
+            }
+        }
         "hakone_gt" => CarSpec {
             cover: Cover::Tint,
             engine_detail: true,
@@ -981,7 +1039,8 @@ pub fn class_spec(class: VehicleClass) -> CarSpec {
 /// Base spec of a car (table, else class fallback) with the budget tier applied.
 pub fn base_spec(def: &VehicleDef, tier: Tier) -> CarSpec {
     let mut s = table(&def.id).unwrap_or_else(|| class_spec(def.class));
-    s.hero = tier == Tier::Hero;
+    // Painted cars get the hero (dense) mechanical detail too.
+    s.hero = tier != Tier::Traffic;
     s
 }
 

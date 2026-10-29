@@ -4,10 +4,12 @@
 //!
 //! | Module | Owner (wave 2) | Cars |
 //! |---|---|---|
+//! | [`models`] | painted-car pipeline | real car families from section specs (asked first) |
 //! | [`performance`] | style-performance | muscle, hot hatch, tuner, supercar, exotic, `debug_coupe` |
 //! | [`traffic`] | style-traffic | civilian traffic cars |
 //! | [`police`] | style-police | `sentinel_*` |
 
+pub mod models;
 pub mod performance;
 pub mod police;
 pub mod traffic;

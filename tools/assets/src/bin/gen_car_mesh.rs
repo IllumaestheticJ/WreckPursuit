@@ -1,10 +1,12 @@
 //! `gen-car-mesh [--check] [car ...]`: generate + skin the procedural mesh of every car (or
 //! the named ones) into `data/panels/meshes/<car>.json`, and its unskinned mid level of detail
-//! into `data/panels/meshes/mid/<car>.json`. `--check` writes nothing and exits 1 if a file on
-//! disk differs from what would be generated (stale).
+//! into `data/panels/meshes/mid/<car>.json`; painted cars also get their detail texture
+//! `data/panels/textures/<car>.png`. `--check` writes nothing and exits 1 if a file on disk
+//! differs from what would be generated (stale).
 
 use car_assets::{
-    build_mesh, build_mid_mesh, car_ids, load_car, mesh_path, mid_mesh_path, repo_root,
+    build_detail_png, build_mesh, build_mid_mesh, car_ids, detail_path, load_car, mesh_path,
+    mid_mesh_path, repo_root,
 };
 
 fn main() {
@@ -20,6 +22,19 @@ fn main() {
         let car = load_car(&root, &id).unwrap_or_else(|e| panic!("{id}: {e}"));
         let mesh = build_mesh(&car);
         let mid = build_mid_mesh(&car);
+        if let (Some(d), Some(png)) = (&mesh.detail, build_detail_png(&car)) {
+            let path = detail_path(&root, &d.file);
+            if check {
+                if std::fs::read(&path).ok().as_deref() != Some(png.as_slice()) {
+                    eprintln!("stale: {}", path.display());
+                    stale += 1;
+                }
+            } else {
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, &png).unwrap();
+                println!("{id}: detail {}×{} -> {}", d.w, d.h, path.display());
+            }
+        }
         for (m, path) in [
             (&mesh, mesh_path(&root, &id)),
             (&mid, mid_mesh_path(&root, &id)),

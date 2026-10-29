@@ -29,7 +29,13 @@ use crate::wheels::WheelGeom;
 ///   their end of the car (see [`crate::skin::light_regions`]).
 ///
 /// Field names and serde shapes are exactly those of the two sides; only the number changed.
-pub const MESH_FORMAT: u32 = 4;
+///
+/// 5 (newest) = 4 + the painted-car detail texture: `CarMesh::detail` ([`DetailTexture`]) and
+/// `MeshPart::duvs` (a second UV set into it). Only meshes that carry them are written as format
+/// 5; every other mesh stays format [`MESH_FORMAT_PLAIN`] byte for byte.
+pub const MESH_FORMAT: u32 = 5;
+/// Format of a mesh without a detail texture (written for every car that is not painted).
+pub const MESH_FORMAT_PLAIN: u32 = 4;
 /// How far a head / tail lamp lens stands proud of the nose / tail face, m.
 pub const LIGHT_PROUD_M: f32 = 0.014;
 /// How deep a head / tail lamp lens is sunk into the body behind the nose / tail face, m.
@@ -96,6 +102,11 @@ pub fn loft_steps(tier: Tier) -> (f32, f32) {
     match tier {
         Tier::Hero => (0.07, 0.036),
         Tier::Traffic => (0.11, 0.065),
+        // Caps of the curvature-driven loft (`section::adaptive_stations`).
+        Tier::Painted => (
+            crate::section::ADAPTIVE_STEPS.0,
+            crate::section::ADAPTIVE_STEPS.1,
+        ),
     }
 }
 
@@ -254,6 +265,27 @@ pub struct MeshPart {
     /// for every other part. See [`FoldBinding`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fold: Option<FoldBinding>,
+    /// Detail-texture UV per vertex in 1/65535 (format 5, painted cars; empty otherwise and for
+    /// glass / interior / engine-bay / brake parts): u right, v down from the texture's first
+    /// row. See `data/panels/README.md` "Detail texture".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub duvs: Vec<u16>,
+}
+
+/// A painted car's detail texture (format 5): `data/panels/<file>`, RGBA8 PNG, `w` × `h`
+/// (a power of two), RGB = detail colour / shading, A = paint mask. `hash` (FNV-1a 64 of the
+/// PNG bytes, hex) changes whenever the texture does. The full and mid LOD share it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DetailTexture {
+    /// Path under `data/panels/` (`textures/<car>.png`).
+    pub file: String,
+    /// Width, px.
+    pub w: u32,
+    /// Height, px.
+    pub h: u32,
+    /// FNV-1a 64 of the PNG bytes, 16 hex digits.
+    pub hash: String,
 }
 
 /// How a sheet panel crumples in the renderer (visual only; the lattice, hull and repair bill
@@ -382,6 +414,9 @@ pub struct CarMesh {
     /// Visual camber per wheel (FL FR RL RR), degrees, + = top leans in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wheel_camber_deg: Option<[f32; 4]>,
+    /// Painted-car detail texture (format 5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<DetailTexture>,
     /// Parts in a stable order.
     pub parts: Vec<MeshPart>,
 }
@@ -407,6 +442,9 @@ impl CarMesh {
         }
         if let Some(c) = &self.wheel_camber_deg {
             s.push_str(&format!("  \"wheel_camber_deg\": {},\n", j(c)));
+        }
+        if let Some(d) = &self.detail {
+            s.push_str(&format!("  \"detail\": {},\n", j(d)));
         }
         s.push_str("  \"parts\": [\n");
         for (i, p) in self.parts.iter().enumerate() {
@@ -522,7 +560,10 @@ fn windows(p: &BodyProfile) -> Windows {
     let q0 = p.roof.0 + 0.08;
     let q1 = last - 0.04;
     let van = p.style.silhouette == crate::style::Silhouette::Van;
-    let quarter = (!van && p.style.quarter_glass && q1 - q0 > 0.2).then_some((q0, q1));
+    let quarter = match p.spec().and_then(|s| s.anchors.quarter_glass_y) {
+        Some([a, b]) if p.style.quarter_glass && b - a > 0.05 => Some((a, b)),
+        _ => (!van && p.style.quarter_glass && q1 - q0 > 0.2).then_some((q0, q1)),
+    };
     let rear = if van { None } else { rear };
     // B-pillar: between the front window and the rear door window or quarter glass.
     let b_pillar = match (rear, quarter) {
@@ -766,17 +807,22 @@ pub fn stations(p: &BodyProfile, base: f32, fine: f32) -> Vec<f32> {
         }
     }
     let fine_at = |y: f32| zones.iter().any(|&(a, b)| y >= a && y <= b);
-    let mut ys = vec![p.y_tail];
-    let mut y = p.y_tail;
-    while y < p.y_nose - 1e-4 {
-        let step = if fine_at(y) { fine } else { base };
-        // Shrink the last step so the nose lands exactly.
-        y = (y + step).min(p.y_nose);
-        if p.y_nose - y < 0.3 * step {
-            y = p.y_nose;
+    let mut ys = if p.spec().is_some() {
+        spec_stations(p, base, fine, &fine_at)
+    } else {
+        let mut ys = vec![p.y_tail];
+        let mut y = p.y_tail;
+        while y < p.y_nose - 1e-4 {
+            let step = if fine_at(y) { fine } else { base };
+            // Shrink the last step so the nose lands exactly.
+            y = (y + step).min(p.y_nose);
+            if p.y_nose - y < 0.3 * step {
+                y = p.y_nose;
+            }
+            ys.push(y);
         }
-        ys.push(y);
-    }
+        ys
+    };
     let win = windows(p);
     let mut keys = vec![
         p.y_fw,
@@ -825,6 +871,42 @@ pub fn stations(p: &BodyProfile, base: f32, fine: f32) -> Vec<f32> {
     ys.sort_by(|a, b| a.total_cmp(b));
     ys.dedup_by(|a, b| (*a - *b).abs() < 0.001);
     ys
+}
+
+/// Curvature-driven stations of a car with a section spec ([`crate::section::adaptive_stations`]):
+/// every step follows the spec's side-view lines, plan widths, greenhouse and arches within
+/// [`crate::section::ADAPTIVE_TOL_M`] (scaled with `base` for coarser LODs), at most `fine` near
+/// the ends and arches, [`crate::section::ADAPTIVE_STEPS`]`.2` on the crumpling sheets (hood,
+/// fenders, trunk lid, quarters: the `fold` binding needs rows) and `base` elsewhere.
+fn spec_stations(p: &BodyProfile, base: f32, fine: f32, fine_at: &dyn Fn(f32) -> bool) -> Vec<f32> {
+    use crate::section::{adaptive_stations, ADAPTIVE_STEPS, ADAPTIVE_TOL_M};
+    let sheet = ADAPTIVE_STEPS.2.min(base);
+    let tol = ADAPTIVE_TOL_M * (base / ADAPTIVE_STEPS.0).max(1.0);
+    let max_step = |y: f32| {
+        if fine_at(y) {
+            fine
+        } else if y > p.y_fd_hinge || y < p.y_quarter.0 {
+            sheet
+        } else {
+            base
+        }
+    };
+    let curves = |y: f32| {
+        let sill = p.sill(y);
+        let mut v = vec![sill, p.belt(y), p.top(y), p.half_width(y) + p.haunch(y)];
+        // Absent curves are NaN (skipped by the chord test).
+        v.push(if p.has_greenhouse(y) {
+            p.roof_half_w(y)
+        } else {
+            f32::NAN
+        });
+        v.push(
+            p.arch_floor(y)
+                .map_or(f32::NAN, |a| a.min(p.belt(y) - 0.05)),
+        );
+        v
+    };
+    adaptive_stations(p.y_tail, p.y_nose, tol, max_step, curves)
 }
 
 /// Generate the mesh for a car with its [`style_for`] style (skin binding left empty; see
@@ -987,8 +1069,57 @@ pub fn generate_mid(def: &VehicleDef, lattice: &LatticeDef) -> CarMesh {
     generate_lod(def, lattice, &style_for(def), Lod::Mid)
 }
 
-/// Generate the mesh for a car with an explicit style at a level of detail.
+/// Whether a style is a painted car (a [`Tier::Painted`] style with a section spec): its meshes
+/// carry detail UVs and the detail texture (format [`MESH_FORMAT`]).
+pub fn is_painted(style: &CarStyle) -> bool {
+    style.tier == Tier::Painted && style.body.sections.is_some()
+}
+
+/// The detail texture of a painted car and its full mesh's parts with detail UVs (`None` for
+/// every other car). The layout comes from the full mesh; the mid LOD reuses it.
+pub fn painted_detail(
+    def: &VehicleDef,
+    lattice: &LatticeDef,
+    style: &CarStyle,
+) -> Option<(
+    crate::paint::layout::Layout,
+    Vec<MeshPart>,
+    std::sync::Arc<crate::paint::Painted>,
+)> {
+    if !is_painted(style) {
+        return None;
+    }
+    let full = build_lod(def, lattice, style, Lod::Full);
+    let layout = crate::paint::layout::Layout::build(&full.parts);
+    let mut parts = full.parts;
+    crate::paint::assign_duvs(&layout, &mut parts);
+    let prof = BodyProfile::styled(def, lattice, &style.body);
+    let painted = crate::paint::paint_mesh(def, &prof, &layout, &parts);
+    Some((layout, parts, painted))
+}
+
+/// Generate the mesh for a car with an explicit style at a level of detail. Painted cars
+/// ([`is_painted`]) get detail UVs and their `detail` texture reference (format 5).
 pub fn generate_lod(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle, lod: Lod) -> CarMesh {
+    let Some((layout, full_parts, painted)) = painted_detail(def, lattice, style) else {
+        return build_lod(def, lattice, style, lod);
+    };
+    let mut m = if lod == Lod::Full {
+        let mut m = build_lod(def, lattice, style, lod);
+        m.parts = full_parts;
+        m
+    } else {
+        let mut m = build_lod(def, lattice, style, lod);
+        crate::paint::assign_duvs(&layout, &mut m.parts);
+        m
+    };
+    m.detail = Some(painted.detail.clone());
+    m.format = MESH_FORMAT;
+    m
+}
+
+/// The mesh of a level of detail without detail UVs (format [`MESH_FORMAT_PLAIN`]).
+fn build_lod(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle, lod: Lod) -> CarMesh {
     let mid = lod == Lod::Mid;
     let mid_style;
     let style = if mid {
@@ -1102,12 +1233,13 @@ pub fn generate_lod(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle, lo
     CarMesh {
         id: def.id.clone(),
         lattice_id: lattice.id.clone(),
-        format: MESH_FORMAT,
+        format: MESH_FORMAT_PLAIN,
         tri_count,
         tints,
         livery: style.livery.clone(),
         atlas: Some(atlas),
         wheel_camber_deg: camber.iter().any(|c| c.abs() > 1e-4).then_some(camber),
+        detail: None,
         parts,
     }
 }
@@ -2293,6 +2425,7 @@ mod tests {
             skin_nodes: Vec::new(),
             skin_weights: Vec::new(),
             fold: None,
+            duvs: Vec::new(),
         }
     }
 
