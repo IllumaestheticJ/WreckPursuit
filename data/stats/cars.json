@@ -257,11 +257,55 @@
         "cornering": 1.0
       }
     },
+    "nissan_skyline_r34_25gt": {
+      "display_name": "Nissan Skyline 25GT (R34)",
+      "zero_to_100_s": 8.25,
+      "top_speed_kmh": 218.8,
+      "cornering_g": 0.811,
+      "bars": {
+        "acceleration": 0.62,
+        "top_speed": 0.463,
+        "cornering": 0.522
+      }
+    },
+    "nissan_skyline_r34_25gt_t": {
+      "display_name": "Nissan Skyline 25GT-T (R34)",
+      "zero_to_100_s": 6.7,
+      "top_speed_kmh": 254.6,
+      "cornering_g": 0.919,
+      "bars": {
+        "acceleration": 0.744,
+        "top_speed": 0.674,
+        "cornering": 0.738
+      }
+    },
+    "nissan_skyline_r34_gtr": {
+      "display_name": "Nissan Skyline GT-R (R34)",
+      "zero_to_100_s": 5.15,
+      "top_speed_kmh": 252.1,
+      "cornering_g": 0.92,
+      "bars": {
+        "acceleration": 0.868,
+        "top_speed": 0.66,
+        "cornering": 0.739
+      }
+    },
+    "nissan_skyline_r34_gtr_vspec2": {
+      "display_name": "Nissan Skyline GT-R V-Spec II (R34)",
+      "zero_to_100_s": 5.18,
+      "top_speed_kmh": 251.2,
+      "cornering_g": 0.931,
+      "bars": {
+        "acceleration": 0.865,
+        "top_speed": 0.654,
+        "cornering": 0.762
+      }
+    },
     "nyx_proto": {
       "display_name": "Nyx Proto",
       "zero_to_100_s": 3.91,
       "top_speed_kmh": 308.0,
-      "cornering_g": 1.349,
+      "cornering_g": 1.356,
       "bars": {
         "acceleration": 0.967,
         "top_speed": 0.988,

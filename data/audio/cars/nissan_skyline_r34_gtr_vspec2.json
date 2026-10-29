@@ -1,0 +1,15 @@
+{
+  "id": "nissan_skyline_r34_gtr_vspec2",
+  "engine": {
+    "cylinders": 6,
+    "layout": "Inline",
+    "firing": "Even",
+    "induction_exhaust_balance": 0.4,
+    "turbo": true,
+    "supercharger": false,
+    "gain": 1.0
+  },
+  "engine_pack": "engine_proc_i6",
+  "world_pack": "world_rec",
+  "horn_cue": "horn/standard"
+}
