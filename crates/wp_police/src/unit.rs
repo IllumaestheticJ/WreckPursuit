@@ -298,7 +298,9 @@ pub struct UnitBody {
     pub speed: f32,
     /// Current lateral acceleration, g.
     pub lat_g: f32,
-    /// Altitude, m (helicopters).
+    /// Height, m: a helicopter's altitude; a ground unit's chassis height (from
+    /// `sync_unit`, or the road under a kinematically driven unit; 0 on flat cities).
+    /// Sightlines start at it.
     pub alt_m: f32,
 }
 

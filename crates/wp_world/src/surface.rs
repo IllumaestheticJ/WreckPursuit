@@ -11,7 +11,8 @@
 //! - [`deck_rails`]: guard-rail lines along bridge decks;
 //! - [`median_barriers`]: concrete barrier lines between divided-highway carriageways (open
 //!   at median crossovers, [`crate::crossover`]);
-//! - [`deck_slabs`]: bridge-deck pieces that hide what is under them (line of sight);
+//! - [`deck_slabs`]: bridge-deck pieces with room for a car under them (police stakeouts);
+//!   [`deck_occluders`]: whole bridge decks that hide what is under them (line of sight);
 //! - [`edge_barriers`]: concrete barrier lines along the outer edges of highways;
 //! - [`MapGround`]: a wheel ground probe over roads and terrain without a physics engine.
 
@@ -1708,6 +1709,12 @@ impl PavedIndex {
 /// Whether the whole cross-section of `s` at point `k` is more than `gap` metres above
 /// `ground` (a bridge deck rather than an embankment).
 pub fn is_elevated(s: &RoadSurface, k: usize, ground: &dyn Fn(V2) -> f32, gap: f32) -> bool {
+    deck_clearance(s, k, ground) > gap
+}
+
+/// Smallest height of `s`'s cross-section at centreline point `k` (left edge, centre, right
+/// edge) above `ground`, m. Negative where the road is cut into the ground.
+pub fn deck_clearance(s: &RoadSurface, k: usize, ground: &dyn Fn(V2) -> f32) -> f32 {
     let n = s.centre.len();
     let p = s.centre[k];
     let tan = if k + 1 < n {
@@ -1716,10 +1723,13 @@ pub fn is_elevated(s: &RoadSurface, k: usize, ground: &dyn Fn(V2) -> f32, gap: f
         geom::normalize(geom::sub(geom::xy(p), geom::xy(s.centre[k - 1])))
     };
     let r = geom::right_of(tan);
-    [-s.left_m, 0.0, s.right_m].iter().all(|lat| {
-        let q = geom::add(geom::xy(p), geom::scale(r, *lat));
-        s.z_at(k, *lat) - ground(q) > gap
-    })
+    [-s.left_m, 0.0, s.right_m]
+        .iter()
+        .map(|lat| {
+            let q = geom::add(geom::xy(p), geom::scale(r, *lat));
+            s.z_at(k, *lat) - ground(q)
+        })
+        .fold(f32::INFINITY, f32::min)
 }
 
 /// Guard-rail lines `(a, b)` (at road height) along both edges of every bridge-deck stretch:
@@ -2566,17 +2576,18 @@ pub const DECK_COVER_CLEARANCE_M: f32 = 3.0;
 
 /// One piece of bridge deck between two surface centreline points: the paved strip from
 /// `left_m` left to `right_m` right of the centreline `a`→`b`, treated as a thin plane (bank
-/// ignored). Used by [`CityMap::line_of_sight`] so overpasses hide the road below them from a
-/// helicopter.
+/// ignored). [`deck_occluders`] gives the ones [`CityMap::line_of_sight`] uses, so overpasses
+/// hide the road below them from a helicopter and from police on the deck.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DeckSlab {
     /// Centreline start (road height), m.
     pub a: V3,
     /// Centreline end, m.
     pub b: V3,
-    /// Paved width left of the centreline, m.
+    /// Width left of the centreline, m: paved ([`deck_slabs`]) or paved plus the deck's
+    /// sidewalk ([`deck_occluders`]).
     pub left_m: f32,
-    /// Paved width right of the centreline, m.
+    /// Width right of the centreline, m (as `left_m`).
     pub right_m: f32,
 }
 
@@ -2634,6 +2645,71 @@ pub fn deck_slabs(net: &RoadNetwork) -> Vec<DeckSlab> {
                     left_m: s.left_m,
                     right_m: s.right_m,
                 });
+            }
+        }
+    }
+    out
+}
+
+/// A deck piece is part of a bridge's solid structure when either of its ends is more than
+/// this above the terrain, m. Lower than this, a sightline under the deck would already be
+/// within the terrain test's tolerance; a road sitting on the ground never qualifies.
+pub const DECK_OCCLUDER_MIN_GAP_M: f32 = 0.5;
+
+/// A deck occludes this far past its outer edge (paving or sidewalk), m: the edge beam and
+/// the rail or barrier on it. Also closes the seam between a divided highway's two decks,
+/// which meet with a small height step between them.
+pub const DECK_OCCLUDER_EDGE_M: f32 = 0.5;
+
+/// Bridge decks as line-of-sight occluders ([`CityMap::line_of_sight`]): every deck stretch
+/// with room for a car under it ([`DECK_COVER_CLEARANCE_M`] somewhere along it), taken whole
+/// from abutment to abutment, as pieces over its full width (paving, the sidewalks on it and
+/// [`DECK_OCCLUDER_EDGE_M`] of edge).
+///
+/// A stretch is a run of consecutive centreline pieces of one surface that have at least one
+/// end more than [`DECK_OCCLUDER_MIN_GAP_M`] above the terrain. [`deck_slabs`] keeps only the
+/// pieces with the full clearance at both ends, so on its own it leaves the deck's ends and
+/// its sidewalks open: a cop on the deck near an end, or a helicopter looking in past the
+/// paved edge, saw a car parked under it through the solid deck. Empty without terrain.
+pub fn deck_occluders(net: &RoadNetwork) -> Vec<DeckSlab> {
+    let Some(t) = &net.terrain else {
+        return Vec::new();
+    };
+    let ground = |q: V2| t.height_at(q);
+    let mut out = Vec::new();
+    for s in &net.surfaces {
+        let n = s.centre.len();
+        if n < 2 {
+            continue;
+        }
+        let clear: Vec<f32> = (0..n).map(|k| deck_clearance(s, k, &ground)).collect();
+        let raised = |k: usize| clear[k].max(clear[k + 1]) > DECK_OCCLUDER_MIN_GAP_M;
+        let side = |on: bool| DECK_OCCLUDER_EDGE_M + if on { SIDEWALK_W_M } else { 0.0 };
+        let (left_m, right_m) = (
+            s.left_m + side(s.sidewalk[0]),
+            s.right_m + side(s.sidewalk[1]),
+        );
+        let mut k = 0;
+        while k + 1 < n {
+            if !raised(k) {
+                k += 1;
+                continue;
+            }
+            let start = k;
+            while k + 1 < n && raised(k) {
+                k += 1;
+            }
+            // Pieces start..k (exclusive end k), points start..=k.
+            if clear[start..=k]
+                .iter()
+                .any(|c| *c >= DECK_COVER_CLEARANCE_M)
+            {
+                out.extend((start..k).map(|j| DeckSlab {
+                    a: s.centre[j],
+                    b: s.centre[j + 1],
+                    left_m,
+                    right_m,
+                }));
             }
         }
     }

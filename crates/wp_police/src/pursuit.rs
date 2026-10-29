@@ -315,7 +315,7 @@ impl PoliceSystem {
                     }
                 }
             }
-            if self.camera_sees(world, p) {
+            if self.camera_sees(world, p, pz) {
                 o.seen = true;
                 o.witnessed = true;
             }
@@ -2047,6 +2047,11 @@ impl PoliceSystem {
                     );
                     self.update_avoid(i, dt);
                     let rep = step_ground(&mut self.units[i], &env, &cfg, &mut self.rng, dt);
+                    // Its height follows the road it drives along (sightlines start there).
+                    let b = self.units[i].body;
+                    if let Some(z) = self.kinematic_alt(b.pos, b.heading, b.alt_m) {
+                        self.units[i].body.alt_m = z;
+                    }
                     // Standing time (reset in place, row 78), as physical units count it in
                     // `unit_input`.
                     let u = &mut self.units[i];
