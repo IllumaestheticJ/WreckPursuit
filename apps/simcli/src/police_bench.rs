@@ -221,6 +221,7 @@ impl BenchCell {
                 driver: Driver::Scripted,
                 inputs: Vec::new(),
                 tune: Default::default(),
+                paint: None,
                 mods: Vec::new(),
                 player_steering: None,
             }],

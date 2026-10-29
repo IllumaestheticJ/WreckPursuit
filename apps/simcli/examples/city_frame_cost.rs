@@ -69,6 +69,7 @@ fn main() {
             assists: None,
             player_steering: None,
             tune: Default::default(),
+            paint: None,
             driver: Driver::Scripted,
             inputs: Vec::new(),
         }],

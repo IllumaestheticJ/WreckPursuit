@@ -154,7 +154,9 @@ pub struct OwnedCar {
     /// special); `None` for an ordinary car. Shown instead of the model name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variant_name: Option<String>,
-    /// Factory paint (0xRRGGBB) the car was sold in; `None` = the renderer's default colour.
+    /// Paint (0xRRGGBB): the lot colour it was sold in, or its respray. `None` (dealer and
+    /// floor cars, older saves) = the default colour [`OwnedCar::body_paint`] picks by uid.
+    /// Views never read this directly: they all draw [`OwnedCar::body_paint`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paint: Option<u32>,
 }
@@ -193,6 +195,17 @@ impl OwnedCar {
     /// True when the car is in the garage and drivable.
     pub fn is_usable(&self) -> bool {
         self.location == CarLocation::Garage && self.damage.is_drivable()
+    }
+
+    /// The colour the car is drawn in (0xRRGGBB), the one source for every view (garage bay,
+    /// workshop, paint shop, Free Roam, races, lot visits): its own [`Self::paint`], else one
+    /// fixed factory colour picked by its uid, so a car with no saved paint never changes
+    /// colour between views, sessions or reloads.
+    pub fn body_paint(&self) -> u32 {
+        self.paint.unwrap_or_else(|| {
+            let n = crate::lots::FACTORY_PAINTS.len();
+            crate::lots::FACTORY_PAINTS[self.uid.0 as usize % n]
+        })
     }
 }
 

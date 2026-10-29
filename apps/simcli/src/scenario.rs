@@ -463,6 +463,12 @@ pub struct EntitySpec {
     /// `tune: (suspension: 5, gearing: 5, diff: 4, brake_balance: 2)`; missing sliders are stock.
     #[serde(default, skip_serializing_if = "CarTune::is_stock")]
     pub tune: CarTune,
+    /// Body colour 0xRRGGBB the renderer draws the car in (presentation only: the sim never
+    /// reads it). A career car carries its paint here (`wp_economy::OwnedCar::body_paint`),
+    /// so every session that shows it, crash replays and saved replays included, draws the
+    /// same colour. `None` = the renderer's default for the entity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint: Option<u32>,
     /// Who drives. Input keyframes always apply on top of `scripted`; other drivers ignore them.
     #[serde(default)]
     pub driver: Driver,

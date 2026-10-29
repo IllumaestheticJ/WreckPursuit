@@ -80,6 +80,8 @@ mod lots_tests;
 #[cfg(test)]
 mod out_of_play_tests;
 #[cfg(test)]
+mod paint_tests;
+#[cfg(test)]
 mod police_audio_trace;
 #[cfg(test)]
 mod race_spots_tests;
@@ -638,6 +640,10 @@ struct VehicleInfo {
     /// `wp_world` agent id of promoted traffic (the `agent_id` of `traffic_agents()`), so the
     /// physical car can be painted like its instanced twin; `None` for other vehicles.
     traffic_agent: Option<u32>,
+    /// Body colour 0xRRGGBB the scenario entity carries (`EntitySpec::paint`: a career car's
+    /// paint, a lot listing's factory colour); the renderer draws it in every art style.
+    /// `None` = the renderer's default for the entity.
+    paint: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -678,7 +684,7 @@ pub fn car_model_info(car_id: &str) -> Result<String, JsValue> {
 /// Static info JSON for a vehicle: scenario name, dimensions, wheels, CG (chassis space),
 /// lattice sizes, the name tables for region / component / surface indices and, for sim police
 /// vehicles, their `wp_police` unit id (`police_unit`); for promoted traffic, its `wp_world`
-/// agent id (`traffic_agent`).
+/// agent id (`traffic_agent`); the body colour a scenario entity carries (`paint`).
 #[wasm_bindgen]
 pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
     with(|s| {
@@ -692,10 +698,10 @@ pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
                 .ok_or_else(|| format!("unknown entity {entity}"))?,
         };
         // Scenario entities have a name and spawn pose; sim-spawned ones (police, traffic) don't.
-        let (name, spawn_pos) = match (s.spec(EntityId(entity)), parked) {
-            (_, Some(prop)) => (format!("parked{prop}"), [0.0; 3]),
-            (Some(spec), None) => (spec.id.clone(), spec.pos),
-            (None, None) => (format!("{}{entity}", kind.to_lowercase()), [0.0; 3]),
+        let (name, spawn_pos, paint) = match (s.spec(EntityId(entity)), parked) {
+            (_, Some(prop)) => (format!("parked{prop}"), [0.0; 3], None),
+            (Some(spec), None) => (spec.id.clone(), spec.pos, spec.paint),
+            (None, None) => (format!("{}{entity}", kind.to_lowercase()), [0.0; 3], None),
         };
         let car = car_of(s, entity)?;
         let d = &car.def;
@@ -753,6 +759,7 @@ pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
                 .map(|u| u.0),
             police_county: police::vehicle_county(s.sim(), EntityId(entity)),
             traffic_agent: s.vehicle(EntityId(entity)).and_then(|v| v.traffic_agent),
+            paint,
         }))
     })
 }
