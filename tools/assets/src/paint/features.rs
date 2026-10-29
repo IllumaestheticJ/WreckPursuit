@@ -586,8 +586,9 @@ pub mod skyline_r34 {
                 });
             }
         }
-        // Belt moulding on the door / quarter tops.
-        if z > p.belt(y) - 0.006 && !matches!(region, Some(BodyRegion::Cabin)) {
+        // Belt moulding under the side glass (doors and the quarters' window ledge).
+        let under_glass = p.has_greenhouse(y) && y < p.y_fw - 0.02;
+        if under_glass && z > p.belt(y) - 0.006 && !matches!(region, Some(BodyRegion::Cabin)) {
             return Some(shade(BLACK, 1.4));
         }
         // GT-R emblem on the front fender, behind the arch, low.

@@ -969,6 +969,11 @@ const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
     ("lindwurm_4t", 21157),
     ("lucciola_350", 19966),
     ("marten_20", 19876),
+    // Painted R34 family (2026-10-29, `Tier::Painted`).
+    ("nissan_skyline_r34_25gt", 14672),
+    ("nissan_skyline_r34_25gt_t", 15070),
+    ("nissan_skyline_r34_gtr", 15161),
+    ("nissan_skyline_r34_gtr_vspec2", 15161),
     ("rampart_50", 21912),
     ("satchel_20", 10868),
     ("sentinel_bastion", 21603),

@@ -11,7 +11,8 @@
 // tex.rgb. SHOT_FLAT=1 keeps flat shading for them too (default: smooth, like the game).
 // SHOT_NOTEX=1 renders them without the texture (shape checks).
 //
-// SHOT_CAMS="name:x,y,z:x,y,z;…" adds one <car>_<name>.png per camera (SHOT_FOV degrees).
+// SHOT_CAMS="name:x,y,z:x,y,z;…" adds one <car>_<name>.png per camera (SHOT_FOV degrees);
+// SHOT_BG / SHOT_GROUND set the background / ground colour (hex).
 //
 // Orthographic fit checks: SHOT_ORTHO=front,side,top,rear (any subset) adds <car>_ortho_<view>.png
 // at a fixed scale (SHOT_PX_PER_M, default 200 px/m) with a 0.5 m grid (red lines every 1 m,
@@ -70,12 +71,12 @@ window.shoot = async (mesh, car, detailUrl, opts) => {
   document.body.innerHTML = "";
   document.body.appendChild(r.domElement);
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x9aa4ad);
+  scene.background = new THREE.Color(opts.bg ?? 0x9aa4ad);
   scene.add(new THREE.HemisphereLight(0xffffff, 0x404040, 1.6));
   const sun = new THREE.DirectionalLight(0xffffff, 2.2);
   sun.position.set(4, 6, 9);
   scene.add(sun);
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: 0x5d646b }));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: opts.ground ?? 0x5d646b }));
   scene.add(ground);
   const root = new THREE.Group();
   scene.add(root);
@@ -266,6 +267,9 @@ const opts = {
     return [n, v(a), v(b)];
   }),
   fov: Number(process.env.SHOT_FOV ?? 30),
+  // SHOT_BG / SHOT_GROUND: background and ground colours (hex, e.g. 0x202326).
+  bg: process.env.SHOT_BG ? Number(process.env.SHOT_BG) : null,
+  ground: process.env.SHOT_GROUND ? Number(process.env.SHOT_GROUND) : null,
   orthoOnly: process.env.SHOT_ORTHO_ONLY === "1",
   pxPerM: Number(process.env.SHOT_PX_PER_M ?? 200),
   refs,

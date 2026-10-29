@@ -85,7 +85,45 @@ from each side; only the number is new:
 | `tints`, `livery`, `atlas`, `wheel_camber_deg`; part `rigid`; new `kind` / `material` values; livery-atlas UVs on paint parts | `claude/detailed-car-models` (its "format 2") |
 | part `fold` = `{ chords, leads, across, dir, gain, max_m, pop_m, weights }`; head / tail lamps in `FrameFront` / `FrameRear` bound to their end of the car | `lead/round12` (its "format 3") |
 
-Readers should accept format 4 only (`validate-car-asset` and `tests/assets.rs` do).
+Readers should accept format 4, and format 5 for painted cars (`validate-car-asset` and
+`tests/assets.rs` do; see "Format 5: painted cars" below).
+
+### Format 5: painted cars (detail texture, 2026-10-29)
+
+Real-car families built by the painted-car pipeline (`tools/assets` `section.rs` + `paint/`,
+`Tier::Painted`; first family: the Nissan Skyline R34) carry a per-car detail texture. Format 5
+= format 4 plus two optional fields; only meshes that have them are written as format 5, every
+other mesh stays format 4 byte for byte.
+
+| Field | What |
+|---|---|
+| `detail` = `{ "file": "textures/<car>.png", "w": 1024, "h": 1024, "hash": "<16 hex>" }` | the texture under `data/panels/`, RGBA8 PNG, square power of two (≤ 2048), `hash` = FNV-1a 64 of the PNG bytes (changes whenever the texture does: cache key) |
+| part `duvs` | second UV set (u, v in 1/65535, **v down from the PNG's first row**: load with `flipY = false`), one per vertex, on every textured part: kinds `panel`, `light`, `mirror`, `detail`, `tire`, `rim`, `lightbar` (not glass) and painted `body` parts. Glass, interior, engine bay, suspension / exhaust, brakes, decal carriers and black body trim (seals, underbody) have none |
+
+The full and mid LOD share one texture (same `detail`; the mid LOD reuses the full mesh's UV
+layout). The first 8 × 8 texels are white with alpha 1 (neutral) for parts drawn with the
+texture but without `duvs` (mod parts).
+
+**Shader rule.** `tex = texture(detail, duv)`; `albedo = tex.rgb · mix(1, paint, tex.a)`:
+
+- body paint (`paint` / `livery` materials): `tex.a = 1` where the paint shows, and `tex.rgb` is
+  the baked shading multiplier (ambient occlusion, painted light); `tex.a = 0` texels (panel
+  gaps, grilles, intakes, badges, plates, black mouldings, lamp sockets) are opaque colours;
+  the police livery keeps working as `paint = liveryMap(uvs)`;
+- every other textured part: `tex.a = 0`, `tex.rgb` is its colour (draw the material white);
+- lamps (`headlight`, `taillight`, `emissive_amber`): `emissive = tex.rgb · level`.
+
+Without `detail` a car draws exactly as before. Layout of the texture (`paint::layout`): faces
+are projected along six views by their normal (the livery-atlas thresholds, plus a bottom view);
+the lofted body (`livery` parts) shares one car-wide frame per view, every other part has its
+own islands, all tires and rims share one wheel island (hub space, seen from outboard);
+islands are metric (≈ 6–7 mm per texel on the body, nose / tail frames 1.5×, lamps and wheels
+2×), shelf-packed with 3 px padding. The PNG is written by `gen-car-mesh` and checked by
+`gen-car-mesh --check`, `validate-car-asset` and `cargo test -p car-assets`.
+
+Section specs of the families: `models/<family>.json` (`car_assets::section::SectionSpec`; not
+read by the game). Parity cars copied from a painted template keep pointing at the template's
+texture file (`detail.file` is not renamed by `tools/parity/build_parity_cars.py`).
 
 ```jsonc
 {

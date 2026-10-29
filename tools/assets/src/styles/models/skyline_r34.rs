@@ -36,7 +36,7 @@ pub const HEADLAMP: [[f32; 2]; 7] = [
     [0.362, 0.786],
 ];
 /// Head-lamp cast yaw: the outer end wraps onto the fender, deg.
-pub const HEADLAMP_YAW_DEG: f32 = 18.0;
+pub const HEADLAMP_YAW_DEG: f32 = 24.0;
 /// Front turn signal in the bumper corner, under the lamp's outer half (|x|, z).
 pub const FRONT_SIGNAL: [[f32; 2]; 4] = [
     [0.650, 0.612],
@@ -58,6 +58,9 @@ pub fn style(def: &VehicleDef, spec: Arc<SectionSpec>) -> CarStyle {
         hood_crown: 0.018,
         roof_crown: 0.022,
         power_bulge_h: if wide { 0.010 } else { 0.0 },
+        // Fender tops a little above the bonnet beside its shut lines.
+        front_fender_rise_m: 0.014,
+        fender_peak_w: 0.66,
         hood_bulge_w: 0.40,
         nose_rake_deg: 30.0,
         crease_z: 0.42,

@@ -24,7 +24,68 @@ node tools/assets/mesh_shots.mjs <dir> <car> ...      # rest-pose shots: front /
                                                      #    MESH_DIR=<dir> renders <dir>/<car>.json;
                                                      #    SHOT_WIRE=1 overlays the triangle edges)
 node tools/assets/crumple_shots.mjs after            # hood crumple shots at 8 m / 30 m
+SHOT_ORTHO=side,front,top,rear SHOT_REF=side=<png> node tools/assets/mesh_shots.mjs <out> <car>
+                                                     # fixed-scale ortho views + 0.5 m grid (+ ref overlay);
+                                                     # SHOT_CAMS="name:x,y,z:x,y,z;…" SHOT_FOV SHOT_BG extra views;
+                                                     # painted cars draw their detail texture (SHOT_NOTEX=1: off)
 ```
+
+Without `apps/testbed-web/node_modules`, `mesh_shots.mjs` takes `THREE_DIR=<dir with
+three.module.js>` and `PLAYWRIGHT_CORE=<package dir>` (falls back to the global `playwright`).
+
+## Painted-car pipeline (`src/section.rs`, `src/paint/`, `src/styles/models/`, 2026-10-29)
+Real car families (real names allowed since 2026-10-29) are built from a measured **section
+spec** and get their detail **painted into a per-car texture** (PS2-era look: accurate clean
+silhouette in the geometry, lamp internals / grilles / intakes / badges / plates / handles /
+gaps / spokes / baked shading in the texture).
+
+- **Section spec** `data/panels/models/<family>.json` (`section::SectionSpec`): anchors (nose,
+  tail, windshield base, roof front / rear, deck start, bumper tops, door-glass rear end,
+  quarter-glass span), side-view lines (`sill`, `belt`, `greenhouse` centre line), plan-view
+  curves (`half_width`, `haunch` blisters, `roof_half_width`), section keyframes (sill tuck,
+  shoulder rounding, crease height / depth, glass inset) and per-trim deltas (curve overlays,
+  ride height, flares, arch gap, wing, NACA duct, painted wheel design, paint, texture layers).
+  Curves are monotone cubic (Fritsch–Carlson). `SectionSpec::for_car(trim, front_axle_y)` fits
+  a trim to a car. `BodyStyle::sections` makes `BodyProfile` read nose / tail, cabin stations,
+  `sill` / `belt` / `top` / `half_width` / `haunch` / `roof_half_w` and the section knobs from
+  it; the lattice keeps the panel zones and hinges (hood rear / trunk front move like
+  `cabin_shift_m`); arch lifting, crowns and every other knob still apply. Loft stations follow
+  the curves' curvature (`section::adaptive_stations`, 3 mm chord tolerance, ≤ 15 cm on flat
+  spans, ≤ 12 cm on the crumpling sheets, ≤ 6 cm at the ends and arches). Other cars: no spec,
+  byte-identical meshes.
+- **Model styles** `styles/models/` (`MODELS`: car id → family, trim), asked first by
+  `style_for`; `Tier::Painted` (4k–30k triangles: no cap pressure, the loft spends triangles
+  where the silhouette needs them). The family kit holds only silhouette geometry (flat lamp
+  lenses cast on the body, signals, wing, mirrors); `WheelStyle::painted` draws a plain rim
+  (lip + shallow dished face) whose spokes are painted.
+- **Detail texture** (`paint/`): `layout` (second UV set `duvs`, see `data/panels/README.md`
+  "Format 5"), `rasterise` (part / position / normal per texel), `features` (per-family texel
+  painters driven by the trim's `texture_layers`), panel gaps where neighbouring texels of a
+  car-wide frame show different panels, AO baked from the rest mesh (`bake`: BVH, 16 rays,
+  2-texel grid), faint noise, dilation; PNG writer on `miniz_oxide` (pure Rust; car-assets is
+  never reachable from `wp_wasm`). Deterministic (same mesh ⇒ same bytes; the up-to-date test
+  compares the PNG on disk). Painting the 1024² texture takes ≈ 1 s (`opt-level = 2` for
+  car-assets in the dev profile).
+- **Checks**: `validate` (format 5 exactly with a detail texture; duvs on every textured part),
+  `validate_detail_file` (PNG matches `hash` / size), `tests/painted.rs` (determinism, island
+  overlap, LOD detail UVs, gaps on panel boundaries, paint mask only on paint parts, spec
+  extremes, zones / hinges kept).
+- **Iterating a family**: edit the JSON, `cargo run -p car-assets --bin gen-car-mesh <car>`,
+  `SHOT_ORTHO=side,front,top,rear node tools/assets/mesh_shots.mjs <out> <car>`; reference
+  photos stay local (never in the repo).
+
+| painted car (2026-10-29) | full tris | mid tris | texture (PNG) |
+|---|---|---|---|
+| nissan_skyline_r34_25gt | 14672 | 5046 | 1024², 376 kB |
+| nissan_skyline_r34_25gt_t | 15070 | 4968 | 1024², 392 kB |
+| nissan_skyline_r34_gtr | 15161 | 5167 | 1024², 376 kB |
+| nissan_skyline_r34_gtr_vspec2 | 15161 | 5232 | 1024², 379 kB |
+
+Known gaps (painted pipeline): the in-game renderer (`apps/testbed-web/src/render/panels.ts`,
+`fleet.ts`, a new `detail.ts`) does not draw the detail texture yet (painted cars show their
+material colours in the game; `mesh_shots.mjs` shows the intended look); the door cut lines
+follow the generated lattice (the R34 front door hinge sits ≈ 0.5 m behind the real one);
+the AO bake ignores wheels in the wheel island (analytic shading there).
 
 Wave-2 style / mechanical authors: see `docs/design/vehicles/PLAN.md` "Foundation API (for wave 2)".
 Per-archetype notes: `docs/design/vehicles/wave2_{performance,traffic,police,mechanical}.md`.
