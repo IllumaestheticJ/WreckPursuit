@@ -38,6 +38,21 @@ pub const PARKED_CAR_HALF_EXTENTS: [f32; 3] = [0.95, 2.25, 0.75];
 /// Mass of a parked car, kg (same as `wp_world::props`' parked cars).
 pub const PARKED_CAR_MASS_KG: f32 = 1400.0;
 
+/// Friction of a parked car's box, against everything (the ground under it most of all). A
+/// car parked on its wheels rolls a long way when shoved along its length (only the parked
+/// axle's tyres drag), so the box slides as easily as a stopped traffic car holding its
+/// brakes (`wp_world::leader::held`) rolls: about a third of the 0.6 the other props have
+/// (owner, 2026-10-29: "parked cars are way heavier than traffic cars"; calibrated by
+/// `parked_mass`).
+pub const PARKED_CAR_FRICTION: f32 = 0.2;
+
+/// Sideways grip of a parked car standing on its wheels, m/s² (on top of the box's
+/// [`PARKED_CAR_FRICTION`]): its tyres resist being pushed sideways much more than along its
+/// length, as a stopped traffic car's do. Applied as a velocity change on the box's sideways
+/// speed (and the matching yaw rate, the tyres acting at the axles) while the box rests on
+/// the ground upright; never more than stops it. Calibrated by `parked_mass`.
+pub const PARKED_CAR_SIDE_GRIP_MPS2: f32 = 5.0;
+
 /// Entity id base of promoted parked cars: prop `i` is `EntityId(PARKED_ENTITY_BASE + i)` in
 /// its damage model and in the contacts other bodies see from it. Far above every vehicle id
 /// (those count up from 1) and below [`wp_contracts::WORLD_ENTITY`].
@@ -320,8 +335,99 @@ impl crate::Sim {
     /// Car model whose lattice dents parked cars (simcli: the traffic car, `debug_sedan`; the
     /// testbed draws parked cars with the same model). Without one, parked cars are shoved but
     /// never dent. Set after [`crate::Sim::set_world`], before the first tick.
+    ///
+    /// Parked cars weigh what the model weighs (`mass_kg`): every parked car's box takes the
+    /// model's mass, so a parked car is exactly as heavy as a traffic car of its model.
     pub fn set_parked_car(&mut self, car: LoadedCar) {
+        let mass = car.def.mass_kg.max(1.0);
+        for i in 0..self.props.len() {
+            if self.props.kinds[i] != wp_world::props::PropKind::ParkedCar {
+                continue;
+            }
+            if let Some(col) = self.physics.colliders.get_mut(self.props.colliders[i]) {
+                if col.mass() != mass {
+                    col.set_mass(mass);
+                }
+            }
+        }
         self.parked.car = Some(car);
+    }
+
+    /// Before the physics step: the sideways grip of the tyres under every awake parked car
+    /// resting upright on the ground ([`PARKED_CAR_SIDE_GRIP_MPS2`]): its sideways speed and
+    /// yaw rate lose at most that much this tick, never past zero. Ascending prop order, from
+    /// last tick's contacts only (deterministic). A parked car on its side or roof, or in the
+    /// air, slides on its box alone.
+    pub(crate) fn parked_side_grip(&mut self, dt: f32) {
+        use rapier3d::prelude::PairContacts;
+        let dv = PARKED_CAR_SIDE_GRIP_MPS2 * dt;
+        for i in self.props.active() {
+            if self.props.kinds[i] != wp_world::props::PropKind::ParkedCar {
+                continue;
+            }
+            let h = self.props.bodies[i];
+            let Some(rb) = self.physics.bodies.get(h) else {
+                continue;
+            };
+            if !rb.is_dynamic() || rb.is_sleeping() {
+                continue;
+            }
+            let rot = *rb.rotation();
+            let up = rot * Vector::Z;
+            if up.z < 0.8 {
+                continue;
+            }
+            // On the ground: last tick's contacts include a floor-like one with a body that
+            // does not move (road, terrain, the ground slab).
+            let col = self.props.colliders[i];
+            let grounded = self
+                .physics
+                .narrow_phase()
+                .contact_pairs_with(col)
+                .any(|pair| {
+                    let other = if pair.collider1 == col {
+                        pair.collider2
+                    } else {
+                        pair.collider1
+                    };
+                    let fixed = self.physics.colliders.get(other).is_some_and(|c| {
+                        c.parent()
+                            .and_then(|p| self.physics.bodies.get(p))
+                            .is_none_or(|b| !b.is_dynamic())
+                    });
+                    let PairContacts::Rigid(rigid) = &pair.contacts else {
+                        return false;
+                    };
+                    fixed
+                        && rigid
+                            .solver_manifolds()
+                            .iter()
+                            .any(|m| !m.points.is_empty() && m.data.normal.z.abs() > 0.7)
+                });
+            if !grounded {
+                continue;
+            }
+            let [hx, hy, _] = self.props.half_extents[i];
+            // Sideways, along the ground: the box's right axis flattened.
+            let right = rot * Vector::X;
+            let side = Vector::new(right.x, right.y, 0.0).normalize_or_zero();
+            let v = rb.linvel();
+            let v_side = v.dot(side);
+            let cut = v_side.clamp(-dv, dv);
+            // Yaw: the same grip at the axles (0.6 of the half length out) on the box's yaw
+            // inertia, m·(w² + l²)/12.
+            let lever = 0.6 * hy;
+            let alpha = PARKED_CAR_SIDE_GRIP_MPS2 * lever * 3.0 / (hx * hx + hy * hy);
+            let w = rb.angvel();
+            let w_up = w.dot(up);
+            let cut_w = w_up.clamp(-alpha * dt, alpha * dt);
+            if cut == 0.0 && cut_w == 0.0 {
+                continue;
+            }
+            let rb = &mut self.physics.bodies[h];
+            rb.set_linvel(v - side * cut, false);
+            rb.set_angvel(w - up * cut_w, false);
+        }
     }
 
     /// Promoted (damageable) parked cars, ascending prop index.
