@@ -5,8 +5,9 @@
 //! (`PoliceSystem::roadblocks`) becomes a Rapier box: the barrier line runs from wall to
 //! wall (or barrier to barrier) with overlapping boxes, so no car squeezes through it untouched.
 //! The barriers are light water-filled plastic sections (owner, 2026-10-29: "the roadblock
-//! k-rail is completely immovable", answered "light, easy to push"): dynamic bodies of the
-//! configured `barrier_mass_kg` that a car shoves aside, paying in speed and damage. Its one
+//! k-rail is completely immovable", answered "light, easy to push"): fixed until a vehicle
+//! comes near, then dynamic bodies of the configured `barrier_mass_kg` that the car shoves
+//! aside, paying in speed and damage. Its one
 //! gap holds a wooden sawhorse barricade, also fixed until a car reaches it at
 //! [`BARRICADE_BREAK_MPS`] or faster: then it breaks into [`BARRICADE_PIECES`] loose timber
 //! pieces (dynamic, together [`wp_police::tools::BARRICADE_MASS_KG`]) that the car smashes
@@ -59,7 +60,8 @@ pub struct ProbeFilter {
 /// What a roadblock body is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolPart {
-    /// Light plastic barrier section (dynamic: a car shoves it aside).
+    /// Light plastic barrier section (fixed until a vehicle comes near, then dynamic: the car
+    /// shoves it aside).
     Barrier,
     /// The intact wooden barricade in the gap (fixed until broken).
     Barricade,
@@ -181,9 +183,9 @@ impl Sim {
         }
     }
 
-    /// A box body for `b`: fixed for the intact barricade, dynamic (with `b`'s mass) for a
-    /// barrier section or a loose piece. Barriers use continuous collision so a fast car
-    /// cannot pass through a thin light section in one step.
+    /// A box body for `b`: fixed for a barrier section (until [`Sim::loosen_barriers`]) and
+    /// the intact barricade, dynamic (with `b`'s mass) for a loose piece. Every roadblock body
+    /// is in [`crate::physics::ROADBLOCK_GROUP`]: the overlapping sections ignore each other.
     fn insert_tool_box(
         &mut self,
         b: &wp_police::StaticCollider,
@@ -198,11 +200,10 @@ impl Sim {
         );
         let builder = match part {
             ToolPart::Piece => RigidBodyBuilder::dynamic(),
-            ToolPart::Barrier => RigidBodyBuilder::dynamic()
-                .ccd_enabled(true)
-                .linear_damping(0.3)
-                .angular_damping(0.6),
-            ToolPart::Barricade => RigidBodyBuilder::fixed(),
+            // Fixed until a vehicle comes near ([`Sim::loosen_barriers`]), like the city's
+            // props: laid overlapping walls and kerbs, on cambers and hills, a loose section
+            // would slide or be pushed out of the wall before anyone arrived.
+            ToolPart::Barrier | ToolPart::Barricade => RigidBodyBuilder::fixed(),
         };
         let body = self.physics.bodies.insert(builder.pose(pose).build());
         let [hx, hy, hz] = b.half_extents_m;
@@ -210,6 +211,7 @@ impl Sim {
             .mass(b.mass_kg.max(1.0))
             .friction(0.5)
             .restitution(0.05)
+            .collision_groups(crate::physics::roadblock_groups())
             .build();
         self.physics
             .colliders
@@ -328,6 +330,43 @@ impl Sim {
                 });
             }
             self.barricades_broken += 1;
+        }
+    }
+
+    /// Before the physics step: turn every fixed barrier section a vehicle is about to reach
+    /// into a light dynamic body (its configured mass, continuous collision so a fast car
+    /// cannot pass through it in one step) that the car then shoves aside. A section stays
+    /// loose once let go. Deterministic: sections in body order, vehicles in slot order.
+    pub(crate) fn loosen_barriers(&mut self) {
+        let dt = wp_contracts::PHYSICS_DT;
+        let mut loosen: Vec<RigidBodyHandle> = Vec::new();
+        for t in &self.tool_bodies {
+            if t.part != ToolPart::Barrier || !self.physics.bodies[t.body].is_fixed() {
+                continue;
+            }
+            let c = self.physics.bodies[t.body].translation().to_array();
+            let [hx, hy, hz] = t.half_extents_m;
+            let near = self.vehicles.iter().any(|v| {
+                if v.ghost_ticks > 0 {
+                    return false;
+                }
+                let st = v.vehicle.state();
+                let speed = (st.lin_vel[0] * st.lin_vel[0] + st.lin_vel[1] * st.lin_vel[1]).sqrt();
+                // Car half length ~2.4 m, plus three steps of travel and a margin.
+                let reach = hx.max(hy) + 2.5 + 1.0 + speed * 3.0 * dt;
+                let d = [st.pos[0] - c[0], st.pos[1] - c[1]];
+                (st.pos[2] - c[2]).abs() <= hz + 2.0 && d[0] * d[0] + d[1] * d[1] <= reach * reach
+            });
+            if near {
+                loosen.push(t.body);
+            }
+        }
+        for h in loosen {
+            let rb = &mut self.physics.bodies[h];
+            rb.set_body_type(rapier3d::prelude::RigidBodyType::Dynamic, true);
+            rb.enable_ccd(true);
+            rb.set_linear_damping(0.3);
+            rb.set_angular_damping(0.6);
         }
     }
 

@@ -26,6 +26,7 @@
         world_metric(name: "roadblock_barriers_max", min: 8.0, max: 60.0),
         world_metric(name: "spike_strips_max", min: 2.0, max: 6.0),
         world_metric(name: "barricades_broken", min: 0.0, max: 0.0),
-        world_metric(name: "barrier_displaced_max_m", min: 0.0, max: 0.01),
+        // 2026-10-29: barriers are light plastic a car shoves aside (owner); measured 14.3 m.
+        world_metric(name: "barrier_displaced_max_m", min: 1.0, max: 40.0),
     ],
 )

@@ -1,9 +1,9 @@
 // Golden "feel" case: police roadblock. A sedan at 56 km/h (15.56 m/s) drives into a police
 // roadblock placed across its path 40 m ahead (`roadblock_at`: wp_police's barrier layout,
 // placed directly so the test does not depend on dispatch AI). Owner 2026-10-28: the block is
-// solid kerb to kerb (fixed barrier boxes, `wp_sim` police tools) but for one barricaded gap
-// at the right edge; the car hits the solid part head-on: it stops, the block does not move,
-// the car is damaged.
+// sealed kerb to kerb (barrier boxes, `wp_sim` police tools) but for one barricaded gap at the
+// right edge. Owner 2026-10-29: the barriers are light water-filled plastic, "easy to push":
+// the car hits a barrier head-on and shoves it aside, losing a little speed and health.
 (
     name: "golden_roadblock",
     seed: 109,
@@ -17,10 +17,12 @@
     hash_every: 24,
     expect: [
         world_metric(name: "roadblock_barriers_max", min: 2.0, max: 20.0),
-        world_metric(name: "barrier_displaced_max_m", min: 0.0, max: 0.01),
+        // 2026-10-29: barriers are light plastic a car shoves aside (owner); measured 13.1 m.
+        world_metric(name: "barrier_displaced_max_m", min: 1.0, max: 40.0),
         world_metric(name: "barricades_broken", min: 0.0, max: 0.0),
         event_count(event: "Contact", entity: "car", min: 1, max: 100000),
         crush_depth(entity: "car", min: 0.02, max: 1.0),
-        metric(entity: "car", name: "final_health", min: 0.0, max: 0.99),
+        // 2026-10-29: barriers are light plastic a car shoves aside (owner); measured 0.995.
+        metric(entity: "car", name: "final_health", min: 0.9, max: 0.999),
     ],
 )

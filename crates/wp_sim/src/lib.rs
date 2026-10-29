@@ -1511,6 +1511,7 @@ impl Sim {
         self.parked_side_grip(dt);
         self.update_ghosts();
         self.break_barricades();
+        self.loosen_barriers();
         let parked = if sys.damage {
             self.parked_candidates()
         } else {

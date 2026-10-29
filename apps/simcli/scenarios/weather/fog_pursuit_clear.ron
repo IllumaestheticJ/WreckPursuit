@@ -5,7 +5,7 @@
 // starts its pursuit later than this file does.
 (
     name: "weather_fog_pursuit_clear",
-    seed: 108,
+    seed: 111,
     city: procedural(seed: 1, blocks_x: 12, blocks_y: 12, block_m: 110.0),
     time_of_day_h: 12.0,
     time_ratio: 1.0,
@@ -33,6 +33,9 @@
         // placed in plain sight). Measured 7.00 s (fog twin: 11.70 s).
         // Re-aimed 2026-10-23 (owner: Core day patrols 8 -> 3): measured 10.70 s (fog twin
         // unchanged at 11.70 s, still later).
-        pursuit_started_before(t_s: 12.0),
+        // Re-aimed 2026-10-29 (bridge sightlines: the grid's viaduct deck now hides what is
+        // under it, so on seed 108 the clear twin was recognised at 11.90 s, after the fog twin's
+        // 11.50 s). Both twins moved to seed 111: measured 4.40 s (fog twin 11.50 s).
+        pursuit_started_before(t_s: 8.0),
     ],
 )

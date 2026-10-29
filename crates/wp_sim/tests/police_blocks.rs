@@ -484,6 +484,56 @@ fn barricade_breaks_when_hit_at_speed_and_holds_a_crawl() {
     }
 }
 
+/// The light sections are laid overlapping each other, the barricade, kerbs and the walls or
+/// rails they meet. Nobody touching them, they must stand where they were put (no explosion of
+/// overlapping dynamic boxes, no creep): at every sampled site across the three places.
+#[test]
+fn untouched_barriers_stand_still() {
+    let mut sim = sim();
+    let (placed, _) = place_blocks(&mut sim);
+    assert!(placed.len() > 20, "only {} blocks", placed.len());
+    let poses = |s: &Sim| -> Vec<(u32, [f32; 3])> {
+        s.roadblock_barriers()
+            .iter()
+            .filter(|b| b.part == ToolPart::Barrier)
+            .map(|b| (b.tool, b.pos))
+            .collect()
+    };
+    let start = poses(&sim);
+    for _ in 0..(240 * 5) {
+        sim.step_fixed();
+    }
+    let end = poses(&sim);
+    assert_eq!(start.len(), end.len());
+    let worst = start
+        .iter()
+        .zip(&end)
+        .map(|((t, a), (_, b))| {
+            let d = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+            (d, *t)
+        })
+        .fold((0.0f32, 0u32), |m, x| if x.0 > m.0 { x } else { m });
+    eprintln!(
+        "{} sections, worst drift {:.3} m (tool {})",
+        start.len(),
+        worst.0,
+        worst.1
+    );
+    for ((t, a), (_, b)) in start.iter().zip(&end) {
+        let d = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+        if d > 0.05 {
+            let p = placed.iter().find(|p| p.tool == *t).map(|p| p.place);
+            eprintln!("DRIFT tool {t} {p:?} {a:?} -> {b:?}");
+        }
+    }
+    assert!(
+        worst.0 < 0.05,
+        "a section moved {:.3} m on its own (tool {})",
+        worst.0,
+        worst.1
+    );
+}
+
 #[test]
 fn a_car_shoves_a_light_barrier_aside() {
     let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
