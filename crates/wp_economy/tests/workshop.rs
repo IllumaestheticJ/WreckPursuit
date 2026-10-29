@@ -5,7 +5,7 @@ mod common;
 use common::*;
 use wp_contracts::{BodyRegion, Component, DamageMode, HandlingEffects, RepairItem};
 use wp_economy::repair::{reference_estimate, DamageReport};
-use wp_economy::{CarSpec, CarUid, Condition, Economy, EconomyError, PlayerAccount};
+use wp_economy::{CarSpec, CarUid, Condition, Economy, EconomyError, PartSource, PlayerAccount};
 
 const MODE: DamageMode = DamageMode::Arcade;
 
@@ -445,14 +445,63 @@ fn the_catalog_says_when_a_part_needs_another_first() {
             .expect("the swan-neck wing is in the catalog")
     };
     let before = swan(&e, &a);
+    // Not a `reason` (that would block buying both together), but named in `needs`.
+    assert_eq!(before.reason, None);
     assert!(
         before
-            .reason
+            .needs
             .as_deref()
-            .is_some_and(|r| r.contains("first")),
+            .is_some_and(|n| n.contains("Splitter")),
         "{:?}",
-        before.reason
+        before.needs
     );
     e.install_mod(&mut a, car, "aero_splitter", MODE).unwrap();
-    assert_eq!(swan(&e, &a).reason, None);
+    let after = swan(&e, &a);
+    assert_eq!((after.reason, after.needs), (None, None));
+}
+
+/// Owner, 2026-10-29: "intake: engine_ecu_2 needs engine_intake_1". With the Race ECU Map on
+/// (it needs a stage-1 intake), the mechanic swaps the intake for a better one: the old one
+/// comes off on the way, but only the finished car is checked.
+#[test]
+fn the_mechanic_upgrades_a_part_another_mod_needs() {
+    let (e, mut a, car) = rich();
+    e.install_mod(&mut a, car, "engine_intake_1", MODE).unwrap();
+    e.install_mod(&mut a, car, "engine_ecu_1", MODE).unwrap();
+    e.install_mod(&mut a, car, "engine_ecu_2", MODE).unwrap();
+    let intake = e
+        .workshop(&a, car, MODE)
+        .unwrap()
+        .slots
+        .into_iter()
+        .find(|s| s.fitted.as_ref().and_then(|f| f.grade.as_deref()) == Some("engine_intake_1"))
+        .expect("the stage-1 intake is fitted in a slot")
+        .id;
+    let grade = e
+        .part_catalog(&a, car, MODE)
+        .unwrap()
+        .into_iter()
+        .find(|c| {
+            c.grade
+                .as_deref()
+                .is_some_and(|g| g.starts_with("engine_intake_") && g != "engine_intake_1")
+                && c.reason.is_none()
+        })
+        .expect("a better intake for sale")
+        .grade;
+    e.mechanic_install(
+        &mut a,
+        car,
+        &intake,
+        &PartSource::Buy(grade.clone()),
+        true,
+        MODE,
+    )
+    .expect("the intake upgrade goes on with the Race ECU fitted");
+    let mods = &a.try_car(car).unwrap().mods;
+    assert!(mods.contains(grade.as_ref().unwrap()), "{mods:?}");
+    assert!(mods.contains(&"engine_ecu_2".to_string()), "{mods:?}");
+    // Taking the intake off for good still asks for the ECU to come off first.
+    let mut b = a.clone();
+    assert!(e.remove_part(&mut b, car, &intake).is_err());
 }

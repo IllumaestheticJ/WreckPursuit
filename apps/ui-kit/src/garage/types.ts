@@ -599,6 +599,9 @@ export interface CatalogEntry {
   price: number;
   count: number;
   reason: string | null;
+  /** Name of a mod that must be fitted before this grade can go on (it can still be bought, or
+   * bought and fitted together with it); null = nothing missing. */
+  needs?: string | null;
   /** What the mechanic charges to fit it (the whole set for a set). */
   install_fee: number;
   /** Names of installed mods fitting it takes off because it does their job (coilovers replace dampers). */
