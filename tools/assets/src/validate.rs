@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use wp_contracts::{BodyRegion, LoadedCar};
 use wp_damage::PanelSpec;
 
-use crate::mesh::{CarMesh, PartKind, MESH_FORMAT};
+use crate::mesh::{CarMesh, PartKind, MESH_FORMAT, MESH_FORMAT_PLAIN};
 use crate::skin::part_candidates;
 
 /// Exterior regions that must have a mesh part whenever the lattice has nodes in them.
@@ -29,6 +29,85 @@ pub const EXTERIOR_REGIONS: [BodyRegion; 17] = [
     BodyRegion::FrameRight,
 ];
 
+/// Largest detail texture side, px (1024 is the target; 2048 the cap).
+pub const DETAIL_MAX_PX: u32 = 2048;
+
+/// Problems with a mesh's detail texture and UVs (painted cars; for every other car: no
+/// `detail`, no `duvs`). The texture must be a square power of two up to [`DETAIL_MAX_PX`]
+/// (its file: [`validate_detail_file`]); every textured part
+/// ([`crate::paint::layout::textured`]) has one detail UV per vertex, no other part has any.
+pub fn validate_detail(car: &LoadedCar, mesh: &CarMesh) -> Vec<String> {
+    let mut errs = Vec::new();
+    let painted = crate::mesh::is_painted(&crate::style::style_for(&car.def));
+    let Some(d) = &mesh.detail else {
+        if painted {
+            errs.push(format!("{}: painted car without a detail texture", mesh.id));
+        }
+        if let Some(p) = mesh.parts.iter().find(|p| !p.duvs.is_empty()) {
+            errs.push(format!(
+                "{}/{}: duvs without a detail texture",
+                mesh.id, p.name
+            ));
+        }
+        return errs;
+    };
+    if !painted {
+        errs.push(format!(
+            "{}: detail texture on a car that is not painted",
+            mesh.id
+        ));
+    }
+    if d.w != d.h || !d.w.is_power_of_two() || d.w > DETAIL_MAX_PX {
+        errs.push(format!(
+            "{}: detail {}×{} (square power of two ≤ {DETAIL_MAX_PX})",
+            mesh.id, d.w, d.h
+        ));
+    }
+    for p in &mesh.parts {
+        let want = crate::paint::layout::textured(p);
+        if want && p.duvs.len() != p.vertex_count() * 2 {
+            errs.push(format!(
+                "{}/{}: {} duvs for {} vertices",
+                mesh.id,
+                p.name,
+                p.duvs.len(),
+                p.vertex_count()
+            ));
+        }
+        if !want && !p.duvs.is_empty() {
+            errs.push(format!("{}/{}: untextured part with duvs", mesh.id, p.name));
+        }
+    }
+    errs
+}
+
+/// Problems with the detail texture file a mesh on disk points at: it must exist and match the
+/// mesh's `hash`, `w` and `h` (meshes generated with other styles, like the knob sweeps in the
+/// tests, are checked by [`validate_detail`] only).
+pub fn validate_detail_file(mesh: &CarMesh) -> Vec<String> {
+    let mut errs = Vec::new();
+    let Some(d) = &mesh.detail else {
+        return errs;
+    };
+    let path = crate::detail_path(&crate::repo_root(), &d.file);
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            if crate::paint::canvas::fnv1a_hex(&bytes) != d.hash {
+                errs.push(format!("{}: {} does not match its hash", mesh.id, d.file));
+            }
+            if bytes.len() > 24 {
+                let w = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+                let h = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+                if (w, h) != (d.w, d.h) {
+                    errs.push(format!("{}: {} is {w}×{h}", mesh.id, d.file));
+                }
+            }
+        }
+        Err(e) => errs.push(format!("{}: {}: {e}", mesh.id, path.display())),
+    }
+    errs
+}
+
 /// Every problem found (empty = valid).
 pub fn validate(car: &LoadedCar, mesh: &CarMesh, panels: Option<&PanelSpec>) -> Vec<String> {
     let mut errs = Vec::new();
@@ -42,9 +121,16 @@ pub fn validate(car: &LoadedCar, mesh: &CarMesh, panels: Option<&PanelSpec>) -> 
             mesh.lattice_id, lattice.id
         ));
     }
-    if mesh.format != MESH_FORMAT {
-        errs.push(format!("format {} (expected {MESH_FORMAT})", mesh.format));
+    // Format 5 exactly when the mesh carries a detail texture, else format 4.
+    let want = if mesh.detail.is_some() {
+        MESH_FORMAT
+    } else {
+        MESH_FORMAT_PLAIN
+    };
+    if mesh.format != want {
+        errs.push(format!("format {} (expected {want})", mesh.format));
     }
+    errs.extend(validate_detail(car, mesh));
     let tris: u32 = mesh.parts.iter().map(|p| p.tri_count() as u32).sum();
     if tris != mesh.tri_count {
         errs.push(format!(

@@ -1,8 +1,9 @@
-//! Reader for the per-panel car meshes in `data/panels/meshes/<car>.json` (formats 1–4, written
+//! Reader for the per-panel car meshes in `data/panels/meshes/<car>.json` (formats 1–5, written
 //! by `tools/assets`, see `data/panels/README.md`). Only the fields the renderer needs are read;
 //! the writer and validator stay in `car-assets`. Ignored here: the sheet buckling binding
 //! (`fold`, formats 2–4: those panels skin like any other, no crumple bend yet) and format 4's
-//! tints / livery / atlas / rigid flags (new part kinds and materials get a plain look).
+//! tints / livery / atlas / rigid flags (new part kinds and materials get a plain look) and
+//! format 5's detail texture / `duvs` (painted cars draw with their material colours here).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -15,7 +16,7 @@ use wp_contracts::BodyRegion;
 pub const MESH_FORMAT: u32 = 1;
 
 /// Newest mesh file format this reader understands (`car_assets::mesh::MESH_FORMAT`).
-pub const MESH_FORMAT_MAX: u32 = 4;
+pub const MESH_FORMAT_MAX: u32 = 5;
 
 /// What a mesh part is (mirrors `car_assets::mesh::PartKind`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

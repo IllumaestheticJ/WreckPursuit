@@ -2,7 +2,8 @@
 //! cars'). Exits 1 on any problem.
 
 use car_assets::{
-    car_ids, load_car, load_mesh, mesh_path, panel_path, repo_root, validate::validate,
+    car_ids, load_car, load_mesh, mesh_path, panel_path, repo_root,
+    validate::{validate, validate_detail_file},
 };
 
 fn main() {
@@ -44,7 +45,8 @@ fn main() {
                 continue;
             }
         };
-        let errs = validate(&car, &mesh, spec.as_ref());
+        let mut errs = validate(&car, &mesh, spec.as_ref());
+        errs.extend(validate_detail_file(&mesh));
         if errs.is_empty() {
             println!(
                 "ok  {id}: {} parts, {} tris",

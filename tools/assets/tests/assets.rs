@@ -6,14 +6,16 @@ mod crash;
 
 use car_assets::crumple::{measure, render_detail, PartCrumple, Pose};
 use car_assets::mesh::{
-    PartKind, FOLD_MAX_M, INDICATOR_PREFIX, LID_POP_M, MESH_FORMAT, MID_TRI_BUDGET, TRI_BUDGET,
+    PartKind, FOLD_MAX_M, INDICATOR_PREFIX, LID_POP_M, MESH_FORMAT, MESH_FORMAT_PLAIN,
+    MID_TRI_BUDGET, TRI_BUDGET,
 };
 use car_assets::profile::BodyProfile;
 use car_assets::skin::{deform_detail, FoldMemory};
 use car_assets::style::style_for;
 use car_assets::{
-    build_mesh, build_mid_mesh, car_ids, load_car, load_mesh, mesh_path, mid_mesh_path, panel_path,
-    repo_root, validate::validate,
+    build_detail_png, build_mesh, build_mid_mesh, car_ids, detail_path, load_car, load_mesh,
+    mesh_path, mid_mesh_path, panel_path, repo_root,
+    validate::{validate, validate_detail_file},
 };
 use wp_contracts::BodyRegion;
 use wp_damage::PanelSpec;
@@ -28,13 +30,23 @@ fn every_car_has_a_valid_up_to_date_mesh_and_panel_spec() {
         let spec = PanelSpec::load(&panel_path(&root, &id)).unwrap();
         spec.validate(&car.lattice).unwrap();
         let on_disk = load_mesh(&mesh_path(&root, &id)).unwrap();
-        let errs = validate(&car, &on_disk, Some(&spec));
+        let mut errs = validate(&car, &on_disk, Some(&spec));
+        errs.extend(validate_detail_file(&on_disk));
         assert!(errs.is_empty(), "{id}: {errs:#?}");
         let fresh = build_mesh(&car);
         assert!(
             fresh == on_disk,
             "{id}: data/panels/meshes is stale; run `cargo run -p car-assets --bin gen-car-mesh`"
         );
+        // Painted cars: the texture on disk is the one the generator paints, byte for byte.
+        if let Some(d) = &fresh.detail {
+            let png = build_detail_png(&car).expect("painted car paints a texture");
+            assert!(
+                std::fs::read(detail_path(&root, &d.file)).ok() == Some(png),
+                "{id}: {} is stale; run `cargo run -p car-assets --bin gen-car-mesh`",
+                d.file
+            );
+        }
         assert!((TRI_BUDGET.0..=TRI_BUDGET.1).contains(&fresh.tri_count));
     }
 }
@@ -56,7 +68,11 @@ fn every_car_has_an_up_to_date_mid_lod() {
         );
         let m = &fresh;
         assert_eq!(m.id, id);
-        assert_eq!(m.format, MESH_FORMAT, "{id}");
+        assert_eq!(m.format, full.format, "{id}");
+        assert_eq!(
+            m.detail, full.detail,
+            "{id}: mid LOD paints with another texture"
+        );
         assert_eq!(m.lattice_id, full.lattice_id, "{id}");
         assert_eq!(m.atlas, full.atlas, "{id}: mid atlas differs");
         assert_eq!(m.livery, full.livery, "{id}: mid livery differs");
@@ -110,15 +126,17 @@ fn every_car_has_an_up_to_date_mid_lod() {
     }
 }
 
-/// Format 4 = detailed-car-models' format 2 + round 12's format 3 (see `MESH_FORMAT`); every
-/// mesh on disk is format 4 and the panels that buckle carry a fold binding.
+/// Format 4 = detailed-car-models' format 2 + round 12's format 3 (see `MESH_FORMAT`); format 5
+/// = 4 + the painted cars' detail texture. Every mesh on disk is format 4, or 5 exactly when it
+/// has a detail texture, and the panels that buckle carry a fold binding.
 #[test]
 fn meshes_are_format_4_with_fold_bindings() {
-    assert_eq!(MESH_FORMAT, 4);
+    assert_eq!((MESH_FORMAT_PLAIN, MESH_FORMAT), (4, 5));
     let root = repo_root();
     for id in car_ids(&root) {
         let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
-        assert_eq!(mesh.format, 4, "{id}");
+        let want = if mesh.detail.is_some() { 5 } else { 4 };
+        assert_eq!(mesh.format, want, "{id}");
         assert!(
             mesh.atlas.is_some(),
             "{id}: format-4 meshes carry the livery atlas"

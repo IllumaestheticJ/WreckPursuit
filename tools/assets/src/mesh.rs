@@ -92,8 +92,9 @@ pub fn indicator_side_key(right: bool, left_region: BodyRegion) -> PartKey {
     }
 }
 
-/// Hard overall triangle range of any car (per-tier budgets: [`Tier::tri_budget`]).
-pub const TRI_BUDGET: (u32, u32) = (4000, 22000);
+/// Hard overall triangle range of any car (per-tier budgets: [`Tier::tri_budget`]; painted
+/// cars up to 30k since 2026-10-29).
+pub const TRI_BUDGET: (u32, u32) = (4000, 30000);
 /// Window margin (pillar half width) around door edges, m.
 const WINDOW_MARGIN: f32 = 0.06;
 

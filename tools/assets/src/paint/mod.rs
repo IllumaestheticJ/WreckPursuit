@@ -336,13 +336,32 @@ pub fn paint(def: &VehicleDef, prof: &BodyProfile, layout: &Layout, parts: &[Mes
 /// Panel gaps: inside a car-wide frame, a texel whose right / lower neighbour shows another
 /// panel group is the dark shut line; the texel on the far side gets a soft shadow.
 fn gaps(c: &mut Canvas, tex: &[Texel], parts: &[MeshPart], islands: &[&layout::Island], size: u32) {
-    let group = |i: usize| -> Option<(u32, wp_contracts::BodyRegion)> {
-        let t = &tex[i];
-        if t.part == 0 || !matches!(islands[t.island as usize].key, IslandKey::Frame(_)) {
-            return None;
+    let line = gap_mask(tex, parts, islands, size);
+    for (i, &l) in line.iter().enumerate() {
+        match l {
+            2 => c.px[i] = GAP,
+            1 => {
+                for ch in c.px[i].iter_mut().take(3) {
+                    *ch *= 0.62;
+                }
+            }
+            _ => {}
         }
-        gap_group(&parts[t.part as usize - 1]).map(|g| (t.island, g))
-    };
+    }
+}
+
+/// Colour of a panel gap texel.
+pub const GAP: Rgba = [0.045, 0.045, 0.05, 0.0];
+
+/// Panel gap mask per texel: 2 = shut line (this texel's right or lower neighbour in the same
+/// car-wide frame shows another panel group), 1 = the shadow on the far side, 0 = none.
+pub fn gap_mask(
+    tex: &[Texel],
+    parts: &[MeshPart],
+    islands: &[&layout::Island],
+    size: u32,
+) -> Vec<u8> {
+    let group = |i: usize| gap_group_of(tex, parts, islands, i);
     let mut line = vec![0u8; tex.len()];
     for y in 0..size - 1 {
         for x in 0..size - 1 {
@@ -362,17 +381,21 @@ fn gaps(c: &mut Canvas, tex: &[Texel], parts: &[MeshPart], islands: &[&layout::I
             }
         }
     }
-    for (i, &l) in line.iter().enumerate() {
-        match l {
-            2 => c.px[i] = [0.045, 0.045, 0.05, 0.0],
-            1 => {
-                for ch in c.px[i].iter_mut().take(3) {
-                    *ch *= 0.62;
-                }
-            }
-            _ => {}
-        }
+    line
+}
+
+/// Group of a texel for gaps (`None` outside a car-wide frame or on the cabin body).
+pub fn gap_group_of(
+    tex: &[Texel],
+    parts: &[MeshPart],
+    islands: &[&layout::Island],
+    i: usize,
+) -> Option<(u32, wp_contracts::BodyRegion)> {
+    let t = &tex[i];
+    if t.part == 0 || !matches!(islands[t.island as usize].key, IslandKey::Frame(_)) {
+        return None;
     }
+    gap_group(&parts[t.part as usize - 1]).map(|g| (t.island, g))
 }
 
 /// Grow every island `passes` texels into its padding (copying the nearest painted texel), so
@@ -421,7 +444,7 @@ pub fn assign_duvs(layout: &Layout, parts: &mut [MeshPart]) {
     }
 }
 
-/// A texel of `View` (used by tests).
+/// Name of a [`View`] (diagnostics).
 pub fn view_name(v: View) -> &'static str {
     match v {
         View::Left => "left",
@@ -432,10 +455,4 @@ pub fn view_name(v: View) -> &'static str {
         View::Bottom => "bottom",
         View::Wheel => "wheel",
     }
-}
-
-/// Unused colour helper kept for the features module.
-pub fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
-    let t = t.clamp(0.0, 1.0);
-    [0, 1, 2, 3].map(|k| a[k] + (b[k] - a[k]) * t)
 }

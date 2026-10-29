@@ -11,7 +11,7 @@
     "y_deck": -1.22,
     "z_bumper_top": [0.6, 0.66],
     "z_door_bottom": 0.3,
-    "quarter_glass_y": [-0.98, -0.66]
+    "quarter_glass_y": [-1.03, -0.66]
   },
   "lines": {
     "sill": [

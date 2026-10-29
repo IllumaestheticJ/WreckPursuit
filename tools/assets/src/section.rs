@@ -661,9 +661,15 @@ mod tests {
             |_| 0.5,
             |y| vec![if y > 3.0 { (y - 3.0).powi(2) } else { 0.0 }],
         );
-        let flat = ys.iter().filter(|&&y| y < 3.0).count();
-        let curved = ys.iter().filter(|&&y| y > 3.0).count();
-        assert!(curved > 2 * flat.min(6), "{ys:?}");
+        // Flat span: the cap; curved span: much finer.
+        for w in ys.windows(2) {
+            let step = w[1] - w[0];
+            if w[1] <= 3.0 {
+                assert!((step - 0.5).abs() < 0.01, "{ys:?}");
+            } else if w[0] >= 3.0 {
+                assert!(step < 0.12, "{ys:?}");
+            }
+        }
         assert!(ys
             .windows(2)
             .all(|w| w[1] > w[0] && w[1] - w[0] <= 0.5 + 1e-4));
