@@ -1111,6 +1111,50 @@ fn stopping_in_a_garage_or_safehouse_on_a_career_run_opens_the_place() {
     assert_eq!(close.end, RunEnd::Free);
 }
 
+/// Owner, 2026-10-29: "it should still let me drive until im out of the circle". The place
+/// panel does not hold the car: the player can drive off, and leaving the ring closes it.
+#[test]
+fn a_place_visit_lets_the_car_drive_off_and_closes_out_of_the_ring() {
+    let (mut c, _) = career_with("kestrel_ts", 50_000, DamageMode::Arcade);
+    let mut sc = night_run_in("ignored", DamageMode::Arcade, procedural_city());
+    sc.entities[0].speed_mps = 0.0;
+    let mut s = c.start_run(sc).unwrap();
+    s.run_ticks(10);
+    let garage = s.garages()[0].clone();
+    park_at(&mut s, [garage.pos[0], garage.pos[1]]);
+    assert!(s.place().visit.is_some(), "a garage visit opens");
+    let id = player(&s);
+    s.set_input(
+        id,
+        VehicleInput {
+            throttle: 1.0,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    s.run_ticks(240 * 2);
+    let speed = s.vehicle(id).unwrap().vehicle.state().speed_mps.abs();
+    assert!(
+        speed > 2.0,
+        "the car drives with the panel open: {speed} m/s"
+    );
+    let mut closed = false;
+    for _ in 0..240 * 20 {
+        s.run_ticks(1);
+        if s.place().visit.is_none() {
+            closed = true;
+            break;
+        }
+    }
+    assert!(closed, "driving out of the ring closes the visit");
+    let st = s.vehicle(id).unwrap().vehicle.state();
+    assert!(
+        !garage.contains([st.pos[0], st.pos[1]]),
+        "it closed only once out of the ring"
+    );
+    c.finish_run(&mut s).unwrap();
+}
+
 /// A career car has nitrous only with the garage's Nitrous Kit (owner decision 2026-10-26),
 /// in both damage modes (owner rule: physics never differs by mode).
 #[test]

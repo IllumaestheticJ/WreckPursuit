@@ -1,6 +1,7 @@
 // Career places: stopping inside a garage or a safehouse ring on a career run (wp_wasm
-// `place_json()`, see crates/wp_wasm/src/garage_visit.rs) holds the car and offers what the
-// place is for, drawn with the UI kit's primitives:
+// `place_json()`, see crates/wp_wasm/src/garage_visit.rs) offers what the place is for while the
+// car stays in the ring (it can still drive: driving out closes the panel), drawn with the UI
+// kit's primitives:
 //  - garage: "Workshop" (work on the car part by part) or "Garage" (repairs, mods, tuning, cars);
 //  - safehouse: "End the night here" (the run ends safely and the career is saved) or "Workshop";
 //  - car lot: "Walk the lot" (the lot visit: browse and buy);

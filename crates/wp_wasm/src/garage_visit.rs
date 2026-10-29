@@ -308,8 +308,9 @@ pub enum PlaceKind {
 }
 
 /// An open career place visit (JSON for the testbed's place panel; `place_json`): the car
-/// stopped inside a garage or safehouse with no pursuit on and is held until the player
-/// chooses (the testbed ends the run into the garage / workshop) or leaves.
+/// stopped inside a garage or safehouse with no pursuit on. It stays open until the player
+/// chooses (the testbed ends the run into the garage / workshop), leaves, or drives out of the
+/// ring; the car is not held meanwhile.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PlaceVisit {
     /// Increments with every visit (the panel redraws on a new one).

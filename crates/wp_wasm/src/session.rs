@@ -141,7 +141,8 @@ pub struct Session {
     visit_seq: u32,
     /// The city's safehouses (sessions with an economy run; career places).
     safehouses: Vec<SafehouseSite>,
-    /// The open career place visit (garage or safehouse; the player's car is held).
+    /// The open career place visit (garage or safehouse). The car is not held: it closes when the
+    /// car drives out of the ring.
     place: Option<PlaceVisit>,
     /// Car lots on the map (career runs in the combined world; [`Session::set_career_places`]).
     lots: Vec<PlaceSite>,
@@ -1399,8 +1400,19 @@ impl Session {
             )
         });
         if self.place.is_some() {
+            // Driving out of the ring closes the visit (the car is never held by it).
+            let inside = self.vehicle(player).is_some_and(|v| {
+                let p = v.vehicle.state().pos;
+                let xy = [p[0], p[1]];
+                self.garages.iter().any(|g| g.contains(xy))
+                    || self.homes.iter().any(|h| h.contains(xy))
+                    || self.lots.iter().any(|l| l.contains(xy))
+                    || self.safehouses.iter().any(|h| h.contains(xy))
+            });
             if run.is_over() || chased {
                 self.place_leave();
+            } else if !inside {
+                self.place = None;
             }
             return;
         }
@@ -1790,10 +1802,12 @@ impl Session {
         } else if let Some(idx) = self
             .run
             .as_ref()
-            .filter(|r| r.is_over() || self.visit.is_some() || self.place.is_some())
+            .filter(|r| r.is_over() || self.visit.is_some())
             .and_then(|r| self.index(r.player()))
         {
-            // The run is over, or the car is in a garage: it brakes to a halt and stays there.
+            // The run is over, or the car is in a garage visit: it brakes to a halt and stays
+            // there. A career place visit does not hold the car (owner 2026-10-29: "it should
+            // still let me drive until im out of the circle"); driving out of the ring closes it.
             let keep = self.last_input[idx];
             self.log_input(
                 idx,
