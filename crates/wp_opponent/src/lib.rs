@@ -15,8 +15,8 @@
 //! - [`learned`]: corrections learned in offline training runs (per car and stretch of road:
 //!   corner-speed scale and lateral aim; traffic and police behaviour numbers), applied by
 //!   [`Field`] when [`RaceConfig::learned`] is on.
-//! - [`draft`]: slipstream model (drag multiplier per vehicle from wake geometry) for the sim
-//!   loop to apply.
+//! - [`draft`]: re-export of the slipstream model (`wp_vehicle::draft`, applied by the sim to
+//!   every vehicle) plus [`draft::body_from_obs`].
 //! - [`evader`]: scripted escapee for the police benchmark (`simcli police-bench`): flees
 //!   police it can see on the road graph, three skills.
 //! - [`roam`]: free-roam street racers that chain legs around their haunt (highway, touge,

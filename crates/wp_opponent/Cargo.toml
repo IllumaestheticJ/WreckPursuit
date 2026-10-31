@@ -16,8 +16,9 @@ serde.workspace = true
 serde_json.workspace = true
 
 [features]
-# Full-sim draft tests: need `wp_sim::Sim::set_drag_scale` (requested from the lead, see
-# docs/integration/opponent.md). Off by default so the crate builds against today's wp_sim.
+# Opt-in full-race draft test (`draft_lets_a_faster_driver_in_the_same_car_pass`). The sim
+# applies slipstream to every car since 2026-10-31 (docs/integration/drafting.md); the
+# feature only turns this long sweep on.
 sim-draft-hook = []
 
 [dev-dependencies]

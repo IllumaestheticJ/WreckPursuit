@@ -94,8 +94,8 @@ pub struct Setup {
     pub heat: Vec<(EntityId, f32)>,
     /// Keep running to `max_s` after every racer has left the race (chases).
     pub run_full: bool,
-    /// Apply the slipstream model (`wp_opponent::draft`) to every vehicle each tick. Needs
-    /// the `sim-draft-hook` feature (`Sim::set_drag_scale`); ignored without it.
+    /// `RaceConfig::draft`: the racers drive for the tow (close up on straights, pull out
+    /// with the run). The sim applies the slipstream to every car either way.
     pub draft: bool,
     /// `RaceConfig::ram_traffic` (racers unafraid of traffic, the game's default). Off, the
     /// field also disqualifies racers that touch a civilian (the careful driving tests).
@@ -159,7 +159,7 @@ pub struct Outcome {
     pub max_wait_s: Vec<f32>,
     /// Police vehicles alive at the end.
     pub police_vehicles: usize,
-    /// Seconds each racer spent with its drag cut by more than 15 % (slipstream runs only).
+    /// Seconds each racer spent with its drag cut by more than 15 % (`Sim::drafting`).
     pub tow_s: Vec<f32>,
 }
 
@@ -231,7 +231,7 @@ pub fn run(
             ..CorridorOptions::default()
         },
         signals: !setup.closed_roads && std::env::var("WP_NO_SIGNALS").is_err(),
-        draft: setup.draft && cfg!(feature = "sim-draft-hook"),
+        draft: setup.draft,
         allow_abandon: setup.allow_abandon,
         ram_traffic: setup.ram_traffic,
         civilian_contact_dq: !setup.ram_traffic,
@@ -309,7 +309,6 @@ pub fn run(
     let mut stuck_s = vec![0.0f32; entities.len()];
     let mut max_stuck_s = vec![0.0f32; entities.len()];
     let mut wait_s = vec![0.0f32; entities.len()];
-    #[allow(unused_mut)]
     let mut tow_s = vec![0.0f32; entities.len()];
     let mut max_wait_s = vec![0.0f32; entities.len()];
     let max_ticks = (setup.max_s * 240.0) as u64;
@@ -347,21 +346,14 @@ pub fn run(
         for (e, inp) in inputs {
             sim.set_input(e, inp).unwrap();
         }
-        #[cfg(feature = "sim-draft-hook")]
-        if setup.draft {
-            let bodies: Vec<wp_opponent::DraftBody> =
-                obs.iter().map(wp_opponent::DraftBody::from_obs).collect();
-            let scales = wp_opponent::drag_scales(&bodies, &wp_opponent::DraftParams::default());
-            for (o, k) in obs.iter().zip(scales) {
-                sim.set_drag_scale(o.entity, k).unwrap();
-                if let Some(i) = entities.iter().position(|e| *e == o.entity) {
-                    if k < 0.85 {
-                        tow_s[i] += 1.0 / 240.0;
-                    }
-                }
+        sim.step_fixed();
+        // The sim applies slipstream to every car itself (`wp_sim::draft_link`); time spent
+        // in a useful tow (> 15 % less drag) after this tick.
+        for (i, e) in entities.iter().enumerate() {
+            if sim.drafting(*e).unwrap_or(0.0) > 0.15 {
+                tow_s[i] += 1.0 / 240.0;
             }
         }
-        sim.step_fixed();
         events = sim.drain_events();
         police_events.extend(events.iter().filter_map(|e| match e {
             SimEvent::Police(pe) => Some(pe.clone()),

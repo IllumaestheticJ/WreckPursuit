@@ -663,9 +663,11 @@ fn sweep_open_roads_progress() {
     eprintln!("TOTAL {total:.0} longest wait {worst:.0}");
 }
 
-/// Same car, one clearly better driver at the back: with slipstream it gets past (the tow
-/// on the straights closes the time gap the corners open); without, it never does.
-/// Needs `Sim::set_drag_scale` (feature `sim-draft-hook`, see the integration doc).
+/// Same car, one clearly better driver at the back: with the tow tactics
+/// (`RaceConfig::draft`) it gets past (the tow on the straights closes the time gap the
+/// corners open); without them, it rarely does. The sim applies the slipstream physics to
+/// every car in both runs (`docs/integration/drafting.md`). Feature `sim-draft-hook`: kept
+/// opt-in, it is a long race sweep and the tactics are still off by default.
 #[cfg(feature = "sim-draft-hook")]
 #[test]
 fn draft_lets_a_faster_driver_in_the_same_car_pass() {

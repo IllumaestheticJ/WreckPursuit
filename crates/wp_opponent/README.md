@@ -46,8 +46,8 @@ gap to the player — pace is car capability × how much of it the driver dares 
   side into the corner longer than `side_by_side_s` while behind, or when oncoming traffic
   appears in the lane (open roads).
 - **Slipstream/tow**: held up on a straight → tuck in behind at half the time gap before pulling
-  out. With `RaceConfig::draft` (only when the sim loop applies `draft::drag_scales`, see
-  below): 0.3 s behind racers outside braking zones (so the corner exit doesn't open a gap the
+  out. With `RaceConfig::draft` (the sim applies slipstream to every car since 2026-10-31;
+  the flag only turns on these tactics): 0.3 s behind racers outside braking zones (so the corner exit doesn't open a gap the
   wake can't bridge), flat out in the wake down to the minimum gap on straights (the
   braking-distance cap still holds), and a tow-built run (> 0.8 m/s closing within 12 m) or a
   gap under 8 m counts as a pass chance.
@@ -305,19 +305,20 @@ a lane under a bridge or anywhere in the Ashpeak hills).
 
 Field-level: `RaceConfig { laps, decision_ticks (4 = 60 Hz), allow_abandon,
 civilian_contact_dq, cooldown_speed_mps, seed, line: LineParams, corridor: CorridorOptions,
-signals (default on; off for closed courses), draft (default off; on only if the sim applies
-slipstream) }`, `AI_CONTACT_IMPULSE_NS = 400` (racer–racer collision threshold),
+signals (default on; off for closed courses), draft (tow tactics, default off; the sim's
+slipstream physics applies either way) }`, `AI_CONTACT_IMPULSE_NS = 400` (racer–racer collision threshold),
 `YIELD_RADIUS_M`, `YIELD_AFTER_S`, `RED_LIGHT_RISK`.
 
 ### Slipstream model (`draft`)
-`draft::drag_scales(&[DraftBody], &DraftParams) -> Vec<f32>`: a drag multiplier per vehicle
-for the sim loop to apply (`effects.drag_scale *= scale` before `apply_damage_effects`).
-35 % less drag bumper to bumper, linear to nothing at 25 m behind the leader's rear bumper,
-fading quadratically to the edge of a wake one leader-width wide (+50 % over the range);
-leader ≥ 10 m/s, follower travelling within ~25° of it; strongest leader wins, no stacking.
-O(n²), deterministic. Physical size of the effect: at 25–35 m/s a sedan (CdA 0.66 m², 1.4 t)
-gains 0.06–0.13 m/s² — a few metres per straight; it matters because it removes the gap the
-corners open, not as a straight-line rocket.
+Moved to `wp_vehicle::draft` (2026-10-31) when `wp_sim` started applying it to every vehicle
+each tick (`docs/integration/drafting.md`); `wp_opponent::draft` re-exports it
+(`drag_scales`, `DraftBody`, `DraftParams`, …) plus `draft::body_from_obs(&VehicleObs)`
+(formerly `DraftBody::from_obs`). 35 % less drag bumper to bumper, linear to nothing at 25 m
+behind the leader's rear bumper, fading quadratically to the edge of a wake one leader-width
+wide (+50 % over the range); leader ≥ 10 m/s, follower travelling within ~25° of it;
+strongest leader wins, no stacking. Physical size of the effect: at 25–35 m/s a sedan (CdA
+0.66 m², 1.4 t) gains 0.06–0.13 m/s² — a few metres per straight; it matters because it
+removes the gap the corners open, not as a straight-line rocket.
 
 ## Using it
 ```rust
@@ -386,8 +387,9 @@ Full-sim tests (`tests/race.rs`, procedural 8×8 city, counter-clockwise arteria
   wanted racers are caught, the clean one races on.)
 - Signal unit tests: careful driver stops for a red / short green, a risk-taker doesn't; a
   lasting green ignores cross traffic held at its red but not a car moving inside the box.
-- Draft unit tests (wake geometry) and, with `--features sim-draft-hook` (needs
-  `Sim::set_drag_scale`, requested from the lead), `draft_lets_a_faster_driver_in_the_same_car_pass`:
+- Draft wake-geometry tests now live in `wp_vehicle::draft`. With `--features sim-draft-hook`
+  (the sim now always applies slipstream; the feature only turns on this test and the tow
+  tactics run), `draft_lets_a_faster_driver_in_the_same_car_pass`:
   same sedan, a 0.8-skill driver behind three 0.35s, 4 laps, seeds 1–4 — with slipstream it
   gains places in every seed (finishes 1st/2nd/3rd/2nd), without it finishes last every time;
   zero AI contacts.
@@ -418,9 +420,8 @@ racers, so their race checks are `expect_pending`; `pace_*.ron` are raced and ch
 | `Roamers::tick`, 8 roamers, 25 % traffic, leg planning included | 0.24–0.29 ms per 60 Hz frame | — |
 
 ## Known gaps
-- **Same-car passes need the slipstream hook in `wp_sim`** (`Sim::set_drag_scale`, one line;
-  patch in `docs/integration/opponent.md`). Until it lands `RaceConfig::draft` must stay off and
-  near-equal cars rarely pass. Even with it, two drivers within ~0.1 skill in the same car
+- **Same-car passes**: the sim applies slipstream to every car (2026-10-31), but
+  `RaceConfig::draft` (tow tactics) is still off by default, so near-equal cars rarely pass. Even with it, two drivers within ~0.1 skill in the same car
   don't catch each other (the pace difference is smaller than the gap). Late-braking passes
   (the other real-world lever) are not implemented.
 - Open-road racing: careful drivers (risk < 0.35) wait out long reds; traffic still dominates
