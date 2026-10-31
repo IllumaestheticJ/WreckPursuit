@@ -85,6 +85,11 @@ export class ScannerPlayer {
   volume = 0.9;
   /** speechSynthesis.speak calls made (e2e: speech is attempted when supported). */
   speechAttempts = 0;
+  /** Utterances the speech engine took up: started, or errored other than by our own cancel
+   * (headless Chromium has no voices: "synthesis-failed"). A wedged queue never gets here (e2e). */
+  speechReached = 0;
+  /** Times a new line found speech still queued from an earlier one and cleared it (e2e). */
+  speechUnwedged = 0;
   /** Called for every line the scanner says (the radio strip shows it). */
   onSay: ((unit: number, text: string, tier: number) => void) | null = null;
   /** Alert tones played before tier 1 lines (e2e). */
@@ -142,9 +147,29 @@ export class ScannerPlayer {
         const base = 1.05 + (hash(unit * 7 + 3) % 5) * 0.04;
         u.rate = air ? base + 0.2 : tier === 3 ? base + 0.25 : priority === "Urgent" || priority === "Pursuit" ? base + 0.12 : base;
         u.volume = Math.min(1, this.volume * (tier === 3 ? 1 : 0.9) * loud);
+        let reached = false;
+        const took = () => {
+          if (!reached) this.speechReached++;
+          reached = true;
+        };
+        u.onstart = took;
+        u.onerror = (e) => {
+          if (e.error !== "canceled" && e.error !== "interrupted") took();
+        };
         this.speechAttempts++;
-        if (lead_s > 0) setTimeout(() => speechSynthesis.speak(u), lead_s * 1000);
-        else speechSynthesis.speak(u);
+        const speak = () => {
+          // One transmission at a time: the previous line has ended (`end` above), so anything
+          // still queued is stale, or a queue Chromium wedged (pause() on an idle synth, a lost
+          // utterance): clear it, or this line would wait behind it for ever.
+          if (speechSynthesis.paused) speechSynthesis.resume();
+          if (speechSynthesis.speaking || speechSynthesis.pending) {
+            this.speechUnwedged++;
+            speechSynthesis.cancel();
+          }
+          speechSynthesis.speak(u);
+        };
+        if (lead_s > 0) setTimeout(speak, lead_s * 1000);
+        else speak();
       } catch (e) {
         console.warn("radio voice:", e);
       }
