@@ -1,0 +1,31 @@
+// Chase-camera approach to a wanted-level-5 arcade-classic-style roadblock (roadblocks-v2, owner
+// 2026-10-31) on a downtown Port Vesper street, for the e2e screenshots
+// (`apps/testbed-web/e2e/police_blocks_shots.mjs`). The block is placed directly (`roadblock_at`,
+// level 5: its tier in data/police/tools.toml); the car cruises toward it at 12 m/s and brakes
+// to a stop short of it. Expectations: the block stands with its tier's cars, untouched.
+(
+    name: "police_roadblock_tier5",
+    seed: 45,
+    city: preset(name: "vesper_v2", seed: 1),
+    time_of_day_h: 14.0,
+    time_ratio: 0.0,
+    traffic_density: 0.0,
+    assists: ai,
+    police_orders: [(t_s: 0.0, order: roadblock_at(target: "car", pos: (50.0, -250.0), dir: (1.0, 0.0), level: 5))],
+    entities: [
+        (
+            id: "car",
+            car: "debug_sedan",
+            pos: (-70.0, -250.0, 0.0),
+            yaw: -1.5708,
+            speed_mps: 12.0,
+            driver: cruise(target_mps: 12.0, until_s: 7.0),
+            inputs: [(t_s: 7.0, input: (brake: 1.0))],
+        ),
+    ],
+    duration_s: 10.0,
+    expect: [
+        world_metric(name: "roadblock_cars_max", min: 1.0, max: 8.0),
+        world_metric(name: "roadblock_car_moved_max_m", min: 0.0, max: 0.3),
+    ],
+)

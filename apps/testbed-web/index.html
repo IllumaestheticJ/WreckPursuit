@@ -37,6 +37,10 @@
       body.wp-player #controls, body.wp-player .telemetry, body.wp-player .comps, body.wp-player .regions,
       body.wp-player .feed, body.wp-player .inputs, body.wp-player #audio-panel, body.wp-player #error,
       body.wp-player .hud-main .dim { display: none !important; }
+      #tool-alert { position: absolute; top: 22%; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; text-shadow: 0 2px 6px #000; }
+      #tool-alert b { display: block; font: 900 26px/1 system-ui, sans-serif; letter-spacing: 0.1em; color: #ffb020; animation: wp-strobe 0.6s steps(1) infinite; }
+      #tool-alert span { display: block; margin-top: 3px; font-size: 13px; color: #eee; }
+      #tool-alert[data-kind="spikes"] b { color: #ffd84a; }
       #pursuit-banner { position: absolute; top: 34%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; text-shadow: 0 2px 6px #000; }
       #pursuit-banner b { display: block; font: 900 44px/1 system-ui, sans-serif; letter-spacing: 0.12em; }
       #pursuit-banner span { display: block; margin-top: 4px; font-size: 13px; color: #ddd; }

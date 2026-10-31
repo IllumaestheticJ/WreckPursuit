@@ -1,0 +1,31 @@
+// Chase-camera approach to a spike-strip deployment (roadblocks-v2, owner 2026-10-31) on a
+// downtown Port Vesper street, for the e2e screenshots (`e2e/police_blocks_shots.mjs`): the
+// strip lies across the racer's lanes from under its unit's car (lights flashing, flares on the
+// approach) to the kerb. The car cruises toward it at 12 m/s in its own lane and brakes to a
+// stop short of it.
+(
+    name: "police_spike_deploy",
+    seed: 47,
+    city: preset(name: "vesper_v2", seed: 1),
+    time_of_day_h: 14.0,
+    time_ratio: 0.0,
+    traffic_density: 0.0,
+    assists: ai,
+    police_orders: [(t_s: 0.0, order: spikes_at(target: "car", pos: (50.0, -250.0), dir: (1.0, 0.0)))],
+    entities: [
+        (
+            id: "car",
+            car: "debug_sedan",
+            pos: (-70.0, -252.0, 0.0),
+            yaw: -1.5708,
+            speed_mps: 12.0,
+            driver: cruise(target_mps: 12.0, until_s: 7.0),
+            inputs: [(t_s: 7.0, input: (brake: 1.0))],
+        ),
+    ],
+    duration_s: 10.0,
+    expect: [
+        world_metric(name: "spike_strips_max", min: 1.0, max: 1.0),
+        metric(entity: "car", name: "spiked_wheels", min: 0.0, max: 0.0),
+    ],
+)

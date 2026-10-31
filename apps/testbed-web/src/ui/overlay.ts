@@ -13,7 +13,7 @@
 // readout (the old standalone heat panel was folded in here, round 6).
 import { billRequestJson, ChaseEndDetector, createLiveModel, mountOverlay, type ChaseEndInfo, type LiveBillJson, type LiveModel } from "../../../ui-kit/src/live";
 import type { SimEvent as KitSimEvent } from "../../../ui-kit/src/generated/contracts";
-import { bannerFor, toReadout, type Banner, type PoliceStatus } from "../police";
+import { bannerFor, toolAlertFor, toReadout, type Banner, type PoliceStatus } from "../police";
 import { layers } from "../settings";
 import { sim, type SimEvent } from "../wasm/sim";
 import type { Radar } from "./map";
@@ -23,6 +23,9 @@ export class UiOverlay {
   private readonly chaseEl: HTMLElement;
   private readonly billEl: HTMLElement;
   private readonly bannerEl: HTMLElement;
+  /** "Roadblock ahead" / "Spike strip ahead" alert (owner 2026-10-31). */
+  private readonly toolAlertEl: HTMLElement;
+  private toolAlertKey = "";
   private billOpen = false;
   /** The open bill was opened automatically (capture / scenario end), not by the user. */
   private billAuto = false;
@@ -57,6 +60,10 @@ export class UiOverlay {
     this.bannerEl.id = "pursuit-banner";
     this.bannerEl.className = "hidden";
     parent.appendChild(this.bannerEl);
+    this.toolAlertEl = document.createElement("div");
+    this.toolAlertEl.id = "tool-alert";
+    this.toolAlertEl.className = "hidden";
+    parent.appendChild(this.toolAlertEl);
   }
 
   /** Feed one frame (call after draining events). */
@@ -66,6 +73,7 @@ export class UiOverlay {
     const status = sim.policeStatus(player);
     this.status = status;
     this.showBanner(chase ? bannerFor(status) : null);
+    this.showToolAlert(chase ? toolAlertFor(status) : null);
     // A capture or a wreck ends the run: show what the damage costs. (An escape does not: the
     // player is still driving.)
     const fresh = status?.last_outcome && status.outcome_age_s !== null && status.outcome_age_s < 1 ? status.last_outcome : null;
@@ -106,8 +114,24 @@ export class UiOverlay {
     this.lastChaseEnd = null;
     this.endBillShown = false;
     this.showBanner(null);
+    this.showToolAlert(null);
     if (this.billAuto) this.setBill(false);
     else if (this.billOpen) this.model.openBill();
+  }
+
+  private showToolAlert(a: ReturnType<typeof toolAlertFor>): void {
+    const key = a ? `${a.text}|${a.sub}` : "";
+    if (key === this.toolAlertKey) return;
+    this.toolAlertKey = key;
+    this.toolAlertEl.classList.toggle("hidden", !a);
+    if (!a) return;
+    this.toolAlertEl.dataset.kind = a.kind;
+    this.toolAlertEl.innerHTML = "";
+    const head = document.createElement("b");
+    head.textContent = `⚠ ${a.text}`;
+    const sub = document.createElement("span");
+    sub.textContent = a.sub;
+    this.toolAlertEl.append(head, sub);
   }
 
   private showBanner(b: Banner | null): void {

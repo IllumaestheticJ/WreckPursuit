@@ -1,0 +1,27 @@
+// Golden "feel" case: threading a roadblock's gap (roadblocks-v2, owner 2026-10-31,
+// arcade-classic-style roadblocks). A wanted-level-1 block (`roadblock_at`, level 1: two
+// cruisers parked at an angle across the flat world's 19 m road, nose to nose, one wide gap in
+// the middle, placed directly so the test does not depend on dispatch AI). The sedan at
+// 80 km/h (22 m/s) is lined up on the gap and drives through untouched; 15 m past the block it
+// breaks up (`roadblocks_passed`). Re-aimed 2026-10-31: replaces `golden_roadblock` (barrier
+// sections shoved aside); the ranges are set around the first measured run.
+(
+    name: "golden_roadblock_gap",
+    seed: 111,
+    mode: Simulation,
+    assists: ai,
+    police_orders: [(t_s: 0.0, order: roadblock_at(target: "car", pos: (0.0, 60.0), dir: (0.0, 1.0), level: 1))],
+    entities: [
+        (id: "car", car: "debug_sedan", pos: (0.0, 0.0, 0.0), speed_mps: 22.0, driver: cruise(target_mps: 22.0, until_s: 6.0)),
+    ],
+    duration_s: 6.0,
+    hash_every: 24,
+    expect: [
+        world_metric(name: "roadblock_cars_max", min: 2.0, max: 2.0),
+        world_metric(name: "roadblock_heavy_max", min: 0.0, max: 0.0),
+        world_metric(name: "roadblock_car_moved_max_m", min: 0.0, max: 0.2),
+        world_metric(name: "roadblocks_passed", min: 1.0, max: 1.0),
+        metric(entity: "car", name: "final_health", min: 0.999, max: 1.0),
+        metric(entity: "car", name: "distance_m", min: 110.0, max: 150.0),
+    ],
+)

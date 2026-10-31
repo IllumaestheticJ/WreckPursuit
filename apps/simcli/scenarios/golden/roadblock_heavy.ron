@@ -1,0 +1,26 @@
+// Golden "feel" case: ramming a heavy roadblock unit (roadblocks-v2, owner 2026-10-31). A
+// wanted-level-4 block on the flat world's 19 m road: three cars angled across it, the two
+// nearest the middle heavy `sentinel_bastion` SUVs, a spike strip in front of each gap. The
+// sedan at 80 km/h (22 m/s) is lined up on the right-hand end of the middle heavy unit
+// (x = 1.4). A 2.6 t body-on-frame SUV parked with its brakes on barely moves: the sedan stops
+// short or limps on, slower and more damaged than in `golden_roadblock_ram`. The ranges are
+// set around the first measured run.
+(
+    name: "golden_roadblock_heavy",
+    seed: 113,
+    mode: Simulation,
+    assists: ai,
+    police_orders: [(t_s: 0.0, order: roadblock_at(target: "car", pos: (0.0, 60.0), dir: (0.0, 1.0), level: 4))],
+    entities: [
+        (id: "car", car: "debug_sedan", pos: (1.4, 0.0, 0.0), speed_mps: 22.0, driver: cruise(target_mps: 22.0, until_s: 6.0)),
+    ],
+    duration_s: 6.0,
+    hash_every: 24,
+    expect: [
+        world_metric(name: "roadblock_cars_max", min: 3.0, max: 3.0),
+        world_metric(name: "roadblock_heavy_max", min: 2.0, max: 2.0),
+        world_metric(name: "spike_strips_max", min: 2.0, max: 2.0),
+        event_count(event: "Contact", entity: "car", min: 1, max: 100000),
+        metric(entity: "car", name: "final_health", min: 0.0, max: 0.95),
+    ],
+)

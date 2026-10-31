@@ -341,8 +341,9 @@ pub const CAR_PLAN_W_M: f32 = 2.0;
 /// Widest a parked car's footprint across the road is planned (near the largest it can be,
 /// `hypot(CAR_PLAN_L_M, CAR_PLAN_W_M)` = 5.57 m), m.
 pub const FOOT_MAX_M: f32 = 5.4;
-/// Narrowest footprint planned (a car angled well along the road), m.
-pub const FOOT_MIN_M: f32 = 2.4;
+/// Narrowest footprint planned: a car still angled about 30° across the line of travel
+/// (fewer cars on a road too narrow for more), m.
+pub const FOOT_MIN_M: f32 = 4.4;
 /// Narrowest gap a block leaves: one car width (about 2.0 m) and a quarter metre each side, m.
 pub const GAP_MIN_M: f32 = 2.5;
 /// Most cars in one line.
@@ -399,8 +400,8 @@ fn angle_for_footprint(foot_m: f32) -> (f32, f32) {
 }
 
 /// One line of cars across `[lo, hi]` (lateral offsets, + right of travel): `n` cars and the
-/// gaps between them (about `gap_m` wide), more cars on a road too wide for `n`, fewer (or a
-/// gap at a kerb) on one too narrow. Returns the cars' `(centre, footprint)` and the gaps'
+/// gaps between them (about `gap_m` wide; wider, and open lanes at the kerbs, on a road too
+/// wide for `n`), fewer cars (one car and a gap at a kerb at least) on one too narrow. Returns the cars' `(centre, footprint)` and the gaps'
 /// `(left, right)`, left to right.
 fn line_layout(
     lo: f32,
@@ -410,32 +411,19 @@ fn line_layout(
     edge: GapPick,
 ) -> (Vec<(f32, f32)>, Vec<(f32, f32)>) {
     let w = (hi - lo).max(0.0);
+    let gap_m = gap_m.max(GAP_MIN_M);
+    // Fewer cars where the road cannot hold them angled with car-width gaps between them.
     let mut n = n.clamp(1, MAX_LINE_CARS);
-    let mut g = gap_m.max(GAP_MIN_M);
-    let foot = |n: u32, g: f32| (w - (n as f32 - 1.0) * g) / n as f32;
-    loop {
-        if n > 1 && foot(n, g) < FOOT_MIN_M {
-            // Too narrow: close the gaps toward the minimum, then drop a car.
-            g = ((w - n as f32 * FOOT_MIN_M) / (n as f32 - 1.0)).max(GAP_MIN_M);
-            if foot(n, g) < FOOT_MIN_M {
-                n -= 1;
-                g = gap_m.max(GAP_MIN_M);
-                continue;
-            }
-        }
-        if n > 1 && foot(n, g) > FOOT_MAX_M && n < MAX_LINE_CARS {
-            n += 1;
-            continue;
-        }
-        break;
+    while n > 1 && n as f32 * FOOT_MIN_M + (n as f32 - 1.0) * GAP_MIN_M > w {
+        n -= 1;
     }
     if n == 1 {
-        // One car and a gap at a kerb (the side picked), or in the middle of a wide road.
-        let f = (w - g).clamp(FOOT_MIN_M.min(w), FOOT_MAX_M);
+        // One car and a gap at a kerb (the side picked).
+        let lo_f = FOOT_MIN_M.min((w - GAP_MIN_M).max(CAR_PLAN_W_M));
+        let f = (w - gap_m).clamp(lo_f, FOOT_MAX_M);
         let c = match edge {
             GapPick::Left => hi - 0.5 * f,
-            GapPick::Right => lo + 0.5 * f,
-            GapPick::Centre => lo + 0.5 * f,
+            GapPick::Right | GapPick::Centre => lo + 0.5 * f,
         };
         let gap = if c - 0.5 * f - lo > hi - (c + 0.5 * f) {
             (lo, c - 0.5 * f)
@@ -444,22 +432,41 @@ fn line_layout(
         };
         return (vec![(c, f)], vec![gap]);
     }
-    let f = foot(n, g).clamp(FOOT_MIN_M, FOOT_MAX_M);
-    // Whatever the clamp leaves goes to the kerbs.
-    let edge_m = 0.5 * (w - n as f32 * f - (n as f32 - 1.0) * g);
+    let k = n as f32 - 1.0;
+    // Gaps as planned, closed toward the minimum where the cars would be too narrow.
+    let mut g = gap_m;
+    if (w - k * g) / (n as f32) < FOOT_MIN_M {
+        g = ((w - n as f32 * FOOT_MIN_M) / k).max(GAP_MIN_M);
+    }
+    let mut f = ((w - k * g) / n as f32).max(FOOT_MIN_M);
+    let mut edge_m = 0.0;
+    if f > FOOT_MAX_M {
+        // A wide road: the cars as wide as they get, the gaps up to half as wide again, the
+        // rest open at the kerbs (or shared by the gaps when too narrow to drive).
+        f = FOOT_MAX_M;
+        let spare = w - n as f32 * f - k * g;
+        let widen = spare.min(k * 0.5 * gap_m);
+        g += widen / k;
+        let rest = 0.5 * (spare - widen);
+        if rest >= GAP_MIN_M {
+            edge_m = rest;
+        } else {
+            g += 2.0 * rest / k;
+        }
+    }
     let mut cars = Vec::new();
     let mut gaps = Vec::new();
-    if edge_m >= GAP_MIN_M {
+    if edge_m > 0.0 {
         gaps.push((lo, lo + edge_m));
     }
-    for k in 0..n {
-        let x0 = lo + edge_m + k as f32 * (f + g);
+    for i in 0..n {
+        let x0 = lo + edge_m + i as f32 * (f + g);
         cars.push((x0 + 0.5 * f, f));
-        if k + 1 < n {
+        if i + 1 < n {
             gaps.push((x0 + f, x0 + f + g));
         }
     }
-    if edge_m >= GAP_MIN_M {
+    if edge_m > 0.0 {
         gaps.push((hi - edge_m, hi));
     }
     (cars, gaps)
@@ -985,7 +992,7 @@ mod tests {
 
     #[test]
     fn footprint_angle_solves_the_footprint() {
-        for f in [2.4f32, 3.0, 4.0, 5.0, 5.4] {
+        for f in [2.4f32, 3.0, 4.0, 4.4, 5.0, 5.4] {
             let (c, s) = angle_for_footprint(f);
             assert!((c * c + s * s - 1.0).abs() < 1e-4);
             let got = c * CAR_PLAN_L_M + s * CAR_PLAN_W_M;
@@ -997,8 +1004,8 @@ mod tests {
     #[test]
     fn roadblock_tiers_lay_angled_cars_with_gaps_between_them() {
         use crate::section::Section;
-        // A 14 m two-way road with sidewalks.
-        let sec = Section::plain(-7.0, 7.0);
+        // A 19 m boulevard.
+        let sec = Section::plain(-9.5, 9.5);
         for (r, cars, heavy, spiked) in [
             (recipe(2, 0, 4.5, 0), 2, 0, 0),
             (recipe(3, 0, 3.0, 1), 3, 0, 1),
@@ -1014,15 +1021,15 @@ mod tests {
             // between neighbours as planned, at least a car width.
             let mut feet: Vec<(f32, f32)> = lay.cars.iter().map(foot).collect();
             feet.sort_by(|a, b| a.0.total_cmp(&b.0));
-            assert!((feet[0].0 - -7.0).abs() < 0.05, "{feet:?}");
-            assert!((feet.last().unwrap().1 - 7.0).abs() < 0.05, "{feet:?}");
+            assert!((feet[0].0 - -9.5).abs() < 0.05, "{feet:?}");
+            assert!((feet.last().unwrap().1 - 9.5).abs() < 0.05, "{feet:?}");
             for (w, g) in feet.windows(2).zip(&lay.gaps) {
                 let open = w[1].0 - w[0].1;
                 assert!((open - g.width_m).abs() < 0.05, "{open} vs {g:?}");
                 assert!(g.width_m >= GAP_MIN_M - 1e-3);
             }
             for c in &lay.cars {
-                assert!(c.heading[0].abs() > 0.7, "across the road: {c:?}");
+                assert!(c.heading[0].abs() > 0.5, "angled across the road: {c:?}");
                 assert!(c.heading[1] < 0.0, "nose toward the racer: {c:?}");
                 assert!(c.pos[1] >= 54.0 - 1e-3 && c.pos[1] <= 54.0 + STAGGER_M + 1e-3);
             }
@@ -1042,15 +1049,21 @@ mod tests {
         }
         // The wide-gap tier leaves a gap well over a car width.
         let lay = roadblock_layout(&site_north(), &sec, &recipe(2, 0, 4.5, 0), false, GapPick::Centre);
-        assert!(lay.gaps[0].width_m >= 4.4);
+        assert!(lay.gaps[0].width_m >= 4.5);
     }
 
     #[test]
     fn roads_too_wide_or_narrow_get_more_or_fewer_cars() {
         use crate::section::Section;
         let r = recipe(2, 0, 4.5, 0);
+        // Too wide for two cars: a wider gap and an open lane at each kerb.
         let wide = roadblock_layout(&site_north(), &Section::plain(-12.0, 12.0), &r, false, GapPick::Centre);
-        assert!(wide.cars.len() >= 4, "{}", wide.cars.len());
+        assert_eq!(wide.cars.len(), 2);
+        assert_eq!(wide.gaps.len(), 3);
+        assert!(wide.gaps.iter().all(|g| g.width_m >= GAP_MIN_M - 1e-3));
+        // Too narrow for three: two.
+        let two = roadblock_layout(&site_north(), &Section::plain(-7.0, 7.0), &recipe(3, 0, 3.0, 1), false, GapPick::Centre);
+        assert_eq!(two.cars.len(), 2);
         let narrow = roadblock_layout(&site_north(), &Section::plain(-3.0, 3.0), &r, false, GapPick::Left);
         assert_eq!(narrow.cars.len(), 1);
         assert_eq!(narrow.gaps.len(), 1);
@@ -1068,7 +1081,7 @@ mod tests {
         use crate::section::Section;
         let lay = roadblock_layout(
             &site_north(),
-            &Section::plain(-7.0, 7.0),
+            &Section::plain(-9.5, 9.5),
             &recipe(3, 2, 2.7, 9),
             true,
             GapPick::Centre,

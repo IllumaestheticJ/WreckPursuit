@@ -16,6 +16,9 @@ use wp_police::{
 
 const RACER: EntityId = EntityId(7);
 
+/// The racer drives this far right of its road's centre line, m.
+const RACER_LANE_M: f32 = 1.75;
+
 struct Harness {
     police: PoliceSystem,
     world: ScenarioWorld,
@@ -86,6 +89,9 @@ impl Harness {
     fn racer_view(&self) -> RacerView {
         let p = self.path.point_at(self.s).unwrap();
         let d = self.path.dir_at(self.s).unwrap();
+        // In its own lane, right of the road's centre line (2026-10-31: a spike car stands
+        // astride the centre line of a two-way road, its strip over the racer's half).
+        let p = [p[0] + d[1] * RACER_LANE_M, p[1] - d[0] * RACER_LANE_M];
         RacerView {
             entity: RACER,
             pos: [p[0], p[1], 0.0],
@@ -214,7 +220,7 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
     let mut strip = None;
     for _ in 0..200 {
         h.run(0.05, &[]);
-        for s in h.police.spike_strips() {
+        for s in h.police.spike_strips().iter().filter(|s| s.block.is_none()) {
             spike_unit(&h, s);
         }
         if let Some(s) = h.police.spike_strips().iter().find(|s| s.id == pending.id) {
@@ -1842,7 +1848,7 @@ fn ai_spikes_hit_a_racer_that_keeps_its_road() {
         for _ in 0..160 {
             h.police.set_heat(RACER, 75.0);
             h.run(0.25, &[]);
-            for s in h.police.spike_strips() {
+            for s in h.police.spike_strips().iter().filter(|s| s.block.is_none()) {
                 spike_unit(&h, s);
             }
             if h.events

@@ -57,6 +57,9 @@ pub const ROADS_AHEAD_MAX_LEGS: usize = 24;
 
 /// Road half width used for tool layout, m.
 pub const ROAD_HALF_WIDTH_M: f32 = 5.0;
+/// Half width of the road a tool placed on a world without roads (the flat test world) is
+/// laid across: a 19 m boulevard, wide enough for every roadblock tier, m.
+pub const FLAT_ROAD_HALF_WIDTH_M: f32 = 9.5;
 
 /// Within this distance of a racer's road (ahead or behind it), a one-way road running the
 /// other way is the far carriageway of a divided road (row 140), m.
@@ -4561,7 +4564,7 @@ impl PoliceSystem {
             }
         }
         if site.segment.0 as usize >= self.graph.segments.len() {
-            return Section::plain(-ROAD_HALF_WIDTH_M, ROAD_HALF_WIDTH_M);
+            return Section::plain(-FLAT_ROAD_HALF_WIDTH_M, FLAT_ROAD_HALF_WIDTH_M);
         }
         let span = self.tool_span(site);
         let (mut lo, mut hi) = if dot(span.flow, site.dir) >= 0.0 {

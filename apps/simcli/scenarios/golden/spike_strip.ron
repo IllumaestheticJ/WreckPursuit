@@ -7,6 +7,10 @@
 // (data/police/tools.toml deflate_s, row 132: the car drops soon after the hit) it is on its
 // rims when it brakes at 3 s: about 0.37 g, 16.3 m/s at 5 s and 9.1 m/s at 7 s (it was
 // 8.2 m/s at 5 s, stopped at 6.23 s, while deflate_s was 5 s).
+// Re-aimed 2026-10-31 (roadblocks-v2, arcade-classic-style spike strips): the strip now covers
+// only the racer's half of the flat world's two-way road, from under its unit's car (astride
+// the centre line, x = 0) to the kerb, so the racer drives in its own lane at x = 4 instead of
+// on the centre line (where the spike car now stands).
 (
     name: "golden_spike_strip",
     seed: 105,
@@ -17,6 +21,7 @@
         (
             id: "racer",
             car: "debug_sedan",
+            pos: (4.0, 0.0, 0.0),
             speed_mps: 25.0,
             driver: cruise(target_mps: 25.0, until_s: 3.0),
             inputs: [(t_s: 3.0, input: (brake: 1.0))],
