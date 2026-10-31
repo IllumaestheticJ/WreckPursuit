@@ -1816,26 +1816,18 @@ pub fn police_tool_stride() -> u32 {
 }
 
 /// Police tools on the road, as oriented boxes, 11 floats each:
-/// `[kind, x, y, z, qx, qy, qz, qw, hx, hy, hz]` (centre, orientation, half extents; box local
-/// +X across the road). `kind` 0 = roadblock barrier (a fixed physics box); 1 = spike strip,
-/// lying flat on the road (local +X along the strip); 2 = the wooden sawhorse barricade in a
-/// roadblock's gap (local +X across the gap); 3 = a loose piece of a smashed barricade (a
-/// physics body whose pose changes as it tumbles).
+/// `[kind, x, y, z, qx, qy, qz, qw, hx, hy, hz]` (centre, orientation, half extents). `kind`
+/// 1 = spike strip, lying flat on the road (local +X along the strip; roadblock gap strips
+/// included); 4 = a traffic cone in front of a roadblock; 5 = a burning road flare on the
+/// approach to a roadblock or spike strip (orientation identity, half extents its size).
+/// Drawing only. Roadblocks themselves are their police cars (arcade-classic style, owner
+/// 2026-10-31), drawn with the other vehicles; kinds 0, 2 and 3 (barrier sections, the
+/// barricade and its pieces) are retired.
 #[wasm_bindgen]
 pub fn police_tools() -> Result<Vec<f32>, JsValue> {
     get(|s| {
         let sim = s.sim();
         let mut out = Vec::new();
-        for b in sim.roadblock_barriers() {
-            out.push(match b.part {
-                wp_sim::ToolPart::Barrier => 0.0,
-                wp_sim::ToolPart::Barricade => 2.0,
-                wp_sim::ToolPart::Piece => 3.0,
-            });
-            out.extend_from_slice(&b.pos);
-            out.extend_from_slice(&b.rot);
-            out.extend_from_slice(&b.half_extents_m);
-        }
         let map = sim.world().map();
         for st in sim.spike_strips() {
             let c = [(st.a[0] + st.b[0]) * 0.5, (st.a[1] + st.b[1]) * 0.5];
@@ -1845,6 +1837,15 @@ pub fn police_tools() -> Result<Vec<f32>, JsValue> {
             let (sn, cs) = (d[1].atan2(d[0]) * 0.5).sin_cos();
             let z = map.ground_height(c, None) + 0.03;
             out.extend_from_slice(&[1.0, c[0], c[1], z, 0.0, 0.0, sn, cs, half_len, 0.22, 0.03]);
+        }
+        for m in sim.tool_markers() {
+            let z = map.ground_height(m.pos, None);
+            let (kind, he) = match m.kind {
+                wp_sim::ToolMarker::Cone => (4.0, [0.18, 0.18, 0.36]),
+                wp_sim::ToolMarker::Flare => (5.0, [0.05, 0.05, 0.12]),
+            };
+            out.extend_from_slice(&[kind, m.pos[0], m.pos[1], z, 0.0, 0.0, 0.0, 1.0]);
+            out.extend_from_slice(&he);
         }
         out
     })

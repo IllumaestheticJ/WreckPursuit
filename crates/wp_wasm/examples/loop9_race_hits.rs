@@ -43,22 +43,7 @@ fn main() {
                     if a == player || b == player {
                         let other = if a == player { b } else { a };
                         let what = if other == WORLD_ENTITY {
-                            let d3 = |q: [f32; 3]| {
-                                ((q[0] - point[0]).powi(2)
-                                    + (q[1] - point[1]).powi(2)
-                                    + (q[2] - point[2]).powi(2))
-                                .sqrt()
-                            };
-                            let bar = s
-                                .sim()
-                                .roadblock_barriers()
-                                .iter()
-                                .map(|b| (d3(b.pos), b.half_extents_m))
-                                .min_by(|a, b| a.0.total_cmp(&b.0));
-                            format!(
-                                "world (nearest roadblock barrier {:?})",
-                                bar.map(|(d, h)| (format!("{d:.1} m"), h))
-                            )
+                            format!("world at ({:.1},{:.1},{:.1})", point[0], point[1], point[2])
                         } else {
                             s.vehicle(other)
                                 .map(|v| format!("{:?} {}", v.kind, v.car_id))
@@ -82,9 +67,9 @@ fn main() {
                 cooldown -= 1;
             } else if hist.front().copied().unwrap_or(0.0) - sp > 12.0 {
                 println!(
-                    "{id} t={:.1}s HARD STOP {:.1}->{sp:.1} m/s at ({:.1},{:.1},{:.1}); barriers {} debris {}",
+                    "{id} t={:.1}s HARD STOP {:.1}->{sp:.1} m/s at ({:.1},{:.1},{:.1}); roadblocks {} debris {}",
                     t as f32 / 240.0, hist.front().unwrap(), st.pos[0], st.pos[1], st.pos[2],
-                    s.sim().roadblock_barriers().len(), s.sim().debris_count()
+                    s.sim().police().roadblocks().len(), s.sim().debris_count()
                 );
                 for r in &recent {
                     println!("{r}");

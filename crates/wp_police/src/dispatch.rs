@@ -21,11 +21,13 @@ use crate::section::{Section, SECTION_REACH_M};
 use crate::time::SimTime;
 use crate::tools::{
     plan_site_where, roadblock_layout, spike_layout, GapPick, Roadblock, SiteRules, SpikeLayout,
-    SpikeStrip, ToolSite, BLOCK_ALONG_M, VERGE_REACH_M,
+    SpikeStrip, ToolSite, BLOCK_ALONG_M, FOOT_MIN_M, GAP_MIN_M,
 };
 
-/// A roadblock's hard stops must also hold this far before and after its barrier line, m.
-pub const BLOCK_STOPS_ALONG_M: f32 = 0.8;
+/// A roadblock breaks up once its racer is this far past its last car line, m.
+pub const BLOCK_PASSED_M: f32 = 15.0;
+/// ... and within this far of the site across the road (not on a parallel street), m.
+pub const BLOCK_PASS_SIDE_M: f32 = 40.0;
 use crate::unit::{Assignment, DriveCommand, Tactic, Track, Unit, UnitRole, LANE_OFFSET_M};
 use crate::PoliceSystem;
 
@@ -122,6 +124,8 @@ pub(crate) struct PendingToolCar {
     pub pos: [f32; 2],
     /// Heading (unit vector).
     pub heading: [f32; 2],
+    /// A heavy unit ([`crate::Unit::heavy`]).
+    pub heavy: bool,
     /// Its assignment once spawned.
     pub assignment: Assignment,
 }
@@ -1814,9 +1818,11 @@ impl PoliceSystem {
 
     pub(crate) fn think(&mut self, world: &dyn WorldQuery, tdt: f32) {
         if self.graph.nodes.is_empty() {
-            // No road network: rules only.
+            // No road network: rules only (and the break-up of directly placed roadblocks
+            // their racer got past).
             self.update_observations(world);
             self.update_racer_rules(tdt);
+            self.maintain_roadblocks();
             return;
         }
         if !self.warmed_up {
@@ -1843,6 +1849,7 @@ impl PoliceSystem {
         }
         self.expire_tools();
         self.maintain_tool_cars(world);
+        self.maintain_roadblocks();
         self.maintain_spike_runs(world);
         self.plan_units(world, tdt);
         self.audit_active_stops(tdt);
@@ -4030,11 +4037,17 @@ impl PoliceSystem {
         Some((p, [r.vel[0], r.vel[1]]))
     }
 
-    /// Place a roadblock ahead of `racer` (optionally on a specific road).
+    /// Place a roadblock ahead of `racer` (optionally on a specific road), built for its wanted
+    /// level (owner 2026-10-31, arcade-classic-style roadblocks: `tools.toml` tiers). The site
+    /// is on its predicted path with every car spot out of every racer's view (`world`
+    /// sharpens that test with the world's own sight lines; a human captain's command is checked
+    /// on the road graph's city blocks only); the cars appear together once their spots are
+    /// hidden ([`Self::maintain_tool_cars`]).
     pub(crate) fn place_roadblock(
         &mut self,
         racer: EntityId,
         road: Option<crate::captain::RoadEdgeId>,
+        world: Option<&dyn WorldQuery>,
     ) -> Result<ToolId, CaptainError> {
         let now = self.now;
         let rec = self.racers.get(&racer).ok_or(CaptainError::UnknownTarget)?;
@@ -4042,7 +4055,7 @@ impl PoliceSystem {
             return Err(CaptainError::NotPursued);
         }
         let level = rec.level.number();
-        let rb = &self.cfg.tools.roadblock;
+        let rb = self.cfg.tools.roadblock.clone();
         let need = self.cfg.presence.unlocks.roadblock_level;
         if level < need {
             return Err(CaptainError::Locked { need_level: need });
@@ -4064,53 +4077,61 @@ impl PoliceSystem {
             min_sight_m: rb.min_sight_m,
             highway_ok: level <= rb.highway_max_level,
         };
-        // Owner 2026-10-28: a roadblock seals the whole road (hard stop to hard stop) but for
-        // one barricaded gap; only sites where that is possible are taken.
+        let recipe = rb.tier(level);
+        // One draw for the second line (high heat only).
+        let second = recipe.second_line_chance > 0.0
+            && (self.rng.below(1000) as f32) < recipe.second_line_chance * 1000.0;
+        // The gap pick varies block to block (by tool id: no draw on the police RNG).
+        let pick = [GapPick::Right, GapPick::Left, GapPick::Centre][(self.next_tool % 3) as usize];
         let z = self.racers.get(&racer).map_or(0.0, |r| r.pos[2]);
-        let sealable = |site: &ToolSite| self.block_section(site, z).is_some();
-        let site = plan_site_where(&self.graph, p, v, &rules, road.map(|r| r.0), &sealable)
+        // Owner rule: police never spawn in view. Only a site whose every car spot is out of
+        // every racer's sight is taken.
+        let hidden = |site: &ToolSite| {
+            let Some(sec) = self.block_section(site, z) else {
+                return false;
+            };
+            let lay = roadblock_layout(site, &sec, &recipe, second, pick);
+            lay.cars
+                .iter()
+                .all(|c| !self.in_racer_view_opt(world, c.pos, true))
+        };
+        let site = plan_site_where(&self.graph, p, v, &rules, road.map(|r| r.0), &hidden)
             .map_err(CaptainError::Site)?;
-        let n = rb.units[0] + self.rng.below(rb.units[1] - rb.units[0] + 1);
-        // The gap side varies block to block (by tool id: no draw on the police RNG, so the
-        // rest of the police's decisions stay as they were).
-        let gap = [GapPick::Right, GapPick::Left, GapPick::Centre][(self.next_tool % 3) as usize];
         let sec = self
             .block_section(&site, z)
             .unwrap_or_else(|| self.tool_section(&site, z));
-        let layout = roadblock_layout(
-            &site,
-            &sec,
-            rb.barrier_half_extents_m,
-            rb.barrier_mass_kg,
-            gap,
-        );
+        let layout = roadblock_layout(&site, &sec, &recipe, second, pick);
         let lifetime = rb.lifetime_s;
         let cooldown = rb.cooldown_s.get(self.phase);
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
-        for (pos, heading) in layout.unit_spots.iter().take(n as usize).copied() {
+        for car in &layout.cars {
             self.tool_cars.push(PendingToolCar {
                 tool: id,
-                pos,
-                heading,
+                pos: car.pos,
+                heading: car.heading,
+                heavy: car.heavy,
                 assignment: Assignment::RoadblockAt {
                     segment: site.segment,
                     tool: id,
                 },
             });
         }
-        let barriers = layout.barriers;
-        let barricade = Some(layout.barricade);
         self.roadblocks.push(Roadblock {
             id,
             racer,
             site,
             units: Vec::new(),
-            barriers,
             expires: now.plus(lifetime),
             scripted: false,
-            barricade,
             z_m: sec.z_m,
+            level,
+            cars: layout.cars,
+            gaps: layout.gaps,
+            gap_strips: layout.gap_strips,
+            cones: layout.cones,
+            flares: layout.flares,
+            set_up: false,
         });
         self.captain.roadblock_ready = now.plus(cooldown);
         self.stats.roadblocks += 1;
@@ -4143,40 +4164,63 @@ impl PoliceSystem {
         self.tool_section(&Self::scenario_site(pos, dir), z_hint)
     }
 
-    /// Scenario / test placement: a roadblock's barriers across the road at `pos`, facing
-    /// traffic that travels along `dir`, attributed to `racer`. Unlike
-    /// [`PoliceSystem::captain_command`] this bypasses every dispatch rule (pursuit, unlock
-    /// level, cooldown, budget, site planning) and spawns no units, so a scenario can put a
-    /// barricade exactly where a car will hit it, even on the flat world. Expires after the
-    /// configured lifetime like any roadblock; emits `RoadblockPlaced`.
-    pub fn place_roadblock_at(&mut self, racer: EntityId, pos: [f32; 2], dir: [f32; 2]) -> ToolId {
-        let rb = &self.cfg.tools.roadblock;
+    /// Scenario / test placement: a roadblock for wanted level `level` (its `tools.toml` tier)
+    /// across the road at `pos`, facing traffic that travels along `dir`, attributed to
+    /// `racer`. Unlike [`PoliceSystem::captain_command`] this bypasses every dispatch rule
+    /// (pursuit, unlock level, cooldown, budget, site planning, the out-of-view rule): its cars
+    /// are spawned and its gap strips laid at once, so a scenario can put a block exactly where
+    /// a car will meet it, even on the flat world. The gap pick is [`GapPick::Right`]; the
+    /// second line is there when the tier's `second_line_chance` is 0.5 or more (no RNG draw).
+    /// Expires after the configured lifetime like any roadblock; emits `RoadblockPlaced`.
+    pub fn place_roadblock_at(
+        &mut self,
+        racer: EntityId,
+        pos: [f32; 2],
+        dir: [f32; 2],
+        level: u8,
+    ) -> ToolId {
+        let rb = self.cfg.tools.roadblock.clone();
         let site = Self::scenario_site(pos, dir);
         let line = Self::scenario_site(add(pos, scale(site.dir, BLOCK_ALONG_M)), dir);
         let sec = self
             .block_section(&site, 0.0)
             .unwrap_or_else(|| self.tool_section(&line, 0.0));
-        let layout = roadblock_layout(
-            &site,
-            &sec,
-            rb.barrier_half_extents_m,
-            rb.barrier_mass_kg,
-            GapPick::Right,
-        );
+        let recipe = rb.tier(level);
+        let second = recipe.second_line_chance >= 0.5;
+        let layout = roadblock_layout(&site, &sec, &recipe, second, GapPick::Right);
         let expires = self.now.plus(rb.lifetime_s);
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
+        let mut units = Vec::new();
+        for car in &layout.cars {
+            let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, car.pos, car.heading);
+            self.units[i].heavy = car.heavy;
+            self.assign(
+                i,
+                Assignment::RoadblockAt {
+                    segment: site.segment,
+                    tool: id,
+                },
+            );
+            units.push(self.units[i].id);
+        }
         self.roadblocks.push(Roadblock {
             id,
             racer,
             site,
-            units: Vec::new(),
-            barriers: layout.barriers,
+            units,
             expires,
             scripted: false,
-            barricade: Some(layout.barricade),
             z_m: sec.z_m,
+            level: level.clamp(1, 5),
+            cars: layout.cars,
+            gaps: layout.gaps,
+            gap_strips: layout.gap_strips,
+            cones: layout.cones,
+            flares: layout.flares,
+            set_up: false,
         });
+        self.set_up_block(self.roadblocks.len() - 1);
         self.stats.roadblocks += 1;
         self.pending.push(PoliceEvent::RoadblockPlaced {
             tool: id,
@@ -4187,19 +4231,94 @@ impl PoliceSystem {
         id
     }
 
-    /// Scenario / test placement: a spike strip across the road at `pos`, perpendicular to
-    /// `dir`, attributed to `racer`, bypassing every dispatch rule (see
-    /// [`PoliceSystem::place_roadblock_at`]), the row-131 spawn view check included. Like
-    /// every strip it comes with a spike unit parked on the shoulder beside it (left of `dir`)
-    /// and is lifted when that unit leaves (PR #54). Any racer crossing it is spiked. Emits
-    /// `SpikesPlaced`.
+    /// Roadblock `k`'s cars all stand: it is set up. Its gap strips go down (one
+    /// [`SpikeStrip`] per spiked gap, [`SpikeStrip::block`] set, no unit of its own: it lies
+    /// while the block stands), announced with the block (no separate radio call).
+    pub(crate) fn set_up_block(&mut self, k: usize) {
+        let rb = &self.roadblocks[k];
+        if rb.set_up {
+            return;
+        }
+        let (block, racer, site, expires, scripted) =
+            (rb.id, rb.racer, rb.site, rb.expires, rb.scripted);
+        let segs = rb.gap_strips.clone();
+        self.roadblocks[k].set_up = true;
+        for [a, b] in segs {
+            let id = ToolId(self.next_tool);
+            self.next_tool += 1;
+            let mut strip = SpikeStrip::between(id, racer, site, a, b, None, expires);
+            strip.scripted = scripted;
+            strip.block = Some(block);
+            self.spikes_announced.insert(id);
+            self.lay_spikes(strip);
+        }
+    }
+
+    /// Owner 2026-10-31: the cops stay with their cars until the block's racer is past it
+    /// ([`BLOCK_PASSED_M`] beyond the last car line, within [`BLOCK_PASS_SIDE_M`] of the site
+    /// across the road). Then the block breaks up: its gap strips are lifted, its cars rejoin
+    /// the pursuit (the racer still pursued) or drive off out of service, and the block is
+    /// removed. Race-profile blocks stay for the whole field. Blocks in list order.
+    pub(crate) fn maintain_roadblocks(&mut self) {
+        let passed: Vec<ToolId> = self
+            .roadblocks
+            .iter()
+            .filter(|rb| rb.set_up && !rb.scripted)
+            .filter(|rb| {
+                self.racers.get(&rb.racer).is_some_and(|r| {
+                    let p = xy(r.pos);
+                    let right = [rb.site.dir[1], -rb.site.dir[0]];
+                    rb.past_by(p) > BLOCK_PASSED_M
+                        && dot(sub(p, rb.site.pos), right).abs() < BLOCK_PASS_SIDE_M
+                })
+            })
+            .map(|rb| rb.id)
+            .collect();
+        for id in passed {
+            let Some(k) = self.roadblocks.iter().position(|r| r.id == id) else {
+                continue;
+            };
+            let rb = self.roadblocks.remove(k);
+            self.pending.push(PoliceEvent::ToolRemoved { tool: id });
+            let strips: Vec<ToolId> = self
+                .spikes
+                .iter()
+                .filter(|s| s.block == Some(id))
+                .map(|s| s.id)
+                .collect();
+            for s in strips {
+                self.lift_spikes(s);
+            }
+            let pursued = self.racers.get(&rb.racer).is_some_and(|r| r.pursued());
+            self.stats.roadblocks_passed += 1;
+            for uid in rb.units {
+                let Some(i) = self.unit_index(uid) else {
+                    continue;
+                };
+                if self.units[i].wrecked {
+                    continue;
+                }
+                if pursued {
+                    self.units[i].role = UnitRole::Reinforcement;
+                    self.assign(i, Assignment::Pursue { target: rb.racer });
+                } else {
+                    self.assign(i, Assignment::OutOfService);
+                }
+            }
+        }
+    }
+
+    /// Scenario / test placement: a spike strip across the racer's lanes at `pos`, facing
+    /// traffic along `dir`, attributed to `racer`, bypassing every dispatch rule (see
+    /// [`PoliceSystem::place_roadblock_at`]), the out-of-view check included. Like every
+    /// strip it comes with its spike unit, parked beside the strip's inner end
+    /// ([`spike_layout`]), and is lifted when that unit leaves (PR #54). Any racer crossing it
+    /// is spiked. Emits `SpikesPlaced`.
     pub fn place_spikes_at(&mut self, racer: EntityId, pos: [f32; 2], dir: [f32; 2]) -> ToolId {
-        let sc = &self.cfg.tools.spikes;
-        let (length, lifetime) = (sc.length_m, sc.lifetime_s);
+        let lifetime = self.cfg.tools.spikes.lifetime_s;
         let site = Self::scenario_site(pos, dir);
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
-        let _ = length;
         let (_, lay) = self.spike_plan(&site, 0.0);
         let post = lay.post;
         let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, post, lay.heading);
@@ -4212,7 +4331,7 @@ impl PoliceSystem {
         );
         let mut strip =
             SpikeStrip::between(id, racer, site, lay.a, lay.b, None, self.now.plus(lifetime));
-        strip.extra = lay.extra;
+        strip.flares = lay.flares;
         strip.unit = Some(self.units[i].id);
         strip.post = Some(post);
         self.lay_spikes(strip);
@@ -4235,6 +4354,10 @@ impl PoliceSystem {
     /// strip's post and within [`SPIKE_UNIT_LEASH_M`] of where it parked (row 165: every
     /// strip, scripted race-profile strips included, has its unit).
     fn spike_unit_holds(&self, s: &SpikeStrip) -> bool {
+        // A roadblock's gap strip lies while its block stands.
+        if let Some(b) = s.block {
+            return self.roadblocks.iter().any(|r| r.id == b && r.set_up);
+        }
         let Some(uid) = s.unit else {
             return false;
         };
@@ -4320,7 +4443,12 @@ impl PoliceSystem {
                 remaining_s: self.captain.spikes_ready.since(now),
             });
         }
-        let active = self.spikes.iter().filter(|s| !s.scripted).count() + self.spike_runs.len();
+        let active = self
+            .spikes
+            .iter()
+            .filter(|s| !s.scripted && s.block.is_none())
+            .count()
+            + self.spike_runs.len();
         if active as u32 >= sc.max_active.min(self.commander.budget.spikes) {
             return Err(CaptainError::Budget);
         }
@@ -4340,11 +4468,11 @@ impl PoliceSystem {
         // Owner 2026-10-28: the strip covers the whole paved road and ends under its car.
         let z = self.racers.get(&racer).map_or(0.0, |r| r.pos[2]);
         let hidden = |site: &ToolSite| {
-            let sec = self.tool_section(site, z);
+            let (sec, lay) = self.spike_plan(site, z);
             if !sec.spikeable() {
                 return false;
             }
-            let post = spike_layout(site, &sec).post;
+            let post = lay.post;
             self.spot_clear(post) && self.spike_post_ok(world, post, SPIKE_PICK_MARGIN_M)
         };
         // Nothing hidden in the usual range (a long straight in plain view): look up to
@@ -4366,7 +4494,7 @@ impl PoliceSystem {
         let post = lay.post;
         let expires = now.plus(lifetime);
         let mut strip = SpikeStrip::between(id, racer, site, lay.a, lay.b, None, expires);
-        strip.extra = lay.extra.clone();
+        strip.flares = lay.flares.clone();
         self.spike_runs.push(SpikeRun {
             strip,
             post,
@@ -4379,57 +4507,45 @@ impl PoliceSystem {
         Ok(id)
     }
 
-    /// A spike strip at `site` ([`spike_layout`] across [`Self::tool_section`]) with its extra
-    /// segments: every other paved run across the road between the hard stops (or within
-    /// [`VERGE_REACH_M`] of the paved road where a side has none), so a car crossing the
-    /// verge onto a ramp beside the carriageway still meets spikes.
+    /// A spike strip at `site` ([`spike_layout`] across [`Self::tool_section`]): across the
+    /// racer's lanes from under its car to the kerb, the car astride the centre line of a
+    /// two-way road ([`Self::two_way_at`]) or at the left kerb of a one-way one.
     pub(crate) fn spike_plan(&self, site: &ToolSite, z_hint: f32) -> (Section, SpikeLayout) {
         let sec = self.tool_section(site, z_hint);
-        let mut lay = spike_layout(site, &sec);
-        if let (false, Some(z)) = (self.section.is_empty(), sec.z_m) {
-            let lo = sec.stop_lo.unwrap_or(sec.paved_lo - VERGE_REACH_M);
-            let hi = sec.stop_hi.unwrap_or(sec.paved_hi + VERGE_REACH_M);
-            let right = [site.dir[1], -site.dir[0]];
-            let at = |x: f32| add(site.pos, scale(right, x));
-            for (r0, r1) in self.section.paved_runs(site.pos, site.dir, z, lo, hi) {
-                if r1 >= sec.paved_lo - 0.3 && r0 <= sec.paved_hi + 0.3 {
-                    continue; // the main run
-                }
-                // Into a stop it meets.
-                let a = if r0 - lo <= 0.4 { lo } else { r0 };
-                let b = if hi - r1 <= 0.4 { hi } else { r1 };
-                lay.extra.push([at(a), at(b)]);
-            }
-        }
+        let lay = spike_layout(site, &sec, self.two_way_at(site, &sec));
         (sec, lay)
     }
 
-    /// The road across a roadblock at `site` (its barrier line stands [`BLOCK_ALONG_M`] past
-    /// the site), if the block can seal it there: hard stops on both sides at the line and
-    /// [`BLOCK_STOPS_ALONG_M`] either side of it (no wall ending at the line, no corner a car
-    /// could slip round). `None`: the road cannot be sealed there.
-    pub(crate) fn block_section(&self, site: &ToolSite, z_hint: f32) -> Option<Section> {
-        let at = |d: f32| ToolSite {
-            pos: add(site.pos, scale(site.dir, d)),
-            ..*site
-        };
-        let sec = self.tool_section(&at(BLOCK_ALONG_M), z_hint);
-        if !sec.sealable(VERGE_REACH_M) {
-            return None;
-        }
-        for d in [
-            BLOCK_ALONG_M - BLOCK_STOPS_ALONG_M,
-            BLOCK_ALONG_M + BLOCK_STOPS_ALONG_M,
-        ] {
-            if !self.tool_section(&at(d), z_hint).sealable(VERGE_REACH_M) {
-                return None;
+    /// Whether the road at `site` (section `sec`) carries traffic both ways: from the city's
+    /// paving when known (no one-way flow at the site), else the road graph's segment (sites
+    /// planned on it), else two-way (scenario sites on graph-only or flat worlds).
+    pub(crate) fn two_way_at(&self, site: &ToolSite, sec: &Section) -> bool {
+        if let (false, Some(z)) = (self.section.is_empty(), sec.z_m) {
+            if let Some((_, flow)) = self.section.paving_at(site.pos, z) {
+                return flow.is_none();
             }
         }
-        Some(sec)
+        if site.sight_m > 0.0 && (site.segment.0 as usize) < self.graph.segments.len() {
+            return !self.tool_span(site).oneway;
+        }
+        true
+    }
+
+    /// The road across a roadblock at `site` (its front car line stands [`BLOCK_ALONG_M`]
+    /// past the site), if a block fits there: the line on carriageway, no far carriageway of a
+    /// divided road in the way, and room for a car and a gap. `None`: no block here.
+    pub(crate) fn block_section(&self, site: &ToolSite, z_hint: f32) -> Option<Section> {
+        let at = ToolSite {
+            pos: add(site.pos, scale(site.dir, BLOCK_ALONG_M)),
+            ..*site
+        };
+        let sec = self.tool_section(&at, z_hint);
+        let room = sec.road_hi - sec.road_lo >= FOOT_MIN_M + GAP_MIN_M;
+        (sec.on_road && !sec.opposing && room).then_some(sec)
     }
 
     /// [`Self::block_section`] for a block at `pos` facing traffic along `dir` (for tests and
-    /// tools): the section at its barrier line, or `None` where it cannot seal the road.
+    /// tools): the section at its front car line, or `None` where no block fits.
     pub fn block_section_at(&self, pos: [f32; 2], dir: [f32; 2], z_hint: f32) -> Option<Section> {
         self.block_section(&Self::scenario_site(pos, dir), z_hint)
     }
@@ -4502,10 +4618,20 @@ impl PoliceSystem {
         }
     }
 
-    /// Spawn the roadblock cars whose spots are now out of every racer's view, now and along
-    /// its road ahead (row 131); drop those whose roadblock has gone.
+    /// Spawn the roadblock cars once their spots are out of every racer's view, now and along
+    /// its road ahead (row 131; owner rule: police never spawn in view). A block's cars appear
+    /// together: while any of its spots is in view, all of them wait. A block whose cars all
+    /// stand is set up ([`Self::set_up_block`]). Cars of a block that has gone are dropped.
     fn maintain_tool_cars(&mut self, world: &dyn WorldQuery) {
         let pending = std::mem::take(&mut self.tool_cars);
+        let mut waiting: std::collections::BTreeSet<ToolId> = std::collections::BTreeSet::new();
+        if self.warmed_up {
+            for car in &pending {
+                if !waiting.contains(&car.tool) && self.spawn_in_view(world, car.pos) {
+                    waiting.insert(car.tool);
+                }
+            }
+        }
         for car in pending {
             let Some(k) = self.roadblocks.iter().position(|r| r.id == car.tool) else {
                 continue;
@@ -4516,15 +4642,22 @@ impl PoliceSystem {
             if self.far_side(&self.racer_corridor(racer), car.pos) {
                 continue;
             }
-            if self.warmed_up && self.spawn_in_view(world, car.pos) {
+            if waiting.contains(&car.tool) {
                 self.tool_cars.push(car);
                 continue;
             }
             let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, car.pos, car.heading);
+            self.units[i].heavy = car.heavy;
             let uid = self.units[i].id;
             self.assign(i, car.assignment);
             self.record_spawn(world, i);
             self.roadblocks[k].units.push(uid);
+        }
+        for k in 0..self.roadblocks.len() {
+            let id = self.roadblocks[k].id;
+            if !self.roadblocks[k].set_up && !self.tool_cars.iter().any(|c| c.tool == id) {
+                self.set_up_block(k);
+            }
         }
     }
 
@@ -4675,7 +4808,7 @@ impl PoliceSystem {
             if lvl >= self.cfg.presence.unlocks.roadblock_level
                 && self.now >= self.captain.roadblock_ready
             {
-                let _ = self.place_roadblock(racer, None);
+                let _ = self.place_roadblock(racer, None, Some(world));
             }
         }
     }

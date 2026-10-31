@@ -178,9 +178,11 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
         .events
         .iter()
         .any(|e| matches!(e, PoliceEvent::PursuitStarted { .. })));
+    // Spikes are locked at low heat (roadblocks are not since 2026-10-31: the L1-2 tier is two
+    // cruisers with a wide gap).
     let err = h
         .police
-        .captain_command(CaptainCommand::RequestRoadblock {
+        .captain_command(CaptainCommand::RequestSpikes {
             target: RACER,
             road: None,
         })
@@ -301,10 +303,12 @@ fn roadblocks_respect_sight_and_highway_rules() {
             RoadClass::Highway,
             "roadblock on a highway at L5"
         );
-        // Cars spawned, or waiting for their spot to leave the racer's view (row 131).
+        // Cars spawned, or all waiting for their spots to leave the racer's view (row 131):
+        // the L5 tier (owner 2026-10-31), heavy units among them.
         let cars = rb.units.len() + h.police.tool_cars_waiting(rb.id).len();
-        assert!((2..=3).contains(&cars), "{cars} roadblock cars");
-        assert!(!rb.barriers.is_empty());
+        assert_eq!(cars, rb.cars.len());
+        assert!(rb.cars.len() >= 2 && rb.heavy_cars() >= 1, "{rb:?}");
+        assert!(rb.units.is_empty() || h.police.tool_cars_waiting(rb.id).is_empty());
     }
     assert!(!h.police.static_colliders().is_empty() || h.police.roadblocks().is_empty());
 }

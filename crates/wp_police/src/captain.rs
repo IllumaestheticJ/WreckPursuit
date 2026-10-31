@@ -158,7 +158,7 @@ impl PoliceSystem {
         match cmd {
             CaptainCommand::AssignUnit { unit, order } => self.order_unit(unit, order),
             CaptainCommand::RequestRoadblock { target, road } => {
-                self.place_roadblock(target, road).map(|_| ())
+                self.place_roadblock(target, road, None).map(|_| ())
             }
             CaptainCommand::RequestSpikes { target, road } => {
                 self.place_spikes(target, road, None).map(|_| ())
@@ -334,7 +334,8 @@ impl PoliceSystem {
                 remaining_s: r.expires.since(now),
             })
             .collect();
-        tools.extend(self.spikes.iter().map(|s| ToolView {
+        // A roadblock's gap strips are part of the block (no tool of their own here).
+        tools.extend(self.spikes.iter().filter(|s| s.block.is_none()).map(|s| ToolView {
             tool: s.id,
             roadblock: false,
             pos: s.site.pos,
@@ -365,7 +366,7 @@ impl PoliceSystem {
                         .min(self.commander.budget.roadblocks),
                 ],
                 spikes: [
-                    self.spikes.len() as u32,
+                    self.spikes.iter().filter(|s| s.block.is_none()).count() as u32,
                     self.cfg
                         .tools
                         .spikes

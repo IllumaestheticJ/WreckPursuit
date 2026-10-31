@@ -31,7 +31,9 @@ use crate::graph::{
 };
 use crate::heat::WantedLevel;
 use crate::radio::{RadioCue, RadioTier};
-use crate::tools::{roadblock_layout, GapPick, Roadblock, SpikeStrip, ToolSite, NODE_CLEARANCE_M};
+use crate::tools::{
+    roadblock_layout, BlockRecipe, GapPick, Roadblock, SpikeStrip, ToolSite, NODE_CLEARANCE_M,
+};
 use crate::unit::{Assignment, UnitRole, LANE_OFFSET_M};
 use crate::PoliceSystem;
 
@@ -276,8 +278,8 @@ pub struct RouteBlock {
     /// Where, as a fraction of the course length (moved on to the first spot clear of
     /// junctions).
     pub at: f32,
-    /// Unused since 2026-10-28 (kept so older tables load): every roadblock seals the road
-    /// but for one [`crate::tools::GAP_W_M`] gap with a breakable barricade.
+    /// Unused since 2026-10-28 (kept so older tables load): a roadblock's gaps come from its
+    /// layout ([`crate::tools::roadblock_layout`]).
     #[serde(default)]
     pub gap_m: f32,
     /// Which edge of the carriageway the gap is on.
@@ -1225,9 +1227,11 @@ impl PoliceSystem {
         self.deck_at(p).unwrap_or(0.0)
     }
 
-    /// A scripted roadblock at `site` sealing the road (owner 2026-10-28: hard stop to hard
-    /// stop but for one barricaded gap at `gap`), with up to `units` cars behind it. `None`
-    /// (nothing placed) where the road cannot be sealed.
+    /// A scripted roadblock at `site` (owner 2026-10-31, arcade-classic-style roadblocks):
+    /// `units` cars angled across the road with gaps between them, the gap left open at `gap`
+    /// when one car is all the road takes. The block is built like the race's own wanted-level
+    /// cap would have it (the L3 tier's gaps and spikes when the profile allows that heat, else
+    /// the L2 tier's), with the profile's car count. `None` (nothing placed) where no block fits.
     fn push_roadblock(
         &mut self,
         site: ToolSite,
@@ -1238,33 +1242,35 @@ impl PoliceSystem {
     ) -> Option<ToolId> {
         let sec = self.block_section(&site, self.z_hint(site.pos))?;
         let rb = &self.cfg.tools.roadblock;
-        let layout = roadblock_layout(
-            &site,
-            &sec,
-            rb.barrier_half_extents_m,
-            rb.barrier_mass_kg,
-            gap,
-        );
+        let tier = if self.cfg.presence.unlocks.spikes_level <= 3 { 3 } else { 2 };
+        let recipe = BlockRecipe {
+            cars: units.max(1),
+            heavy: 0,
+            ..rb.tier(tier)
+        };
+        let layout = roadblock_layout(&site, &sec, &recipe, false, gap);
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
         let mut ids = Vec::new();
-        for (pos, heading) in layout.unit_spots.iter().take(units as usize).copied() {
+        for car in &layout.cars {
             let assignment = Assignment::RoadblockAt {
                 segment: site.segment,
                 tool: id,
             };
             // Row 158: a car a racer could see (now or round the corner ahead) waits out of
             // view and appears once hidden, like the AI captain's tool cars (row 131).
-            if self.warmed_up && self.in_racer_view_opt(None, pos, true) {
+            if self.warmed_up && self.in_racer_view_opt(None, car.pos, true) {
                 self.tool_cars.push(crate::dispatch::PendingToolCar {
                     tool: id,
-                    pos,
-                    heading,
+                    pos: car.pos,
+                    heading: car.heading,
+                    heavy: car.heavy,
                     assignment,
                 });
                 continue;
             }
-            let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, pos, heading);
+            let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, car.pos, car.heading);
+            self.units[i].heavy = car.heavy;
             ids.push(self.units[i].id);
             self.assign(i, assignment);
         }
@@ -1273,12 +1279,20 @@ impl PoliceSystem {
             racer: owner,
             site,
             units: ids,
-            barriers: layout.barriers,
             expires,
             scripted: true,
-            barricade: Some(layout.barricade),
             z_m: sec.z_m,
+            level: tier,
+            cars: layout.cars,
+            gaps: layout.gaps,
+            gap_strips: layout.gap_strips,
+            cones: layout.cones,
+            flares: layout.flares,
+            set_up: false,
         });
+        if !self.tool_cars.iter().any(|c| c.tool == id) {
+            self.set_up_block(self.roadblocks.len() - 1);
+        }
         self.stats.roadblocks += 1;
         self.pending.push(PoliceEvent::RoadblockPlaced {
             tool: id,
@@ -1383,8 +1397,8 @@ impl PoliceSystem {
         let total = course.length();
         let s = (sp.at * total).clamp(0.0, total);
         let dir = course.dir_at(s);
-        // Owner 2026-10-28: the strip covers the whole paved road (`length_m` / `offset_m`
-        // no longer apply) and ends under its car on the right edge.
+        // Owner 2026-10-31: the strip covers the racer's lanes from under its car to the kerb
+        // (`length_m` / `offset_m` no longer apply).
         let pos = course.point_at(s);
         let seg = self
             .graph
@@ -1418,7 +1432,7 @@ impl PoliceSystem {
             },
         );
         let mut strip = SpikeStrip::between(id, owner, site, lay.a, lay.b, None, expires);
-        strip.extra = lay.extra;
+        strip.flares = lay.flares;
         strip.scripted = true;
         strip.unit = Some(self.units[i].id);
         strip.post = Some(post);
@@ -1724,25 +1738,20 @@ mod tests {
             sight_m: 0.0,
             ahead_m: 0.0,
         };
-        let sec = police.tool_section(&site, 0.0);
-        let lay = crate::tools::spike_layout(&site, &sec);
-        // Owner 2026-10-28: the strip runs from the median-side edge to under its car, which
-        // stands inside the outer edge: nothing paved is left open.
+        let (_, lay) = police.spike_plan(&site, 0.0);
+        // Owner 2026-10-31: on the one-way carriageway the car stands at the left (median-side)
+        // edge and the strip runs from under it to the outer edge.
         let (a, b, car) = (
             lateral(p, east, lay.a),
             lateral(p, east, lay.b),
             lateral(p, east, lay.post),
         );
-        assert!((a - -4.0).abs() < 1e-3, "strip starts at {a}");
         assert!(
-            car + crate::tools::UNIT_HALF_W_M <= 8.0 + 1e-3,
+            car - crate::tools::UNIT_HALF_W_M >= -4.0 - 1e-3,
             "car at {car}"
         );
-        assert!(
-            b > car - crate::tools::UNIT_HALF_W_M,
-            "strip ends at {b}, car at {car}"
-        );
-        assert!(b < car, "strip ends under the car's inner half");
+        assert!(a > car && a < car + crate::tools::UNIT_HALF_W_M, "strip starts at {a}");
+        assert!(b >= 8.0 - 1e-3, "strip ends at {b}");
     }
 
     #[test]
@@ -1766,7 +1775,7 @@ mod tests {
         };
         let sec = police.tool_section(&site, 0.0);
         assert!(sec.paved_hi <= 16.6 - 7.05 + 1e-3 && sec.paved_lo >= -16.6 - 7.05 - 1e-3);
-        let lay = crate::tools::spike_layout(&site, &sec);
+        let (_, lay) = police.spike_plan(&site, 0.0);
         let car = lateral(p, east, lay.post);
         assert!(
             car + crate::tools::UNIT_HALF_W_M <= 16.6 - 7.05 + 1e-3,
@@ -1872,35 +1881,17 @@ mod tests {
                     .nodes
                     .iter()
                     .all(|n| dist(n.pos, rb.site.pos) >= 15.0));
-                // Owner 2026-10-28: barriers kerb to kerb but for one car-width gap, at the
-                // profile's side, with the barricade in it.
+                // Owner 2026-10-31: the profile's cars angled across the road kerb to kerb
+                // with car-width-or-wider gaps between them.
                 let hw = ROAD_HALF_WIDTH_M;
-                let mut spans: Vec<(f32, f32)> = rb
-                    .barriers
-                    .iter()
-                    .map(|b| {
-                        (
-                            b.pos[1] - b.half_extents_m[0],
-                            b.pos[1] + b.half_extents_m[0],
-                        )
-                    })
-                    .collect();
-                spans.sort_by(|a, b| a.0.total_cmp(&b.0));
-                assert!(spans[0].0 <= -hw + 1e-3, "{spans:?}");
-                assert!(spans.last().unwrap().1 >= hw - 1e-3, "{spans:?}");
-                let gaps: Vec<(f32, f32)> = spans
-                    .windows(2)
-                    .filter(|w| w[1].0 > w[0].1 + 1e-3)
-                    .map(|w| (w[0].1, w[1].0))
-                    .collect();
-                assert_eq!(gaps.len(), 1, "{spans:?}");
-                let (g0, g1) = gaps[0];
-                assert!((g1 - g0 - crate::tools::GAP_W_M).abs() < 1e-3);
-                let bc = rb.barricade.expect("barricade");
-                assert!(bc.collider.pos[1] - bc.collider.half_extents_m[0] <= g0);
-                assert!(bc.collider.pos[1] + bc.collider.half_extents_m[0] >= g1);
-                // At one edge of the road (left of the racing direction is +y here).
-                assert!(g1 >= hw - 0.4 || g0 <= -hw + 0.4, "gap {g0}..{g1}");
+                assert!(rb.set_up && !rb.cars.is_empty());
+                assert_eq!(rb.cars.len(), rb.gaps.len() + 1, "{rb:?}");
+                for g in &rb.gaps {
+                    assert!(g.width_m >= crate::tools::GAP_MIN_M - 1e-3);
+                    for p in [g.a, g.b] {
+                        assert!(p[1] >= -hw - 1e-3 && p[1] <= hw + 1e-3, "gap {g:?}");
+                    }
+                }
             } else {
                 // Down a cross street, across it.
                 assert!(d > 15.0, "side block only {d:.1} m off the course");

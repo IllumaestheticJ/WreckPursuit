@@ -346,8 +346,10 @@ pub enum OrderKind {
         /// Scenario-local entity id of the pursued racer.
         target: String,
     },
-    /// Roadblock barriers placed exactly at `pos` across traffic heading `dir`, bypassing the
-    /// dispatch rules (`PoliceSystem::place_roadblock_at`). Works on the flat world too.
+    /// A roadblock (its police cars parked across the road, arcade-classic style) placed
+    /// exactly at `pos` across traffic heading `dir`, built for wanted level `level` (its
+    /// `tools.toml` tier, default 2), bypassing the dispatch rules
+    /// (`PoliceSystem::place_roadblock_at`). Works on the flat world too.
     RoadblockAt {
         /// Scenario-local entity id the tool is aimed at.
         target: String,
@@ -355,6 +357,9 @@ pub enum OrderKind {
         pos: [f32; 2],
         /// Direction the target travels, XY (normalised).
         dir: [f32; 2],
+        /// Wanted level (1..=5) whose roadblock tier is built.
+        #[serde(default = "default_block_level")]
+        level: u8,
     },
     /// Spike strip placed exactly at `pos` across traffic heading `dir`, bypassing the
     /// dispatch rules (`PoliceSystem::place_spikes_at`). Any racer crossing it is spiked.
@@ -378,6 +383,16 @@ impl OrderKind {
             | OrderKind::SpikesAt { target, .. } => target,
         }
     }
+}
+
+fn default_block_level() -> u8 {
+    2
+}
+
+/// Whether an order places a tool directly (`roadblock_at` / `spikes_at`): those need police
+/// cars even on the flat world.
+pub fn places_tool_directly(o: &OrderKind) -> bool {
+    matches!(o, OrderKind::RoadblockAt { .. } | OrderKind::SpikesAt { .. })
 }
 
 /// Assist profile selection.

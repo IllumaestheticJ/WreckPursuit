@@ -323,6 +323,9 @@ pub struct PoliceStats {
     pub tool_sight_m: Vec<f32>,
     /// Roadblocks placed.
     pub roadblocks: u32,
+    /// Roadblocks their racer got past (the block broke up, its cars rejoined or drove off).
+    #[serde(default)]
+    pub roadblocks_passed: u32,
     /// Spike strips placed.
     pub spikes: u32,
     /// Spike hits.
@@ -1363,12 +1366,11 @@ impl PoliceSystem {
         &self.spikes
     }
 
-    /// Static colliders for `wp_sim`: roadblock barriers plus parked roadblock units (when
-    /// units are not physical bodies yet).
+    /// Static colliders for `wp_sim`: parked roadblock units that are not physical bodies
+    /// (kinematic police without a host car model).
     pub fn static_colliders(&self) -> Vec<StaticCollider> {
         let mut v = Vec::new();
         for rb in &self.roadblocks {
-            v.extend(rb.barriers.iter().copied());
             for uid in &rb.units {
                 if let Some(i) = self.unit_index(*uid) {
                     let u = &self.units[i];
@@ -1384,6 +1386,41 @@ impl PoliceSystem {
             }
         }
         v
+    }
+
+    /// The nearest police tool set up on `racer`'s road ahead within `range_m` (owner
+    /// 2026-10-31: the HUD's "Roadblock ahead" alert): a set-up roadblock or a laid spike
+    /// strip whose line the racer is driving toward (moving along the tool's direction, within
+    /// [`dispatch::BLOCK_PASS_SIDE_M`] of it across the road). Returns `(is_roadblock,
+    /// distance_m)`; a block's own gap strips count as the block.
+    pub fn tool_ahead(&self, racer: EntityId, range_m: f32) -> Option<(bool, f32)> {
+        let r = self.racers.get(&racer)?;
+        let p = graph::xy(r.pos);
+        let v = [r.vel[0], r.vel[1]];
+        let check = |pos: [f32; 2], dir: [f32; 2]| -> Option<f32> {
+            let ahead = graph::dot(graph::sub(pos, p), dir);
+            let side = graph::dot(graph::sub(pos, p), [dir[1], -dir[0]]).abs();
+            (ahead > 0.0
+                && ahead <= range_m
+                && side < dispatch::BLOCK_PASS_SIDE_M
+                && graph::dot(v, dir) > 1.0)
+                .then_some(ahead)
+        };
+        let blocks = self.roadblocks.iter().filter(|b| b.set_up).filter_map(|b| {
+            let line = graph::add(
+                b.site.pos,
+                graph::scale(b.site.dir, tools::BLOCK_ALONG_M),
+            );
+            check(line, b.site.dir).map(|d| (true, d))
+        });
+        let strips = self
+            .spikes
+            .iter()
+            .filter(|s| s.block.is_none())
+            .filter_map(|s| check(s.site.pos, s.site.dir).map(|d| (false, d)));
+        blocks
+            .chain(strips)
+            .min_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0)))
     }
 
     // -----------------------------------------------------------------------------------------

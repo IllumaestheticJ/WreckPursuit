@@ -657,11 +657,14 @@ impl PoliceSystem {
             let mut parts: Vec<(f32, String)> = Vec::new();
             let mut kinds: Vec<Callout> = Vec::new();
             for &(roadblock, tool, _) in tools.iter().filter(|t| t.2 == racer) {
+                // Owner 2026-10-31: the radio says what the block is ("three-car roadblock
+                // with spikes"), as the HUD's alert does.
+                let mut name = String::from("spikes");
                 let site = if roadblock {
-                    self.roadblocks
-                        .iter()
-                        .find(|r| r.id == tool)
-                        .map(|r| r.site)
+                    self.roadblocks.iter().find(|r| r.id == tool).map(|r| {
+                        name = r.radio_name();
+                        r.site
+                    })
                 } else {
                     self.spikes
                         .iter()
@@ -686,8 +689,7 @@ impl PoliceSystem {
                 let place = self.place_phrase(site.pos, rv);
                 let m = round_m(ahead_m);
                 let rel = if ahead { "ahead" } else { "behind" };
-                let what = if roadblock { "roadblock" } else { "spikes" };
-                parts.push((ahead_m, format!("{what} {m} metres {rel}, {place}")));
+                parts.push((ahead_m, format!("{name} {m} metres {rel}, {place}")));
                 kinds.push(if roadblock {
                     Callout::RoadblockAhead
                 } else {

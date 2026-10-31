@@ -94,19 +94,23 @@ by the `parked_*` world metrics (not per entity; they are not entities).
 `police_orders` deploy police tools at `t_s` (applied once, at tick `round(t_s/dt)`):
 - `roadblock(target: "car")` and `spikes(target: "car")` are captain orders
   (`Sim::captain_command`). wp_police checks them: the target must be in a pursuit and wanted
-  enough (spikes from L2, roadblock from L3), and a refusal shows up in `summary.json` →
+  enough (spikes from L4, roadblock from L1), and a refusal shows up in `summary.json` →
   `police_orders[].result`.
-- `roadblock_at(target, pos: (x, y), dir: (dx, dy))` and `spikes_at(…)` place the tool
-  directly at `pos`, across a road heading `dir` (`PoliceSystem::place_roadblock_at` /
-  `place_spikes_at`). This works on the flat world and needs no pursuit, which makes it the
-  form to use for deterministic tests. `target` is the racer the tool is aimed at.
+- `roadblock_at(target, pos: (x, y), dir: (dx, dy), level: n)` and `spikes_at(…)` place the
+  tool directly at `pos`, across a road heading `dir` (`PoliceSystem::place_roadblock_at` /
+  `place_spikes_at`); `level` (default 2) picks the roadblock's tier in `data/police/tools.toml`.
+  This works on the flat world and needs no pursuit, which makes it the form to use for
+  deterministic tests. `target` is the racer the tool is aimed at. A scenario with such an
+  order gets physical police cars on the flat world too (`sentinel_cruiser`, heavy units
+  `sentinel_bastion`).
 
-Roadblock barriers are **dynamic rigid bodies** (mass from `data/police/tools.toml`): a car
-that hits one shoves it and takes damage from the contact. They are removed when the
-roadblock expires. A spike strip punctures every wheel of any racer that crosses it, and each
-punctured tyre deflates linearly over `deflate_s` (5 s): smaller rolling radius and less
-grip (`HandlingEffects::tire_puncture`). The barrier body poses are part of the state hash
-(spec v4).
+Roadblocks are arcade-classic-style (2026-10-31): the block **is** its police cars, real
+vehicles parked at an angle across the road with the brakes held, gaps between them (spiked at
+higher heat). A car rams one aside like any other parked car, through the normal vehicle and
+damage code. Once the target is 15 m past the last car line the block breaks up: its cars
+rejoin the pursuit or drive off. A spike strip lies across the target's lanes from under its
+unit's car to the kerb and punctures every wheel that crosses it; each punctured tyre deflates
+linearly over `deflate_s` (smaller rolling radius and less grip, `HandlingEffects::tire_puncture`).
 
 `weather` (optional; omitted = no weather system, dry and clear, as before) turns on
 `wp_weather` (`Sim::set_weather`): `kind` is `Clear | Overcast | LightRain | HeavyRain | Fog`,
@@ -210,10 +214,10 @@ lane changes made for it), `traffic_turnarounds` (civilians that turned around o
 to the last junction because their lane was blocked), `traffic_siren_yields` (civilians that
 pulled over for a siren unit coming up behind them), `traffic_max_stop_s` (longest a civilian stood still outside a red / amber light, s), `traffic_max_queue` (longest queue of stopped civilians back from a stop line, followed back through junctions; sampled each second), `traffic_box_stops` (civilians that stood > 5 s inside a junction box), `traffic_jam_recycled` (unseen civilians recycled after standing still 30 s outside a red light) (jam diagnostics, owner row 85), `props`
 (parked cars and cones turned into bodies), `static_boxes`, `police_units_max` (most police
-units alive at once), `police_units_final`, `roadblock_barriers_max` (most solid roadblock barrier bodies at once,
-the barricade not counted), `spike_strips_max`, `barrier_displaced_max_m` (furthest any barrier body was pushed from
-where it spawned; barriers are fixed since 2026-10-28, so 0 means the block held), `barricades_broken`
-(roadblock barricades smashed through). The police tool metrics also work on the flat world. Parked cars (city or
+units alive at once), `police_units_final`, `roadblock_cars_max` (most physical cars standing in set-up roadblocks at once),
+`roadblock_heavy_max` (heavy units among them), `spike_strips_max`, `roadblock_car_moved_max_m`
+(furthest a roadblock car was shoved from its spot while in its block), `roadblocks_passed`
+(blocks their target got past). The police tool metrics also work on the flat world. Parked cars (city or
 `parked`, any world): `parked_dented` (parked cars hit hard enough to get a damage lattice),
 `parked_crush_max_m` (deepest structural crush of any of them at the end, as `crush_depth_m`),
 `parked_health_min` (lowest health of any dented one; 1 when none), `parked_glass_shattered`,

@@ -35,10 +35,7 @@ pub use physics::{
     PhysicsWorld, SAFETY_FLOOR_Z,
 };
 pub use police_link::{PoliceModel, POLICE_SLOT_RESERVE};
-pub use police_tools::{
-    BarrierView, ProbeFilter, SpikeStripView, ToolPart, BARRICADE_BREAK_MPS, BARRICADE_HIT_MASS_KG,
-    BARRICADE_PIECES,
-};
+pub use police_tools::{SpikeStripView, ToolMarker, ToolMarkerView};
 pub use systems::{SystemId, Systems};
 pub use traffic_link::TRAFFIC_SLOT_RESERVE;
 pub use weather_link::{WEATHER_CELL_M, WEATHER_GRID_MARGIN_M};
@@ -270,6 +267,9 @@ pub struct Sim {
     parked: parked::ParkedDamage,
     contact_filter: Option<ContactFilter>,
     police_car: Option<LoadedCar>,
+    /// Car model for heavy police units ([`Sim::set_police_heavy_car`]; `None` = the fleet's
+    /// heaviest model, else `police_car`).
+    police_heavy_car: Option<LoadedCar>,
     police_car_limits: Option<wp_police::pro::CarLimits>,
     /// Multi-model police ([`Sim::set_police_cars`]); empty = the single `police_car`.
     police_fleet: Vec<police_link::PoliceModel>,
@@ -286,13 +286,6 @@ pub struct Sim {
     record_contacts: bool,
     applied_contacts: Vec<(EntityId, Vec<wp_contracts::ContactImpulse>)>,
     debris: Vec<rapier3d::prelude::RigidBodyHandle>,
-    /// Roadblock barrier bodies (see `police_tools`).
-    tool_bodies: Vec<police_tools::ToolBody>,
-    /// Roadblock barricades smashed so far (`police_tools`).
-    barricades_broken: u32,
-    /// Barricade smashes this tick: `(vehicle slot, the hit's damage contact)`, merged into
-    /// the tick's contacts after the physics step.
-    barricade_hits: Vec<(usize, wp_contracts::ContactImpulse)>,
     city_colliders: CityColliders,
     /// Hilly cities: props still resting (not colliding with terrain), in creation order.
     resting_props: Vec<(
@@ -327,6 +320,7 @@ impl Sim {
             parked: parked::ParkedDamage::default(),
             contact_filter: None,
             police_car: None,
+            police_heavy_car: None,
             police_car_limits: None,
             police_fleet: Vec::new(),
             police_unit_models: std::collections::BTreeMap::new(),
@@ -336,9 +330,6 @@ impl Sim {
             record_contacts: false,
             applied_contacts: Vec::new(),
             debris: Vec::new(),
-            tool_bodies: Vec::new(),
-            barricades_broken: 0,
-            barricade_hits: Vec::new(),
             city_colliders: CityColliders::default(),
             resting_props: Vec::new(),
             resting_bodies: Default::default(),
@@ -751,7 +742,6 @@ impl Sim {
     /// starting heat (`PoliceSystem::for_world(cfg, self.world(), setup)`). Call after
     /// `set_world` (which rebuilds police) and before the first tick so replays match.
     pub fn set_police(&mut self, police: PoliceSystem) {
-        self.clear_police_tools();
         self.police = police;
     }
 
@@ -1510,8 +1500,6 @@ impl Sim {
         self.wake_resting_props();
         self.parked_side_grip(dt);
         self.update_ghosts();
-        self.break_barricades();
-        self.loosen_barriers();
         let parked = if sys.damage {
             self.parked_candidates()
         } else {
@@ -1525,11 +1513,6 @@ impl Sim {
             &infos,
         );
         out.extend(std::mem::take(&mut tick_contacts.events));
-        for (slot, c) in std::mem::take(&mut self.barricade_hits) {
-            if let Some(v) = tick_contacts.per_vehicle.get_mut(slot) {
-                v.push(c);
-            }
-        }
         // Battering-ram mods: effective mass (body impulses, before the vehicles read their
         // bodies) and damage dealt / taken in car-on-car hits. On the solver's impulses, before
         // any damage scaling below.
@@ -1637,7 +1620,6 @@ impl Sim {
             self.police
                 .step(world_q, &racers, &tick_events, dt, &mut out);
             self.reconcile_police_units();
-            self.sync_police_tools();
         }
         self.last_tick_events = out.len();
         self.events.extend(out);
@@ -1752,13 +1734,10 @@ impl Sim {
         h.write_f32_q(self.world.clock.time.seconds_since_midnight, 1e3);
         h.write_u64(self.world.state_hash());
         h.write_u64(self.police.state_hash());
-        h.write_u32(self.tool_bodies.len() as u32);
-        for t in &self.tool_bodies {
-            h.write_u32(t.tool.0);
-            for x in self.physics.bodies[t.body].translation().to_array() {
-                h.write_f32_q(x, 1e3);
-            }
-        }
+        // Retired roadblock barrier bodies (roadblocks-v2: a block is its police cars, hashed
+        // with the vehicles): always none. Kept so the hash layout of every other run is
+        // unchanged.
+        h.write_u32(0);
         self.hash_weather(&mut h);
         // Dented parked cars (only once one exists, so runs without one keep their hashes).
         if !self.parked.wrecks.is_empty() {
