@@ -2435,6 +2435,7 @@ async function main(): Promise<void> {
         camera: cameraLabel(rig.mode) + (rig.lookBack && rig.mode !== "orbit" && rig.mode !== "cinematic" ? " (look back)" : ""),
         units: gameSettings?.units,
         nitrous: focusView ? sim.nitrous(app.focus) : null,
+        drafting: focusView ? sim.drafting(app.focus) : 0,
       });
       updatePanels(replay);
     }

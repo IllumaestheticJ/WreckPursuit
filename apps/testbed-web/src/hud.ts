@@ -44,6 +44,18 @@ export function nitrousGauge(n: Float32Array | null): string {
   return `<div class="nitrous${burning ? " burning" : ""}" title="nitrous: hold N (pad B) with the throttle down">N₂O ${bar(fill, colour)} ${(fill * 100).toFixed(0)}%</div>`;
 }
 
+/** Drag reduction (0..0.35, `sim.drafting`) above which the SLIPSTREAM tag lights: about
+ * 15 m behind a leader, where the tow starts to be worth having. */
+export const SLIPSTREAM_ON = 0.12;
+
+/** SLIPSTREAM tag beside the gear: dim in clear air, lit while drafting, with the drag cut.
+ * Empty when the readout is missing (no focused car). */
+export function slipstreamTag(drafting: number | null | undefined): string {
+  if (drafting == null || !Number.isFinite(drafting)) return "";
+  const on = drafting >= SLIPSTREAM_ON;
+  return `<span class="slip${on ? " on" : ""}" title="slipstream: less air drag in a car's wake (every car drafts)">SLIPSTREAM${on ? ` −${(drafting * 100).toFixed(0)}%` : ""}</span>`;
+}
+
 /** Fields the event feed leaves out: who (shown separately), positions and raw payloads. */
 const FEED_SKIP = new Set(["vehicle", "pos", "heading", "payload"]);
 
@@ -109,6 +121,8 @@ export interface HudFrame {
   units?: "kmh" | "mph";
   /** Nitrous bottle of the focused car (`sim.nitrous`: fill, burning, strength, refill). */
   nitrous?: Float32Array | null;
+  /** Slipstream of the focused car (`sim.drafting`: drag reduction 0..0.35). */
+  drafting?: number | null;
 }
 
 export class Hud {
@@ -198,7 +212,7 @@ export class Hud {
     const hh = Math.floor(f.hours);
     const mm = Math.floor((f.hours - hh) * 60);
     this.main.innerHTML =
-      `<div class="speed">${Math.abs(speed).toFixed(0)}<small> ${mph ? "mph" : "km/h"}</small> <span class="gear">${gearTxt}</span></div>` +
+      `<div class="speed">${Math.abs(speed).toFixed(0)}<small> ${mph ? "mph" : "km/h"}</small> <span class="gear">${gearTxt}</span>${slipstreamTag(f.drafting)}</div>` +
       `<div>rpm ${rpm.toFixed(0)} ${bar(rpm / limit, rpm > redline ? "#ff4040" : "#40c0ff")}</div>` +
       nitrousGauge(f.nitrous ?? null) +
       `<div>${badge(true, f.mode)}${f.replay ? badge(true, "REPLAY") : ""}${f.recording ? '<span class="badge rec">● REC</span>' : ""}</div>` +

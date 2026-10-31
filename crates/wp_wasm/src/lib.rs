@@ -2245,6 +2245,17 @@ pub fn nitrous(entity: u32) -> Result<Vec<f32>, JsValue> {
     })
 }
 
+/// Slipstream the car is in: its aerodynamic drag reduction, `0` (clear air) to `0.35` (right
+/// on a leader's bumper; `wp_sim::DRAFT_PARAMS`). The sim applies drafting to every car every
+/// tick (`wp_sim::Sim::drafting`); this is only the HUD readout.
+#[wasm_bindgen]
+pub fn drafting(entity: u32) -> Result<f32, JsValue> {
+    with(|s| {
+        s.drafting(EntityId(entity))
+            .ok_or_else(|| format!("unknown entity {entity}"))
+    })
+}
+
 /// Traffic / police intent arrows, 8 floats each: `[entity, kind, from xyz, to xyz]`
 /// (kind 0 = traffic route, 1 = police target). **Placeholder hook**: empty until the
 /// lead exposes intents (request TB-5, deferred).
