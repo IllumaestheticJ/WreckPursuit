@@ -125,18 +125,18 @@ export class CarLook {
     const host = this.host;
     host.root.add(this.root);
     const t = this.tweaks;
-    if (t.wheelWidth || t.dragRadials) {
+    // Wider tyres are not a tweak: VehicleView draws them as a stance (stance.ts) on top.
+    if (t.dragRadials) {
       host.info.wheels.forEach((w, i) => {
         const rear = w.position_m[1] < 0;
-        const sx = t.wheelWidth ?? (t.dragRadials ? (rear ? 1.12 : 0.8) : 1);
-        const sr = t.dragRadials && rear ? 1.05 : 1;
+        const sx = rear ? 1.12 : 0.8;
+        const sr = rear ? 1.05 : 1;
         for (const m of host.panels.wheelParts[i]) {
           const def = host.panels.wheelDef(m);
           if (def?.kind === "tire") m.scale.set(sx, sr, sr);
           else if (def?.kind === "rim") m.scale.x = sx;
         }
       });
-      for (const o of this.wheelPieces) o.scale.x = t.wheelWidth ?? 1;
     }
     host.setLampStyle(t.lamps);
     host.panels.onStyled = () => this.applyMaterials();

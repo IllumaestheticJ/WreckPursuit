@@ -24,8 +24,6 @@ export interface Tweaks {
   caliper?: number;
   /** Tyre rubber: 0 = matte street, 1 = glossy slick. */
   tyreGloss?: number;
-  /** Tyre and rim width scale (wide tyres). */
-  wheelWidth?: number;
   /** Drag radials: tall rear tyres, skinny fronts. */
   dragRadials?: boolean;
   /** Interior stripped: 1 = bare trim, 2 = interior removed (one race seat). */
