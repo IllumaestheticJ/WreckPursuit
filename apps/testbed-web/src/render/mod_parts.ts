@@ -20,6 +20,7 @@
 import * as THREE from "three";
 import type { CarMeshJson, MeshPartJson, PanelBody, PartMaterial } from "./panels";
 import type { WheelInfo } from "../wasm/sim";
+import { widthGrade } from "./cosmetics/stance";
 
 /** `wp_economy::PartVisual`. */
 export interface PartVisual {
@@ -1011,7 +1012,12 @@ export function fitBuild(panels: PanelBody, build: BuildVisuals, wheels: WheelIn
     const wi = wheels[i];
     if (!wi) return;
     const s = Math.sign(wi.position_m[0]) || 1;
-    const scale = wv.base_width_m > 0 ? wv.width_m / wv.base_width_m : 1;
+    // Wider tyres (whole width steps) are drawn by VehicleView's stance (cosmetics/stance.ts),
+    // which widens the whole wheel group: rims and tread are built at the stock width for it.
+    // Any other width change scales the tyre as before.
+    const stance = widthGrade(wv.base_width_m, wv.width_m) > 0;
+    const width = stance ? wv.base_width_m : wv.width_m;
+    const scale = !stance && wv.base_width_m > 0 ? wv.width_m / wv.base_width_m : 1;
     for (const m of panels.wheelParts[i]) if (m.name.endsWith("_tire")) m.scale.x = scale;
     const rimR = (stockRimRadius(mesh, i) || wi.radius_m * 0.62) * (wv.radius_m / (wv.base_radius_m || wv.radius_m));
     const addWheel = (geo: Geo, material: PartMaterial, name: string, hub = false) => {
@@ -1021,10 +1027,10 @@ export function fitBuild(panels: PanelBody, build: BuildVisuals, wheels: WheelIn
       // The stock rim goes; the new design takes its place.
       // (`_rim`, and format 4's `_rim_dark` / `_rim_bright` pieces.)
       for (let k = panels.wheelParts[i].length - 1; k >= 0; k--) if (/_rim($|_)/.test(panels.wheelParts[i][k].name)) panels.wheelParts[i].splice(k, 1)[0].removeFromParent();
-      rimGeo(rimStyle, rimR, s, wv.width_m).forEach((r, k) => addWheel(r.geo, r.material, `mod_rim_${rimStyle}_${i}_${k}`));
+      rimGeo(rimStyle, rimR, s, width).forEach((r, k) => addWheel(r.geo, r.material, `mod_rim_${rimStyle}_${i}_${k}`));
       drawn.add("Rims");
     }
-    const tread = treadGeo(wv.tire_id === wv.base_tire_id ? "" : wv.tire_id, wv.radius_m, wv.width_m, s);
+    const tread = treadGeo(wv.tire_id === wv.base_tire_id ? "" : wv.tire_id, wv.radius_m, width, s);
     tread.forEach((t, k) => addWheel(t.geo, t.material, `mod_tread_${wv.tire_id}_${i}_${k}`));
     if (tread.length) drawn.add("Tires");
     if (brake) {

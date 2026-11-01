@@ -232,6 +232,8 @@ export class WorkshopMode {
     if (!this.active) return;
     const view = this.deps.playerView();
     if (view && view !== this.placedFor && view.panels.ready) this.place(view);
+    // Wide-tyre arch lips on a fender that is off the car are not drawn either.
+    if (view) view.removedRegions = this.removedRegions;
     // The cosmetic look is built after the panels: give it the removed panels when it arrives.
     if (view && view === this.placedFor && view.look && view.look !== this.lookFor) {
       this.lookFor = view.look;

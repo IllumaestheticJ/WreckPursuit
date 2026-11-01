@@ -28,7 +28,7 @@ and fall off with the panel they are on.
 | `bull_bar` | `style`: `tube`, `guard`, `ram`, `push` | body.ts |
 | `spotlight`, `steel_bumper` (`end`), `skid_plate`, `rad_guard`, `armor_plates`, `door_bars`, `antenna` (`style`: `whip`, `stub`), `plates` | | body.ts |
 | `rims` | `style`: `steel`, `black_steel`, `mesh`, `gold_mesh`, `forged_5spoke`, `turbofan`, `deep_dish`, `split_spoke` | wheels.ts |
-| `tyres` | `style`: `sport`, `slick`, `drag`, `all_terrain`, `wide` | wheels.ts |
+| `tyres` | `style`: `sport`, `slick`, `drag`, `all_terrain`, `wide` (`level`: width grade) | wheels.ts; `wide` is the stance in stance.ts (wider tread, wheel pushed out, deep dish, arch lips) |
 | `sidewall` | `style`: `whitewall`, `letters`, `red_line` | wheels.ts |
 | `hub_guards`, `brakes` (`level`), `springs` (`colour`), `dampers`, `sway_bar` (`axle`) | | wheels.ts |
 | `seats`, `interior` (`colour`), `strip` (`level`), `cage` (`level`), `shifter` (`style`), `hydro_handbrake`, `dash_box`, `nitrous` (`bottles`), `fuel_cell`, `window_net` | | cabin.ts |
