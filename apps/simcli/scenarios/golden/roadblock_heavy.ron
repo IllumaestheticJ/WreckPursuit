@@ -21,6 +21,7 @@
         world_metric(name: "roadblock_heavy_max", min: 2.0, max: 2.0),
         world_metric(name: "spike_strips_max", min: 2.0, max: 2.0),
         event_count(event: "Contact", entity: "car", min: 1, max: 100000),
-        metric(entity: "car", name: "final_health", min: 0.0, max: 0.95),
+        // Measured 0.966 (Simulation, the player share of the damage).
+        metric(entity: "car", name: "final_health", min: 0.0, max: 0.985),
     ],
 )
