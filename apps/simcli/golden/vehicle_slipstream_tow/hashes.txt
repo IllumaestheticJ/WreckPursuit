@@ -1,0 +1,5 @@
+# simcli hashes scenario=vehicle_slipstream_tow systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
+240 2063dc43f49df67b
+480 7db30b1882293cb1
+720 835e1b9156f26c0f
+960 c487d94d14ca9153

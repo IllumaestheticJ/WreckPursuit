@@ -22,7 +22,8 @@
 //!   `WorldQuery::weather_at` each step or set by hand: water depth, road
 //!   temperature, painted line) for wet grip, ice and aquaplaning — the weather hook.
 //! - **Brakes** with bias and ABS, **steering** with speed sensitivity, Ackermann, toe,
-//!   countersteer help and FWD torque steer, **assists** (filters, TCS, ESC), **aero**,
+//!   countersteer help and FWD torque steer, **assists** (filters, TCS, ESC), **aero**
+//!   (with slipstream from [`draft`], applied by `wp_sim` to every car),
 //!   **FFB**, and full [`wp_contracts::HandlingEffects`] damage feedback.
 //!
 //! ## Per-tick integration (what `wp_sim` does)
@@ -46,6 +47,7 @@ pub mod brake_dive;
 pub mod brakes;
 pub mod car_lab;
 pub mod diff;
+pub mod draft;
 pub mod drift;
 pub mod drift_lab;
 pub mod drift_lab_w;

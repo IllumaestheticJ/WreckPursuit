@@ -371,6 +371,17 @@ faster refill) by `wp_sim` the further they trail their target. Tuning: `data/tu
 details in `docs/integration/nitrous.md`. Tests: `nitrous.rs` unit tests and `tests/nitrous.rs`
 (a rolling car gains about 4 m/s more in 6 s of burn; the far-behind AI bottle 1.5 m/s on top).
 
+## Slipstream (`draft.rs`, owner 2026-10-31)
+
+Pure wake model: `draft::drag_scales_into(&[DraftBody], &DraftParams, &mut DraftScratch, &mut
+Vec<f32>)` gives every car a drag multiplier (35 % less drag bumper to bumper, nothing 25 m
+behind; leader ≥ 10 m/s; strongest leader wins). `wp_sim` runs it once per tick over every
+vehicle and calls `Vehicle::set_draft_drag_scale`; the aero drag is multiplied by it on top of
+`HandlingEffects::drag_scale`. Derived each tick, so not in snapshots. Sorted-x broad phase,
+identical to the all-pairs test. Cost: `cargo run --release -p wp_vehicle --example
+draft_bench` — 0.016 ms per 60 Hz frame for a 24-car pack, 0.065 ms for 64 (worst case, every
+pair in reach). Details: `docs/integration/drafting.md`.
+
 ## Snapshots and client prediction
 
 `Vehicle::snapshot()` / `restore()` capture the **full** dynamic state as an opaque ~0.9 kB

@@ -2220,6 +2220,12 @@ impl Session {
         self.vehicle(id).map(|v| v.vehicle.ffb())
     }
 
+    /// Slipstream a vehicle is in: aerodynamic drag reduction 0 (clear air) .. 0.35
+    /// (`wp_sim::Sim::drafting`), for the HUD.
+    pub fn drafting(&self, id: EntityId) -> Option<f32> {
+        self.sim.drafting(id)
+    }
+
     /// Input a vehicle is driving with (live, scripted, replayed or AI).
     pub fn input(&self, id: EntityId) -> VehicleInput {
         self.vehicle(id).map(|v| v.input).unwrap_or_default()

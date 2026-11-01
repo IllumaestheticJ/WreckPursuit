@@ -1,0 +1,42 @@
+// Slipstream (drafting, wp_sim::draft_link, owner approval 2026-10-31). Three identical
+// Kestrel TS at 40 m/s heading +Y on the flat world, full throttle for 4 s:
+//   "towed"   5 m bumper-to-bumper behind "leader" (same lane) — in its wake;
+//   "control" two lanes over (x = 20 m), in clear air — the same car alone.
+// The towed car meets ~28 % less drag and ends ~0.5 m/s faster than the control (measured
+// 2026-10-31: towed 45.58, leader and control 45.07 m/s; the gap closes 5.0 -> 4.0 m, no
+// contact); the leader and the control get nothing and end at the same speed. Physics, so the same in Arcade and Simulation.
+(
+    name: "vehicle_slipstream_tow",
+    mode: Arcade,
+    seed: 31,
+    duration_s: 4.0,
+    entities: [
+        (
+            id: "towed",
+            car: "kestrel_ts",
+            pos: (0.0, 0.0, 0.0),
+            speed_mps: 40.0,
+            inputs: [(t_s: 0.0, input: (throttle: 1.0))],
+        ),
+        (
+            id: "leader",
+            car: "kestrel_ts",
+            pos: (0.0, 9.6, 0.0),
+            speed_mps: 40.0,
+            inputs: [(t_s: 0.0, input: (throttle: 1.0))],
+        ),
+        (
+            id: "control",
+            car: "kestrel_ts",
+            pos: (20.0, 0.0, 0.0),
+            speed_mps: 40.0,
+            inputs: [(t_s: 0.0, input: (throttle: 1.0))],
+        ),
+    ],
+    expect: [
+        speed_at(entity: "control", t_s: 4.0, min: 44.6, max: 45.3),
+        speed_at(entity: "leader", t_s: 4.0, min: 44.6, max: 45.3),
+        speed_at(entity: "towed", t_s: 4.0, min: 45.35, max: 46.3),
+        event_count(event: "Contact", entity: "towed", min: 0, max: 0),
+    ],
+)

@@ -12,6 +12,7 @@
 
 mod contacts;
 mod crash_mass;
+mod draft_link;
 mod nitrous_link;
 mod parked;
 mod parked_mass;
@@ -25,6 +26,7 @@ mod traffic_link;
 mod weather_link;
 
 pub use contacts::CONTACT_EVENT_MIN_IMPULSE_NS;
+pub use draft_link::DRAFT_PARAMS;
 pub use parked::{
     prop_of_entity, ChassisMap, ParkedStats, ParkedWreck, MAX_PARKED_WRECKS,
     PARKED_CAR_HALF_EXTENTS, PARKED_CAR_MASS_KG, PARKED_ENTITY_BASE, PROMOTE_CLOSING_MPS,
@@ -258,6 +260,8 @@ pub struct Sim {
     physics: PhysicsWorld,
     police: PoliceSystem,
     vehicles: Vec<SimVehicle>,
+    /// Slipstream scratch buffers (`draft_link`; derived each tick, not state).
+    draft: draft_link::DraftScratch,
     events: Vec<SimEvent>,
     systems: Systems,
     last_tick_events: usize,
@@ -312,6 +316,7 @@ impl Sim {
             tick: 0,
             next_entity: 1,
             vehicles: Vec::new(),
+            draft: draft_link::DraftScratch::default(),
             events: Vec::new(),
             systems: Systems::ALL,
             last_tick_events: 0,
@@ -1417,6 +1422,9 @@ impl Sim {
         self.update_light_modes();
         if sys.vehicle {
             self.update_ai_nitrous();
+            // Slipstream for every car (one physics, both modes): drag multipliers from this
+            // tick's positions, before any car steps.
+            self.apply_slipstream();
             // Weather reaches every wheel through `weather_at` (the plain world without weather).
             let wx = self.weather.as_ref().map(|w| w.query(&self.world));
             let world_q: &dyn WorldQuery = match &wx {
@@ -1679,6 +1687,17 @@ impl Sim {
     /// Vehicle slots in ascending entity order.
     pub fn vehicles(&self) -> &[SimVehicle] {
         &self.vehicles
+    }
+
+    /// How much slipstream `id` is in: its aerodynamic drag reduction from the last tick's
+    /// draft pass, `0` (clear air) to [`DRAFT_PARAMS`]`.max_reduction` (0.35, right on a
+    /// leader's bumper). `None` for an unknown entity. For the HUD; physics reads the
+    /// vehicle's own multiplier.
+    pub fn drafting(&self, id: EntityId) -> Option<f32> {
+        self.vehicles
+            .iter()
+            .find(|v| v.id == id)
+            .map(|v| 1.0 - v.vehicle.draft_drag_scale())
     }
 
     /// State of every vehicle, ascending by entity id. Health and mode come from damage.
