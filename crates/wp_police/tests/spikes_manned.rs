@@ -26,6 +26,15 @@ struct Seen {
 /// Assert every strip is manned; return (tool spawns, in sight, seen within the audit window).
 fn check_step(p: &PoliceSystem, name: &str) -> (usize, usize, usize) {
     for s in p.spike_strips() {
+        // A roadblock's gap strip is manned by its block's cars (2026-10-31).
+        if let Some(b) = s.block {
+            assert!(
+                p.roadblocks().iter().any(|r| r.id == b && r.set_up),
+                "{name}: gap strip {:?} without its roadblock",
+                s.id
+            );
+            continue;
+        }
         let uid = s
             .unit
             .unwrap_or_else(|| panic!("{name}: strip {:?} without its unit", s.id));

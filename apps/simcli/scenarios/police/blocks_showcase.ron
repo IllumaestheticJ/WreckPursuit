@@ -1,9 +1,11 @@
-// Owner 2026-10-28: roadblocks and spike strips completely block the road. Two roadblocks and
-// two spike strips on Port Vesper's wide roads, placed directly (`roadblock_at` / `spikes_at`:
-// the police's own layout, no dispatch AI): a downtown street (buildings 26 m apart) and Loop 9
-// (barrier to barrier), each sealed but for one barricaded gap at the right edge; strips across
-// a downtown street and Loop 9's south straight, each ending under its unit's car. The car is
-// parked out of the way. Used by the e2e screenshots (`e2e/police_blocks_shots.mjs`).
+// Arcade-classic-style roadblocks and a spike strip (roadblocks-v2, owner 2026-10-31) on Port
+// Vesper, placed directly (`roadblock_at` / `spikes_at`: the police's own layout, no dispatch
+// AI) for the e2e screenshots (`e2e/police_blocks_shots.mjs`): a wanted-level-1 block (two
+// cruisers, one wide gap) on a downtown street, a level-3 block (three cars, a spiked gap) on
+// Loop 9, a level-5 block (heavy SUVs, every gap spiked, a second line) on a downtown street,
+// and a spike strip with its unit beside it on Loop 9's south straight. Every block's cars are
+// real police vehicles, parked with the brakes held. The car is parked out of the way.
+// Re-aimed 2026-10-31: replaces the barrier / barricade showcase.
 (
     name: "police_blocks_showcase",
     seed: 28,
@@ -13,9 +15,9 @@
     traffic_density: 0.0,
     assists: ai,
     police_orders: [
-        (t_s: 0.0, order: roadblock_at(target: "car", pos: (50.0, -250.0), dir: (1.0, 0.0))),
-        (t_s: 0.0, order: roadblock_at(target: "car", pos: (-292.2, 1366.6), dir: (-0.999, -0.045))),
-        (t_s: 0.0, order: spikes_at(target: "car", pos: (200.0, -300.0), dir: (0.0, -1.0))),
+        (t_s: 0.0, order: roadblock_at(target: "car", pos: (50.0, -250.0), dir: (1.0, 0.0), level: 1)),
+        (t_s: 0.0, order: roadblock_at(target: "car", pos: (-292.2, 1366.6), dir: (-0.999, -0.045), level: 3)),
+        (t_s: 0.0, order: roadblock_at(target: "car", pos: (200.0, -300.0), dir: (0.0, -1.0), level: 5)),
         (t_s: 0.0, order: spikes_at(target: "car", pos: (805.0, -1041.8), dir: (0.999, 0.05))),
     ],
     entities: [
@@ -23,9 +25,10 @@
     ],
     duration_s: 3.0,
     expect: [
-        world_metric(name: "roadblock_barriers_max", min: 8.0, max: 60.0),
-        world_metric(name: "spike_strips_max", min: 2.0, max: 6.0),
-        world_metric(name: "barricades_broken", min: 0.0, max: 0.0),
-        world_metric(name: "barrier_displaced_max_m", min: 0.0, max: 0.01),
+        world_metric(name: "roadblock_cars_max", min: 6.0, max: 20.0),
+        world_metric(name: "roadblock_heavy_max", min: 2.0, max: 6.0),
+        world_metric(name: "spike_strips_max", min: 2.0, max: 8.0),
+        // Parked with the brakes held: nobody touches them.
+        world_metric(name: "roadblock_car_moved_max_m", min: 0.0, max: 0.3),
     ],
 )

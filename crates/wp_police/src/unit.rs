@@ -462,6 +462,10 @@ pub struct Unit {
     /// station (agency livery); the AI never reads it.
     #[serde(default)]
     pub spawn_pos: [f32; 2],
+    /// A heavy unit (owner 2026-10-31: police SUV / armoured types in high-heat roadblocks).
+    /// The host gives it its heaviest police car model; the AI drives it like any other.
+    #[serde(default)]
+    pub heavy: bool,
 }
 
 /// A pursuer's road route to the racer (see `PoliceSystem::chase_route`).
@@ -532,6 +536,7 @@ impl Unit {
             limits: None,
             pro: None,
             spawn_pos: pos,
+            heavy: false,
         }
     }
 

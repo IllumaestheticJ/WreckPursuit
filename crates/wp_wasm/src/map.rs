@@ -595,16 +595,18 @@ fn police_part(p: &PoliceSystem, player: EntityId, seen: &Seen, out: &mut Vec<f3
         n_units += 1;
     }
     let mut n_tools = 0;
-    for rb in p.roadblocks() {
+    // Owner 2026-10-31: a roadblock is on the map once it is set up (its cars stand: the radio
+    // has reported it) and, in a career, once the player is close or the scanner decrypts it.
+    for rb in p.roadblocks().iter().filter(|r| r.set_up) {
         let s = &rb.site;
-        // Across the road: perpendicular to the road direction; as wide as the barriers reach.
+        // Across the road: perpendicular to the road direction; as wide as its cars reach.
         let dir = [-s.dir[1], s.dir[0]];
         let half = rb
-            .barriers
+            .cars
             .iter()
             .map(|c| {
                 let d = [c.pos[0] - s.pos[0], c.pos[1] - s.pos[1]];
-                (d[0] * dir[0] + d[1] * dir[1]).abs() + c.half_extents_m[0]
+                (d[0] * dir[0] + d[1] * dir[1]).abs() + wp_police::tools::UNIT_HALF_L_M
             })
             .fold(4.0f32, f32::max);
         let Some(intel) = seen.tool(s.pos) else {

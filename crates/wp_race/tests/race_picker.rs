@@ -22,6 +22,15 @@ use wp_sim::{Sim, VehicleKind};
 fn assert_strips_manned(sim: &Sim, id: &str) {
     let p = sim.police();
     for s in p.spike_strips() {
+        // A roadblock's gap strip (roadblocks-v2) is manned by its block's cars.
+        if let Some(b) = s.block {
+            assert!(
+                p.roadblocks().iter().any(|r| r.id == b && r.set_up),
+                "{id}: gap strip {:?} without its roadblock",
+                s.id
+            );
+            continue;
+        }
         let u = s
             .unit
             .and_then(|uid| p.units().iter().find(|u| u.id == uid))

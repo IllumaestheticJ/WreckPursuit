@@ -180,6 +180,8 @@ pub fn scenario_states(sim: &Sim, ids: &[EntityId]) -> Vec<(EntityId, wp_contrac
 
 /// Car model for AI police units in city scenarios.
 pub const POLICE_CAR: &str = "sentinel_cruiser";
+/// Car model for heavy police units (high-heat roadblocks, owner 2026-10-31): the police SUV.
+pub const POLICE_HEAVY_CAR: &str = "sentinel_bastion";
 /// Car model for physical (near-player) traffic in city scenarios.
 pub const TRAFFIC_CAR: &str = "debug_sedan";
 /// Car model whose lattice dents parked cars (`Sim::set_parked_car`); the same model as
@@ -425,6 +427,8 @@ pub fn build_sim(
             if sc.police_cars {
                 sim.set_police(police_for_city(sc, sim.world(), &ids));
                 sim.set_police_car(load_car(data, POLICE_CAR)?);
+                // Heavy roadblock units (owner 2026-10-31): the police SUV.
+                sim.set_police_heavy_car(load_car(data, POLICE_HEAVY_CAR)?);
                 if sc.uses_police_fleet() {
                     sim.set_police_cars(car_mix_police(data)?);
                     sim.set_police_fleet_floor(sc.police_unit_level.unwrap_or(0));
@@ -445,7 +449,19 @@ pub fn build_sim(
             }
             true
         }
-        None => false,
+        None => {
+            // The flat world has no patrols, but a tool placed directly (`roadblock_at`,
+            // `spikes_at`) is its police cars: give them bodies.
+            if sc
+                .police_orders
+                .iter()
+                .any(|o| crate::scenario::places_tool_directly(&o.order))
+            {
+                sim.set_police_car(load_car(data, POLICE_CAR)?);
+                sim.set_police_heavy_car(load_car(data, POLICE_HEAVY_CAR)?);
+            }
+            false
+        }
     };
     // Parked cars dent with the traffic car's lattice (the testbed draws them with its mesh).
     for p in &sc.parked {
@@ -826,15 +842,18 @@ pub struct WorldSummary {
     pub police_units_max: u32,
     /// Police units alive at the end.
     pub police_units_final: u32,
-    /// Most physical roadblock barriers at once.
-    pub roadblock_barriers_max: u32,
-    /// Most spike strips on the road at once.
+    /// Most roadblock cars standing in set-up roadblocks at once (roadblocks-v2: a block is
+    /// its police cars).
+    pub roadblock_cars_max: u32,
+    /// Most heavy units among them at once.
+    pub roadblock_heavy_max: u32,
+    /// Most spike strips on the road at once (roadblock gap strips included).
     pub spike_strips_max: u32,
-    /// Farthest any roadblock barrier was pushed from where it was placed, m (barriers are
-    /// fixed since 2026-10-28: 0 shows the block held).
-    pub barrier_displaced_max_m: f32,
-    /// Roadblock barricades smashed (`Sim::barricades_broken`).
-    pub barricades_broken: u32,
+    /// Farthest any roadblock car was shoved from where it parked while still in its block, m
+    /// (a car rammed aside).
+    pub roadblock_car_moved_max_m: f32,
+    /// Roadblocks their racer got past (the block broke up: `PoliceStats::roadblocks_passed`).
+    pub roadblocks_passed: u32,
     /// Parked cars hit hard enough to dent (promoted to a damage lattice).
     pub parked_dented: u32,
     /// Deepest dent on any parked car at the end (`DamageModel::structural_crush_m`, as the
@@ -872,10 +891,11 @@ impl WorldSummary {
             "static_boxes" => self.static_boxes as f32,
             "police_units_max" => self.police_units_max as f32,
             "police_units_final" => self.police_units_final as f32,
-            "roadblock_barriers_max" => self.roadblock_barriers_max as f32,
+            "roadblock_cars_max" => self.roadblock_cars_max as f32,
+            "roadblock_heavy_max" => self.roadblock_heavy_max as f32,
             "spike_strips_max" => self.spike_strips_max as f32,
-            "barrier_displaced_max_m" => self.barrier_displaced_max_m,
-            "barricades_broken" => self.barricades_broken as f32,
+            "roadblock_car_moved_max_m" => self.roadblock_car_moved_max_m,
+            "roadblocks_passed" => self.roadblocks_passed as f32,
             "parked_dented" => self.parked_dented as f32,
             "parked_crush_max_m" => self.parked_crush_max_m,
             "parked_health_min" => self.parked_health_min,
@@ -887,7 +907,7 @@ impl WorldSummary {
     }
 
     /// Every metric name [`WorldSummary::metric`] accepts.
-    pub const METRICS: [&'static str; 28] = [
+    pub const METRICS: [&'static str; 29] = [
         "traffic_agents_final",
         "traffic_agents_min",
         "traffic_moving_frac_final",
@@ -906,10 +926,11 @@ impl WorldSummary {
         "static_boxes",
         "police_units_max",
         "police_units_final",
-        "roadblock_barriers_max",
+        "roadblock_cars_max",
+        "roadblock_heavy_max",
         "spike_strips_max",
-        "barrier_displaced_max_m",
-        "barricades_broken",
+        "roadblock_car_moved_max_m",
+        "roadblocks_passed",
         "parked_dented",
         "parked_crush_max_m",
         "parked_health_min",
@@ -927,11 +948,12 @@ struct WorldTracker {
     agents_min: Option<u32>,
     moving_min: Option<f32>,
     police_max: u32,
-    barriers_max: u32,
+    block_cars_max: u32,
+    block_heavy_max: u32,
     spikes_max: u32,
-    /// First-seen position of every barrier: `(tool, index within tool) -> pos`.
-    barrier_start: BTreeMap<(u32, u32), [f32; 3]>,
-    barrier_displaced_max: f32,
+    /// First-seen position of every roadblock car (by police unit id).
+    block_car_start: BTreeMap<u32, [f32; 2]>,
+    block_car_moved_max: f32,
     /// Where each parked car stood at the first tick (filled lazily, parked props only).
     parked_start: Vec<[f32; 3]>,
     parked_moved_max: f32,
@@ -947,20 +969,27 @@ fn moving_frac(world: &wp_world::World) -> f32 {
 
 impl WorldTracker {
     fn police_tools(&mut self, sim: &Sim) {
-        let barriers: Vec<_> = sim
-            .roadblock_barriers()
-            .into_iter()
-            .filter(|b| b.part == wp_sim::ToolPart::Barrier)
-            .collect();
-        self.barriers_max = self.barriers_max.max(barriers.len() as u32);
-        self.spikes_max = self.spikes_max.max(sim.spike_strips().len() as u32);
-        let mut index: BTreeMap<u32, u32> = BTreeMap::new();
-        for b in &barriers {
-            let i = index.entry(b.tool).or_insert(0);
-            let start = *self.barrier_start.entry((b.tool, *i)).or_insert(b.pos);
-            *i += 1;
-            self.barrier_displaced_max = self.barrier_displaced_max.max(dist(start, b.pos));
+        let police = sim.police();
+        let (mut cars, mut heavy) = (0u32, 0u32);
+        for rb in police.roadblocks().iter().filter(|r| r.set_up) {
+            for uid in &rb.units {
+                let Some(u) = police.units().iter().find(|u| u.id == *uid) else {
+                    continue;
+                };
+                if u.entity.is_none() {
+                    continue;
+                }
+                cars += 1;
+                heavy += u.heavy as u32;
+                let start = *self.block_car_start.entry(uid.0).or_insert(u.body.pos);
+                let d = ((u.body.pos[0] - start[0]).powi(2) + (u.body.pos[1] - start[1]).powi(2))
+                    .sqrt();
+                self.block_car_moved_max = self.block_car_moved_max.max(d);
+            }
         }
+        self.block_cars_max = self.block_cars_max.max(cars);
+        self.block_heavy_max = self.block_heavy_max.max(heavy);
+        self.spikes_max = self.spikes_max.max(sim.spike_strips().len() as u32);
     }
 
     /// Farthest shove of any parked car: checks only the props that are dynamic now (the
@@ -1021,10 +1050,11 @@ impl WorldTracker {
             static_boxes: sim.static_box_count() as u32,
             police_units_max: self.police_max,
             police_units_final: sim.police().units().len() as u32,
-            roadblock_barriers_max: self.barriers_max,
+            roadblock_cars_max: self.block_cars_max,
+            roadblock_heavy_max: self.block_heavy_max,
             spike_strips_max: self.spikes_max,
-            barrier_displaced_max_m: self.barrier_displaced_max,
-            barricades_broken: sim.barricades_broken(),
+            roadblock_car_moved_max_m: self.block_car_moved_max,
+            roadblocks_passed: sim.police().stats().roadblocks_passed,
             parked_dented: sim.parked_wrecks().len() as u32,
             parked_crush_max_m: sim
                 .parked_wrecks()
@@ -1071,8 +1101,11 @@ pub fn apply_police_orders(
                     road: None,
                 })
             }
-            OrderKind::RoadblockAt { pos, dir, .. } => {
-                sim.police_mut().place_roadblock_at(target, *pos, *dir);
+            OrderKind::RoadblockAt {
+                pos, dir, level, ..
+            } => {
+                sim.police_mut()
+                    .place_roadblock_at(target, *pos, *dir, *level);
                 Ok(())
             }
             OrderKind::SpikesAt { pos, dir, .. } => {

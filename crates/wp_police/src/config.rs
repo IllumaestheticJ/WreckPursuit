@@ -861,13 +861,10 @@ pub struct RoadblockConfig {
     pub max_ahead_m: f32,
     /// Required straight approach sight distance, m.
     pub min_sight_m: f32,
-    /// Parked units per roadblock `[min, max]`.
-    pub units: [u32; 2],
-    /// Barrier half extents `[x, y, z]`, m.
-    pub barrier_half_extents_m: [f32; 3],
-    /// Barrier mass, kg.
-    pub barrier_mass_kg: f32,
-    /// Parked unit mass, kg.
+    /// What a block is made of at each wanted level, L1 first (5 entries; owner 2026-10-31,
+    /// arcade-classic-style roadblocks: cars across the road with gaps between them).
+    pub tiers: Vec<crate::tools::BlockRecipe>,
+    /// Mass of a parked unit as a static collider while it has no physical car, kg.
     pub unit_mass_kg: f32,
     /// Lifetime, s.
     pub lifetime_s: f32,
@@ -877,6 +874,14 @@ pub struct RoadblockConfig {
     pub cooldown_s: PhaseTable<f32>,
     /// Max roadblocks active at once.
     pub max_active: u32,
+}
+
+impl RoadblockConfig {
+    /// The block recipe for wanted level `level` (clamped to 1..=5).
+    pub fn tier(&self, level: u8) -> crate::tools::BlockRecipe {
+        let i = (level.clamp(1, 5) as usize - 1).min(self.tiers.len().saturating_sub(1));
+        self.tiers[i]
+    }
 }
 
 /// Spike strip tool.
@@ -1205,10 +1210,16 @@ impl PoliceConfig {
         {
             return bad("response: need never_closer_m <= spawn_min_m <= spawn_max_m, despawn_min_m >= never_closer_m, unit caps ascending");
         }
-        if self.tools.roadblock.units[0] == 0
-            || self.tools.roadblock.units[0] > self.tools.roadblock.units[1]
+        let tiers = &self.tools.roadblock.tiers;
+        if tiers.len() != 5
+            || tiers.iter().any(|t| {
+                t.cars == 0
+                    || t.heavy > t.cars
+                    || t.gap_m < crate::tools::GAP_MIN_M
+                    || !(0.0..=1.0).contains(&t.second_line_chance)
+            })
         {
-            return bad("roadblock.units must be [min>=1, max>=min]");
+            return bad("roadblock.tiers: 5 entries (L1..L5), cars >= 1, heavy <= cars, gap_m >= 2.5, second_line_chance in 0..=1");
         }
         let h = &self.tools.helicopter;
         if !(h.position_report_s > 0.0 && h.lost_visual_after_s >= 0.0) {

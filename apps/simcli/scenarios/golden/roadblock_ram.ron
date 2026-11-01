@@ -1,0 +1,27 @@
+// Golden "feel" case: ramming the light end of a roadblock cruiser (roadblocks-v2, owner
+// 2026-10-31). The same level-1 block as `golden_roadblock_gap` (two `sentinel_cruiser`s angled
+// across the flat world's 19 m road); the sedan at 80 km/h (22 m/s) is lined up on the kerb-side
+// end of the left cruiser (x = -8.6). The cruiser is a real parked vehicle (brakes held, same
+// vehicle and damage code as every car): the hit spins it aside and the sedan gets through,
+// slower and damaged. Replaces `golden_roadblock_barricade` (the retired wooden barricade);
+// the ranges are set around the first measured run.
+(
+    name: "golden_roadblock_ram",
+    seed: 112,
+    mode: Simulation,
+    assists: ai,
+    police_orders: [(t_s: 0.0, order: roadblock_at(target: "car", pos: (0.0, 60.0), dir: (0.0, 1.0), level: 1))],
+    entities: [
+        (id: "car", car: "debug_sedan", pos: (-8.6, 0.0, 0.0), speed_mps: 22.0, driver: cruise(target_mps: 22.0, until_s: 6.0)),
+    ],
+    duration_s: 6.0,
+    hash_every: 24,
+    expect: [
+        world_metric(name: "roadblock_cars_max", min: 2.0, max: 2.0),
+        world_metric(name: "roadblock_car_moved_max_m", min: 1.0, max: 30.0),
+        event_count(event: "Contact", entity: "car", min: 1, max: 100000),
+        crush_depth(entity: "car", min: 0.02, max: 1.0),
+        metric(entity: "car", name: "final_health", min: 0.3, max: 0.99),
+        metric(entity: "car", name: "distance_m", min: 70.0, max: 140.0),
+    ],
+)

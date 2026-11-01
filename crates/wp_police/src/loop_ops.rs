@@ -25,7 +25,7 @@
 //!   With no free ramp spot it carries on home like any unit out of service.
 //!
 //! Roadblocks and spike strips ahead on the predicted route are the AI captain's as before
-//! (now sealing the road but for the barricaded gap). Fairness: every operation is capped by
+//! (arcade-classic-style: cars angled across the road with gaps between them). Fairness: every operation is capped by
 //! the race's ground-unit cap, flankers and traps by the wanted level; units still despawn
 //! when far out of the chase; nothing ever appears in a racer's view; the escape rules are
 //! unchanged.
