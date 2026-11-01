@@ -1,0 +1,11 @@
+# simcli hashes scenario=police_roadblock_tier1 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
+240 347224257afb3f14
+480 61200fb212bb426c
+720 d0842a60bf77eb30
+960 ce35ea2dfe547349
+1200 7ef6150374ad93ae
+1440 dbe7e4661b2365cc
+1680 9d4e53052189b17a
+1920 343a0acc5d18713e
+2160 a555022954e19b0d
+2400 18bce956731011c9

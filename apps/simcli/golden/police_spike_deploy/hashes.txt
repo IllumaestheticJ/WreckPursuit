@@ -1,0 +1,11 @@
+# simcli hashes scenario=police_spike_deploy systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.2
+240 39f81db3f95e4aa2
+480 6b02c5d2c1a7216c
+720 2fae5efa6696ae9b
+960 5be0539951bbc5a1
+1200 11a63c4b4838a59e
+1440 4205d898795b8a59
+1680 7a365a294632eaa2
+1920 c11b6d9fe461e590
+2160 201c1411c7efe6fe
+2400 a380d4351c74788e
