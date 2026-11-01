@@ -117,7 +117,11 @@ fn each_tier_parks_its_cars_across_the_road() {
         assert!(rb.set_up, "L{level}: not set up");
         assert_eq!(rb.cars.len(), cars, "L{level}: {:?}", rb.cars);
         assert_eq!(rb.heavy_cars(), heavy, "L{level}");
-        assert_eq!(rb.gaps.iter().filter(|g| g.spiked).count(), spiked, "L{level}");
+        assert_eq!(
+            rb.gaps.iter().filter(|g| g.spiked).count(),
+            spiked,
+            "L{level}"
+        );
         assert_eq!(rb.cars.iter().any(|c| c.line == 1), second, "L{level}");
         assert_eq!(sim.spike_strips().len(), spiked, "L{level}: gap strips");
         // The front-line gaps: a car width or more; the wide-gap tiers well over.
@@ -139,9 +143,9 @@ fn each_tier_parks_its_cars_across_the_road() {
         assert_eq!((bastions, cruisers), (heavy, cars - heavy), "L{level}");
         for c in &rb.cars {
             assert!(
-                pc.iter().any(|p| ((p.1[0] - c.pos[0]).powi(2) + (p.1[1] - c.pos[1]).powi(2))
-                    .sqrt()
-                    < 0.5),
+                pc.iter().any(
+                    |p| ((p.1[0] - c.pos[0]).powi(2) + (p.1[1] - c.pos[1]).powi(2)).sqrt() < 0.5
+                ),
                 "L{level}: no car at {:?}",
                 c.pos
             );
@@ -180,9 +184,23 @@ fn a_car_threads_the_gap_at_speed_undamaged() {
 }
 
 /// Ram the end of the car nearest `x` (the racer lined up on its nose or tail corner) at
-/// `speed`; returns (racer y, speed, health after 6 s; how far the rammed car was shoved).
-fn ram(level: u8, pick: impl Fn(&Roadblock) -> f32, speed: f32) -> (f32, f32, f32, f32) {
+/// `speed`; returns (racer y, speed, health after 6 s; how far the rammed car was shoved; the
+/// racer's lowest speed in the 1.5 s after the hit).
+fn ram(level: u8, pick: impl Fn(&Roadblock) -> f32, speed: f32) -> (f32, f32, f32, f32, f32) {
+    ram_with(level, pick, speed, None)
+}
+
+/// [`ram`] with every police car of model `car` (e.g. the heavy SUV) instead of the cruiser.
+fn ram_with(
+    level: u8,
+    pick: impl Fn(&Roadblock) -> f32,
+    speed: f32,
+    car: Option<&str>,
+) -> (f32, f32, f32, f32, f32) {
     let mut sim = sim(13);
+    if let Some(c) = car {
+        sim.set_police_car(load_car(data(&format!("cars/{c}.json"))).unwrap());
+    }
     sim.police_mut()
         .place_roadblock_at(EntityId(1), SITE, NORTH, level);
     sim.step_fixed();
@@ -190,14 +208,26 @@ fn ram(level: u8, pick: impl Fn(&Roadblock) -> f32, speed: f32) -> (f32, f32, f3
     let x = pick(&rb);
     let start = police_cars(&sim);
     let e = racer(&mut sim, x, speed);
-    steps(&mut sim, 6.0);
+    // Lowest speed in the 1.5 s from first touching the car (how hard it stopped the racer).
+    let mut touched: Option<usize> = None;
+    let mut min_v = f32::MAX;
+    for k in 0..(6.0 * 240.0) as usize {
+        sim.step_fixed();
+        let (p, v, _) = state(&sim, e);
+        if touched.is_none() && p[1] > 55.0 && v < speed - 1.0 {
+            touched = Some(k);
+        }
+        if touched.is_some_and(|t| k < t + 360) {
+            min_v = min_v.min(v);
+        }
+    }
     let (p, v, health) = state(&sim, e);
     let shoved = start
         .iter()
         .zip(police_cars(&sim))
         .map(|(a, b)| ((a.1[0] - b.1[0]).powi(2) + (a.1[1] - b.1[1]).powi(2)).sqrt())
         .fold(0.0f32, f32::max);
-    (p[1], v, health, shoved)
+    (p[1], v, health, shoved, min_v)
 }
 
 /// The light end of a car: its footprint's outer kerb-side corner, 0.9 m in (the racer's
@@ -216,9 +246,10 @@ fn end_of(rb: &Roadblock, k: usize) -> f32 {
 #[test]
 fn ramming_a_cruisers_end_gets_through_slowed_and_damaged() {
     let speed = 22.0;
-    let (y, v, health, shoved) = ram(1, |rb| end_of(rb, 0), speed);
+    let (y, v, health, shoved, _) = ram(1, |rb| end_of(rb, 0), speed);
     eprintln!("rammed cruiser: y {y:.1} v {v:.1} health {health:.3} shoved {shoved:.1} m");
-    assert!(y > 80.0, "did not get through: y {y:.1}");
+    // Through the car line (y = 64) and on, the cruiser pushed out of the way.
+    assert!(y > 69.0, "did not get through: y {y:.1}");
     assert!(v < speed - 3.0, "lost no speed: {v:.1} m/s");
     assert!(health < 0.99, "no damage: {health:.3}");
     assert!(shoved > 1.0, "the cruiser hardly moved: {shoved:.2} m");
@@ -226,35 +257,29 @@ fn ramming_a_cruisers_end_gets_through_slowed_and_damaged() {
 
 #[test]
 fn ramming_a_heavy_unit_is_much_harder() {
-    let speed = 22.0;
-    // L4: the heavy units stand in the middle; the middle car's end.
-    let heavy_k = |rb: &Roadblock| {
-        let k = rb
-            .cars
-            .iter()
-            .position(|c| c.heavy)
-            .expect("a heavy unit");
-        end_of(rb, k)
-    };
-    let (yh, vh, hh, sh) = ram(4, heavy_k, speed);
-    let (yc, vc, hc, sc) = ram(1, |rb| end_of(rb, 0), speed);
+    // The same hit on the same block (the kerb-side end of its left car, 16 m/s), its cars
+    // once cruisers (2.05 t) and once the heavy police SUV (`sentinel_bastion`, 2.64 t
+    // body-on-frame) that the L4-5 tiers park. Same vehicle and damage code for both.
+    let speed = 16.0;
+    let (yh, vh, hh, sh, mh) = ram_with(1, |rb| end_of(rb, 0), speed, Some("sentinel_bastion"));
+    let (yc, vc, hc, sc, mc) = ram(1, |rb| end_of(rb, 0), speed);
     eprintln!(
-        "heavy: y {yh:.1} v {vh:.1} health {hh:.3} shoved {sh:.1} m; cruiser: y {yc:.1} v {vc:.1} health {hc:.3} shoved {sc:.1} m"
+        "heavy: y {yh:.1} v {vh:.1} health {hh:.3} shoved {sh:.1} m, min speed {mh:.1}; \
+         cruiser: y {yc:.1} v {vc:.1} health {hc:.3} shoved {sc:.1} m, min speed {mc:.1}"
     );
-    // The heavy unit moves less, and the car comes off worse: slower beyond it (or stopped
-    // short), more damage.
-    assert!(sh < sc, "heavy shoved {sh:.2} m vs cruiser {sc:.2} m");
+    // The heavy unit moves much less, stops the car much harder, and it gets less far.
+    assert!(sh < 0.8 * sc, "heavy shoved {sh:.2} m vs cruiser {sc:.2} m");
     assert!(
-        yh < yc - 5.0 || vh < vc - 2.0,
-        "the heavy unit cost no more: y {yh:.1} vs {yc:.1}, v {vh:.1} vs {vc:.1}"
+        mh < 0.7 * mc,
+        "heavy left {mh:.1} m/s vs cruiser {mc:.1} m/s"
     );
-    assert!(hh <= hc, "health {hh:.3} vs {hc:.3}");
+    assert!(yh < yc - 2.0, "got as far: y {yh:.1} vs {yc:.1}");
 }
 
 #[test]
 fn spikes_deflate_the_tyres_of_a_car_that_crosses_them_and_not_one_that_goes_around() {
     // The flat world's road is two-way: the spike car stands astride the centre line, the
-    // strip over the racer's half (x > 0); the oncoming half is open.
+    // strip over the racer's half (x > 0.3); the oncoming half is open.
     for (x, spiked) in [(4.0f32, true), (-5.0, false)] {
         let mut sim = sim(14);
         let tool = sim

@@ -392,7 +392,10 @@ fn default_block_level() -> u8 {
 /// Whether an order places a tool directly (`roadblock_at` / `spikes_at`): those need police
 /// cars even on the flat world.
 pub fn places_tool_directly(o: &OrderKind) -> bool {
-    matches!(o, OrderKind::RoadblockAt { .. } | OrderKind::SpikesAt { .. })
+    matches!(
+        o,
+        OrderKind::RoadblockAt { .. } | OrderKind::SpikesAt { .. }
+    )
 }
 
 /// Assist profile selection.

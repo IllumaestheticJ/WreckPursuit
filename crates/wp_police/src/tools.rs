@@ -358,6 +358,9 @@ pub const FLARE_AHEAD_M: f32 = 22.0;
 pub const VERGE_REACH_M: f32 = 12.0;
 /// A spike strip's end lies this far under its unit's car (its inner side), m.
 pub const SPIKE_UNDER_CAR_M: f32 = 0.15;
+/// On a two-way road a spike car stands this far left of the centre line (its strip then
+/// starts 0.3 m right of the line), m.
+pub const TWO_WAY_CAR_LEFT_M: f32 = 0.5;
 /// Half width of a parked police car, m.
 pub const UNIT_HALF_W_M: f32 = 0.95;
 /// Half length of a parked police car, m.
@@ -531,7 +534,11 @@ pub fn roadblock_layout(
             // racer.
             let side = if k % 2 == 0 { 1.0 } else { -1.0 };
             let heading = add(scale(right, side * across), scale(site.dir, -along));
-            let yk = y + if stagger && k % 2 == 1 { STAGGER_M } else { 0.0 };
+            let yk = y + if stagger && k % 2 == 1 {
+                STAGGER_M
+            } else {
+                0.0
+            };
             let heavy = order.iter().take(heavy_n).any(|i| *i == k);
             cars.push(BlockCar {
                 pos: at(x, yk),
@@ -621,7 +628,10 @@ pub fn spike_layout(site: &ToolSite, sec: &crate::section::Section, two_way: boo
     let at = |x: f32, y: f32| add(add(site.pos, scale(site.dir, y)), scale(right, x));
     let (lo, hi) = (sec.road_lo, sec.road_hi);
     let car = if two_way {
-        (0.5 * (lo + hi))
+        // Astride the centre line, a little into the oncoming lane: the strip starts just
+        // right of the line, so a car on the line (or in its own lane) meets it.
+        // The site lies on the road's line: on a two-way road, its centre line.
+        (0.0 - TWO_WAY_CAR_LEFT_M)
             .min(hi - UNIT_HALF_W_M - 1.0)
             .max(lo + UNIT_HALF_W_M)
     } else {
@@ -1037,18 +1047,31 @@ mod tests {
             assert!(lay.cars[0].heading[0] > 0.0 && lay.cars[1].heading[0] < 0.0);
             // Heavy units in the middle.
             if heavy > 0 {
-                let mid = lay.cars.iter().min_by(|a, b| a.pos[0].abs().total_cmp(&b.pos[0].abs()));
+                let mid = lay
+                    .cars
+                    .iter()
+                    .min_by(|a, b| a.pos[0].abs().total_cmp(&b.pos[0].abs()));
                 assert!(mid.unwrap().heavy);
             }
             // Gap strips lie across their gap, in front of the line.
-            for (s, g) in lay.gap_strips.iter().zip(lay.gaps.iter().filter(|g| g.spiked)) {
+            for (s, g) in lay
+                .gap_strips
+                .iter()
+                .zip(lay.gaps.iter().filter(|g| g.spiked))
+            {
                 assert!(s[0][0] < g.a[0] && s[1][0] > g.b[0]);
                 assert!((s[0][1] - (54.0 - GAP_SPIKE_AHEAD_M)).abs() < 1e-3);
             }
             assert!(!lay.flares.is_empty() && !lay.cones.is_empty());
         }
         // The wide-gap tier leaves a gap well over a car width.
-        let lay = roadblock_layout(&site_north(), &sec, &recipe(2, 0, 4.5, 0), false, GapPick::Centre);
+        let lay = roadblock_layout(
+            &site_north(),
+            &sec,
+            &recipe(2, 0, 4.5, 0),
+            false,
+            GapPick::Centre,
+        );
         assert!(lay.gaps[0].width_m >= 4.5);
     }
 
@@ -1057,14 +1080,32 @@ mod tests {
         use crate::section::Section;
         let r = recipe(2, 0, 4.5, 0);
         // Too wide for two cars: a wider gap and an open lane at each kerb.
-        let wide = roadblock_layout(&site_north(), &Section::plain(-12.0, 12.0), &r, false, GapPick::Centre);
+        let wide = roadblock_layout(
+            &site_north(),
+            &Section::plain(-12.0, 12.0),
+            &r,
+            false,
+            GapPick::Centre,
+        );
         assert_eq!(wide.cars.len(), 2);
         assert_eq!(wide.gaps.len(), 3);
         assert!(wide.gaps.iter().all(|g| g.width_m >= GAP_MIN_M - 1e-3));
         // Too narrow for three: two.
-        let two = roadblock_layout(&site_north(), &Section::plain(-7.0, 7.0), &recipe(3, 0, 3.0, 1), false, GapPick::Centre);
+        let two = roadblock_layout(
+            &site_north(),
+            &Section::plain(-7.0, 7.0),
+            &recipe(3, 0, 3.0, 1),
+            false,
+            GapPick::Centre,
+        );
         assert_eq!(two.cars.len(), 2);
-        let narrow = roadblock_layout(&site_north(), &Section::plain(-3.0, 3.0), &r, false, GapPick::Left);
+        let narrow = roadblock_layout(
+            &site_north(),
+            &Section::plain(-3.0, 3.0),
+            &r,
+            false,
+            GapPick::Left,
+        );
         assert_eq!(narrow.cars.len(), 1);
         assert_eq!(narrow.gaps.len(), 1);
         assert!(narrow.gaps[0].width_m >= GAP_MIN_M - 1e-3);
@@ -1106,10 +1147,17 @@ mod tests {
         // Two-way: the car astride the centre line, the strip over the racer's half, the
         // oncoming lane open.
         let lay = spike_layout(&site_north(), &sec, true);
-        assert!(lay.post[0].abs() < 1e-4);
+        assert!((lay.post[0] + TWO_WAY_CAR_LEFT_M).abs() < 1e-4);
+        assert!(
+            lay.a[0] > 0.0 && lay.a[0] < 0.8,
+            "the strip reaches the centre line"
+        );
         assert!(lay.a[0] > lay.post[0] && lay.a[0] < lay.post[0] + UNIT_HALF_W_M);
         assert!(lay.b[0] >= 5.0);
-        assert!(lay.post[0] - UNIT_HALF_W_M - -5.0 >= 2.0, "oncoming lane open");
+        assert!(
+            lay.post[0] - UNIT_HALF_W_M - -5.0 >= 2.0,
+            "oncoming lane open"
+        );
         assert_eq!(lay.heading, [0.0, 1.0]);
         // One-way: the car at the left kerb, the strip over the rest.
         let lay = spike_layout(&site_north(), &sec, false);

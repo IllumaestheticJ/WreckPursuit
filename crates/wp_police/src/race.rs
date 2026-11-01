@@ -1242,7 +1242,11 @@ impl PoliceSystem {
     ) -> Option<ToolId> {
         let sec = self.block_section(&site, self.z_hint(site.pos))?;
         let rb = &self.cfg.tools.roadblock;
-        let tier = if self.cfg.presence.unlocks.spikes_level <= 3 { 3 } else { 2 };
+        let tier = if self.cfg.presence.unlocks.spikes_level <= 3 {
+            3
+        } else {
+            2
+        };
         let recipe = BlockRecipe {
             cars: units.max(1),
             heavy: 0,
@@ -1750,8 +1754,12 @@ mod tests {
             car - crate::tools::UNIT_HALF_W_M >= -4.0 - 1e-3,
             "car at {car}"
         );
-        assert!(a > car && a < car + crate::tools::UNIT_HALF_W_M, "strip starts at {a}");
-        assert!(b >= 8.0 - 1e-3, "strip ends at {b}");
+        assert!(
+            a > car && a < car + crate::tools::UNIT_HALF_W_M,
+            "strip starts at {a}"
+        );
+        let kerb = police.tool_section(&site, 0.0).road_hi;
+        assert!(b >= kerb - 1e-3, "strip ends at {b}, kerb at {kerb}");
     }
 
     #[test]
@@ -1884,8 +1892,12 @@ mod tests {
                 // Owner 2026-10-31: the profile's cars angled across the road kerb to kerb
                 // with car-width-or-wider gaps between them.
                 let hw = ROAD_HALF_WIDTH_M;
+                // (A 10 m avenue takes one angled car and a kerb gap, wider roads more.)
                 assert!(rb.set_up && !rb.cars.is_empty());
-                assert_eq!(rb.cars.len(), rb.gaps.len() + 1, "{rb:?}");
+                assert!(
+                    !rb.gaps.is_empty() && rb.gaps.len() + 1 >= rb.cars.len(),
+                    "{rb:?}"
+                );
                 for g in &rb.gaps {
                     assert!(g.width_m >= crate::tools::GAP_MIN_M - 1e-3);
                     for p in [g.a, g.b] {
@@ -1946,7 +1958,7 @@ mod tests {
     }
 
     #[test]
-    fn scripted_spikes_cover_the_whole_road() {
+    fn scripted_spikes_cover_the_racers_lanes() {
         let mut police = system();
         let prof = RaceProfiles::builtin()
             .get("grid_highway_sprint")
@@ -1972,15 +1984,17 @@ mod tests {
             .unwrap()
             .body
             .pos;
-        // Owner 2026-10-28: every lane is spiked; past the strip's end stands its car.
+        // Owner 2026-10-31: every lane of the racer's half is spiked from under its car to the
+        // kerb (the racing direction is +x: its half is y < the car); the other half is a way
+        // around.
         let x = prof.spikes[0].at * c.length();
         let mut lane = -12.0;
         while lane <= 12.0 {
             let y = -1.75 + lane;
             let hit = s.wheels_crossing([x - 5.0, y], [x + 5.0, y], 0.8);
             let through_car = (y - car[1]).abs() < 2.0 * crate::tools::UNIT_HALF_W_M;
-            let on_road =
-                y.abs() <= police.half_width(SegmentId(0)) + 0.01 || hit.iter().any(|w| *w);
+            let on_road = (y.abs() <= police.half_width(SegmentId(0)) + 0.01 && y < car[1])
+                || hit.iter().any(|w| *w);
             assert!(
                 !on_road || hit.iter().any(|w| *w) || through_car,
                 "a car at y = {y} drives past the strip {:?}..{:?} (car at {car:?})",

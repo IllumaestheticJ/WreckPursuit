@@ -184,7 +184,9 @@ pub fn status(p: &PoliceSystem, racer: EntityId) -> PoliceStatus {
                 .filter(|b| b.set_up)
                 .min_by(|a, b| {
                     let r = p.racer(racer).map_or([0.0; 2], |r| [r.pos[0], r.pos[1]]);
-                    (a.ahead_of(r) - d).abs().total_cmp(&(b.ahead_of(r) - d).abs())
+                    (a.ahead_of(r) - d)
+                        .abs()
+                        .total_cmp(&(b.ahead_of(r) - d).abs())
                 })
                 .map_or("roadblock".to_string(), |b| b.radio_name())
         } else {

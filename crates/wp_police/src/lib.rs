@@ -1407,10 +1407,7 @@ impl PoliceSystem {
                 .then_some(ahead)
         };
         let blocks = self.roadblocks.iter().filter(|b| b.set_up).filter_map(|b| {
-            let line = graph::add(
-                b.site.pos,
-                graph::scale(b.site.dir, tools::BLOCK_ALONG_M),
-            );
+            let line = graph::add(b.site.pos, graph::scale(b.site.dir, tools::BLOCK_ALONG_M));
             check(line, b.site.dir).map(|d| (true, d))
         });
         let strips = self

@@ -164,7 +164,6 @@ pub fn barrel_groups(resting: bool) -> InteractionGroups {
     InteractionGroups::new(BARREL_GROUP, filter, InteractionTestMode::And)
 }
 
-
 /// A full copy of the Rapier state. `PhysicsPipeline` only holds per-step scratch buffers and
 /// counters, so the copy gets a fresh one (stepping it gives the same results).
 impl Clone for PhysicsWorld {

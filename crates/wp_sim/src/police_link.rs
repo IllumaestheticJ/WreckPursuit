@@ -432,7 +432,10 @@ impl Sim {
                     let pm = &self.police_fleet[m.min(self.police_fleet.len() - 1)];
                     (pm.car.clone(), pm.limits)
                 } else if heavy && self.police_heavy_car.is_some() {
-                    (self.police_heavy_car.clone().expect("heavy police car"), None)
+                    (
+                        self.police_heavy_car.clone().expect("heavy police car"),
+                        None,
+                    )
                 } else {
                     // `single` is Some here (checked above).
                     (single.clone().expect("single police car"), None)

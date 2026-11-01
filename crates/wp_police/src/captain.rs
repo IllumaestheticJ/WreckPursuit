@@ -335,12 +335,17 @@ impl PoliceSystem {
             })
             .collect();
         // A roadblock's gap strips are part of the block (no tool of their own here).
-        tools.extend(self.spikes.iter().filter(|s| s.block.is_none()).map(|s| ToolView {
-            tool: s.id,
-            roadblock: false,
-            pos: s.site.pos,
-            remaining_s: s.expires.since(now),
-        }));
+        tools.extend(
+            self.spikes
+                .iter()
+                .filter(|s| s.block.is_none())
+                .map(|s| ToolView {
+                    tool: s.id,
+                    roadblock: false,
+                    pos: s.site.pos,
+                    remaining_s: s.expires.since(now),
+                }),
+        );
         let left = |t: SimTime| t.since(now);
         CaptainView {
             time: now,

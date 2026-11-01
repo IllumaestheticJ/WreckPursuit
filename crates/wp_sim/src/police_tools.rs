@@ -65,7 +65,10 @@ impl Sim {
     pub fn tool_markers(&self) -> Vec<ToolMarkerView> {
         let mut out = Vec::new();
         for rb in self.police.roadblocks().iter().filter(|r| r.set_up) {
-            for (kind, list) in [(ToolMarker::Cone, &rb.cones), (ToolMarker::Flare, &rb.flares)] {
+            for (kind, list) in [
+                (ToolMarker::Cone, &rb.cones),
+                (ToolMarker::Flare, &rb.flares),
+            ] {
                 out.extend(list.iter().map(|p| ToolMarkerView {
                     tool: rb.id.0,
                     kind,

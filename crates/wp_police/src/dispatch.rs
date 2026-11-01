@@ -4098,7 +4098,12 @@ impl PoliceSystem {
                 .iter()
                 .all(|c| !self.in_racer_view_opt(world, c.pos, true))
         };
-        let site = plan_site_where(&self.graph, p, v, &rules, road.map(|r| r.0), &hidden)
+        // No hidden site (a long straight in plain view): any site a block fits; its cars then
+        // wait, all together, until their spots are out of sight (`maintain_tool_cars`).
+        let fits = |site: &ToolSite| self.block_section(site, z).is_some();
+        let road = road.map(|r| r.0);
+        let site = plan_site_where(&self.graph, p, v, &rules, road, &hidden)
+            .or_else(|_| plan_site_where(&self.graph, p, v, &rules, road, &fits))
             .map_err(CaptainError::Site)?;
         let sec = self
             .block_section(&site, z)
