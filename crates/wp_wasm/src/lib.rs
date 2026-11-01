@@ -88,6 +88,8 @@ mod race_spots_tests;
 #[cfg(test)]
 mod race_tests;
 #[cfg(test)]
+mod radio_tests;
+#[cfg(test)]
 mod roam_tests;
 #[cfg(test)]
 mod run_tests;
