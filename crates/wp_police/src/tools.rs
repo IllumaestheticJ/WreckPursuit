@@ -406,13 +406,10 @@ fn angle_for_footprint(foot_m: f32) -> (f32, f32) {
 /// gaps between them (about `gap_m` wide; wider, and open lanes at the kerbs, on a road too
 /// wide for `n`), fewer cars (one car and a gap at a kerb at least) on one too narrow. Returns the cars' `(centre, footprint)` and the gaps'
 /// `(left, right)`, left to right.
-fn line_layout(
-    lo: f32,
-    hi: f32,
-    n: u32,
-    gap_m: f32,
-    edge: GapPick,
-) -> (Vec<(f32, f32)>, Vec<(f32, f32)>) {
+/// One car line: the cars' `(centre, footprint)` and the gaps' `(left, right)`, left to right.
+type LineLayout = (Vec<(f32, f32)>, Vec<(f32, f32)>);
+
+fn line_layout(lo: f32, hi: f32, n: u32, gap_m: f32, edge: GapPick) -> LineLayout {
     let w = (hi - lo).max(0.0);
     let gap_m = gap_m.max(GAP_MIN_M);
     // Fewer cars where the road cannot hold them angled with car-width gaps between them.

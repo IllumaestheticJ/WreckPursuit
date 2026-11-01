@@ -68,6 +68,9 @@ impl PoliceModel {
     }
 }
 
+/// A police car unit still without a body: `(unit, position, heading, speed, heavy)`.
+type WantedBody = (UnitId, [f32; 2], [f32; 2], f32, bool);
+
 /// SplitMix64 finalizer (deterministic integer hash).
 fn mix64(mut z: u64) -> u64 {
     z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -409,7 +412,7 @@ impl Sim {
             let _ = self.despawn_vehicle(id);
         }
 
-        let wanted: Vec<(UnitId, [f32; 2], [f32; 2], f32, bool)> = self
+        let wanted: Vec<WantedBody> = self
             .police
             .units()
             .iter()

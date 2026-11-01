@@ -1912,7 +1912,7 @@ fn roadblock_tiers_appear_out_of_sight() {
                 let spiked = rb.gaps.iter().filter(|g| g.spiked).count();
                 if tier.spiked_gaps == 0 {
                     assert_eq!(spiked, 0, "L{level}");
-                } else if rb.gaps.len() > 0 {
+                } else if !rb.gaps.is_empty() {
                     assert!(spiked >= 1, "L{level}: no spiked gap");
                 }
                 for uid in &rb.units {
