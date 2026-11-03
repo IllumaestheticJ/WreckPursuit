@@ -12,6 +12,8 @@ import { COUNTY_PAINT, countySkin, hasPoliceLivery, setupPoliceLook } from "./re
 import { LightRig, patternFor, phaseFor, wigwag } from "./render/lights";
 import { fitBuild, type BuildVisuals, type FittedBuild } from "./render/mod_parts";
 import { CarLook, type LookHost } from "./render/cosmetics/look";
+import { gradeOfPieces, widthGrade, WheelStance } from "./render/cosmetics/stance";
+import { loadVisuals, piecesOf } from "./render/cosmetics/visuals";
 import { artStyle, makeHeadlightPool, vehiclePaint } from "./render/style";
 import { PALETTE, sirenLightIntensity } from "./render/palette";
 import { IND, indicatorColour, indicatorHue, indicatorLevel, indicatorMarkers, meshFrontRear, meshIndicatorEnds, proxyGeoms, styledPaint } from "./render/fleet";
@@ -189,6 +191,14 @@ export class VehicleView {
   /** Cosmetic look of the installed mods (player career car; null for everyone else). */
   look: CarLook | null = null;
   private lookGen = 0;
+  /** Wide-tyre stance (render/cosmetics/stance.ts), once the panel mesh is ready. */
+  stance: WheelStance | null = null;
+  /** Tyre width grade of the build's wheels (wp_economy::visuals; 0 = stock). */
+  private buildGrade = 0;
+  /** Tyre width grade of the cosmetic look's mods (null: no look; the build's grade shows). */
+  private lookGrade: number | null = null;
+  /** Workshop: body regions whose panel is off the car (arch lips on them are not drawn). */
+  removedRegions: ReadonlySet<string> = new Set();
   /** Lamp lens style from the look (LAMP_STYLES key). */
   private lampStyle: string | undefined;
   /** Greybox paint (the colour the view was created with). */
@@ -364,6 +374,7 @@ export class VehicleView {
         this.panels.root.position.z = this.build.ride_height_m;
         // Smoked lamp covers (re-applied by applyStyle).
         this.styleVersion = -1;
+        this.buildGrade = Math.max(0, ...this.build.wheels.map((w) => widthGrade(w.base_width_m, w.width_m)));
       }
       // Police models (livery scheme in the mesh file) get livery, unit decals and the flashing
       // mesh light bar whoever drives them.
@@ -378,6 +389,7 @@ export class VehicleView {
         w.spin.rotation.order = "YXZ";
         w.spin.rotation.y = this.panels.camberRad[i];
       });
+      this.refreshStance();
       this.wheelPartsShown = null;
       const ind = this.indicatorGeoms();
       this.indL.geometry.dispose();
@@ -457,6 +469,7 @@ export class VehicleView {
       this.panels.paint.transparent = this.panels.paint.opacity < 1;
       this.panels.paint.depthWrite = !this.panels.paint.transparent;
       this.look?.update();
+      this.stance?.update(this.removedRegions);
     }
 
     // Panel meshes wanted but not loaded yet: the proxy, not the debug box / lattice hull.
@@ -652,7 +665,7 @@ export class VehicleView {
     this.wheels.forEach((w, i) => {
       const r = 1 - 0.3 * Math.min(Math.max(p[base + i] ?? 0, 0), 1);
       // Axle along X: the radius lies in the Y/Z plane, so this commutes with the spin about X.
-      w.spin.scale.set(1, r, r);
+      w.spin.scale.set(this.stance?.widthScale(i) ?? 1, r, r);
     });
   }
 
@@ -884,6 +897,18 @@ export class VehicleView {
     this.look?.dispose();
     this.look = null;
     this.lampStyle = undefined;
+    // Wide tyres: while a look is set its mod list decides the stance (the workshop previews
+    // fitting or removing them); without one the build's wheel widths do.
+    if (!mods) {
+      this.lookGrade = null;
+      this.refreshStance();
+    } else {
+      void loadVisuals().then((v) => {
+        if (gen !== this.lookGen) return;
+        this.lookGrade = gradeOfPieces(piecesOf(mods, v));
+        this.panels.whenReady(() => gen === this.lookGen && this.refreshStance());
+      });
+    }
     if (!mods?.length) return;
     this.panels.whenReady(() => {
       const drawn = new Set(this.fitted?.drawn ?? []);
@@ -900,8 +925,26 @@ export class VehicleView {
         look.showcase = showcase;
         look.setLights(false);
         this.look = look;
+        // The look's wheel pieces (rims, sidewalls) take the stance too.
+        this.refreshStance();
       });
     });
+  }
+
+  /** Tyre width grade drawn: the look's while one is set, else the build's. */
+  get stanceGrade(): number {
+    return this.lookGrade ?? this.buildGrade;
+  }
+
+  /** (Re)apply the wide-tyre stance for `stanceGrade` (after the mesh, a build or a look). */
+  private refreshStance(): void {
+    if (!this.panels.ready || !this.panels.mesh) return;
+    const grade = this.stanceGrade;
+    if (!this.stance && grade === 0) return;
+    this.stance ??= new WheelStance({ panels: this.panels, info: this.info, wheels: this.wheels });
+    this.stance.apply(grade);
+    // New wheel pieces: re-run the panel / debug wheel visibility pass.
+    this.wheelPartsShown = null;
   }
 
   private lookHost(): LookHost {
@@ -919,6 +962,7 @@ export class VehicleView {
 
   dispose(): void {
     this.look?.dispose();
+    this.stance?.dispose();
     this.panels.dispose();
     this.root.removeFromParent();
     this.velocity.removeFromParent();

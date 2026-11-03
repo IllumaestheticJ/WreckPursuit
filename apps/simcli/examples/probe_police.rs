@@ -46,11 +46,16 @@ fn main() {
             );
         }
         println!("    nearest unit {nearest:.0} m");
-        for b in v.sim.roadblock_barriers() {
-            println!(
-                "    roadblock {} barrier at ({:.1}, {:.1}, {:.1})",
-                b.tool, b.pos[0], b.pos[1], b.pos[2]
-            );
+        for rb in v.sim.police().roadblocks() {
+            for c in &rb.cars {
+                println!(
+                    "    roadblock {} car at ({:.1}, {:.1}){}",
+                    rb.id.0,
+                    c.pos[0],
+                    c.pos[1],
+                    if c.heavy { " heavy" } else { "" }
+                );
+            }
         }
         for st in v.sim.spike_strips() {
             println!(

@@ -2270,3 +2270,19 @@ the opening; both carriageway edges meet level (< 5 cm) in each opening; 6 cones
 inside it and clear of its middle, present as World props; the procedural grid is unchanged.
 **Changes outside wp_world:** `crates/wp_wasm/src/map.rs` (POI kind string),
 `apps/ui-kit/src/map/{data,draw}.ts` (cone icon), greyboxes regenerated (`vesper_v2*`, `ashpeak*`).
+
+## Lead feedback (v0.14.6, 2026-11-01) — a car behind a wreck on a one-lane road never gets out
+- `apps/simcli/scenarios/jam/pursuit_jam_vesper.ron` on the v0.14.6 tip (roadblocks-v2 +
+  slipstream): `traffic_max_stop_s` 79.6 s (bound was 48). Bound raised to 85 s for now; put it
+  back to 48 once this is fixed.
+- What happens: at ~429 s the chase wrecks physical civilian agent 0 (entity 410) at
+  (416, 860) on single-lane seg 818 (`l.left`/`l.right` both None). Agent 3 stops behind it at
+  s = 105.4 and from then on every `resolve_blocks` attempt gives
+  `try_pass = Impossible`, `try_turn = false`, `try_reverse = false`. The despawn pass skips it
+  because the racer, parked at its route end (427, 1008) 160 m away, has it in line of sight.
+  Result: it stands from ~520 s to the end of the run (600 s), and agent 8 queues behind it.
+- Asks: (1) a car that has exhausted pass / turn / reverse behind a **wreck** (`disabled`)
+  should get some way out (e.g. squeeze past on the kerb / verge at walking pace, or push the
+  wreck aside when the wreck is light); (2) consider recycling such a car even when seen if
+  it is far (> ~120 m) and has been stuck for > `jam_recycle_s` × 2; (3) re-measure seeds 1–4
+  of `jam_pursuit_vesper` and restore the 48 s bound.

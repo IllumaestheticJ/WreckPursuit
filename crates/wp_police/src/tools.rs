@@ -7,6 +7,12 @@
 //! - approach sight distance ([`RoadGraph::approach_sight_m`]) ≥ `min_sight_m` — never around a
 //!   blind corner;
 //! - roadblocks never on a highway when the wanted level is above `highway_max_level`.
+//!
+//! Roadblocks and spike strips are arcade-classic-style (owner 2026-10-31): a roadblock is a
+//! line of police cars parked at an angle across the road with gaps between them
+//! ([`roadblock_layout`], tiers by wanted level in `tools.toml`); a spike strip lies across the
+//! racer's lanes from under its unit's car to the kerb ([`spike_layout`]). Both appear already
+//! set up, out of every racer's view.
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::EntityId;
@@ -156,7 +162,44 @@ pub struct StaticCollider {
     pub mass_kg: f32,
 }
 
-/// A roadblock: parked units + barriers across the road.
+/// One police car of a roadblock: where it parks, which way it points and what it is.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct BlockCar {
+    /// Parking spot (car centre), m.
+    pub pos: [f32; 2],
+    /// Heading (unit vector): angled across the road, nose toward the racer.
+    pub heading: [f32; 2],
+    /// A heavy unit (police SUV / armoured type): much harder to shove aside. `wp_sim` gives
+    /// it the heaviest police model it has.
+    pub heavy: bool,
+    /// Line it stands in: 0 = the front line, 1 = the second line behind it.
+    pub line: u8,
+}
+
+/// A way through a roadblock: the open road between two cars (or between a car and the
+/// kerb), measured along the car line.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct BlockGap {
+    /// Left end of the gap (seen by the approaching racer), m.
+    pub a: [f32; 2],
+    /// Right end, m.
+    pub b: [f32; 2],
+    /// Clear width, m (planned with [`CAR_PLAN_L_M`] × [`CAR_PLAN_W_M`] footprints, so a
+    /// slightly smaller car leaves a little more).
+    pub width_m: f32,
+    /// A spike strip lies across it, in front of the car line.
+    pub spiked: bool,
+    /// Line it belongs to (see [`BlockCar::line`]).
+    pub line: u8,
+}
+
+/// A roadblock (owner 2026-10-31, arcade-classic-style roadblocks): a line of police cars
+/// parked across the road at an angle, nose to nose or staggered, lights flashing. The ways
+/// through are the gaps between the cars (car-width or wider; spiked at higher heat) and the
+/// cars themselves: ramming the light end of a car shoves it aside at a cost in speed and
+/// damage; heavy units barely move. The cars are ordinary police units ([`crate::Unit`]) that
+/// `wp_sim` makes real vehicles parked with the brakes held; once the racer is past they
+/// rejoin the pursuit or drive off.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Roadblock {
     /// Id.
@@ -165,230 +208,440 @@ pub struct Roadblock {
     pub racer: EntityId,
     /// Site.
     pub site: ToolSite,
-    /// Parked units.
+    /// Parked units (filled as the cars appear, out of every racer's view).
     pub units: Vec<UnitId>,
-    /// Barrier colliders.
-    pub barriers: Vec<StaticCollider>,
     /// Removed at.
     pub expires: SimTime,
     /// Placed by a race profile ([`crate::race`]): stays when the racer's pursuit ends and
     /// does not count against the AI captain's budget.
     #[serde(default)]
     pub scripted: bool,
-    /// The wooden barricade over the block's one gap (owner, 2026-10-28: the only way
-    /// through, smashed at a speed and damage cost). `None` only for blocks from saves made
-    /// before the rule.
-    #[serde(default)]
-    pub barricade: Option<Barricade>,
-    /// Road height at the site, m, when the city's geometry is known: `wp_sim` stands the
-    /// barriers on the surface nearest it (the deck, not the road under it).
+    /// Road height at the site, m, when the city's geometry is known.
     #[serde(default)]
     pub z_m: Option<f32>,
+    /// Wanted level (1..=5) the block was built for (its tier, `tools.toml` `[[roadblock.tiers]]`).
+    #[serde(default)]
+    pub level: u8,
+    /// The planned cars, front line first, left to right.
+    #[serde(default)]
+    pub cars: Vec<BlockCar>,
+    /// The ways through, front line first, left to right.
+    #[serde(default)]
+    pub gaps: Vec<BlockGap>,
+    /// Spike strips across the spiked gaps, `[a, b]` (laid as [`SpikeStrip`]s with
+    /// [`SpikeStrip::block`] set once every car stands).
+    #[serde(default)]
+    pub gap_strips: Vec<[[f32; 2]; 2]>,
+    /// Traffic cones in front of the cars (drawing only), m.
+    #[serde(default)]
+    pub cones: Vec<[f32; 2]>,
+    /// Burning road flares on the approach (drawing only: a red glow seen from far off), m.
+    #[serde(default)]
+    pub flares: Vec<[f32; 2]>,
+    /// Every car stands at its spot (they appear together, out of every racer's view) and the
+    /// gap strips are down. Until then nothing of the block is on the road or the map.
+    #[serde(default)]
+    pub set_up: bool,
 }
 
-/// The one gap a roadblock leaves open (about one car width, [`GAP_W_M`]) and the breakable
-/// wooden sawhorse barricade standing in it.
+impl Roadblock {
+    /// Heavy units in the block.
+    pub fn heavy_cars(&self) -> usize {
+        self.cars.iter().filter(|c| c.heavy).count()
+    }
+
+    /// How the radio names the block: "two-car roadblock", "three-car roadblock with spikes",
+    /// "heavy roadblock with spikes, two lines".
+    pub fn radio_name(&self) -> String {
+        let n = self.cars.iter().filter(|c| c.line == 0).count();
+        let mut s = if self.heavy_cars() > 0 {
+            "heavy roadblock".to_string()
+        } else {
+            let count = match n {
+                0 | 1 => "one-car",
+                2 => "two-car",
+                3 => "three-car",
+                4 => "four-car",
+                _ => "wide",
+            };
+            format!("{count} roadblock")
+        };
+        if self.gaps.iter().any(|g| g.spiked) {
+            s.push_str(" with spikes");
+        }
+        if self.cars.iter().any(|c| c.line > 0) {
+            s.push_str(", two lines");
+        }
+        s
+    }
+
+    /// Distance from `p` to the front car line along the block's travel direction, m
+    /// (negative: past it).
+    pub fn ahead_of(&self, p: [f32; 2]) -> f32 {
+        let line = add(self.site.pos, scale(self.site.dir, BLOCK_ALONG_M));
+        dot2(sub(line, p), self.site.dir)
+    }
+
+    /// Distance past the last car line along the travel direction a racer at `p` is, m
+    /// (negative: not past it yet).
+    pub fn past_by(&self, p: [f32; 2]) -> f32 {
+        let last = self
+            .cars
+            .iter()
+            .map(|c| dot2(sub(c.pos, self.site.pos), self.site.dir))
+            .fold(BLOCK_ALONG_M, f32::max);
+        dot2(sub(p, self.site.pos), self.site.dir) - last
+    }
+}
+
+/// Dot product.
+fn dot2(a: [f32; 2], b: [f32; 2]) -> f32 {
+    a[0] * b[0] + a[1] * b[1]
+}
+
+/// What a roadblock is made of at one wanted level (`tools.toml` `[[roadblock.tiers]]`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct Barricade {
-    /// The barricade's box (spans the gap and overlaps the barriers either side a little).
-    pub collider: StaticCollider,
-    /// Gap edges on the barrier line, m: left end, right end (seen by the approaching racer).
-    pub gap: [[f32; 2]; 2],
-    /// Clear width of the gap, m.
-    pub width_m: f32,
+#[serde(deny_unknown_fields)]
+pub struct BlockRecipe {
+    /// Cars in the front line (more on a road too wide for them, fewer on one too narrow).
+    pub cars: u32,
+    /// How many of them are heavy units (the ones nearest the middle of the road first).
+    pub heavy: u32,
+    /// Planned width of each gap between cars, m (never below [`GAP_MIN_M`]).
+    pub gap_m: f32,
+    /// How many gaps get a spike strip (0 = none; more than there are = all).
+    pub spiked_gaps: u32,
+    /// Chance (0..=1) of a second, staggered line [`SECOND_LINE_M`] behind the first, with
+    /// its gaps off the front line's.
+    pub second_line_chance: f32,
 }
 
-/// Clear width of a roadblock's one gap, m: one car width (the widest cars are about 2.0 m
-/// across) with ~0.3 m to spare each side.
-pub const GAP_W_M: f32 = 2.6;
-/// The barrier line stands this far past the site point along the racer's travel, m.
+/// Where a single-car block leaves its gap, and which gaps get spikes when only some do
+/// (picked by tool id: no draw on the police RNG).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GapPick {
+    /// At the left edge of the carriageway / the leftmost gaps.
+    Left,
+    /// The middle.
+    Centre,
+    /// At the right edge / the rightmost gaps.
+    Right,
+}
+
+/// The front car line stands this far past the site point along the racer's travel, m.
 pub const BLOCK_ALONG_M: f32 = 4.0;
-/// Boxes on the barrier line overlap their neighbours by this much (no seam a wheel could
-/// find), m.
-pub const BARRIER_OVERLAP_M: f32 = 0.1;
-/// End barriers reach this far into the hard stop they meet (wall, barrier, rail), m.
-pub const STOP_OVERLAP_M: f32 = 0.25;
-/// A roadblock seals only where the hard stops on both sides are within this of the paved
-/// road's edge (a lot or verge beside the sidewalk), m.
+/// A second line stands this far behind the first, m.
+pub const SECOND_LINE_M: f32 = 14.0;
+/// Odd cars of a line of three or more stand this much further along (staggered), m.
+pub const STAGGER_M: f32 = 1.2;
+/// Car size the layout plans with (the largest police models: 5.18 m × 2.04 m), m.
+pub const CAR_PLAN_L_M: f32 = 5.2;
+/// See [`CAR_PLAN_L_M`].
+pub const CAR_PLAN_W_M: f32 = 2.0;
+/// Widest a parked car's footprint across the road is planned (near the largest it can be,
+/// `hypot(CAR_PLAN_L_M, CAR_PLAN_W_M)` = 5.57 m), m.
+pub const FOOT_MAX_M: f32 = 5.4;
+/// Narrowest footprint planned: a car still angled about 30° across the line of travel
+/// (fewer cars on a road too narrow for more), m.
+pub const FOOT_MIN_M: f32 = 4.4;
+/// Narrowest gap a block leaves: one car width (about 2.0 m) and a quarter metre each side, m.
+pub const GAP_MIN_M: f32 = 2.5;
+/// Most cars in one line.
+pub const MAX_LINE_CARS: u32 = 6;
+/// A gap's spike strip lies this far in front of the car line (toward the racer), m.
+pub const GAP_SPIKE_AHEAD_M: f32 = 3.5;
+/// ... and reaches this far past each end of the gap (under the cars' noses), m.
+pub const GAP_SPIKE_OVERHANG_M: f32 = 1.0;
+/// Road flares burn this far before the car line, m.
+pub const FLARE_AHEAD_M: f32 = 22.0;
+/// Within this of the paved road a side counts as within reach (sections, spike extras), m.
 pub const VERGE_REACH_M: f32 = 12.0;
-/// Barricade size: half height and half depth, m (a sawhorse with a board ~1 m up).
-pub const BARRICADE_HALF_H_M: f32 = 0.55;
-/// See [`BARRICADE_HALF_H_M`].
-pub const BARRICADE_HALF_D_M: f32 = 0.3;
-/// Barricade mass: a timber frame (~30 kg) with sandbags on its feet (~100 kg), kg.
-pub const BARRICADE_MASS_KG: f32 = 132.0;
-/// A spike strip's end lies this far under its unit's car (its inner side), m: covered while
-/// the car stands there, and once the car is rammed aside the paving beyond the strip's end
-/// (about 1.85 m to the edge) is wide enough for a car's wheels to pass the strip.
+/// A spike strip's end lies this far under its unit's car (its inner side), m.
 pub const SPIKE_UNDER_CAR_M: f32 = 0.15;
+/// On a two-way road a spike car stands this far left of the centre line (its strip then
+/// starts 0.3 m right of the line), m.
+pub const TWO_WAY_CAR_LEFT_M: f32 = 0.5;
 /// Half width of a parked police car, m.
 pub const UNIT_HALF_W_M: f32 = 0.95;
 /// Half length of a parked police car, m.
 pub const UNIT_HALF_L_M: f32 = 2.45;
 
-/// Where a roadblock leaves its gap, across the carriageway.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GapPick {
-    /// At the left edge of the carriageway.
-    Left,
-    /// In the middle of it.
-    Centre,
-    /// At the right edge.
-    Right,
-}
-
 /// A roadblock laid out across a [`crate::section::Section`] (see [`roadblock_layout`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockLayout {
-    /// Solid barriers, left to right.
-    pub barriers: Vec<StaticCollider>,
-    /// The gap and its barricade.
-    pub barricade: Barricade,
-    /// Parking spots for the block's cars: nose to tail just behind the barrier line, on the
-    /// solid parts (never behind the gap), nearest the gap first.
-    pub unit_spots: Vec<([f32; 2], [f32; 2])>,
-    /// Lateral span covered, m (+ right of the site's travel direction).
-    pub lo: f32,
-    /// See `lo`.
-    pub hi: f32,
+    /// The cars, front line first, left to right.
+    pub cars: Vec<BlockCar>,
+    /// The ways through, front line first, left to right.
+    pub gaps: Vec<BlockGap>,
+    /// Spike strips across the spiked gaps, `[a, b]`.
+    pub gap_strips: Vec<[[f32; 2]; 2]>,
+    /// Cones (drawing only).
+    pub cones: Vec<[f32; 2]>,
+    /// Road flares (drawing only).
+    pub flares: Vec<[f32; 2]>,
 }
 
-/// Lay a roadblock across `sec` (measured at the barrier line, [`BLOCK_ALONG_M`] past `site`)
-/// at `site`: one barrier line from the left hard stop to the
-/// right one (into them by [`STOP_OVERLAP_M`]; the paved edges where a side has no stop),
-/// boxes overlapping by [`BARRIER_OVERLAP_M`], broken only by one [`GAP_W_M`] gap on the
-/// carriageway at `gap`, which a wooden barricade fills. `he` is the barrier box's half
-/// extents (its length is adjusted to fill each run exactly).
+/// Unit `(across, along)` direction of a car whose footprint across the road is `foot_m`:
+/// `across · L + along · W = foot` with `across² + along² = 1`, the solution with the car more
+/// across than along the road (bisection on `along`, no trig: deterministic everywhere).
+fn angle_for_footprint(foot_m: f32) -> (f32, f32) {
+    let (l, w) = (CAR_PLAN_L_M, CAR_PLAN_W_M);
+    let foot = |s: f32| (1.0 - s * s).max(0.0).sqrt() * l + s * w;
+    // The footprint peaks at along = w / hypot(l, w); search from there to fully along.
+    let peak = w / (l * l + w * w).sqrt();
+    let (mut lo, mut hi) = (peak, 1.0f32);
+    for _ in 0..40 {
+        let mid = 0.5 * (lo + hi);
+        if foot(mid) > foot_m {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let s = 0.5 * (lo + hi);
+    ((1.0 - s * s).max(0.0).sqrt(), s)
+}
+
+/// One line of cars across `[lo, hi]` (lateral offsets, + right of travel): `n` cars and the
+/// gaps between them (about `gap_m` wide; wider, and open lanes at the kerbs, on a road too
+/// wide for `n`), fewer cars (one car and a gap at a kerb at least) on one too narrow. Returns the cars' `(centre, footprint)` and the gaps'
+/// `(left, right)`, left to right.
+/// One car line: the cars' `(centre, footprint)` and the gaps' `(left, right)`, left to right.
+type LineLayout = (Vec<(f32, f32)>, Vec<(f32, f32)>);
+
+fn line_layout(lo: f32, hi: f32, n: u32, gap_m: f32, edge: GapPick) -> LineLayout {
+    let w = (hi - lo).max(0.0);
+    let gap_m = gap_m.max(GAP_MIN_M);
+    // Fewer cars where the road cannot hold them angled with car-width gaps between them.
+    let mut n = n.clamp(1, MAX_LINE_CARS);
+    while n > 1 && n as f32 * FOOT_MIN_M + (n as f32 - 1.0) * GAP_MIN_M > w {
+        n -= 1;
+    }
+    if n == 1 {
+        // One car and a gap at a kerb (the side picked).
+        let lo_f = FOOT_MIN_M.min((w - GAP_MIN_M).max(CAR_PLAN_W_M));
+        let f = (w - gap_m).clamp(lo_f, FOOT_MAX_M);
+        let c = match edge {
+            GapPick::Left => hi - 0.5 * f,
+            GapPick::Right | GapPick::Centre => lo + 0.5 * f,
+        };
+        let gap = if c - 0.5 * f - lo > hi - (c + 0.5 * f) {
+            (lo, c - 0.5 * f)
+        } else {
+            (c + 0.5 * f, hi)
+        };
+        return (vec![(c, f)], vec![gap]);
+    }
+    let k = n as f32 - 1.0;
+    // Gaps as planned, closed toward the minimum where the cars would be too narrow.
+    let mut g = gap_m;
+    if (w - k * g) / (n as f32) < FOOT_MIN_M {
+        g = ((w - n as f32 * FOOT_MIN_M) / k).max(GAP_MIN_M);
+    }
+    let mut f = ((w - k * g) / n as f32).max(FOOT_MIN_M);
+    let mut edge_m = 0.0;
+    if f > FOOT_MAX_M {
+        // A wide road: the cars as wide as they get, the gaps up to half as wide again, the
+        // rest open at the kerbs (or shared by the gaps when too narrow to drive).
+        f = FOOT_MAX_M;
+        let spare = w - n as f32 * f - k * g;
+        let widen = spare.min(k * 0.5 * gap_m);
+        g += widen / k;
+        let rest = 0.5 * (spare - widen);
+        if rest >= GAP_MIN_M {
+            edge_m = rest;
+        } else {
+            g += 2.0 * rest / k;
+        }
+    }
+    let mut cars = Vec::new();
+    let mut gaps = Vec::new();
+    if edge_m > 0.0 {
+        gaps.push((lo, lo + edge_m));
+    }
+    for i in 0..n {
+        let x0 = lo + edge_m + i as f32 * (f + g);
+        cars.push((x0 + 0.5 * f, f));
+        if i + 1 < n {
+            gaps.push((x0 + f, x0 + f + g));
+        }
+    }
+    if edge_m > 0.0 {
+        gaps.push((hi - edge_m, hi));
+    }
+    (cars, gaps)
+}
+
+/// Lay a roadblock across `sec` at `site` for `recipe` (owner 2026-10-31, arcade-classic
+/// style): the front line of cars [`BLOCK_ALONG_M`] past the site, kerb to kerb across the
+/// carriageway, each car angled across the road (nose toward the racer, neighbours nose to
+/// nose; odd cars of three or more staggered [`STAGGER_M`] further along), the gaps between
+/// them about `recipe.gap_m` wide. The heavy cars are the ones nearest the middle. With
+/// `second_line` a second line of one car fewer stands [`SECOND_LINE_M`] behind, its gaps off
+/// the front line's. `pick` chooses which gaps get spikes when only some do (and the kerb a
+/// one-car block leaves open). Cones stand in front of every car and flares burn on the
+/// approach.
 pub fn roadblock_layout(
     site: &ToolSite,
     sec: &crate::section::Section,
-    he: [f32; 3],
-    mass_kg: f32,
-    gap: GapPick,
+    recipe: &BlockRecipe,
+    second_line: bool,
+    pick: GapPick,
 ) -> BlockLayout {
     let right = [site.dir[1], -site.dir[0]];
-    let line = add(site.pos, scale(site.dir, BLOCK_ALONG_M));
-    let at = |x: f32| add(line, scale(right, x));
-    let lo = sec.stop_lo.map_or(sec.paved_lo, |s| s - STOP_OVERLAP_M);
-    let hi = sec.stop_hi.map_or(sec.paved_hi, |s| s + STOP_OVERLAP_M);
-    // The gap on the carriageway, 0.3 m in from its edge at the sides.
-    let half = GAP_W_M * 0.5;
-    let (rlo, rhi) = (sec.road_lo, sec.road_hi);
-    let mut c = match gap {
-        GapPick::Left => rlo + 0.3 + half,
-        GapPick::Centre => 0.5 * (rlo + rhi),
-        GapPick::Right => rhi - 0.3 - half,
+    let at = |x: f32, y: f32| add(add(site.pos, scale(site.dir, y)), scale(right, x));
+    let (lo, hi) = (sec.road_lo, sec.road_hi.max(sec.road_lo + 2.0 * GAP_MIN_M));
+    let mut cars = Vec::new();
+    let mut gaps = Vec::new();
+    let mut strips = Vec::new();
+    let mut cones = Vec::new();
+    let lines: &[(u8, u32, f32)] = if second_line {
+        &[
+            (0, recipe.cars, BLOCK_ALONG_M),
+            (1, 0, BLOCK_ALONG_M + SECOND_LINE_M),
+        ]
+    } else {
+        &[(0, recipe.cars, BLOCK_ALONG_M)]
     };
-    c = c.clamp(lo + half + 0.05, hi - half - 0.05);
-    let (g0, g1) = (c - half, c + half);
-    let mut barriers = Vec::new();
-    for (a, b) in [(lo, g0), (g1, hi)] {
-        let w = b - a;
-        if w <= 0.02 {
-            continue;
+    let mut front_cars = 0u32;
+    for &(line, n, y) in lines {
+        let n = if line == 0 {
+            n
+        } else {
+            front_cars.saturating_sub(1).max(2)
+        };
+        let (line_cars, line_gaps) = line_layout(lo, hi, n, recipe.gap_m, pick);
+        if line == 0 {
+            front_cars = line_cars.len() as u32;
         }
-        let full = 2.0 * he[0];
-        let n = ((w - BARRIER_OVERLAP_M) / (full - BARRIER_OVERLAP_M))
-            .ceil()
-            .max(1.0) as usize;
-        let piece = (w + (n as f32 - 1.0) * BARRIER_OVERLAP_M) / n as f32;
-        for i in 0..n {
-            let x = a + 0.5 * piece + i as f32 * (piece - BARRIER_OVERLAP_M);
-            let p = at(x);
-            barriers.push(StaticCollider {
-                pos: [p[0], p[1], he[2]],
-                half_extents_m: [0.5 * piece, he[1], he[2]],
-                forward: site.dir,
-                mass_kg,
+        // Heavy cars: nearest the middle of the road first (front line only).
+        let mid = 0.5 * (lo + hi);
+        let mut order: Vec<usize> = (0..line_cars.len()).collect();
+        order.sort_by(|a, b| {
+            (line_cars[*a].0 - mid)
+                .abs()
+                .total_cmp(&(line_cars[*b].0 - mid).abs())
+                .then(a.cmp(b))
+        });
+        let heavy_n = if line == 0 { recipe.heavy as usize } else { 0 };
+        let stagger = line_cars.len() >= 3;
+        for (k, &(x, f)) in line_cars.iter().enumerate() {
+            let (across, along) = angle_for_footprint(f);
+            // Neighbours nose to nose: even cars point right, odd ones left; noses toward the
+            // racer.
+            let side = if k % 2 == 0 { 1.0 } else { -1.0 };
+            let heading = add(scale(right, side * across), scale(site.dir, -along));
+            let yk = y + if stagger && k % 2 == 1 {
+                STAGGER_M
+            } else {
+                0.0
+            };
+            let heavy = order.iter().take(heavy_n).any(|i| *i == k);
+            cars.push(BlockCar {
+                pos: at(x, yk),
+                heading,
+                heavy,
+                line,
             });
+            // Two cones before each car's front, inside its footprint.
+            for dx in [-0.25f32, 0.25] {
+                cones.push(at(x + dx * f, y - GAP_SPIKE_AHEAD_M - 1.5));
+            }
+        }
+        // Spiked gaps: all, or `spiked_gaps` of them from the picked side.
+        let ng = line_gaps.len();
+        let want = (recipe.spiked_gaps as usize).min(ng);
+        let spiked: Vec<bool> = (0..ng)
+            .map(|i| {
+                if want >= ng {
+                    return true;
+                }
+                match pick {
+                    GapPick::Left => i < want,
+                    GapPick::Right => i >= ng - want,
+                    GapPick::Centre => {
+                        let first = (ng - want) / 2;
+                        i >= first && i < first + want
+                    }
+                }
+            })
+            .collect();
+        for (i, &(x0, x1)) in line_gaps.iter().enumerate() {
+            gaps.push(BlockGap {
+                a: at(x0, y),
+                b: at(x1, y),
+                width_m: x1 - x0,
+                spiked: spiked[i],
+                line,
+            });
+            if spiked[i] {
+                let ys = y - GAP_SPIKE_AHEAD_M;
+                strips.push([
+                    at((x0 - GAP_SPIKE_OVERHANG_M).max(lo - 0.2), ys),
+                    at((x1 + GAP_SPIKE_OVERHANG_M).min(hi + 0.2), ys),
+                ]);
+            }
         }
     }
-    let bp = at(c);
-    let barricade = Barricade {
-        collider: StaticCollider {
-            pos: [bp[0], bp[1], BARRICADE_HALF_H_M],
-            half_extents_m: [
-                half + BARRIER_OVERLAP_M,
-                BARRICADE_HALF_D_M,
-                BARRICADE_HALF_H_M,
-            ],
-            forward: site.dir,
-            mass_kg: BARRICADE_MASS_KG,
-        },
-        gap: [at(g0), at(g1)],
-        width_m: GAP_W_M,
-    };
-    // Cars nose to tail behind the line (racer side clear), never behind the gap; a second
-    // row behind the first when one row has too few spots.
-    let step = 2.0 * UNIT_HALF_L_M + 0.4;
-    let mut spots: Vec<(f32, [f32; 2], [f32; 2])> = Vec::new();
-    let (plo, phi) = (sec.paved_lo.max(lo), sec.paved_hi.min(hi));
-    for row in 0..2 {
-        let behind =
-            BLOCK_ALONG_M + he[1] + 0.3 + UNIT_HALF_W_M + row as f32 * (2.0 * UNIT_HALF_W_M + 0.6);
-        let car_at = |x: f32| add(add(site.pos, scale(site.dir, behind)), scale(right, x));
-        let rank = |x: f32| row as f32 * 1000.0 + (x - c).abs();
-        // Left of the gap, from the gap outward; then right of it.
-        let mut x = g0 - 0.6 - UNIT_HALF_L_M;
-        while x - UNIT_HALF_L_M >= plo {
-            spots.push((rank(x), car_at(x), perp_left(site.dir)));
-            x -= step;
-        }
-        let mut x = g1 + 0.6 + UNIT_HALF_L_M;
-        while x + UNIT_HALF_L_M <= phi {
-            spots.push((rank(x), car_at(x), scale(perp_left(site.dir), -1.0)));
-            x += step;
-        }
+    // Flares on the approach: at both kerbs and in front of every front-line gap.
+    let yf = BLOCK_ALONG_M - FLARE_AHEAD_M;
+    let mut flares = vec![at(lo + 0.5, yf), at(hi - 0.5, yf)];
+    for g in gaps.iter().filter(|g| g.line == 0) {
+        let x = 0.5 * (dot2(sub(g.a, site.pos), right) + dot2(sub(g.b, site.pos), right));
+        flares.push(at(x, yf + 6.0));
     }
-    spots.sort_by(|a, b| a.0.total_cmp(&b.0));
     BlockLayout {
-        barriers,
-        barricade,
-        unit_spots: spots.into_iter().map(|(_, p, h)| (p, h)).collect(),
-        lo,
-        hi,
+        cars,
+        gaps,
+        gap_strips: strips,
+        cones,
+        flares,
     }
 }
 
 /// A spike strip laid out across a [`crate::section::Section`] (see [`spike_layout`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpikeLayout {
-    /// Strip end on the left (the far end from its car), m.
+    /// Strip end on the left: under the edge of its car, [`SPIKE_UNDER_CAR_M`] in, m.
     pub a: [f32; 2],
-    /// Strip end on the right, [`SPIKE_UNDER_CAR_M`] under its car.
+    /// Strip end on the right: the kerb of the racer's carriageway, m.
     pub b: [f32; 2],
-    /// Where its car parks, m: on the right edge of the paving, beside the strip's end.
+    /// Where its car parks, m: at the inner (left) end of the strip.
     pub post: [f32; 2],
     /// Parked heading: the racer's travel direction.
     pub heading: [f32; 2],
-    /// More segments over the other paved runs between the stops (see
-    /// [`SpikeStrip::extra`]); filled by the caller, which knows the city's paving.
-    pub extra: Vec<[[f32; 2]; 2]>,
+    /// Burning road flares on the approach (drawing only), m.
+    pub flares: Vec<[f32; 2]>,
 }
 
-/// Lay a spike strip across `sec` at `site`: from the left end of the paved run (into the
-/// hard stop there, if it meets one) to [`SPIKE_UNDER_CAR_M`] under its car, which stands on
-/// the right edge of the paving. Every lane, shoulder and sidewalk of the road is covered;
-/// the ways past are off the paving (where there is no wall or barrier) and through the car.
-pub fn spike_layout(site: &ToolSite, sec: &crate::section::Section) -> SpikeLayout {
+/// Lay a spike strip across `sec` at `site` (owner 2026-10-31, arcade-classic style): across
+/// the racer's lanes, from under its unit's car to the kerb. On a two-way road (`two_way`) the
+/// car stands astride the centre line and the strip covers the racer's half; on a one-way road
+/// the car stands at the left kerb and the strip covers the rest of the carriageway. The ways
+/// past are the other lane (two-way roads), off the road (sidewalk or verge) and ramming the
+/// car aside. Flares burn on the approach.
+pub fn spike_layout(site: &ToolSite, sec: &crate::section::Section, two_way: bool) -> SpikeLayout {
     let right = [site.dir[1], -site.dir[0]];
-    let at = |x: f32| add(site.pos, scale(right, x));
-    let lo = match sec.stop_lo {
-        Some(s) if s >= sec.paved_lo - 0.3 => s,
-        _ => sec.paved_lo,
+    let at = |x: f32, y: f32| add(add(site.pos, scale(site.dir, y)), scale(right, x));
+    let (lo, hi) = (sec.road_lo, sec.road_hi);
+    let car = if two_way {
+        // Astride the centre line, a little into the oncoming lane: the strip starts just
+        // right of the line, so a car on the line (or in its own lane) meets it.
+        // The site lies on the road's line: on a two-way road, its centre line.
+        (0.0 - TWO_WAY_CAR_LEFT_M)
+            .min(hi - UNIT_HALF_W_M - 1.0)
+            .max(lo + UNIT_HALF_W_M)
+    } else {
+        lo + UNIT_HALF_W_M + 0.1
     };
-    let edge = match sec.stop_hi {
-        Some(s) if s <= sec.paved_hi + 0.3 => s.min(sec.paved_hi),
-        _ => sec.paved_hi,
-    };
-    let car = edge - UNIT_HALF_W_M - 0.05;
-    let end = car - UNIT_HALF_W_M + SPIKE_UNDER_CAR_M;
+    let start = car + UNIT_HALF_W_M - SPIKE_UNDER_CAR_M;
+    let end = (hi + 0.2).max(start + 0.5);
     SpikeLayout {
-        a: at(lo),
-        b: at(end.max(lo + 0.5)),
-        post: at(car),
+        a: at(start, 0.0),
+        b: at(end, 0.0),
+        post: at(car, 0.0),
         heading: site.dir,
-        extra: Vec::new(),
+        flares: vec![at(car, -FLARE_AHEAD_M), at(hi - 0.5, -FLARE_AHEAD_M + 4.0)],
     }
 }
 
@@ -423,6 +676,14 @@ pub struct SpikeStrip {
     /// belong to the same unit and go with it.
     #[serde(default)]
     pub extra: Vec<[[f32; 2]; 2]>,
+    /// The roadblock this strip lies in a gap of (owner 2026-10-31: spiked gaps at higher
+    /// heat). Such a strip has no unit of its own: it lies while its block stands and goes
+    /// with it.
+    #[serde(default)]
+    pub block: Option<ToolId>,
+    /// Burning road flares on the approach (drawing only), m.
+    #[serde(default)]
+    pub flares: Vec<[f32; 2]>,
 }
 
 impl SpikeStrip {
@@ -452,6 +713,8 @@ impl SpikeStrip {
             expires,
             scripted: false,
             extra: Vec::new(),
+            block: None,
+            flares: Vec::new(),
         }
     }
 
@@ -476,6 +739,8 @@ impl SpikeStrip {
             expires,
             scripted: false,
             extra: Vec::new(),
+            block: None,
+            flares: Vec::new(),
         }
     }
 
@@ -716,110 +981,186 @@ mod tests {
         }
     }
 
-    /// Lateral spans `(lo, hi)` (+x = right of north) of the boxes, sorted.
-    fn spans(cs: &[StaticCollider]) -> Vec<(f32, f32)> {
-        let mut v: Vec<(f32, f32)> = cs
-            .iter()
-            .map(|c| {
-                (
-                    c.pos[0] - c.half_extents_m[0],
-                    c.pos[0] + c.half_extents_m[0],
-                )
-            })
-            .collect();
-        v.sort_by(|a, b| a.0.total_cmp(&b.0));
-        v
+    fn recipe(cars: u32, heavy: u32, gap_m: f32, spiked: u32) -> BlockRecipe {
+        BlockRecipe {
+            cars,
+            heavy,
+            gap_m,
+            spiked_gaps: spiked,
+            second_line_chance: 0.0,
+        }
+    }
+
+    /// Lateral extent `(lo, hi)` (+x = right of north) of a planned car's footprint.
+    fn foot(c: &BlockCar) -> (f32, f32) {
+        let half = 0.5 * (c.heading[0].abs() * CAR_PLAN_L_M + c.heading[1].abs() * CAR_PLAN_W_M);
+        (c.pos[0] - half, c.pos[0] + half)
     }
 
     #[test]
-    fn roadblock_spans_stop_to_stop_with_one_barricaded_gap() {
-        use crate::section::Section;
-        // A 14 m road with sidewalks, buildings 4 m past them on the left and 6 m on the right.
-        let sec = Section {
-            paved_lo: -10.0,
-            paved_hi: 10.0,
-            road_lo: -7.0,
-            road_hi: 7.0,
-            stop_lo: Some(-14.0),
-            stop_hi: Some(16.0),
-            opposing: false,
-            on_road: true,
-            z_m: None,
-        };
-        assert!(sec.sealable(VERGE_REACH_M));
-        for gap in [GapPick::Left, GapPick::Centre, GapPick::Right] {
-            let lay = roadblock_layout(&site_north(), &sec, [1.2, 0.3, 0.5], 400.0, gap);
-            let sp = spans(&lay.barriers);
-            // Into both stops.
-            assert!(sp[0].0 <= -14.0 - STOP_OVERLAP_M + 1e-3);
-            assert!(sp.last().unwrap().1 >= 16.0 + STOP_OVERLAP_M - 1e-3);
-            // Neighbours overlap, except across exactly one gap of GAP_W_M.
-            let mut gaps = Vec::new();
-            for w in sp.windows(2) {
-                if w[1].0 > w[0].1 + 1e-3 {
-                    gaps.push((w[0].1, w[1].0));
-                } else {
-                    assert!(w[0].1 - w[1].0 >= BARRIER_OVERLAP_M - 1e-3, "{w:?}");
-                }
-            }
-            assert_eq!(gaps.len(), 1, "{gap:?}: {sp:?}");
-            let (g0, g1) = gaps[0];
-            assert!((g1 - g0 - GAP_W_M).abs() < 1e-3);
-            assert!(
-                g0 >= sec.road_lo - 1e-3 && g1 <= sec.road_hi + 1e-3,
-                "gap on the road"
-            );
-            // The barricade fills it.
-            let b = lay.barricade.collider;
-            assert!(b.pos[0] - b.half_extents_m[0] < g0 && b.pos[0] + b.half_extents_m[0] > g1);
-            // All on one line, 4 m past the site.
-            assert!(lay.barriers.iter().all(|c| (c.pos[1] - 54.0).abs() < 1e-3));
-            // Cars behind the line, never behind the gap.
-            assert!(lay.unit_spots.len() >= 3);
-            for (p, _) in &lay.unit_spots {
-                assert!(p[1] > 54.0 + 1.0);
-                assert!(p[0] + UNIT_HALF_L_M <= g0 - 0.5 || p[0] - UNIT_HALF_L_M >= g1 + 0.5);
-            }
+    fn footprint_angle_solves_the_footprint() {
+        for f in [2.4f32, 3.0, 4.0, 4.4, 5.0, 5.4] {
+            let (c, s) = angle_for_footprint(f);
+            assert!((c * c + s * s - 1.0).abs() < 1e-4);
+            let got = c * CAR_PLAN_L_M + s * CAR_PLAN_W_M;
+            assert!((got - f).abs() < 1e-3, "{f}: {got}");
+            assert!(c > 0.0 && s > 0.0);
         }
-        // No stop within reach on one side, or a far carriageway: not sealable.
-        assert!(!Section {
-            stop_hi: None,
-            ..sec
-        }
-        .sealable(VERGE_REACH_M));
-        assert!(!Section {
-            stop_hi: Some(30.0),
-            ..sec
-        }
-        .sealable(VERGE_REACH_M));
-        assert!(!Section {
-            opposing: true,
-            ..sec
-        }
-        .sealable(VERGE_REACH_M));
     }
 
     #[test]
-    fn spike_strip_covers_the_paving_and_ends_under_its_car() {
+    fn roadblock_tiers_lay_angled_cars_with_gaps_between_them() {
         use crate::section::Section;
-        // Barrier on the left at the paved edge, open verge on the right.
-        let sec = Section {
-            paved_lo: -2.0,
-            paved_hi: 9.0,
-            road_lo: -2.0,
-            road_hi: 9.0,
-            stop_lo: Some(-2.0),
-            stop_hi: None,
-            opposing: false,
-            on_road: true,
-            z_m: None,
-        };
-        let lay = spike_layout(&site_north(), &sec);
-        assert!((lay.a[0] - -2.0).abs() < 1e-4, "{:?}", lay.a);
-        let car = lay.post[0];
-        assert!(car + UNIT_HALF_W_M <= 9.0 + 1e-4);
-        assert!(lay.b[0] > car - UNIT_HALF_W_M && lay.b[0] < car);
+        // A 19 m boulevard.
+        let sec = Section::plain(-9.5, 9.5);
+        for (r, cars, heavy, spiked) in [
+            (recipe(2, 0, 4.5, 0), 2, 0, 0),
+            (recipe(3, 0, 3.0, 1), 3, 0, 1),
+            (recipe(3, 2, 2.7, 9), 3, 2, 2),
+        ] {
+            let lay = roadblock_layout(&site_north(), &sec, &r, false, GapPick::Centre);
+            assert_eq!(lay.cars.len(), cars, "{r:?}");
+            assert_eq!(lay.cars.iter().filter(|c| c.heavy).count(), heavy);
+            assert_eq!(lay.gaps.len(), cars - 1);
+            assert_eq!(lay.gaps.iter().filter(|g| g.spiked).count(), spiked);
+            assert_eq!(lay.gap_strips.len(), spiked);
+            // Cars kerb to kerb, angled across the road, noses toward the racer; the gaps
+            // between neighbours as planned, at least a car width.
+            let mut feet: Vec<(f32, f32)> = lay.cars.iter().map(foot).collect();
+            feet.sort_by(|a, b| a.0.total_cmp(&b.0));
+            assert!((feet[0].0 - -9.5).abs() < 0.05, "{feet:?}");
+            assert!((feet.last().unwrap().1 - 9.5).abs() < 0.05, "{feet:?}");
+            for (w, g) in feet.windows(2).zip(&lay.gaps) {
+                let open = w[1].0 - w[0].1;
+                assert!((open - g.width_m).abs() < 0.05, "{open} vs {g:?}");
+                assert!(g.width_m >= GAP_MIN_M - 1e-3);
+            }
+            for c in &lay.cars {
+                assert!(c.heading[0].abs() > 0.5, "angled across the road: {c:?}");
+                assert!(c.heading[1] < 0.0, "nose toward the racer: {c:?}");
+                assert!(c.pos[1] >= 54.0 - 1e-3 && c.pos[1] <= 54.0 + STAGGER_M + 1e-3);
+            }
+            // Neighbours point at each other (nose to nose).
+            assert!(lay.cars[0].heading[0] > 0.0 && lay.cars[1].heading[0] < 0.0);
+            // Heavy units in the middle.
+            if heavy > 0 {
+                let mid = lay
+                    .cars
+                    .iter()
+                    .min_by(|a, b| a.pos[0].abs().total_cmp(&b.pos[0].abs()));
+                assert!(mid.unwrap().heavy);
+            }
+            // Gap strips lie across their gap, in front of the line.
+            for (s, g) in lay
+                .gap_strips
+                .iter()
+                .zip(lay.gaps.iter().filter(|g| g.spiked))
+            {
+                assert!(s[0][0] < g.a[0] && s[1][0] > g.b[0]);
+                assert!((s[0][1] - (54.0 - GAP_SPIKE_AHEAD_M)).abs() < 1e-3);
+            }
+            assert!(!lay.flares.is_empty() && !lay.cones.is_empty());
+        }
+        // The wide-gap tier leaves a gap well over a car width.
+        let lay = roadblock_layout(
+            &site_north(),
+            &sec,
+            &recipe(2, 0, 4.5, 0),
+            false,
+            GapPick::Centre,
+        );
+        assert!(lay.gaps[0].width_m >= 4.5);
+    }
+
+    #[test]
+    fn roads_too_wide_or_narrow_get_more_or_fewer_cars() {
+        use crate::section::Section;
+        let r = recipe(2, 0, 4.5, 0);
+        // Too wide for two cars: a wider gap and an open lane at each kerb.
+        let wide = roadblock_layout(
+            &site_north(),
+            &Section::plain(-12.0, 12.0),
+            &r,
+            false,
+            GapPick::Centre,
+        );
+        assert_eq!(wide.cars.len(), 2);
+        assert_eq!(wide.gaps.len(), 3);
+        assert!(wide.gaps.iter().all(|g| g.width_m >= GAP_MIN_M - 1e-3));
+        // Too narrow for three: two.
+        let two = roadblock_layout(
+            &site_north(),
+            &Section::plain(-7.0, 7.0),
+            &recipe(3, 0, 3.0, 1),
+            false,
+            GapPick::Centre,
+        );
+        assert_eq!(two.cars.len(), 2);
+        let narrow = roadblock_layout(
+            &site_north(),
+            &Section::plain(-3.0, 3.0),
+            &r,
+            false,
+            GapPick::Left,
+        );
+        assert_eq!(narrow.cars.len(), 1);
+        assert_eq!(narrow.gaps.len(), 1);
+        assert!(narrow.gaps[0].width_m >= GAP_MIN_M - 1e-3);
+        for lay in [&wide, &narrow] {
+            for c in &lay.cars {
+                let (a, b) = foot(c);
+                assert!(a >= -12.05 && b <= 12.05);
+            }
+        }
+    }
+
+    #[test]
+    fn a_second_line_staggers_its_gaps() {
+        use crate::section::Section;
+        let lay = roadblock_layout(
+            &site_north(),
+            &Section::plain(-9.5, 9.5),
+            &recipe(3, 2, 2.7, 9),
+            true,
+            GapPick::Centre,
+        );
+        let second: Vec<&BlockGap> = lay.gaps.iter().filter(|g| g.line == 1).collect();
+        assert!(!second.is_empty());
+        assert!(lay.cars.iter().any(|c| c.line == 1 && c.pos[1] > 60.0));
+        // No second-line gap lines up with a front-line gap.
+        for g2 in &second {
+            let c2 = 0.5 * (g2.a[0] + g2.b[0]);
+            for g1 in lay.gaps.iter().filter(|g| g.line == 0) {
+                let c1 = 0.5 * (g1.a[0] + g1.b[0]);
+                assert!((c1 - c2).abs() > 1.5, "{c1} vs {c2}");
+            }
+        }
+    }
+
+    #[test]
+    fn spike_strip_covers_the_racers_lanes_from_its_car_to_the_kerb() {
+        use crate::section::Section;
+        let sec = Section::plain(-5.0, 5.0);
+        // Two-way: the car astride the centre line, the strip over the racer's half, the
+        // oncoming lane open.
+        let lay = spike_layout(&site_north(), &sec, true);
+        assert!((lay.post[0] + TWO_WAY_CAR_LEFT_M).abs() < 1e-4);
+        assert!(
+            lay.a[0] > 0.0 && lay.a[0] < 0.8,
+            "the strip reaches the centre line"
+        );
+        assert!(lay.a[0] > lay.post[0] && lay.a[0] < lay.post[0] + UNIT_HALF_W_M);
+        assert!(lay.b[0] >= 5.0);
+        assert!(
+            lay.post[0] - UNIT_HALF_W_M - -5.0 >= 2.0,
+            "oncoming lane open"
+        );
         assert_eq!(lay.heading, [0.0, 1.0]);
+        // One-way: the car at the left kerb, the strip over the rest.
+        let lay = spike_layout(&site_north(), &sec, false);
+        assert!(lay.post[0] - UNIT_HALF_W_M >= -5.0 && lay.post[0] < -3.5);
+        assert!(lay.b[0] >= 5.0);
+        assert!(!lay.flares.is_empty());
     }
 
     #[test]

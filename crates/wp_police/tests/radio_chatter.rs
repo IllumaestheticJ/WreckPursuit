@@ -68,6 +68,12 @@ struct Harness {
 
 impl Harness {
     fn new(seed: u64) -> Self {
+        Self::with_roadblocks(seed, true)
+    }
+
+    /// [`Harness::new`], optionally with the AI captain's roadblocks locked (a test about
+    /// other callouts, whose timing the L1 roadblock's radio call would shift; 2026-10-31).
+    fn with_roadblocks(seed: u64, roadblocks: bool) -> Self {
         let (graph, map) = city().clone();
         let seg = graph
             .segments
@@ -89,6 +95,9 @@ impl Harness {
         // city's straights are too short for 600 m sites.
         let mut cfg = PoliceConfig::builtin_dense_patrols();
         cfg.tools.spikes.appear_far_m = 300.0;
+        if !roadblocks {
+            cfg.presence.unlocks.roadblock_level = 99;
+        }
         let mut police = PoliceSystem::with_city(
             cfg,
             graph,
@@ -209,7 +218,9 @@ fn find(lines: &[RadioLine], from: usize, needle: &str) -> Option<usize> {
 
 #[test]
 fn scripted_pursuit_callouts_in_order_with_places_and_no_overlap() {
-    let mut h = Harness::new(11);
+    // Roadblocks (from L1 since 2026-10-31) have their own test below; at L1 their call would
+    // delay the lost-visual call past the short L1 escape.
+    let mut h = Harness::with_roadblocks(11, false);
     let min_gap = PoliceConfig::builtin().radio.min_gap_s;
     h.speed = 18.0;
     h.run(1.0);
@@ -239,7 +250,7 @@ fn scripted_pursuit_callouts_in_order_with_places_and_no_overlap() {
         }
     }
     let lost = lost_at.unwrap_or_else(|| panic!("no lost-visual call: {:#?}", h.texts()));
-    assert_eq!(h.status(), PursuitStatus::Searching);
+    assert_eq!(h.status(), PursuitStatus::Searching, "{:#?}", h.texts());
     let rec = h.police.racer(RACER).unwrap().clone();
     let last_known = rec.last_known.unwrap();
     assert!(

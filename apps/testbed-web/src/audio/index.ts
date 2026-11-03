@@ -377,9 +377,18 @@ export class AudioSystem {
     this.safe(() => audioBridge.setScannerTier(this.careerTier ?? this.tier));
   }
 
-  /** speechSynthesis.speak calls so far (e2e) and whether speech exists in this browser. */
-  speech(): { supported: boolean; attempts: number; voice: boolean } {
-    return { supported: ScannerPlayer.speechSupported(), attempts: this.scanner?.speechAttempts ?? 0, voice: this.radioVoice() };
+  /** speechSynthesis.speak calls so far (e2e) and whether speech exists in this browser.
+   * `reached`: utterances the speech engine took up (started, or failed for lack of a voice as
+   * in headless Chromium); a wedged queue leaves them pending forever, so `reached` stays put
+   * while `attempts` climbs. `unwedged`: times `say` found the queue stuck and cleared it. */
+  speech(): { supported: boolean; attempts: number; voice: boolean; reached: number; unwedged: number } {
+    return {
+      supported: ScannerPlayer.speechSupported(),
+      attempts: this.scanner?.speechAttempts ?? 0,
+      voice: this.radioVoice(),
+      reached: this.scanner?.speechReached ?? 0,
+      unwedged: this.scanner?.speechUnwedged ?? 0,
+    };
   }
 
   /** Current player volumes (audio panel settings). */
@@ -397,7 +406,7 @@ export class AudioSystem {
 
   /**
    * Silence everything while the game is paused: suspends the AudioContext (looped engine /
-   * siren voices freeze instead of droning on) and pauses scanner TTS. Idempotent, so main.ts
+   * siren voices freeze instead of droning on) and cuts the scanner TTS line. Idempotent, so main.ts
    * calls it every frame with `app.paused`.
    *
    * `garageScreen`: the pause is a garage screen (career garage, workshop). The game buses are
@@ -407,9 +416,14 @@ export class AudioSystem {
   setPaused(p: boolean, garageScreen = false): void {
     const ui = p && garageScreen;
     if (p === this.paused && ui === this.uiOnly) return;
-    if (p !== this.paused && typeof speechSynthesis !== "undefined") {
-      if (p) speechSynthesis.pause();
-      else speechSynthesis.resume();
+    // Radio voice: a pause drops the line being spoken (cancel) instead of
+    // speechSynthesis.pause(). Chromium's pause() on an idle synth wedges the queue: every later
+    // speak() stays pending, never starts and never errors, even after resume(). The career
+    // garage is a pause, so after the first garage visit or Esc menu no callout was spoken again
+    // (owner report 2026-10-31). Radio lines are momentary; a half line is not worth resuming.
+    if (p !== this.paused && ScannerPlayer.speechSupported()) {
+      if (p) speechSynthesis.cancel();
+      else if (speechSynthesis.paused) speechSynthesis.resume();
     }
     this.paused = p;
     this.uiOnly = ui;

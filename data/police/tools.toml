@@ -7,15 +7,48 @@ captain_order_hold_s = 20.0
 min_ahead_m = 300.0
 max_ahead_m = 700.0
 min_sight_m = 120.0
-units = [2, 3]
-barrier_half_extents_m = [1.2, 0.3, 0.5]
-# Light water-filled plastic sections that a car shoves aside (owner 2026-10-29).
-barrier_mass_kg = 120.0
 unit_mass_kg = 1700.0
 lifetime_s = 90.0
 # Never on highways when the wanted level is above this.
 highway_max_level = 3
 max_active = 1
+# Arcade-classic-style roadblocks (owner 2026-10-31): police cars parked at an angle across the
+# road, nose to nose or staggered, with gaps between them. One entry per wanted level, L1 first.
+# cars: front-line cars (more on a road too wide, fewer on one too narrow); heavy: how many are
+# heavy units (the heaviest police model: much harder to shove), nearest the middle first;
+# gap_m: planned gap width (>= 2.5 m, a car width plus a little); spiked_gaps: gaps with a spike
+# strip in front (more than there are = all); second_line_chance: chance of a second, staggered
+# line 14 m behind.
+[[roadblock.tiers]]
+cars = 2
+heavy = 0
+gap_m = 4.5
+spiked_gaps = 0
+second_line_chance = 0.0
+[[roadblock.tiers]]
+cars = 2
+heavy = 0
+gap_m = 4.0
+spiked_gaps = 0
+second_line_chance = 0.0
+[[roadblock.tiers]]
+cars = 3
+heavy = 0
+gap_m = 3.0
+spiked_gaps = 1
+second_line_chance = 0.0
+[[roadblock.tiers]]
+cars = 3
+heavy = 2
+gap_m = 2.8
+spiked_gaps = 9
+second_line_chance = 0.35
+[[roadblock.tiers]]
+cars = 4
+heavy = 3
+gap_m = 2.7
+spiked_gaps = 9
+second_line_chance = 0.7
 [roadblock.cooldown_s]
 dawn = 60.0
 day = 40.0

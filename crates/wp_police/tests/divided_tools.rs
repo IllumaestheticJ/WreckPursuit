@@ -196,9 +196,8 @@ fn spikes_stay_on_the_racers_carriageway(name: &str, world: &World) -> usize {
             strip.a,
             strip.b
         );
-        // Spans the carriageway: covers the racer's line, every lane and (owner 2026-10-28)
-        // the shoulders up to its car (which may stand in the outer lane where no shoulder is
-        // known), but never more than a carriageway with its shoulders.
+        // Spans the carriageway (owner 2026-10-31): from under its car at the left edge over
+        // every lane to the kerb, never more than a carriageway with its shoulders.
         let width = sseg.lanes_fwd as f32 * sseg.lane_width_m;
         let len = dist(strip.a, strip.b);
         assert!(
@@ -218,7 +217,7 @@ fn spikes_stay_on_the_racers_carriageway(name: &str, world: &World) -> usize {
     checked
 }
 
-/// A roadblock on a divided highway: every barrier and car spot on the racer's side of the
+/// A roadblock on a divided highway: every planned and parked car on the racer's side of the
 /// median. Returns whether it was on one (and so checked).
 fn roadblock_stays_on_its_carriageway(
     name: &str,
@@ -249,7 +248,7 @@ fn roadblock_stays_on_its_carriageway(
             .find(|x| x.id == *u)
             .map(|x| x.body.pos)
     }));
-    spots.extend(rb.barriers.iter().map(|b| [b.pos[0], b.pos[1]]));
+    spots.extend(rb.cars.iter().map(|c| c.pos));
     for p in spots {
         assert!(
             right_of(median, flow, p) * side > 0.0,

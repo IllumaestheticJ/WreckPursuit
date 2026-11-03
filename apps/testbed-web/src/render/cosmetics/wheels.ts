@@ -110,7 +110,8 @@ const tyres: Builder = (c, p) => {
       c.tweaks.tyreGloss = 0.4;
       return;
     case "wide":
-      c.tweaks.wheelWidth = 1.15;
+      // Drawn by VehicleView's wide-tyre stance (stance.ts: wider tread, pushed-out wheel,
+      // deep dish, arch lips), the same as on cars whose build has the wider tyres.
       return;
     case "drag":
       c.tweaks.dragRadials = true;

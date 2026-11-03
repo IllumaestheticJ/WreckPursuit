@@ -502,6 +502,9 @@ export const sim = {
   ffb: (entity: number): Float32Array => wasm.ffb(entity),
   /** Nitrous bottle `[fill 0..1, burning 0/1, strength, refill, fitted 0/1]` (HUD gauge). */
   nitrous: (entity: number): Float32Array => wasm.nitrous(entity),
+  /** Slipstream: aero drag reduction 0 (clear air) .. 0.35 (on a leader's bumper). The sim
+   * drafts every car; this is the HUD readout (`wp_sim::Sim::drafting`). */
+  drafting: (entity: number): number => wasm.drafting(entity),
   intents: (): Float32Array => wasm.intents(),
   recordStart: (): void => wasm.record_start(),
   recordStop: (): Uint8Array => wasm.record_stop(),

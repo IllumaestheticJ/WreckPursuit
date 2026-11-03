@@ -1,5 +1,9 @@
 # Police blocks and Loop 9 by day — integration notes
 
+> **Superseded 2026-10-31 (roadblocks part):** the barrier / barricade / water-filled-section
+> roadblocks described below are retired. See `docs/integration/roadblocks-v2.md`
+> (arcade-classic-style roadblocks: police cars across the road with gaps).
+
 - **Workstream / prompt:** 06 police, owner requests 2026-10-28 (lead helper)
 - **Branch:** `lead/police-blocks` (from `lead/batch-1028`)
 - **Crates / folders:** `crates/wp_police`, `data/police`; physics and drawing in `wp_sim`,

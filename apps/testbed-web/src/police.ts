@@ -25,6 +25,18 @@ export interface PoliceStatus {
   last_outcome: PursuitOutcome | null;
   /** Seconds since that pursuit ended. */
   outcome_age_s: number | null;
+  /** Nearest set-up roadblock / laid spike strip on the road ahead (wp_wasm `TOOL_ALERT_M`), if any. */
+  tool_ahead?: { kind: "roadblock" | "spikes"; dist_m: number; name: string } | null;
+}
+
+/** The HUD's tool alert line ("ROADBLOCK AHEAD · 320 m"), or null. Owner 2026-10-31. */
+export function toolAlertFor(p: PoliceStatus | null): { text: string; sub: string; kind: "roadblock" | "spikes" } | null {
+  const t = p?.tool_ahead;
+  if (!t) return null;
+  const m = Math.max(10, Math.round(t.dist_m / 10) * 10);
+  return t.kind === "roadblock"
+    ? { text: "ROADBLOCK AHEAD", sub: `${t.name} · ${m} m`, kind: "roadblock" }
+    : { text: "SPIKE STRIP AHEAD", sub: `${m} m`, kind: "spikes" };
 }
 
 /** `wp_police::PursuitOutcome` names. */

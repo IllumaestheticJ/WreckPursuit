@@ -68,6 +68,9 @@ impl PoliceModel {
     }
 }
 
+/// A police car unit still without a body: `(unit, position, heading, speed, heavy)`.
+type WantedBody = (UnitId, [f32; 2], [f32; 2], f32, bool);
+
 /// SplitMix64 finalizer (deterministic integer hash).
 fn mix64(mut z: u64) -> u64 {
     z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -141,6 +144,36 @@ impl Sim {
         self.police_car = Some(car);
     }
 
+    /// Car model for heavy police units (owner 2026-10-31: the SUV / armoured types that stand
+    /// in high-heat roadblocks, [`wp_police::Unit::heavy`]; e.g. `sentinel_bastion`). With a
+    /// fleet ([`Sim::set_police_cars`]) the fleet model of this id is used, else the fleet's
+    /// heaviest; without either a heavy unit gets the plain [`Sim::set_police_car`] model. The
+    /// car is an ordinary vehicle: same physics and damage code as every other.
+    pub fn set_police_heavy_car(&mut self, car: LoadedCar) {
+        self.police_heavy_car = Some(car);
+    }
+
+    /// Fleet index of the model heavy units drive: the one named by
+    /// [`Sim::set_police_heavy_car`], else the heaviest (first of equals).
+    fn heavy_fleet_model(&self) -> usize {
+        if let Some(h) = &self.police_heavy_car {
+            if let Some(i) = self
+                .police_fleet
+                .iter()
+                .position(|m| m.car.def.id == h.def.id)
+            {
+                return i;
+            }
+        }
+        let mut best = 0;
+        for (i, m) in self.police_fleet.iter().enumerate() {
+            if m.car.def.mass_kg > self.police_fleet[best].car.def.mass_kg {
+                best = i;
+            }
+        }
+        best
+    }
+
     /// Several police car models keyed by wanted level (replaces [`Sim::set_police_car`]'s
     /// single model while non-empty; empty restores it). Each AI car unit gets its model once,
     /// the first tick the sim sees it, from the highest wanted level of any racer at that
@@ -189,15 +222,20 @@ impl Sim {
         let units = self.police.units();
         self.police_unit_models
             .retain(|id, _| units.iter().any(|u| u.id == *id));
-        let new: Vec<UnitId> = units
+        let new: Vec<(UnitId, bool)> = units
             .iter()
             .filter(|u| u.kind == UnitKind::Car && u.player.is_none())
             .filter(|u| !self.police_unit_models.contains_key(&u.id))
-            .map(|u| u.id)
+            .map(|u| (u.id, u.heavy))
             .collect();
         let level = self.police_dispatch_level().max(self.police_fleet_floor);
-        for unit in new {
-            let m = pick_police_model(&self.police_fleet, level, self.config.seed, unit);
+        let heavy_model = self.heavy_fleet_model();
+        for (unit, heavy) in new {
+            let m = if heavy {
+                heavy_model
+            } else {
+                pick_police_model(&self.police_fleet, level, self.config.seed, unit)
+            };
             self.police_unit_models.insert(unit, m);
         }
         // Owner 2026-10-26 ("cars should match my stars"): units in a model the level has
@@ -374,12 +412,12 @@ impl Sim {
             let _ = self.despawn_vehicle(id);
         }
 
-        let wanted: Vec<(UnitId, [f32; 2], [f32; 2], f32)> = self
+        let wanted: Vec<WantedBody> = self
             .police
             .units()
             .iter()
             .filter(|u| u.kind == UnitKind::Car && u.player.is_none() && u.entity.is_none())
-            .map(|u| (u.id, u.body.pos, u.body.heading, u.body.speed))
+            .map(|u| (u.id, u.body.pos, u.body.heading, u.body.speed, u.heavy))
             .collect();
         self.assign_police_models();
         let multi = !self.police_fleet.is_empty();
@@ -391,11 +429,16 @@ impl Sim {
         };
         if multi || single.is_some() {
             let unbodied: Vec<UnitId> = wanted.iter().map(|w| w.0).collect();
-            for (unit, pos, heading, speed) in wanted {
+            for (unit, pos, heading, speed, heavy) in wanted {
                 let (car, model_limits) = if multi {
                     let m = self.police_unit_models.get(&unit).copied().unwrap_or(0);
                     let pm = &self.police_fleet[m.min(self.police_fleet.len() - 1)];
                     (pm.car.clone(), pm.limits)
+                } else if heavy && self.police_heavy_car.is_some() {
+                    (
+                        self.police_heavy_car.clone().expect("heavy police car"),
+                        None,
+                    )
                 } else {
                     // `single` is Some here (checked above).
                     (single.clone().expect("single police car"), None)

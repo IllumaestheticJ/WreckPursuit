@@ -136,10 +136,11 @@ day = 0.0
 dusk = 0.1
 night = 0.25
 
-# Wanted level (1..=5) at which tools / tactics unlock.
+# Wanted level (1..=5) at which tools / tactics unlock. Roadblocks from L1 (owner 2026-10-31:
+# arcade-classic-style blocks scale from two cruisers at L1-2 to heavy units and spikes at L4-5).
 [unlocks]
 spikes_level = 4
-roadblock_level = 3
+roadblock_level = 1
 pit_level = 2
 boxin_level = 1
 rolling_block_level = 3

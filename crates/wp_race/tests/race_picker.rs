@@ -22,6 +22,15 @@ use wp_sim::{Sim, VehicleKind};
 fn assert_strips_manned(sim: &Sim, id: &str) {
     let p = sim.police();
     for s in p.spike_strips() {
+        // A roadblock's gap strip (roadblocks-v2) is manned by its block's cars.
+        if let Some(b) = s.block {
+            assert!(
+                p.roadblocks().iter().any(|r| r.id == b && r.set_up),
+                "{id}: gap strip {:?} without its roadblock",
+                s.id
+            );
+            continue;
+        }
         let u = s
             .unit
             .and_then(|uid| p.units().iter().find(|u| u.id == uid))
@@ -1125,5 +1134,9 @@ fn offramp_sprint() {
 fn grid_arterial_sprint() {
     let r = run_race("grid_arterial_sprint", 200);
     // 1.0 km across the grid city's blocks.
-    check(&r, 25.0..130.0, 3);
+    // Slipstream (lead/drafting, 2026-10-31: every car drafts, police included) reshuffles the
+    // chase: two of the four are now Captured by the city police (Dnf(Captured), a valid
+    // reason) and two finish (68.2 s, 70.9 s). Was 3 finishers; 2 keeps "the race ends with
+    // a winner and every non-finisher has a reason".
+    check(&r, 25.0..130.0, 2);
 }

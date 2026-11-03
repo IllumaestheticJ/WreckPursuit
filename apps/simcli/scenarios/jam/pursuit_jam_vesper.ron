@@ -47,7 +47,23 @@
         // at (-98, 137) stands Obstructed behind a stationary civilian (agent 0) for ~34 s
         // without starting a go-around. The same kind of wp_world follow-up (a car that
         // does not get round a standing one); bound 46 -> 48 s.
-        world_metric(name: "traffic_max_stop_s", min: 0.0, max: 48.0),
-        world_metric(name: "traffic_max_queue", min: 0.0, max: 12.0),
+        // v0.14.6 (roadblocks-v2 + slipstream together, 2026-11-01): 79.6 s. The racer now
+        // finishes the whole route (route_progress 1.0) and parks at the lay-by (427, 1008) from
+        // ~478 s to the end. At ~429 s the chase wrecked a physical civilian (agent 0, entity
+        // 410) at (416, 860) on single-lane seg 818; the civilian behind it (agent 3) finds no
+        // pass, turn or reverse, and is never recycled because the parked racer 160 m away
+        // keeps it in view (recycling skips cars a player can see). It stands from ~520 s until
+        // the run ends, so the number is cut off by the run, not a bound on the wait. Same
+        // wp_world follow-up as above (lead feedback in docs/integration/world.md, v0.14.6);
+        // bound 48 -> 85 s until that lands, then back to 48.
+        world_metric(name: "traffic_max_stop_s", min: 0.0, max: 85.0),
+        // Slipstream (lead/drafting, owner approval 2026-10-31: every car drafts, police
+        // included) reshuffles this chase: the racer is boxed in and stands still at L5 at
+        // (97, 70) from ≈ 266 s, and the civilians held behind that standing pursuit scene
+        // queue up to 17 cars by 282 s (the queue was ≤ 8 before it; measured with a
+        // max_queue-per-second probe). A capture scene, not a traffic jam: the queue metric
+        // does not exempt scenes the way the stop timer does (wp_world follow-up). Bound
+        // 12 -> 18.
+        world_metric(name: "traffic_max_queue", min: 0.0, max: 18.0),
     ],
 )

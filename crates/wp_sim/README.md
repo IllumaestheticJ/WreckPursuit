@@ -109,6 +109,16 @@ Deterministic (the switches follow from the state); replays log only the permiss
 out of the police's racer views. Street racers have it (a racer racing the player does not).
 Test: `light_mode_far_from_the_player`.
 
+## Slipstream (lead, owner approval 2026-10-31, `draft_link.rs`)
+Every fixed tick, before the vehicles step, `apply_slipstream` builds a `DraftBody` per slot
+(Rapier body x/y position and velocity, `body_size_m` width/length), runs
+`wp_vehicle::draft::drag_scales_into` (`DRAFT_PARAMS`) and sets each car's
+`Vehicle::set_draft_drag_scale`. Every vehicle kind, both damage modes, no branching on
+either. `Sim::drafting(id)` is the HUD readout (drag reduction 0..0.35). Not stored or hashed:
+derived from the states every tick. Tests: `tests/slipstream.rs` (5 m behind at 40 m/s: +0.52
+m/s after 4 s of full throttle; nothing side by side or behind a slow car; bit-equal across
+modes and kinds; deterministic). See `docs/integration/drafting.md`.
+
 ## Known gaps
 - Traffic AI does not slow in rain or fog yet (needs a `wp_world` hook, request W-D1 in
   `docs/integration/world.md`); police speed caps ignore weather (E, weather.md step 4).

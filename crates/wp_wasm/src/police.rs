@@ -112,7 +112,24 @@ pub struct PoliceStatus {
     pub last_outcome: Option<&'static str>,
     /// Seconds since that pursuit ended (police clock), if any.
     pub outcome_age_s: Option<f32>,
+    /// The HUD's tool alert (owner 2026-10-31: "Roadblock ahead"): the nearest set-up
+    /// roadblock or laid spike strip on the racer's road ahead within [`TOOL_ALERT_M`], if any.
+    pub tool_ahead: Option<ToolAhead>,
 }
+
+/// A police tool on the racer's road ahead ([`PoliceStatus::tool_ahead`]).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ToolAhead {
+    /// `"roadblock"` or `"spikes"`.
+    pub kind: &'static str,
+    /// Distance ahead along the road, m.
+    pub dist_m: f32,
+    /// What the radio calls it ("three-car roadblock with spikes"; "spikes").
+    pub name: String,
+}
+
+/// The HUD alerts a tool this far ahead or closer, m.
+pub const TOOL_ALERT_M: f32 = 400.0;
 
 /// Name of a pursuit outcome (matches the serde name).
 fn outcome_name(o: PursuitOutcome) -> &'static str {
@@ -160,7 +177,29 @@ pub fn status(p: &PoliceSystem, racer: EntityId) -> PoliceStatus {
         .iter()
         .rev()
         .find(|r| r.racer == racer && r.end.is_some() && r.outcome.is_some());
+    let tool_ahead = p.tool_ahead(racer, TOOL_ALERT_M).map(|(roadblock, d)| {
+        let name = if roadblock {
+            p.roadblocks()
+                .iter()
+                .filter(|b| b.set_up)
+                .min_by(|a, b| {
+                    let r = p.racer(racer).map_or([0.0; 2], |r| [r.pos[0], r.pos[1]]);
+                    (a.ahead_of(r) - d)
+                        .abs()
+                        .total_cmp(&(b.ahead_of(r) - d).abs())
+                })
+                .map_or("roadblock".to_string(), |b| b.radio_name())
+        } else {
+            "spikes".to_string()
+        };
+        ToolAhead {
+            kind: if roadblock { "roadblock" } else { "spikes" },
+            dist_m: d,
+            name,
+        }
+    });
     PoliceStatus {
+        tool_ahead,
         level,
         heat,
         heat_in_level,

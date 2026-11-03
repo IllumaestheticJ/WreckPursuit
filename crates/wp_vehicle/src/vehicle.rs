@@ -376,6 +376,10 @@ pub struct Vehicle {
     lab_counter_s: f32,
     /// Nitrous bottle ([`crate::nitrous`]); in snapshots.
     pub(crate) nitrous: crate::nitrous::Nitrous,
+    /// Slipstream drag multiplier ([`crate::draft`]; 1 = clear air), on top of the damage
+    /// model's `drag_scale`. Recomputed from vehicle positions by `wp_sim` before every step,
+    /// so it is derived state: not in snapshots.
+    pub(crate) draft_drag_scale: f32,
 }
 
 impl Vehicle {
@@ -511,6 +515,7 @@ impl Vehicle {
             lab_slip_rate: 0.0,
             lab_counter_s: 0.0,
             nitrous: crate::nitrous::Nitrous::full(),
+            draft_drag_scale: 1.0,
             corners,
         };
         v.converter = def
@@ -715,6 +720,24 @@ impl Vehicle {
             fitted: self.nitrous.fitted,
             ..crate::nitrous::Nitrous::full()
         };
+    }
+
+    /// Set the slipstream drag multiplier ([`crate::draft`]): 1 = clear air, smaller = in a
+    /// wake. Clamped to `0..=1` (NaN = 1). Multiplies the aero drag on top of the damage
+    /// model's `HandlingEffects::drag_scale`; `wp_sim` recomputes it for every car before every
+    /// step, so it is not part of snapshots.
+    pub fn set_draft_drag_scale(&mut self, scale: f32) {
+        self.draft_drag_scale = if scale.is_nan() {
+            1.0
+        } else {
+            scale.clamp(0.0, 1.0)
+        };
+    }
+
+    /// The slipstream drag multiplier last set with [`Vehicle::set_draft_drag_scale`]
+    /// (1 = clear air).
+    pub fn draft_drag_scale(&self) -> f32 {
+        self.draft_drag_scale
     }
 
     /// The nitrous bottle ([`crate::nitrous`]).
@@ -2154,7 +2177,7 @@ impl Vehicle {
             ch.lin_vel,
             fwd,
             self.def.drag_cd_a_m2,
-            eff.drag_scale,
+            eff.drag_scale * self.draft_drag_scale,
             self.def.lift_front - self.def.aero_downforce_coeffs[0] - df_front,
             self.def.lift_rear - self.def.aero_downforce_coeffs[1] - df_rear,
         );
