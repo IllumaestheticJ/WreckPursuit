@@ -77,4 +77,5 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.67 | preview | Candidate G handling + AI retune; spike strips only with their car (row 165); Ashpeak de-dup (split greybox parts, Harlan → Harnell) |
 | 0.12.68 | main + public demo | PR #67 (includes #65): all of the above plus duplicate median barriers removed, row 168 police capture rules, Ashpeak metro course tuning |
 | 0.12.69 | preview | (next) |
-| public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
+| 0.14.5 | public demo ([link](https://claude.ai/artifact/92K98WkVSncv1PAPiqhHvL)) | Demo page rebuilt from green `main` 1abfd2a4 (v0.14.5) on 2026-11-03; new artifact (the old demo link is owned by another account). Game start menu, all cities, car meshes and audio included |
+| public demo | demo link | Refreshed only from a green main; current: 0.14.5 |

@@ -81,8 +81,10 @@ behaviour unchanged). `CARGO_PROFILE_RELEASE_DEBUG=0` alone does not shrink it.
 
 
 ## Public demo (2026-10-20, owner request)
-A clean shareable build at https://claude.ai/artifact/RWysDBxKzRA1FQFU6cEhVF (the owner makes it
-public from its Share menu). Same files as the preview; only `index.html` differs: dev panels
+A clean shareable build at https://claude.ai/artifact/92K98WkVSncv1PAPiqhHvL (since 2026-11-03, v0.14.5;
+the earlier link RWysDBxKzRA1FQFU6cEhVF belongs to another account and is no longer updated; the owner
+makes it public from its Share menu). Stage with `tools/preview_build.sh`, then publish in batches
+(≤255 files / 64 MB each: assets + scenarios + audio first, then city parts, then car meshes). Same files as the preview; only `index.html` differs: dev panels
 hidden (`body.demo`), a start menu (city chase / rainy night / races / free drive / garage),
 quick play runs outside the career, first-time assists auto gears + TCS. Reference page:
 `tools/demo/index.demo.html` (re-point its `assets/main-*.js` / `*.css` tags to the new build's
