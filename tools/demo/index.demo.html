@@ -18,6 +18,8 @@
       .hud-main { min-width: 300px; }
       .hud-main .speed { font-size: 28px; color: #fff; }
       .hud-main .gear { font-size: 28px; color: #ffdc00; margin-left: 12px; }
+      .hud-main .slip { font-size: 11px; margin-left: 10px; padding: 0 4px; border-radius: 3px; vertical-align: middle; color: #555; letter-spacing: 1px; transition: color 0.2s, background 0.2s; }
+      .hud-main .slip.on { color: #fff; background: #2a6; }
       .dim { color: #999; }
       .rtf-warn { color: #ffb020; font-weight: bold; }
       .badge { display: inline-block; padding: 0 4px; margin: 2px 3px 0 0; border-radius: 3px; font-size: 11px; }
@@ -37,6 +39,10 @@
       body.wp-player #controls, body.wp-player .telemetry, body.wp-player .comps, body.wp-player .regions,
       body.wp-player .feed, body.wp-player .inputs, body.wp-player #audio-panel, body.wp-player #error,
       body.wp-player .hud-main .dim { display: none !important; }
+      #tool-alert { position: absolute; top: 22%; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; text-shadow: 0 2px 6px #000; }
+      #tool-alert b { display: block; font: 900 26px/1 system-ui, sans-serif; letter-spacing: 0.1em; color: #ffb020; animation: wp-strobe 0.6s steps(1) infinite; }
+      #tool-alert span { display: block; margin-top: 3px; font-size: 13px; color: #eee; }
+      #tool-alert[data-kind="spikes"] b { color: #ffd84a; }
       #pursuit-banner { position: absolute; top: 34%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; text-shadow: 0 2px 6px #000; }
       #pursuit-banner b { display: block; font: 900 44px/1 system-ui, sans-serif; letter-spacing: 0.12em; }
       #pursuit-banner span { display: block; margin-top: 4px; font-size: 13px; color: #ddd; }
@@ -134,8 +140,8 @@
       @media (max-width: 520px) { #photo-panel { left: 8px; width: auto; max-height: 45vh; top: auto; bottom: 8px; } }
       #error { position: absolute; top: 40%; left: 50%; transform: translateX(-50%); color: #f66; white-space: pre; }
     </style>
-    <script type="module" crossorigin src="./assets/main-DyxrtaYU.js"></script>
-    <link rel="modulepreload" crossorigin href="./assets/three.module-O-AZ-mRF.js">
+    <script type="module" crossorigin src="./assets/main-D6W5l5yQ.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/three.module-C7u5HntV.js">
     <link rel="stylesheet" crossorigin href="./assets/main-DnBG7uC0.css">
     <script>
   // Demo: friendlier assists for first-time players (auto gears + traction control), unless
@@ -248,7 +254,7 @@
       <div id="mod-shop"></div>
       <div id="error"></div>
     </div>
-  <div id="wp-version" style="position:fixed;right:max(6px,env(safe-area-inset-right,0px));bottom:max(4px,env(safe-area-inset-bottom,0px));z-index:60;font:11px/1.2 ui-monospace,monospace;color:#9aa3b5;background:rgba(0,0,0,0.45);padding:2px 6px;border-radius:3px;pointer-events:none">v0.14.5</div>
+  <div id="wp-version" style="position:fixed;right:max(6px,env(safe-area-inset-right,0px));bottom:max(4px,env(safe-area-inset-bottom,0px));z-index:60;font:11px/1.2 ui-monospace,monospace;color:#9aa3b5;background:rgba(0,0,0,0.45);padding:2px 6px;border-radius:3px;pointer-events:none">v0.14.6</div>
     <button id="demo-open" hidden>Menu</button>
     <div id="demo-menu">
       <div class="card">
