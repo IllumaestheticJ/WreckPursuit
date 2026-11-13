@@ -18,10 +18,21 @@ use car_assets::{
 use wp_contracts::BodyRegion;
 use wp_damage::PanelSpec;
 
+/// Every car id, minus the comma-separated ids in `WP_ASSETS_SKIP` (for triage: a test stops at
+/// its first failing car, so skipping it shows the next one; unset in CI, so every car runs).
+fn test_cars(root: &std::path::Path) -> Vec<String> {
+    let skip = std::env::var("WP_ASSETS_SKIP").unwrap_or_default();
+    let skip: Vec<&str> = skip.split(',').filter(|s| !s.is_empty()).collect();
+    car_ids(root)
+        .into_iter()
+        .filter(|id| !skip.contains(&id.as_str()))
+        .collect()
+}
+
 #[test]
 fn every_car_has_a_valid_up_to_date_mesh_and_panel_spec() {
     let root = repo_root();
-    let ids = car_ids(&root);
+    let ids = test_cars(&root);
     assert!(ids.len() >= 16);
     for id in ids {
         let car = load_car(&root, &id).unwrap();
@@ -45,7 +56,7 @@ fn every_car_has_a_valid_up_to_date_mesh_and_panel_spec() {
 #[test]
 fn every_car_has_an_up_to_date_mid_lod() {
     let root = repo_root();
-    for id in car_ids(&root) {
+    for id in test_cars(&root) {
         let car = load_car(&root, &id).unwrap();
         let full = load_mesh(&mesh_path(&root, &id)).unwrap();
         let on_disk = load_mesh(&mid_mesh_path(&root, &id)).unwrap();
@@ -116,7 +127,7 @@ fn every_car_has_an_up_to_date_mid_lod() {
 fn meshes_are_format_4_with_fold_bindings() {
     assert_eq!(MESH_FORMAT, 4);
     let root = repo_root();
-    for id in car_ids(&root) {
+    for id in test_cars(&root) {
         let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
         assert_eq!(mesh.format, 4, "{id}");
         assert!(
@@ -194,7 +205,7 @@ fn skinned_vertices_follow_their_region_nodes() {
 #[test]
 fn hinged_parts_start_at_their_hinge_line() {
     let root = repo_root();
-    for id in car_ids(&root) {
+    for id in test_cars(&root) {
         let car = load_car(&root, &id).unwrap();
         let spec = PanelSpec::load(&panel_path(&root, &id)).unwrap();
         let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
@@ -248,7 +259,7 @@ fn style_knob_extremes_never_panic() {
         Silhouette::Wedge,
         Silhouette::Suv,
     ];
-    for id in car_ids(&root) {
+    for id in test_cars(&root) {
         let car = load_car(&root, &id).unwrap();
         let base = style_for(&car.def);
         let mut variants: Vec<BodyStyle> = Vec::new();
@@ -757,7 +768,7 @@ fn first_hit(mesh: &car_assets::mesh::CarMesh, o: [f32; 3], d: [f32; 3]) -> Opti
 #[test]
 fn lights_sit_outside_the_shell() {
     let root = repo_root();
-    for id in car_ids(&root) {
+    for id in test_cars(&root) {
         let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
         check_lights(&id, &mesh);
     }
@@ -1080,7 +1091,7 @@ fn check_signals(label: &str, mesh: &car_assets::mesh::CarMesh) {
 #[test]
 fn every_car_has_turn_signals_integrated_into_its_lamps() {
     let root = repo_root();
-    let ids = car_ids(&root);
+    let ids = test_cars(&root);
     for id in &ids {
         let car = load_car(&root, id).unwrap();
         let full = load_mesh(&mesh_path(&root, id)).unwrap();
@@ -1138,7 +1149,7 @@ fn every_car_has_turn_signals_integrated_into_its_lamps() {
 fn phase3_knobs_keep_panels_on_their_regions() {
     use car_assets::style::SideSculpt;
     let root = repo_root();
-    for id in car_ids(&root) {
+    for id in test_cars(&root) {
         let car = load_car(&root, &id).unwrap();
         let spec = PanelSpec::load(&panel_path(&root, &id)).unwrap();
         let base = style_for(&car.def);
@@ -1223,7 +1234,7 @@ fn phase3_knobs_keep_panels_on_their_regions() {
 #[test]
 fn plan_width_keeps_the_body_outside_the_tires() {
     let root = repo_root();
-    for id in car_ids(&root) {
+    for id in test_cars(&root) {
         let car = load_car(&root, &id).unwrap();
         let mut body = style_for(&car.def).body;
         // Baseline without the car's own plan curve (a style may already pinch the waist).
@@ -1644,7 +1655,7 @@ fn a_pillar_quality(mesh: &car_assets::mesh::CarMesh, seals: bool) -> (f32, f32,
 #[test]
 fn a_pillars_are_solid_clean_and_meet_the_window_corners() {
     let root = repo_root();
-    for id in car_ids(&root) {
+    for id in test_cars(&root) {
         let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
         let has = |n: &str| {
             mesh.parts

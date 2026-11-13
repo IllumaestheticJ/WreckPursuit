@@ -56,6 +56,14 @@ pub const GH_BLEND_M: f32 = 0.05;
 /// Largest corner drop of the windshield / rear-glass plan wrap, m (see
 /// [`BodyProfile::greenhouse_crown`]).
 pub const WRAP_DROP_MAX_M: f32 = 0.035;
+/// Height of the shoulder roll as a multiple of [`BodyStyle::shoulder_round`] (car-realism:
+/// the side turns in over this height below the belt, see [`BodyProfile::ring`]).
+pub const SHOULDER_DROP: f32 = 1.5;
+/// Share of the shoulder's horizontal span (body side → glass base) the shoulder point (ring
+/// point 7) sits in from the side; with [`SHOULDER_Z`] it puts the point on a quarter arc.
+pub const SHOULDER_X: f32 = 0.366;
+/// Share of the shoulder roll's height the shoulder point sits below the belt.
+pub const SHOULDER_Z: f32 = 0.366;
 /// Ring index of the side-glass base (greenhouse layout).
 pub const RING_GLASS_BASE: usize = 8;
 /// Ring index of the side-glass top edge (greenhouse layout): the A-pillar's lower edge at the
@@ -320,7 +328,20 @@ impl BodyProfile {
         } else {
             st.deck_min_m.clamp(0.02, 0.25)
         };
-        let v_deck = clamp_soft(y_deck + shift, y_tail + deck_min, r0 - 0.05);
+        // Car-realism: a three-box body's deck (rear-glass base → tail) is at most
+        // `deck_max_share` of the car's length; a longer lattice deck moves the visual glass base
+        // rearward (at most 0.28 m), which lengthens the cabin.
+        let deck_auto = if trunk_lid && rear_glass && st.silhouette == Silhouette::Notchback {
+            let max = st.deck_max_share.clamp(0.10, 1.0) * (y_nose - y_tail);
+            -((y_deck + shift - y_tail) - max).clamp(0.0, 0.28)
+        } else {
+            0.0
+        };
+        let v_deck = clamp_soft(
+            y_deck + shift + deck_auto + st.rear_glass_base_shift_m.clamp(-0.45, 0.30),
+            y_tail + deck_min,
+            r0 - 0.05,
+        );
         if let Some(len) = st.hood_length {
             let want = clamp_soft(y_nose - len, r0 + 0.6, y_bf - 0.30);
             r1 += want - v_fw;
@@ -347,6 +368,22 @@ impl BodyProfile {
         // the flat roof keeps ≥ 0.25 m where there is room (≥ 0.05 m always).
         r1 = clamp_soft(r1, r0 + 0.25, v_fw - 0.10);
         r0 = clamp_soft(r0.min(r1 - 0.25), v_deck + 0.06, r1 - 0.05);
+        // Car-realism: a three-box body keeps a flat roof of at least `roof_min_share` of the
+        // cabin base (windshield base → rear-glass base); both glasses steepen to make room, the
+        // windshield to no less than 50° and the rear glass to no less than 42° from vertical.
+        if rear_glass && matches!(st.silhouette, Silhouette::Notchback | Silhouette::CabForward) {
+            let want = st.roof_min_share.clamp(0.0, 0.6) * (v_fw - v_deck);
+            let need = want - (r1 - r0);
+            if need > 0.0 {
+                let room_f = (v_fw - (rz - cowl_z).max(0.1) * tan_deg(50.0) - r1).max(0.0);
+                let room_r = (r0 - (v_deck + (rz - z_deck).max(0.05) * tan_deg(42.0))).max(0.0);
+                if room_f + room_r > 0.0 {
+                    let k = (need / (room_f + room_r)).min(1.0);
+                    r1 += k * room_f;
+                    r0 -= k * room_r;
+                }
+            }
+        }
 
         let roof_half = match (st.tumblehome_m, st.tumblehome) {
             (Some(t), _) => half_w - t.clamp(TUMBLEHOME_M_RANGE.0, TUMBLEHOME_M_RANGE.1),
@@ -416,7 +453,8 @@ impl BodyProfile {
         smoothstep(1.0 - (y - self.y_tail) / self.style.tail_round.clamp(0.05, 0.6))
     }
 
-    /// Plan-view rounding factor (0 → 1 toward either end).
+    /// Plan-view rounding factor (0 → 1 toward either end; an S-curve, used for the underside
+    /// rise toward the ends).
     fn plan_t(&self, y: f32) -> (f32, f32) {
         let n = self.style.nose_plan_round.clamp(0.05, 0.45);
         let t = self.style.tail_plan_round.clamp(0.05, 0.45);
@@ -426,17 +464,31 @@ impl BodyProfile {
         )
     }
 
+    /// Plan-view corner inset at `y`, m (car-realism): each end's corner is a quarter-ellipse arc
+    /// [`BodyStyle::nose_plan_round`] / `tail_plan_round` long and about a third of that deep,
+    /// so the side turns into the end face (a rounded bumper corner) instead of easing back to
+    /// a flat box corner. [`BodyStyle::plan_corner_sharp`] (0…1) blends back to the old S-curve.
+    fn corner_inset(&self, y: f32) -> f32 {
+        let s = &self.style;
+        let sharp = s.plan_corner_sharp.clamp(0.0, 1.0);
+        let one = |round: f32, d: f32| -> f32 {
+            let len = round.clamp(0.05, 0.45);
+            let u = (1.0 - d / len).clamp(0.0, 1.0);
+            if u <= 0.0 {
+                return 0.0;
+            }
+            let deep = (0.36 * round).clamp(0.01, 0.17);
+            let old = (0.23 * round).clamp(0.01, 0.12) * smoothstep(u);
+            let arc = deep * (1.0 - (1.0 - u * u).max(0.0).sqrt());
+            lerp(arc, old, sharp)
+        };
+        one(s.nose_plan_round, self.y_nose - y) + one(s.tail_plan_round, y - self.y_tail)
+    }
+
     /// Body half width at `y` (rounded in plan view at the ends), before flares/haunches.
     pub fn half_width(&self, y: f32) -> f32 {
-        let (n, t) = self.plan_t(y);
-        let ni = (0.23 * self.style.nose_plan_round).clamp(0.01, 0.12);
-        let ti = (0.23 * self.style.tail_plan_round).clamp(0.01, 0.12);
-        let w = self.half_w - ni * n - ti * t;
-        let bow = self.end_bow(y);
-        if self.style.plan_width.is_empty() && bow >= 1.0 {
-            return w;
-        }
-        let ws = w * bow * self.plan_scale(y);
+        let w = self.half_w;
+        let ws = (w - self.corner_inset(y)) * self.end_bow(y) * self.plan_scale(y);
         if ws >= w {
             return ws;
         }
@@ -713,7 +765,7 @@ impl BodyProfile {
         let belt = self.belt(y).max(sill + 0.12);
         let h = belt - sill;
         let tuck = s.sill_tuck.clamp(0.01, 0.12).min(0.3 * h);
-        let ch = s.shoulder_round.clamp(0.01, 0.12).min(0.3 * h);
+        let ch = self.shoulder_drop(h);
         let height = self.roof.2.max(belt);
         let zc = clamp_soft(
             s.crease_z.clamp(0.25, 0.70) * height,
@@ -1100,23 +1152,81 @@ impl BodyProfile {
     /// How far the A-pillar's lower edge moves out at its foot (side-glass base − roof-rail half
     /// width at the windshield base), m.
     fn a_foot_flare(&self) -> f32 {
-        // As `ring` / `top_xs` place them (without the section-shape knobs).
-        let s = &self.style;
         let y = self.y_fw - 0.01;
-        let (w, hn) = (self.half_width(y), self.haunch(y));
-        let h = (self.belt(y).max(self.sill(y) + 0.12) - self.sill(y)).max(0.0);
-        let ch = s.shoulder_round.clamp(0.01, 0.12).min(0.3 * h);
-        let xs = w + hn - 0.5 * ch;
-        let gb = (w + 0.5 * hn - s.glass_inset.clamp(0.04, 0.20))
-            .max(0.3)
-            .min(xs - 0.01)
-            .max(0.05);
+        let gb = self.glass_base_x(y);
         let rw = self.roof_half_w(y).min(gb - 0.02).max(0.04);
         (gb - rw).max(0.0)
     }
 
-    /// Greenhouse half width at roof height at `y` (A-pillar plan taper applied).
+    /// |x| of the side-glass base at `y` as [`Self::ring`] places it (before the section-shape
+    /// knobs): the body side minus [`BodyStyle::glass_inset`], never outside the shoulder.
+    pub fn glass_base_x(&self, y: f32) -> f32 {
+        let s = &self.style;
+        let (w, hn) = (self.half_width(y), self.haunch(y));
+        let xs = w + hn - SHOULDER_X * self.shoulder_span(w + hn, w + 0.5 * hn);
+        (w + 0.5 * hn - s.glass_inset.clamp(0.04, 0.20))
+            .max(0.3)
+            .min(xs - 0.01)
+            .max(0.05)
+    }
+
+    /// Horizontal span of the shoulder roll at a station: from the body side (`side`) in to the
+    /// glass base (`side_gb` − glass inset), m.
+    fn shoulder_span(&self, side: f32, side_gb: f32) -> f32 {
+        let gb = (side_gb - self.style.glass_inset.clamp(0.04, 0.20)).max(0.3);
+        (side - gb).clamp(0.02, 0.20)
+    }
+
+    /// Height of the shoulder roll below the belt for a side `h` tall, m: the side starts to
+    /// turn in this far under the belt ([`BodyStyle::shoulder_round`] × [`SHOULDER_DROP`]).
+    pub fn shoulder_drop(&self, h: f32) -> f32 {
+        (SHOULDER_DROP * self.style.shoulder_round.clamp(0.01, 0.12)).min(0.3 * h)
+    }
+
+    /// Greenhouse half width at roof-rail height at `y`: the roof half width with the A- and
+    /// C-pillar plan tapers and [`BodyStyle::roof_plan_taper`]; ahead of the header and behind
+    /// the roof's rear edge the pillars run straight out toward the glass base
+    /// ([`BodyStyle::windshield_base_w`] / [`BodyStyle::rear_glass_base_w`]), so the windshield
+    /// and rear glass are wider at their base than at the roof, as on a real car (car-realism).
     pub fn roof_half_w(&self, y: f32) -> f32 {
+        let old = self.roof_half_w_tapered(y);
+        let (r0, r1, _, _) = self.roof;
+        let s = &self.style;
+        if y > r1 {
+            let k = s.windshield_base_w.clamp(0.0, 1.0);
+            if k <= 0.0 {
+                return old;
+            }
+            let yb = y.min(self.y_fw);
+            let t = ((yb - r1) / (self.y_fw - r1).max(0.05)).clamp(0.0, 1.0);
+            let lean = 0.15 * tan_deg(s.a_pillar_rake_deg.clamp(0.0, 25.0));
+            let foot = (self.glass_base_x(yb) - 0.02 - lean).max(0.3);
+            let straight = lerp(self.roof_half_w_tapered(r1), foot, t);
+            return lerp(old, straight.max(old), k);
+        }
+        if y < r0 && self.rear_glass {
+            let k = s.rear_glass_base_w.clamp(0.0, 1.0);
+            let ye = match self.rear_line() {
+                Some((_, (ye, _))) => ye,
+                None => self.y_deck,
+            };
+            if k <= 0.0 || y < ye - 0.3 {
+                return old;
+            }
+            let yb = y.max(ye);
+            let t = ((r0 - yb) / (r0 - ye).max(0.05)).clamp(0.0, 1.0);
+            let lean = 0.15 * tan_deg(s.c_pillar_rake_deg.clamp(0.0, 25.0));
+            let foot = (self.glass_base_x(yb) - 0.02 - lean).max(0.3);
+            let straight = lerp(self.roof_half_w_tapered(r0), foot, t);
+            // Behind the glass base the old width takes over again within 0.3 m.
+            let fade = smoothstep(1.0 - (ye - y).max(0.0) / 0.3);
+            return lerp(old, straight.max(old), k * fade);
+        }
+        old
+    }
+
+    /// The roof half width with the plan tapers only (the pre-car-realism greenhouse plan).
+    fn roof_half_w_tapered(&self, y: f32) -> f32 {
         let taper = tan_deg(self.style.a_pillar_rake_deg.clamp(0.0, 25.0))
             * (y - (self.roof.1 - 0.2)).max(0.0);
         let taper_rear = tan_deg(self.style.c_pillar_rake_deg.clamp(0.0, 25.0))
@@ -1243,7 +1353,11 @@ impl BodyProfile {
         let gh = !self.bed_open(y) && self.has_greenhouse(y);
         let h = belt - sill;
         let tuck = s.sill_tuck.clamp(0.01, 0.12).min(0.3 * h);
-        let ch = s.shoulder_round.clamp(0.01, 0.12).min(0.3 * h);
+        // Shoulder roll (car-realism): the side turns in `ch` below the belt and reaches the
+        // glass base / top edge in two chords of about 30° and 60°, so smooth shading rounds
+        // the fender tops, door shoulders and deck edges (a small `shoulder_round` keeps the
+        // edge crisp).
+        let ch = self.shoulder_drop(h);
         let height = self.roof.2.max(belt);
         let zc = clamp_soft(
             s.crease_z.clamp(0.25, 0.70) * height,
@@ -1253,6 +1367,7 @@ impl BodyProfile {
         let cd = s.crease_depth.clamp(0.0, 0.03);
         let fl = s.flare.clamp(0.0, 0.08) * self.arch_t(y);
         let hn = self.haunch(y);
+        let span = self.shoulder_span(w + hn, w + 0.5 * hn);
         let lower = |x: f32, z: f32| RingPt {
             p: [-x, y, z],
             seg: Seg::Lower,
@@ -1266,7 +1381,7 @@ impl BodyProfile {
             lower(w + hn - cd, zc + 0.05),
             lower(w + hn, belt - ch),
             RingPt {
-                p: [-(w + hn - 0.5 * ch), y, belt],
+                p: [-(w + hn - SHOULDER_X * span), y, belt - SHOULDER_Z * ch],
                 seg: if gh { Seg::Ledge } else { Seg::Top },
             },
         ];
@@ -1280,7 +1395,7 @@ impl BodyProfile {
                 }
             }
         }
-        let xs = w + hn - 0.5 * ch;
+        let xs = w + hn - SHOULDER_X * span;
         let gb = (w + 0.5 * hn - s.glass_inset.clamp(0.04, 0.20)).max(0.3);
         // Section shape (phase 3): sill tuck-in, side bulge, side sculpts.
         let ri = s.rocker_in_m.clamp(0.0, 0.08);

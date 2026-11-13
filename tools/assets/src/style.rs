@@ -468,6 +468,35 @@ pub struct BodyStyle {
     /// rear end, m (+ the top line falls toward the rear, independent of the roof edge; the roof
     /// rail band widens). Range −0.03…+0.10. Default 0.
     pub dlo_top_drop_m: f32,
+
+    // --- Car-realism knobs (2026-11-13; see `docs/integration/car-realism.md`) ---
+    /// How far the A-pillar foot runs out to the side-glass base, 0…1: 1 (default) = the
+    /// pillar is a straight line from the roof corner to the glass base at the cowl, so the
+    /// windshield is wider at its base than at the header and the side glass is one plane; 0 =
+    /// the old greenhouse plan (the windshield narrows toward its base by `a_pillar_rake_deg`
+    /// and the pillar flares out at its foot). Narrow prototype canopies want 0.3…0.6.
+    pub windshield_base_w: f32,
+    /// As [`BodyStyle::windshield_base_w`] for the C-pillar foot / rear-glass base, 0…1.
+    /// Default 0.6 (teardrop canopies with a large `c_pillar_rake_deg` want 0…0.3).
+    pub rear_glass_base_w: f32,
+    /// Plan-view corner shape of the nose and tail, 0…1: 0 (default) = quarter-ellipse corners
+    /// (the side turns into the end face over `nose_plan_round` / `tail_plan_round`); 1 = the
+    /// old shallow S-curve (a box with eased sides and a hard vertical corner).
+    pub plan_corner_sharp: f32,
+    /// Smallest flat roof of a three-box body ([`Silhouette::Notchback`] / `CabForward` with
+    /// rear glass) as a share of the cabin base length (windshield base → rear-glass base):
+    /// when the glass rakes leave less, both glasses steepen (windshield ≥ 50°, rear glass ≥ 42°
+    /// from vertical) to make room. Range 0…0.6. Default 0.30 (real saloons 0.35…0.45).
+    pub roof_min_share: f32,
+    /// Moves the rear-glass base (the visual front edge of the trunk lid / deck) along y, m
+    /// (− = rearward: a longer cabin and a shorter deck; the lid still pivots on its lattice
+    /// hinge nodes, like `cabin_shift_m`). Range −0.45…+0.30. Default 0.
+    pub rear_glass_base_shift_m: f32,
+    /// Longest deck of a [`Silhouette::Notchback`] with a trunk lid (rear-glass base → tail) as
+    /// a share of the car's length: a longer lattice deck moves the visual rear-glass base
+    /// rearward by up to 0.28 m (a longer cabin, as on real saloons, whose deck is 15–20 % of
+    /// the length). Range 0.10…1.0 (1.0 = off). Default 0.19.
+    pub deck_max_share: f32,
 }
 
 /// Allowed range of a [`BodyStyle::plan_width`] scale.
@@ -658,6 +687,12 @@ impl Default for BodyStyle {
             dlo_kink_m: 0.0,
             dlo_kink_len_m: 0.15,
             dlo_top_drop_m: 0.0,
+            windshield_base_w: 1.0,
+            rear_glass_base_w: 0.6,
+            plan_corner_sharp: 0.0,
+            roof_min_share: 0.30,
+            rear_glass_base_shift_m: 0.0,
+            deck_max_share: 0.19,
         }
     }
 }

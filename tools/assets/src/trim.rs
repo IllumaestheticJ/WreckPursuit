@@ -419,10 +419,7 @@ fn arch_path(p: &BodyProfile, arch: (f32, f32, f32), n: usize) -> Vec<[f32; 3]> 
             continue;
         };
         let belt = p.belt(y);
-        let ch = s
-            .shoulder_round
-            .clamp(0.01, 0.12)
-            .min(0.3 * (belt - p.sill(y)));
+        let ch = p.shoulder_drop(belt - p.sill(y));
         let z = z.min(belt - ch - 0.03);
         if z < p.sill(y) + 0.06 {
             continue;
